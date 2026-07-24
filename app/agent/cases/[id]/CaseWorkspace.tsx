@@ -182,6 +182,9 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
   const age = ageFrom(c.prospect.dateOfBirth);
 
   function move(stage: CaseStage) {
+    if (stage === "WITHDRAWN" && !window.confirm("Retirar este caso? Esta ação é definitiva e não pode ser desfeita.")) {
+      return;
+    }
     setMessage(null);
     startTransition(async () => {
       const result = await transitionCase(c.id, stage);
@@ -265,7 +268,12 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
           {c.nextStages
             .filter((s) => s !== primary)
             .map((s) => (
-              <Button key={s} variant="secondary" disabled={pending} onClick={() => move(s)}>
+              <Button
+                key={s}
+                variant={s === "WITHDRAWN" ? "danger" : "secondary"}
+                disabled={pending}
+                onClick={() => move(s)}
+              >
                 {caseStageLabel[s]}
               </Button>
             ))}

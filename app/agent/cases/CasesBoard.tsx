@@ -73,7 +73,7 @@ export function CasesBoard({ cases }: { cases: Case[] }) {
                 setFilter(f.key);
                 setPage(1);
               }}
-              className={`inline-flex min-h-9 items-center rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
+              className={`inline-flex min-h-10 items-center rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
                 active
                   ? "bg-teal text-paper"
                   : "border border-border-steel bg-paper text-ink-muted hover:border-teal hover:text-teal"

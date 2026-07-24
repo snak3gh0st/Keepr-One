@@ -107,12 +107,12 @@ export default async function ClientPolicyDetailPage({ params }: { params: Promi
                 href={illustrationRequestUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-border-steel bg-rail px-4 py-2.5 text-sm font-semibold text-paper transition-[background-color,border-color,color,transform] duration-150 hover:border-teal hover:bg-teal-pale/40 focus-visible:ring-[3px] focus-visible:ring-teal-pale focus-visible:outline-none"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-border-steel bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-[background-color,border-color,color,transform] duration-150 hover:border-teal hover:bg-teal-pale/40 focus-visible:ring-[3px] focus-visible:ring-teal-pale focus-visible:outline-none"
               >
                 Solicitar ilustração no parceiro
               </a>
             ) : (
-              <p className="text-xs text-paper/65">
+              <p className="text-xs text-ink-muted">
                 Configure <span className="font-mono">ILLUSTRATION_REQUEST_URL</span> no ambiente para ativar o botão de solicitação.
               </p>
             )}

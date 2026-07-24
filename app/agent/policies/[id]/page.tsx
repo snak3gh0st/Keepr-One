@@ -7,13 +7,12 @@ import { requireRole } from '@/lib/require-role'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getDownlineIds } from '@/lib/hierarchy'
 import { canAccessPolicy } from '@/lib/policy-access'
-import { uploadPolicyDocument } from './actions'
 import { AnnualReviewCard } from './AnnualReviewCard'
+import { PolicyUploadForm } from './PolicyUploadForm'
 import { Shell } from '@/components/Shell'
 import { PageTitle } from '@/components/PageTitle'
 import { PolicyStatusPill } from '@/components/StatusPill'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
-import { Button } from '@/components/Button'
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -141,23 +140,12 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             </ul>
             {policyDocuments.length === 0 && <EmptyState>Nenhum documento ainda.</EmptyState>}
 
-            <form
-              action={uploadPolicyDocument}
-              className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border-steel p-4"
-            >
-              <input type="hidden" name="policyId" value={policy.id} />
-              <input type="hidden" name="documentKind" value="DOCUMENT" />
-              <input
-                type="file"
-                name="file"
-                accept=".pdf,.png,.jpg,.jpeg"
-                required
-                className="text-sm text-ink-muted file:mr-3 file:rounded-md file:border-0 file:bg-teal-pale file:px-3 file:py-2 file:text-sm file:font-semibold file:text-teal"
-              />
-              <Button type="submit" variant="secondary">
-                Enviar documento
-              </Button>
-            </form>
+            <PolicyUploadForm
+              policyId={policy.id}
+              documentKind="DOCUMENT"
+              label="Enviar documento"
+              pendingLabel="Enviando…"
+            />
           </section>
           <section className="rounded-md border border-border-steel bg-paper p-5">
             <h2 className="mb-3 text-base font-semibold text-ink">Ilustrações</h2>
@@ -176,23 +164,12 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             </ul>
             {illustrationDocuments.length === 0 && <EmptyState>Nenhuma ilustração anexada ainda.</EmptyState>}
 
-            <form
-              action={uploadPolicyDocument}
-              className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border-steel p-4"
-            >
-              <input type="hidden" name="policyId" value={policy.id} />
-              <input type="hidden" name="documentKind" value="ILLUSTRATION" />
-              <input
-                type="file"
-                name="file"
-                accept=".pdf,.png,.jpg,.jpeg"
-                required
-                className="text-sm text-ink-muted file:mr-3 file:rounded-md file:border-0 file:bg-teal-pale file:px-3 file:py-2 file:text-sm file:font-semibold file:text-teal"
-              />
-              <Button type="submit" variant="secondary">
-                Enviar ilustração
-              </Button>
-            </form>
+            <PolicyUploadForm
+              policyId={policy.id}
+              documentKind="ILLUSTRATION"
+              label="Enviar ilustração"
+              pendingLabel="Enviando…"
+            />
             <div className="mt-4">
               {illustrationRequestUrl ? (
                 <a
