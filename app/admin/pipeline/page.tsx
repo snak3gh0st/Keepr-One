@@ -11,7 +11,7 @@ import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { StatCard } from '@/components/StatCard'
 import { TrendChart } from '@/components/TrendChart'
-import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
+import { AgentPipelineTable } from './AgentPipelineTable'
 
 const usd = formatCompactMoney
 
@@ -161,29 +161,7 @@ export default async function PipelinePage() {
           <h2 className="text-base font-semibold text-ink">Pipeline por agente</h2>
           <span className="text-xs text-ink-muted">{agentRows.length} agentes com casos</span>
         </div>
-        <Table>
-          <Thead>
-            <tr>
-              <Th>Agente</Th>
-              <Th className="text-right">Em andamento</Th>
-              <Th className="text-right">Emitidos</Th>
-              <Th className="text-right">Win rate</Th>
-              <Th className="text-right">Cobertura em pipeline</Th>
-            </tr>
-          </Thead>
-          <tbody>
-            {agentRows.map((r, i) => (
-              <Tr key={r.agentId} index={i}>
-                <Td>{r.agentName}</Td>
-                <TdNum>{r.open}</TdNum>
-                <TdNum>{r.placed}</TdNum>
-                <TdNum>{(r.winRate * 100).toFixed(0)}%</TdNum>
-                <TdNum>{usd(r.inFlightCoverage)}</TdNum>
-              </Tr>
-            ))}
-          </tbody>
-        </Table>
-        {agentRows.length === 0 && <EmptyState>Nenhum caso atribuído ainda.</EmptyState>}
+        <AgentPipelineTable rows={agentRows} />
       </section>
     </Shell>
   )
