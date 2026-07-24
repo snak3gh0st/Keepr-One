@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
+import { Logo } from '@/components/Logo'
 import { Button } from '@/components/Button'
 import { Field, Input } from '@/components/Field'
 
@@ -34,7 +35,7 @@ export default function LoginPage() {
   return (
     <main className="grid min-h-screen w-full bg-panel md:grid-cols-[minmax(0,1.1fr)_minmax(390px,0.8fr)]">
       <div className="relative hidden overflow-hidden bg-rail p-12 text-paper md:flex md:flex-col md:justify-between lg:p-20">
-        <div className="relative z-10 flex items-center gap-2.5 text-xl font-semibold tracking-tight"><span className="grid h-9 w-9 place-items-center rounded-md bg-paper text-teal"><span className="text-base font-bold">F</span></span>Fyntra</div>
+        <Logo size={34} className="relative z-10 text-xl" />
         <div className="relative z-10 max-w-md">
           <p className="text-sm font-semibold text-paper/65">Operações RICOS</p>
           <h1 className="mt-5 max-w-lg text-5xl font-semibold leading-[1.05] tracking-[-0.04em]">A operação começa com números confiáveis.</h1>
@@ -47,7 +48,7 @@ export default function LoginPage() {
       <div className="flex items-center justify-center bg-paper px-5 py-12 sm:px-10">
       <div className="w-full max-w-sm">
       <div className="mb-8 md:hidden">
-        <span className="flex items-center gap-2 font-sans text-xl font-semibold tracking-tight text-ink"><span className="grid h-8 w-8 place-items-center rounded-md bg-teal text-paper"><span className="text-sm font-bold">F</span></span>Fyntra</span>
+        <Logo size={30} variant="onTeal" className="text-xl text-ink" />
       </div>
       <div className="mb-8">
         <p className="text-xs font-semibold text-teal">Área segura</p>

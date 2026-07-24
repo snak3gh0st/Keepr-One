@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { Logo } from "@/components/Logo";
 
 type NavItem = { href: string; label: string; icon: string };
 
@@ -92,7 +93,7 @@ export function Shell({
           distracted, one-handed tap near "Sair" can never land on a nav
           destination instead (or vice versa). */}
       <div className="flex items-center justify-between border-b border-white/10 bg-rail px-4 py-3 text-paper md:hidden">
-        <span className="flex items-center gap-2 font-sans text-base font-semibold tracking-tight"><span className="grid h-7 w-7 place-items-center rounded-md bg-paper text-teal"><span className="text-xs font-bold">F</span></span>Fyntra</span>
+        <Logo size={26} className="text-base" />
         <span className="mr-auto ml-3 text-xs text-paper/55">{currentPage}</span>
         <button
           type="button"
@@ -108,7 +109,7 @@ export function Shell({
         className="fixed inset-x-0 bottom-0 z-30 flex shrink-0 border-t border-white/10 bg-rail text-paper md:sticky md:top-0 md:h-screen md:w-[248px] md:flex-col md:self-start md:border-t-0 md:bg-rail"
       >
         <div className="hidden px-6 pb-8 pt-8 md:block">
-          <span className="flex items-center gap-2.5 font-sans text-lg font-semibold tracking-tight"><span className="grid h-8 w-8 place-items-center rounded-md bg-paper text-teal"><span className="text-sm font-bold">F</span></span>Fyntra</span>
+          <Logo size={30} className="text-lg" />
           <p className="mt-3 text-xs text-paper/50">Operações RICOS</p>
         </div>
         <div className="hidden px-6 pb-2 md:block"><p className="text-xs font-semibold text-paper/45">{roleLabel}</p></div>
