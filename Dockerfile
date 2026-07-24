@@ -27,6 +27,12 @@ COPY --from=builder /app/prisma ./prisma
 # standalone image. Keep this version in sync with `prisma` in package.json.
 RUN npm install prisma@6.19.3 --no-save --prefix /opt/prisma-cli
 EXPOSE 3000
+# Next.js standalone binds to $HOSTNAME (the container IP), not localhost. This
+# gives the container a real health status so a rolling deploy waits for the new
+# container to serve before the old one is removed — a bad build fails the deploy
+# instead of taking prod down.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=3 \
+  CMD ["node", "-e", "fetch('http://'+process.env.HOSTNAME+':'+(process.env.PORT||3000)+'/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 # Apply pending migrations before serving. Fails fast (and the deploy fails)
 # if a migration errors, rather than serving against a stale schema.
 CMD ["sh", "-c", "node /opt/prisma-cli/node_modules/prisma/build/index.js migrate deploy && node server.js"]
