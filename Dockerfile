@@ -21,5 +21,12 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
+# Prisma CLI + engines so `migrate deploy` can run on boot. The Next.js standalone
+# output omits them, so copy from the full builder node_modules.
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 EXPOSE 3000
-CMD ["node", "server.js"]
+# Apply pending migrations before serving. Fails fast (and Coolify keeps the old
+# container) if the DB is unreachable or a migration errors, rather than serving
+# against a stale schema.
+CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy && node server.js"]
