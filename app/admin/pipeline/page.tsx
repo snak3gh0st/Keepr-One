@@ -6,14 +6,14 @@ import { buildPipelineFunnel, buildAgentPipeline } from '@/lib/pipeline-bi'
 import { buildCycleTimes, type StageTransition } from '@/lib/cycle-time'
 import { caseStageLabel, caseStageTone, type CaseStage } from '@/lib/case-workflow'
 import { bucketByMonth } from '@/lib/dashboard'
+import { formatCompactMoney } from '@/lib/format'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { StatCard } from '@/components/StatCard'
 import { TrendChart } from '@/components/TrendChart'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
 
-const usd = (v: number) =>
-  v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v.toFixed(0)}`
+const usd = formatCompactMoney
 
 const BAR_TONE: Record<string, string> = {
   success: 'bg-success',

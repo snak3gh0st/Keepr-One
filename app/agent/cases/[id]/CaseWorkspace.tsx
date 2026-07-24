@@ -7,6 +7,7 @@ import { Button } from "@/components/Button";
 import { CaseStagePill, PolicyStatusPill } from "@/components/StatusPill";
 import { caseStageLabel, type CaseStage } from "@/lib/case-workflow";
 import { computeNeedsAnalysis, type NeedsAnalysisInput } from "@/lib/needs-analysis";
+import { formatMoney } from "@/lib/format";
 import { transitionCase, updateRequirement, startApplication, saveNeedsAnalysis, addCaseNote, addFollowUp, completeFollowUp } from "./actions";
 
 type Requirement = { id: string; title: string; status: string };
@@ -94,7 +95,8 @@ const NEEDS_FIELDS: { key: keyof NeedsAnalysisInput; label: string }[] = [
   { key: "liquidAssets", label: "Ativos líquidos ($)" },
 ];
 
-const usd = (v: number) => `$${v.toLocaleString("en-US")}`;
+const usd = formatMoney;
+const TOBACCO_LABEL: Record<string, string> = { NON_TOBACCO: "Não fumante", TOBACCO: "Fumante" };
 
 function NeedsAnalysisForm({
   caseId,
@@ -277,11 +279,11 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
           <div><dt className="text-xs text-ink-muted">Agente</dt><dd className="text-sm text-ink">{c.agentName}</dd></div>
           <div><dt className="text-xs text-ink-muted">Estado</dt><dd className="text-sm text-ink">{c.prospect.state ?? "—"}</dd></div>
           <div><dt className="text-xs text-ink-muted">Idade</dt><dd className="text-sm text-ink">{age ?? "—"}</dd></div>
-          <div><dt className="text-xs text-ink-muted">Tabaco</dt><dd className="text-sm text-ink">{c.prospect.tobaccoStatus ?? "—"}</dd></div>
+          <div><dt className="text-xs text-ink-muted">Tabaco</dt><dd className="text-sm text-ink">{c.prospect.tobaccoStatus ? (TOBACCO_LABEL[c.prospect.tobaccoStatus] ?? c.prospect.tobaccoStatus) : "—"}</dd></div>
           <div><dt className="text-xs text-ink-muted">E-mail</dt><dd className="text-sm text-ink">{c.prospect.email ?? "—"}</dd></div>
           <div><dt className="text-xs text-ink-muted">Telefone</dt><dd className="text-sm text-ink">{c.prospect.phone ?? "—"}</dd></div>
-          <div><dt className="text-xs text-ink-muted">Cobertura alvo</dt><dd className="text-sm text-ink">{c.targetCoverage ? `$${c.targetCoverage}` : "—"}</dd></div>
-          <div><dt className="text-xs text-ink-muted">Orçamento mensal</dt><dd className="text-sm text-ink">{c.monthlyBudget ? `$${c.monthlyBudget}/m` : "—"}</dd></div>
+          <div><dt className="text-xs text-ink-muted">Cobertura alvo</dt><dd className="text-sm text-ink">{c.targetCoverage ?? "—"}</dd></div>
+          <div><dt className="text-xs text-ink-muted">Orçamento mensal</dt><dd className="text-sm text-ink">{c.monthlyBudget ? `${c.monthlyBudget}/m` : "—"}</dd></div>
         </dl>
       </Section>
 
@@ -303,7 +305,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
             {c.illustrations.map((il) => (
               <li key={il.id} className="flex items-center justify-between py-2 text-sm">
                 <span className="text-ink">{il.productName ?? "Ilustração"} · {il.kind === "PRELIMINARY" ? "Estimativa" : "Oficial"}</span>
-                <span className="font-mono text-ink-muted">{il.faceAmount ? `$${il.faceAmount}` : "—"} · {il.premium ? `$${il.premium}/m` : "—"}</span>
+                <span className="font-mono text-ink-muted">{il.faceAmount ?? "—"} · {il.premium ? `${il.premium}/m` : "—"}</span>
               </li>
             ))}
           </ul>

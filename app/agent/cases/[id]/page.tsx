@@ -7,6 +7,7 @@ import { getDownlineIds } from '@/lib/hierarchy'
 import { canAccessCase } from '@/lib/case-access'
 import { allowedTransitions } from '@/lib/case-workflow'
 import { decimalToNumber } from '@/lib/decimal'
+import { formatMoney } from '@/lib/format'
 import { Shell } from '@/components/Shell'
 import { CaseWorkspace } from './CaseWorkspace'
 
@@ -31,7 +32,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
 
   if (!c || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, c)) notFound()
 
-  const money = (v: unknown) => (v != null ? decimalToNumber(v).toFixed(2) : null)
+  const money = (v: unknown) => (v != null ? formatMoney(decimalToNumber(v)) : null)
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
