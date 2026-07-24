@@ -8,6 +8,7 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getDownlineIds } from '@/lib/hierarchy'
 import { canAccessPolicy } from '@/lib/policy-access'
 import { uploadPolicyDocument } from './actions'
+import { AnnualReviewCard } from './AnnualReviewCard'
 import { Shell } from '@/components/Shell'
 import { PageTitle } from '@/components/PageTitle'
 import { PolicyStatusPill } from '@/components/StatusPill'
@@ -24,6 +25,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       client: true,
       commissionRecords: { include: { agent: { include: { user: true } } }, orderBy: { createdAt: 'desc' } },
       documents: true,
+      reviews: { orderBy: { dueAt: 'desc' } },
     },
   })
   if (!policy) notFound()
@@ -116,6 +118,15 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             <p className="mt-2 text-sm text-ink">{policy.client.name}</p>
             {policy.client.email && <p className="mt-1 text-xs text-ink-muted">{policy.client.email}</p>}
           </section>
+          <AnnualReviewCard
+            policyId={policy.id}
+            reviews={policy.reviews.map((r) => ({
+              id: r.id,
+              dueAt: r.dueAt.toISOString(),
+              completedAt: r.completedAt ? r.completedAt.toISOString() : null,
+              notes: r.notes,
+            }))}
+          />
           <section className="rounded-md border border-border-steel bg-paper p-5">
             <h2 className="mb-3 text-base font-semibold text-ink">Documentos</h2>
             <ul className="divide-y divide-border-steel rounded-md border border-border-steel bg-panel">

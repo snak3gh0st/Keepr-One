@@ -106,6 +106,7 @@ export default async function AgentDashboard() {
   let awaitingIllustration = 0
   let openRequirements = 0
   let dueFollowUps = 0
+  let dueReviews = 0
   let atRiskPolicies = 0
   let txnExpected = 0
   let txnPaid = 0
@@ -137,6 +138,7 @@ export default async function AgentDashboard() {
       atRiskCount,
       txnByType,
       dueFollowUpCount,
+      dueReviewCount,
     ] = await Promise.all([
       prisma.policy.count({ where: { agentId: agent.id } }),
       prisma.commissionRecord.aggregate({ where: { agentId: agent.id }, _sum: { amount: true } }),
@@ -180,6 +182,13 @@ export default async function AgentDashboard() {
           insuranceCase: { assignedAgentId: { in: scope } },
         },
       }),
+      prisma.policyReview.count({
+        where: {
+          completedAt: null,
+          dueAt: { lte: endOfToday(now) },
+          policy: { agentId: { in: scope } },
+        },
+      }),
     ])
 
     openCases = openCasesCount
@@ -187,6 +196,7 @@ export default async function AgentDashboard() {
     openRequirements = openRequirementsCount
     atRiskPolicies = atRiskCount
     dueFollowUps = dueFollowUpCount
+    dueReviews = dueReviewCount
     for (const t of txnByType) {
       const sum = decimalToNumber(t._sum.amount)
       if (t.type === 'EXPECTED') txnExpected = sum
@@ -224,6 +234,7 @@ export default async function AgentDashboard() {
         <WorkCard href="/agent/cases" label="Aguardando ilustração" value={awaitingIllustration} tone="gold" />
         <WorkCard href="/agent/cases" label="Requirements abertos" value={openRequirements} tone="gold" />
         <WorkCard href="/agent/policies" label="Apólices em risco" value={atRiskPolicies} tone="danger" />
+        <WorkCard href="/agent/policies" label="Revisões anuais" value={dueReviews} tone="gold" />
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border-steel bg-border-steel sm:grid-cols-3">

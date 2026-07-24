@@ -202,6 +202,7 @@ model Policy {
   snapshots         PolicySnapshot[]
   transactions      PolicyTransaction[]
   commissionTransactions CommissionTransaction[]
+  reviews           PolicyReview[]
 
   @@index([agentId])
   @@index([clientId])
@@ -398,6 +399,19 @@ model CommissionTransaction {
   @@index([agentId, occurredAt])
   @@unique([provider, externalId])
   @@unique([provider, sourceTransactionId])
+}
+
+model PolicyReview {
+  id          String    @id @default(cuid())
+  policyId    String
+  policy      Policy    @relation(fields: [policyId], references: [id])
+  dueAt       DateTime
+  completedAt DateTime?
+  notes       String?
+  createdAt   DateTime  @default(now())
+
+  @@index([policyId])
+  @@index([dueAt])
 }
 
 model IntegrationConnection {

@@ -6,8 +6,29 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getDownlineIds } from '@/lib/hierarchy'
 import { canAccessPolicy } from '@/lib/policy-access'
 import { buildStoredPath, saveUploadedFile } from '@/lib/storage'
+import { nextAnnualReview } from '@/lib/annual-review'
 import { revalidatePath } from 'next/cache'
 import { randomUUID } from 'crypto'
+
+type ActionResult = { ok: true } | { ok: false; message: string }
+
+// Confirms the caller may act on this policy; returns null when allowed,
+// otherwise a failure result the action can pass straight back to the UI.
+async function assertPolicyAccess(policyId: string): Promise<ActionResult | null> {
+  const session = await requireRole('ADMIN', 'AGENT')
+  if (session.user.role === 'ADMIN') return null
+
+  const policy = await prisma.policy.findUnique({ where: { id: policyId }, select: { agentId: true, clientId: true } })
+  if (!policy) return { ok: false, message: 'Apólice não encontrada.' }
+
+  const agent = await getCurrentAgent()
+  const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
+  const scopeIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
+  if (!canAccessPolicy({ role: 'AGENT', agentScopeIds: scopeIds }, policy)) {
+    return { ok: false, message: 'Apólice fora da sua carteira.' }
+  }
+  return null
+}
 
 const ALLOWED_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg'])
 const MAX_SIZE_BYTES = 10 * 1024 * 1024
@@ -61,4 +82,45 @@ export async function uploadPolicyDocument(formData: FormData): Promise<void> {
   })
 
   revalidatePath(`/agent/policies/${policyId}`)
+}
+
+export async function scheduleAnnualReview(policyId: string): Promise<ActionResult> {
+  const denied = await assertPolicyAccess(policyId)
+  if (denied) return denied
+
+  const open = await prisma.policyReview.findFirst({
+    where: { policyId, completedAt: null },
+    select: { id: true },
+  })
+  if (open) return { ok: false, message: 'Já existe uma revisão anual agendada.' }
+
+  await prisma.policyReview.create({ data: { policyId, dueAt: nextAnnualReview(new Date()) } })
+  revalidatePath(`/agent/policies/${policyId}`)
+  return { ok: true }
+}
+
+export async function completeAnnualReview(reviewId: string, notes: string): Promise<ActionResult> {
+  const review = await prisma.policyReview.findUnique({
+    where: { id: reviewId },
+    select: { id: true, policyId: true, completedAt: true },
+  })
+  if (!review) return { ok: false, message: 'Revisão não encontrada.' }
+
+  const denied = await assertPolicyAccess(review.policyId)
+  if (denied) return denied
+  if (review.completedAt) return { ok: true } // idempotent
+
+  const now = new Date()
+  // Complete this review and roll the next anniversary forward in one transaction
+  // so the recurring cadence never drops a year.
+  await prisma.$transaction([
+    prisma.policyReview.update({
+      where: { id: reviewId },
+      data: { completedAt: now, notes: notes.trim() || null },
+    }),
+    prisma.policyReview.create({ data: { policyId: review.policyId, dueAt: nextAnnualReview(now) } }),
+  ])
+
+  revalidatePath(`/agent/policies/${review.policyId}`)
+  return { ok: true }
 }
