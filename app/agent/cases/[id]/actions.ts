@@ -47,6 +47,8 @@ export async function transitionCase(caseId: string, nextStage: CaseStage): Prom
         type: 'STAGE_CHANGED',
         title: `Etapa alterada para ${caseStageLabel[nextStage]}`,
         body: `De ${caseStageLabel[insuranceCase.stage]} para ${caseStageLabel[nextStage]}.`,
+        // Structured from/to powers pipeline cycle-time analytics.
+        metadata: { from: insuranceCase.stage, to: nextStage },
       },
     }),
   ])

@@ -3,7 +3,8 @@ export const dynamic = 'force-dynamic'
 import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/require-role'
 import { buildPipelineFunnel } from '@/lib/pipeline-bi'
-import { caseStageLabel, caseStageTone } from '@/lib/case-workflow'
+import { buildCycleTimes, type StageTransition } from '@/lib/cycle-time'
+import { caseStageLabel, caseStageTone, type CaseStage } from '@/lib/case-workflow'
 import { bucketByMonth } from '@/lib/dashboard'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
@@ -24,7 +25,17 @@ export default async function PipelinePage() {
   const session = await requireRole('ADMIN')
 
   const cases = await prisma.insuranceCase.findMany({
-    select: { stage: true, targetCoverage: true, monthlyBudget: true, createdAt: true },
+    select: {
+      stage: true,
+      targetCoverage: true,
+      monthlyBudget: true,
+      createdAt: true,
+      timelineEvents: {
+        where: { type: 'STAGE_CHANGED' },
+        select: { createdAt: true, metadata: true },
+        orderBy: { createdAt: 'asc' },
+      },
+    },
   })
 
   const funnel = buildPipelineFunnel(
@@ -34,6 +45,19 @@ export default async function PipelinePage() {
       monthlyBudget: c.monthlyBudget?.toNumber() ?? null,
     })),
   )
+
+  // Only events carrying structured from/to feed cycle time; older events (pre
+  // metadata) are skipped rather than parsed from labels.
+  const cycleTimes = buildCycleTimes(
+    cases.map((c) => ({
+      createdAt: c.createdAt,
+      transitions: c.timelineEvents.flatMap((e): StageTransition[] => {
+        const m = e.metadata as { from?: CaseStage; to?: CaseStage } | null
+        return m?.from && m?.to ? [{ from: m.from, to: m.to, at: e.createdAt }] : []
+      }),
+    })),
+  )
+  const maxCycle = Math.max(1, ...cycleTimes.map((c) => c.avgDays))
 
   const trend = bucketByMonth(cases.map((c) => c.createdAt), 6, new Date()).map((b) => ({
     label: b.month.slice(5),
@@ -88,6 +112,36 @@ export default async function PipelinePage() {
           </div>
         </aside>
       </div>
+
+      <section className="mt-8 rounded-lg border border-border-steel bg-paper p-6">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-base font-semibold text-ink">Tempo médio por etapa</h2>
+          <span className="text-xs text-ink-muted">Dias entre entrar e sair da etapa</span>
+        </div>
+        {cycleTimes.length === 0 ? (
+          <p className="mt-4 text-sm text-ink-muted">
+            Ainda sem transições registradas para medir. O tempo por etapa aparece conforme os casos avançam.
+          </p>
+        ) : (
+          <ul className="mt-5 space-y-2.5">
+            {cycleTimes.map((s) => (
+              <li key={s.stage} className="grid grid-cols-[150px_1fr_5rem] items-center gap-3">
+                <span className="text-sm text-ink-muted">{caseStageLabel[s.stage]}</span>
+                <div className="h-5 rounded bg-panel">
+                  <div
+                    className="h-5 rounded bg-teal"
+                    style={{ width: `${Math.round((s.avgDays / maxCycle) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-right font-mono text-sm tabular-nums text-ink">
+                  {s.avgDays.toFixed(1)}d
+                  <span className="ml-1 text-xs text-ink-muted">·{s.samples}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </Shell>
   )
 }
