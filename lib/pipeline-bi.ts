@@ -25,6 +25,42 @@ export type PipelineFunnel = {
 
 const TERMINAL: CaseStage[] = ['PLACED', 'DECLINED', 'WITHDRAWN']
 
+export type AgentPipelineCase = PipelineCase & { agentId: string; agentName: string }
+export type AgentPipelineRow = {
+  agentId: string
+  agentName: string
+  total: number
+  open: number
+  placed: number
+  winRate: number
+  inFlightCoverage: number
+}
+
+// Per-agent pipeline breakdown for management drill-down. Groups cases by their
+// assigned agent and folds each group through the same funnel logic, then ranks
+// by live workload (open cases) so managers see who's carrying the most first.
+export function buildAgentPipeline(cases: AgentPipelineCase[]): AgentPipelineRow[] {
+  const groups = new Map<string, { name: string; cases: PipelineCase[] }>()
+  for (const c of cases) {
+    const g = groups.get(c.agentId) ?? { name: c.agentName, cases: [] }
+    g.cases.push(c)
+    groups.set(c.agentId, g)
+  }
+
+  return Array.from(groups, ([agentId, g]) => {
+    const f = buildPipelineFunnel(g.cases)
+    return {
+      agentId,
+      agentName: g.name,
+      total: f.total,
+      open: f.open,
+      placed: f.placed,
+      winRate: f.winRate,
+      inFlightCoverage: f.inFlightCoverage,
+    }
+  }).sort((a, b) => b.open - a.open || b.placed - a.placed)
+}
+
 export function buildPipelineFunnel(cases: PipelineCase[]): PipelineFunnel {
   const counts = new Map<CaseStage, number>(CASE_STAGES.map((s) => [s, 0]))
   let inFlightCoverage = 0

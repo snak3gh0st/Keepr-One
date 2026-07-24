@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/require-role'
-import { buildPipelineFunnel } from '@/lib/pipeline-bi'
+import { buildPipelineFunnel, buildAgentPipeline } from '@/lib/pipeline-bi'
 import { buildCycleTimes, type StageTransition } from '@/lib/cycle-time'
 import { caseStageLabel, caseStageTone, type CaseStage } from '@/lib/case-workflow'
 import { bucketByMonth } from '@/lib/dashboard'
@@ -10,6 +10,7 @@ import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { StatCard } from '@/components/StatCard'
 import { TrendChart } from '@/components/TrendChart'
+import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
 
 const usd = (v: number) =>
   v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v.toFixed(0)}`
@@ -30,6 +31,8 @@ export default async function PipelinePage() {
       targetCoverage: true,
       monthlyBudget: true,
       createdAt: true,
+      assignedAgentId: true,
+      assignedAgent: { select: { user: { select: { name: true } } } },
       timelineEvents: {
         where: { type: 'STAGE_CHANGED' },
         select: { createdAt: true, metadata: true },
@@ -58,6 +61,16 @@ export default async function PipelinePage() {
     })),
   )
   const maxCycle = Math.max(1, ...cycleTimes.map((c) => c.avgDays))
+
+  const agentRows = buildAgentPipeline(
+    cases.map((c) => ({
+      agentId: c.assignedAgentId,
+      agentName: c.assignedAgent.user?.name ?? '—',
+      stage: c.stage,
+      targetCoverage: c.targetCoverage?.toNumber() ?? null,
+      monthlyBudget: c.monthlyBudget?.toNumber() ?? null,
+    })),
+  )
 
   const trend = bucketByMonth(cases.map((c) => c.createdAt), 6, new Date()).map((b) => ({
     label: b.month.slice(5),
@@ -141,6 +154,36 @@ export default async function PipelinePage() {
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="mt-8">
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 className="text-base font-semibold text-ink">Pipeline por agente</h2>
+          <span className="text-xs text-ink-muted">{agentRows.length} agentes com casos</span>
+        </div>
+        <Table>
+          <Thead>
+            <tr>
+              <Th>Agente</Th>
+              <Th className="text-right">Em andamento</Th>
+              <Th className="text-right">Emitidos</Th>
+              <Th className="text-right">Win rate</Th>
+              <Th className="text-right">Cobertura em pipeline</Th>
+            </tr>
+          </Thead>
+          <tbody>
+            {agentRows.map((r, i) => (
+              <Tr key={r.agentId} index={i}>
+                <Td>{r.agentName}</Td>
+                <TdNum>{r.open}</TdNum>
+                <TdNum>{r.placed}</TdNum>
+                <TdNum>{(r.winRate * 100).toFixed(0)}%</TdNum>
+                <TdNum>{usd(r.inFlightCoverage)}</TdNum>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
+        {agentRows.length === 0 && <EmptyState>Nenhum caso atribuído ainda.</EmptyState>}
       </section>
     </Shell>
   )

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildPipelineFunnel, type PipelineCase } from './pipeline-bi'
+import { buildPipelineFunnel, buildAgentPipeline, type PipelineCase } from './pipeline-bi'
 
 const c = (stage: PipelineCase['stage'], cov = 0, budget = 0): PipelineCase => ({
   stage,
@@ -41,5 +41,31 @@ describe('buildPipelineFunnel', () => {
     ])
     expect(f.inFlightCoverage).toBe(750_000)
     expect(f.inFlightBudget).toBe(450)
+  })
+})
+
+describe('buildAgentPipeline', () => {
+  const ac = (agentId: string, agentName: string, stage: PipelineCase['stage'], cov = 0) => ({
+    agentId,
+    agentName,
+    stage,
+    targetCoverage: cov,
+    monthlyBudget: null,
+  })
+
+  it('groups by agent and ranks by open workload', () => {
+    const rows = buildAgentPipeline([
+      ac('a1', 'Ana', 'PLACED'),
+      ac('a2', 'Bruno', 'LEAD'),
+      ac('a2', 'Bruno', 'DISCOVERY'),
+    ])
+    expect(rows.map((r) => r.agentId)).toEqual(['a2', 'a1']) // Bruno (2 open) before Ana (0 open)
+    expect(rows[0]).toMatchObject({ agentName: 'Bruno', open: 2, placed: 0 })
+    expect(rows[1]).toMatchObject({ agentName: 'Ana', open: 0, placed: 1, winRate: 1 })
+  })
+
+  it('sums in-flight coverage per agent', () => {
+    const rows = buildAgentPipeline([ac('a1', 'Ana', 'DISCOVERY', 300_000), ac('a1', 'Ana', 'PLACED', 999)])
+    expect(rows[0].inFlightCoverage).toBe(300_000)
   })
 })
