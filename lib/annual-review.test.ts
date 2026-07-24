@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nextAnnualReview, isReviewDue } from './annual-review'
+import { nextAnnualReview, isReviewDue, nextReviewFrom } from './annual-review'
 
 describe('nextAnnualReview', () => {
   it('advances one calendar year without mutating the input', () => {
@@ -24,5 +24,25 @@ describe('isReviewDue', () => {
   })
   it('is not due when still in the future', () => {
     expect(isReviewDue(new Date('2026-08-01T00:00:00.000Z'), now)).toBe(false)
+  })
+})
+
+describe('nextReviewFrom', () => {
+  const now = new Date('2026-07-24T12:00:00.000Z')
+
+  it('falls back to one year out when there is no effective date', () => {
+    expect(nextReviewFrom(null, now).toISOString()).toBe('2027-07-24T12:00:00.000Z')
+  })
+
+  it('uses this year for an anniversary still ahead', () => {
+    expect(nextReviewFrom(new Date('2020-11-10T00:00:00.000Z'), now).toISOString()).toBe(
+      '2026-11-10T00:00:00.000Z',
+    )
+  })
+
+  it('rolls a passed anniversary to next year (no overdue seeding)', () => {
+    expect(nextReviewFrom(new Date('2023-03-05T00:00:00.000Z'), now).toISOString()).toBe(
+      '2027-03-05T00:00:00.000Z',
+    )
   })
 })

@@ -12,3 +12,14 @@ export function nextAnnualReview(from: Date): Date {
 export function isReviewDue(dueAt: Date, now: Date): boolean {
   return dueAt.getTime() <= now.getTime()
 }
+
+// First review date when seeding from a policy: the next upcoming anniversary of
+// its effective date (so a 3-year-old policy isn't scheduled overdue). With no
+// effective date, fall back to one year out.
+export function nextReviewFrom(effectiveDate: Date | null, now: Date): Date {
+  if (!effectiveDate) return nextAnnualReview(now)
+  const anniversary = new Date(effectiveDate)
+  anniversary.setFullYear(now.getFullYear())
+  if (anniversary.getTime() < now.getTime()) anniversary.setFullYear(anniversary.getFullYear() + 1)
+  return anniversary
+}

@@ -1,6 +1,7 @@
 import { parse } from 'csv-parse/sync'
 import { prisma } from '@/lib/prisma'
 import { computeOverrides } from '@/lib/commission'
+import { ensureAnnualReview, REVIEWABLE_POLICY_STATUS } from '@/lib/policy-reviews'
 import { PolicyRowSchema, CommissionRowSchema } from './schemas'
 
 export function parseCsv(content: string): Record<string, string>[] {
@@ -183,6 +184,16 @@ export async function importPolicies(content: string, uploadedById: string, file
       create: { policyId: policy.id, ...snapshotData },
       update: snapshotData,
     })
+
+    // Seed an annual review for in-force policies so the yearly cadence starts
+    // automatically. Idempotent — re-imports won't duplicate an open review.
+    if (row.status === REVIEWABLE_POLICY_STATUS) {
+      await ensureAnnualReview(
+        policy.id,
+        row.effectiveDate ? new Date(row.effectiveDate) : null,
+        new Date(),
+      )
+    }
     successCount += 1
   }
 
