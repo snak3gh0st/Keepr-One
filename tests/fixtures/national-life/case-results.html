@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <body>
+    <main data-carrier-id="NATIONAL_LIFE" data-portal-page="case-results">
+      <h1>Case search</h1>
+      <form action="/cases/search" method="get">
+        <label for="external-application-id">External application ID</label>
+        <input
+          id="external-application-id"
+          name="applicationId"
+          type="search"
+          value="{{APPLICATION_ID}}"
+        />
+        <button type="submit">Search</button>
+      </form>
+
+      <section aria-label="Search results">
+        <a href="{{DETAIL_PATH}}">Open application {{APPLICATION_ID}}</a>
+      </section>
+    </main>
+  </body>
+</html>
