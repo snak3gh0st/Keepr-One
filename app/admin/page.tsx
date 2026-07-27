@@ -70,7 +70,7 @@ export default async function AdminDashboard() {
           delta={percentChange(commissionCurrent, commissionPrevious)}
           deltaSuffix=" vs mês anterior"
         >
-          <TrendChart compact data={premiumBuckets.map((b) => ({ label: b.month.slice(5), value: b.total }))} />
+          <TrendChart compact tone="onDark" data={premiumBuckets.map((b) => ({ label: b.month.slice(5), value: b.total }))} />
         </StatCardHero>
       </div>
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Logo } from "@/components/Logo";
+import { Avatar } from "@/components/Avatar";
 
 type NavItem = { href: string; label: string; icon: string };
 
@@ -77,6 +78,12 @@ export function Shell({
   const items = NAV[role];
   const currentPage = PAGE_NAMES[pathname] ?? (role === "ADMIN" ? "Operação" : role === "AGENT" ? "Minha operação" : "Minha conta");
   const roleLabel = role === "ADMIN" ? "Administração" : role === "AGENT" ? "Área do agente" : "Portal do cliente";
+  const quickAction =
+    role === "AGENT" && pathname === "/agent"
+      ? { href: "/agent/cases/new", label: "Novo caso" }
+      : role === "ADMIN" && pathname === "/admin"
+        ? { href: "/admin/import", label: "Importar dados" }
+        : null;
 
   async function handleSignOut() {
     await authClient.signOut();
@@ -85,20 +92,17 @@ export function Shell({
   }
 
   return (
-    <div className="min-h-full w-full bg-paper md:flex">
-      <a href="#main-content" className="sr-only fixed left-3 top-3 z-50 rounded-md bg-paper px-3 py-2 text-sm font-semibold text-ink shadow-[var(--shadow-overlay)] focus:not-sr-only">
+    <div className="min-h-full w-full bg-canvas md:flex">
+      <a href="#main-content" className="sr-only fixed left-3 top-3 z-50 rounded-full bg-paper px-4 py-2.5 text-sm font-semibold text-ink shadow-[var(--shadow-overlay)] focus:not-sr-only">
         Ir para o conteúdo
       </a>
-      {/* Mobile-only top bar: deliberately far from the bottom nav so a
-          distracted, one-handed tap near "Sair" can never land on a nav
-          destination instead (or vice versa). */}
-      <div className="flex items-center justify-between border-b border-white/10 bg-rail px-4 py-3 text-paper md:hidden">
-        <Logo size={26} className="text-base" />
-        <span className="mr-auto ml-3 text-xs text-paper/55">{currentPage}</span>
+
+      <div className="flex items-center justify-between border-b border-white/[0.08] bg-[#0a0a0a] px-4 py-3 text-white md:hidden">
+        <Logo size={28} className="text-base text-white" />
         <button
           type="button"
           onClick={handleSignOut}
-          className="text-xs font-semibold text-paper/70 hover:text-paper"
+          className="rounded-full border border-white/[0.12] px-3 py-1.5 text-xs font-semibold text-white/65 hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75"
         >
           Sair
         </button>
@@ -106,54 +110,103 @@ export function Shell({
 
       <nav
         aria-label="Navegação principal"
-        className="fixed inset-x-0 bottom-0 z-30 flex shrink-0 border-t border-white/10 bg-rail text-paper md:sticky md:top-0 md:h-screen md:w-[248px] md:flex-col md:self-start md:border-t-0 md:bg-rail"
+        className="fixed inset-x-0 bottom-0 z-30 flex shrink-0 border-t border-white/[0.08] bg-[#090909] pb-[env(safe-area-inset-bottom)] text-white shadow-[0_-16px_48px_rgba(0,0,0,0.22)] md:sticky md:top-0 md:h-screen md:w-[272px] md:flex-col md:self-start md:border-r md:border-t-0 md:border-white/[0.07] md:pb-0 md:shadow-[16px_0_56px_rgba(0,0,0,0.12)]"
       >
-        <div className="hidden px-6 pb-8 pt-8 md:block">
-          <Logo size={30} className="text-lg" />
-          <p className="mt-3 text-xs text-paper/50">Operações RICOS</p>
+        <div aria-hidden className="pointer-events-none absolute inset-0 hidden overflow-hidden md:block">
+          <div className="absolute -left-24 -top-20 h-72 w-72 rounded-full bg-white/[0.035] blur-3xl" />
+          <div className="absolute -bottom-28 -right-24 h-64 w-64 rounded-full bg-white/[0.025] blur-3xl" />
         </div>
-        <div className="hidden px-6 pb-2 md:block"><p className="text-xs font-semibold text-paper/45">{roleLabel}</p></div>
-        <ul className="flex w-full md:flex-1 md:flex-col md:gap-1 md:overflow-y-auto md:px-3">
+
+        <div className="relative hidden px-6 pb-9 pt-7 md:block">
+          <Logo size={34} className="text-xl text-white" />
+          <div className="mt-7 rounded-2xl border border-white/[0.11] bg-white/[0.035] px-4 py-3.5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">Workspace</p>
+            <p className="mt-1.5 text-sm font-medium text-white/88">Operações RICOS</p>
+          </div>
+        </div>
+
+        <div className="relative hidden px-6 pb-3 md:block">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">{roleLabel}</p>
+        </div>
+
+        <ul className="relative flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain md:flex-1 md:snap-none md:flex-col md:gap-1.5 md:overflow-y-auto md:px-3">
           {items.map((item) => {
-            const active = pathname === item.href;
+            const isSection = item.href.split("/").filter(Boolean).length > 1;
+            const active = pathname === item.href || (isSection && pathname.startsWith(`${item.href}/`));
             return (
-              <li key={item.href} className="flex-1 md:flex-none">
+              <li key={item.href} className="w-[78px] shrink-0 snap-start md:w-auto md:flex-none">
                 <Link
                   href={item.href}
                   aria-current={active ? "page" : undefined}
-                    className={`flex flex-1 flex-col items-center gap-1 whitespace-nowrap px-1 py-2.5 text-center text-[10px] font-semibold transition-colors duration-150 md:flex-row md:rounded-md md:px-3 md:py-2.5 md:text-left md:text-sm ${
-                      active
-                      ? "bg-paper/12 text-paper"
-                      : "text-paper/55 hover:bg-paper/7 hover:text-paper"
+                  className={`group flex flex-1 flex-col items-center gap-1.5 whitespace-nowrap px-1 py-2.5 text-center text-[10px] font-semibold transition-all duration-300 focus-visible:outline-white/75 md:flex-row md:rounded-xl md:px-3.5 md:py-3 md:text-left md:text-[13px] ${
+                    active
+                      ? "bg-[#f1f1ef] text-[#090909] shadow-[0_14px_32px_rgba(0,0,0,0.34)]"
+                      : "text-white/55 hover:bg-white/[0.06] hover:text-white"
                   }`}
                 >
-                  <NavIcon name={item.icon} />
-                  {item.label}
+                  <span className="transition-transform duration-500 ease-out group-hover:scale-105">
+                    <NavIcon name={item.icon} />
+                  </span>
+                  <span>{item.label}</span>
                 </Link>
               </li>
             );
           })}
         </ul>
-        <div className="hidden border-t border-white/10 px-6 py-5 md:block">
-          <p className="text-xs font-semibold text-paper/45">Conta conectada</p>
-          <p className="mt-1 truncate text-sm font-medium text-paper">{userName}</p>
-          <button
-            type="button"
-            onClick={handleSignOut}
-            className="mt-2 text-xs font-semibold text-paper/55 hover:text-paper"
-          >
-            Sair
-          </button>
+
+        <div className="relative hidden px-3 pb-4 pt-3 md:block">
+          <div className="rounded-2xl border border-white/[0.11] bg-white/[0.04] p-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <Avatar name={userName || "Conta"} />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-white">{userName || "Conta conectada"}</p>
+                <p className="mt-0.5 text-[11px] text-white/55">{roleLabel}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="mt-3 flex min-h-9 w-full items-center justify-center rounded-xl border border-white/[0.1] text-xs font-semibold text-white/65 transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75"
+            >
+              Sair da conta
+            </button>
+          </div>
         </div>
       </nav>
 
-      <main id="main-content" className="min-w-0 flex-1 bg-canvas px-4 py-6 pb-24 md:px-9 md:py-8 md:pb-10 lg:px-12">
-        <div className="mx-auto max-w-[1480px]">
-          <div className="mb-8 flex items-center justify-between border-b border-border-steel/70 pb-4 text-xs">
-            <div className="flex items-center gap-2 text-ink-muted"><span>Fyntra</span><span className="text-ink-muted/40">/</span><span className="font-medium text-ink">{currentPage}</span></div>
-            <span className="hidden items-center gap-2 text-ink-muted sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-success" /> Operação conectada</span>
+      <main id="main-content" className="min-w-0 w-full max-w-full flex-1 overflow-x-hidden bg-canvas pb-24 md:pb-0">
+        <div className="sticky top-0 z-20 border-b border-border-steel/65 bg-canvas/88 px-4 backdrop-blur-xl sm:px-6 md:px-9 lg:px-12">
+          <div className="mx-auto flex h-[72px] max-w-[1500px] items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="hidden text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted sm:block">keepr one</p>
+              <div className="flex items-center gap-2">
+                <p className="truncate text-sm font-semibold tracking-[-0.02em] text-ink sm:mt-1">{currentPage}</p>
+                <span className="hidden h-1 w-1 rounded-full bg-border-steel sm:block" />
+                <span className="hidden items-center gap-1.5 text-xs text-ink-muted sm:flex">
+                  <span className="h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_0_4px_oklch(0.46_0.11_155/0.1)]" />
+                  Operação conectada
+                </span>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="hidden rounded-full border border-border-steel bg-paper/80 px-3 py-2 text-xs font-medium text-ink-muted lg:inline-flex">
+                {roleLabel}
+              </span>
+              {quickAction && (
+                <Link
+                  href={quickAction.href}
+                  className="group inline-flex min-h-10 items-center gap-2 rounded-full bg-rail-strong px-4 py-2.5 text-xs font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5"
+                >
+                  <span className="text-base leading-none text-mint transition-transform duration-500 group-hover:rotate-90">+</span>
+                  {quickAction.label}
+                </Link>
+              )}
+            </div>
           </div>
-          {children}
+        </div>
+
+        <div className="keepr-grid min-h-[calc(100vh-72px)] px-4 py-7 sm:px-6 md:px-9 md:py-10 lg:px-12">
+          <div className="mx-auto max-w-[1500px]">{children}</div>
         </div>
       </main>
     </div>

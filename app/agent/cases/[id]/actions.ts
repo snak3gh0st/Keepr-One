@@ -58,7 +58,7 @@ export async function transitionCase(caseId: string, nextStage: CaseStage): Prom
   return { ok: true }
 }
 
-// Standard life-application document checklist. These are Fyntra-owned tracking
+// Standard life-application document checklist. These are Keepr One-owned tracking
 // items, not carrier-authoritative requirements — when a vendor feed is wired,
 // its requirements sync in via provider/externalId alongside these.
 const STANDARD_REQUIREMENTS = [

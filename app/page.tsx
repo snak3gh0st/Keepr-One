@@ -24,7 +24,7 @@ export default async function Home() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-sm flex-col items-center justify-center px-4 text-center">
       <span className="font-sans text-2xl font-semibold tracking-tight text-ink">
-        Fyntra
+        Keepr One
       </span>
       <p className="mt-2 text-sm text-ink-muted">
         Acesse sua conta para ver suas apólices e comissões.

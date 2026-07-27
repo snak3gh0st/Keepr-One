@@ -1,30 +1,38 @@
-// Fyntra brand mark. A geometric "F" whose middle stroke is rendered in the
-// brand gold, tying the ledger-teal and gold accent together in one glyph.
-// Single source for the mark so every surface (shell, login, breadcrumb) stays
-// identical — change it here, it changes everywhere.
-
 type Variant = "onLight" | "onTeal";
 
 export function LogoMark({ size = 28, variant = "onLight" }: { size?: number; variant?: Variant }) {
-  const tile = variant === "onTeal" ? "var(--color-teal)" : "var(--color-paper)";
-  const glyph = variant === "onTeal" ? "var(--color-paper)" : "var(--color-teal)";
-  const accent = "var(--color-gold)";
+  const green = variant === "onTeal" ? "var(--color-paper)" : "#42c77d";
+  const greenShade = variant === "onTeal" ? "rgba(255,255,255,0.72)" : "#237f5a";
+  const lowerArm = variant === "onTeal" ? "var(--color-rail-strong)" : "#ffffff";
+
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 32 32"
-      role="img"
-      aria-label="Fyntra"
+      viewBox="8 6 84 86"
+      aria-hidden
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      className="shrink-0 overflow-visible drop-shadow-[0_0_8px_rgba(66,199,125,0.24)]"
     >
-      <rect width="32" height="32" rx="8" fill={tile} />
-      {/* stem + top bar */}
-      <rect x="11" y="8" width="3.4" height="16" rx="1" fill={glyph} />
-      <rect x="11" y="8" width="11" height="3.4" rx="1" fill={glyph} />
-      {/* middle stroke — the gold accent */}
-      <rect x="11" y="14.6" width="7.6" height="3.4" rx="1" fill={accent} />
+      <path
+        d="M13 13.5C13 11.01 15.01 9 17.5 9H44L13 58V13.5Z"
+        fill={green}
+        stroke={greenShade}
+        strokeWidth="0.7"
+      />
+      <path
+        d="M13 64.5L60.5 9H88L13 86V64.5Z"
+        fill={green}
+        stroke={greenShade}
+        strokeWidth="0.7"
+      />
+      <path
+        d="M47.5 66L61.5 52L89 88H61L47.5 66Z"
+        fill={lowerArm}
+        stroke="rgba(8, 20, 14, 0.2)"
+        strokeWidth="0.7"
+      />
     </svg>
   );
 }
@@ -41,9 +49,18 @@ export function Logo({
   className?: string;
 }) {
   return (
-    <span className={`inline-flex items-center gap-2.5 font-sans font-semibold tracking-tight ${className}`}>
+    <span
+      role="img"
+      aria-label="Keepr One"
+      className={`inline-flex items-center gap-2 font-brand font-medium tracking-[-0.045em] ${className}`}
+    >
       <LogoMark size={size} variant={variant} />
-      {wordmark && <span>Fyntra</span>}
+      {wordmark && (
+        <span aria-hidden className="inline-flex items-baseline gap-[0.22em] leading-none">
+          <span className="font-bold text-current">keepr</span>
+          <span className="font-medium text-[#42c77d]">one</span>
+        </span>
+      )}
     </span>
   );
 }
