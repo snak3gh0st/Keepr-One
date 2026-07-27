@@ -20,6 +20,7 @@ function NavIcon({ name }: { name: string }) {
     users: <><circle cx="9" cy="8" r="3" /><path d="M3 20c.5-3 2.5-5 6-5s5.5 2 6 5M16 5.5a3 3 0 0 1 0 5.8M18 15c1.8.7 2.8 2.3 3 5" /></>,
     document: <><path d="M6 3h9l3 3v15H6zM14 3v4h4M9 12h6M9 16h6" /></>,
     money: <><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="12" cy="12" r="3" /><path d="M7 9h.01M17 15h.01" /></>,
+    link: <><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L10.8 5" /><path d="M14 11a5 5 0 0 0-7.1 0l-2.4 2.4a5 5 0 0 0 7.1 7.1L13.2 19" /></>,
   };
   return <svg {...common}>{paths[name] ?? paths.grid}</svg>;
 }
@@ -33,6 +34,7 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
     { href: "/admin/commission-plans", label: "Planos de comissão", icon: "layers" },
     { href: "/admin/import", label: "Importar dados", icon: "upload" },
     { href: "/admin/audit", label: "Auditoria", icon: "audit" },
+    { href: "/agent/integrations/national-life", label: "Integrações", icon: "link" },
   ],
   AGENT: [
     { href: "/agent", label: "Hoje", icon: "grid" },
@@ -41,6 +43,7 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
     { href: "/agent/policies", label: "Apólices", icon: "document" },
     { href: "/agent/commissions", label: "Comissões", icon: "money" },
     { href: "/agent/hierarchy", label: "Equipe", icon: "hierarchy" },
+    { href: "/agent/integrations/national-life", label: "Integrações", icon: "link" },
   ],
   CLIENT: [{ href: "/client", label: "Minhas apólices", icon: "document" }],
 };
@@ -61,6 +64,7 @@ const PAGE_NAMES: Record<string, string> = {
   "/agent/policies": "Apólices",
   "/agent/policies/new": "Sobre apólices",
   "/agent/commissions": "Extrato de comissões",
+  "/agent/integrations/national-life": "Conexão National Life",
   "/client": "Minhas apólices",
 };
 
