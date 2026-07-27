@@ -81,10 +81,7 @@ export type CreateBrowserJobInput = {
 
 export type BrowserJobRepository = {
   findByIdempotencyKey(idempotencyKey: string): Promise<BrowserJobRecord | null>
-  findMostRecentByIdempotencyKeyPrefix(
-    idempotencyKeyPrefix: string,
-    states?: readonly BrowserJobState[],
-  ): Promise<BrowserJobRecord | null>
+  findMostRecentByRetryKeyFamily(baseKey: string, states?: readonly BrowserJobState[]): Promise<BrowserJobRecord | null>
   create(input: CreateBrowserJobInput): Promise<BrowserJobRecord>
   claimNextAvailable(input: {
     now: Date
@@ -133,6 +130,10 @@ function buildCaseSyncBucket(now: Date): number {
 
 function buildCaseSyncIdempotencyKey(agentId: string, caseId: string, now: Date): string {
   return `national-life:case-sync:${agentId}:${caseId}:${buildCaseSyncBucket(now)}`
+}
+
+function buildCaseSyncRetryKey(baseKey: string): string {
+  return `${baseKey}:retry:${randomUUID()}`
 }
 
 function sanitizeCaseReadSyncInput(input: {
@@ -253,12 +254,19 @@ const prismaBrowserJobRepository: BrowserJobRepository = {
     return job ? fromPrismaBrowserJob(job) : null
   },
 
-  async findMostRecentByIdempotencyKeyPrefix(idempotencyKeyPrefix, states) {
+  async findMostRecentByRetryKeyFamily(baseKey, states) {
     const job = await prisma.browserAutomationJob.findFirst({
       where: {
-        idempotencyKey: {
-          startsWith: idempotencyKeyPrefix,
-        },
+        OR: [
+          {
+            idempotencyKey: baseKey,
+          },
+          {
+            idempotencyKey: {
+              startsWith: `${baseKey}:retry:`,
+            },
+          },
+        ],
         state: states?.length ? { in: [...states] } : undefined,
       },
       orderBy: [{ createdAt: 'desc' }],
@@ -421,19 +429,19 @@ export function createBrowserJobService(deps?: BrowserJobServiceDeps) {
       const now = resolveNow(deps)
       const sanitized = sanitizeCaseReadSyncInput(input)
       const baseKey = buildCaseSyncIdempotencyKey(sanitized.agentId, sanitized.payload.caseId, now)
-      const active = await repository.findMostRecentByIdempotencyKeyPrefix(baseKey, [...ACTIVE_JOB_STATES])
+      const active = await repository.findMostRecentByRetryKeyFamily(baseKey, [...ACTIVE_JOB_STATES])
 
       if (active) {
         return { jobId: active.id, duplicate: true }
       }
 
-      const existing = await repository.findMostRecentByIdempotencyKeyPrefix(baseKey)
+      const existing = await repository.findMostRecentByRetryKeyFamily(baseKey)
 
       const created = await repository.create({
         agentId: sanitized.agentId,
         caseId: sanitized.payload.caseId,
         operation: 'SYNC_CASE_READ',
-        idempotencyKey: existing ? `${baseKey}:${randomUUID()}` : baseKey,
+        idempotencyKey: existing ? buildCaseSyncRetryKey(baseKey) : baseKey,
         input: sanitized.payload,
         availableAt: now,
       })

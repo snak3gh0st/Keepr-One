@@ -643,6 +643,11 @@ git add lib/national-life/job-service.ts lib/national-life/job-service.test.ts
 git commit -m "feat: add durable National Life browser job queue"
 ```
 
+**Round 2 fix evidence (2026-07-27):**
+- Reproduced the new finding with a focused regression: an active job keyed `national-life:case-sync:agent-1:case-1:59505120` was incorrectly treated as a duplicate of bucket `5950512` because the repository and test double used raw `startsWith(baseKey)` matching.
+- Tightened Task 4 dedupe semantics so only the exact base key or explicit retry variants under the unambiguous `:retry:` suffix family match (`baseKey` or `baseKey:retry:*`), preventing adjacent numeric buckets from colliding.
+- Added the cross-bucket regression in `lib/national-life/job-service.test.ts` and reran `pnpm vitest run lib/national-life/job-service.test.ts` to green after the fix (`10 passed`).
+
 ---
 
 ### Task 5: Steel Session Boundary and Navigation Allowlist

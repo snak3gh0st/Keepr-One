@@ -79,13 +79,14 @@ function createInMemoryRepository(
       return structuredClone(jobs.find((job) => job.idempotencyKey === idempotencyKey) ?? null)
     },
 
-    async findMostRecentByIdempotencyKeyPrefix(idempotencyKeyPrefix, states) {
+    async findMostRecentByRetryKeyFamily(baseKey, states) {
       return (
         structuredClone(
           jobs
             .filter(
               (job) =>
-                job.idempotencyKey.startsWith(idempotencyKeyPrefix) &&
+                (job.idempotencyKey === baseKey ||
+                  job.idempotencyKey.startsWith(`${baseKey}:retry:`)) &&
                 (!states?.length || states.includes(job.state)),
             )
             .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0] ?? null,
@@ -228,7 +229,7 @@ describe('National Life browser job service', () => {
         leaseOwner: 'worker-2',
         leaseExpiresAt: new Date('2026-07-27T12:08:00.000Z'),
         startedAt: new Date('2026-07-27T12:02:00.000Z'),
-        idempotencyKey: `${baseKey}:retry-1`,
+        idempotencyKey: `${baseKey}:retry:1`,
         input: {
           caseId: 'case-1',
           applicationId: 'app-1',
@@ -253,6 +254,53 @@ describe('National Life browser job service', () => {
     ).resolves.toEqual({ jobId: 'job-active-reenqueue', duplicate: true })
 
     await expect(repository.snapshot()).resolves.toHaveLength(2)
+  })
+
+  it('does not deduplicate across distinct buckets that share a numeric prefix', async () => {
+    const repository = createInMemoryRepository([
+      buildJob({
+        id: 'job-other-bucket',
+        agentId: 'agent-1',
+        caseId: 'case-1',
+        operation: 'SYNC_CASE_READ',
+        state: 'RUNNING',
+        leaseOwner: 'worker-2',
+        leaseExpiresAt: new Date('2026-07-27T12:08:00.000Z'),
+        startedAt: new Date('2026-07-27T12:02:00.000Z'),
+        idempotencyKey: 'national-life:case-sync:agent-1:case-1:59505120',
+        input: {
+          caseId: 'case-1',
+          applicationId: 'app-1',
+          lookup: { kind: 'EXTERNAL_ID', value: 'NLG-123' },
+        },
+      }),
+    ])
+
+    const service = createBrowserJobService({
+      repository,
+      connectionTestScopeId: 'scope-1',
+      now: () => new Date('2026-07-27T12:02:00.000Z'),
+    })
+
+    await expect(
+      service.enqueueCaseReadSync({
+        agentId: 'agent-1',
+        caseId: 'case-1',
+        applicationId: 'app-1',
+        lookup: { kind: 'EXTERNAL_ID', value: 'NLG-123' },
+      }),
+    ).resolves.toEqual({ jobId: 'job-2', duplicate: false })
+
+    await expect(repository.snapshot()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'job-other-bucket',
+        idempotencyKey: 'national-life:case-sync:agent-1:case-1:59505120',
+      }),
+      expect.objectContaining({
+        id: 'job-2',
+        idempotencyKey: 'national-life:case-sync:agent-1:case-1:5950512',
+      }),
+    ])
   })
 
   it('never places credentials or URLs in job input', async () => {
