@@ -264,7 +264,7 @@ export function PublicLanding() {
           </nav>
         </header>
 
-        <section className="landing-hero" data-hero>
+        <section className="landing-hero landing-dark-texture" data-hero>
           <div className="landing-hero-aura" data-hero-aura aria-hidden="true" />
           <div className="landing-grain" aria-hidden="true" />
 
@@ -310,7 +310,10 @@ export function PublicLanding() {
           </div>
         </div>
 
-        <section className="landing-interest" id="plataforma">
+        <section
+          className="landing-interest landing-light-texture keepr-noise"
+          id="plataforma"
+        >
           <div className="landing-wrap">
             <div className="landing-section-intro">
               <h2 data-copy-reveal>
@@ -428,7 +431,10 @@ export function PublicLanding() {
           </div>
         </section>
 
-        <section className="landing-journey" id="operacao">
+        <section
+          className="landing-journey landing-dark-texture"
+          id="operacao"
+        >
           <div className="landing-grain" aria-hidden="true" />
           <div className="landing-wrap landing-journey-layout">
             <div className="landing-journey-intro">
@@ -470,7 +476,10 @@ export function PublicLanding() {
           </div>
         </section>
 
-        <section className="landing-questions" id="visao">
+        <section
+          className="landing-questions landing-light-texture keepr-noise"
+          id="visao"
+        >
           <div className="landing-wrap">
             <div className="landing-questions-heading">
               <span className="landing-section-index">Sua visão diária</span>
@@ -493,7 +502,7 @@ export function PublicLanding() {
           </div>
         </section>
 
-        <section className="landing-final">
+        <section className="landing-final landing-dark-texture">
           <div className="landing-grain" aria-hidden="true" />
           <div className="landing-final-aura" aria-hidden="true" />
           <div className="landing-wrap landing-final-inner">
@@ -520,7 +529,8 @@ export function PublicLanding() {
           </div>
         </section>
 
-        <footer className="landing-footer">
+        <footer className="landing-footer landing-dark-texture">
+          <div className="landing-grain" aria-hidden="true" />
           <div className="landing-wrap landing-footer-inner">
             <div>
               <Logo size={25} variant="onLight" className="text-white" />

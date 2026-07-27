@@ -361,9 +361,38 @@ table {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  opacity: 0.13;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='site-grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.78' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23site-grain)' opacity='.42'/%3E%3C/svg%3E");
+  opacity: 0.14;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='landing-noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23landing-noise)' opacity='.17'/%3E%3C/svg%3E");
   mix-blend-mode: soft-light;
+}
+
+.landing-dark-texture::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+  opacity: 0.9;
+  background-image:
+    linear-gradient(to right, oklch(0.82 0.15 151 / 0.052) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.82 0.15 151 / 0.052) 1px, transparent 1px);
+  background-position: center;
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse at center, black 12%, transparent 88%);
+}
+
+.landing-light-texture {
+  background-color: var(--landing-paper);
+  background-image:
+    linear-gradient(to right, oklch(0.35 0.02 150 / 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.35 0.02 150 / 0.045) 1px, transparent 1px);
+  background-position: center;
+  background-size: 32px 32px;
+}
+
+.landing-light-texture > .landing-wrap {
+  position: relative;
+  z-index: 1;
 }
 
 .landing-header {
@@ -462,23 +491,6 @@ table {
     radial-gradient(ellipse at 50% 17%, rgba(255, 255, 255, 0.09), transparent 39%),
     radial-gradient(ellipse at 49% 51%, rgba(101, 228, 151, 0.035), transparent 39%),
     linear-gradient(180deg, #060806 0%, #020302 76%, #050706 100%);
-}
-
-.landing-hero::before {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  content: "";
-  opacity: 0.28;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-position: center;
-  background-size: 72px 72px;
-  mask-image: linear-gradient(to bottom, transparent 3%, black 38%, transparent 88%);
-  transform: perspective(900px) rotateX(58deg) scale(1.45) translateY(18%);
-  transform-origin: center 80%;
 }
 
 .landing-hero-aura {
@@ -1100,9 +1112,13 @@ table {
   position: relative;
   z-index: 3;
   padding: 11rem 0 12rem;
-  background:
-    radial-gradient(circle at 74% 12%, rgba(66, 199, 125, 0.07), transparent 22%),
-    var(--landing-paper);
+  background-color: var(--landing-paper);
+  background-image:
+    linear-gradient(to right, oklch(0.35 0.02 150 / 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.35 0.02 150 / 0.045) 1px, transparent 1px),
+    radial-gradient(circle at 74% 12%, rgba(66, 199, 125, 0.07), transparent 22%);
+  background-position: center, center, center;
+  background-size: 32px 32px, 32px 32px, auto;
   color: var(--landing-ink);
 }
 
@@ -1564,7 +1580,12 @@ table {
   position: relative;
   z-index: 3;
   padding: 11rem 0 12rem;
-  background: var(--landing-paper);
+  background-color: var(--landing-paper);
+  background-image:
+    linear-gradient(to right, oklch(0.35 0.02 150 / 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.35 0.02 150 / 0.045) 1px, transparent 1px);
+  background-position: center;
+  background-size: 32px 32px;
   color: var(--landing-ink);
 }
 
@@ -1626,20 +1647,6 @@ table {
     var(--landing-black);
 }
 
-.landing-final::before {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  content: "";
-  opacity: 0.22;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 54px 54px;
-  mask-image: radial-gradient(ellipse at center, black 8%, transparent 74%);
-}
-
 .landing-final-aura {
   position: absolute;
   bottom: -30rem;
@@ -1682,11 +1689,14 @@ table {
 .landing-footer {
   position: relative;
   z-index: 3;
+  overflow: hidden;
   padding: 4rem 0 2.5rem;
   background: #030403;
 }
 
 .landing-footer-inner {
+  position: relative;
+  z-index: 2;
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: start;
@@ -1870,10 +1880,6 @@ table {
 
   .landing-hero {
     padding: 8rem 0 4.5rem;
-  }
-
-  .landing-hero::before {
-    background-size: 48px 48px;
   }
 
   .landing-hero-kicker {
