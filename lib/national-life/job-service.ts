@@ -113,10 +113,6 @@ function isTerminalJobState(state: BrowserJobState): boolean {
   return TERMINAL_JOB_STATES.has(state)
 }
 
-function isActiveJobState(state: BrowserJobState): boolean {
-  return ACTIVE_JOB_STATES.has(state)
-}
-
 function coerceIdentifier(name: string, value: string): string {
   const normalized = value.trim()
 
