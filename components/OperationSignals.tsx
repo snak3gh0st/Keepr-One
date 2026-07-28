@@ -42,7 +42,7 @@ export function OperationSignals({ signals }: { signals: OperationSignal[] }) {
               id="operation-signals-title"
               className="mt-5 max-w-lg text-3xl font-medium tracking-[-0.045em] sm:text-4xl"
             >
-              Decisões melhores começam com contexto.
+              Decisões melhores começam com clareza.
             </h2>
           </div>
           <div className="mt-10 flex items-center gap-2">

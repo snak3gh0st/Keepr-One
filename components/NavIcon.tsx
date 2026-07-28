@@ -9,7 +9,8 @@ export type NavIconName =
   | "audit"
   | "users"
   | "document"
-  | "money";
+  | "money"
+  | "link";
 
 const ICON_PATHS: Record<NavIconName, ReactNode> = {
   grid: (
@@ -68,6 +69,12 @@ const ICON_PATHS: Record<NavIconName, ReactNode> = {
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <circle cx="12" cy="12" r="3" />
       <path d="M7 9h.01M17 15h.01" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L10.8 5" />
+      <path d="M14 11a5 5 0 0 0-7.1 0l-2.4 2.4a5 5 0 0 0 7.1 7.1L13.2 19" />
     </>
   ),
 };

@@ -2,16 +2,32 @@ export function ContextPanel({
   eyebrow,
   title,
   children,
+  as = "aside",
 }: {
   eyebrow?: string
   title: string
   children: React.ReactNode
+  as?: "aside" | "section" | "div"
 }) {
+  const Component = as
+
   return (
-    <aside className="h-fit rounded-lg bg-rail px-5 py-5 text-paper">
-      {eyebrow && <p className="text-xs font-semibold text-paper/55">{eyebrow}</p>}
-      <h2 className="mt-2 text-base font-semibold tracking-[-0.01em]">{title}</h2>
-      <div className="mt-4 text-sm leading-6 text-paper/70">{children}</div>
-    </aside>
-  )
+    <Component
+      className="module-context-panel keepr-noise"
+      aria-label={as === "aside" ? title : undefined}
+    >
+      <div className="module-context-heading">
+        {eyebrow && <p>{eyebrow}</p>}
+        <h2>{title}</h2>
+      </div>
+      <div className="module-context-body">{children}</div>
+      <div className="module-context-status" aria-hidden="true">
+        <span>
+          <i />
+          Operação conectada
+        </span>
+        <b>keepr one</b>
+      </div>
+    </Component>
+  );
 }
