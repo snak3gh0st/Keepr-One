@@ -7,6 +7,7 @@ export function LogoMark({ size = 28, variant = "onLight" }: { size?: number; va
 
   return (
     <svg
+      data-logo-mark
       width={size}
       height={size}
       viewBox="8 6 84 86"
@@ -50,13 +51,18 @@ export function Logo({
 }) {
   return (
     <span
+      data-logo-root
       role="img"
       aria-label="Keepr One"
       className={`inline-flex items-center gap-2 font-brand font-medium tracking-[-0.045em] ${className}`}
     >
       <LogoMark size={size} variant={variant} />
       {wordmark && (
-        <span aria-hidden className="inline-flex items-baseline gap-[0.22em] leading-none">
+        <span
+          aria-hidden
+          className="inline-flex items-baseline gap-[0.22em] leading-none"
+          data-logo-wordmark
+        >
           <span className="font-bold text-current">keepr</span>
           <span className="font-medium text-[#42c77d]">one</span>
         </span>

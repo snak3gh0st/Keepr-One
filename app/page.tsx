@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Keepr One — Sua operação em uma só visão",
     description:
-      "Do primeiro contato à comissão paga, conduza sua operação financeira com contexto.",
+      "Do primeiro contato à comissão paga, conduza sua operação financeira com tudo em um só lugar.",
     type: "website",
     images: [
       {
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Keepr One — Sua operação em uma só visão",
     description:
-      "Do primeiro contato à comissão paga, conduza sua operação financeira com contexto.",
+      "Do primeiro contato à comissão paga, conduza sua operação financeira com tudo em um só lugar.",
     images: ["/keepr-one-og.png"],
   },
 };
