@@ -40,35 +40,37 @@ export default async function NationalLifeConnectionPage() {
         </Link>
       </PageHeader>
 
-      <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="max-w-5xl">
-          {configured ? (
+      {configured ? (
+        <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="max-w-5xl">
             <NationalLifeConnectionForm summary={summary} />
-          ) : (
-            <EmptyState>
-              Esta integração ainda não foi habilitada neste ambiente. Fale com o time técnico antes de tentar conectar uma conta National Life.
-            </EmptyState>
-          )}
-        </div>
+          </div>
 
-        <ContextPanel eyebrow="Guardrails" title="Acesso autorizado e seguro">
-          <p>
-            Esta área salva a credencial por agente, mostra apenas identidade mascarada e nunca devolve a senha para o navegador.
-          </p>
-          <div className="mt-5 border-t border-white/10 pt-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Teste de conexão</p>
-            <p className="mt-2 text-sm text-paper/70">
-              O teste cria um job durável para o worker. Nenhum browser automation roda dentro da requisição.
+          <ContextPanel eyebrow="Guardrails" title="Acesso autorizado e seguro">
+            <p>
+              Esta área salva a credencial por agente, mostra apenas identidade mascarada e nunca devolve a senha para o navegador.
             </p>
-          </div>
-          <div className="mt-5 border-t border-white/10 pt-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Dados protegidos</p>
-            <p className="mt-2 text-sm text-paper/70">
-              Não use credenciais reais neste branch de desenvolvimento e nunca cole cookies, tokens ou dados de health aqui.
-            </p>
-          </div>
-        </ContextPanel>
-      </div>
+            <div className="mt-5 border-t border-white/10 pt-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Teste de conexão</p>
+              <p className="mt-2 text-sm text-paper/70">
+                O teste cria um job durável para o worker. Nenhum browser automation roda dentro da requisição.
+              </p>
+            </div>
+            <div className="mt-5 border-t border-white/10 pt-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Dados protegidos</p>
+              <p className="mt-2 text-sm text-paper/70">
+                Nunca cole cookies, tokens ou dados de saúde nesta tela.
+              </p>
+            </div>
+          </ContextPanel>
+        </div>
+      ) : (
+        <div className="mt-8 max-w-5xl">
+          <EmptyState>
+            Esta integração ainda não foi habilitada neste ambiente. Fale com o time técnico antes de tentar conectar uma conta National Life.
+          </EmptyState>
+        </div>
+      )}
     </Shell>
   )
 }
