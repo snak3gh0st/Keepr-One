@@ -10,9 +10,10 @@ import { canAccessPolicy } from '@/lib/policy-access'
 import { AnnualReviewCard } from './AnnualReviewCard'
 import { PolicyUploadForm } from './PolicyUploadForm'
 import { Shell } from '@/components/Shell'
-import { PageTitle } from '@/components/PageTitle'
-import { PolicyStatusPill } from '@/components/StatusPill'
+import { PageHeader } from '@/components/PageHeader'
+import { policyStatusLabel } from '@/components/StatusPill'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
+import { ModuleSummary } from '@/components/ModuleSummary'
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -40,6 +41,10 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
   const policyDocuments = policy.documents.filter((doc) => !doc.storedPath.includes('/illustrations/'))
   const illustrationDocuments = policy.documents.filter((doc) => doc.storedPath.includes('/illustrations/'))
+  const premium = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+  }).format(Number(policy.premium))
 
   const rawIllustrationRequestUrl = process.env.ILLUSTRATION_REQUEST_URL
   let illustrationRequestUrl: string | null = null
@@ -58,35 +63,30 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
   return (
     <Shell role={session.user.role as 'ADMIN' | 'AGENT'} userName={session.user.name}>
-      <Link href="/agent/policies" className="text-sm font-semibold text-teal hover:text-teal-deep">
-        ← Voltar
-      </Link>
-      <div className="mt-3 border-b border-border-steel pb-6">
-        <PageTitle>Apólice {policy.policyNumber}</PageTitle>
-        <p className="mt-2 text-sm text-ink-muted">Detalhes da apólice e comissões geradas.</p>
-      </div>
-      <div className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border-steel bg-border-steel sm:grid-cols-4">
-        <div className="bg-panel px-4 py-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Carrier</p>
-          <p className="text-sm text-ink">{policy.carrier}</p>
-        </div>
-        <div className="bg-panel px-4 py-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Produto</p>
-          <p className="text-sm text-ink">{policy.product}</p>
-        </div>
-        <div className="bg-panel px-4 py-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Prêmio</p>
-          <p className="font-mono text-sm text-ink">${policy.premium.toString()}</p>
-        </div>
-        <div className="bg-panel px-4 py-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Status</p>
-          <PolicyStatusPill status={policy.status} />
-        </div>
-      </div>
+      <PageHeader
+        title={policy.policyNumber}
+        eyebrow="Detalhe da apólice"
+        description={`Contrato de ${policy.client.name} com documentos, revisão e comissão organizados em uma única visão.`}
+      >
+        <Link href="/agent/policies" className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper hover:bg-white/[0.06]">
+          ← Voltar à carteira
+        </Link>
+      </PageHeader>
 
-      <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <section>
-          <h2 className="mb-3 text-base font-semibold text-ink">Comissão gerada por esta apólice</h2>
+      <ModuleSummary
+        label={`Resumo da apólice ${policy.policyNumber}`}
+        items={[
+          { label: 'Seguradora', value: policy.carrier, detail: 'Companhia responsável pelo contrato', compact: true },
+          { label: 'Produto', value: policy.product, detail: 'Solução vinculada à apólice', compact: true },
+          { label: 'Prêmio', value: premium, detail: 'Valor registrado no contrato', tone: 'green' },
+          { label: 'Status', value: policyStatusLabel[policy.status] ?? policy.status, detail: 'Situação atual da cobertura', compact: true },
+        ]}
+      />
+
+      <div className="module-content-grid">
+        <section className="module-main-surface">
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Resultado financeiro</p>
+          <h2 className="mb-5 mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">Comissão gerada por esta apólice</h2>
           <Table>
             <Thead>
               <tr>
@@ -101,7 +101,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               {policy.commissionRecords.map((record, i) => (
                 <Tr key={record.id} index={i}>
                   <Td>{record.agent.user.name}</Td>
-                  <Td>{record.type === 'DIRECT' ? 'Direta' : 'Override'}</Td>
+                  <Td>{record.type === 'DIRECT' ? 'Direta' : 'Repasse da equipe'}</Td>
                   <Td className="text-ink-muted">{record.level}</Td>
                   <Td className="font-mono">{record.period}</Td>
                   <TdNum>${record.amount.toString()}</TdNum>
@@ -111,8 +111,8 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           </Table>
           {policy.commissionRecords.length === 0 && <EmptyState>Nenhuma comissão registrada ainda.</EmptyState>}
         </section>
-        <aside className="space-y-5 lg:sticky lg:top-6">
-          <section className="rounded-md border border-border-steel bg-paper p-5">
+        <aside className="space-y-4 lg:sticky lg:top-[5.75rem]">
+          <section className="module-main-surface">
             <h2 className="text-base font-semibold text-ink">Cliente</h2>
             <p className="mt-2 text-sm text-ink">{policy.client.name}</p>
             {policy.client.email && <p className="mt-1 text-xs text-ink-muted">{policy.client.email}</p>}
@@ -126,7 +126,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               notes: r.notes,
             }))}
           />
-          <section className="rounded-md border border-border-steel bg-paper p-5">
+          <section className="module-main-surface">
             <h2 className="mb-3 text-base font-semibold text-ink">Documentos</h2>
             <ul className="divide-y divide-border-steel rounded-md border border-border-steel bg-panel">
               {policyDocuments.map((doc) => (
@@ -147,7 +147,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               pendingLabel="Enviando…"
             />
           </section>
-          <section className="rounded-md border border-border-steel bg-paper p-5">
+          <section className="module-main-surface">
             <h2 className="mb-3 text-base font-semibold text-ink">Ilustrações</h2>
             <p className="mb-4 text-sm text-ink-muted">
               Aqui ficam as ilustrações vinculadas à apólice para consulta do time.

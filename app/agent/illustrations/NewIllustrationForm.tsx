@@ -47,7 +47,7 @@ export function NewIllustrationForm() {
 
     const result = await createIllustrationRequest(formData);
     if (result.ok) {
-      const text = "Cotações de mercado geradas internamente para este prospect."
+      const text = "Cotações de mercado geradas internamente para este cliente."
       setMessage({
         ok: true,
         text,
@@ -73,8 +73,12 @@ export function NewIllustrationForm() {
     }).format(value)
 
   return (
-    <div className="rounded-md border border-border-steel bg-paper p-5">
-      <h2 className="text-base font-semibold text-ink">Informações para ilustração</h2>
+    <div className="module-main-surface">
+      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Simulação orientada</p>
+      <h2 className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">Informações para ilustração</h2>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">
+        Reúna os dados do cliente e compare as opções sem sair do fluxo de atendimento.
+      </p>
       <form action={handleSubmit} className="mt-5 grid gap-4 sm:grid-cols-2">
         <Field label="Nome">
           <Input name="firstName" required placeholder="Maria" />
@@ -97,8 +101,8 @@ export function NewIllustrationForm() {
           </Select>
         </Field>
 
-        <div className="sm:col-span-2">
-          <Button type="submit" variant="primary" disabled={submitting}>
+        <div className="border-t border-border-steel pt-5 sm:col-span-2">
+          <Button type="submit" variant="primary" disabled={submitting} className="w-full sm:w-auto">
             {submitting ? "Calculando..." : "Calcular ilustração"}
           </Button>
         </div>
@@ -111,7 +115,7 @@ export function NewIllustrationForm() {
           </p>
           {message.ok && (
             <>
-              <div className="rounded-md border border-border-steel bg-paper p-3">
+              <div className="rounded-2xl border border-border-steel bg-panel/55 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-ink">
                     Cálculo interno • Sem envio para parceiro
@@ -132,7 +136,7 @@ export function NewIllustrationForm() {
                 <div className="mt-4 overflow-x-auto">
                   <table className="w-full border-collapse">
                     <thead>
-                      <tr className="border-b border-white/10 text-left text-xs uppercase tracking-[0.1em] text-ink-muted">
+                      <tr className="border-b border-border-steel text-left text-xs uppercase tracking-[0.1em] text-ink-muted">
                         <th className="pb-2 pr-3 font-medium">Produto</th>
                         <th className="pb-2 pr-3 font-medium">Fórmula de mercado</th>
                         <th className="pb-2 pr-3 font-medium">Prêmio base</th>
@@ -141,7 +145,7 @@ export function NewIllustrationForm() {
                     </thead>
                     <tbody>
                       {message.quotes.map((quote) => (
-                        <tr key={quote.productCode} className="border-b border-white/5">
+                        <tr key={quote.productCode} className="border-b border-border-steel/70 last:border-b-0">
                           <td className="py-2 pr-3 text-sm font-medium text-ink">{quote.productLabel}</td>
                           <td className="py-2 pr-3 text-xs text-ink-muted">{quote.formulaLabel}</td>
                           <td className="py-2 pr-3 text-sm text-ink">{currency(quote.basePremium)}</td>

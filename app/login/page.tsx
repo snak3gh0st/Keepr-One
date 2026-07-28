@@ -13,7 +13,7 @@ gsap.registerPlugin(useGSAP, ScrollTrigger)
 const securitySignals = [
   {
     title: 'Acesso por perfil',
-    description: 'Cada pessoa encontra apenas o contexto necessário para trabalhar.',
+    description: 'Cada pessoa vê apenas o que precisa para trabalhar.',
   },
   {
     title: 'Histórico preservado',
@@ -29,7 +29,7 @@ const marqueeItems = [
   'Acesso monitorado',
   'Dados organizados',
   'Sessões protegidas',
-  'Decisões com contexto',
+  'Decisões com clareza',
 ]
 
 function EyeIcon({ crossed = false }: { crossed?: boolean }) {

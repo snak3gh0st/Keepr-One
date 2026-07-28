@@ -3,16 +3,30 @@
 import { TdHTMLAttributes, ThHTMLAttributes } from "react";
 import { motion, useReducedMotion } from "motion/react";
 
-export function Table({ children }: { children: React.ReactNode }) {
+export function Table({
+  children,
+  label = "Tabela de dados",
+}: {
+  children: React.ReactNode;
+  label?: string;
+}) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-border-steel bg-paper">
-      <table className="min-w-full border-collapse text-[0.9375rem]">{children}</table>
+    <div
+      className="module-table-shell"
+      role="region"
+      aria-label={label}
+      tabIndex={0}
+    >
+      <table>
+        <caption className="sr-only">{label}</caption>
+        {children}
+      </table>
     </div>
   );
 }
 
 export function Thead({ children }: { children: React.ReactNode }) {
-  return <thead className="sticky top-0 z-[1] bg-panel">{children}</thead>;
+  return <thead>{children}</thead>;
 }
 
 export function Th({
@@ -21,7 +35,7 @@ export function Th({
 }: ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
-      className={`whitespace-nowrap border-b border-border-steel px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted ${className}`}
+      className={`module-table-heading ${className}`}
       {...props}
     />
   );
@@ -43,13 +57,14 @@ export function ThSort({
 }) {
   return (
     <th
-      className={`whitespace-nowrap border-b border-border-steel p-0 text-[11px] font-semibold uppercase tracking-[0.08em] ${active ? "text-teal" : "text-ink-muted"} ${className}`}
+      className={`module-table-sort-heading ${active ? "is-active" : ""} ${className}`}
+      aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
       {...props}
     >
       <button
         type="button"
         onClick={onClick}
-        className={`flex w-full items-center gap-1 px-4 py-3 uppercase tracking-[0.08em] hover:text-teal ${numeric ? "justify-end" : "justify-start text-left"}`}
+        className={`module-table-sort ${numeric ? "justify-end" : "justify-start text-left"}`}
       >
         {numeric && (
           <span aria-hidden className={`text-[9px] transition-opacity ${active ? "opacity-100" : "opacity-0"}`}>
@@ -82,7 +97,7 @@ export function Tr({
       initial={reducedMotion ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={reducedMotion ? { duration: 0 } : { duration: 0.2, delay: Math.min(index, 30) * 0.015, ease: "easeOut" }}
-      className={`transition-colors duration-150 hover:bg-teal-pale/70 ${className}`}
+      className={`module-table-row ${className}`}
     >
       {children}
     </motion.tr>
@@ -95,7 +110,7 @@ export function Td({
 }: TdHTMLAttributes<HTMLTableCellElement>) {
   return (
     <td
-      className={`whitespace-nowrap border-b border-border-steel px-4 py-3 text-ink last:border-b-0 ${className}`}
+      className={`module-table-cell ${className}`}
       {...props}
     />
   );
@@ -115,8 +130,13 @@ export function TdNum({
 
 export function EmptyState({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-dashed border-border-steel bg-panel/50 px-5 py-12 text-center">
-      <p className="mx-auto max-w-sm text-sm leading-6 text-ink-muted">{children}</p>
+    <div className="module-empty-state">
+      <span aria-hidden>
+        <i />
+        <i />
+        <i />
+      </span>
+      <p>{children}</p>
     </div>
   );
 }

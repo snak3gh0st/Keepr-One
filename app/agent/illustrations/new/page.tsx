@@ -21,14 +21,14 @@ export default async function NewIllustrationPage() {
       >
         <Link
           href="/agent/policies"
-          className="inline-flex min-h-10 items-center rounded-md border border-teal px-4 py-2.5 text-sm font-semibold text-teal transition-[background-color,border-color,color,transform] duration-150 hover:border-teal-deep hover:bg-teal-pale focus-visible:ring-[3px] focus-visible:ring-teal-pale focus-visible:outline-none"
+          className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
         >
           ← Voltar
         </Link>
       </PageHeader>
 
-      <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="max-w-5xl">
+      <div className="module-content-grid">
+        <div className="min-w-0">
           <NewIllustrationForm />
         </div>
         <ContextPanel eyebrow="Dica rápida" title="O que enviar">

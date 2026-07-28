@@ -27,7 +27,7 @@ export function AnnualReviewCard({ policyId, reviews }: { policyId: string; revi
   }
 
   return (
-    <section className="rounded-md border border-border-steel bg-paper p-5">
+    <section className="module-main-surface">
       <h2 className="text-base font-semibold text-ink">Revisão anual</h2>
 
       {open ? (

@@ -1,86 +1,251 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { EmptyState } from "@/components/Table";
 import { EntityCard, EntityCardList } from "@/components/EntityCard";
 import { Avatar } from "@/components/Avatar";
 import { Pagination, clampPage } from "@/components/Pagination";
 
-type Client = { id: string; name: string; email: string | null; agentName: string };
+type Client = {
+  id: string;
+  name: string;
+  email: string | null;
+  agentId: string;
+  agentName: string;
+};
 
-const GROUPS_PER_PAGE = 8;
+type SortDirection = "asc" | "desc";
+
+const CLIENTS_PER_PAGE = 12;
+const ALL_AGENTS = "__all__";
+const collator = new Intl.Collator("pt-BR", { numeric: true, sensitivity: "base" });
 
 export function ClientsList({ clients }: { clients: Client[] }) {
+  const queryId = useId();
+  const agentSelectId = useId();
+  const sortId = useId();
   const [query, setQuery] = useState("");
+  const [selectedAgentId, setSelectedAgentId] = useState(ALL_AGENTS);
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [page, setPage] = useState(1);
 
-  const allGroups = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = q
-      ? clients.filter((c) => c.name.toLowerCase().includes(q) || (c.email ?? "").toLowerCase().includes(q))
-      : clients;
-    const byAgent = new Map<string, Client[]>();
-    for (const client of filtered) {
-      const list = byAgent.get(client.agentName) ?? [];
-      list.push(client);
-      byAgent.set(client.agentName, list);
-    }
-    return Array.from(byAgent.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [clients, query]);
+  const agents = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          clients.map((client) => [
+            client.agentId,
+            { id: client.agentId, name: client.agentName },
+          ]),
+        ).values(),
+      ).sort((left, right) => collator.compare(left.name, right.name)),
+    [clients],
+  );
 
-  // See ProductionTable for why this is state-adjustment-during-render
-  // rather than a useEffect.
-  const [prevQuery, setPrevQuery] = useState(query);
-  if (prevQuery !== query) {
-    setPrevQuery(query);
+  const filteredClients = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+    const direction = sortDirection === "asc" ? 1 : -1;
+
+    return clients
+      .filter((client) => {
+        const matchesAgent =
+          selectedAgentId === ALL_AGENTS || client.agentId === selectedAgentId;
+        const matchesQuery =
+          normalizedQuery.length === 0 ||
+          client.name.toLocaleLowerCase("pt-BR").includes(normalizedQuery) ||
+          (client.email ?? "").toLocaleLowerCase("pt-BR").includes(normalizedQuery);
+
+        return matchesAgent && matchesQuery;
+      })
+      .sort((a, b) => {
+        const byName = collator.compare(a.name, b.name);
+        if (byName !== 0) return direction * byName;
+        return direction * collator.compare(a.agentName, b.agentName);
+      });
+  }, [clients, query, selectedAgentId, sortDirection]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredClients.length / CLIENTS_PER_PAGE));
+  const currentPage = clampPage(page, pageCount);
+  const pageClients = filteredClients.slice(
+    (currentPage - 1) * CLIENTS_PER_PAGE,
+    currentPage * CLIENTS_PER_PAGE,
+  );
+  const firstVisible = filteredClients.length === 0 ? 0 : (currentPage - 1) * CLIENTS_PER_PAGE + 1;
+  const lastVisible = Math.min(currentPage * CLIENTS_PER_PAGE, filteredClients.length);
+  const hasActiveFilters =
+    query.trim().length > 0 ||
+    selectedAgentId !== ALL_AGENTS ||
+    sortDirection !== "asc";
+
+  function clearFilters() {
+    setQuery("");
+    setSelectedAgentId(ALL_AGENTS);
+    setSortDirection("asc");
     setPage(1);
   }
 
-  const pageCount = Math.max(1, Math.ceil(allGroups.length / GROUPS_PER_PAGE));
-  const currentPage = clampPage(page, pageCount);
-  const groups = allGroups.slice((currentPage - 1) * GROUPS_PER_PAGE, currentPage * GROUPS_PER_PAGE);
-
   return (
-    <div>
-      <label className="block">
-        <span className="sr-only">Buscar cliente</span>
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar por nome ou email…"
-          className="w-full rounded-md border border-border-steel bg-paper px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted focus-visible:border-teal focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
-        />
-      </label>
+    <section aria-labelledby="clients-list-title">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
+            Base de clientes
+          </p>
+          <h2
+            id="clients-list-title"
+            className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink sm:text-3xl"
+          >
+            Encontre quem precisa de você.
+          </h2>
+        </div>
+        <p
+          className="font-mono text-xs tabular-nums text-ink-muted"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {filteredClients.length === clients.length
+            ? `${clients.length} ${clients.length === 1 ? "cliente" : "clientes"}`
+            : `${filteredClients.length} de ${clients.length} clientes`}
+        </p>
+      </div>
 
-      {groups.length === 0 && (
-        <div className="mt-4">
-          <EmptyState>Nenhum cliente encontrado para &quot;{query}&quot;.</EmptyState>
+      {clients.length > 0 && (
+        <div className="mt-6 grid gap-3 rounded-2xl border border-border-steel/80 bg-panel/55 p-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.7fr)_minmax(180px,0.8fr)_minmax(160px,0.65fr)]">
+          <label htmlFor={queryId} className="grid gap-1.5">
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
+              Buscar
+            </span>
+            <input
+              id={queryId}
+              type="search"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Nome ou e-mail"
+              autoComplete="off"
+              aria-controls="clients-results"
+              className="min-h-11 w-full rounded-xl border border-border-steel bg-paper/85 px-3.5 py-2.5 text-sm text-ink outline-none transition-[background-color,border-color,box-shadow] placeholder:text-ink-muted/70 hover:border-teal/50 hover:bg-paper focus:border-teal focus:bg-paper focus:ring-[3px] focus:ring-teal-pale"
+            />
+          </label>
+
+          <label htmlFor={agentSelectId} className="grid gap-1.5">
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
+              Responsável
+            </span>
+            <select
+              id={agentSelectId}
+              value={selectedAgentId}
+              onChange={(event) => {
+                setSelectedAgentId(event.target.value);
+                setPage(1);
+              }}
+              aria-controls="clients-results"
+              className="min-h-11 w-full rounded-xl border border-border-steel bg-paper/85 px-3.5 py-2.5 text-sm text-ink outline-none transition-[background-color,border-color,box-shadow] hover:border-teal/50 hover:bg-paper focus:border-teal focus:bg-paper focus:ring-[3px] focus:ring-teal-pale"
+            >
+              <option value={ALL_AGENTS}>Todos os agentes</option>
+              {agents.map((agentItem) => (
+                <option key={agentItem.id} value={agentItem.id}>
+                  {agentItem.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label htmlFor={sortId} className="grid gap-1.5 sm:col-span-2 xl:col-span-1">
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
+              Ordenar
+            </span>
+            <select
+              id={sortId}
+              value={sortDirection}
+              onChange={(event) => {
+                setSortDirection(event.target.value as SortDirection);
+                setPage(1);
+              }}
+              aria-controls="clients-results"
+              className="min-h-11 w-full rounded-xl border border-border-steel bg-paper/85 px-3.5 py-2.5 text-sm text-ink outline-none transition-[background-color,border-color,box-shadow] hover:border-teal/50 hover:bg-paper focus:border-teal focus:bg-paper focus:ring-[3px] focus:ring-teal-pale"
+            >
+              <option value="asc">Nome: A–Z</option>
+              <option value="desc">Nome: Z–A</option>
+            </select>
+          </label>
         </div>
       )}
 
-      <div className="mt-6 flex flex-col gap-6">
-        {groups.map(([agentName, agentClients]) => (
-          <section key={agentName}>
-            <div className="mb-2 flex items-baseline justify-between px-0.5">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{agentName}</h2>
-              <span className="font-mono text-xs text-ink-muted">{agentClients.length}</span>
+      <div id="clients-results" className="mt-6">
+        {clients.length === 0 ? (
+          <EmptyState>
+            Nenhum cliente está disponível nesta base. Eles aparecerão aqui quando forem vinculados à sua operação.
+          </EmptyState>
+        ) : filteredClients.length === 0 ? (
+          <div className="module-empty-state">
+            <span aria-hidden>
+              <i />
+              <i />
+              <i />
+            </span>
+            <div>
+              <p>Nenhum cliente corresponde à busca ou ao agente selecionado.</p>
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="mt-4 inline-flex min-h-11 items-center justify-center rounded-full bg-rail-strong px-5 py-2.5 text-sm font-semibold text-paper transition-[background-color,transform] hover:-translate-y-0.5 hover:bg-rail focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
+              >
+                Limpar busca e filtros
+              </button>
             </div>
+          </div>
+        ) : (
+          <>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-0.5">
+              <p className="text-xs text-ink-muted">
+                Mostrando <span className="font-mono text-ink">{firstVisible}–{lastVisible}</span> de{" "}
+                <span className="font-mono text-ink">{filteredClients.length}</span>
+              </p>
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="min-h-9 rounded-full border border-border-steel bg-paper/75 px-3.5 py-1.5 text-xs font-semibold text-ink-muted transition-colors hover:border-teal hover:text-teal focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
+                >
+                  Limpar filtros
+                </button>
+              )}
+            </div>
+
             <EntityCardList>
-              {agentClients.map((client, i) => (
-                <EntityCard key={client.id} index={i}>
+              {pageClients.map((client, index) => (
+                <EntityCard key={client.id} index={index}>
                   <Avatar name={client.name} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium text-ink">{client.name}</p>
-                    <p className="truncate text-xs text-ink-muted">{client.email ?? "Sem email cadastrado"}</p>
+                    <p className="truncate text-xs text-ink-muted">
+                      {client.email ?? "Sem e-mail cadastrado"}
+                    </p>
+                  </div>
+                  <div className="min-w-0 basis-full border-t border-border-steel/70 pt-2 sm:basis-auto sm:border-t-0 sm:pt-0 sm:text-right">
+                    <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
+                      Responsável
+                    </p>
+                    <p className="mt-1 truncate text-xs font-medium text-ink">
+                      {client.agentName}
+                    </p>
                   </div>
                 </EntityCard>
               ))}
             </EntityCardList>
-          </section>
-        ))}
+
+            <Pagination
+              page={currentPage}
+              pageCount={pageCount}
+              onPageChange={setPage}
+            />
+          </>
+        )}
       </div>
-      <Pagination page={currentPage} pageCount={pageCount} onPageChange={setPage} />
-    </div>
+    </section>
   );
 }

@@ -4,7 +4,10 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
+import { CrmNavigation } from "@/components/CrmNavigation";
 import { CaseStagePill, PolicyStatusPill } from "@/components/StatusPill";
+import { PageHeader } from "@/components/PageHeader";
+import { ModuleSummary } from "@/components/ModuleSummary";
 import { caseStageLabel, type CaseStage } from "@/lib/case-workflow";
 import { computeNeedsAnalysis, type NeedsAnalysisInput } from "@/lib/needs-analysis";
 import { formatMoney } from "@/lib/format";
@@ -60,6 +63,13 @@ const OBJECTIVE_LABEL: Record<string, string> = {
 };
 const REQ_LABEL: Record<string, string> = { OPEN: "Pendente", RECEIVED: "Recebido", WAIVED: "Dispensado" };
 
+function activityTitle(type: string, title: string) {
+  if (title === "Caso criado") return "Atendimento iniciado";
+  if (title === "Needs analysis atualizada") return "Análise de necessidades atualizada";
+  if (type === "STAGE_CHANGED") return title.replace("Etapa alterada", "Etapa atualizada");
+  return title;
+}
+
 function ageFrom(iso: string | null): number | null {
   if (!iso) return null;
   const dob = new Date(iso);
@@ -72,9 +82,10 @@ function ageFrom(iso: string | null): number | null {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-md border border-border-steel bg-paper p-5">
-      <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-ink-muted">{title}</h2>
-      <div className="mt-4">{children}</div>
+    <section className="module-main-surface">
+      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Fluxo do atendimento</p>
+      <h2 className="mt-2 text-xl font-medium tracking-[-0.035em] text-ink">{title}</h2>
+      <div className="mt-5">{children}</div>
     </section>
   );
 }
@@ -147,7 +158,7 @@ function NeedsAnalysisForm({
               inputMode="numeric"
               value={values[f.key]}
               onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-              className="mt-1 w-full rounded border border-border-steel bg-paper px-2 py-1 text-sm text-ink"
+              className="mt-1 min-h-11 w-full rounded-xl border border-border-steel bg-paper px-3.5 py-2.5 text-sm text-ink outline-none transition-[border-color,box-shadow] focus:border-teal focus:ring-[3px] focus:ring-teal-pale"
             />
           </label>
         ))}
@@ -161,11 +172,11 @@ function NeedsAnalysisForm({
         </div>
       </div>
       <Button variant="primary" disabled={pending || saving} onClick={save}>
-        {saved ? "Recalcular e salvar" : "Salvar needs analysis"}
+        {saved ? "Recalcular e salvar" : "Salvar análise de necessidades"}
       </Button>
       {saved && (
         <p className="text-xs text-ink-muted">
-          Última atualização: {new Date(saved.savedAt).toLocaleString("pt-BR")} · define a cobertura-alvo do caso.
+          Última atualização: {new Date(saved.savedAt).toLocaleString("pt-BR")} · define a cobertura-alvo da oportunidade.
         </p>
       )}
     </div>
@@ -182,7 +193,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
   const age = ageFrom(c.prospect.dateOfBirth);
 
   function move(stage: CaseStage) {
-    if (stage === "WITHDRAWN" && !window.confirm("Retirar este caso? Esta ação é definitiva e não pode ser desfeita.")) {
+    if (stage === "WITHDRAWN" && !window.confirm("Encerrar esta oportunidade? Esta ação é definitiva e não pode ser desfeita.")) {
       return;
     }
     setMessage(null);
@@ -211,6 +222,8 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
   }
 
   const hasApplication = c.applications.length > 0;
+  const requirements = c.applications.flatMap((application) => application.requirements);
+  const openRequirements = requirements.filter((requirement) => requirement.status === "OPEN").length;
 
   const [note, setNote] = useState("");
   const [fuTitle, setFuTitle] = useState("");
@@ -244,24 +257,31 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
   const todayISO = new Date().toISOString().slice(0, 10);
 
   return (
-    <div className="space-y-6">
-      <Link href="/agent/cases" className="text-sm font-semibold text-teal hover:text-teal-deep">
-        ← Voltar aos casos
-      </Link>
-
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-ink">{c.prospect.name}</h1>
+    <div className="space-y-4">
+      <CrmNavigation active="opportunities" />
+      <PageHeader
+        title={c.prospect.name}
+        eyebrow="CRM · Oportunidade em andamento"
+        description={
+          <div className="space-y-3">
             <CaseStagePill stage={c.stage} />
+            <p>
+              {OBJECTIVE_LABEL[c.objective ?? ""] ?? "—"} · {PRODUCT_LABEL[c.productType ?? ""] ?? c.productType ?? "—"} · {c.carrier ?? "—"}
+            </p>
           </div>
-          <p className="mt-1 text-sm text-ink-muted">
-            {OBJECTIVE_LABEL[c.objective ?? ""] ?? "—"} · {PRODUCT_LABEL[c.productType ?? ""] ?? c.productType ?? "—"} · {c.carrier ?? "—"}
-          </p>
-        </div>
+        }
+      >
+        <Link href="/agent/cases" className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper hover:bg-white/[0.06]">
+          ← Voltar às oportunidades
+        </Link>
         <div className="flex flex-wrap items-center gap-2">
           {primary && (
-            <Button variant="primary" disabled={pending} onClick={() => move(primary)}>
+            <Button
+              variant="primary"
+              className="!bg-paper !text-ink hover:!bg-panel"
+              disabled={pending}
+              onClick={() => move(primary)}
+            >
               Avançar para {caseStageLabel[primary]}
             </Button>
           )}
@@ -271,15 +291,26 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
               <Button
                 key={s}
                 variant={s === "WITHDRAWN" ? "danger" : "secondary"}
+                className={s === "WITHDRAWN" ? "" : "!border-white/15 !bg-white/[0.06] !text-paper hover:!bg-white/[0.12]"}
                 disabled={pending}
                 onClick={() => move(s)}
               >
                 {caseStageLabel[s]}
               </Button>
             ))}
-          {c.nextStages.length === 0 && <span className="text-sm text-ink-muted">Caso encerrado.</span>}
+          {c.nextStages.length === 0 && <span className="text-sm text-ink-muted">Oportunidade encerrada.</span>}
         </div>
-      </div>
+      </PageHeader>
+
+      <ModuleSummary
+        label={`Resumo da oportunidade de ${c.prospect.name}`}
+        items={[
+          { label: "Agente responsável", value: c.agentName, detail: "Responsável atual pelo atendimento", compact: true },
+          { label: "Cobertura alvo", value: c.targetCoverage ?? "—", detail: "Proteção estimada para esta oportunidade", tone: "green" },
+          { label: "Orçamento mensal", value: c.monthlyBudget ? `${c.monthlyBudget}/m` : "—", detail: "Faixa mensal informada pelo cliente" },
+          { label: "Pendências", value: openRequirements, detail: `${requirements.length} pendências no total`, tone: openRequirements > 0 ? "gold" : "neutral" },
+        ]}
+      />
       {message && <p role="alert" className="text-sm text-danger">{message}</p>}
 
       <Section title="Resumo">
@@ -295,7 +326,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         </dl>
       </Section>
 
-      <Section title="Needs analysis">
+      <Section title="Análise de necessidades">
         <NeedsAnalysisForm
           caseId={c.id}
           saved={c.needsAnalysis}
@@ -323,7 +354,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
       <Section title="Aplicação">
         {!hasApplication ? (
           <div className="space-y-3">
-            <Empty>Nenhuma aplicação iniciada. Ao iniciar, um checklist padrão de requirements é criado para acompanhamento.</Empty>
+            <Empty>Nenhuma aplicação iniciada. Ao iniciar, uma lista padrão de pendências é criada para acompanhamento.</Empty>
             <Button variant="primary" disabled={pending} onClick={beginApplication}>
               Iniciar aplicação
             </Button>
@@ -337,13 +368,12 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         )}
       </Section>
 
-      <Section title="Requirements">
-        {c.applications.flatMap((a) => a.requirements).length === 0 ? (
-          <Empty>Nenhum requirement. Eles aparecem quando a seguradora solicita documentos na análise.</Empty>
+      <Section title="Pendências">
+        {requirements.length === 0 ? (
+          <Empty>Nenhuma pendência. Elas aparecem quando a seguradora solicita documentos durante a análise.</Empty>
         ) : (
           <ul className="divide-y divide-border-steel">
-            {c.applications.flatMap((app) =>
-              app.requirements.map((r) => (
+            {requirements.map((r) => (
                 <li key={r.id} className="flex items-center justify-between gap-3 py-2">
                   <span className="text-sm text-ink">{r.title}</span>
                   <div className="flex items-center gap-2">
@@ -356,15 +386,14 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
                     )}
                   </div>
                 </li>
-              )),
-            )}
+              ))}
           </ul>
         )}
       </Section>
 
-      <Section title="Policy">
+      <Section title="Apólices">
         {c.policies.length === 0 ? (
-          <Empty>Nenhuma apólice vinculada. A apólice surge após a emissão do caso ou importação de histórico autorizada.</Empty>
+          <Empty>Nenhuma apólice vinculada. A apólice surge quando a oportunidade chega à emissão ou por importação autorizada de histórico.</Empty>
         ) : (
           <ul className="divide-y divide-border-steel">
             {c.policies.map((p) => (
@@ -379,7 +408,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         )}
       </Section>
 
-      <Section title="Timeline">
+      <Section title="Histórico do atendimento">
         <div className="space-y-3">
           <div className="flex gap-2">
             <input
@@ -387,7 +416,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
               onChange={(e) => setNote(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") submitNote(); }}
               placeholder="Registrar nota (ligação, e-mail, decisão)…"
-              className="flex-1 rounded border border-border-steel bg-paper px-3 py-1.5 text-sm text-ink"
+              className="min-h-11 flex-1 rounded-xl border border-border-steel bg-paper px-3.5 py-2.5 text-sm text-ink outline-none transition-[border-color,box-shadow] focus:border-teal focus:ring-[3px] focus:ring-teal-pale"
             />
             <Button variant="secondary" disabled={pending || !note.trim()} onClick={submitNote}>Anotar</Button>
           </div>
@@ -395,15 +424,15 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
             <input
               value={fuTitle}
               onChange={(e) => setFuTitle(e.target.value)}
-              placeholder="Agendar follow-up…"
-              className="min-w-[12rem] flex-1 rounded border border-border-steel bg-paper px-3 py-1.5 text-sm text-ink"
+              placeholder="Agendar retorno…"
+              className="min-h-11 min-w-[12rem] flex-1 rounded-xl border border-border-steel bg-paper px-3.5 py-2.5 text-sm text-ink outline-none transition-[border-color,box-shadow] focus:border-teal focus:ring-[3px] focus:ring-teal-pale"
             />
             <input
               type="date"
               min={todayISO}
               value={fuDue}
               onChange={(e) => setFuDue(e.target.value)}
-              className="rounded border border-border-steel bg-paper px-3 py-1.5 text-sm text-ink"
+              className="min-h-11 rounded-xl border border-border-steel bg-paper px-3.5 py-2.5 text-sm text-ink outline-none transition-[border-color,box-shadow] focus:border-teal focus:ring-[3px] focus:ring-teal-pale"
             />
             <Button variant="secondary" disabled={pending || !fuTitle.trim() || !fuDue} onClick={submitFollowUp}>Agendar</Button>
           </div>
@@ -422,7 +451,12 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-medium text-ink">
-                        {isFollowUp && <span aria-hidden>🔔 </span>}{t.title}
+                        {isFollowUp && (
+                          <span aria-hidden className="mr-2 inline-flex rounded-full bg-teal-pale px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-teal">
+                            retorno
+                          </span>
+                        )}
+                        {activityTitle(t.type, t.title)}
                         {t.doneAt && <span className="ml-2 text-xs font-normal text-success">✓ concluído</span>}
                         {overdue && <span className="ml-2 text-xs font-normal text-danger">atrasado</span>}
                       </p>

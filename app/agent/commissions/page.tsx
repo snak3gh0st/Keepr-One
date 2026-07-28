@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { decimalToNumber } from '@/lib/decimal'
@@ -5,6 +6,7 @@ import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { ContextPanel } from '@/components/ContextPanel'
+import { ModuleSummary } from '@/components/ModuleSummary'
 import { CommissionsList } from './CommissionsList'
 
 export const dynamic = 'force-dynamic'
@@ -41,10 +43,21 @@ export default async function CommissionsPage() {
     const subtotal = rows.reduce((sum, r) => sum + decimalToNumber(r.amount), 0)
     return { period, rows, subtotal }
   })
+  const totalAmount = records.reduce((sum, record) => sum + decimalToNumber(record.amount), 0)
+  const directAmount = records
+    .filter((record) => record.type === 'DIRECT')
+    .reduce((sum, record) => sum + decimalToNumber(record.amount), 0)
+  const overrideAmount = totalAmount - directAmount
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
-      <PageHeader title="Extrato de comissões" eyebrow="Financeiro" description="Nível 0 é sua venda direta. Nível 1+ é repasse de uma venda da sua downline. A origem mostra quem vendeu a apólice.">
+      <PageHeader title="Comissões" eyebrow="Resultado financeiro" description="Entenda quanto veio da sua produção, quanto veio da equipe e qual apólice originou cada lançamento.">
+        <Link
+          href="/agent/policies"
+          className="inline-flex items-center border border-white/20 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/10"
+        >
+          Ver apólices
+        </Link>
         <span className="inline-flex rounded-full bg-gold-pale px-3 py-1.5 text-xs font-semibold text-gold-ink">{records.length} lançamentos</span>
       </PageHeader>
       {loadError && (
@@ -52,8 +65,20 @@ export default async function CommissionsPage() {
           Não foi possível carregar seu extrato agora. Tente atualizar a página.
         </ErrorBanner>
       )}
-      <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">
-      <div className="max-w-4xl">
+
+      {!loadError && (
+        <ModuleSummary
+          label="Resumo das comissões"
+          items={[
+            { label: 'Total registrado', value: `$${totalAmount.toFixed(0)}`, detail: `${periods.length} período(s) com movimento`, tone: 'green' },
+            { label: 'Produção direta', value: `$${directAmount.toFixed(0)}`, detail: 'Comissão das suas próprias vendas' },
+            { label: 'Produção da equipe', value: `$${overrideAmount.toFixed(0)}`, detail: 'Repasses gerados pela sua equipe', tone: 'gold' },
+          ]}
+        />
+      )}
+
+      <div className="module-content-grid">
+      <section className="min-w-0">
         {!loadError && (
           <CommissionsList
             byPeriod={byPeriod.map(({ period, rows, subtotal }) => ({
@@ -71,8 +96,8 @@ export default async function CommissionsPage() {
             }))}
           />
         )}
-      </div>
-      <ContextPanel eyebrow="Como ler" title="Seu extrato">
+      </section>
+      <ContextPanel eyebrow="Continue por aqui" title="Origem de cada resultado">
         <p>Cada lançamento mostra o período, a origem da venda e o nível da comissão dentro da sua hierarquia.</p>
         <div className="mt-5 border-t border-white/10 pt-4">
           <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Nível 0</p>
