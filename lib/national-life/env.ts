@@ -120,3 +120,12 @@ export function getNationalLifeEnv(): NationalLifeEnv {
 
   return cachedEnv
 }
+
+export function isNationalLifeConfigured(): boolean {
+  try {
+    getNationalLifeEnv()
+    return true
+  } catch {
+    return false
+  }
+}

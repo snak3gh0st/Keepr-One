@@ -11,7 +11,9 @@ import {
   saveAgentCredential,
 } from '@/lib/national-life/connection-service'
 import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
-import { getNationalLifeEnv } from '@/lib/national-life/env'
+import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
+
+const NOT_CONFIGURED_MESSAGE = 'Esta integração ainda não foi configurada. Fale com o time técnico.'
 
 const SAVE_CONNECTION_SCHEMA = z.object({
   username: z.string().trim().min(1, 'Informe o usuário.').max(200, 'O usuário deve ter no máximo 200 caracteres.'),
@@ -31,6 +33,10 @@ function revalidateConnectionPath() {
 }
 
 export async function saveNationalLifeConnection(formData: FormData): Promise<ConnectionActionResult> {
+  if (!isNationalLifeConfigured()) {
+    return { ok: false, message: NOT_CONFIGURED_MESSAGE }
+  }
+
   try {
     const agent = await getCurrentAgent()
     const parsed = SAVE_CONNECTION_SCHEMA.safeParse({
@@ -75,6 +81,10 @@ export async function deleteNationalLifeConnection(): Promise<ConnectionActionRe
 }
 
 export async function testNationalLifeConnection(): Promise<ConnectionActionResult> {
+  if (!isNationalLifeConfigured()) {
+    return { ok: false, message: NOT_CONFIGURED_MESSAGE }
+  }
+
   try {
     const agent = await getCurrentAgent()
     const connection = await getAgentConnectionSummary(agent.id)

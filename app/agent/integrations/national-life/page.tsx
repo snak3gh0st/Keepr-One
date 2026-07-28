@@ -1,22 +1,25 @@
 import Link from 'next/link'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentConnectionSummary } from '@/lib/national-life/connection-service'
+import { isNationalLifeConfigured } from '@/lib/national-life/env'
 import { prisma } from '@/lib/prisma'
 import { ContextPanel } from '@/components/ContextPanel'
 import { PageHeader } from '@/components/PageHeader'
 import { Shell } from '@/components/Shell'
+import { EmptyState } from '@/components/Table'
 import { NationalLifeConnectionForm } from './NationalLifeConnectionForm'
 
 export const dynamic = 'force-dynamic'
 
 export default async function NationalLifeConnectionPage() {
   const agent = await getCurrentAgent()
+  const configured = isNationalLifeConfigured()
   const [user, summary] = await Promise.all([
     prisma.user.findUnique({
       where: { id: agent.userId },
       select: { name: true, role: true },
     }),
-    getAgentConnectionSummary(agent.id),
+    configured ? getAgentConnectionSummary(agent.id) : Promise.resolve(null),
   ])
 
   const role = user?.role === 'ADMIN' ? 'ADMIN' : 'AGENT'
@@ -39,7 +42,13 @@ export default async function NationalLifeConnectionPage() {
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="max-w-5xl">
-          <NationalLifeConnectionForm summary={summary} />
+          {configured ? (
+            <NationalLifeConnectionForm summary={summary} />
+          ) : (
+            <EmptyState>
+              Esta integração ainda não foi habilitada neste ambiente. Fale com o time técnico antes de tentar conectar uma conta National Life.
+            </EmptyState>
+          )}
         </div>
 
         <ContextPanel eyebrow="Guardrails" title="Acesso autorizado e seguro">
