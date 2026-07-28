@@ -21,7 +21,7 @@ export function Pagination({
         type="button"
         onClick={() => onPageChange(page - 1)}
         disabled={page <= 1}
-        className="inline-flex min-h-10 items-center gap-1.5 rounded-md border border-border-steel bg-paper px-3 py-1.5 text-sm font-semibold text-ink transition-colors hover:border-teal disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-steel"
+        className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border-steel bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-[border-color,background-color,transform] duration-300 hover:-translate-y-0.5 hover:border-teal hover:bg-panel focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:border-border-steel"
       >
         <span aria-hidden>←</span> Anterior
       </button>
@@ -32,7 +32,7 @@ export function Pagination({
         type="button"
         onClick={() => onPageChange(page + 1)}
         disabled={page >= pageCount}
-        className="inline-flex min-h-10 items-center gap-1.5 rounded-md border border-border-steel bg-paper px-3 py-1.5 text-sm font-semibold text-ink transition-colors hover:border-teal disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-steel"
+        className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border-steel bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-[border-color,background-color,transform] duration-300 hover:-translate-y-0.5 hover:border-teal hover:bg-panel focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:border-border-steel"
       >
         Próxima <span aria-hidden>→</span>
       </button>

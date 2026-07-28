@@ -1,29 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import { Fragment } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Logo } from "@/components/Logo";
 import { Avatar } from "@/components/Avatar";
+import { NavIcon, type NavIconName } from "@/components/NavIcon";
 
-type NavItem = { href: string; label: string; icon: string };
-
-function NavIcon({ name }: { name: string }) {
-  const common = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
-  const paths: Record<string, React.ReactNode> = {
-    grid: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
-    hierarchy: <><circle cx="12" cy="5" r="2.5" /><circle cx="5" cy="19" r="2.5" /><circle cx="19" cy="19" r="2.5" /><path d="M12 7.5v5M12 12.5H5v4M12 12.5h7v4" /></>,
-    chart: <><path d="M4 19V5M4 19h16" /><path d="m7 15 3-4 3 2 5-7" /></>,
-    layers: <><path d="m12 3 8 4-8 4-8-4 8-4Z" /><path d="m4 12 8 4 8-4M4 17l8 4 8-4" /></>,
-    upload: <><path d="M12 16V4M8 8l4-4 4 4" /><path d="M5 14v5h14v-5" /></>,
-    audit: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4M11 8v6M8 11h6" /></>,
-    users: <><circle cx="9" cy="8" r="3" /><path d="M3 20c.5-3 2.5-5 6-5s5.5 2 6 5M16 5.5a3 3 0 0 1 0 5.8M18 15c1.8.7 2.8 2.3 3 5" /></>,
-    document: <><path d="M6 3h9l3 3v15H6zM14 3v4h4M9 12h6M9 16h6" /></>,
-    money: <><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="12" cy="12" r="3" /><path d="M7 9h.01M17 15h.01" /></>,
-    link: <><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L10.8 5" /><path d="M14 11a5 5 0 0 0-7.1 0l-2.4 2.4a5 5 0 0 0 7.1 7.1L13.2 19" /></>,
-  };
-  return <svg {...common}>{paths[name] ?? paths.grid}</svg>;
-}
+type NavItem = {
+  href: string;
+  label: string;
+  icon: NavIconName;
+  group?: string;
+  matches?: string[];
+};
 
 const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
   ADMIN: [
@@ -37,13 +28,23 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
     { href: "/agent/integrations/national-life", label: "Integrações", icon: "link" },
   ],
   AGENT: [
-    { href: "/agent", label: "Hoje", icon: "grid" },
-    { href: "/agent/cases", label: "Casos", icon: "layers" },
-    { href: "/agent/clients", label: "Clientes", icon: "users" },
-    { href: "/agent/policies", label: "Apólices", icon: "document" },
-    { href: "/agent/commissions", label: "Comissões", icon: "money" },
-    { href: "/agent/hierarchy", label: "Equipe", icon: "hierarchy" },
-    { href: "/agent/integrations/national-life", label: "Integrações", icon: "link" },
+    { href: "/agent", label: "Hoje", icon: "grid", group: "Operação" },
+    {
+      href: "/agent/cases",
+      label: "CRM",
+      icon: "layers",
+      group: "Operação",
+      matches: ["/agent/cases", "/agent/clients", "/agent/activities"],
+    },
+    { href: "/agent/policies", label: "Apólices", icon: "document", group: "Carteira" },
+    { href: "/agent/commissions", label: "Comissões", icon: "money", group: "Carteira" },
+    { href: "/agent/hierarchy", label: "Equipe", icon: "hierarchy", group: "Gestão" },
+    {
+      href: "/agent/integrations/national-life",
+      label: "Integrações",
+      icon: "link",
+      group: "Gestão",
+    },
   ],
   CLIENT: [{ href: "/client", label: "Minhas apólices", icon: "document" }],
 };
@@ -57,16 +58,25 @@ const PAGE_NAMES: Record<string, string> = {
   "/admin/import": "Importar dados",
   "/admin/audit": "Auditoria",
   "/agent": "Hoje",
-  "/agent/cases": "Casos",
-  "/agent/cases/new": "Novo caso",
+  "/agent/cases": "CRM · Oportunidades",
+  "/agent/cases/new": "Novo atendimento",
+  "/agent/activities": "CRM · Atividades",
+  "/agent/illustrations/new": "Nova ilustração",
   "/agent/hierarchy": "Minha equipe",
-  "/agent/clients": "Clientes",
+  "/agent/clients": "CRM · Clientes",
   "/agent/policies": "Apólices",
   "/agent/policies/new": "Sobre apólices",
   "/agent/commissions": "Extrato de comissões",
   "/agent/integrations/national-life": "Conexão National Life",
   "/client": "Minhas apólices",
 };
+
+function resolvePageName(pathname: string, role: "ADMIN" | "AGENT" | "CLIENT") {
+  if (PAGE_NAMES[pathname]) return PAGE_NAMES[pathname];
+  if (/^\/agent\/cases\/[^/]+$/.test(pathname)) return "Detalhe da oportunidade";
+  if (/^\/agent\/policies\/[^/]+$/.test(pathname)) return "Detalhe da apólice";
+  return role === "ADMIN" ? "Operação" : role === "AGENT" ? "Minha operação" : "Minha conta";
+}
 
 export function Shell({
   role,
@@ -80,11 +90,13 @@ export function Shell({
   const pathname = usePathname();
   const router = useRouter();
   const items = NAV[role];
-  const currentPage = PAGE_NAMES[pathname] ?? (role === "ADMIN" ? "Operação" : role === "AGENT" ? "Minha operação" : "Minha conta");
+  const mobileItemWidth =
+    role === "AGENT" ? "w-1/5 min-w-[68px]" : role === "CLIENT" ? "w-full" : "w-[78px]";
+  const currentPage = resolvePageName(pathname, role);
   const roleLabel = role === "ADMIN" ? "Administração" : role === "AGENT" ? "Área do agente" : "Portal do cliente";
   const quickAction =
     role === "AGENT" && pathname === "/agent"
-      ? { href: "/agent/cases/new", label: "Novo caso" }
+      ? { href: "/agent/cases/new", label: "Novo atendimento" }
       : role === "ADMIN" && pathname === "/admin"
         ? { href: "/admin/import", label: "Importar dados" }
         : null;
@@ -134,26 +146,44 @@ export function Shell({
         </div>
 
         <ul className="relative flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain md:flex-1 md:snap-none md:flex-col md:gap-1.5 md:overflow-y-auto md:px-3">
-          {items.map((item) => {
-            const isSection = item.href.split("/").filter(Boolean).length > 1;
-            const active = pathname === item.href || (isSection && pathname.startsWith(`${item.href}/`));
+          {items.map((item, index) => {
+            const matchPaths = item.matches ?? [item.href];
+            const active = matchPaths.some((matchPath) => {
+              const isSection = matchPath.split("/").filter(Boolean).length > 1;
+              return pathname === matchPath || (isSection && pathname.startsWith(`${matchPath}/`));
+            });
+            const beginsGroup =
+              item.group && (index === 0 || items[index - 1]?.group !== item.group);
+
             return (
-              <li key={item.href} className="w-[78px] shrink-0 snap-start md:w-auto md:flex-none">
-                <Link
-                  href={item.href}
-                  aria-current={active ? "page" : undefined}
-                  className={`group flex flex-1 flex-col items-center gap-1.5 whitespace-nowrap px-1 py-2.5 text-center text-[10px] font-semibold transition-all duration-300 focus-visible:outline-white/75 md:flex-row md:rounded-xl md:px-3.5 md:py-3 md:text-left md:text-[13px] ${
-                    active
-                      ? "bg-[#f1f1ef] text-[#090909] shadow-[0_14px_32px_rgba(0,0,0,0.34)]"
-                      : "text-white/55 hover:bg-white/[0.06] hover:text-white"
-                  }`}
-                >
-                  <span className="transition-transform duration-500 ease-out group-hover:scale-105">
-                    <NavIcon name={item.icon} />
-                  </span>
-                  <span>{item.label}</span>
-                </Link>
-              </li>
+              <Fragment key={item.href}>
+                {beginsGroup && (
+                  <li
+                    role="presentation"
+                    className={`hidden px-3.5 pb-1 pt-4 md:block ${index === 0 ? "md:pt-1" : ""}`}
+                  >
+                    <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.17em] text-white/35">
+                      {item.group}
+                    </span>
+                  </li>
+                )}
+                <li className={`${mobileItemWidth} shrink-0 snap-start md:w-auto md:flex-none`}>
+                  <Link
+                    href={item.href}
+                    aria-current={active ? "page" : undefined}
+                    className={`group flex flex-1 flex-col items-center gap-1.5 whitespace-nowrap px-1 py-2.5 text-center text-[10px] font-semibold transition-all duration-300 focus-visible:outline-white/75 md:flex-row md:rounded-xl md:px-3.5 md:py-3 md:text-left md:text-[13px] ${
+                      active
+                        ? "bg-[#f1f1ef] text-[#090909] shadow-[0_14px_32px_rgba(0,0,0,0.34)]"
+                        : "text-white/55 hover:bg-white/[0.06] hover:text-white"
+                    }`}
+                  >
+                    <span className="transition-transform duration-500 ease-out group-hover:scale-105">
+                      <NavIcon name={item.icon} />
+                    </span>
+                    <span>{item.label}</span>
+                  </Link>
+                </li>
+              </Fragment>
             );
           })}
         </ul>

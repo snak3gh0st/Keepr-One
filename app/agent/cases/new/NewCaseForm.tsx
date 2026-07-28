@@ -51,8 +51,12 @@ export function NewCaseForm() {
   }
 
   return (
-    <div className="rounded-md border border-border-steel bg-paper p-5">
-      <h2 className="text-base font-semibold text-ink">Dados do prospect e objetivo</h2>
+    <div className="module-main-surface">
+      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Entrada do atendimento</p>
+      <h2 className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">Dados do cliente e objetivo</h2>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">
+        Comece com o essencial. O restante da operação será organizado dentro da oportunidade.
+      </p>
       <form action={handleSubmit} className="mt-5 grid gap-4 sm:grid-cols-2">
         <Field label="Nome">
           <Input name="firstName" required placeholder="Ex: Maria" />
@@ -115,9 +119,9 @@ export function NewCaseForm() {
           <Input name="monthlyBudget" type="number" step="0.01" min={0} placeholder="opcional" />
         </Field>
 
-        <div className="sm:col-span-2">
-          <Button type="submit" variant="primary" disabled={submitting}>
-            {submitting ? "Criando caso..." : "Criar caso"}
+        <div className="flex flex-col gap-3 border-t border-border-steel pt-5 sm:col-span-2 sm:flex-row sm:items-center">
+          <Button type="submit" variant="primary" disabled={submitting} className="w-full sm:w-auto">
+            {submitting ? "Criando atendimento..." : "Criar atendimento"}
           </Button>
           {message && (
             <p role="alert" className="mt-3 text-sm text-danger">{message}</p>

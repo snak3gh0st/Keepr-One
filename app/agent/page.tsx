@@ -276,7 +276,7 @@ export default async function AgentDashboard() {
   const moneyValue = (value: number) => loadError ? '—' : formatCurrency(value)
   const countValue = (value: number) => loadError ? '—' : String(value)
   const pulseMetrics = [
-    { label: 'Casos ativos', value: countValue(openCases) },
+    { label: 'Oportunidades ativas', value: countValue(openCases) },
     { label: 'Comissão esperada', value: moneyValue(txnExpected) },
     { label: 'Apólices', value: countValue(policyCount) },
     { label: 'Equipe', value: countValue(downlineIds.length) },
@@ -284,12 +284,12 @@ export default async function AgentDashboard() {
   ]
   const signals: OperationSignal[] = loadError ? [] : [
     {
-      title: dueFollowUps > 0 ? `${dueFollowUps} follow-ups podem destravar seu pipeline hoje.` : 'Seu pipeline está pronto para o próximo caso.',
+      title: dueFollowUps > 0 ? `${dueFollowUps} retornos podem destravar seu pipeline hoje.` : 'Seu pipeline está pronto para a próxima oportunidade.',
       description: dueFollowUps > 0
         ? 'Comece pelos contatos que já chegaram ao prazo e transforme pendências em avanço real.'
         : 'A fila de contatos está em dia. Use o espaço para abrir uma nova oportunidade.',
-      action: dueFollowUps > 0 ? 'Revisar follow-ups' : 'Criar novo caso',
-      href: dueFollowUps > 0 ? '/agent/cases' : '/agent/cases/new',
+      action: dueFollowUps > 0 ? 'Revisar retornos' : 'Novo atendimento',
+      href: dueFollowUps > 0 ? '/agent/activities' : '/agent/cases/new',
       tone: 'mint',
     },
     {
@@ -305,7 +305,7 @@ export default async function AgentDashboard() {
       title: txnExpected > txnPaid ? 'Existe receita esperada pronta para acompanhamento.' : 'Sua produção está alinhada com os pagamentos registrados.',
       description: txnExpected > txnPaid
         ? `A diferença atual entre o esperado e o pago é de ${formatCurrency(Math.max(0, txnExpected - txnPaid))}.`
-        : 'Use o extrato para acompanhar detalhes, overrides e movimentos da sua equipe.',
+        : 'Use o extrato para acompanhar detalhes, repasses e movimentos da sua equipe.',
       action: 'Ver comissões',
       href: '/agent/commissions',
       tone: 'violet',
@@ -408,12 +408,12 @@ export default async function AgentDashboard() {
               Comece pelo que pode destravar resultado ou proteger sua carteira hoje.
             </p>
             <div className="mt-6 flex flex-col gap-1">
-              <PriorityRow href="/agent/cases" label="Follow-ups pendentes" value={loadError ? null : dueFollowUps} tone="danger" />
-              <PriorityRow href="/agent/cases" label="Requirements abertos" value={loadError ? null : openRequirements} tone="amber" />
+              <PriorityRow href="/agent/activities" label="Retornos pendentes" value={loadError ? null : dueFollowUps} tone="danger" />
+              <PriorityRow href="/agent/activities" label="Pendências abertas" value={loadError ? null : openRequirements} tone="amber" />
               <PriorityRow href="/agent/policies" label="Apólices em risco" value={loadError ? null : atRiskPolicies} tone="danger" />
               <PriorityRow href="/agent/policies" label="Revisões anuais" value={loadError ? null : dueReviews} tone="mint" />
             </div>
-            <Link href="/agent/cases" className="mt-auto inline-flex min-h-11 w-full items-center justify-center rounded-full bg-rail-strong px-4 py-3 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5">
+            <Link href="/agent/activities" className="mt-auto inline-flex min-h-11 w-full items-center justify-center rounded-full bg-rail-strong px-4 py-3 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5">
               Abrir fila completa
             </Link>
           </aside>
@@ -438,7 +438,7 @@ export default async function AgentDashboard() {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-muted">Pipeline</p>
                 <p className="mt-4 font-mono text-5xl font-medium tracking-[-0.06em] tabular-nums text-ink">{countValue(openCases)}</p>
-                <p className="mt-2 text-sm text-ink-muted">casos ativos em andamento</p>
+                <p className="mt-2 text-sm text-ink-muted">oportunidades ativas em andamento</p>
               </div>
               <div className="mt-8 flex items-center justify-between border-t border-border-steel/70 pt-4 text-xs">
                 <span className="text-ink-muted">{countValue(awaitingIllustration)} aguardando ilustração</span>
@@ -514,11 +514,11 @@ export default async function AgentDashboard() {
             <div className="relative max-w-4xl">
               <p className="text-xs font-semibold uppercase tracking-[0.17em] text-rail-strong/55">Mantenha o ritmo</p>
               <h2 className="mt-4 max-w-5xl text-3xl font-medium leading-[1.02] tracking-[-0.05em] sm:text-5xl">
-                O próximo caso pode começar agora.
+                A próxima oportunidade pode começar agora.
               </h2>
             </div>
             <Link href="/agent/cases/new" className="relative mt-8 inline-flex min-h-12 shrink-0 items-center justify-center rounded-full bg-rail-strong px-6 py-3 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-1 lg:mt-0">
-              Abrir novo caso
+              Novo atendimento
             </Link>
           </div>
         </section>

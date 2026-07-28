@@ -16,45 +16,52 @@ export default async function NewPolicyPage() {
       <PageHeader
         title="Apólices não são criadas manualmente"
         eyebrow="Como funciona"
-        description="Uma apólice representa um contrato real — ela surge da emissão de um caso ou de uma importação de histórico autorizada."
+        description="Uma apólice representa um contrato real — ela surge quando uma oportunidade chega à emissão ou por uma importação de histórico autorizada."
       >
         <Link
           href="/agent/policies"
-          className="inline-flex min-h-10 items-center rounded-md border border-teal px-4 py-2.5 text-sm font-semibold text-teal transition-[background-color,border-color,color,transform] duration-150 hover:border-teal-deep hover:bg-teal-pale focus-visible:ring-[3px] focus-visible:ring-teal-pale focus-visible:outline-none"
+          className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
         >
           ← Voltar
         </Link>
       </PageHeader>
-      <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="max-w-3xl rounded-md border border-border-steel bg-paper p-6">
-          <h2 className="text-base font-semibold text-ink">Por onde uma apólice aparece</h2>
-          <ol className="mt-4 space-y-4 text-sm text-ink-muted">
-            <li>
-              <strong className="text-ink">1. Abra um caso.</strong> Registre o prospect e conduza a venda pelas etapas até a emissão.
-              A apólice é criada quando o caso é emitido.
+      <div className="module-content-grid">
+        <section className="module-main-surface">
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Origem da carteira</p>
+          <h2 className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">Por onde uma apólice aparece</h2>
+          <ol className="mt-6 grid gap-3 sm:grid-cols-2">
+            <li className="rounded-2xl border border-border-steel bg-panel/55 p-5">
+              <span className="font-mono text-xs text-teal">01</span>
+              <strong className="mt-8 block text-lg font-medium tracking-[-0.03em] text-ink">Emissão de uma oportunidade</strong>
+              <p className="mt-2 text-sm leading-6 text-ink-muted">
+                Registre o cliente e conduza o atendimento pelas etapas. A apólice surge quando a oportunidade chega à emissão.
+              </p>
             </li>
-            <li>
-              <strong className="text-ink">2. Importação de histórico.</strong> Apólices já existentes entram por importação
-              autorizada (feita pela administração), preservando a origem e o número original.
+            <li className="rounded-2xl border border-border-steel bg-panel/55 p-5">
+              <span className="font-mono text-xs text-teal">02</span>
+              <strong className="mt-8 block text-lg font-medium tracking-[-0.03em] text-ink">Importação de histórico</strong>
+              <p className="mt-2 text-sm leading-6 text-ink-muted">
+                Contratos existentes entram por importação autorizada, preservando sua origem e o número original.
+              </p>
             </li>
           </ol>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
               href="/agent/cases/new"
-              className="inline-flex min-h-10 items-center rounded-md bg-teal px-4 py-2.5 text-sm font-semibold text-paper transition-[background-color] duration-150 hover:bg-teal-deep"
+              className="inline-flex min-h-11 items-center rounded-full bg-rail-strong px-4 py-2.5 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5"
             >
-              Novo caso
+              Novo atendimento
             </Link>
             <Link
               href="/agent/cases"
-              className="inline-flex min-h-10 items-center rounded-md border border-teal px-4 py-2.5 text-sm font-semibold text-teal transition-[background-color,border-color] duration-150 hover:border-teal-deep hover:bg-teal-pale"
+              className="inline-flex min-h-11 items-center rounded-full border border-border-steel bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-[background-color,border-color,transform] duration-300 hover:-translate-y-0.5 hover:border-ink-muted hover:bg-panel"
             >
-              Ver meus casos
+              Ver oportunidades
             </Link>
           </div>
-        </div>
+        </section>
         <ContextPanel eyebrow="Por quê" title="Origem controlada">
-          <p>Impedir a criação manual garante que toda apólice tenha um caso ou uma importação por trás — sem números soltos.</p>
+          <p>Impedir a criação manual garante que toda apólice tenha uma oportunidade ou uma importação por trás — sem números soltos.</p>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Importação</p>
             <p className="mt-2 text-sm text-ink-muted">A importação de histórico é feita pela administração em “Importar dados”.</p>

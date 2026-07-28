@@ -76,7 +76,7 @@ function Canvas({ agents, youId }: { agents: Agent[]; youId: string }) {
   }, [agents, youId]);
 
   return (
-    <div className="hierarchy-flow relative h-[70vh] min-h-[480px] w-full overflow-hidden rounded-lg border border-border-steel bg-panel/40">
+    <div className="hierarchy-flow module-main-surface module-hierarchy-surface relative h-[70vh] min-h-[480px] w-full">
       <ReactFlow
         nodes={nodes}
         edges={edges}

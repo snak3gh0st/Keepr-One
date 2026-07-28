@@ -7,6 +7,7 @@ import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { HierarchyCanvas } from './HierarchyCanvas'
 import { ContextPanel } from '@/components/ContextPanel'
+import { ModuleSummary } from '@/components/ModuleSummary'
 
 export default async function HierarchyPage() {
   const agent = await getCurrentAgent()
@@ -30,13 +31,23 @@ export default async function HierarchyPage() {
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
-      <PageHeader title="Minha hierarquia" eyebrow="Estrutura" description="Sua linha de liderança acima, você no meio, sua downline abaixo. Arraste os cartões para reorganizar a visualização.">
+      <PageHeader title="Equipe" eyebrow="Estrutura da agência" description="Veja sua linha de liderança, sua posição e cada agente conectado à produção da sua operação.">
         <span className="inline-flex rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal">{canvasAgents.length} agentes</span>
       </PageHeader>
-      <div className="mt-8 grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(240px,280px)]">
+
+      <ModuleSummary
+        label="Resumo da estrutura"
+        items={[
+          { label: 'Linha acima', value: uplineIds.length, detail: 'Lideranças conectadas à sua posição' },
+          { label: 'Equipe abaixo', value: downline.length, detail: 'Agentes conectados à sua estrutura', tone: 'green' },
+          { label: 'Profundidade', value: Math.max(0, ...downline.map((item) => item.level)), detail: 'Maior nível abaixo de você' },
+        ]}
+      />
+
+      <div className="module-content-grid">
         <HierarchyCanvas agents={canvasAgents} youId={agent.id} />
-        <ContextPanel eyebrow="Sua posição" title="Como ler a hierarquia">
-          <p>Acima de você estão os responsáveis pela sua linha. Abaixo estão os agentes que fazem parte da sua downline.</p>
+        <ContextPanel eyebrow="Continue por aqui" title="Sua posição na estrutura">
+          <p>Acima de você estão os responsáveis pela sua linha. Abaixo estão os agentes conectados à sua estrutura.</p>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Impacto</p>
             <p className="mt-2">A estrutura define de onde vêm seus repasses de comissão.</p>
