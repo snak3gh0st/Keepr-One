@@ -1,6 +1,37 @@
-import Link from "next/link";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { PublicLanding } from "@/components/PublicLanding";
 import { requireRole } from '@/lib/require-role'
+
+export const metadata: Metadata = {
+  title: "Controle total para agentes financeiros",
+  description:
+    "Keepr One reúne clientes, casos, apólices, comissões e equipe em uma única perspectiva operacional.",
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: "Keepr One — Sua operação em uma só visão",
+    description:
+      "Do primeiro contato à comissão paga, conduza sua operação financeira com tudo em um só lugar.",
+    type: "website",
+    images: [
+      {
+        url: "/keepr-one-og.png",
+        width: 1734,
+        height: 907,
+        alt: "Keepr One — Toda a sua operação. Sob controle.",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Keepr One — Sua operação em uma só visão",
+    description:
+      "Do primeiro contato à comissão paga, conduza sua operação financeira com tudo em um só lugar.",
+    images: ["/keepr-one-og.png"],
+  },
+};
 
 export default async function Home() {
   // Only the session lookup goes in try/catch. redirect() throws a special
@@ -21,20 +52,5 @@ export default async function Home() {
   if (role === 'AGENT') redirect('/agent')
   if (role === 'CLIENT') redirect('/client')
 
-  return (
-    <main className="mx-auto flex min-h-screen w-full max-w-sm flex-col items-center justify-center px-4 text-center">
-      <span className="font-sans text-2xl font-semibold tracking-tight text-ink">
-        Keepr One
-      </span>
-      <p className="mt-2 text-sm text-ink-muted">
-        Acesse sua conta para ver suas apólices e comissões.
-      </p>
-      <Link
-        href="/login"
-        className="mt-6 inline-flex items-center justify-center gap-2 rounded-md bg-teal px-4 py-2.5 text-sm font-semibold text-paper transition-colors duration-150 hover:bg-teal-deep focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
-      >
-        Entrar
-      </Link>
-    </main>
-  )
+  return <PublicLanding />
 }

@@ -22,7 +22,14 @@ const outfit = Outfit({
   subsets: ["latin"],
 });
 
+const metadataBase = new URL(
+  process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.BETTER_AUTH_URL ??
+    "http://localhost:3000",
+);
+
 export const metadata: Metadata = {
+  metadataBase,
   title: {
     default: "Keepr One",
     template: "%s · Keepr One",
