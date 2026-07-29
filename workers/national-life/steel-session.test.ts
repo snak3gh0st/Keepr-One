@@ -225,7 +225,7 @@ describe('National Life Steel session boundary', () => {
       solveCaptcha: false,
       persistProfile: false,
       debugConfig: { interactive: true, systemCursor: true },
-      dimensions: { width: 1280, height: 800 },
+      dimensions: { width: 1600, height: 1000 },
     }])
     expect(session.internalDebugUrl).toBe('https://steel.example/session/1')
     await session.close()

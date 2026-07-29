@@ -14,4 +14,11 @@ describe('National Life Steel runtime compose', () => {
     expect(compose).toContain('/var/lib/nginx:rw,noexec,nosuid,size=64m')
     expect(compose).toContain('access_log off;')
   })
+
+  it('matches the private Xvfb display to the 1600 by 1000 interactive browser', () => {
+    const compose = readFileSync('deploy/national-life-runtime.compose.yaml', 'utf8')
+
+    expect(compose).toContain('Xvfb :10 -screen 0 1600x1000x24')
+    expect(compose).not.toContain('Xvfb :10 -screen 0 1280x800x24')
+  })
 })

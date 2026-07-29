@@ -24,7 +24,7 @@ services:
         set -eu;
         mkdir -p /run/dbus;
         dbus-daemon --system --fork;
-        Xvfb :10 -screen 0 1280x800x24 -ac +extension RANDR >/tmp/xvfb.log 2>&1 &
+        Xvfb :10 -screen 0 1600x1000x24 -ac +extension RANDR >/tmp/xvfb.log 2>&1 &
         awk '/^http \{/ { print; print "    access_log off;"; print "    error_log /dev/stderr warn;"; next } { sub(/proxy_set_header Host \$$host;/, "proxy_set_header Host 127.0.0.1;"); print }' /app/api/nginx.conf >/tmp/nginx.conf;
         nginx -c /tmp/nginx.conf;
         exec /app/api/entrypoint.sh --no-nginx
