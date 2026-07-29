@@ -53,9 +53,13 @@ function createMemoryRepository() {
       const key = attemptKey(input.agentId)
       const current = attempts.get(key)
       if (current) {
-        return current.expiresAt > input.now
-          ? { kind: 'CONFLICT' as const }
-          : { kind: 'BLOCKED_EXPIRED' as const }
+        if (['FAILED', 'CANCELLED', 'EXPIRED'].includes(current.state)) {
+          attempts.delete(key)
+        } else {
+          return current.expiresAt > input.now
+            ? { kind: 'CONFLICT' as const }
+            : { kind: 'BLOCKED_EXPIRED' as const }
+        }
       }
 
       const recentStarts = auditEvents.filter(
@@ -241,6 +245,40 @@ describe('National Life owned interactive connection service', () => {
       attempt: first.kind === 'STARTED' ? first.attempt : null,
     })
     expect(memory.auditEvents).toHaveLength(1)
+  })
+
+  it('preserves a terminal status until the next start replaces it atomically', async () => {
+    const memory = createMemoryRepository()
+    const first = await startConnectionAttempt(
+      { agentId: 'agent-1', userId: 'user-1' },
+      deps(memory.repository),
+    )
+    if (first.kind !== 'STARTED') throw new Error('expected started attempt')
+    memory.attempts.get('agent-1:NATIONAL_LIFE')!.state = 'FAILED'
+    memory.attempts.get('agent-1:NATIONAL_LIFE')!.safeErrorCode =
+      'INTERACTIVE_CONNECTION_FAILED'
+
+    await expect(
+      getOwnedAttemptStatus('agent-1', first.attempt.id, deps(memory.repository)),
+    ).resolves.toMatchObject({
+      id: first.attempt.id,
+      state: 'FAILED',
+      safeErrorCode: 'INTERACTIVE_CONNECTION_FAILED',
+    })
+
+    const replacement = await startConnectionAttempt(
+      { agentId: 'agent-1', userId: 'user-1' },
+      deps(memory.repository),
+    )
+    expect(replacement).toMatchObject({
+      kind: 'STARTED',
+      attempt: { state: 'OPENING_PORTAL' },
+    })
+    expect(
+      memory.attempts.get('agent-1:NATIONAL_LIFE')?.id,
+    ).not.toBe(first.attempt.id)
+    expect(memory.auditEvents).toHaveLength(2)
+    expect(memory.auditEvents.every((event) => event.entityId)).toBe(true)
   })
 
   it('rejects another agent reading or cancelling an attempt', async () => {

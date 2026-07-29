@@ -1,6 +1,10 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { runNationalLifeRuntime, type RuntimeDeps } from './runtime'
+import {
+  getClaimableConnectionAttemptStates,
+  runNationalLifeRuntime,
+  type RuntimeDeps,
+} from './runtime'
 
 function createDeps(options: {
   attempts?: Array<{ id: string } | null>
@@ -66,6 +70,17 @@ async function flush() {
 }
 
 describe('dedicated National Life runtime loops', () => {
+  it('claims only active connection-attempt states', () => {
+    expect(getClaimableConnectionAttemptStates()).toEqual([
+      'OPENING_PORTAL',
+      'AWAITING_LOGIN',
+      'AWAITING_MFA',
+    ])
+    expect(getClaimableConnectionAttemptStates()).not.toEqual(
+      expect.arrayContaining(['FAILED', 'CANCELLED', 'EXPIRED']),
+    )
+  })
+
   it('claims interactive attempts and read-only jobs independently', async () => {
     vi.useFakeTimers()
     const test = createDeps({

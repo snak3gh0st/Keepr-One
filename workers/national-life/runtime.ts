@@ -47,10 +47,11 @@ const CLAIMABLE_ATTEMPT_STATES = [
   'OPENING_PORTAL',
   'AWAITING_LOGIN',
   'AWAITING_MFA',
-  'FAILED',
-  'CANCELLED',
-  'EXPIRED',
 ] as const
+
+export function getClaimableConnectionAttemptStates() {
+  return [...CLAIMABLE_ATTEMPT_STATES]
+}
 
 type RuntimeSignalSource = Pick<EventEmitter, 'once' | 'off'>
 
@@ -261,7 +262,7 @@ function createAttemptStore(
             deploymentScope: env.sessionScopeId,
             provider: NATIONAL_LIFE_PROVIDER,
             purpose: ATTEMPT_PURPOSE,
-            state: { in: [...CLAIMABLE_ATTEMPT_STATES] },
+            state: { in: getClaimableConnectionAttemptStates() },
             OR: [
               { leaseOwner: null },
               { leaseExpiresAt: { lte: now } },
@@ -662,7 +663,7 @@ export function createNationalLifeRuntimeDeps(
           deploymentScope: env.sessionScopeId,
           provider: NATIONAL_LIFE_PROVIDER,
           purpose: ATTEMPT_PURPOSE,
-          state: { in: [...CLAIMABLE_ATTEMPT_STATES] },
+          state: { in: getClaimableConnectionAttemptStates() },
           OR: [
             { leaseOwner: null },
             { leaseExpiresAt: { lte: new Date() } },

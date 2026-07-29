@@ -30,6 +30,11 @@ const VIEWER_ATTEMPT_STATES: NationalLifeConnectionAttemptState[] = [
   'AWAITING_LOGIN',
   'AWAITING_MFA',
 ]
+const TERMINAL_ATTEMPT_STATES: NationalLifeConnectionAttemptState[] = [
+  'FAILED',
+  'CANCELLED',
+  'EXPIRED',
+]
 
 export type ConnectionAttemptStatus = {
   id: string
@@ -281,12 +286,22 @@ const prismaRepository: InteractiveConnectionRepository = {
               purpose: ATTEMPT_PURPOSE,
             },
           },
-          select: { expiresAt: true },
+          select: { id: true, state: true, expiresAt: true },
         })
         if (current) {
-          return current.expiresAt > input.now
-            ? { kind: 'CONFLICT' as const }
-            : { kind: 'BLOCKED_EXPIRED' as const }
+          if (
+            TERMINAL_ATTEMPT_STATES.includes(
+              current.state as NationalLifeConnectionAttemptState,
+            )
+          ) {
+            await transaction.nationalLifeConnectionAttempt.delete({
+              where: { id: current.id },
+            })
+          } else {
+            return current.expiresAt > input.now
+              ? { kind: 'CONFLICT' as const }
+              : { kind: 'BLOCKED_EXPIRED' as const }
+          }
         }
 
         const attempt = await transaction.nationalLifeConnectionAttempt.create({
