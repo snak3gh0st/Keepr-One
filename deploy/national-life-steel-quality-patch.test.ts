@@ -1,19 +1,43 @@
 import { describe, expect, it } from 'vitest'
 import { patchSteelScreencastQuality } from './national-life-steel-quality-patch.mjs'
 
+const reviewedScreencastCall = `await targetClient.send("Page.startScreencast", {
+                    format: "jpeg",
+                    quality: 75,
+                    maxWidth: width,
+                    maxHeight: height,
+                });`
+
+const patchedScreencastCall = `await targetClient.send("Page.startScreencast", {
+                    format: "jpeg",
+                    quality: 92,
+                    maxWidth: width,
+                    maxHeight: height,
+                });`
+
 describe('National Life Steel screencast-quality patch', () => {
-  it('raises the reviewed JPEG screencast quality once', () => {
-    const result = patchSteelScreencastQuality(
-      'Page.startScreencast({ format: "jpeg", quality: 75, maxWidth, maxHeight })',
-    )
-    expect(result).toContain('quality: 92')
-    expect(result).not.toContain('quality: 75')
+  it('raises only the exact reviewed Page.startScreencast JPEG quality', () => {
+    const source = `${reviewedScreencastCall}
+const unrelatedThumbnail = { quality: 75 }`
+
+    const result = patchSteelScreencastQuality(source)
+
+    expect(result).toContain(patchedScreencastCall)
+    expect(result).toContain('const unrelatedThumbnail = { quality: 75 }')
   })
 
   it.each([
-    'Page.startScreencast({ format: "jpeg", maxWidth, maxHeight })',
-    'quality: 75; quality: 75',
-  ])('rejects a missing or ambiguous reviewed Steel handler', (source) => {
+    'const unrelatedThumbnail = { quality: 75 }',
+    `await targetClient.send("Page.startScreencast", {
+                    format: "jpeg",
+                    quality: 80,
+                    maxWidth: width,
+                    maxHeight: height,
+                });
+const unrelatedThumbnail = { quality: 75 }`,
+    `${reviewedScreencastCall}
+${reviewedScreencastCall}`,
+  ])('rejects an absent, changed, or ambiguous reviewed screencast call', (source) => {
     expect(() => patchSteelScreencastQuality(source)).toThrow(
       'Steel screencast quality did not match the reviewed Steel build',
     )

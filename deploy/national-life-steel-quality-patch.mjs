@@ -2,15 +2,29 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
-const reviewedQuality = 'quality: 75'
-const patchedQuality = 'quality: 92'
+const reviewedScreencastCall = `await targetClient.send("Page.startScreencast", {
+                    format: "jpeg",
+                    quality: 75,
+                    maxWidth: width,
+                    maxHeight: height,
+                });`
+
+const patchedScreencastCall = `await targetClient.send("Page.startScreencast", {
+                    format: "jpeg",
+                    quality: 92,
+                    maxWidth: width,
+                    maxHeight: height,
+                });`
 
 export function patchSteelScreencastQuality(source) {
-  const firstIndex = source.indexOf(reviewedQuality)
-  if (firstIndex < 0 || source.indexOf(reviewedQuality, firstIndex + reviewedQuality.length) >= 0) {
+  const firstIndex = source.indexOf(reviewedScreencastCall)
+  if (
+    firstIndex < 0 ||
+    source.indexOf(reviewedScreencastCall, firstIndex + reviewedScreencastCall.length) >= 0
+  ) {
     throw new Error('Steel screencast quality did not match the reviewed Steel build')
   }
-  return source.replace(reviewedQuality, patchedQuality)
+  return source.replace(reviewedScreencastCall, patchedScreencastCall)
 }
 
 async function patchPinnedSteelBuild() {

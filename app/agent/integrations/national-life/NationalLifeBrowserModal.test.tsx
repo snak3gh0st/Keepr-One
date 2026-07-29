@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 let resizeObserverCallback: ResizeObserverCallback | undefined
+const resizeObserverDisconnect = vi.fn()
 
 class ControlledResizeObserver {
   constructor(callback: ResizeObserverCallback) {
@@ -18,7 +19,9 @@ class ControlledResizeObserver {
 
   observe() {}
   unobserve() {}
-  disconnect() {}
+  disconnect() {
+    resizeObserverDisconnect()
+  }
 }
 
 function reportViewerAreaSize(width: number, height: number) {
@@ -129,6 +132,46 @@ describe('NationalLifeBrowserModal', () => {
     expect(stageWidth).toBeLessThanOrEqual(1200)
     expect(stageHeight).toBeLessThanOrEqual(400)
     expect(stageWidth / stageHeight).toBeCloseTo(1.6)
+
+    act(() => reportViewerAreaSize(300, 800))
+
+    await waitFor(() => {
+      expect(stage.style.width).toBe('300px')
+      expect(stage.style.height).toBe('187.5px')
+    })
+  })
+
+  it('caps the viewer stage at its 1600 by 1000 source size', async () => {
+    render(
+      <NationalLifeBrowserModal
+        attempt={attempt}
+        onAuthenticated={vi.fn()}
+        onClosed={vi.fn()}
+      />,
+    )
+
+    const stage = await screen.findByTestId('national-life-viewer-stage')
+    act(() => reportViewerAreaSize(2_000, 2_000))
+
+    await waitFor(() => {
+      expect(stage.style.width).toBe('1600px')
+      expect(stage.style.height).toBe('1000px')
+    })
+  })
+
+  it('disconnects the viewer ResizeObserver on unmount', async () => {
+    const { unmount } = render(
+      <NationalLifeBrowserModal
+        attempt={attempt}
+        onAuthenticated={vi.fn()}
+        onClosed={vi.fn()}
+      />,
+    )
+
+    await screen.findByTestId('national-life-viewer-stage')
+    unmount()
+
+    expect(resizeObserverDisconnect).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the official viewer open while MFA is required', async () => {

@@ -125,7 +125,7 @@ git commit -m "feat: raise National Life interactive display resolution"
 
 **Interfaces:**
 - Produces: `patchSteelScreencastQuality(source: string): string`.
-- Produces: one exact replacement in `/app/api/build/plugins/browser-socket/casting.handler.js`.
+- Produces: one exact replacement of the reviewed `targetClient.send("Page.startScreencast", ...)` JPEG call in `/app/api/build/plugins/browser-socket/casting.handler.js`.
 - Consumes: the currently pinned immutable Steel image source and no privacy-patch symbols.
 
 - [ ] **Step 1: Write failing exact-once patch tests**
@@ -136,19 +136,41 @@ Create `deploy/national-life-steel-quality-patch.test.ts`:
 import { describe, expect, it } from 'vitest'
 import { patchSteelScreencastQuality } from './national-life-steel-quality-patch.mjs'
 
+const reviewedScreencastCall = `await targetClient.send("Page.startScreencast", {
+                    format: "jpeg",
+                    quality: 75,
+                    maxWidth: width,
+                    maxHeight: height,
+                });`
+
+const patchedScreencastCall = `await targetClient.send("Page.startScreencast", {
+                    format: "jpeg",
+                    quality: 92,
+                    maxWidth: width,
+                    maxHeight: height,
+                });`
+
 describe('National Life Steel screencast-quality patch', () => {
-  it('raises the reviewed JPEG screencast quality once', () => {
-    const result = patchSteelScreencastQuality(
-      'Page.startScreencast({ format: "jpeg", quality: 75, maxWidth, maxHeight })',
-    )
-    expect(result).toContain('quality: 92')
-    expect(result).not.toContain('quality: 75')
+  it('raises only the exact reviewed Page.startScreencast JPEG quality', () => {
+    const source = `${reviewedScreencastCall}
+const unrelatedThumbnail = { quality: 75 }`
+    const result = patchSteelScreencastQuality(source)
+
+    expect(result).toContain(patchedScreencastCall)
+    expect(result).toContain('const unrelatedThumbnail = { quality: 75 }')
   })
 
   it.each([
-    'Page.startScreencast({ format: "jpeg", maxWidth, maxHeight })',
-    'quality: 75; quality: 75',
-  ])('rejects a missing or ambiguous reviewed Steel handler', (source) => {
+    'const unrelatedThumbnail = { quality: 75 }',
+    `await targetClient.send("Page.startScreencast", {
+                    format: "jpeg",
+                    quality: 80,
+                    maxWidth: width,
+                    maxHeight: height,
+                });
+const unrelatedThumbnail = { quality: 75 }`,
+    `${reviewedScreencastCall}\n${reviewedScreencastCall}`,
+  ])('rejects an absent, changed, or ambiguous reviewed screencast call', (source) => {
     expect(() => patchSteelScreencastQuality(source)).toThrow(
       'Steel screencast quality did not match the reviewed Steel build',
     )
@@ -169,15 +191,29 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
-const reviewedQuality = 'quality: 75'
-const patchedQuality = 'quality: 92'
+const reviewedScreencastCall = `await targetClient.send("Page.startScreencast", {
+                    format: "jpeg",
+                    quality: 75,
+                    maxWidth: width,
+                    maxHeight: height,
+                });`
+
+const patchedScreencastCall = `await targetClient.send("Page.startScreencast", {
+                    format: "jpeg",
+                    quality: 92,
+                    maxWidth: width,
+                    maxHeight: height,
+                });`
 
 export function patchSteelScreencastQuality(source) {
-  const firstIndex = source.indexOf(reviewedQuality)
-  if (firstIndex < 0 || source.indexOf(reviewedQuality, firstIndex + reviewedQuality.length) >= 0) {
+  const firstIndex = source.indexOf(reviewedScreencastCall)
+  if (
+    firstIndex < 0 ||
+    source.indexOf(reviewedScreencastCall, firstIndex + reviewedScreencastCall.length) >= 0
+  ) {
     throw new Error('Steel screencast quality did not match the reviewed Steel build')
   }
-  return source.replace(reviewedQuality, patchedQuality)
+  return source.replace(reviewedScreencastCall, patchedScreencastCall)
 }
 
 async function patchPinnedSteelBuild() {
@@ -200,7 +236,7 @@ This module does not import, change, or replace `national-life-steel-privacy-pat
 
 Run: `pnpm exec vitest run deploy/national-life-steel-quality-patch.test.ts deploy/national-life-steel-privacy-patch.test.ts`
 
-Expected: PASS. The missing and duplicated-source cases prove a future Steel image cannot silently receive an unreviewed replacement.
+Expected: PASS. The absent, changed, duplicated, and unrelated-decoy cases prove a future Steel image cannot silently receive an unreviewed replacement.
 
 - [ ] **Step 4: Run both patches in the Steel Docker build**
 
@@ -239,36 +275,77 @@ git commit -m "feat: improve National Life viewer screencast quality"
 - Modify: `app/agent/integrations/national-life/NationalLifeBrowserModal.test.tsx:52-77`
 
 **Interfaces:**
-- Produces: `data-testid="national-life-viewer-stage"` carrying `aspect-[16/10]`, `max-w-[1600px]`, and `max-h-[1000px]`.
+- Produces: `data-testid="national-life-viewer-stage"` carrying `aspect-[16/10]`, `max-h-[1000px]`, and inline width/height measured from its container.
+- Produces: `ResizeObserver` sizing with `width = min(container width, container height × 1.6, 1600)` and `height = width / 1.6`; later observer deliveries update the same stage and cleanup disconnects the observer.
 - Consumes: existing signed `viewerUrl` and the current secure iframe attributes.
 - Preserves: the existing title, sandbox, referrer policy, no `allow` permissions, cancel behavior, MFA behavior, and terminal-error behavior.
 
-- [ ] **Step 1: Add a failing fixed-ratio-stage assertion to the first modal test**
+- [ ] **Step 1: Add failing measured-stage assertions**
 
-Immediately after the existing `const frame = await ...` in `frames only the broker bootstrap`, add:
+Retain the secure iframe assertions, then use the controlled `ResizeObserver` harness to cover:
 
 ```ts
-    const stage = screen.getByTestId('national-life-viewer-stage')
-    expect(stage).toHaveClass('aspect-[16/10]')
-    expect(stage).toHaveClass('max-w-[1600px]')
-    expect(stage).toHaveClass('max-h-[1000px]')
-    expect(stage).toContainElement(frame)
+reportViewerAreaSize(1_200, 400) // 640 × 400
+reportViewerAreaSize(300, 800)   // 300 × 187.5, subsequent narrow/tall delivery
+reportViewerAreaSize(2_000, 2_000) // capped at 1600 × 1000
 ```
+
+Unmount the modal and assert that the observer's `disconnect()` was called exactly once.
 
 Run: `pnpm exec vitest run app/agent/integrations/national-life/NationalLifeBrowserModal.test.tsx`
 
-Expected: FAIL because the iframe is presently the direct stretched child.
+Expected during the original implementation cycle: FAIL because the iframe is the direct stretched child and no measured stage or observer lifecycle exists.
 
-- [ ] **Step 2: Implement the proportional viewer stage**
+- [ ] **Step 2: Implement the measured proportional viewer stage**
 
-Replace the current `viewerUrl ? (...) : (...)` content in the `relative min-h-0 flex-1` area with this `viewerUrl` branch, retaining the current loading branch after it:
+Add a viewer-stage sizing hook that observes the available area, caps the source width at 1600, preserves 16:10, updates after subsequent observer deliveries, and disconnects on viewer URL change or unmount:
+
+```tsx
+const VIEWER_ASPECT_RATIO = 16 / 10
+const MAX_VIEWER_WIDTH = 1_600
+
+function useViewerStageSize(viewerUrl: string | null) {
+  const viewerAreaRef = useRef<HTMLDivElement>(null)
+  const [stageSize, setStageSize] = useState<{ width: number; height: number }>()
+
+  useEffect(() => {
+    if (!viewerUrl || !viewerAreaRef.current) {
+      setStageSize(undefined)
+      return
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      const width = Math.min(
+        entry.contentRect.width,
+        entry.contentRect.height * VIEWER_ASPECT_RATIO,
+        MAX_VIEWER_WIDTH,
+      )
+      const height = width / VIEWER_ASPECT_RATIO
+      setStageSize((current) =>
+        current?.width === width && current.height === height ? current : { width, height },
+      )
+    })
+
+    observer.observe(viewerAreaRef.current)
+    return () => observer.disconnect()
+  }, [viewerUrl])
+
+  return { viewerAreaRef, stageSize }
+}
+```
+
+Use that hook in the existing `viewerUrl ? (...) : (...)` branch, retaining the current loading branch:
 
 ```tsx
           {viewerUrl ? (
-            <div className="grid h-full w-full place-items-center overflow-hidden bg-[#101512] p-2 sm:p-4">
+            <div
+              ref={viewerAreaRef}
+              className="grid h-full w-full place-items-center overflow-hidden bg-[#101512] p-2 sm:p-4"
+            >
               <div
                 data-testid="national-life-viewer-stage"
-                className="aspect-[16/10] h-auto max-h-[1000px] w-full max-w-[1600px] overflow-hidden bg-white shadow-2xl"
+                className="aspect-[16/10] max-h-[1000px] overflow-hidden bg-white shadow-2xl"
+                style={stageSize ? stageSize : { visibility: 'hidden' }}
               >
                 <iframe
                   title="Portal oficial da National Life"
@@ -282,7 +359,7 @@ Replace the current `viewerUrl ? (...) : (...)` content in the `relative min-h-0
           ) : (
 ```
 
-Keep the existing loading content inside the unchanged `: (` branch. Remove the iframe `min-h-[600px]`; the stage owns its complete 16:10 geometry. Do not add `allow`, `srcDoc`, carrier URLs, zoom controls, or client-side credential fields.
+Keep the existing loading content inside the unchanged `: (` branch. The measured inline dimensions, not a stale `max-w-[1600px]` utility contract, cap the visible stage. Do not add `allow`, `srcDoc`, carrier URLs, zoom controls, or client-side credential fields.
 
 - [ ] **Step 3: Verify visual component contracts and types**
 
@@ -339,7 +416,7 @@ pnpm exec tsc --noEmit
 docker compose -f deploy/national-life-runtime.compose.yaml config >/tmp/national-life-runtime-compose.yml
 ```
 
-Expected: all commands exit 0. Build the dedicated Steel image locally when Docker is available before opening the PR.
+Expected: focused Vitest, TypeScript, and rendered Compose validation exit 0. The dedicated Steel image build and in-image `quality: 92` inspection remain pending until a Docker-capable environment is available; do not represent them as completed proof.
 
 - [ ] **Step 3: Commit the operator proof checklist**
 
@@ -355,7 +432,7 @@ Run:
 ```bash
 git fetch origin main
 git rebase origin/main
-gh pr create --base main --title "Improve National Life viewer quality" --body "Uses a matched 1600x1000 Steel/Xvfb profile, an independently fail-closed JPEG 92 screencast patch, and a secure capped 16:10 viewer surface. Focused Vitest, TypeScript, Compose config, and dedicated Steel image build pass. Production requires a new user-controlled connection attempt for visual, click-mapping, MFA, encrypted-session, and worker-reuse proof."
+gh pr create --base main --title "Improve National Life viewer quality" --body "Uses a matched 1600x1000 Steel/Xvfb profile, an independently fail-closed JPEG 92 screencast patch, and a secure capped 16:10 viewer surface. Focused Vitest, TypeScript, and rendered Compose config pass. The dedicated Steel image build and in-image quality inspection remain pending in a Docker-capable environment. Production requires a new user-controlled connection attempt for visual, click-mapping, MFA, encrypted-session, and worker-reuse proof."
 ```
 
 Expected: a PR URL is returned. Do not include credentials, session data, bearer tokens, raw Steel URLs, or internal debug endpoints in the PR.
