@@ -1,57 +1,101 @@
-# Fyntra
+# Keepr One
 
-**Fyntra** — Finance, Intelligence and Traction.
+**Keepr One** é o sistema operacional de distribuição de seguros de vida da
+RICOS. O produto organiza o trabalho do agente do prospect à apólice emitida,
+com hierarquia, casos, clientes, requirements, documentos, comissões e
+integrações com seguradoras em uma única operação.
 
-Sistema interno da RICOS para agentes de seguro de vida (National Life Group / Five Rings Financial / Alliance Group): hierarquia multinível de agentes, comissionamento (direto + override de downline), gestão de apólices e clientes, tudo em um só lugar.
+## Produto
 
-## Status
+O Keepr One atende três áreas com isolamento por papel:
 
-MVP em produção, evoluindo por incremento. Entregue até agora:
+- **Agente** (`/agent`): fila operacional, casos, clientes, apólices,
+  ilustrações, requirements, comissões e equipe/downline.
+- **Cliente** (`/client`): consulta das próprias apólices e documentos.
+- **Admin** (`/admin`): agentes, hierarquia, importações, planos de comissão e
+  acompanhamento operacional das integrações.
 
-- Hierarquia multinível de agentes, comissão (direta + override), import de CSV, portais admin/agente/cliente, auth com papéis
-- Redesign completo de UI/UX (ver `PRODUCT.md` e `DESIGN.md` — sistema de design "The Ledger Room")
-- Detalhe de apólice com documentos (upload/download com controle de acesso)
-- Dashboard de carteira do agente (composição por status/carrier/produto, evolução mensal)
-- Alertas de risco (apólices paradas no funil, sem sinal de pagamento, ou que lapsaram recentemente)
-- **Distribution Core (Release 1):** fluxo de vendas por caso (prospect → caso → apólice emitida/importada), com etapas legais, requirements, timeline, snapshots de apólice e ledger imutável de comissões. Apólices deixam de ser criadas manualmente — surgem da emissão de um caso ou de importação de histórico. Ver `docs/operations/distribution-core-rollout.md`.
+O Distribution Core mantém a trilha prospect → caso → emissão/importação de
+apólice, com timeline, requisitos, snapshots e ledger de comissões.
 
-Specs e planos de cada entrega ficam em `docs/superpowers/specs/` e `docs/superpowers/plans/`.
+## Integração National Life
 
-## Portais
+O agente conecta a própria conta da National Life em um navegador isolado
+dentro do Keepr One:
 
-- **Portal do Agente** (`/agent`): fila de trabalho "Hoje" (casos ativos, aguardando ilustração, requirements abertos, apólices em risco, comissões esperadas/pagas/chargeback); casos (`/agent/cases`), clientes, apólices, comissões (diretas + override), equipe/downline. Indicadores de carteira ficam abaixo da fila.
-- **Portal do Cliente** (`/client`): apólices próprias (somente leitura), documentos.
-- **Admin** (`/admin`): import de CSV (apólices/comissões), configuração de planos de comissão, gestão de agentes/hierarquia.
+1. o Keepr One cria uma tentativa temporária vinculada ao agente;
+2. um runtime dedicado abre a página oficial da National Life/Auth0;
+3. o agente informa login e MFA diretamente no navegador remoto;
+4. após autenticação, somente o contexto da sessão é cifrado e vinculado ao
+   agente;
+5. jobs autorizados restauram esse contexto em novas sessões isoladas.
 
-Fora de escopo por ora: comparação entre agentes/período (admin). A trilha de ilustração já está ativa em `/agent/illustrations/new`, com cálculo interno de mercado para Term 15/20/30 e IUL.
+O Keepr One não possui formulário próprio para a senha da National Life e não
+armazena a senha do agente. O Steel Browser permanece em rede privada; apenas o
+viewer broker autenticado e temporário é exposto.
 
-## Stack
+Documentação operacional:
 
-- Next.js 16 (App Router) + TypeScript
-- Prisma 6 + PostgreSQL (self-hosted via Coolify — host `btdb`, banco `lifeos` — nome de infra herdado, o produto chama-se Fyntra)
-- Auth: Better Auth (self-hosted)
-- Tailwind v4
-- Deploy: Coolify, container `lifeos` (host `btapps`)
+- [`docs/operations/national-life-interactive-login-rollout.md`](docs/operations/national-life-interactive-login-rollout.md)
+- [`docs/operations/distribution-core-rollout.md`](docs/operations/distribution-core-rollout.md)
+
+## Arquitetura
+
+- Next.js 16, React 19 e TypeScript
+- Prisma 6 e PostgreSQL
+- Better Auth com controle de acesso por papel
+- Tailwind CSS v4
+- Runtime National Life em Node.js, Playwright e Steel Browser isolado
+- Coolify/Docker no host de aplicações `btapps`
+
+Superfícies públicas:
+
+- `https://keeprone.com`
+- `https://www.keeprone.com`
+- `https://app.keeprone.com`
+- `https://national-life-viewer.keeprone.com` — somente o broker do viewer
+
+O banco e alguns identificadores de infraestrutura ainda podem conservar nomes
+legados. Eles não representam o nome atual do produto e não devem aparecer na
+interface.
 
 ## Desenvolvimento local
 
 ```bash
 pnpm install
-cp .env.example .env   # ajuste DATABASE_URL e BETTER_AUTH_SECRET
+cp .env.example .env
 pnpm exec prisma migrate deploy
 pnpm exec prisma db seed
 pnpm dev
 ```
 
-Depois do seed, todos os usuários seedados (`admin@ricos.test`, `top@ricos.test`,
-`mid@ricos.test`, `leaf@ricos.test`, `client@ricos.test`) conseguem entrar em
-`/login` com a senha `password123`. Essa senha é **apenas para dev/seed** —
-nunca use em produção.
+Configure `DATABASE_URL`, `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET` e as demais
+variáveis exigidas pelo ambiente. Credenciais de seed são exclusivamente
+locais e não devem ser reutilizadas em produção.
 
-## Verificação antes de commitar
+## Verificação
 
 ```bash
 pnpm exec tsc --noEmit
-pnpm build
 pnpm exec vitest run
+pnpm build
 ```
+
+## Deploy
+
+Mudanças são publicadas por branch e pull request para `main`. O Coolify
+implanta o app web a partir de `main`.
+
+O navegador da National Life é um serviço separado e deve ser atualizado com o
+compose dedicado:
+
+```bash
+docker compose -p keeprone-national-life \
+  -f deploy/national-life-runtime.compose.yaml up -d --build
+```
+
+Não publique as portas do Steel Browser nem conecte o container Steel à rede
+pública do proxy.
+
+Specs e planos versionados ficam em `docs/superpowers/specs/` e
+`docs/superpowers/plans/`.
