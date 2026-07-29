@@ -540,7 +540,7 @@ function createViewerDeps(
   return {
     env: {
       signingKey: env.viewerSigningKey,
-      appOrigin: env.appOrigin,
+      appOrigins: env.viewerAppOrigins,
     },
     now: () => new Date(),
     store: {

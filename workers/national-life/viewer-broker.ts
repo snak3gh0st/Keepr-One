@@ -19,7 +19,7 @@ const INTERACTIVE_STATES = new Set(['AWAITING_LOGIN', 'AWAITING_MFA'])
 export type NationalLifeViewerBrokerDeps = {
   env: {
     signingKey: Buffer
-    appOrigin: string
+    appOrigins: string[]
   }
   now: () => Date
   store: {
@@ -49,7 +49,7 @@ export type NationalLifeViewerBrokerDeps = {
 export function createNationalLifeViewerBroker(
   deps: NationalLifeViewerBrokerDeps,
 ) {
-  const appOrigin = validateAppOrigin(deps.env.appOrigin)
+  const appOrigins = validateAppOrigins(deps.env.appOrigins)
   const proxy = httpProxy.createProxyServer({
     ws: true,
     changeOrigin: true,
@@ -57,7 +57,7 @@ export function createNationalLifeViewerBroker(
 
   proxy.on('proxyRes', (proxyResponse) => {
     delete proxyResponse.headers['x-frame-options']
-    proxyResponse.headers['content-security-policy'] = buildCsp(appOrigin)
+    proxyResponse.headers['content-security-policy'] = buildCsp(appOrigins)
     proxyResponse.headers['referrer-policy'] = 'no-referrer'
     proxyResponse.headers['cache-control'] = 'no-store'
     proxyResponse.headers['permissions-policy'] = permissionsPolicy
@@ -281,11 +281,18 @@ function validateAppOrigin(value: string) {
   return parsed.origin
 }
 
+function validateAppOrigins(values: string[]) {
+  if (values.length === 0) {
+    throw new Error('National Life viewer app origins are required')
+  }
+  return values.map(validateAppOrigin)
+}
+
 const permissionsPolicy =
   'camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=()'
 
-function buildCsp(appOrigin: string) {
-  return `default-src 'self'; frame-ancestors ${appOrigin}; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss:; font-src 'self' data:`
+function buildCsp(appOrigins: string[]) {
+  return `default-src 'self'; frame-ancestors ${appOrigins.join(' ')}; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss:; font-src 'self' data:`
 }
 
 function setPrivateHeaders(response: ServerResponse) {

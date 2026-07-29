@@ -15,6 +15,8 @@ const REQUIRED_ENV = {
   NATIONAL_LIFE_SESSION_KEYS: JSON.stringify({ v1: key }),
   NATIONAL_LIFE_VIEWER_SIGNING_KEY: signingKey,
   NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN: 'https://national-life-viewer.keepr.one',
+  NATIONAL_LIFE_VIEWER_APP_ORIGINS:
+    'https://keeprone.com,https://www.keeprone.com,https://app.keeprone.com',
   NATIONAL_LIFE_VIEWER_BIND_HOST: '0.0.0.0',
   NATIONAL_LIFE_VIEWER_PORT: '3010',
   NATIONAL_LIFE_RUNTIME_WORKER_ID: 'national-life-runtime-1',
@@ -53,7 +55,11 @@ describe('National Life secure runtime environment', () => {
     expect(env.runtimeWorkerId).toBe('national-life-runtime-1')
     expect(env.interactiveLoginEnabled).toBe(true)
     expect(env.interactiveLoginAgentIds).toEqual(new Set(['agent-1', 'agent-2']))
-    expect(env.appOrigin).toBe('https://app.keepr.one')
+    expect(env.viewerAppOrigins).toEqual([
+      'https://keeprone.com',
+      'https://www.keeprone.com',
+      'https://app.keeprone.com',
+    ])
   })
 
   it('reports the integration disabled when any required setting is missing', async () => {
@@ -107,6 +113,14 @@ describe('National Life secure runtime environment', () => {
     await expect(
       parse({ NATIONAL_LIFE_PORTAL_ORIGINS: 'https://*.nationallife.example' }),
     ).rejects.toThrow(/origins/)
+  })
+
+  it('rejects wildcard viewer app origins', async () => {
+    await expect(
+      parse({
+        NATIONAL_LIFE_VIEWER_APP_ORIGINS: 'https://*.keeprone.com',
+      }),
+    ).rejects.toThrow(/VIEWER_APP_ORIGINS/)
   })
 
   it('accepts only explicit boolean rollout values', async () => {

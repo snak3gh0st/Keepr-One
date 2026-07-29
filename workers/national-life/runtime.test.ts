@@ -21,7 +21,7 @@ function createDeps(options: {
     viewer: {
       env: {
         signingKey: Buffer.alloc(32, 4),
-        appOrigin: 'https://app.keepr.one',
+        appOrigins: ['https://app.keepr.one'],
       },
       now: () => new Date('2026-07-28T12:00:00.000Z'),
       store: {
