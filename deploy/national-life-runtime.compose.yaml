@@ -50,6 +50,7 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=1g
       - /run:rw,noexec,nosuid,size=64m
+      - /var/lib/nginx:rw,noexec,nosuid,size=64m
       - /data/logs:rw,noexec,nosuid,size=128m
       - /files:rw,noexec,nosuid,size=128m
       - /app/.cache:rw,noexec,nosuid,size=256m
