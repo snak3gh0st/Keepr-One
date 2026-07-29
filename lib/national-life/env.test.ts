@@ -34,9 +34,18 @@ function clearEnv() {
   }
 }
 
-async function parse(overrides: Record<string, string> = {}) {
+async function parse(
+  overrides: Record<string, string | undefined> = {},
+) {
   vi.resetModules()
-  Object.assign(process.env, REQUIRED_ENV, overrides)
+  Object.assign(process.env, REQUIRED_ENV)
+  for (const [name, value] of Object.entries(overrides)) {
+    if (value === undefined) {
+      delete process.env[name]
+    } else {
+      process.env[name] = value
+    }
+  }
   const { getNationalLifeEnv } = await import('./env')
   return getNationalLifeEnv()
 }
@@ -69,6 +78,14 @@ describe('National Life secure runtime environment', () => {
     const { isNationalLifeConfigured } = await import('./env')
 
     expect(isNationalLifeConfigured()).toBe(false)
+  })
+
+  it('uses the authenticated app origin when the viewer allowlist is absent', async () => {
+    const env = await parse({
+      NATIONAL_LIFE_VIEWER_APP_ORIGINS: undefined,
+    })
+
+    expect(env.viewerAppOrigins).toEqual(['https://app.keepr.one'])
   })
 
   it.each([
