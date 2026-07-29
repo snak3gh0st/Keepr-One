@@ -50,7 +50,7 @@ const rawNationalLifeEnvSchema = z.object({
   NATIONAL_LIFE_SESSION_KEYS: z.string().trim().min(1),
   NATIONAL_LIFE_VIEWER_SIGNING_KEY: z.string().trim().min(1),
   NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN: z.string().trim().min(1),
-  NATIONAL_LIFE_VIEWER_APP_ORIGINS: z.string().trim().min(1),
+  NATIONAL_LIFE_VIEWER_APP_ORIGINS: z.string().trim().min(1).optional(),
   NATIONAL_LIFE_VIEWER_BIND_HOST: z.string().trim().min(1),
   NATIONAL_LIFE_VIEWER_PORT: z.string().trim().min(1),
   NATIONAL_LIFE_RUNTIME_WORKER_ID: z.string().trim().min(1).max(200),
@@ -337,7 +337,7 @@ export function getNationalLifeEnv(): NationalLifeEnv {
     ),
     viewerAppOrigins: parseHttpsOrigins(
       'NATIONAL_LIFE_VIEWER_APP_ORIGINS',
-      parsed.NATIONAL_LIFE_VIEWER_APP_ORIGINS,
+      parsed.NATIONAL_LIFE_VIEWER_APP_ORIGINS ?? parsed.BETTER_AUTH_URL,
     ),
     viewerBindHost: parseBindHost(
       parsed.NATIONAL_LIFE_VIEWER_BIND_HOST,
