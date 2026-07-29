@@ -41,6 +41,7 @@ function buildEnv(): NationalLifeEnv {
     runtimeWorkerId: 'worker-1',
     interactiveLoginEnabled: true,
     interactiveLoginAgentIds: new Set(['agent-1']),
+    interactiveLoginAllAgents: false,
     appOrigin: 'https://app.keepr.one',
   }
 }

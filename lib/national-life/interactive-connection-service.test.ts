@@ -206,6 +206,7 @@ function deps(repository: InteractiveConnectionRepository) {
     config: {
       interactiveLoginEnabled: true,
       interactiveLoginAgentIds: new Set<string>(),
+      interactiveLoginAllAgents: true,
       viewerPublicOrigin: 'https://viewer.keepr.one',
       viewerSigningKey: Buffer.alloc(32, 9),
     },
