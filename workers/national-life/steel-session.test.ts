@@ -1,11 +1,19 @@
 import type { NationalLifeEnv } from '../../lib/national-life/env'
 import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+const connectOverCDP = vi.hoisted(() => vi.fn())
+
+vi.mock('playwright-core', () => ({
+  chromium: { connectOverCDP },
+}))
+
 import {
   assertAllowedNavigation,
   captureSteelSessionContext,
   createInteractiveSteelSession,
   createSteelBrowserSession,
+  defaultConnectBrowser,
   reconnectSteelBrowserSession,
   type SteelSessionDeps,
 } from './steel-session'
@@ -185,6 +193,17 @@ async function invokeRouteHandler(handler: RouteHandler, requestUrl: string) {
 }
 
 describe('National Life Steel session boundary', () => {
+  it('uses a localhost host header when attaching through Steel\'s private CDP proxy', async () => {
+    const browser = { contexts: () => [] }
+    connectOverCDP.mockResolvedValueOnce(browser)
+
+    await expect(defaultConnectBrowser('ws://national-life-steel:3000/')).resolves.toBe(browser)
+
+    expect(connectOverCDP).toHaveBeenCalledWith('ws://national-life-steel:3000/', {
+      headers: { Host: 'localhost' },
+    })
+  })
+
   it('creates an interactive real Steel session with the exact safe options', async () => {
     const fake = createFakeSessionDeps()
 

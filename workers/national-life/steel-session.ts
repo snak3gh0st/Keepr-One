@@ -372,6 +372,11 @@ async function safeReleaseSteelSession(steelClient: SteelClient, sessionId: stri
   }
 }
 
-async function defaultConnectBrowser(websocketUrl: string) {
-  return chromium.connectOverCDP(websocketUrl)
+export async function defaultConnectBrowser(websocketUrl: string) {
+  // Steel proxies the private Chrome DevTools socket. Chromium rejects the
+  // service-name host header at that inner endpoint, so retain localhost
+  // while keeping the proxy itself reachable only on the private network.
+  return chromium.connectOverCDP(websocketUrl, {
+    headers: { Host: 'localhost' },
+  })
 }
