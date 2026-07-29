@@ -30,9 +30,17 @@ function buildEnv(): NationalLifeEnv {
     steelApiKey: 'steel-key',
     portalOrigins: ['https://auth.nationallife.example', 'https://agent.nationallife.example'],
     portalLoginUrl: 'https://auth.nationallife.example/login',
-    credentialScopeId: 'scope-1',
-    credentialKeyVersion: 'v1',
-    credentialKeys: { v1: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' },
+    sessionScopeId: 'scope-1',
+    sessionKeyVersion: 'v1',
+    sessionKeys: { v1: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' },
+    viewerSigningKey: Buffer.alloc(32, 2),
+    viewerPublicOrigin: 'https://viewer.keepr.one',
+    viewerBindHost: '127.0.0.1',
+    viewerPort: 3010,
+    runtimeWorkerId: 'worker-1',
+    interactiveLoginEnabled: true,
+    interactiveLoginAgentIds: new Set(['agent-1']),
+    appOrigin: 'https://app.keepr.one',
   }
 }
 

@@ -242,7 +242,7 @@ async function resolveConnectionTestScopeId(deps?: BrowserJobServiceDeps): Promi
   }
 
   const { getNationalLifeEnv } = await import('./env')
-  return sanitizeConnectionTestScopeId(getNationalLifeEnv().credentialScopeId)
+  return sanitizeConnectionTestScopeId(getNationalLifeEnv().sessionScopeId)
 }
 
 const prismaBrowserJobRepository: BrowserJobRepository = {

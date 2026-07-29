@@ -126,13 +126,9 @@ function getErrorSafeDetail(error: unknown): unknown {
 }
 
 function getSessionCryptoConfig(env: NationalLifeEnv) {
-  const current = env as NationalLifeEnv & {
-    sessionScopeId?: string
-    sessionKeys?: Record<string, string>
-  }
   return {
-    scopeId: current.sessionScopeId ?? env.credentialScopeId,
-    keys: current.sessionKeys ?? env.credentialKeys,
+    scopeId: env.sessionScopeId,
+    keys: env.sessionKeys,
   }
 }
 

@@ -16,6 +16,7 @@ import {
   verifyViewerBootstrapToken,
   type ViewerBootstrapPayload,
 } from './viewer-token'
+import { getNationalLifeEnv } from './env'
 
 const ATTEMPT_PURPOSE = 'INTERACTIVE_CONNECTION_ATTEMPT'
 const SESSION_PURPOSE = 'CARRIER_SESSION'
@@ -583,38 +584,14 @@ function resolveConfig(deps?: InteractiveConnectionServiceDeps): Required<Intera
     }
   }
 
-  const rawSigningKey = process.env.NATIONAL_LIFE_VIEWER_SIGNING_KEY ?? ''
-  const signingKey = Buffer.from(rawSigningKey, 'base64')
-  if (
-    signingKey.length !== 32 ||
-    signingKey.toString('base64') !== rawSigningKey
-  ) {
-    throw new Error('National Life viewer signing key is invalid')
-  }
-
-  const viewerPublicOrigin = new URL(
-    process.env.NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN ?? '',
-  )
-  if (
-    viewerPublicOrigin.protocol !== 'https:' ||
-    viewerPublicOrigin.origin !== viewerPublicOrigin.toString().replace(/\/$/, '')
-  ) {
-    throw new Error('National Life viewer public origin is invalid')
-  }
+  const env = getNationalLifeEnv()
 
   return {
-    interactiveLoginEnabled:
-      process.env.NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED === 'true',
-    interactiveLoginAgentIds: new Set(
-      (process.env.NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS ?? '')
-        .split(',')
-        .map((value) => value.trim())
-        .filter(Boolean),
-    ),
-    viewerPublicOrigin: viewerPublicOrigin.origin,
-    viewerSigningKey: signingKey,
-    deploymentScope:
-      process.env.NATIONAL_LIFE_SESSION_SCOPE_ID ?? DEFAULT_DEPLOYMENT_SCOPE,
+    interactiveLoginEnabled: env.interactiveLoginEnabled,
+    interactiveLoginAgentIds: env.interactiveLoginAgentIds,
+    viewerPublicOrigin: env.viewerPublicOrigin,
+    viewerSigningKey: env.viewerSigningKey,
+    deploymentScope: env.sessionScopeId,
   }
 }
 

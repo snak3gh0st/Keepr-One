@@ -111,15 +111,9 @@ function resolveCrypto(deps: RunConnectionAttemptDeps): ConnectionAttemptCrypto 
     return deps.crypto
   }
 
-  const extendedEnv = deps.env as NationalLifeEnv & {
-    sessionScopeId?: string
-    sessionKeyVersion?: string
-    sessionKeys?: Record<string, string>
-  }
-  const scopeId = extendedEnv.sessionScopeId ?? deps.env.credentialScopeId
-  const keyVersion =
-    extendedEnv.sessionKeyVersion ?? deps.env.credentialKeyVersion
-  const keys = extendedEnv.sessionKeys ?? deps.env.credentialKeys
+  const scopeId = deps.env.sessionScopeId
+  const keyVersion = deps.env.sessionKeyVersion
+  const keys = deps.env.sessionKeys
   const activeKey = { version: keyVersion, base64Key: keys[keyVersion] }
 
   return {
