@@ -77,8 +77,11 @@ services:
       NATIONAL_LIFE_VIEWER_BIND_HOST: 0.0.0.0
       NATIONAL_LIFE_VIEWER_PORT: "3010"
       NATIONAL_LIFE_RUNTIME_WORKER_ID: "${NATIONAL_LIFE_RUNTIME_WORKER_ID:?NATIONAL_LIFE_RUNTIME_WORKER_ID is required}"
-      NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED: "false"
-      NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: ""
+      # The secure default remains disabled. A production rollout must opt in
+      # with `true` and one or more exact agent IDs; the runtime rejects an
+      # enabled empty or wildcard allowlist.
+      NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED: "${NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED:-false}"
+      NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: "${NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS:-}"
     mem_limit: 768m
     pids_limit: 128
     networks:
