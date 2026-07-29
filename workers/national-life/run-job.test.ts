@@ -1,20 +1,29 @@
 import { randomBytes } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
 import { describe, expect, it, vi } from 'vitest'
-import { encryptCredential } from '../../lib/national-life/credential-crypto'
+import { encryptBrowserContext } from '../../lib/national-life/browser-context-crypto'
 import type { NationalLifeEnv } from '../../lib/national-life/env'
 import type { BrowserJobRecord } from '../../lib/national-life/job-service'
 import type { BrowserJobState } from '../../lib/national-life/job-state'
-import { encryptMfaContinuation } from '../../lib/national-life/continuation-crypto'
-import type { BrowserSession, NationalLifeCaseObservation, NationalLifeCredentials } from './types'
+import type { BrowserSession, NationalLifeCaseObservation } from './types'
 import {
-  releaseNationalLifeMfaContinuation,
   runNationalLifeJob,
   type NationalLifeJobStore,
-  type StoredNationalLifeCredential,
+  type StoredAgentIntegrationSession,
 } from './run-job'
 
 const key = randomBytes(32).toString('base64')
-const now = new Date('2026-07-27T12:00:00.000Z')
+const now = new Date('2026-07-28T12:00:00.000Z')
+const restoredContext: SessionContext = {
+  cookies: [
+    {
+      name: 'carrier-session',
+      value: 'opaque-session-value',
+      domain: '.nationallife.example',
+    },
+  ],
+}
 
 function buildEnv(): NationalLifeEnv {
   return {
@@ -22,9 +31,17 @@ function buildEnv(): NationalLifeEnv {
     steelApiKey: 'steel-key',
     portalOrigins: ['https://agent.nationallife.example'],
     portalLoginUrl: 'https://agent.nationallife.example/login',
-    credentialScopeId: 'scope-1',
-    credentialKeyVersion: 'v1',
-    credentialKeys: { v1: key },
+    sessionScopeId: 'scope-1',
+    sessionKeyVersion: 'v1',
+    sessionKeys: { v1: key },
+    viewerSigningKey: Buffer.alloc(32, 2),
+    viewerPublicOrigin: 'https://viewer.keepr.one',
+    viewerBindHost: '127.0.0.1',
+    viewerPort: 3010,
+    runtimeWorkerId: 'worker-1',
+    interactiveLoginEnabled: true,
+    interactiveLoginAgentIds: new Set(['agent-1']),
+    appOrigin: 'https://app.keepr.one',
   }
 }
 
@@ -63,41 +80,36 @@ function buildJob(overrides: Partial<BrowserJobRecord> = {}): BrowserJobRecord {
   }
 }
 
-function buildCredential(password = 'super-secret-password'): StoredNationalLifeCredential {
-  const encrypted = encryptCredential(
-    { username: 'producer-100', password },
-    { agentId: 'agent-1', scopeId: 'scope-1', provider: 'NATIONAL_LIFE' },
+function buildStoredSession(
+  overrides: Partial<StoredAgentIntegrationSession> = {},
+): StoredAgentIntegrationSession {
+  const encrypted = encryptBrowserContext(
+    restoredContext,
+    {
+      agentId: 'agent-1',
+      scopeId: 'scope-1',
+      provider: 'NATIONAL_LIFE',
+      purpose: 'AUTHENTICATED_BROWSER_CONTEXT',
+      formatVersion: 1,
+    },
     { version: 'v1', base64Key: key },
   )
-
   return {
+    id: 'integration-session-1',
     agentId: 'agent-1',
     provider: 'NATIONAL_LIFE',
-    algorithm: encrypted.algorithm,
+    status: 'CONNECTED',
+    formatVersion: 1,
     keyVersion: encrypted.keyVersion,
+    algorithm: encrypted.algorithm,
     iv: encrypted.iv,
     ciphertext: encrypted.ciphertext,
     authTag: encrypted.authTag,
+    carrierExpiresAt: new Date('2026-07-28T20:00:00.000Z'),
+    lastConnectedAt: now,
+    lastUsedAt: null,
+    ...overrides,
   }
-}
-
-function createSession(id = 'steel-session-1') {
-  const calls: string[] = []
-  const session = {
-    browser: {},
-    context: {},
-    page: {},
-    steelSessionId: id,
-    debugUrl: `https://steel.example/session/${id}`,
-    close: vi.fn(async () => {
-      calls.push('close')
-    }),
-    disconnect: vi.fn(async () => {
-      calls.push('disconnect')
-    }),
-  } as unknown as BrowserSession
-
-  return { session, calls }
 }
 
 function createStore(seed: BrowserJobRecord): NationalLifeJobStore & {
@@ -121,15 +133,13 @@ function createStore(seed: BrowserJobRecord): NationalLifeJobStore & {
       if (job.id !== jobId || job.state !== 'QUEUED') {
         return null
       }
-
       job = {
         ...job,
         state: 'RUNNING',
         leaseOwner: 'worker-1',
-        leaseExpiresAt: new Date('2026-07-27T12:06:00.000Z'),
+        leaseExpiresAt: new Date('2026-07-28T12:06:00.000Z'),
         attemptCount: job.attemptCount + 1,
       }
-
       return structuredClone(job)
     },
     async transitionJob(input) {
@@ -141,78 +151,86 @@ function createStore(seed: BrowserJobRecord): NationalLifeJobStore & {
         safeErrorCode: input.safeErrorCode ?? null,
         safeErrorDetail: input.safeErrorDetail ?? null,
         availableAt: input.availableAt ?? job.availableAt,
-        continuationKeyVersion: input.continuation?.keyVersion ?? null,
-        continuationIv: input.continuation?.iv ?? null,
-        continuationCiphertext: input.continuation?.ciphertext ?? null,
-        continuationAuthTag: input.continuation?.authTag ?? null,
-        continuationExpiresAt: input.continuationExpiresAt ?? null,
-      }
-    },
-    async clearContinuation(jobId) {
-      if (job.id !== jobId) {
-        return
-      }
-
-      job = {
-        ...job,
-        continuationKeyVersion: null,
-        continuationIv: null,
-        continuationCiphertext: null,
-        continuationAuthTag: null,
-        continuationExpiresAt: null,
       }
     },
   }
 }
 
+function createBrowserSession() {
+  const close = vi.fn(async () => undefined)
+  return {
+    session: {
+      browser: {},
+      context: {},
+      page: {},
+      steelSessionId: 'steel-session-1',
+      debugUrl: 'https://steel.example/internal/session-1',
+      close,
+      disconnect: vi.fn(),
+    } as unknown as BrowserSession,
+    close,
+  }
+}
+
 function createDeps(options: {
   job?: BrowserJobRecord
-  credential?: StoredNationalLifeCredential | null
-  login?: (credentials: NationalLifeCredentials) => Promise<{ kind: 'CONNECTED' } | { kind: 'MFA_REQUIRED'; resumeHint: string }>
+  storedSession?: StoredAgentIntegrationSession | null
+  assertAuthenticated?: () => Promise<void>
   readCase?: () => Promise<NationalLifeCaseObservation>
-  createSessionId?: string
-  reconnectSession?: BrowserSession
-  applyCaseObservation?: () => Promise<{ changed: boolean; requirementChanges: number; communicationChanges: number }>
 }) {
   const store = createStore(options.job ?? buildJob())
-  const created = createSession(options.createSessionId)
+  const browser = createBrowserSession()
   const calls: string[] = []
+  const invalidations: Array<{ agentId: string; provider: string }> = []
+  const used: Array<{ sessionId: string; usedAt: Date }> = []
 
   return {
-    store,
     calls,
-    sessionCalls: created.calls,
+    invalidations,
+    used,
+    store,
+    browser,
     deps: {
       env: buildEnv(),
       workerId: 'worker-1',
       now: () => now,
       jobStore: store,
-      credentialStore: {
-        findForAgent: async () => {
-          calls.push('credential:find')
-          return options.credential === undefined ? buildCredential() : options.credential
+      sessionStore: {
+        async findForAgent() {
+          calls.push('session-store:find')
+          return options.storedSession === undefined
+            ? buildStoredSession()
+            : options.storedSession
+        },
+        async markUsed(sessionId: string, usedAt: Date) {
+          used.push({ sessionId, usedAt })
+        },
+        async invalidate(agentId: string, provider: string) {
+          invalidations.push({ agentId, provider })
         },
       },
-      createSession: async () => {
-        calls.push('session:create')
-        return created.session
+      decryptContext(session: StoredAgentIntegrationSession) {
+        calls.push('context:decrypt')
+        expect(session.id).toBe('integration-session-1')
+        return restoredContext
       },
-      reconnectSession: async () => {
-        calls.push('session:reconnect')
-        return options.reconnectSession ?? createSession('steel-session-resumed').session
+      async createSession(sessionContext: SessionContext) {
+        calls.push('steel:create-restored')
+        expect(sessionContext).toEqual(restoredContext)
+        return browser.session
       },
-      createAdapter: (session: BrowserSession) => ({
-        login: async (credentials: NationalLifeCredentials): Promise<{ kind: 'CONNECTED' } | { kind: 'MFA_REQUIRED'; resumeHint: string }> => {
-          calls.push(`adapter:login:${credentials.username}`)
-          return options.login?.(credentials) ?? { kind: 'CONNECTED' }
+      createAdapter: () => ({
+        async assertAuthenticated() {
+          calls.push('adapter:assert-authenticated')
+          await options.assertAuthenticated?.()
         },
-        readCase: async () => {
-          calls.push(`adapter:read:${session.steelSessionId}`)
+        async readCase() {
+          calls.push('adapter:read')
           return (
             options.readCase?.() ?? {
               externalApplicationId: 'NLG-TEST-1001',
               carrierStatus: 'Underwriting',
-              observedAt: '2026-07-27T12:00:00.000Z',
+              observedAt: '2026-07-28T12:00:00.000Z',
               requirements: [],
               communications: [],
               documents: [],
@@ -220,233 +238,139 @@ function createDeps(options: {
           )
         },
       }),
-      applyCaseObservation: async () => {
+      async applyCaseObservation() {
         calls.push('sync:apply')
-        return (
-          options.applyCaseObservation?.() ?? {
-            changed: true,
-            requirementChanges: 1,
-            communicationChanges: 0,
-          }
-        )
+        return {
+          changed: true,
+          requirementChanges: 1,
+          communicationChanges: 0,
+        }
       },
     },
   }
 }
 
-describe('National Life run-job orchestration', () => {
-  it('decrypts only after claiming an authorized job', async () => {
-    const { deps, calls } = createDeps({})
+describe('National Life restored-context job orchestration', () => {
+  it('restores an authenticated session before reading and applying carrier data', async () => {
+    const test = createDeps({})
 
-    await runNationalLifeJob('job-1', deps)
+    await runNationalLifeJob('job-1', test.deps)
 
-    expect(calls.slice(0, 3)).toEqual(['credential:find', 'session:create', 'adapter:login:producer-100'])
+    expect(test.calls).toEqual([
+      'session-store:find',
+      'context:decrypt',
+      'steel:create-restored',
+      'adapter:assert-authenticated',
+      'adapter:read',
+      'sync:apply',
+    ])
+    expect(test.used).toEqual([
+      { sessionId: 'integration-session-1', usedAt: now },
+    ])
+    expect(test.store.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
+    expect(test.browser.close).toHaveBeenCalledOnce()
   })
 
-  it('does not decrypt credentials when the job is not claimed', async () => {
-    const { deps, calls } = createDeps({ job: buildJob({ state: 'RUNNING' }) })
+  it('does not restore context before the job is claimed', async () => {
+    const test = createDeps({ job: buildJob({ state: 'RUNNING' }) })
 
-    await expect(runNationalLifeJob('job-1', deps)).resolves.toEqual({ kind: 'NOT_CLAIMED' })
-    expect(calls).toEqual([])
+    await expect(runNationalLifeJob('job-1', test.deps)).resolves.toEqual({
+      kind: 'NOT_CLAIMED',
+    })
+    expect(test.calls).toEqual([])
   })
 
-  it('closes the browser session after success', async () => {
-    const { deps, sessionCalls } = createDeps({})
+  it.each([
+    ['missing', null],
+    [
+      'expired',
+      buildStoredSession({
+        carrierExpiresAt: new Date('2026-07-28T11:59:59.000Z'),
+      }),
+    ],
+    [
+      'incomplete',
+      buildStoredSession({
+        ciphertext: null,
+      }),
+    ],
+  ])(
+    'invalidates %s stored context and requests a reconnect',
+    async (_label, storedSession) => {
+      const test = createDeps({ storedSession })
 
-    await runNationalLifeJob('job-1', deps)
+      await runNationalLifeJob('job-1', test.deps)
 
-    expect(sessionCalls).toEqual(['close'])
-  })
+      expect(test.invalidations).toEqual([
+        { agentId: 'agent-1', provider: 'NATIONAL_LIFE' },
+      ])
+      expect(test.store.transitions.at(-1)).toMatchObject({
+        to: 'ACTION_REQUIRED',
+        safeErrorCode: 'NATIONAL_LIFE_RECONNECT_REQUIRED',
+      })
+      expect(test.calls).toEqual(['session-store:find'])
+    },
+  )
 
-  it('closes the browser session after adapter failure', async () => {
-    const { deps, sessionCalls, store } = createDeps({
-      readCase: async () => {
-        const error = new Error('layout changed with super-secret-password')
-        ;(error as Error & { code: string }).code = 'PORTAL_LAYOUT_CHANGED'
-        ;(error as Error & { safeDetail: unknown }).safeDetail = { selector: 'missing', password: 'super-secret-password' }
+  it('invalidates context when the restored carrier session is not authenticated', async () => {
+    const error = Object.assign(new Error('not authenticated'), {
+      code: 'AUTHENTICATION_STATE_INVALID',
+    })
+    const test = createDeps({
+      assertAuthenticated: async () => {
         throw error
       },
     })
 
-    await runNationalLifeJob('job-1', deps)
+    await runNationalLifeJob('job-1', test.deps)
 
-    expect(sessionCalls).toEqual(['close'])
-    expect(store.transitions.at(-1)).toMatchObject({
+    expect(test.invalidations).toEqual([
+      { agentId: 'agent-1', provider: 'NATIONAL_LIFE' },
+    ])
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'ACTION_REQUIRED',
+      safeErrorCode: 'NATIONAL_LIFE_RECONNECT_REQUIRED',
+    })
+    expect(test.browser.close).toHaveBeenCalledOnce()
+    expect(test.used).toEqual([])
+  })
+
+  it('keeps selector drift in manual review without leaking carrier data', async () => {
+    const test = createDeps({
+      readCase: async () => {
+        const error = Object.assign(new Error('layout changed'), {
+          code: 'PORTAL_LAYOUT_CHANGED',
+          safeDetail: { selector: 'missing', secret: 'sensitive-value' },
+        })
+        throw error
+      },
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.store.transitions.at(-1)).toMatchObject({
       to: 'MANUAL_REVIEW',
       safeErrorCode: 'PORTAL_LAYOUT_CHANGED',
     })
+    expect(JSON.stringify(test.store.current())).not.toContain('sensitive-value')
+    expect(test.browser.close).toHaveBeenCalledOnce()
   })
 
-  it('moves an MFA response to WAITING_FOR_MFA', async () => {
-    const { deps, store } = createDeps({
-      login: async () => ({ kind: 'MFA_REQUIRED', resumeHint: 'Complete MFA.' }),
-    })
-
-    await runNationalLifeJob('job-1', deps)
-
-    expect(store.transitions.at(-1)).toMatchObject({
-      to: 'WAITING_FOR_MFA',
-      result: {
-        resumeHint: 'Complete MFA.',
-        continuationExpiresAt: '2026-07-27T12:05:00.000Z',
-      },
-    })
-  })
-
-  it('encrypts the Steel continuation and disconnects without releasing the MFA session', async () => {
-    const { deps, store, sessionCalls } = createDeps({
-      login: async () => ({ kind: 'MFA_REQUIRED', resumeHint: 'Complete MFA.' }),
-    })
-
-    await runNationalLifeJob('job-1', deps)
-
-    const paused = store.current()
-    expect(paused.continuationKeyVersion).toBe('v1')
-    expect(paused.continuationCiphertext).not.toContain('steel-session-1')
-    expect(sessionCalls).toEqual(['disconnect'])
-  })
-
-  it('reconnects the same Steel session after owner resume', async () => {
-    const encrypted = encryptMfaContinuation(
-      {
-        steelSessionId: 'steel-session-paused',
-        debugUrl: 'https://steel.example/session/paused',
-        expiresAt: '2026-07-27T12:05:00.000Z',
-      },
-      { agentId: 'agent-1', jobId: 'job-1', scopeId: 'scope-1' },
-      { version: 'v1', base64Key: key },
-    )
-    const resumed = createSession('steel-session-paused')
-    const { deps, calls } = createDeps({
-      job: buildJob({
-        continuationKeyVersion: encrypted.keyVersion,
-        continuationIv: encrypted.iv,
-        continuationCiphertext: encrypted.ciphertext,
-        continuationAuthTag: encrypted.authTag,
-        continuationExpiresAt: new Date('2026-07-27T12:05:00.000Z'),
-      }),
-      reconnectSession: resumed.session,
-    })
-
-    await runNationalLifeJob('job-1', deps)
-
-    expect(calls).toEqual(['session:reconnect', 'adapter:read:steel-session-paused', 'sync:apply'])
-  })
-
-  it('releases an expired or cancelled MFA session and clears the continuation', async () => {
-    const encrypted = encryptMfaContinuation(
-      {
-        steelSessionId: 'steel-session-paused',
-        debugUrl: 'https://steel.example/session/paused',
-        expiresAt: '2026-07-27T11:59:00.000Z',
-      },
-      { agentId: 'agent-1', jobId: 'job-1', scopeId: 'scope-1' },
-      { version: 'v1', base64Key: key },
-    )
-    const store = createStore(
-      buildJob({
-        state: 'CANCELLED',
-        continuationKeyVersion: encrypted.keyVersion,
-        continuationIv: encrypted.iv,
-        continuationCiphertext: encrypted.ciphertext,
-        continuationAuthTag: encrypted.authTag,
-        continuationExpiresAt: new Date('2026-07-27T11:59:00.000Z'),
-      }),
-    )
-    const session = createSession('steel-session-paused')
-
-    await releaseNationalLifeMfaContinuation(store.current(), {
-      env: buildEnv(),
-      now: () => now,
-      jobStore: store,
-      reconnectSession: async () => session.session,
-    })
-
-    expect(session.calls).toEqual(['close'])
-    expect(store.current().continuationCiphertext).toBeNull()
-  })
-
-  it('marks rejected credentials CREDENTIALS_EXPIRED', async () => {
-    const { deps, store } = createDeps({
-      login: async () => {
-        const error = new Error('login failed')
-        ;(error as Error & { code: string }).code = 'AUTHENTICATION_STATE_INVALID'
-        throw error
-      },
-    })
-
-    await runNationalLifeJob('job-1', deps)
-
-    expect(store.transitions.at(-1)).toMatchObject({
-      to: 'CREDENTIALS_EXPIRED',
-      safeErrorCode: 'CREDENTIALS_EXPIRED',
-    })
-  })
-
-  it('marks selector/schema drift MANUAL_REVIEW with redacted detail', async () => {
-    const { deps, store } = createDeps({
-      readCase: async () => {
-        const error = new Error('layout changed with super-secret-password')
-        ;(error as Error & { code: string }).code = 'PORTAL_LAYOUT_CHANGED'
-        ;(error as Error & { safeDetail: unknown }).safeDetail = {
-          selector: 'missing',
-          password: 'super-secret-password',
-        }
-        throw error
-      },
-    })
-
-    await runNationalLifeJob('job-1', deps)
-
-    const detail = JSON.stringify(store.transitions.at(-1)?.safeErrorDetail)
-    expect(store.transitions.at(-1)).toMatchObject({ to: 'MANUAL_REVIEW' })
-    expect(detail).not.toContain('super-secret-password')
-    expect(detail).toContain('[REDACTED]')
-  })
-
-  it('marks transient failures RETRYABLE with bounded availableAt', async () => {
-    const { deps, store } = createDeps({
-      readCase: async () => {
-        const error = new Error('temporary network failure')
-        ;(error as Error & { code: string }).code = 'ECONNRESET'
-        throw error
-      },
-    })
-
-    await runNationalLifeJob('job-1', deps)
-
-    expect(store.transitions.at(-1)).toMatchObject({
-      to: 'RETRYABLE',
-      safeErrorCode: 'TRANSIENT_WORKER_FAILURE',
-      availableAt: new Date('2026-07-27T12:02:00.000Z'),
-    })
-  })
-
-  it('applies a case observation before marking SUCCEEDED', async () => {
-    const { deps, calls, store } = createDeps({})
-
-    await runNationalLifeJob('job-1', deps)
-
-    expect(calls).toEqual([
-      'credential:find',
-      'session:create',
-      'adapter:login:producer-100',
-      'adapter:read:steel-session-1',
-      'sync:apply',
+  it('contains no credential-decrypt or credential-object runtime path', async () => {
+    const forbidden = [
+      `pass${'word'}`,
+      `decrypt${'Credential'}`,
+      `NationalLife${'Credentials'}`,
+    ]
+    const sources = await Promise.all([
+      readFile(new URL('./run-job.ts', import.meta.url), 'utf8'),
+      readFile(new URL('./types.ts', import.meta.url), 'utf8'),
     ])
-    expect(store.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
-  })
 
-  it('never includes the credential in job result or error', async () => {
-    const { deps, store } = createDeps({
-      credential: buildCredential('super-secret-password'),
-      readCase: async () => {
-        throw new Error('super-secret-password')
-      },
-    })
-
-    await runNationalLifeJob('job-1', deps)
-
-    expect(JSON.stringify(store.current())).not.toContain('super-secret-password')
+    for (const source of sources) {
+      for (const token of forbidden) {
+        expect(source).not.toContain(token)
+      }
+    }
   })
 })

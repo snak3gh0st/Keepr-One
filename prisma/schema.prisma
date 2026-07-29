@@ -116,6 +116,7 @@ enum SyncStatus {
 enum BrowserJobState {
   QUEUED
   RUNNING
+  ACTION_REQUIRED
   WAITING_FOR_MFA
   WAITING_FOR_REVIEW
   RETRYABLE
@@ -171,6 +172,8 @@ model Agent {
   insuranceCases    InsuranceCase[]
   commissionTransactions CommissionTransaction[]
   integrationCredentials AgentIntegrationCredential[]
+  integrationSessions    AgentIntegrationSession[]
+  nationalLifeConnectionAttempts NationalLifeConnectionAttempt[]
   browserJobs            BrowserAutomationJob[]
 
   @@index([parentAgentId])
@@ -296,6 +299,58 @@ model AgentIntegrationCredential {
 
   @@unique([agentId, provider])
   @@index([provider, status])
+}
+
+model AgentIntegrationSession {
+  id                 String   @id @default(cuid())
+  agentId            String
+  agent              Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope    String   @default("SINGLE_DEPLOYMENT")
+  provider           String
+  purpose            String   @default("CARRIER_SESSION")
+  status             String   @default("CONNECTED")
+  formatVersion      Int      @default(1)
+  keyVersion         String?
+  algorithm          String?
+  iv                 String?
+  ciphertext         String?
+  authTag            String?
+  carrierExpiresAt   DateTime?
+  lastConnectedAt    DateTime
+  lastUsedAt         DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([agentId, deploymentScope, provider, purpose])
+  @@index([provider, status])
+}
+
+model NationalLifeConnectionAttempt {
+  id                String   @id @default(cuid())
+  agentId           String
+  agent             Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope   String   @default("SINGLE_DEPLOYMENT")
+  provider          String
+  purpose           String   @default("INTERACTIVE_CONNECTION_ATTEMPT")
+  state             String
+  formatVersion     Int      @default(1)
+  runtimeKeyVersion String?
+  runtimeAlgorithm  String?
+  runtimeIv         String?
+  runtimeCiphertext String?
+  runtimeAuthTag    String?
+  viewerNonceHash   String?
+  currentOrigin     String?
+  safeErrorCode     String?
+  leaseOwner        String?
+  leaseExpiresAt    DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([agentId, deploymentScope, provider, purpose])
+  @@index([state, expiresAt])
+  @@index([leaseExpiresAt])
 }
 
 model BrowserAutomationJob {

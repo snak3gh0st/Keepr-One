@@ -1,7 +1,10 @@
 import type { NationalLifeEnv } from '../../lib/national-life/env'
+import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
 import { describe, expect, it } from 'vitest'
 import {
   assertAllowedNavigation,
+  captureSteelSessionContext,
+  createInteractiveSteelSession,
   createSteelBrowserSession,
   reconnectSteelBrowserSession,
   type SteelSessionDeps,
@@ -13,9 +16,17 @@ function buildEnv(): NationalLifeEnv {
     steelApiKey: 'steel-key',
     portalOrigins: ['https://agent.nationallife.example'],
     portalLoginUrl: 'https://agent.nationallife.example/login',
-    credentialScopeId: 'scope-1',
-    credentialKeyVersion: 'v1',
-    credentialKeys: { v1: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' },
+    sessionScopeId: 'scope-1',
+    sessionKeyVersion: 'v1',
+    sessionKeys: { v1: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' },
+    viewerSigningKey: Buffer.alloc(32, 2),
+    viewerPublicOrigin: 'https://viewer.keepr.one',
+    viewerBindHost: '127.0.0.1',
+    viewerPort: 3010,
+    runtimeWorkerId: 'worker-1',
+    interactiveLoginEnabled: true,
+    interactiveLoginAgentIds: new Set(['agent-1']),
+    appOrigin: 'https://app.keepr.one',
   }
 }
 
@@ -46,6 +57,7 @@ function createFakeSessionDeps(options?: {
   now?: string
   browserCloseFailures?: number
   releaseFailures?: number
+  context?: SessionContext
 }) {
   const createSession =
     options?.createSession ??
@@ -69,10 +81,12 @@ function createFakeSessionDeps(options?: {
   let browserCloseCount = 0
   let releaseCount = 0
   let createCalls = 0
+  const createInputs: unknown[] = []
   let remainingBrowserCloseFailures = options?.browserCloseFailures ?? 0
   let remainingReleaseFailures = options?.releaseFailures ?? 0
   const retrieveCalls: string[] = []
   const releaseCalls: string[] = []
+  const contextCalls: string[] = []
 
   const page = {
     url: () => options?.pageUrl ?? 'about:blank',
@@ -103,9 +117,14 @@ function createFakeSessionDeps(options?: {
   const deps: SteelSessionDeps = {
     createSteelClient: () => ({
       sessions: {
-        create: async () => {
+        create: async (input?: unknown) => {
           createCalls += 1
+          createInputs.push(input)
           return createSession
+        },
+        context: async (sessionId: string) => {
+          contextCalls.push(sessionId)
+          return options?.context ?? { cookies: [] }
         },
         retrieve: async (sessionId: string) => {
           retrieveCalls.push(sessionId)
@@ -135,6 +154,8 @@ function createFakeSessionDeps(options?: {
     getBrowserCloseCount: () => browserCloseCount,
     getReleaseCount: () => releaseCount,
     getCreateCalls: () => createCalls,
+    createInputs,
+    contextCalls,
     retrieveCalls,
     releaseCalls,
   }
@@ -163,6 +184,54 @@ async function invokeRouteHandler(handler: RouteHandler, requestUrl: string) {
 }
 
 describe('National Life Steel session boundary', () => {
+  it('creates an interactive real Steel session with the exact safe options', async () => {
+    const fake = createFakeSessionDeps()
+
+    const session = await createInteractiveSteelSession(buildEnv(), fake.deps)
+
+    expect(fake.createInputs).toEqual([{
+      timeout: 600000,
+      headless: false,
+      solveCaptcha: false,
+      persistProfile: false,
+      debugConfig: { interactive: true, systemCursor: true },
+      dimensions: { width: 1280, height: 800 },
+    }])
+    expect(session.internalDebugUrl).toBe('https://steel.example/session/1')
+    await session.close()
+  })
+
+  it('restores a worker session with the exact captured session context', async () => {
+    const fake = createFakeSessionDeps()
+    const sessionContext: SessionContext = {
+      cookies: [{ name: 'nlg-session', value: 'secret', domain: '.nationallife.example' }],
+    }
+
+    const session = await createSteelBrowserSession(
+      buildEnv(),
+      { sessionContext },
+      fake.deps,
+    )
+
+    expect(fake.createInputs).toEqual([{
+      timeout: 300000,
+      headless: false,
+      solveCaptcha: false,
+      sessionContext,
+    }])
+    await session.close()
+  })
+
+  it('captures context for the exact Steel session id', async () => {
+    const context: SessionContext = { cookies: [] }
+    const fake = createFakeSessionDeps({ context })
+
+    await expect(
+      captureSteelSessionContext('steel-session-9', buildEnv(), fake.deps),
+    ).resolves.toEqual(context)
+    expect(fake.contextCalls).toEqual(['steel-session-9'])
+  })
+
   it('allows exact allowed origins and rejects lookalike hosts', () => {
     expect(() =>
       assertAllowedNavigation('https://agent.nationallife.example/cases', [

@@ -4,12 +4,11 @@ import { assertBrowserJobTransition } from './job-state'
 describe('browser job transitions', () => {
   it.each([
     ['QUEUED', 'RUNNING'],
-    ['RUNNING', 'WAITING_FOR_MFA'],
-    ['WAITING_FOR_MFA', 'QUEUED'],
+    ['RUNNING', 'ACTION_REQUIRED'],
+    ['ACTION_REQUIRED', 'QUEUED'],
     ['RUNNING', 'SUCCEEDED'],
     ['RUNNING', 'RETRYABLE'],
     ['RETRYABLE', 'QUEUED'],
-    ['RUNNING', 'CREDENTIALS_EXPIRED'],
     ['RUNNING', 'MANUAL_REVIEW'],
   ] as const)('allows %s -> %s', (from, to) => {
     expect(() => assertBrowserJobTransition(from, to)).not.toThrow()
@@ -20,4 +19,13 @@ describe('browser job transitions', () => {
       'Invalid browser job transition',
     )
   })
+
+  it.each(['WAITING_FOR_MFA', 'CREDENTIALS_EXPIRED'] as const)(
+    'rejects the removed password-era RUNNING -> %s path',
+    (state) => {
+      expect(() => assertBrowserJobTransition('RUNNING', state)).toThrow(
+        'Invalid browser job transition',
+      )
+    },
+  )
 })

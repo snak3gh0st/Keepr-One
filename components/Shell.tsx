@@ -25,7 +25,7 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
     { href: "/admin/commission-plans", label: "Planos de comissão", icon: "layers" },
     { href: "/admin/import", label: "Importar dados", icon: "upload" },
     { href: "/admin/audit", label: "Auditoria", icon: "audit" },
-    { href: "/agent/integrations/national-life", label: "Integrações", icon: "link" },
+    { href: "/admin/integrations/national-life", label: "Integrações", icon: "link" },
   ],
   AGENT: [
     { href: "/agent", label: "Hoje", icon: "grid", group: "Operação" },
@@ -57,6 +57,7 @@ const PAGE_NAMES: Record<string, string> = {
   "/admin/commission-plans": "Planos de comissão",
   "/admin/import": "Importar dados",
   "/admin/audit": "Auditoria",
+  "/admin/integrations/national-life": "Saúde da integração National Life",
   "/agent": "Hoje",
   "/agent/cases": "CRM · Oportunidades",
   "/agent/cases/new": "Novo atendimento",
@@ -102,6 +103,8 @@ export function Shell({
         : null;
 
   async function handleSignOut() {
+    window.dispatchEvent(new Event('keepr-one:sign-out'));
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
     await authClient.signOut();
     router.push("/login");
     router.refresh();

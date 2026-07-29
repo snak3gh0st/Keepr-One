@@ -1,46 +1,118 @@
 import { Buffer } from 'node:buffer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const key = Buffer.alloc(32, 1).toString('base64')
+const signingKey = Buffer.alloc(32, 2).toString('base64')
 const REQUIRED_ENV = {
   STEEL_BASE_URL: 'https://steel.example',
-  NATIONAL_LIFE_PORTAL_ORIGINS: 'https://agent.nationallife.example',
-  NATIONAL_LIFE_PORTAL_LOGIN_URL: 'https://agent.nationallife.example/login',
-  NATIONAL_LIFE_CREDENTIAL_SCOPE_ID: 'scope-1',
-  NATIONAL_LIFE_CREDENTIAL_KEY_VERSION: 'v1',
-  NATIONAL_LIFE_CREDENTIAL_KEYS: JSON.stringify({ v1: Buffer.alloc(32, 1).toString('base64') }),
+  STEEL_API_KEY: 'steel-key',
+  NATIONAL_LIFE_PORTAL_ORIGINS:
+    'https://auth.nationallife.example,https://agent.nationallife.example',
+  NATIONAL_LIFE_PORTAL_LOGIN_URL:
+    'https://auth.nationallife.example/login',
+  NATIONAL_LIFE_SESSION_SCOPE_ID: 'production-us-east-1',
+  NATIONAL_LIFE_SESSION_KEY_VERSION: 'v1',
+  NATIONAL_LIFE_SESSION_KEYS: JSON.stringify({ v1: key }),
+  NATIONAL_LIFE_VIEWER_SIGNING_KEY: signingKey,
+  NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN: 'https://national-life-viewer.keepr.one',
+  NATIONAL_LIFE_VIEWER_BIND_HOST: '0.0.0.0',
+  NATIONAL_LIFE_VIEWER_PORT: '3010',
+  NATIONAL_LIFE_RUNTIME_WORKER_ID: 'national-life-runtime-1',
+  NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED: 'true',
+  NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: 'agent-1,agent-2',
+  BETTER_AUTH_URL: 'https://app.keepr.one',
 } as const
 
 const ENV_KEYS = Object.keys(REQUIRED_ENV) as Array<keyof typeof REQUIRED_ENV>
 
 function clearEnv() {
-  for (const key of ENV_KEYS) {
-    delete process.env[key]
+  for (const name of ENV_KEYS) {
+    delete process.env[name]
   }
 }
 
-describe('isNationalLifeConfigured', () => {
-  beforeEach(() => {
+async function parse(overrides: Record<string, string> = {}) {
+  vi.resetModules()
+  Object.assign(process.env, REQUIRED_ENV, overrides)
+  const { getNationalLifeEnv } = await import('./env')
+  return getNationalLifeEnv()
+}
+
+describe('National Life secure runtime environment', () => {
+  beforeEach(clearEnv)
+  afterEach(clearEnv)
+
+  it('requires and parses the dedicated session, viewer, rollout, and runtime settings', async () => {
+    const env = await parse()
+
+    expect(env.sessionScopeId).toBe('production-us-east-1')
+    expect(env.sessionKeyVersion).toBe('v1')
+    expect(env.viewerSigningKey).toEqual(Buffer.alloc(32, 2))
+    expect(env.viewerPort).toBe(3010)
+    expect(env.runtimeWorkerId).toBe('national-life-runtime-1')
+    expect(env.interactiveLoginEnabled).toBe(true)
+    expect(env.interactiveLoginAgentIds).toEqual(new Set(['agent-1', 'agent-2']))
+    expect(env.appOrigin).toBe('https://app.keepr.one')
+  })
+
+  it('reports the integration disabled when any required setting is missing', async () => {
+    Object.assign(process.env, REQUIRED_ENV)
+    delete process.env.NATIONAL_LIFE_VIEWER_SIGNING_KEY
     vi.resetModules()
-    clearEnv()
-  })
-
-  afterEach(() => {
-    clearEnv()
-  })
-
-  it('returns false when required environment variables are missing', async () => {
     const { isNationalLifeConfigured } = await import('./env')
+
     expect(isNationalLifeConfigured()).toBe(false)
   })
 
-  it('does not throw when environment variables are missing', async () => {
-    const { isNationalLifeConfigured } = await import('./env')
-    expect(() => isNationalLifeConfigured()).not.toThrow()
+  it.each([
+    ['NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN', 'http://viewer.keepr.one'],
+    ['BETTER_AUTH_URL', 'http://app.keepr.one'],
+  ] as const)('rejects non-HTTPS %s', async (name, value) => {
+    await expect(parse({ [name]: value })).rejects.toThrow(/HTTPS|origin/)
   })
 
-  it('returns true once all required environment variables are valid', async () => {
-    Object.assign(process.env, REQUIRED_ENV)
-    const { isNationalLifeConfigured } = await import('./env')
-    expect(isNationalLifeConfigured()).toBe(true)
+  it.each([
+    ['NATIONAL_LIFE_SESSION_KEYS', JSON.stringify({ v1: Buffer.alloc(31).toString('base64') })],
+    ['NATIONAL_LIFE_VIEWER_SIGNING_KEY', Buffer.alloc(33).toString('base64')],
+  ] as const)('rejects %s unless decoded key material is exactly 32 bytes', async (name, value) => {
+    await expect(parse({ [name]: value })).rejects.toThrow(/32-byte/)
+  })
+
+  it.each(['0', '65536', 'abc'])('rejects invalid viewer port %s', async (port) => {
+    await expect(parse({ NATIONAL_LIFE_VIEWER_PORT: port })).rejects.toThrow(
+      /VIEWER_PORT/,
+    )
+  })
+
+  it('rejects wildcard carrier origins', async () => {
+    await expect(
+      parse({ NATIONAL_LIFE_PORTAL_ORIGINS: 'https://*.nationallife.example' }),
+    ).rejects.toThrow(/origins/)
+  })
+
+  it('accepts only explicit boolean rollout values', async () => {
+    await expect(
+      parse({ NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED: 'yes' }),
+    ).rejects.toThrow(/INTERACTIVE_LOGIN_ENABLED/)
+  })
+
+  it('parses exact allowed agent IDs and rejects wildcard rollout access', async () => {
+    await expect(
+      parse({ NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: '*' }),
+    ).rejects.toThrow(/wildcard/)
+  })
+
+  it('rejects identical worker IDs for concurrent runtime fixtures', async () => {
+    vi.resetModules()
+    const {
+      assertDistinctNationalLifeRuntimeWorkerIds,
+    } = await import('./env')
+
+    expect(() =>
+      assertDistinctNationalLifeRuntimeWorkerIds([
+        'national-life-runtime-1',
+        'national-life-runtime-1',
+      ]),
+    ).toThrow(/unique/)
   })
 })

@@ -1,15 +1,11 @@
 import { ZodError, z } from 'zod'
-import type {
-  AdapterRunResult,
-  BrowserSession,
-  NationalLifeCaseObservation,
-  NationalLifeCredentials,
-} from './types'
+import type { BrowserSession, NationalLifeCaseObservation } from './types'
 
 export type AdapterConfig = Readonly<{
   carrierId: 'NATIONAL_LIFE'
   loginUrl: string
   caseSearchUrl: string
+  allowedOrigins?: readonly string[]
   now?: () => Date
 }>
 
@@ -35,7 +31,12 @@ const SELECTOR_NOT_FOUND_CODE = 'SELECTOR_NOT_FOUND'
 const PORTAL_LAYOUT_CHANGED_CODE = 'PORTAL_LAYOUT_CHANGED'
 const UNEXPECTED_APPLICATION_IDENTIFIER_CODE = 'UNEXPECTED_APPLICATION_IDENTIFIER'
 const AUTHENTICATION_STATE_INVALID_CODE = 'AUTHENTICATION_STATE_INVALID'
-const MFA_RESUME_HINT = 'Complete the National Life MFA challenge and resume this session.'
+const NAVIGATION_ORIGIN_BLOCKED_CODE = 'NAVIGATION_ORIGIN_BLOCKED'
+
+export type NationalLifeAuthenticationState =
+  | { kind: 'AWAITING_LOGIN'; origin: string }
+  | { kind: 'AWAITING_MFA'; origin: string }
+  | { kind: 'AUTHENTICATED'; origin: string }
 
 const requirementSchema = z.object({
   externalId: z.string().min(1),
@@ -87,28 +88,48 @@ export class NationalLifeAdapter {
     private readonly config: AdapterConfig,
   ) {}
 
-  async login(credentials: NationalLifeCredentials): Promise<AdapterRunResult> {
+  async classifyAuthenticationState(): Promise<NationalLifeAuthenticationState> {
     try {
       const page = this.getPage()
-
-      await page.goto(this.config.loginUrl)
-      await this.requireCarrierPage('login')
-      await page.getByLabel('Producer Number').fill(credentials.username)
-      await page.getByLabel('Password').fill(credentials.password)
-      await page.getByRole('button', { name: 'Sign in' }).click()
-
-      if (await this.hasHeading('Multi-factor authentication required')) {
-        return {
-          kind: 'MFA_REQUIRED',
-          resumeHint: MFA_RESUME_HINT,
-        }
+      const currentUrl = new URL(page.url())
+      const allowedOrigins = new Set(
+        (this.config.allowedOrigins ?? [
+          new URL(this.config.loginUrl).origin,
+          new URL(this.config.caseSearchUrl).origin,
+        ]).map((origin) => new URL(origin).origin),
+      )
+      if (!allowedOrigins.has(currentUrl.origin)) {
+        throw new NationalLifeAdapterError(
+          NAVIGATION_ORIGIN_BLOCKED_CODE,
+          'National Life navigation origin is not allowed',
+        )
       }
 
-      await this.requireAuthenticatedPortalPage('case-results')
+      await this.requireCarrierMarker()
 
-      return { kind: 'CONNECTED' }
+      if (await this.hasPortalPage('login')) {
+        return { kind: 'AWAITING_LOGIN', origin: currentUrl.origin }
+      }
+      if (await this.hasPortalPage('mfa')) {
+        return { kind: 'AWAITING_MFA', origin: currentUrl.origin }
+      }
+      if (await this.hasPortalPage('case-results')) {
+        return { kind: 'AUTHENTICATED', origin: currentUrl.origin }
+      }
+
+      throw this.toPortalLayoutChanged()
     } catch (error) {
       throw this.normalizeError(error)
+    }
+  }
+
+  async assertAuthenticated(): Promise<void> {
+    const state = await this.classifyAuthenticationState()
+    if (state.kind !== 'AUTHENTICATED') {
+      throw new NationalLifeAdapterError(
+        AUTHENTICATION_STATE_INVALID_CODE,
+        'National Life session is not authenticated',
+      )
     }
   }
 
@@ -117,7 +138,7 @@ export class NationalLifeAdapter {
       const page = this.getPage()
 
       await page.goto(this.config.caseSearchUrl)
-      await this.requireCarrierPage('case-results')
+      await this.assertAuthenticated()
       await page.getByLabel('External application ID').fill(lookup.value)
       await page.getByRole('button', { name: 'Search' }).click()
       await page.getByRole('link', { name: `Open application ${lookup.value}` }).click()
@@ -196,25 +217,6 @@ export class NationalLifeAdapter {
     }
   }
 
-  private async requireAuthenticatedPortalPage(expectedPage: string) {
-    await this.requireCarrierMarker()
-
-    const count = await this.getPage()
-      .locator(`[data-portal-page="${expectedPage}"]`)
-      .count()
-
-    if (count !== 1) {
-      throw new NationalLifeAdapterError(
-        AUTHENTICATION_STATE_INVALID_CODE,
-        'National Life did not reach an authenticated portal page',
-        {
-          expectedPortalPage: expectedPage,
-          portalUrl: this.getPage().url(),
-        },
-      )
-    }
-  }
-
   private async requireCarrierMarker() {
     const count = await this.getPage()
       .locator(`[data-carrier-id="${this.config.carrierId}"]`)
@@ -225,8 +227,10 @@ export class NationalLifeAdapter {
     }
   }
 
-  private async hasHeading(name: string) {
-    return (await this.getPage().getByRole('heading', { name }).count()) > 0
+  private async hasPortalPage(name: string) {
+    return (
+      (await this.getPage().locator(`[data-portal-page="${name}"]`).count()) === 1
+    )
   }
 
   private async requireText(locator: AdapterLocator, label: string) {
