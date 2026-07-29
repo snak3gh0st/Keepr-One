@@ -29,8 +29,11 @@ The feature remains disabled until all gates in this document pass.
 5. Verify the exact pinned self-hosted Steel image digest, `headless: false`,
    no recorder extension, empty replay-event response, no HLS/MP4 output, no
    screenshots, and retention cleanup using an interactive fixture session.
-6. Enable only named pilot agents with
-   `NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS`; wildcard access is forbidden.
+6. Use either a named pilot allowlist through
+   `NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS`, or set
+   `NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS=true` with an empty allowlist
+   to let every authenticated agent connect only their own National Life
+   account. Wildcards remain forbidden.
 
 ## Coolify deployment artifact
 
@@ -55,7 +58,9 @@ The checked-in Steel image is an immutable digest, with headful sessions and
 all known Steel logging switches disabled. That is defence in depth only: it
 does not replace the mandatory no-recording fixture proof below. Keep
 `NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED=false` in this service and in the web
-application until every production gate passes.
+application until every production gate passes. When enabling every agent,
+set `NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS=true` and leave
+`NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS` empty.
 
 ## Required authorized pilot
 

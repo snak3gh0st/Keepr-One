@@ -184,6 +184,7 @@ export type InteractiveConnectionRepository = {
 export type InteractiveConnectionConfig = {
   interactiveLoginEnabled: boolean
   interactiveLoginAgentIds: ReadonlySet<string>
+  interactiveLoginAllAgents: boolean
   viewerPublicOrigin: string
   viewerSigningKey: Buffer
   deploymentScope?: string
@@ -604,6 +605,7 @@ function resolveConfig(deps?: InteractiveConnectionServiceDeps): Required<Intera
   return {
     interactiveLoginEnabled: env.interactiveLoginEnabled,
     interactiveLoginAgentIds: env.interactiveLoginAgentIds,
+    interactiveLoginAllAgents: env.interactiveLoginAllAgents,
     viewerPublicOrigin: env.viewerPublicOrigin,
     viewerSigningKey: env.viewerSigningKey,
     deploymentScope: env.sessionScopeId,
@@ -627,10 +629,7 @@ function assertInteractiveAccess(
   if (!config.interactiveLoginEnabled) {
     throw new Error('National Life interactive login is unavailable')
   }
-  if (
-    config.interactiveLoginAgentIds.size > 0 &&
-    !config.interactiveLoginAgentIds.has(agentId)
-  ) {
+  if (!config.interactiveLoginAllAgents && !config.interactiveLoginAgentIds.has(agentId)) {
     throw new Error('National Life interactive login is unavailable')
   }
 }

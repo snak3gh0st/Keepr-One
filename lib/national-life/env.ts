@@ -16,6 +16,7 @@ type RawNationalLifeEnv = {
   NATIONAL_LIFE_RUNTIME_WORKER_ID?: string
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED?: string
   NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS?: string
+  NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS?: string
   BETTER_AUTH_URL?: string
 }
 
@@ -34,6 +35,7 @@ export type NationalLifeEnv = {
   runtimeWorkerId: string
   interactiveLoginEnabled: boolean
   interactiveLoginAgentIds: ReadonlySet<string>
+  interactiveLoginAllAgents: boolean
   appOrigin: string
 }
 
@@ -52,6 +54,7 @@ const rawNationalLifeEnvSchema = z.object({
   NATIONAL_LIFE_RUNTIME_WORKER_ID: z.string().trim().min(1).max(200),
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED: z.string().trim().min(1),
   NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: z.string(),
+  NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS: z.string().trim().min(1).default('false'),
   BETTER_AUTH_URL: z.string().trim().min(1),
 })
 
@@ -258,6 +261,8 @@ export function getNationalLifeEnv(): NationalLifeEnv {
       process.env.NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED,
     NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS:
       process.env.NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS,
+    NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS:
+      process.env.NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS,
     BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
   }
   const parsed = rawNationalLifeEnvSchema.parse(rawEnv)
@@ -291,7 +296,20 @@ export function getNationalLifeEnv(): NationalLifeEnv {
   const interactiveLoginAgentIds = parseAgentIds(
     parsed.NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS,
   )
-  if (interactiveLoginEnabled && interactiveLoginAgentIds.size === 0) {
+  const interactiveLoginAllAgents = parseBoolean(
+    'NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS',
+    parsed.NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS,
+  )
+  if (interactiveLoginAllAgents && interactiveLoginAgentIds.size > 0) {
+    throw new Error(
+      'NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS cannot be combined with a named allowlist',
+    )
+  }
+  if (
+    interactiveLoginEnabled &&
+    !interactiveLoginAllAgents &&
+    interactiveLoginAgentIds.size === 0
+  ) {
     throw new Error(
       'NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS must list exact agent IDs when enabled',
     )
@@ -320,6 +338,7 @@ export function getNationalLifeEnv(): NationalLifeEnv {
     runtimeWorkerId: parsed.NATIONAL_LIFE_RUNTIME_WORKER_ID,
     interactiveLoginEnabled,
     interactiveLoginAgentIds,
+    interactiveLoginAllAgents,
     appOrigin: parseHttpsOrigin('BETTER_AUTH_URL', parsed.BETTER_AUTH_URL),
   }
   return cachedEnv

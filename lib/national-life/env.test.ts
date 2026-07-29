@@ -20,6 +20,7 @@ const REQUIRED_ENV = {
   NATIONAL_LIFE_RUNTIME_WORKER_ID: 'national-life-runtime-1',
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED: 'true',
   NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: 'agent-1,agent-2',
+  NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS: 'false',
   BETTER_AUTH_URL: 'https://app.keepr.one',
 } as const
 
@@ -118,6 +119,16 @@ describe('National Life secure runtime environment', () => {
     await expect(
       parse({ NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: '*' }),
     ).rejects.toThrow(/wildcard/)
+  })
+
+  it('permits an explicit all-agent rollout without a named allowlist', async () => {
+    const env = await parse({
+      NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS: 'true',
+      NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: '',
+    })
+
+    expect(env.interactiveLoginAllAgents).toBe(true)
+    expect(env.interactiveLoginAgentIds).toEqual(new Set())
   })
 
   it('rejects identical worker IDs for concurrent runtime fixtures', async () => {
