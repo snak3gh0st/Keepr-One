@@ -11,6 +11,7 @@ type RawNationalLifeEnv = {
   NATIONAL_LIFE_SESSION_KEYS?: string
   NATIONAL_LIFE_VIEWER_SIGNING_KEY?: string
   NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN?: string
+  NATIONAL_LIFE_VIEWER_APP_ORIGINS?: string
   NATIONAL_LIFE_VIEWER_BIND_HOST?: string
   NATIONAL_LIFE_VIEWER_PORT?: string
   NATIONAL_LIFE_RUNTIME_WORKER_ID?: string
@@ -30,13 +31,13 @@ export type NationalLifeEnv = {
   sessionKeys: Record<string, string>
   viewerSigningKey: Buffer
   viewerPublicOrigin: string
+  viewerAppOrigins: string[]
   viewerBindHost: string
   viewerPort: number
   runtimeWorkerId: string
   interactiveLoginEnabled: boolean
   interactiveLoginAgentIds: ReadonlySet<string>
   interactiveLoginAllAgents: boolean
-  appOrigin: string
 }
 
 const rawNationalLifeEnvSchema = z.object({
@@ -49,6 +50,7 @@ const rawNationalLifeEnvSchema = z.object({
   NATIONAL_LIFE_SESSION_KEYS: z.string().trim().min(1),
   NATIONAL_LIFE_VIEWER_SIGNING_KEY: z.string().trim().min(1),
   NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN: z.string().trim().min(1),
+  NATIONAL_LIFE_VIEWER_APP_ORIGINS: z.string().trim().min(1),
   NATIONAL_LIFE_VIEWER_BIND_HOST: z.string().trim().min(1),
   NATIONAL_LIFE_VIEWER_PORT: z.string().trim().min(1),
   NATIONAL_LIFE_RUNTIME_WORKER_ID: z.string().trim().min(1).max(200),
@@ -159,18 +161,16 @@ function parseSteelBaseUrl(value: string) {
   return parsed
 }
 
-function parsePortalOrigins(rawOrigins: string) {
+function parseHttpsOrigins(name: string, rawOrigins: string) {
   const origins = rawOrigins
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean)
   if (origins.length === 0) {
-    throw new Error(
-      'NATIONAL_LIFE_PORTAL_ORIGINS must include exact HTTPS origins',
-    )
+    throw new Error(`${name} must include exact HTTPS origins`)
   }
   return origins.map((origin) =>
-    parseHttpsOrigin('NATIONAL_LIFE_PORTAL_ORIGINS origins', origin),
+    parseHttpsOrigin(`${name} origins`, origin),
   )
 }
 
@@ -251,6 +251,8 @@ export function getNationalLifeEnv(): NationalLifeEnv {
       process.env.NATIONAL_LIFE_VIEWER_SIGNING_KEY,
     NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN:
       process.env.NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN,
+    NATIONAL_LIFE_VIEWER_APP_ORIGINS:
+      process.env.NATIONAL_LIFE_VIEWER_APP_ORIGINS,
     NATIONAL_LIFE_VIEWER_BIND_HOST:
       process.env.NATIONAL_LIFE_VIEWER_BIND_HOST,
     NATIONAL_LIFE_VIEWER_PORT:
@@ -267,7 +269,8 @@ export function getNationalLifeEnv(): NationalLifeEnv {
   }
   const parsed = rawNationalLifeEnvSchema.parse(rawEnv)
   const steelBaseUrl = parseSteelBaseUrl(parsed.STEEL_BASE_URL)
-  const portalOrigins = parsePortalOrigins(
+  const portalOrigins = parseHttpsOrigins(
+    'NATIONAL_LIFE_PORTAL_ORIGINS',
     parsed.NATIONAL_LIFE_PORTAL_ORIGINS,
   )
   const portalLoginUrl = parseHttpsUrl(
@@ -300,6 +303,7 @@ export function getNationalLifeEnv(): NationalLifeEnv {
     'NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS',
     parsed.NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS,
   )
+  parseHttpsOrigin('BETTER_AUTH_URL', parsed.BETTER_AUTH_URL)
   if (interactiveLoginAllAgents && interactiveLoginAgentIds.size > 0) {
     throw new Error(
       'NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS cannot be combined with a named allowlist',
@@ -331,6 +335,10 @@ export function getNationalLifeEnv(): NationalLifeEnv {
       'NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN',
       parsed.NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN,
     ),
+    viewerAppOrigins: parseHttpsOrigins(
+      'NATIONAL_LIFE_VIEWER_APP_ORIGINS',
+      parsed.NATIONAL_LIFE_VIEWER_APP_ORIGINS,
+    ),
     viewerBindHost: parseBindHost(
       parsed.NATIONAL_LIFE_VIEWER_BIND_HOST,
     ),
@@ -339,7 +347,6 @@ export function getNationalLifeEnv(): NationalLifeEnv {
     interactiveLoginEnabled,
     interactiveLoginAgentIds,
     interactiveLoginAllAgents,
-    appOrigin: parseHttpsOrigin('BETTER_AUTH_URL', parsed.BETTER_AUTH_URL),
   }
   return cachedEnv
 }

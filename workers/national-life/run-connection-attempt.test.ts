@@ -41,7 +41,7 @@ function buildEnv(): NationalLifeEnv {
     interactiveLoginEnabled: true,
     interactiveLoginAgentIds: new Set(['agent-1']),
     interactiveLoginAllAgents: false,
-    appOrigin: 'https://app.keepr.one',
+    viewerAppOrigins: ['https://app.keepr.one'],
   }
 }
 

@@ -55,7 +55,11 @@ async function createFixture() {
   const deps: NationalLifeViewerBrokerDeps = {
     env: {
       signingKey,
-      appOrigin: 'https://app.keepr.one',
+      appOrigins: [
+        'https://keeprone.com',
+        'https://www.keeprone.com',
+        'https://app.keeprone.com',
+      ],
     },
     now: () => now,
     store: {
@@ -225,7 +229,7 @@ describe('National Life signed viewer broker', () => {
     expect(response.headers.get('referrer-policy')).toBe('no-referrer')
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('content-security-policy')).toContain(
-      "frame-ancestors https://app.keepr.one",
+      "frame-ancestors https://keeprone.com https://www.keeprone.com https://app.keeprone.com",
     )
     expect(response.headers.get('content-security-policy')).toContain(
       "script-src 'self' 'unsafe-inline'",
