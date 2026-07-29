@@ -16,12 +16,13 @@ services:
     # intentionally headful, so provide its private X server and D-Bus inside
     # disposable mounts before starting the API.
     entrypoint: ["/bin/sh", "-lc"]
-    command: >-
-      set -eu;
-      mkdir -p /run/dbus;
-      dbus-daemon --system --fork;
-      Xvfb :10 -screen 0 1280x800x24 -ac +extension RANDR >/tmp/xvfb.log 2>&1 &
-      exec /app/api/entrypoint.sh --no-nginx
+    command:
+      - >-
+        set -eu;
+        mkdir -p /run/dbus;
+        dbus-daemon --system --fork;
+        Xvfb :10 -screen 0 1280x800x24 -ac +extension RANDR >/tmp/xvfb.log 2>&1 &
+        exec /app/api/entrypoint.sh --no-nginx
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
