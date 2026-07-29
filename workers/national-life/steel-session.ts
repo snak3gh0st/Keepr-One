@@ -108,7 +108,7 @@ export async function createInteractiveSteelSession(
     solveCaptcha: false,
     persistProfile: false,
     debugConfig: { interactive: true, systemCursor: true },
-    dimensions: { width: 1280, height: 800 },
+    dimensions: { width: 1600, height: 1000 },
   })
 
   try {
