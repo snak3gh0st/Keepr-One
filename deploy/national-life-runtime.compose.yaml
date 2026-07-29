@@ -50,7 +50,7 @@ services:
       - /root/.config:rw,noexec,nosuid,size=256m
       - /root/.cache:rw,noexec,nosuid,size=256m
     networks:
-      coolify:
+      national-life-private:
         aliases:
           - national-life-steel
 
@@ -85,6 +85,7 @@ services:
       coolify:
         aliases:
           - national-life-runtime
+      national-life-private: {}
     labels:
       - traefik.enable=true
       - traefik.http.middlewares.keeprone-nlgviewer-https.redirectscheme.scheme=https
@@ -103,3 +104,7 @@ networks:
   coolify:
     external: true
     name: coolify
+  # Steel can reach the carrier through this bridge, but it is not attached to
+  # Coolify's shared application network. Only the broker joins both networks.
+  national-life-private:
+    name: keeprone-national-life-private
