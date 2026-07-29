@@ -1,129 +1,120 @@
-"use server";
+'use server'
 
-import { randomUUID } from 'node:crypto'
-import { revalidatePath } from 'next/cache'
-import { z } from 'zod'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { prisma } from '@/lib/prisma'
 import {
-  deleteAgentCredential,
-  getAgentConnectionSummary,
-  saveAgentCredential,
-} from '@/lib/national-life/connection-service'
-import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
-import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
+  cancelConnectionAttempt,
+  disconnectAgentSession,
+  issueViewerBootstrap,
+  startConnectionAttempt,
+} from '@/lib/national-life/interactive-connection-service'
+import { assertSameOriginAction } from '@/lib/security/same-origin-action'
+import { headers } from 'next/headers'
 
-const NOT_CONFIGURED_MESSAGE = 'Esta integração ainda não foi configurada. Fale com o time técnico.'
-
-const SAVE_CONNECTION_SCHEMA = z.object({
-  username: z.string().trim().min(1, 'Informe o usuário.').max(200, 'O usuário deve ter no máximo 200 caracteres.'),
-  password: z.string().min(1, 'Informe a senha.').max(500, 'A senha deve ter no máximo 500 caracteres.'),
-})
-
-const CONNECTION_TEST_LIMIT = 5
-const CONNECTION_TEST_WINDOW_MS = 15 * 60_000
-const CONNECTION_PATH = '/agent/integrations/national-life'
-
-export type ConnectionActionResult =
-  | { ok: true; message: string }
+export type StartConnectionActionResult =
+  | { ok: true; attemptId: string; state: string; expiresAt: string }
   | { ok: false; message: string }
 
-function revalidateConnectionPath() {
-  revalidatePath(CONNECTION_PATH)
+export type ViewerBootstrapActionResult =
+  | { ok: true; bootstrapUrl: string; expiresAt: string }
+  | { ok: false; message: string }
+
+export type ConnectionMutationActionResult =
+  | { ok: true }
+  | { ok: false; message: string }
+
+async function assertCurrentActionOrigin() {
+  const requestHeaders = await headers()
+  assertSameOriginAction({
+    origin: requestHeaders.get('origin'),
+    host: requestHeaders.get('host'),
+    forwardedHost: requestHeaders.get('x-forwarded-host'),
+    forwardedProto: requestHeaders.get('x-forwarded-proto'),
+  })
 }
 
-export async function saveNationalLifeConnection(formData: FormData): Promise<ConnectionActionResult> {
-  if (!isNationalLifeConfigured()) {
-    return { ok: false, message: NOT_CONFIGURED_MESSAGE }
-  }
-
+export async function startNationalLifeConnection(): Promise<StartConnectionActionResult> {
   try {
+    await assertCurrentActionOrigin()
     const agent = await getCurrentAgent()
-    const parsed = SAVE_CONNECTION_SCHEMA.safeParse({
-      username: formData.get('username'),
-      password: formData.get('password'),
-    })
-
-    if (!parsed.success) {
-      return { ok: false, message: parsed.error.issues[0]?.message ?? 'Dados inválidos.' }
-    }
-
-    const env = getNationalLifeEnv()
-
-    await saveAgentCredential({
+    const result = await startConnectionAttempt({
       agentId: agent.id,
-      scopeId: env.credentialScopeId,
-      username: parsed.data.username,
-      password: parsed.data.password,
+      userId: agent.userId,
     })
-
-    revalidateConnectionPath()
-    return { ok: true, message: 'Conexão National Life salva com segurança.' }
+    if (result.kind === 'RATE_LIMITED') {
+      return {
+        ok: false,
+        message:
+          'Você atingiu o limite de conexões recentes. Aguarde alguns minutos e tente novamente.',
+      }
+    }
+    return {
+      ok: true,
+      attemptId: result.attempt.id,
+      state: result.attempt.state,
+      expiresAt: result.attempt.expiresAt.toISOString(),
+    }
   } catch {
-    return { ok: false, message: 'Não foi possível salvar a conexão agora.' }
+    return {
+      ok: false,
+      message: 'Não foi possível iniciar a conexão National Life agora.',
+    }
   }
 }
 
-export async function deleteNationalLifeConnection(): Promise<ConnectionActionResult> {
+export async function createNationalLifeViewerBootstrap(
+  attemptId: string,
+): Promise<ViewerBootstrapActionResult> {
   try {
+    await assertCurrentActionOrigin()
     const agent = await getCurrentAgent()
+    const bootstrap = await issueViewerBootstrap({ agentId: agent.id, attemptId })
+    return {
+      ok: true,
+      bootstrapUrl: bootstrap.bootstrapUrl,
+      expiresAt: bootstrap.expiresAt.toISOString(),
+    }
+  } catch {
+    return {
+      ok: false,
+      message:
+        'A sessão segura não está mais disponível. Inicie uma nova conexão.',
+    }
+  }
+}
 
-    await deleteAgentCredential({
+export async function cancelNationalLifeConnection(
+  attemptId: string,
+): Promise<ConnectionMutationActionResult> {
+  try {
+    await assertCurrentActionOrigin()
+    const agent = await getCurrentAgent()
+    await cancelConnectionAttempt({
       agentId: agent.id,
-      provider: NATIONAL_LIFE_PROVIDER,
+      userId: agent.userId,
+      attemptId,
     })
-
-    revalidateConnectionPath()
-    return { ok: true, message: 'Conexão National Life removida.' }
+    return { ok: true }
   } catch {
-    return { ok: false, message: 'Não foi possível remover a conexão agora.' }
+    return {
+      ok: false,
+      message: 'Não foi possível cancelar a conexão National Life agora.',
+    }
   }
 }
 
-export async function testNationalLifeConnection(): Promise<ConnectionActionResult> {
-  if (!isNationalLifeConfigured()) {
-    return { ok: false, message: NOT_CONFIGURED_MESSAGE }
-  }
-
+export async function disconnectNationalLifeConnection(): Promise<ConnectionMutationActionResult> {
   try {
+    await assertCurrentActionOrigin()
     const agent = await getCurrentAgent()
-    const connection = await getAgentConnectionSummary(agent.id)
-
-    if (!connection) {
-      return { ok: false, message: 'Salve as credenciais antes de testar a conexão.' }
-    }
-
-    const fifteenMinutesAgo = new Date(Date.now() - CONNECTION_TEST_WINDOW_MS)
-    const recentAttempts = await prisma.browserAutomationJob.count({
-      where: {
-        agentId: agent.id,
-        provider: NATIONAL_LIFE_PROVIDER,
-        operation: 'TEST_CONNECTION',
-        createdAt: { gte: fifteenMinutesAgo },
-      },
+    await disconnectAgentSession({
+      agentId: agent.id,
+      userId: agent.userId,
     })
-
-    if (recentAttempts >= CONNECTION_TEST_LIMIT) {
-      return { ok: false, message: 'Você atingiu o limite de testes recentes. Aguarde alguns minutos e tente novamente.' }
-    }
-
-    const env = getNationalLifeEnv()
-
-    await prisma.browserAutomationJob.create({
-      data: {
-        agentId: agent.id,
-        provider: NATIONAL_LIFE_PROVIDER,
-        operation: 'TEST_CONNECTION',
-        idempotencyKey: `national-life-test-${randomUUID()}`,
-        input: {
-          scopeId: env.credentialScopeId,
-        },
-      },
-    })
-
-    revalidateConnectionPath()
-    return { ok: true, message: 'Teste enfileirado. O worker validará a conexão sem expor suas credenciais.' }
+    return { ok: true }
   } catch {
-    return { ok: false, message: 'Não foi possível iniciar o teste de conexão agora.' }
+    return {
+      ok: false,
+      message: 'Não foi possível desconectar a National Life agora.',
+    }
   }
 }
