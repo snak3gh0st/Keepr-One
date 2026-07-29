@@ -28,6 +28,38 @@ function stateLabel(state: string | undefined) {
   return 'Preparando o portal oficial'
 }
 
+const VIEWER_ASPECT_RATIO = 16 / 10
+const MAX_VIEWER_WIDTH = 1_600
+
+function useViewerStageSize(viewerUrl: string | null) {
+  const viewerAreaRef = useRef<HTMLDivElement>(null)
+  const [stageSize, setStageSize] = useState<{ width: number; height: number }>()
+
+  useEffect(() => {
+    if (!viewerUrl || !viewerAreaRef.current) {
+      setStageSize(undefined)
+      return
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      const width = Math.min(
+        entry.contentRect.width,
+        entry.contentRect.height * VIEWER_ASPECT_RATIO,
+        MAX_VIEWER_WIDTH,
+      )
+      const height = width / VIEWER_ASPECT_RATIO
+      setStageSize((current) =>
+        current?.width === width && current.height === height ? current : { width, height },
+      )
+    })
+
+    observer.observe(viewerAreaRef.current)
+    return () => observer.disconnect()
+  }, [viewerUrl])
+
+  return { viewerAreaRef, stageSize }
+}
+
 export function NationalLifeBrowserModal({
   attempt,
   onAuthenticated,
@@ -41,6 +73,7 @@ export function NationalLifeBrowserModal({
     useNationalLifeConnectionAttempt(attempt)
   const [remaining, setRemaining] = useState(() => remainingTime(attempt.expiresAt))
   const completed = useRef(false)
+  const { viewerAreaRef, stageSize } = useViewerStageSize(viewerUrl)
 
   const origin = useMemo(
     () => status?.currentOrigin ?? 'Aguardando o portal oficial da National Life',
@@ -133,10 +166,14 @@ export function NationalLifeBrowserModal({
 
         <div className="relative min-h-0 flex-1 bg-white">
           {viewerUrl ? (
-            <div className="grid h-full w-full place-items-center overflow-hidden bg-[#101512] p-2 sm:p-4 [container-type:size]">
+            <div
+              ref={viewerAreaRef}
+              className="grid h-full w-full place-items-center overflow-hidden bg-[#101512] p-2 sm:p-4"
+            >
               <div
                 data-testid="national-life-viewer-stage"
-                className="aspect-[16/10] w-[min(100cqw,160cqh,1600px)] max-h-[1000px] overflow-hidden bg-white shadow-2xl"
+                className="aspect-[16/10] max-h-[1000px] overflow-hidden bg-white shadow-2xl"
+                style={stageSize ? stageSize : { visibility: 'hidden' }}
               >
                 <iframe
                   title="Portal oficial da National Life"

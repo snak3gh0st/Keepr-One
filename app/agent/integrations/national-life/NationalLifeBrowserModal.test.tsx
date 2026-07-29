@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,6 +8,25 @@ const mocks = vi.hoisted(() => ({
   bootstrap: vi.fn(),
   cancel: vi.fn(),
 }))
+
+let resizeObserverCallback: ResizeObserverCallback | undefined
+
+class ControlledResizeObserver {
+  constructor(callback: ResizeObserverCallback) {
+    resizeObserverCallback = callback
+  }
+
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+function reportViewerAreaSize(width: number, height: number) {
+  resizeObserverCallback?.(
+    [{ contentRect: { width, height } } as ResizeObserverEntry],
+    {} as ResizeObserver,
+  )
+}
 
 vi.mock('./actions', () => ({
   createNationalLifeViewerBootstrap: mocks.bootstrap,
@@ -48,12 +67,14 @@ beforeEach(() => {
   })
   mocks.cancel.mockResolvedValue({ ok: true })
   vi.stubGlobal('fetch', vi.fn(async () => statusResponse('AWAITING_LOGIN')))
+  vi.stubGlobal('ResizeObserver', ControlledResizeObserver)
 })
 
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  resizeObserverCallback = undefined
 })
 
 describe('NationalLifeBrowserModal', () => {
@@ -81,11 +102,33 @@ describe('NationalLifeBrowserModal', () => {
     const stage = screen.getByTestId('national-life-viewer-stage')
     expect(stage).toHaveClass('aspect-[16/10]')
     expect(stage).toHaveClass('max-h-[1000px]')
-    expect(stage).toHaveClass('w-[min(100cqw,160cqh,1600px)]')
-    expect(stage.parentElement).toHaveClass('[container-type:size]')
     expect(stage).toContainElement(frame)
     expect(screen.getByText('https://auth.nationallife.com')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /voltar|avançar|recarregar/i })).not.toBeInTheDocument()
+  })
+
+  it('fits the viewer stage inside a wide, short viewer area', async () => {
+    render(
+      <NationalLifeBrowserModal
+        attempt={attempt}
+        onAuthenticated={vi.fn()}
+        onClosed={vi.fn()}
+      />,
+    )
+
+    const stage = await screen.findByTestId('national-life-viewer-stage')
+    act(() => reportViewerAreaSize(1200, 400))
+
+    await waitFor(() => {
+      expect(stage.style.width).toBe('640px')
+      expect(stage.style.height).toBe('400px')
+    })
+
+    const stageWidth = Number.parseFloat(stage.style.width)
+    const stageHeight = Number.parseFloat(stage.style.height)
+    expect(stageWidth).toBeLessThanOrEqual(1200)
+    expect(stageHeight).toBeLessThanOrEqual(400)
+    expect(stageWidth / stageHeight).toBeCloseTo(1.6)
   })
 
   it('keeps the official viewer open while MFA is required', async () => {
