@@ -198,25 +198,20 @@ describe('National Life Steel session boundary', () => {
     connectOverCDP.mockReset()
   })
 
-  it('discovers and rewrites Steel\'s private browser websocket endpoint', async () => {
+  it('attaches directly through Steel\'s private API websocket proxy', async () => {
     connectOverCDP.mockImplementationOnce(async (endpoint: string) => ({
       endpoint,
       contexts: () => [],
     }))
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      webSocketDebuggerUrl: 'ws://127.0.0.1/devtools/browser/browser-1',
-    }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    })))
+    vi.stubGlobal('fetch', vi.fn(() => {
+      throw new Error('CDP discovery must not bypass the Steel API proxy')
+    }))
 
-    const browser = await defaultConnectBrowser('ws://national-life-steel:9223/') as unknown as {
+    const browser = await defaultConnectBrowser('ws://national-life-steel:3000/') as unknown as {
       endpoint: string
     }
 
-    expect(browser.endpoint).toBe(
-      'ws://national-life-steel:9223/devtools/browser/browser-1',
-    )
+    expect(browser.endpoint).toBe('ws://national-life-steel:3000/')
   })
 
   it('creates an interactive real Steel session with the exact safe options', async () => {

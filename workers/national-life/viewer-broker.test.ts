@@ -191,17 +191,17 @@ describe('National Life signed viewer broker', () => {
     ])
   })
 
-  it('proxies authenticated upgrade only to the owned attempt debug URL', async () => {
+  it('proxies authenticated upgrades only to the owned Steel cast endpoint', async () => {
     const fixture = await createFixture()
     const bootstrapResponse = await bootstrap(fixture.brokerOrigin, fixture.issue())
     const response = await rawUpgrade(
       fixture.broker,
       viewerCookie(bootstrapResponse),
-      '/viewer/?target=https://evil.test',
+      '/viewer?tabInfo=true&target=https://evil.test',
     )
     expect(response).toContain('101 Switching Protocols')
     expect(fixture.upstreamRequests).toEqual([
-      'UPGRADE:/debug?interactive=true&showControls=false',
+      'UPGRADE:/v1/sessions/cast?tabInfo=true',
     ])
   })
 
@@ -226,6 +226,9 @@ describe('National Life signed viewer broker', () => {
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('content-security-policy')).toContain(
       "frame-ancestors https://app.keepr.one",
+    )
+    expect(response.headers.get('content-security-policy')).toContain(
+      "script-src 'self' 'unsafe-inline'",
     )
     expect(response.headers.get('content-security-policy')).not.toContain('*')
   })

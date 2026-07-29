@@ -373,53 +373,10 @@ async function safeReleaseSteelSession(steelClient: SteelClient, sessionId: stri
 }
 
 export async function defaultConnectBrowser(websocketUrl: string) {
-  const cdpWebSocketUrl = await discoverPrivateCdpWebSocketUrl(websocketUrl)
-
   // Steel proxies the private Chrome DevTools socket. Chromium rejects the
   // service-name host header at that inner endpoint, so retain localhost
   // while keeping the proxy itself reachable only on the private network.
-  return chromium.connectOverCDP(cdpWebSocketUrl, {
+  return chromium.connectOverCDP(websocketUrl, {
     headers: { Host: 'localhost' },
   })
-}
-
-async function discoverPrivateCdpWebSocketUrl(websocketUrl: string) {
-  const steelEndpoint = new URL(websocketUrl)
-  if (
-    !['ws:', 'wss:'].includes(steelEndpoint.protocol) ||
-    steelEndpoint.pathname !== '/' ||
-    steelEndpoint.search ||
-    steelEndpoint.hash
-  ) {
-    return websocketUrl
-  }
-
-  const discoveryUrl = new URL('/json/version', steelEndpoint)
-  discoveryUrl.protocol = steelEndpoint.protocol === 'wss:' ? 'https:' : 'http:'
-  const response = await fetch(discoveryUrl)
-  if (!response.ok) {
-    throw new Error('Steel CDP discovery failed')
-  }
-
-  const payload: unknown = await response.json()
-  const discoveredUrl =
-    typeof payload === 'object' &&
-    payload !== null &&
-    'webSocketDebuggerUrl' in payload &&
-    typeof payload.webSocketDebuggerUrl === 'string'
-      ? new URL(payload.webSocketDebuggerUrl)
-      : null
-
-  if (
-    !discoveredUrl ||
-    !['ws:', 'wss:'].includes(discoveredUrl.protocol) ||
-    !discoveredUrl.pathname.startsWith('/devtools/browser/')
-  ) {
-    throw new Error('Steel CDP discovery returned an invalid browser endpoint')
-  }
-
-  discoveredUrl.protocol = steelEndpoint.protocol
-  discoveredUrl.hostname = steelEndpoint.hostname
-  discoveredUrl.port = steelEndpoint.port
-  return discoveredUrl.toString()
 }
