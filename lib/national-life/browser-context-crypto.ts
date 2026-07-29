@@ -156,27 +156,33 @@ function decodeKey(base64Key: string) {
   return key
 }
 
-function encryptSecret(
+function encryptSecret<T>(
   value: unknown,
   binding: BrowserContextBinding,
   activeKey: ActiveEncryptionKey,
+  schema: z.ZodType<T>,
 ): EncryptedBrowserSecret {
-  const key = decodeKey(activeKey.base64Key)
-  const iv = randomBytes(12)
-  const cipher = createCipheriv('aes-256-gcm', key, iv)
-  cipher.setAAD(Buffer.from(canonicalJson(binding)))
+  try {
+    const validatedValue = schema.parse(value)
+    const key = decodeKey(activeKey.base64Key)
+    const iv = randomBytes(12)
+    const cipher = createCipheriv('aes-256-gcm', key, iv)
+    cipher.setAAD(Buffer.from(canonicalJson(binding)))
 
-  const ciphertext = Buffer.concat([
-    cipher.update(Buffer.from(canonicalJson(value))),
-    cipher.final(),
-  ])
+    const ciphertext = Buffer.concat([
+      cipher.update(Buffer.from(canonicalJson(validatedValue))),
+      cipher.final(),
+    ])
 
-  return {
-    algorithm: 'aes-256-gcm',
-    keyVersion: activeKey.version,
-    iv: iv.toString('base64'),
-    ciphertext: ciphertext.toString('base64'),
-    authTag: cipher.getAuthTag().toString('base64'),
+    return {
+      algorithm: 'aes-256-gcm',
+      keyVersion: activeKey.version,
+      iv: iv.toString('base64'),
+      ciphertext: ciphertext.toString('base64'),
+      authTag: cipher.getAuthTag().toString('base64'),
+    }
+  } catch {
+    throw new Error('Browser context encryption failed')
   }
 }
 
@@ -225,7 +231,7 @@ export function encryptBrowserContext(
   binding: BrowserContextBinding,
   activeKey: ActiveEncryptionKey,
 ): EncryptedBrowserSecret {
-  return encryptSecret(context, binding, activeKey)
+  return encryptSecret(context, binding, activeKey, sessionContextSchema)
 }
 
 export function decryptBrowserContext(
@@ -241,7 +247,7 @@ export function encryptAttemptRuntime(
   binding: BrowserContextBinding,
   activeKey: ActiveEncryptionKey,
 ): EncryptedBrowserSecret {
-  return encryptSecret(runtime, binding, activeKey)
+  return encryptSecret(runtime, binding, activeKey, attemptRuntimeSchema)
 }
 
 export function decryptAttemptRuntime(

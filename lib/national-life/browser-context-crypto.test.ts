@@ -83,14 +83,14 @@ describe('National Life browser context encryption', () => {
     ).toThrow('Browser context decryption failed')
   })
 
-  it('validates the decrypted Steel session context shape', () => {
+  it('rejects unexpected Steel session context fields before encryption', () => {
     const invalidContext = {
-      cookies: [{ name: 'nlg-session', value: 123 }],
+      ...context,
+      password: 'must-not-be-persisted',
     } as unknown as SessionContext
-    const encrypted = encryptBrowserContext(invalidContext, binding, activeKey)
 
-    expect(() => decryptBrowserContext(encrypted, binding, keyRing)).toThrow(
-      'Browser context decryption failed',
+    expect(() => encryptBrowserContext(invalidContext, binding, activeKey)).toThrow(
+      'Browser context encryption failed',
     )
   })
 
@@ -110,5 +110,22 @@ describe('National Life browser context encryption', () => {
     expect(() =>
       decryptAttemptRuntime(encrypted, binding, keyRing),
     ).toThrow('Browser context decryption failed')
+  })
+
+  it('rejects unexpected interactive attempt runtime fields before encryption', () => {
+    const runtimeBinding: BrowserContextBinding = {
+      ...binding,
+      purpose: 'INTERACTIVE_ATTEMPT_RUNTIME',
+    }
+    const invalidRuntime = {
+      steelSessionId: 'steel-session-1',
+      debugUrl: 'https://steel.example/session/1',
+      expiresAt: '2026-07-28T12:05:00.000Z',
+      mfaCode: 'must-not-be-persisted',
+    }
+
+    expect(() =>
+      encryptAttemptRuntime(invalidRuntime, runtimeBinding, activeKey),
+    ).toThrow('Browser context encryption failed')
   })
 })
