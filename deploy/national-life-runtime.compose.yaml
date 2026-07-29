@@ -12,7 +12,16 @@ services:
     expose:
       - "3000"
       - "9223"
-    command: ["--no-nginx"]
+    # Steel's API entrypoint does not start a display server. The viewer is
+    # intentionally headful, so provide its private X server and D-Bus inside
+    # disposable mounts before starting the API.
+    entrypoint: ["/bin/sh", "-lc"]
+    command: >-
+      set -eu;
+      mkdir -p /run/dbus;
+      dbus-daemon --system --fork;
+      Xvfb :10 -screen 0 1280x800x24 -ac +extension RANDR >/tmp/xvfb.log 2>&1 &
+      exec /app/api/entrypoint.sh --no-nginx
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
@@ -22,6 +31,7 @@ services:
       CDP_DOMAIN: national-life-steel:9223
       CDP_REDIRECT_PORT: "9223"
       CHROME_HEADLESS: "false"
+      DEFAULT_TIMEZONE: America/New_York
       LOG_LEVEL: warn
       LOG_STORAGE_ENABLED: "false"
       ENABLE_CDP_LOGGING: "false"
@@ -33,9 +43,12 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=1g
+      - /run:rw,noexec,nosuid,size=64m
       - /data/logs:rw,noexec,nosuid,size=128m
       - /files:rw,noexec,nosuid,size=128m
       - /app/.cache:rw,noexec,nosuid,size=256m
+      - /root/.config:rw,noexec,nosuid,size=256m
+      - /root/.cache:rw,noexec,nosuid,size=256m
     networks:
       coolify:
         aliases:
