@@ -50,3 +50,7 @@ export type BrowserSession = Readonly<{
   close(): Promise<void>
   disconnect(): Promise<void>
 }>
+
+export type InteractiveBrowserSession = BrowserSession & {
+  internalDebugUrl: string
+}

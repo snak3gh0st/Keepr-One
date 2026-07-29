@@ -1,12 +1,20 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
-import { Steel } from 'steel-sdk'
-import { NATIONAL_LIFE_JOB_TIMEOUT_MS } from '../../lib/national-life/constants'
+import { Steel, type SessionContext } from 'steel-sdk'
+import {
+  NATIONAL_LIFE_CONNECTION_ATTEMPT_TTL_MS,
+  NATIONAL_LIFE_JOB_TIMEOUT_MS,
+} from '../../lib/national-life/constants'
 import type { NationalLifeEnv } from '../../lib/national-life/env'
-import type { BrowserSession, BrowserSessionContinuation } from './types'
+import type {
+  BrowserSession,
+  BrowserSessionContinuation,
+  InteractiveBrowserSession,
+} from './types'
 
 type RemoteSteelSession = {
   id: string
   debugUrl: string
+  sessionViewerUrl?: string
   websocketUrl: string
   status: 'live' | 'released' | 'failed'
 }
@@ -32,6 +40,7 @@ type SteelClient = {
   sessions: {
     create(input?: unknown): Promise<RemoteSteelSession>
     retrieve(sessionId: string): Promise<RemoteSteelSession>
+    context(sessionId: string): Promise<SessionContext>
     release(sessionId: string): Promise<unknown>
   }
 }
@@ -66,13 +75,17 @@ export function assertAllowedNavigation(targetUrl: string, allowedOrigins: reado
 
 export async function createSteelBrowserSession(
   env: NationalLifeEnv,
-  deps?: SteelSessionDeps,
+  optionsOrDeps?: { sessionContext?: SessionContext } | SteelSessionDeps,
+  suppliedDeps?: SteelSessionDeps,
 ): Promise<BrowserSession> {
+  const options = isSteelSessionDeps(optionsOrDeps) ? undefined : optionsOrDeps
+  const deps = isSteelSessionDeps(optionsOrDeps) ? optionsOrDeps : suppliedDeps
   const steelClient = createSteelClient(env, deps)
   const remoteSession = await steelClient.sessions.create({
     timeout: NATIONAL_LIFE_JOB_TIMEOUT_MS,
     headless: false,
     solveCaptcha: false,
+    ...(options?.sessionContext ? { sessionContext: options.sessionContext } : {}),
   })
 
   try {
@@ -81,6 +94,40 @@ export async function createSteelBrowserSession(
     await safeReleaseSteelSession(steelClient, remoteSession.id)
     throw error
   }
+}
+
+export async function createInteractiveSteelSession(
+  env: NationalLifeEnv,
+  deps?: SteelSessionDeps,
+): Promise<InteractiveBrowserSession> {
+  const steelClient = createSteelClient(env, deps)
+  const remoteSession = await steelClient.sessions.create({
+    timeout: NATIONAL_LIFE_CONNECTION_ATTEMPT_TTL_MS,
+    headless: false,
+    solveCaptcha: false,
+    persistProfile: false,
+    debugConfig: { interactive: true, systemCursor: true },
+    dimensions: { width: 1280, height: 800 },
+  })
+
+  try {
+    const session = await connectManagedSession(remoteSession, steelClient, env, deps)
+    return {
+      ...session,
+      internalDebugUrl: remoteSession.debugUrl,
+    }
+  } catch (error) {
+    await safeReleaseSteelSession(steelClient, remoteSession.id)
+    throw error
+  }
+}
+
+export async function captureSteelSessionContext(
+  steelSessionId: string,
+  env: NationalLifeEnv,
+  deps?: SteelSessionDeps,
+): Promise<SessionContext> {
+  return createSteelClient(env, deps).sessions.context(steelSessionId)
 }
 
 export async function reconnectSteelBrowserSession(
@@ -119,6 +166,15 @@ function createSteelClient(env: NationalLifeEnv, deps?: SteelSessionDeps): Steel
     baseURL: env.steelBaseUrl,
     steelAPIKey: env.steelApiKey,
   })
+}
+
+function isSteelSessionDeps(
+  value: { sessionContext?: SessionContext } | SteelSessionDeps | undefined,
+): value is SteelSessionDeps {
+  return Boolean(
+    value &&
+      ('createSteelClient' in value || 'connectBrowser' in value || 'now' in value),
+  )
 }
 
 async function connectManagedSession(

@@ -1,7 +1,9 @@
+import { readFile } from 'node:fs/promises'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { startNationalLifeFixtureServer } from '../../scripts/national-life-fixture-server'
 import { createFakeBrowserSession } from '../../tests/national-life/fake-browser'
 import { NationalLifeAdapter } from './adapter'
+import type { BrowserSession } from './types'
 
 type FixtureServer = Awaited<ReturnType<typeof startNationalLifeFixtureServer>>
 
@@ -16,96 +18,73 @@ describe('National Life deterministic adapter', () => {
     await fixtureServer.close()
   })
 
-  it('authenticates and returns CONNECTED without exposing credentials', async () => {
+  it('classifies the carrier-owned login page without reading credentials', async () => {
     const { session } = await createFakeBrowserSession({ baseUrl: fixtureServer.origin })
     const adapter = createAdapter(session, fixtureServer.origin)
 
-    const result = await adapter.login({
-      username: 'producer-100',
-      password: 'invented-secret',
+    await session.page.goto(`${fixtureServer.origin}/login`)
+    await expect(adapter.classifyAuthenticationState()).resolves.toEqual({
+      kind: 'AWAITING_LOGIN',
+      origin: fixtureServer.origin,
     })
-
-    expect(result).toEqual({ kind: 'CONNECTED' })
-    expect(JSON.stringify(result)).not.toContain('invented-secret')
   })
 
-  it('returns MFA_REQUIRED without bypassing the challenge', async () => {
+  it('classifies the carrier-owned MFA page without bypassing it', async () => {
     const { session } = await createFakeBrowserSession({ baseUrl: fixtureServer.origin })
     const adapter = createAdapter(session, fixtureServer.origin)
 
-    await expect(
-      adapter.login({
-        username: 'mfa-producer',
-        password: 'invented-secret',
-      }),
-    ).resolves.toEqual({
-      kind: 'MFA_REQUIRED',
-      resumeHint: 'Complete the National Life MFA challenge and resume this session.',
+    await session.page.goto(`${fixtureServer.origin}/mfa`)
+    await expect(adapter.classifyAuthenticationState()).resolves.toEqual({
+      kind: 'AWAITING_MFA',
+      origin: fixtureServer.origin,
     })
   })
 
-  it('rejects remote or lookalike fixture origins before fetch', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-
-    await expect(
-      createFakeBrowserSession({
-        baseUrl: 'http://127.0.0.1.evil.test:4173',
-        startPath: '/login',
-      }),
-    ).rejects.toMatchObject({
-      code: 'FIXTURE_ORIGIN_INVALID',
-    })
-
-    expect(fetchSpy).not.toHaveBeenCalled()
-    fetchSpy.mockRestore()
-  })
-
-  it('rejects fixture origins with extra path, query, hash, or userinfo before fetch', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-    const invalidOrigins = [
-      'http://127.0.0.1:4173/login',
-      'http://127.0.0.1:4173?fixture=1',
-      'http://user:pass@127.0.0.1:4173',
-      'http://127.0.0.1:4173/#debug',
-    ]
-
-    for (const baseUrl of invalidOrigins) {
-      await expect(
-        createFakeBrowserSession({
-          baseUrl,
-          startPath: '/login',
-        }),
-      ).rejects.toMatchObject({
-        code: 'FIXTURE_ORIGIN_INVALID',
-      })
-    }
-
-    expect(fetchSpy).not.toHaveBeenCalled()
-    fetchSpy.mockRestore()
-  })
-
-  it('rejects branded post-login pages that do not prove an authenticated portal state', async () => {
+  it('classifies a deterministic authenticated carrier page', async () => {
     const { session } = await createFakeBrowserSession({ baseUrl: fixtureServer.origin })
     const adapter = createAdapter(session, fixtureServer.origin)
 
-    await expect(
-      adapter.login({
-        username: 'denied-producer',
-        password: 'invented-secret',
-      }),
-    ).rejects.toMatchObject({
-      code: 'AUTHENTICATION_STATE_INVALID',
+    await session.page.goto(`${fixtureServer.origin}/cases/search`)
+    await expect(adapter.classifyAuthenticationState()).resolves.toEqual({
+      kind: 'AUTHENTICATED',
+      origin: fixtureServer.origin,
     })
+    await expect(adapter.assertAuthenticated()).resolves.toBeUndefined()
+  })
+
+  it('rejects a non-allowlisted current origin before reading page markers', async () => {
+    const locator = vi.fn(() => ({ count: vi.fn(async () => 1) }))
+    const session = {
+      page: { url: () => 'https://agent.nationallife.example.evil.test/login', locator },
+    } as unknown as BrowserSession
+    const adapter = createAdapter(session, 'https://agent.nationallife.example')
+
+    await expect(adapter.classifyAuthenticationState()).rejects.toMatchObject({
+      code: 'NAVIGATION_ORIGIN_BLOCKED',
+    })
+    expect(locator).not.toHaveBeenCalled()
+  })
+
+  it('rejects unknown pages on an allowlisted origin as portal layout changes', async () => {
+    const { session } = await createFakeBrowserSession({ baseUrl: fixtureServer.origin })
+    const adapter = createAdapter(session, fixtureServer.origin)
+
+    await session.page.goto(`${fixtureServer.origin}/login/failed`)
+    await expect(adapter.classifyAuthenticationState()).rejects.toMatchObject({
+      code: 'PORTAL_LAYOUT_CHANGED',
+    })
+  })
+
+  it('contains no credential-fill implementation or credential type import', async () => {
+    const source = await readFile(new URL('./adapter.ts', import.meta.url), 'utf8')
+    expect(source).not.toContain('.fill(credentials')
+    expect(source).not.toContain('NationalLifeCredentials')
   })
 
   it('searches by external application id and normalizes a case observation', async () => {
     const { session } = await createFakeBrowserSession({ baseUrl: fixtureServer.origin })
     const adapter = createAdapter(session, fixtureServer.origin)
-
-    await adapter.login({
-      username: 'producer-100',
-      password: 'invented-secret',
-    })
+    await session.page.goto(`${fixtureServer.origin}/cases/search`)
 
     await expect(
       adapter.readCase({ kind: 'EXTERNAL_ID', value: 'NLG-TEST-1001' }),
@@ -128,11 +107,7 @@ describe('National Life deterministic adapter', () => {
   it('rejects an unexpected application identifier', async () => {
     const { session } = await createFakeBrowserSession({ baseUrl: fixtureServer.origin })
     const adapter = createAdapter(session, fixtureServer.origin)
-
-    await adapter.login({
-      username: 'producer-100',
-      password: 'invented-secret',
-    })
+    await session.page.goto(`${fixtureServer.origin}/cases/search`)
 
     await expect(
       adapter.readCase({ kind: 'EXTERNAL_ID', value: 'NLG-TEST-UNEXPECTED' }),
@@ -144,11 +119,7 @@ describe('National Life deterministic adapter', () => {
   it('returns a typed selector failure for the changed layout', async () => {
     const { session } = await createFakeBrowserSession({ baseUrl: fixtureServer.origin })
     const adapter = createAdapter(session, fixtureServer.origin)
-
-    await adapter.login({
-      username: 'producer-100',
-      password: 'invented-secret',
-    })
+    await session.page.goto(`${fixtureServer.origin}/cases/search`)
 
     await expect(
       adapter.readCase({ kind: 'EXTERNAL_ID', value: 'NLG-TEST-CHANGED' }),
@@ -157,29 +128,26 @@ describe('National Life deterministic adapter', () => {
     })
   })
 
-  it('performs no POST, PUT, PATCH or DELETE after login', async () => {
+  it('performs no POST, PUT, PATCH or DELETE while reading cases', async () => {
     const { session, requests } = await createFakeBrowserSession({ baseUrl: fixtureServer.origin })
     const adapter = createAdapter(session, fixtureServer.origin)
-
-    await adapter.login({
-      username: 'producer-100',
-      password: 'invented-secret',
-    })
+    await session.page.goto(`${fixtureServer.origin}/cases/search`)
 
     await adapter.readCase({ kind: 'EXTERNAL_ID', value: 'NLG-TEST-1001' })
 
-    expect(requests.filter((request) => request.method === 'POST')).toHaveLength(1)
-
-    const followUpMethods = requests.slice(2).map((request) => request.method)
-    expect(followUpMethods).toEqual(['GET', 'GET', 'GET', 'GET'])
+    expect(requests.every((request) => request.method === 'GET')).toBe(true)
   })
 })
 
-function createAdapter(session: Awaited<ReturnType<typeof createFakeBrowserSession>>['session'], origin: string) {
+function createAdapter(
+  session: BrowserSession,
+  origin: string,
+) {
   return new NationalLifeAdapter(session, {
     carrierId: 'NATIONAL_LIFE',
     loginUrl: `${origin}/login`,
     caseSearchUrl: `${origin}/cases/search`,
+    allowedOrigins: [origin],
     now: () => new Date('2026-07-27T12:34:56.000Z'),
   })
 }
