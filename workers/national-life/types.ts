@@ -1,10 +1,5 @@
 import type { Browser, BrowserContext, Page } from 'playwright-core'
 
-export type NationalLifeCredentials = Readonly<{
-  username: string
-  password: string
-}>
-
 export type NationalLifeCaseObservation = {
   externalApplicationId: string
   carrierStatus: string

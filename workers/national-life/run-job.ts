@@ -1,44 +1,56 @@
-import { decryptCredential } from '../../lib/national-life/credential-crypto'
-import { decryptMfaContinuation, encryptMfaContinuation, type MfaContinuation } from '../../lib/national-life/continuation-crypto'
+import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
+import {
+  decryptBrowserContext,
+  type EncryptedBrowserSecret,
+} from '../../lib/national-life/browser-context-crypto'
 import type { NationalLifeEnv } from '../../lib/national-life/env'
-import type { BrowserJobRecord, CaseReadSyncJobInput } from '../../lib/national-life/job-service'
+import type {
+  BrowserJobRecord,
+  CaseReadSyncJobInput,
+} from '../../lib/national-life/job-service'
 import type { BrowserJobState } from '../../lib/national-life/job-state'
 import { redactDiagnostic } from '../../lib/national-life/redaction'
-import type { BrowserSession, NationalLifeCaseObservation, NationalLifeCredentials } from './types'
+import type {
+  BrowserSession,
+  NationalLifeCaseObservation,
+} from './types'
 
-const MFA_CONTINUATION_TTL_MS = 5 * 60_000
 const TRANSIENT_RETRY_DELAY_MS = 2 * 60_000
-
-const CREDENTIALS_EXPIRED_CODES = new Set(['AUTHENTICATION_STATE_INVALID'])
+const AUTHENTICATION_STATE_INVALID = 'AUTHENTICATION_STATE_INVALID'
+const RECONNECT_REQUIRED = 'NATIONAL_LIFE_RECONNECT_REQUIRED'
 const MANUAL_REVIEW_CODES = new Set([
   'PORTAL_LAYOUT_CHANGED',
   'SCHEMA_VALIDATION_FAILED',
   'UNEXPECTED_APPLICATION_IDENTIFIER',
 ])
-const TRANSIENT_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EAI_AGAIN'])
+const TRANSIENT_CODES = new Set([
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'ECONNREFUSED',
+  'EAI_AGAIN',
+])
 
-export type StoredNationalLifeCredential = {
+export type StoredAgentIntegrationSession = {
+  id: string
   agentId: string
   provider: string
-  algorithm: 'aes-256-gcm'
-  keyVersion: string
-  iv: string
-  ciphertext: string
-  authTag: string
+  status: string
+  formatVersion: number
+  keyVersion: string | null
+  algorithm: string | null
+  iv: string | null
+  ciphertext: string | null
+  authTag: string | null
+  carrierExpiresAt: Date | null
+  lastConnectedAt: Date
+  lastUsedAt: Date | null
 }
-
-type NationalLifeLoginResult = { kind: 'CONNECTED' } | { kind: 'MFA_REQUIRED'; resumeHint: string }
 
 type NationalLifeJobAdapter = {
-  login(credentials: NationalLifeCredentials): Promise<NationalLifeLoginResult>
-  readCase(lookup: CaseReadSyncJobInput['lookup']): Promise<NationalLifeCaseObservation>
-}
-
-export type NationalLifeContinuationPatch = {
-  keyVersion: string
-  iv: string
-  ciphertext: string
-  authTag: string
+  assertAuthenticated(): Promise<void>
+  readCase(
+    lookup: CaseReadSyncJobInput['lookup'],
+  ): Promise<NationalLifeCaseObservation>
 }
 
 export type NationalLifeJobStore = {
@@ -51,10 +63,7 @@ export type NationalLifeJobStore = {
     safeErrorCode?: string
     safeErrorDetail?: unknown
     availableAt?: Date
-    continuation?: NationalLifeContinuationPatch
-    continuationExpiresAt?: Date | null
   }): Promise<void>
-  clearContinuation(jobId: string): Promise<void>
 }
 
 export type NationalLifeRunJobDeps = {
@@ -62,11 +71,18 @@ export type NationalLifeRunJobDeps = {
   workerId: string
   now: () => Date
   jobStore: NationalLifeJobStore
-  credentialStore: {
-    findForAgent(agentId: string, provider: string): Promise<StoredNationalLifeCredential | null>
+  sessionStore: {
+    findForAgent(
+      agentId: string,
+      provider: string,
+    ): Promise<StoredAgentIntegrationSession | null>
+    markUsed(sessionId: string, usedAt: Date): Promise<void>
+    invalidate(agentId: string, provider: string): Promise<void>
   }
-  createSession(): Promise<BrowserSession>
-  reconnectSession(continuation: MfaContinuation): Promise<BrowserSession>
+  decryptContext?(
+    storedSession: StoredAgentIntegrationSession,
+  ): SessionContext
+  createSession(sessionContext: SessionContext): Promise<BrowserSession>
   createAdapter(session: BrowserSession): NationalLifeJobAdapter
   applyCaseObservation(input: {
     agentId: string
@@ -74,17 +90,29 @@ export type NationalLifeRunJobDeps = {
     applicationId: string
     jobId: string
     observation: NationalLifeCaseObservation
-  }): Promise<{ changed: boolean; requirementChanges: number; communicationChanges: number }>
+  }): Promise<{
+    changed: boolean
+    requirementChanges: number
+    communicationChanges: number
+  }>
 }
 
-export type RunNationalLifeJobResult = { kind: 'NOT_CLAIMED' } | { kind: 'COMPLETED' }
+export type RunNationalLifeJobResult =
+  | { kind: 'NOT_CLAIMED' }
+  | { kind: 'COMPLETED' }
 
-function isCaseReadSyncInput(input: BrowserJobRecord['input']): input is CaseReadSyncJobInput {
+function isCaseReadSyncInput(
+  input: BrowserJobRecord['input'],
+): input is CaseReadSyncJobInput {
   return 'lookup' in input
 }
 
 function getErrorCode(error: unknown): string | undefined {
-  if (error instanceof Error && 'code' in error && typeof (error as { code?: unknown }).code === 'string') {
+  if (
+    error instanceof Error &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+  ) {
     return (error as { code: string }).code
   }
   return undefined
@@ -97,39 +125,104 @@ function getErrorSafeDetail(error: unknown): unknown {
   return undefined
 }
 
-function buildContinuationSecret(job: BrowserJobRecord): NationalLifeContinuationPatch | undefined {
-  if (!job.continuationKeyVersion || !job.continuationIv || !job.continuationCiphertext || !job.continuationAuthTag) {
-    return undefined
+function getSessionCryptoConfig(env: NationalLifeEnv) {
+  const current = env as NationalLifeEnv & {
+    sessionScopeId?: string
+    sessionKeys?: Record<string, string>
   }
-
   return {
-    keyVersion: job.continuationKeyVersion,
-    iv: job.continuationIv,
-    ciphertext: job.continuationCiphertext,
-    authTag: job.continuationAuthTag,
+    scopeId: current.sessionScopeId ?? env.credentialScopeId,
+    keys: current.sessionKeys ?? env.credentialKeys,
   }
 }
 
+function encryptedContextFromSession(
+  session: StoredAgentIntegrationSession,
+): EncryptedBrowserSecret | null {
+  if (
+    session.status !== 'CONNECTED' ||
+    session.formatVersion !== 1 ||
+    !session.keyVersion ||
+    session.algorithm !== 'aes-256-gcm' ||
+    !session.iv ||
+    !session.ciphertext ||
+    !session.authTag
+  ) {
+    return null
+  }
+  return {
+    keyVersion: session.keyVersion,
+    algorithm: 'aes-256-gcm',
+    iv: session.iv,
+    ciphertext: session.ciphertext,
+    authTag: session.authTag,
+  }
+}
+
+function decryptStoredContext(
+  session: StoredAgentIntegrationSession,
+  env: NationalLifeEnv,
+) {
+  const encrypted = encryptedContextFromSession(session)
+  if (!encrypted) {
+    throw new Error('Stored National Life session is incomplete')
+  }
+  const crypto = getSessionCryptoConfig(env)
+  return decryptBrowserContext(
+    encrypted,
+    {
+      agentId: session.agentId,
+      scopeId: crypto.scopeId,
+      provider: session.provider,
+      purpose: 'AUTHENTICATED_BROWSER_CONTEXT',
+      formatVersion: 1,
+    },
+    crypto.keys,
+  )
+}
+
+function isUsableSession(
+  session: StoredAgentIntegrationSession | null,
+  now: Date,
+) {
+  return Boolean(
+    session &&
+      encryptedContextFromSession(session) &&
+      (!session.carrierExpiresAt || session.carrierExpiresAt > now),
+  )
+}
+
+async function requestReconnect(
+  job: BrowserJobRecord,
+  deps: Pick<NationalLifeRunJobDeps, 'jobStore' | 'sessionStore'>,
+) {
+  await deps.sessionStore.invalidate(job.agentId, job.provider)
+  await deps.jobStore.transitionJob({
+    jobId: job.id,
+    from: 'RUNNING',
+    to: 'ACTION_REQUIRED',
+    safeErrorCode: RECONNECT_REQUIRED,
+  })
+}
+
 async function handleFailure(
-  jobId: string,
+  job: BrowserJobRecord,
   error: unknown,
-  deps: Pick<NationalLifeRunJobDeps, 'jobStore' | 'now'>,
+  deps: Pick<
+    NationalLifeRunJobDeps,
+    'jobStore' | 'sessionStore' | 'now'
+  >,
 ): Promise<void> {
   const code = getErrorCode(error)
 
-  if (code && CREDENTIALS_EXPIRED_CODES.has(code)) {
-    await deps.jobStore.transitionJob({
-      jobId,
-      from: 'RUNNING',
-      to: 'CREDENTIALS_EXPIRED',
-      safeErrorCode: 'CREDENTIALS_EXPIRED',
-    })
+  if (code === AUTHENTICATION_STATE_INVALID) {
+    await requestReconnect(job, deps)
     return
   }
 
   if (code && MANUAL_REVIEW_CODES.has(code)) {
     await deps.jobStore.transitionJob({
-      jobId,
+      jobId: job.id,
       from: 'RUNNING',
       to: 'MANUAL_REVIEW',
       safeErrorCode: code,
@@ -140,7 +233,7 @@ async function handleFailure(
 
   if (code && TRANSIENT_CODES.has(code)) {
     await deps.jobStore.transitionJob({
-      jobId,
+      jobId: job.id,
       from: 'RUNNING',
       to: 'RETRYABLE',
       safeErrorCode: 'TRANSIENT_WORKER_FAILURE',
@@ -150,7 +243,7 @@ async function handleFailure(
   }
 
   await deps.jobStore.transitionJob({
-    jobId,
+    jobId: job.id,
     from: 'RUNNING',
     to: 'FAILED',
     safeErrorCode: 'UNEXPECTED_WORKER_FAILURE',
@@ -177,75 +270,38 @@ export async function runNationalLifeJob(
     return { kind: 'COMPLETED' }
   }
 
-  const { input } = job
-  let session: BrowserSession | undefined
-  let preserveForMfa = false
+  const storedSession = await deps.sessionStore.findForAgent(
+    job.agentId,
+    job.provider,
+  )
+  if (!isUsableSession(storedSession, deps.now())) {
+    await requestReconnect(job, deps)
+    return { kind: 'COMPLETED' }
+  }
+
+  let sessionContext: SessionContext
+  try {
+    sessionContext = deps.decryptContext
+      ? deps.decryptContext(storedSession!)
+      : decryptStoredContext(storedSession!, deps.env)
+  } catch {
+    await requestReconnect(job, deps)
+    return { kind: 'COMPLETED' }
+  }
+
+  let browserSession: BrowserSession | undefined
 
   try {
-    const existingContinuation = buildContinuationSecret(job)
-    let observation: NationalLifeCaseObservation
+    browserSession = await deps.createSession(sessionContext)
+    const adapter = deps.createAdapter(browserSession)
+    await adapter.assertAuthenticated()
+    await deps.sessionStore.markUsed(storedSession!.id, deps.now())
 
-    if (existingContinuation) {
-      const continuation = decryptMfaContinuation(
-        { algorithm: 'aes-256-gcm', ...existingContinuation },
-        { agentId: job.agentId, jobId: job.id, scopeId: deps.env.credentialScopeId },
-        deps.env.credentialKeys,
-        { now: deps.now },
-      )
-
-      session = await deps.reconnectSession(continuation)
-      const adapter = deps.createAdapter(session)
-      observation = await adapter.readCase(input.lookup)
-    } else {
-      const stored = await deps.credentialStore.findForAgent(job.agentId, job.provider)
-
-      if (!stored) {
-        await deps.jobStore.transitionJob({
-          jobId: job.id,
-          from: 'RUNNING',
-          to: 'CREDENTIALS_EXPIRED',
-          safeErrorCode: 'CREDENTIALS_MISSING',
-        })
-        return { kind: 'COMPLETED' }
-      }
-
-      const credentials = decryptCredential(
-        stored,
-        { agentId: job.agentId, scopeId: deps.env.credentialScopeId, provider: job.provider },
-        deps.env.credentialKeys,
-      )
-
-      session = await deps.createSession()
-      const adapter = deps.createAdapter(session)
-      const loginResult = await adapter.login(credentials)
-
-      if (loginResult.kind === 'MFA_REQUIRED') {
-        const expiresAt = new Date(deps.now().getTime() + MFA_CONTINUATION_TTL_MS)
-        const encrypted = encryptMfaContinuation(
-          { steelSessionId: session.steelSessionId, debugUrl: session.debugUrl, expiresAt: expiresAt.toISOString() },
-          { agentId: job.agentId, jobId: job.id, scopeId: deps.env.credentialScopeId },
-          { version: deps.env.credentialKeyVersion, base64Key: deps.env.credentialKeys[deps.env.credentialKeyVersion] },
-        )
-
-        preserveForMfa = true
-        await deps.jobStore.transitionJob({
-          jobId: job.id,
-          from: 'RUNNING',
-          to: 'WAITING_FOR_MFA',
-          result: { resumeHint: loginResult.resumeHint, continuationExpiresAt: expiresAt.toISOString() },
-          continuation: encrypted,
-          continuationExpiresAt: expiresAt,
-        })
-        return { kind: 'COMPLETED' }
-      }
-
-      observation = await adapter.readCase(input.lookup)
-    }
-
+    const observation = await adapter.readCase(job.input.lookup)
     const syncResult = await deps.applyCaseObservation({
       agentId: job.agentId,
-      caseId: input.caseId,
-      applicationId: input.applicationId,
+      caseId: job.input.caseId,
+      applicationId: job.input.applicationId,
       jobId: job.id,
       observation,
     })
@@ -256,45 +312,11 @@ export async function runNationalLifeJob(
       to: 'SUCCEEDED',
       result: syncResult,
     })
-
-    return { kind: 'COMPLETED' }
   } catch (error) {
-    await handleFailure(job.id, error, deps)
-    return { kind: 'COMPLETED' }
+    await handleFailure(job, error, deps)
   } finally {
-    if (session) {
-      if (preserveForMfa) {
-        await session.disconnect()
-      } else {
-        await session.close()
-      }
-    }
-  }
-}
-
-export async function releaseNationalLifeMfaContinuation(
-  job: BrowserJobRecord,
-  deps: {
-    env: NationalLifeEnv
-    now: () => Date
-    jobStore: Pick<NationalLifeJobStore, 'clearContinuation'>
-    reconnectSession: (continuation: MfaContinuation) => Promise<BrowserSession>
-  },
-): Promise<void> {
-  const continuationSecret = buildContinuationSecret(job)
-
-  if (!continuationSecret) {
-    return
+    await browserSession?.close()
   }
 
-  const continuation = decryptMfaContinuation(
-    { algorithm: 'aes-256-gcm', ...continuationSecret },
-    { agentId: job.agentId, jobId: job.id, scopeId: deps.env.credentialScopeId },
-    deps.env.credentialKeys,
-    { now: deps.now, allowExpired: true },
-  )
-
-  const session = await deps.reconnectSession(continuation)
-  await session.close()
-  await deps.jobStore.clearContinuation(job.id)
+  return { kind: 'COMPLETED' }
 }
