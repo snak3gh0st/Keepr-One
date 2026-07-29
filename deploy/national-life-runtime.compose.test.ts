@@ -6,5 +6,6 @@ describe('National Life Steel runtime compose', () => {
     const compose = readFileSync('deploy/national-life-runtime.compose.yaml', 'utf8')
 
     expect(compose).toContain('/var/lib/nginx:rw,noexec,nosuid,size=64m')
+    expect(compose).toContain('access_log off;')
   })
 })
