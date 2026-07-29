@@ -105,19 +105,29 @@ export class NationalLifeAdapter {
         )
       }
 
-      await this.requireCarrierMarker()
+      const carrierMarkerCount = await page
+        .locator(`[data-carrier-id="${this.config.carrierId}"]`)
+        .count()
 
-      if (await this.hasPortalPage('login')) {
-        return { kind: 'AWAITING_LOGIN', origin: currentUrl.origin }
-      }
-      if (await this.hasPortalPage('mfa')) {
-        return { kind: 'AWAITING_MFA', origin: currentUrl.origin }
-      }
-      if (await this.hasPortalPage('case-results')) {
-        return { kind: 'AUTHENTICATED', origin: currentUrl.origin }
+      if (carrierMarkerCount === 1) {
+        if (await this.hasPortalPage('login')) {
+          return { kind: 'AWAITING_LOGIN', origin: currentUrl.origin }
+        }
+        if (await this.hasPortalPage('mfa')) {
+          return { kind: 'AWAITING_MFA', origin: currentUrl.origin }
+        }
+        if (await this.hasPortalPage('case-results')) {
+          return { kind: 'AUTHENTICATED', origin: currentUrl.origin }
+        }
+
+        throw this.toPortalLayoutChanged()
       }
 
-      throw this.toPortalLayoutChanged()
+      if (carrierMarkerCount > 1) {
+        throw this.toPortalLayoutChanged()
+      }
+
+      return this.classifyHostedAuthentication(currentUrl)
     } catch (error) {
       throw this.normalizeError(error)
     }
@@ -233,6 +243,38 @@ export class NationalLifeAdapter {
     )
   }
 
+  private classifyHostedAuthentication(
+    currentUrl: URL,
+  ): NationalLifeAuthenticationState {
+    const loginUrl = new URL(this.config.loginUrl)
+    const returnUrl = resolveSameOriginReturnUrl(loginUrl)
+
+    if (!returnUrl) {
+      throw this.toPortalLayoutChanged()
+    }
+
+    if (currentUrl.origin !== loginUrl.origin) {
+      return { kind: 'AWAITING_LOGIN', origin: currentUrl.origin }
+    }
+
+    const loginDirectory = loginUrl.pathname.slice(
+      0,
+      loginUrl.pathname.lastIndexOf('/') + 1,
+    )
+    if (
+      currentUrl.pathname === loginUrl.pathname ||
+      currentUrl.pathname.startsWith(loginDirectory)
+    ) {
+      return { kind: 'AWAITING_LOGIN', origin: currentUrl.origin }
+    }
+
+    if (isPathWithin(currentUrl.pathname, returnUrl.pathname)) {
+      return { kind: 'AUTHENTICATED', origin: currentUrl.origin }
+    }
+
+    throw this.toPortalLayoutChanged()
+  }
+
   private async requireText(locator: AdapterLocator, label: string) {
     const count = await locator.count()
     if (count !== 1) {
@@ -295,4 +337,24 @@ function hasErrorCode(error: unknown, code: string): error is Error & { code: st
 
 function normalizeWhitespace(value: string | null | undefined) {
   return value?.replace(/\s+/g, ' ').trim() ?? null
+}
+
+function resolveSameOriginReturnUrl(loginUrl: URL) {
+  const returnUrlValue = loginUrl.searchParams.get('returnUrl')
+  if (!returnUrlValue) {
+    return null
+  }
+
+  const returnUrl = new URL(returnUrlValue, loginUrl.origin)
+  return returnUrl.origin === loginUrl.origin ? returnUrl : null
+}
+
+function isPathWithin(pathname: string, parentPathname: string) {
+  const normalizedParent = parentPathname.endsWith('/')
+    ? parentPathname
+    : `${parentPathname}/`
+  return (
+    pathname === normalizedParent.slice(0, -1) ||
+    pathname.startsWith(normalizedParent)
+  )
 }

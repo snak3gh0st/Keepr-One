@@ -52,6 +52,45 @@ describe('National Life deterministic adapter', () => {
     await expect(adapter.assertAuthenticated()).resolves.toBeUndefined()
   })
 
+  it('keeps the real Auth0 page open while the agent completes login or MFA', async () => {
+    const locator = vi.fn(() => ({ count: vi.fn(async () => 0) }))
+    const session = {
+      page: {
+        url: () => 'https://nlg-prod.auth0.com/login',
+        locator,
+      },
+    } as unknown as BrowserSession
+    const adapter = createProductionAdapter(session)
+
+    await expect(adapter.classifyAuthenticationState()).resolves.toEqual({
+      kind: 'AWAITING_LOGIN',
+      origin: 'https://nlg-prod.auth0.com',
+    })
+  })
+
+  it('waits through the National Life callback before accepting the agent portal', async () => {
+    let currentUrl = 'https://www.nationallife.com/agent/auth/logincallback'
+    const locator = vi.fn(() => ({ count: vi.fn(async () => 0) }))
+    const session = {
+      page: {
+        url: () => currentUrl,
+        locator,
+      },
+    } as unknown as BrowserSession
+    const adapter = createProductionAdapter(session)
+
+    await expect(adapter.classifyAuthenticationState()).resolves.toEqual({
+      kind: 'AWAITING_LOGIN',
+      origin: 'https://www.nationallife.com',
+    })
+
+    currentUrl = 'https://www.nationallife.com/agent/'
+    await expect(adapter.classifyAuthenticationState()).resolves.toEqual({
+      kind: 'AUTHENTICATED',
+      origin: 'https://www.nationallife.com',
+    })
+  })
+
   it('rejects a non-allowlisted current origin before reading page markers', async () => {
     const locator = vi.fn(() => ({ count: vi.fn(async () => 1) }))
     const session = {
@@ -149,5 +188,18 @@ function createAdapter(
     caseSearchUrl: `${origin}/cases/search`,
     allowedOrigins: [origin],
     now: () => new Date('2026-07-27T12:34:56.000Z'),
+  })
+}
+
+function createProductionAdapter(session: BrowserSession) {
+  return new NationalLifeAdapter(session, {
+    carrierId: 'NATIONAL_LIFE',
+    loginUrl:
+      'https://www.nationallife.com/agent/auth/login?returnUrl=%2Fagent%2F',
+    caseSearchUrl: 'https://www.nationallife.com/cases/search',
+    allowedOrigins: [
+      'https://www.nationallife.com',
+      'https://nlg-prod.auth0.com',
+    ],
   })
 }
