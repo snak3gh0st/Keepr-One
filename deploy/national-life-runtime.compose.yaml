@@ -99,6 +99,7 @@ services:
       national-life-private: {}
     labels:
       - traefik.enable=true
+      - traefik.docker.network=coolify
       - traefik.http.middlewares.keeprone-nlgviewer-https.redirectscheme.scheme=https
       - traefik.http.routers.keeprone-nlgviewer-http.entrypoints=http
       - traefik.http.routers.keeprone-nlgviewer-http.middlewares=keeprone-nlgviewer-https
