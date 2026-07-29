@@ -1,4 +1,7 @@
 FROM ghcr.io/steel-dev/steel-browser@sha256:b0a3253a96a11e861ccfbb61ccb6679b801b94070ddf5463c29f4df97395d85d
 
 COPY deploy/national-life-steel-privacy-patch.mjs /tmp/national-life-steel-privacy-patch.mjs
-RUN node /tmp/national-life-steel-privacy-patch.mjs && rm -f /tmp/national-life-steel-privacy-patch.mjs
+COPY deploy/national-life-steel-quality-patch.mjs /tmp/national-life-steel-quality-patch.mjs
+RUN node /tmp/national-life-steel-privacy-patch.mjs \
+  && node /tmp/national-life-steel-quality-patch.mjs \
+  && rm -f /tmp/national-life-steel-privacy-patch.mjs /tmp/national-life-steel-quality-patch.mjs
