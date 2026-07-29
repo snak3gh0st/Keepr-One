@@ -133,10 +133,10 @@ export function NationalLifeBrowserModal({
 
         <div className="relative min-h-0 flex-1 bg-white">
           {viewerUrl ? (
-            <div className="grid h-full w-full place-items-center overflow-hidden bg-[#101512] p-2 sm:p-4">
+            <div className="grid h-full w-full place-items-center overflow-hidden bg-[#101512] p-2 sm:p-4 [container-type:size]">
               <div
                 data-testid="national-life-viewer-stage"
-                className="aspect-[16/10] h-auto max-h-[1000px] w-full max-w-[1600px] overflow-hidden bg-white shadow-2xl"
+                className="aspect-[16/10] w-[min(100cqw,160cqh,1600px)] max-h-[1000px] overflow-hidden bg-white shadow-2xl"
               >
                 <iframe
                   title="Portal oficial da National Life"
