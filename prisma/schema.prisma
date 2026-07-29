@@ -305,7 +305,9 @@ model AgentIntegrationSession {
   id                 String   @id @default(cuid())
   agentId            String
   agent              Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope    String   @default("SINGLE_DEPLOYMENT")
   provider           String
+  purpose            String   @default("CARRIER_SESSION")
   status             String   @default("CONNECTED")
   formatVersion      Int      @default(1)
   keyVersion         String?
@@ -319,7 +321,7 @@ model AgentIntegrationSession {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  @@unique([agentId, provider])
+  @@unique([agentId, deploymentScope, provider, purpose])
   @@index([provider, status])
 }
 
@@ -327,7 +329,9 @@ model NationalLifeConnectionAttempt {
   id                String   @id @default(cuid())
   agentId           String
   agent             Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope   String   @default("SINGLE_DEPLOYMENT")
   provider          String
+  purpose           String   @default("INTERACTIVE_CONNECTION_ATTEMPT")
   state             String
   runtimeKeyVersion String?
   runtimeAlgorithm  String?
@@ -343,7 +347,7 @@ model NationalLifeConnectionAttempt {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  @@unique([agentId, provider])
+  @@unique([agentId, deploymentScope, provider, purpose])
   @@index([state, expiresAt])
   @@index([leaseExpiresAt])
 }

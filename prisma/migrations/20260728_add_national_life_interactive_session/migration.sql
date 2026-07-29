@@ -5,7 +5,9 @@ ALTER TYPE "BrowserJobState" ADD VALUE 'ACTION_REQUIRED';
 CREATE TABLE "AgentIntegrationSession" (
     "id" TEXT NOT NULL,
     "agentId" TEXT NOT NULL,
+    "deploymentScope" TEXT NOT NULL DEFAULT 'SINGLE_DEPLOYMENT',
     "provider" TEXT NOT NULL,
+    "purpose" TEXT NOT NULL DEFAULT 'CARRIER_SESSION',
     "status" TEXT NOT NULL DEFAULT 'CONNECTED',
     "formatVersion" INTEGER NOT NULL DEFAULT 1,
     "keyVersion" TEXT,
@@ -26,7 +28,9 @@ CREATE TABLE "AgentIntegrationSession" (
 CREATE TABLE "NationalLifeConnectionAttempt" (
     "id" TEXT NOT NULL,
     "agentId" TEXT NOT NULL,
+    "deploymentScope" TEXT NOT NULL DEFAULT 'SINGLE_DEPLOYMENT',
     "provider" TEXT NOT NULL,
+    "purpose" TEXT NOT NULL DEFAULT 'INTERACTIVE_CONNECTION_ATTEMPT',
     "state" TEXT NOT NULL,
     "runtimeKeyVersion" TEXT,
     "runtimeAlgorithm" TEXT,
@@ -49,7 +53,7 @@ CREATE TABLE "NationalLifeConnectionAttempt" (
 CREATE INDEX "AgentIntegrationSession_provider_status_idx" ON "AgentIntegrationSession"("provider", "status");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "AgentIntegrationSession_agentId_provider_key" ON "AgentIntegrationSession"("agentId", "provider");
+CREATE UNIQUE INDEX "AgentIntegrationSession_agentId_deploymentScope_provider_pu_key" ON "AgentIntegrationSession"("agentId", "deploymentScope", "provider", "purpose");
 
 -- CreateIndex
 CREATE INDEX "NationalLifeConnectionAttempt_state_expiresAt_idx" ON "NationalLifeConnectionAttempt"("state", "expiresAt");
@@ -58,7 +62,7 @@ CREATE INDEX "NationalLifeConnectionAttempt_state_expiresAt_idx" ON "NationalLif
 CREATE INDEX "NationalLifeConnectionAttempt_leaseExpiresAt_idx" ON "NationalLifeConnectionAttempt"("leaseExpiresAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "NationalLifeConnectionAttempt_agentId_provider_key" ON "NationalLifeConnectionAttempt"("agentId", "provider");
+CREATE UNIQUE INDEX "NationalLifeConnectionAttempt_agentId_deploymentScope_provi_key" ON "NationalLifeConnectionAttempt"("agentId", "deploymentScope", "provider", "purpose");
 
 -- AddForeignKey
 ALTER TABLE "AgentIntegrationSession" ADD CONSTRAINT "AgentIntegrationSession_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
