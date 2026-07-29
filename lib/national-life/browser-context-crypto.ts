@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
-import type { SessionContext } from 'steel-sdk'
+import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
 import { z } from 'zod'
 
 export type BrowserContextBinding = {

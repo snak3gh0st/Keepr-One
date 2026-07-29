@@ -1,4 +1,4 @@
-import type { SessionContext } from 'steel-sdk'
+import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
 import {
   decryptAttemptRuntime,
   encryptAttemptRuntime,

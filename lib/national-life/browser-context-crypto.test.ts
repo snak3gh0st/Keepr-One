@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import type { SessionContext } from 'steel-sdk'
+import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
 import { describe, expect, it } from 'vitest'
 import {
   decryptAttemptRuntime,

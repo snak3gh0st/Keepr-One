@@ -1,6 +1,7 @@
 export type BrowserJobState =
   | 'QUEUED'
   | 'RUNNING'
+  | 'ACTION_REQUIRED'
   | 'WAITING_FOR_MFA'
   | 'WAITING_FOR_REVIEW'
   | 'RETRYABLE'
@@ -14,6 +15,7 @@ const allowedBrowserJobTransitions: Record<BrowserJobState, readonly BrowserJobS
   QUEUED: ['RUNNING', 'CANCELLED'],
   RUNNING: [
     'WAITING_FOR_MFA',
+    'ACTION_REQUIRED',
     'WAITING_FOR_REVIEW',
     'RETRYABLE',
     'CREDENTIALS_EXPIRED',
@@ -23,6 +25,7 @@ const allowedBrowserJobTransitions: Record<BrowserJobState, readonly BrowserJobS
     'CANCELLED',
   ],
   WAITING_FOR_MFA: ['QUEUED', 'CREDENTIALS_EXPIRED', 'MANUAL_REVIEW', 'FAILED', 'CANCELLED'],
+  ACTION_REQUIRED: ['QUEUED', 'CANCELLED'],
   WAITING_FOR_REVIEW: ['QUEUED', 'MANUAL_REVIEW', 'FAILED', 'CANCELLED'],
   RETRYABLE: ['QUEUED', 'MANUAL_REVIEW', 'FAILED', 'CANCELLED'],
   CREDENTIALS_EXPIRED: ['QUEUED', 'CANCELLED'],

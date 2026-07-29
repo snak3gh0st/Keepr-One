@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import type { Socket } from 'node:net'
+import type { Duplex } from 'node:stream'
 import httpProxy from 'http-proxy'
 import type {
   AttemptRuntime,
@@ -286,7 +286,7 @@ function unauthorized(response: ServerResponse) {
   response.end('Unauthorized')
 }
 
-function rejectUpgrade(socket: Socket, status: 401 | 404 | 502) {
+function rejectUpgrade(socket: Duplex, status: 401 | 404 | 502) {
   if (socket.destroyed) {
     return
   }

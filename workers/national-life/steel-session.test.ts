@@ -1,5 +1,5 @@
 import type { NationalLifeEnv } from '../../lib/national-life/env'
-import type { SessionContext } from 'steel-sdk'
+import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
 import { describe, expect, it } from 'vitest'
 import {
   assertAllowedNavigation,

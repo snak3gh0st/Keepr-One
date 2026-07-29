@@ -1,5 +1,6 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
-import { Steel, type SessionContext } from 'steel-sdk'
+import { Steel } from 'steel-sdk'
+import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
 import {
   NATIONAL_LIFE_CONNECTION_ATTEMPT_TTL_MS,
   NATIONAL_LIFE_JOB_TIMEOUT_MS,
