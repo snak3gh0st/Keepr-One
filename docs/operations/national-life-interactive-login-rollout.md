@@ -108,3 +108,15 @@ restore, runtime, TypeScript, lint scope, and container images. A fixture E2E,
 real National Life login, provider authorization, no-recording runtime proof,
 and production deployment remain external gates; this document does not claim
 they were completed locally.
+
+## Viewer quality profile (1600×1000 / JPEG 92)
+
+Existing connection attempts retain their original Steel dimensions. After deployment, cancel any old attempt and start a new one.
+
+1. On `btapps`, update the dedicated runtime source to the merged commit and rebuild the `national-life-steel` and `national-life-runtime` services with the `keeprone-national-life` Compose project.
+2. Confirm both containers are running and the runtime reaches `http://national-life-steel:3000` only on the private network.
+3. Start a new Keepr One connection. Confirm the complete National Life/Auth0 page is sharp, centered, and uncropped; small viewports must scale down proportionally.
+4. Click username, password, and Login controls to verify pointer mapping. The agent enters credentials and MFA only in the carrier page.
+5. Confirm `AUTHENTICATED`, modal closure, encrypted session persistence, and a successful read-only worker reuse.
+
+Rollback: revert the viewer-quality PR, rebuild the same dedicated services, and use a new connection attempt. Existing encrypted contexts are unaffected.
