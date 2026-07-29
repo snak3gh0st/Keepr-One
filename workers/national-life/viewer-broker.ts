@@ -83,7 +83,7 @@ export function createNationalLifeViewerBroker(
       (requestUrl.pathname === '/viewer' ||
         requestUrl.pathname.startsWith('/viewer/'))
     ) {
-      const target = await resolveViewerTarget(request, deps)
+      const target = await resolveViewerTarget(request, deps, 'http')
       if (!target) {
         unauthorized(response)
         return
@@ -121,7 +121,7 @@ export function createNationalLifeViewerBroker(
       return
     }
 
-    const target = await resolveViewerTarget(request, deps)
+    const target = await resolveViewerTarget(request, deps, 'websocket')
     if (!target) {
       rejectUpgrade(socket, 401)
       return
@@ -197,6 +197,7 @@ async function handleBootstrap(
 async function resolveViewerTarget(
   request: IncomingMessage,
   deps: NationalLifeViewerBrokerDeps,
+  transport: 'http' | 'websocket',
 ) {
   const token = readCookie(request.headers.cookie, VIEWER_COOKIE)
   if (!token) {
@@ -236,8 +237,20 @@ async function resolveViewerTarget(
     }
 
     const target = new URL(runtime.debugUrl)
-    target.searchParams.set('interactive', 'true')
-    target.searchParams.set('showControls', 'false')
+    if (transport === 'websocket') {
+      const requestUrl = new URL(request.url ?? '/', 'http://viewer.internal')
+      target.pathname = '/v1/sessions/cast'
+      target.search = ''
+      for (const parameter of ['pageId', 'tabInfo']) {
+        const value = requestUrl.searchParams.get(parameter)
+        if (value) {
+          target.searchParams.set(parameter, value)
+        }
+      }
+    } else {
+      target.searchParams.set('interactive', 'true')
+      target.searchParams.set('showControls', 'false')
+    }
     return target
   } catch {
     return null
@@ -272,7 +285,7 @@ const permissionsPolicy =
   'camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=()'
 
 function buildCsp(appOrigin: string) {
-  return `default-src 'self'; frame-ancestors ${appOrigin}; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss:; font-src 'self' data:`
+  return `default-src 'self'; frame-ancestors ${appOrigin}; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss:; font-src 'self' data:`
 }
 
 function setPrivateHeaders(response: ServerResponse) {
