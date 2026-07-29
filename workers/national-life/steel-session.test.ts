@@ -1,6 +1,6 @@
 import type { NationalLifeEnv } from '../../lib/national-life/env'
 import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const connectOverCDP = vi.hoisted(() => vi.fn())
 
@@ -193,15 +193,30 @@ async function invokeRouteHandler(handler: RouteHandler, requestUrl: string) {
 }
 
 describe('National Life Steel session boundary', () => {
-  it('uses a localhost host header when attaching through Steel\'s private CDP proxy', async () => {
-    const browser = { contexts: () => [] }
-    connectOverCDP.mockResolvedValueOnce(browser)
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    connectOverCDP.mockReset()
+  })
 
-    await expect(defaultConnectBrowser('ws://national-life-steel:3000/')).resolves.toBe(browser)
+  it('discovers and rewrites Steel\'s private browser websocket endpoint', async () => {
+    connectOverCDP.mockImplementationOnce(async (endpoint: string) => ({
+      endpoint,
+      contexts: () => [],
+    }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      webSocketDebuggerUrl: 'ws://127.0.0.1/devtools/browser/browser-1',
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })))
 
-    expect(connectOverCDP).toHaveBeenCalledWith('ws://national-life-steel:3000/', {
-      headers: { Host: 'localhost' },
-    })
+    const browser = await defaultConnectBrowser('ws://national-life-steel:9223/') as unknown as {
+      endpoint: string
+    }
+
+    expect(browser.endpoint).toBe(
+      'ws://national-life-steel:9223/devtools/browser/browser-1',
+    )
   })
 
   it('creates an interactive real Steel session with the exact safe options', async () => {
