@@ -117,6 +117,45 @@ function parseHttpsUrl(name: string, value: string) {
   return parsed
 }
 
+function parseSteelBaseUrl(value: string) {
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    throw new Error(
+      'STEEL_BASE_URL must be an HTTPS URL or the private national-life-steel Docker service URL',
+    )
+  }
+
+  if (value.includes('*')) {
+    throw new Error(
+      'STEEL_BASE_URL must be an HTTPS URL or the private national-life-steel Docker service URL',
+    )
+  }
+
+  if (parsed.protocol === 'https:') {
+    return parsed
+  }
+
+  const isPrivateDockerService =
+    parsed.protocol === 'http:' &&
+    parsed.hostname === 'national-life-steel' &&
+    parsed.port === '3000' &&
+    parsed.username === '' &&
+    parsed.password === '' &&
+    parsed.pathname === '/' &&
+    parsed.search === '' &&
+    parsed.hash === ''
+
+  if (!isPrivateDockerService) {
+    throw new Error(
+      'STEEL_BASE_URL must be an HTTPS URL or the private national-life-steel Docker service URL',
+    )
+  }
+
+  return parsed
+}
+
 function parsePortalOrigins(rawOrigins: string) {
   const origins = rawOrigins
     .split(',')
@@ -222,10 +261,7 @@ export function getNationalLifeEnv(): NationalLifeEnv {
     BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
   }
   const parsed = rawNationalLifeEnvSchema.parse(rawEnv)
-  const steelBaseUrl = parseHttpsUrl(
-    'STEEL_BASE_URL',
-    parsed.STEEL_BASE_URL,
-  )
+  const steelBaseUrl = parseSteelBaseUrl(parsed.STEEL_BASE_URL)
   const portalOrigins = parsePortalOrigins(
     parsed.NATIONAL_LIFE_PORTAL_ORIGINS,
   )

@@ -32,6 +32,31 @@ The feature remains disabled until all gates in this document pass.
 6. Enable only named pilot agents with
    `NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS`; wildcard access is forbidden.
 
+## Coolify deployment artifact
+
+Import `deploy/national-life-runtime.compose.yaml` as a separate Coolify Docker
+Compose service from the same Keepr One revision. It creates two Keepr One-owned
+services on the private `coolify` network:
+
+- `national-life-steel` is the isolated Steel Browser. It has no public route;
+  its HTTP and CDP ports are reachable only by Docker service name.
+- `national-life-runtime` is the broker/worker. Only this service receives the
+  public TLS route `https://national-life-viewer.keeprone.com`.
+
+Before starting the service, create the DNS record for the viewer hostname and
+set these Coolify service secrets: `DATABASE_URL`, `BETTER_AUTH_URL`,
+`NATIONAL_LIFE_SESSION_SCOPE_ID`, `NATIONAL_LIFE_SESSION_KEY_VERSION`,
+`NATIONAL_LIFE_SESSION_KEYS`, `NATIONAL_LIFE_VIEWER_SIGNING_KEY`, and a unique
+`NATIONAL_LIFE_RUNTIME_WORKER_ID`. Do not set `STEEL_API_KEY` for this private
+self-hosted deployment unless the reviewed Steel build is explicitly configured
+to require it.
+
+The checked-in Steel image is an immutable digest, with headful sessions and
+all known Steel logging switches disabled. That is defence in depth only: it
+does not replace the mandatory no-recording fixture proof below. Keep
+`NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED=false` in this service and in the web
+application until every production gate passes.
+
 ## Required authorized pilot
 
 Before enabling beyond the pilot, obtain confirmation that the organization's

@@ -71,6 +71,24 @@ describe('National Life secure runtime environment', () => {
     await expect(parse({ [name]: value })).rejects.toThrow(/HTTPS|origin/)
   })
 
+  it('accepts the Steel API only through a private Docker service hostname', async () => {
+    const env = await parse({
+      STEEL_BASE_URL: 'http://national-life-steel:3000',
+    })
+
+    expect(env.steelBaseUrl).toBe('http://national-life-steel:3000')
+  })
+
+  it.each([
+    'http://steel.example:3000',
+    'http://127.0.0.1:3000',
+    'http://national-life-steel:3000?target=https://example.com',
+  ])('rejects unsafe non-HTTPS Steel URL %s', async (steelBaseUrl) => {
+    await expect(parse({ STEEL_BASE_URL: steelBaseUrl })).rejects.toThrow(
+      /STEEL_BASE_URL/,
+    )
+  })
+
   it.each([
     ['NATIONAL_LIFE_SESSION_KEYS', JSON.stringify({ v1: Buffer.alloc(31).toString('base64') })],
     ['NATIONAL_LIFE_VIEWER_SIGNING_KEY', Buffer.alloc(33).toString('base64')],

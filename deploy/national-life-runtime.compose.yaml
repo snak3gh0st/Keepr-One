@@ -1,0 +1,92 @@
+# Import this file as a separate Coolify Docker Compose service. It is not part
+# of the public Keepr One web application deployment.
+#
+# Before deployment, point national-life-viewer.keeprone.com at this Coolify
+# host and configure all ${...} values in Coolify's service environment. Do not
+# publish Steel's ports or add Traefik/Caddy labels to national-life-steel.
+services:
+  national-life-steel:
+    # Pinned on 2026-07-29. Replace only with a reviewed immutable digest.
+    image: ghcr.io/steel-dev/steel-browser@sha256:b0a3253a96a11e861ccfbb61ccb6679b801b94070ddf5463c29f4df97395d85d
+    restart: unless-stopped
+    expose:
+      - "3000"
+      - "9223"
+    command: ["--no-nginx"]
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DOMAIN: national-life-steel:3000
+      USE_SSL: "false"
+      CDP_DOMAIN: national-life-steel:9223
+      CDP_REDIRECT_PORT: "9223"
+      CHROME_HEADLESS: "false"
+      LOG_LEVEL: warn
+      LOG_STORAGE_ENABLED: "false"
+      ENABLE_CDP_LOGGING: "false"
+      LOG_CUSTOM_EMIT_EVENTS: "false"
+      ENABLE_VERBOSE_LOGGING: "false"
+    mem_limit: 2g
+    pids_limit: 256
+    shm_size: 1g
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1g
+      - /data/logs:rw,noexec,nosuid,size=128m
+      - /files:rw,noexec,nosuid,size=128m
+      - /app/.cache:rw,noexec,nosuid,size=256m
+    networks:
+      coolify:
+        aliases:
+          - national-life-steel
+
+  national-life-runtime:
+    build:
+      context: ..
+      dockerfile: Dockerfile.national-life-runtime
+    restart: unless-stopped
+    depends_on:
+      - national-life-steel
+    expose:
+      - "3010"
+    environment:
+      DATABASE_URL: "${DATABASE_URL:?DATABASE_URL is required}"
+      BETTER_AUTH_URL: "${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}"
+      STEEL_BASE_URL: http://national-life-steel:3000
+      NATIONAL_LIFE_PORTAL_ORIGINS: https://www.nationallife.com,https://nlg-prod.auth0.com
+      NATIONAL_LIFE_PORTAL_LOGIN_URL: https://www.nationallife.com/agent/auth/login?returnUrl=%2Fagent%2F
+      NATIONAL_LIFE_SESSION_SCOPE_ID: "${NATIONAL_LIFE_SESSION_SCOPE_ID:?NATIONAL_LIFE_SESSION_SCOPE_ID is required}"
+      NATIONAL_LIFE_SESSION_KEY_VERSION: "${NATIONAL_LIFE_SESSION_KEY_VERSION:?NATIONAL_LIFE_SESSION_KEY_VERSION is required}"
+      NATIONAL_LIFE_SESSION_KEYS: "${NATIONAL_LIFE_SESSION_KEYS:?NATIONAL_LIFE_SESSION_KEYS is required}"
+      NATIONAL_LIFE_VIEWER_SIGNING_KEY: "${NATIONAL_LIFE_VIEWER_SIGNING_KEY:?NATIONAL_LIFE_VIEWER_SIGNING_KEY is required}"
+      NATIONAL_LIFE_VIEWER_PUBLIC_ORIGIN: https://national-life-viewer.keeprone.com
+      NATIONAL_LIFE_VIEWER_BIND_HOST: 0.0.0.0
+      NATIONAL_LIFE_VIEWER_PORT: "3010"
+      NATIONAL_LIFE_RUNTIME_WORKER_ID: "${NATIONAL_LIFE_RUNTIME_WORKER_ID:?NATIONAL_LIFE_RUNTIME_WORKER_ID is required}"
+      NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED: "false"
+      NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: ""
+    mem_limit: 768m
+    pids_limit: 128
+    networks:
+      coolify:
+        aliases:
+          - national-life-runtime
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.keeprone-nlgviewer-https.redirectscheme.scheme=https
+      - traefik.http.routers.keeprone-nlgviewer-http.entrypoints=http
+      - traefik.http.routers.keeprone-nlgviewer-http.middlewares=keeprone-nlgviewer-https
+      - traefik.http.routers.keeprone-nlgviewer-http.rule=Host(`national-life-viewer.keeprone.com`)
+      - traefik.http.routers.keeprone-nlgviewer-http.service=keeprone-nlgviewer
+      - traefik.http.routers.keeprone-nlgviewer-https.entrypoints=https
+      - traefik.http.routers.keeprone-nlgviewer-https.rule=Host(`national-life-viewer.keeprone.com`)
+      - traefik.http.routers.keeprone-nlgviewer-https.service=keeprone-nlgviewer
+      - traefik.http.routers.keeprone-nlgviewer-https.tls=true
+      - traefik.http.routers.keeprone-nlgviewer-https.tls.certresolver=letsencrypt
+      - traefik.http.services.keeprone-nlgviewer.loadbalancer.server.port=3010
+
+networks:
+  coolify:
+    external: true
+    name: coolify
