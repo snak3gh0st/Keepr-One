@@ -32,6 +32,7 @@ CREATE TABLE "NationalLifeConnectionAttempt" (
     "provider" TEXT NOT NULL,
     "purpose" TEXT NOT NULL DEFAULT 'INTERACTIVE_CONNECTION_ATTEMPT',
     "state" TEXT NOT NULL,
+    "formatVersion" INTEGER NOT NULL DEFAULT 1,
     "runtimeKeyVersion" TEXT,
     "runtimeAlgorithm" TEXT,
     "runtimeIv" TEXT,

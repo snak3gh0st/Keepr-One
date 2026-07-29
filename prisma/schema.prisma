@@ -333,6 +333,7 @@ model NationalLifeConnectionAttempt {
   provider          String
   purpose           String   @default("INTERACTIVE_CONNECTION_ATTEMPT")
   state             String
+  formatVersion     Int      @default(1)
   runtimeKeyVersion String?
   runtimeAlgorithm  String?
   runtimeIv         String?
