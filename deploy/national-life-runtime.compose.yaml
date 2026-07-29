@@ -7,7 +7,10 @@
 services:
   national-life-steel:
     # Pinned on 2026-07-29. Replace only with a reviewed immutable digest.
-    image: ghcr.io/steel-dev/steel-browser@sha256:b0a3253a96a11e861ccfbb61ccb6679b801b94070ddf5463c29f4df97395d85d
+    build:
+      context: ..
+      dockerfile: Dockerfile.national-life-steel
+    image: keeprone-national-life-steel:privacy-hardened
     restart: unless-stopped
     expose:
       - "3000"
@@ -22,12 +25,14 @@ services:
         mkdir -p /run/dbus;
         dbus-daemon --system --fork;
         Xvfb :10 -screen 0 1280x800x24 -ac +extension RANDR >/tmp/xvfb.log 2>&1 &
+        sed 's/proxy_set_header Host $$host;/proxy_set_header Host 127.0.0.1;/' /app/api/nginx.conf >/tmp/nginx.conf;
+        nginx -c /tmp/nginx.conf;
         exec /app/api/entrypoint.sh --no-nginx
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: "3000"
-      DOMAIN: national-life-steel:3000
+      DOMAIN: national-life-steel:9223
       USE_SSL: "false"
       CDP_DOMAIN: national-life-steel:9223
       CDP_REDIRECT_PORT: "9223"
