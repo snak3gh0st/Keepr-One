@@ -20,11 +20,16 @@ export function patchSteelScreencastQuality(source) {
   const firstIndex = source.indexOf(reviewedScreencastCall)
   if (
     firstIndex < 0 ||
-    source.indexOf(reviewedScreencastCall, firstIndex + reviewedScreencastCall.length) >= 0
+    source.indexOf(reviewedScreencastCall, firstIndex + reviewedScreencastCall.length) >= 0 ||
+    countOccurrences(source, 'Page.startScreencast') !== 1
   ) {
     throw new Error('Steel screencast quality did not match the reviewed Steel build')
   }
   return source.replace(reviewedScreencastCall, patchedScreencastCall)
+}
+
+function countOccurrences(source, target) {
+  return source.split(target).length - 1
 }
 
 async function patchPinnedSteelBuild() {

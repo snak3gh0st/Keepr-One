@@ -37,6 +37,13 @@ const unrelatedThumbnail = { quality: 75 }`
 const unrelatedThumbnail = { quality: 75 }`,
     `${reviewedScreencastCall}
 ${reviewedScreencastCall}`,
+    `${reviewedScreencastCall}
+await targetClient.send("Page.startScreencast", {
+                    format: "jpeg",
+                    quality: 80,
+                    maxWidth: width,
+                    maxHeight: height,
+                });`,
   ])('rejects an absent, changed, or ambiguous reviewed screencast call', (source) => {
     expect(() => patchSteelScreencastQuality(source)).toThrow(
       'Steel screencast quality did not match the reviewed Steel build',
