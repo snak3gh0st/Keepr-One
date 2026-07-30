@@ -574,3 +574,55 @@ vez de 43%.
 - **Rotas não sondadas**: `pip-contribution-increase`, os dois filhos de
   `annuity-flow-report`, `Transfer-Company-Information`, `service-forms`,
   `forecasted-incentives`, `plan-prospectus-report`.
+
+## Rapid Solve: illustration como escrita no carrier (levantado 2026-07-30)
+
+`/agent/tools/business-tools/illustrations` renderiza a ferramenta **Rapid Solve**.
+Não é grid: é formulário de cálculo. Campos observados:
+
+```
+ddlIssueState            estado de emissão
+firstName, lastName      segurado
+birthday                 data de nascimento
+ddlGender                sexo
+FaceAmount_btn                    ← resolver POR capital segurado
+Premium-DeathBenefitFocus_btn     ← resolver por prêmio, foco em benefício
+Premium-AccumulationFocus_btn     ← resolver por prêmio, foco em acumulação
+faceAmount   (number)    entrada
+premiumAmount(number)    entrada
+Strategy_dropdown, allocation     estratégia de índice
+rapid_checkbox
+get_quote    (submit)
+```
+
+Os três botões são **modos de solve**: informa-se um lado e o carrier devolve o
+outro. Isso o torna útil para cotação nova — e **não** o torna fonte do capital
+segurado das apólices existentes: aqui `faceAmount` é entrada de uma simulação,
+não o valor contratado de uma apólice em vigor.
+
+### O que o app tem hoje
+
+`app/agent/illustrations/new/actions.ts` calcula por **fórmula local**
+(`lib/policy-quote.ts`, `calculateMarketPremium`). Os números da tela de
+illustration hoje são sintéticos, não vêm do carrier.
+
+O modelo, por outro lado, já tem a forma certa: `Illustration` guarda `provider`,
+`externalId`, `productName`, `faceAmount`, `premium`, `documentUrl`, `rawPayload`,
+com `@@unique([provider, externalId])` — que é exatamente a chave de idempotência
+que uma submissão ao carrier exige para não duplicar.
+
+### Bloqueios reais antes de ligar isso
+
+1. **`Illustration.caseId` é obrigatório** e `InsuranceCase` tem **0 linhas**.
+   Criar illustration exigiria inventar um caso, ou tornar o vínculo opcional.
+   Mesma classe do bloqueio de modelagem já registrado neste documento.
+2. **`BrowserJobOperation` não tem operação de escrita** — só `TEST_CONNECTION` e
+   `SYNC_CASE_READ`. Uma submissão precisa de tipo próprio para ser auditável.
+3. **Perfil de risco diferente de tudo feito até aqui.** Todo o restante desta
+   integração é leitura: repetir uma leitura é inofensivo. Uma submissão repetida
+   não é. Precisa de idempotência real, e de tolerância a falha no meio.
+4. **Contrato de submissão desconhecido.** Não se sabe se `get_quote` emite XHR
+   com JSON (replicável via `page.request.post`, como os grids) ou se faz POST de
+   formulário e re-renderiza. Isso decide a implementação inteira, e só se
+   descobre **submetendo** — que é a primeira ação de escrita contra a conta real
+   do agente. Decisão humana antes, não depois.
