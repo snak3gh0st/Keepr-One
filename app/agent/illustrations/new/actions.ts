@@ -1,6 +1,8 @@
 "use server";
 
 import { getCurrentAgent } from '@/lib/agent-context'
+import { enqueueRapidSolveQuote } from '@/lib/national-life/job-service'
+import { RAPID_SOLVE_PRODUCT_CODE, SOLVE_TYPES, toCarrierDate } from '@/lib/national-life/rapid-solve'
 import { calculateMarketPremium, type MarketAgeBand } from '@/lib/policy-quote'
 
 type TobaccoStatus = 'YES' | 'NO' | 'FORMER'
@@ -102,6 +104,107 @@ function buildIllustrationQuotes(ageBand: MarketAgeBand, tobaccoStatus: TobaccoS
       premium: roundMoney(quote.premium * tobaccoFactor),
     }
   })
+}
+
+type RequestCarrierQuoteResult =
+  | { ok: true; jobId: string }
+  | { ok: false; message: string }
+
+const SOLVE_TYPE_VALUES = new Set<string>(Object.values(SOLVE_TYPES))
+
+/// Asks National Life to price the illustration, instead of estimating it here.
+///
+/// Returns a job id rather than a quote. The app reaches neither the carrier
+/// nor the browser that holds the agent's session — both live in the runtime —
+/// so the question is queued and the screen polls for the answer.
+///
+/// The carrier's own fields are taken from the form rather than derived from
+/// the ones already there. A tobacco answer is not a rate class, and guessing
+/// the mapping would misprice the quote in a way that looks like a quote.
+export async function requestCarrierQuote(
+  formData: FormData,
+): Promise<RequestCarrierQuoteResult> {
+  const agent = await getCurrentAgent()
+
+  const firstName = normalizeText(formData.get('firstName') as string | null)
+  const lastName = normalizeText(formData.get('lastName') as string | null)
+  const dateOfBirthRaw = normalizeText(formData.get('dateOfBirth') as string | null)
+  const issueState = normalizeText(formData.get('issueState') as string | null)
+  const gender = normalizeText(formData.get('gender') as string | null)
+  const rateClass = normalizeText(formData.get('rateClass') as string | null)
+  const solveType = normalizeText(formData.get('solveType') as string | null)
+  const deathBenefitOption = normalizeText(formData.get('deathBenefitOption') as string | null)
+  const strategy = normalizeText(formData.get('strategy') as string | null)
+  const amount = Number(normalizeText(formData.get('amount') as string | null))
+  const allocationRaw = normalizeText(formData.get('allocation') as string | null)
+  const allocation = allocationRaw === '' ? 100 : Number(allocationRaw)
+  const productCode =
+    normalizeText(formData.get('productCode') as string | null) || RAPID_SOLVE_PRODUCT_CODE
+
+  if (!firstName) return { ok: false, message: 'Informe o nome.' }
+  if (!lastName) return { ok: false, message: 'Informe o sobrenome.' }
+  if (!dateOfBirthRaw) return { ok: false, message: 'Informe a data de nascimento (DOB).' }
+  if (!issueState) return { ok: false, message: 'Informe o estado de emissão.' }
+  if (!gender) return { ok: false, message: 'Informe o gênero, como a seguradora o classifica.' }
+  if (!rateClass) return { ok: false, message: 'Informe a classe de risco.' }
+  if (!deathBenefitOption) return { ok: false, message: 'Informe a opção de benefício por morte.' }
+  if (!strategy) return { ok: false, message: 'Informe a estratégia de alocação.' }
+
+  if (!SOLVE_TYPE_VALUES.has(solveType)) {
+    return { ok: false, message: 'Escolha o que a seguradora deve calcular.' }
+  }
+
+  // The same field carries face amount or premium depending on the solve type,
+  // which is how the carrier's own screen works.
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return {
+      ok: false,
+      message:
+        solveType === SOLVE_TYPES.SPECIFY_AMOUNT
+          ? 'Informe um capital segurado maior que zero.'
+          : 'Informe um prêmio maior que zero.',
+    }
+  }
+
+  if (!Number.isFinite(allocation) || allocation < 0 || allocation > 100) {
+    return { ok: false, message: 'A alocação precisa estar entre 0 e 100.' }
+  }
+
+  const dateOfBirth = new Date(`${dateOfBirthRaw}T00:00:00.000Z`)
+  if (Number.isNaN(dateOfBirth.getTime()) || dateOfBirth > new Date()) {
+    return { ok: false, message: 'Data de nascimento inválida.' }
+  }
+
+  try {
+    const { jobId } = await enqueueRapidSolveQuote({
+      agentId: agent.id,
+      quote: {
+        issueState,
+        firstName,
+        lastName,
+        // The carrier's format, written once here so the queue never carries a
+        // date that has to be guessed at on the way out.
+        dateOfBirth: toCarrierDate(dateOfBirth),
+        gender,
+        rateClass,
+        solveType,
+        amount,
+        deathBenefitOption,
+        strategy,
+        allocation,
+        productCode,
+      },
+    })
+
+    return { ok: true, jobId }
+  } catch {
+    // The reason is either a validation detail already checked above or an
+    // infrastructure fault. Neither is something to put in front of an agent.
+    return {
+      ok: false,
+      message: 'Não foi possível enviar a cotação para a seguradora. Tente novamente.',
+    }
+  }
 }
 
 export async function createIllustrationRequest(formData: FormData): Promise<CreateIllustrationRequestResult> {

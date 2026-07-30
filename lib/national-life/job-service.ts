@@ -3,6 +3,7 @@ import type { BrowserAutomationJob, BrowserJobOperation, Prisma } from '@prisma/
 import { prisma } from '@/lib/prisma'
 import { NATIONAL_LIFE_MAX_JOB_ATTEMPTS, NATIONAL_LIFE_PROVIDER } from './constants'
 import { assertBrowserJobTransition, type BrowserJobState } from './job-state'
+import type { RapidSolveFailure, RapidSolveQuote } from './rapid-solve'
 import { redactDiagnostic } from './redaction'
 
 const CASE_SYNC_BUCKET_MS = 5 * 60_000
@@ -64,6 +65,15 @@ export type BrowserJobInput =
   | CaseReadSyncJobInput
   | RapidSolveQuoteJobInput
 
+/// Three outcomes the screen has to tell apart, and it must not collapse them.
+/// ANSWERED means the carrier replied — including a reply that refuses to
+/// quote, which carries its own sentence. UNAVAILABLE means we never got an
+/// answer, and showing a number there would be inventing one.
+export type RapidSolveQuoteStatus =
+  | { state: 'PENDING' }
+  | { state: 'ANSWERED'; quote: RapidSolveQuote | RapidSolveFailure }
+  | { state: 'UNAVAILABLE'; safeErrorCode: string }
+
 export type BrowserJobRecord = {
   id: string
   agentId: string
@@ -119,6 +129,7 @@ export type BrowserJobRepository = {
     patch: Partial<BrowserJobRecord>
   }): Promise<BrowserJobRecord | null>
   listExpiredRunningJobs(now: Date): Promise<BrowserJobRecord[]>
+  findOwnedById(agentId: string, jobId: string): Promise<BrowserJobRecord | null>
 }
 
 export type BrowserJobServiceDeps = {
@@ -492,6 +503,17 @@ const prismaBrowserJobRepository: BrowserJobRepository = {
 
     return jobs.map(fromPrismaBrowserJob)
   },
+
+  async findOwnedById(agentId, jobId) {
+    // The agent is part of the lookup rather than checked after it, so a job id
+    // belonging to someone else is indistinguishable from one that does not
+    // exist. A quote carries a named insured and a premium.
+    const job = await prisma.browserAutomationJob.findFirst({
+      where: { id: jobId, agentId },
+    })
+
+    return job ? fromPrismaBrowserJob(job) : null
+  },
 }
 
 function resolveRepository(deps?: BrowserJobServiceDeps): BrowserJobRepository {
@@ -573,6 +595,42 @@ export function createBrowserJobService(deps?: BrowserJobServiceDeps) {
       })
 
       return { jobId: created.id, duplicate: false }
+    },
+
+    /// What the illustration screen is allowed to know about a quote it asked
+    /// for. Deliberately not the job record: the screen needs the carrier's
+    /// answer, not lease owners and attempt counts.
+    async getOwnedQuoteStatus(
+      agentId: string,
+      jobId: string,
+    ): Promise<RapidSolveQuoteStatus | null> {
+      const job = await repository.findOwnedById(
+        coerceIdentifier('agentId', agentId),
+        coerceIdentifier('jobId', jobId),
+      )
+
+      if (!job || job.operation !== 'GET_RAPID_SOLVE_QUOTE') {
+        return null
+      }
+
+      if (!isTerminalJobState(job.state)) {
+        return { state: 'PENDING' }
+      }
+
+      // SUCCEEDED carries the carrier's reply, which may itself be a refusal.
+      if (job.state === 'SUCCEEDED') {
+        const result = job.result as { ok?: unknown } | null
+        return result && typeof result === 'object' && 'ok' in result
+          ? { state: 'ANSWERED', quote: result as RapidSolveQuote | RapidSolveFailure }
+          : // Succeeded without a payload is not an answer. Saying so beats
+            // rendering an empty quote as though the carrier had sent one.
+            { state: 'UNAVAILABLE', safeErrorCode: 'QUOTE_RESULT_MISSING' }
+      }
+
+      return {
+        state: 'UNAVAILABLE',
+        safeErrorCode: job.safeErrorCode ?? 'QUOTE_FAILED',
+      }
     },
 
     async claimNextJob(workerId: string, now = resolveNow(deps)): Promise<ClaimedBrowserJob | null> {
@@ -696,6 +754,13 @@ export async function enqueueRapidSolveQuote(input: {
   quote: RapidSolveQuoteJobInput
 }): Promise<{ jobId: string; duplicate: boolean }> {
   return createBrowserJobService().enqueueRapidSolveQuote(input)
+}
+
+export async function getOwnedQuoteStatus(
+  agentId: string,
+  jobId: string,
+): Promise<RapidSolveQuoteStatus | null> {
+  return createBrowserJobService().getOwnedQuoteStatus(agentId, jobId)
 }
 
 export async function claimNextJob(workerId: string, now?: Date): Promise<ClaimedBrowserJob | null> {

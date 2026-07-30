@@ -79,6 +79,12 @@ function createInMemoryRepository(
       return structuredClone(jobs.find((job) => job.idempotencyKey === idempotencyKey) ?? null)
     },
 
+    async findOwnedById(agentId, jobId) {
+      return structuredClone(
+        jobs.find((job) => job.id === jobId && job.agentId === agentId) ?? null,
+      )
+    },
+
     async findMostRecentByRetryKeyFamily(baseKey, states) {
       return (
         structuredClone(
@@ -648,6 +654,101 @@ describe('Rapid Solve quote jobs', () => {
         quote: { ...quote, dateOfBirth: '1986-03-10' },
       }),
     ).rejects.toThrow('dateOfBirth must be MM/DD/YYYY')
+  })
+
+  it('reports a quote still in flight as pending', async () => {
+    const repository = createInMemoryRepository()
+    const service = createService(repository)
+    const { jobId } = await service.enqueueRapidSolveQuote({ agentId: 'agent-1', quote })
+
+    await expect(service.getOwnedQuoteStatus('agent-1', jobId)).resolves.toEqual({
+      state: 'PENDING',
+    })
+  })
+
+  it('hands back the carrier answer once the job succeeded', async () => {
+    const repository = createInMemoryRepository([
+      buildJob({
+        id: 'job-quote',
+        agentId: 'agent-1',
+        operation: 'GET_RAPID_SOLVE_QUOTE',
+        idempotencyKey: 'quote-key',
+        state: 'SUCCEEDED',
+        input: quote,
+        result: { ok: true, faceAmount: 250_000, annualPremium: 3_748.8, monthlyPremium: 312.4, lapseYear: null },
+      }),
+    ])
+
+    await expect(
+      createService(repository).getOwnedQuoteStatus('agent-1', 'job-quote'),
+    ).resolves.toMatchObject({
+      state: 'ANSWERED',
+      quote: { ok: true, monthlyPremium: 312.4 },
+    })
+  })
+
+  // A refusal reached us, so the screen can print the carrier's sentence. This
+  // is the case that must not be reported as UNAVAILABLE.
+  it('reports a carrier refusal as an answer', async () => {
+    const repository = createInMemoryRepository([
+      buildJob({
+        id: 'job-quote',
+        agentId: 'agent-1',
+        operation: 'GET_RAPID_SOLVE_QUOTE',
+        idempotencyKey: 'quote-key',
+        state: 'SUCCEEDED',
+        input: quote,
+        result: { ok: false, message: 'Face amount below the product minimum.' },
+      }),
+    ])
+
+    await expect(
+      createService(repository).getOwnedQuoteStatus('agent-1', 'job-quote'),
+    ).resolves.toMatchObject({
+      state: 'ANSWERED',
+      quote: { ok: false, message: 'Face amount below the product minimum.' },
+    })
+  })
+
+  it('reports a failed job as unavailable rather than as a quote', async () => {
+    const repository = createInMemoryRepository([
+      buildJob({
+        id: 'job-quote',
+        agentId: 'agent-1',
+        operation: 'GET_RAPID_SOLVE_QUOTE',
+        idempotencyKey: 'quote-key',
+        state: 'FAILED',
+        input: quote,
+        safeErrorCode: 'NATIONAL_LIFE_RECONNECT_REQUIRED',
+      }),
+    ])
+
+    await expect(
+      createService(repository).getOwnedQuoteStatus('agent-1', 'job-quote'),
+    ).resolves.toEqual({
+      state: 'UNAVAILABLE',
+      safeErrorCode: 'NATIONAL_LIFE_RECONNECT_REQUIRED',
+    })
+  })
+
+  // A quote names an insured and a premium. Another agent's job id must look
+  // exactly like one that never existed.
+  it('does not reveal a quote belonging to another agent', async () => {
+    const repository = createInMemoryRepository([
+      buildJob({
+        id: 'job-quote',
+        agentId: 'agent-2',
+        operation: 'GET_RAPID_SOLVE_QUOTE',
+        idempotencyKey: 'quote-key',
+        state: 'SUCCEEDED',
+        input: quote,
+        result: { ok: true, faceAmount: 250_000, annualPremium: 1, monthlyPremium: 1, lapseYear: null },
+      }),
+    ])
+
+    await expect(
+      createService(repository).getOwnedQuoteStatus('agent-1', 'job-quote'),
+    ).resolves.toBeNull()
   })
 
   it('rejects an amount that is not a positive number', async () => {
