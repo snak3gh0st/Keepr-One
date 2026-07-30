@@ -363,10 +363,24 @@ página), que não teriam trazido nem prêmio nem capital segurado.
 | `NEW_BUSINESS.AnticipatedAnnualPremium` / `ModalPremium` | os casos de novo negócio | já extraído |
 | `PREMIUM_REPORT_AGENCY` | **agregado da agência, 2 linhas** | não serve por apólice — não voltar aqui |
 
-`PremiumAmt` vem por transação, com `BillingFrequency` (`Monthly`) e
-`PremiumTransaction` (`As Earned`) — é prêmio modal do lançamento, não anualizado.
-Transformar isso em `Policy.premium` exige uma regra (última transação? anualizar
-pela frequência?), que é decisão de negócio, não mecânica.
+`PremiumAmt` vem por transação, com `BillingFrequency` e `PremiumTransaction`
+(`As Earned`) — é prêmio modal do lançamento, não anualizado.
+
+**Decidido e aplicado (2026-07-30):** guardar o modal com o modo, não anualizar.
+`Policy.premiumMode` foi acrescentado e o backfill
+(`scripts/sql/national-life-backfill-premium-from-commissions.sql`) rodou em
+produção: **2.148 apólices** com prêmio e modo, das 9.614.
+
+```
+Monthly 2145 | Quarterly 2 | Single Payment 1
+```
+
+A distribuição justifica a decisão: anualizar teria transformado três apólices
+não-mensais em números errados sem deixar rastro. `$250` mensal e `$250` anual são
+apólices diferentes, e só o par (valor, modo) diz qual é qual.
+
+As 7.466 restantes ficam com `premium = 0` e `premiumMode = NULL`, que o front já
+lê como "não informado" via `premiumIsKnown()` — não como zero.
 
 **Capital segurado (`faceAmount`) segue sem fonte conhecida.** Nenhum grid mapeado
 até agora o carrega. Não inventar: `Policy.faceAmount` continua 0 e a UI deve
