@@ -150,7 +150,76 @@ então `status-map.ts` precisa normalizar por prefixo, não por igualdade.
 | `LIFE_PERSISTENCY` | — | GetJsonResult | ⛔ resposta não é JSON |
 | `COMMISSIONS_POLICY_HISTORY` | — | não emite XHR | ⛔ provável formulário |
 | `POLICY_PAYMENT_HISTORY` | — | **form por apólice** | ⛔ ver abaixo |
-| `PLACEMENT_REPORT` | — | não emite XHR | ⛔ não investigado |
+| `PLACEMENT_REPORT` | — | não emite XHR | ⛔ redireciona, sem grid |
+| `CLIENT_INTELLIGENCE` | — | GetJsonResult | 🆕 grid mapeado, não extraído |
+| `CORRESPONDENCE` | — | GetJsonResult | 🆕 grid mapeado, não extraído |
+| `COMMISSIONS_PAYMENT_PORTAL` | — | GetJsonResult | 🆕 grid mapeado, não extraído |
+| `PENDING_GROSS_COMMISSIONS` | — | GetJsonResult | 🆕 grid mapeado, não extraído |
+| `PIP_PENDING` | — | GetJsonResult | 🆕 grid mapeado, não extraído |
+
+## Como achar rotas sem adivinhar (2026-07-30)
+
+A primeira versão deste documento listou rotas "extraídas da nav autenticada",
+mas a sonda que as extraiu foi apagada na limpeza. A sessão seguinte herdou dois
+nomes lembrados — `commissions-payment-portal`, `client-intelligence` — e nenhum
+caminho. Adivinhar URL não é grátis: cada erro é uma requisição ao carrier contra
+uma sessão de ~20 minutos.
+
+`portalRoutesIn` (`lib/national-life/portal-routes.ts`) resolve isso de vez.
+`scripts/national-life-describe-page.ts` agora reporta `routes` em toda página:
+
+```
+tsx scripts/national-life-describe-page.ts /agent/
+```
+
+Uma requisição devolveu **239 rotas** `/agent/`, o mapa completo do portal. Ids
+de drill-down colapsam para `{id}`, então 9 mil links de apólice reportam como um
+template, não como 9 mil rotas.
+
+O script também **toma o lock do browser agora, e espera por ele** em vez de
+desistir (`withBrowserLockWaiting`). Foi o tick do keep-alive — a cada 10 min pelo
+crontab do host — que matou cinco sondagens antes, e a leitura errada foi "rota
+morta". Uma sondagem é barata de adiar e custa uma requisição ao carrier para
+repetir. Passado o prazo ela ainda devolve `null` e sai com código 1: "nunca
+rodou" não pode parecer "rodou e não achou nada".
+
+### Grids novos encontrados (2026-07-30, estrutura verificada, não extraídos)
+
+Todos servem `GetJsonResult` — `fetchNationalLifeGrid` já os lê sem código novo.
+Falta o mapeamento linha→modelo e a decisão de onde persistir.
+
+| rota | colunas observadas |
+|---|---|
+| `client-intelligence` | `FollowUpCaseDetailsId`, `CreatedDate`, Category, Sub Category, Agent, Client, Policy #, **Email**, **Phone**, **Notes** |
+| `correspondence` | `DocumentDate`, Policy/Trust Number, Insured/Annuitant, DocumentType |
+| `commissions-payment-portal` | `GlobalId`, `FullName` |
+| `pending-gross-commissions` | `AgentNumber`, NL Life, NL Annuities, NL Mutual Funds, LSW Life, LSW Annuities, Variable Products |
+| `pip-pending-report` | AgentName, AgentNumber, AgencyName, PolicyNo, AnnuitantName, Product, Increase Submit Date, Expected Increase Amount, Total Contribution Expected |
+
+Notas de valor e de risco:
+
+- **`client-intelligence` é o único grid com contato do cliente** (e-mail, telefone)
+  e com notas em texto livre. É também, por isso, o de maior sensibilidade: notas
+  livres podem conter qualquer coisa que o agente digitou. Tratar como PII antes
+  de persistir, não depois.
+- **`commissions-payment-portal` é pequeno mas destrava o resto**: mapeia o
+  `GlobalId` que toda linha de comissão carrega para um nome de beneficiário. É o
+  que responde "de quem é esta comissão" sem heurística.
+- **`pending-gross-commissions`** redireciona para `/personal` e quebra o bruto
+  pendente por linha de produto — dimensão que `PAYABLE_GROSS_COMMISSIONS` não tem.
+
+### Rotas sondadas que não rendem grid
+
+| rota | o que é |
+|---|---|
+| `placement-report` | redireciona para `/placement-report/agent`; zero tabelas, zero XHR |
+| `annuity-flow-report` | devolve página de erro (`hidden \| errorPage`) |
+| `compensation/incentives/current-incentives` | página de conteúdo, sem tabela |
+| `tools/business-tools/reports` | página de navegação, sem tabela |
+| `profile/agent-payment-center` | **formulário de escrita** (valores de pagamento) — perfil de risco de escrita, não de leitura |
+
+> As 239 rotas restantes são produto, treinamento e marketing — conteúdo
+> institucional, sem dado de negócio do agente.
 
 > Importante: `PAID_COMMISSIONS` e `PROJECTED_COMMISSIONS` foram reportados como
 > "Could not open" na primeira passada. **Era o esgotamento de PID do Steel**, não

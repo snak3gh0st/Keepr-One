@@ -20,6 +20,10 @@ export const NATIONAL_LIFE_GRIDS = {
   LIFE_PENDING_LAPSE: '/agent/book-of-business/inforce-book/life-pending-lapse-report',
   LIFE_PERSISTENCY: '/agent/book-of-business/inforce-book/life-persistency-report',
   CORRESPONDENCE: '/agent/book-of-business/inforce-book/correspondence',
+  PIP_PENDING: '/agent/book-of-business/inforce-book/pip-pending-report',
+  // The follow-up log: client email, phone and free-text notes, which no other
+  // grid carries.
+  CLIENT_INTELLIGENCE: '/agent/book-of-business/client-intelligence',
   // Compensation.
   COMMISSIONS_OVERVIEW: '/agent/compensation/commissions/overview',
   PAID_COMMISSIONS: '/agent/compensation/commissions/paid-commissions',
@@ -27,9 +31,15 @@ export const NATIONAL_LIFE_GRIDS = {
     '/agent/compensation/commissions/paid-commissions/commissions-earning-report',
   COMMISSIONS_POLICY_HISTORY:
     '/agent/compensation/commissions/paid-commissions/commissions-policy-history',
+  // Maps the `GlobalId` that every commission row carries to a payee name.
+  COMMISSIONS_PAYMENT_PORTAL:
+    '/agent/compensation/commissions/paid-commissions/commissions-payment-portal',
   PROJECTED_COMMISSIONS: '/agent/compensation/commissions/projected-commissions',
   PAYABLE_GROSS_COMMISSIONS:
     '/agent/compensation/commissions/projected-commissions/payable-gross-commissions',
+  // Redirects to `/personal`; gross pending split by product line.
+  PENDING_GROSS_COMMISSIONS:
+    '/agent/compensation/commissions/projected-commissions/pending-gross-commissions',
 } as const
 
 export type NationalLifeGridKey = keyof typeof NATIONAL_LIFE_GRIDS
