@@ -6,6 +6,13 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getDownlineIds } from '@/lib/hierarchy'
 import { decimalToNumber } from '@/lib/decimal'
 import { periodFromDate, shiftPeriod, percentChange } from '@/lib/period'
+import {
+  sumByPeriod,
+  toCarrierCommissionRecords,
+  totalForPeriod,
+  totalOf,
+} from '@/lib/national-life/commission-records'
+import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 import { Shell } from '@/components/Shell'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { policyStatusLabel } from '@/components/StatusPill'
@@ -250,6 +257,36 @@ export default async function AgentDashboard() {
       period: bucket.period,
       total: decimalToNumber(bucket._sum.amount),
     }))
+
+    // The carrier's commission lives in the integration's own table, not in
+    // CommissionRecord: that model requires a policyId and fewer than half the
+    // transactions match a policy still in the book. The commissions page has
+    // always read it directly; this dashboard summed only CommissionRecord,
+    // which is empty, so the same agent saw real commission on one page and
+    // zero here. Both read the same source now.
+    if (isNationalLifeConfigured()) {
+      const carrierRows = await prisma.nationalLifeReportRow.findMany({
+        where: {
+          agentId: agent.id,
+          deploymentScope: getNationalLifeEnv().sessionScopeId,
+          gridKey: 'COMMISSION_DETAIL_NLD_COMMISSION_EARNING',
+        },
+        select: { id: true, raw: true, amounts: true },
+      })
+      const carrierRecords = toCarrierCommissionRecords(carrierRows)
+
+      commissionTotalAmount += totalOf(carrierRecords)
+      commissionThisMonth += totalForPeriod(carrierRecords, currentP)
+      commissionLastMonth += totalForPeriod(carrierRecords, previousP)
+
+      const merged = new Map(commissionByPeriod.map((bucket) => [bucket.period, bucket.total]))
+      for (const bucket of sumByPeriod(carrierRecords, { from: trendStartP, to: currentP })) {
+        merged.set(bucket.period, (merged.get(bucket.period) ?? 0) + bucket.total)
+      }
+      commissionByPeriod = [...merged.entries()]
+        .map(([period, total]) => ({ period, total }))
+        .sort((left, right) => left.period.localeCompare(right.period))
+    }
     byStatus = statusBuckets
     byCarrier = carrierBuckets
     byProduct = productBuckets
