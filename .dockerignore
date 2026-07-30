@@ -5,3 +5,8 @@ docs
 *.md
 .env
 .env.local
+
+# Test files never run inside an image; keeping them out avoids shipping test
+# code to production and keeps the national-life directory copies tight.
+*.test.ts
+*.test.tsx

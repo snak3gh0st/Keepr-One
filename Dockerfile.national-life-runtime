@@ -12,34 +12,19 @@ RUN pnpm exec prisma generate
 COPY tsconfig.json ./
 COPY lib/prisma.ts ./lib/prisma.ts
 COPY lib/integrations/idempotency.ts ./lib/integrations/idempotency.ts
-COPY lib/national-life/browser-context-crypto.ts ./lib/national-life/browser-context-crypto.ts
-COPY lib/national-life/case-snapshot-service.ts ./lib/national-life/case-snapshot-service.ts
-COPY lib/national-life/portal-grid-client.ts ./lib/national-life/portal-grid-client.ts
-COPY lib/national-life/inforce-policy-service.ts ./lib/national-life/inforce-policy-service.ts
-COPY lib/national-life/report-row-service.ts ./lib/national-life/report-row-service.ts
-COPY lib/national-life/commission-detail.ts ./lib/national-life/commission-detail.ts
-COPY lib/national-life/connection-attempt-state.ts ./lib/national-life/connection-attempt-state.ts
-COPY lib/national-life/constants.ts ./lib/national-life/constants.ts
-COPY lib/national-life/env.ts ./lib/national-life/env.ts
-COPY lib/national-life/job-service.ts ./lib/national-life/job-service.ts
-COPY lib/national-life/job-state.ts ./lib/national-life/job-state.ts
-COPY lib/national-life/redaction.ts ./lib/national-life/redaction.ts
-COPY lib/national-life/status-map.ts ./lib/national-life/status-map.ts
-COPY lib/national-life/sync-service.ts ./lib/national-life/sync-service.ts
-COPY lib/national-life/viewer-token.ts ./lib/national-life/viewer-token.ts
-COPY workers/national-life/adapter.ts ./workers/national-life/adapter.ts
-COPY workers/national-life/run-connection-attempt.ts ./workers/national-life/run-connection-attempt.ts
-COPY workers/national-life/run-job.ts ./workers/national-life/run-job.ts
-COPY workers/national-life/runtime.ts ./workers/national-life/runtime.ts
-COPY workers/national-life/steel-session.ts ./workers/national-life/steel-session.ts
-COPY workers/national-life/types.ts ./workers/national-life/types.ts
-COPY workers/national-life/viewer-broker.ts ./workers/national-life/viewer-broker.ts
+
+# Whole directories rather than file by file. Listing each module meant every new
+# one was missing from the image and only failed at runtime with
+# MODULE_NOT_FOUND — that happened three times. The surface stays limited to the
+# National Life code; test files are excluded by .dockerignore.
+COPY lib/national-life/ ./lib/national-life/
+COPY workers/national-life/ ./workers/national-life/
 COPY scripts/national-life-runtime.ts ./scripts/national-life-runtime.ts
 COPY scripts/national-life-sync-snapshots.ts ./scripts/national-life-sync-snapshots.ts
+COPY scripts/national-life-sync-commission-detail.ts ./scripts/national-life-sync-commission-detail.ts
 COPY scripts/national-life-describe-grids.ts ./scripts/national-life-describe-grids.ts
 COPY scripts/national-life-describe-page.ts ./scripts/national-life-describe-page.ts
 COPY scripts/national-life-find-handler.ts ./scripts/national-life-find-handler.ts
-COPY scripts/national-life-sync-commission-detail.ts ./scripts/national-life-sync-commission-detail.ts
 
 ENV NODE_ENV=production
 EXPOSE 3010
