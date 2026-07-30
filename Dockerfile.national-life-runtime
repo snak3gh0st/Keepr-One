@@ -19,15 +19,12 @@ COPY lib/integrations/idempotency.ts ./lib/integrations/idempotency.ts
 # National Life code; test files are excluded by .dockerignore.
 COPY lib/national-life/ ./lib/national-life/
 COPY workers/national-life/ ./workers/national-life/
-COPY scripts/national-life-runtime.ts ./scripts/national-life-runtime.ts
-COPY scripts/national-life-sync-snapshots.ts ./scripts/national-life-sync-snapshots.ts
-COPY scripts/national-life-sync-commission-detail.ts ./scripts/national-life-sync-commission-detail.ts
-COPY scripts/national-life-keep-alive.ts ./scripts/national-life-keep-alive.ts
-COPY scripts/national-life-sync-rendered-report.ts ./scripts/national-life-sync-rendered-report.ts
-COPY scripts/national-life-check-session.ts ./scripts/national-life-check-session.ts
-COPY scripts/national-life-describe-grids.ts ./scripts/national-life-describe-grids.ts
-COPY scripts/national-life-describe-page.ts ./scripts/national-life-describe-page.ts
-COPY scripts/national-life-find-handler.ts ./scripts/national-life-find-handler.ts
+# The scripts kept being listed one by one even though the comment above was
+# written about exactly this, and it went wrong a fourth time: three probes and
+# the first real quote were missing from the image, ran only because they were
+# copied in by hand, and vanished the next time the container was recreated.
+# The glob stays scoped to National Life, and .dockerignore keeps tests out.
+COPY scripts/national-life-*.ts ./scripts/
 
 ENV NODE_ENV=production
 EXPOSE 3010
