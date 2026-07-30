@@ -132,6 +132,48 @@ Distribuição de status obtida (`NEW_BUSINESS`): `Issued` 417, `PENDING` 96,
 `Issued, Pending EFT - <data>` 12 — note que o status às vezes **embute uma data**,
 então `status-map.ts` precisa normalizar por prefixo, não por igualdade.
 
+## Mapa de extração por grid (verificado 2026-07-30)
+
+| gridKey | recordsTotal | estratégia | situação |
+|---|---|---|---|
+| `NEW_BUSINESS` | 825 | GetJsonResult | ✅ 693 gravados |
+| `RECENTLY_CLOSED` | 127 | GetJsonResult | ✅ 109 gravados |
+| `INFORCE_CLIENTS` | 10272 | GetJsonResult | ✅ 9371 gravados (teto 10000 truncou) |
+| `PAID_COMMISSIONS` | 8 | GetJsonResult | ✅ 8 gravados |
+| `PROJECTED_COMMISSIONS` | 4 | GetJsonResult | ✅ 4 gravados |
+| `TRANSFERS_EXCHANGES` | 0 | GetJsonResult | ✅ vazio de verdade |
+| `COMMISSIONS_OVERVIEW` | — | **date picker** | ⛔ ver abaixo |
+| `POLICY_PAYMENT_HISTORY` | — | **form por apólice** | ⛔ ver abaixo |
+| `PLACEMENT_REPORT` | — | não emite XHR | ⛔ não investigado |
+
+> Importante: `PAID_COMMISSIONS` e `PROJECTED_COMMISSIONS` foram reportados como
+> "Could not open" na primeira passada. **Era o esgotamento de PID do Steel**, não
+> o carrier. Com o container saudável servem JSON normalmente. Não confiar em
+> falha de abertura de página como conclusão sem checar os PIDs primeiro.
+
+### `COMMISSIONS_OVERVIEW` — dirigido por data, não por grid
+
+Server-rendered, HTTP 200, título "Commission Overview". As 5 tabelas do HTML são
+todas *date pickers* (`table-condensed`, cabeçalhos "commission Calendar / « July
+2026 » / Su Mo Tu…"), e a página não emite **nenhum** XHR para o carrier — só
+analytics. Ou seja: não existe tabela de dados até uma data ser escolhida.
+
+Caminho provável para o detalhe de comissão: `PAID_COMMISSIONS` devolve, por
+extrato, `GlobalId`, `PayDate`, `ConcatParam` (date-string) e `PayStatement` (link).
+São 8 extratos — drill-down por extrato custa ~8 requisições, o que torna o
+detalhe de comissão viável. **Não implementado.**
+
+### `POLICY_PAYMENT_HISTORY` — consulta por apólice
+
+Server-rendered, HTTP 200, com formulário de busca: `Enter_policy_number`,
+`enter_first_name`, `enter_last_name` + submit. Não é grid em massa.
+
+Consequência de escala a decidir antes de implementar: extrair histórico de
+pagamento de todo o livro significa **~9.371 submissões de formulário**, uma por
+apólice. Isso é volume de requisição relevante contra o carrier. Alternativas:
+sob demanda por apólice (quando o usuário abre), ou lote noturno de um
+subconjunto (ex. só `Active`, ou só as com pagamento pendente).
+
 ## Limites operacionais descobertos em produção (2026-07-30)
 
 **Steel esgota PIDs e para de subir browser.** O container tinha `pids_limit: 256`.
