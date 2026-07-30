@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { BrowserAutomationJob, BrowserJobOperation, Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { NATIONAL_LIFE_MAX_JOB_ATTEMPTS, NATIONAL_LIFE_PROVIDER } from './constants'
@@ -37,7 +37,32 @@ export type CaseReadSyncJobInput = {
   lookup: CaseReadSyncLookup
 }
 
-export type BrowserJobInput = ConnectionTestJobInput | CaseReadSyncJobInput
+/// A pre-sale illustration. Unlike the other two this has no case: the insured
+/// is a prospect who exists only on the screen the agent is filling in, which is
+/// why `BrowserAutomationJob.caseId` stays null for it.
+///
+/// Dates cross the queue as `MM/DD/YYYY` strings rather than `Date`, because the
+/// row is JSON and a `Date` would come back from Postgres as whatever the parser
+/// made of it. This is already the carrier's own format.
+export type RapidSolveQuoteJobInput = {
+  issueState: string
+  firstName: string
+  lastName: string
+  dateOfBirth: string
+  gender: string
+  rateClass: string
+  solveType: string
+  amount: number
+  deathBenefitOption: string
+  strategy: string
+  allocation: number
+  productCode: string
+}
+
+export type BrowserJobInput =
+  | ConnectionTestJobInput
+  | CaseReadSyncJobInput
+  | RapidSolveQuoteJobInput
 
 export type BrowserJobRecord = {
   id: string
@@ -160,6 +185,80 @@ function sanitizeCaseReadSyncInput(input: {
         kind: 'EXTERNAL_ID',
         value: lookupValue,
       },
+    },
+  }
+}
+
+/// Keyed by the input rather than by the subject, which the case-sync key cannot
+/// be: two quotes for the same prospect minutes apart are the normal way an
+/// agent works — raise the face amount, ask again. Bucketing on agent and
+/// prospect alone would hand back the first quote's numbers under the second
+/// quote's question, and it would look like an answer.
+///
+/// The bucket still absorbs a double-click, because an identical input inside
+/// the window is the same question.
+function buildRapidSolveIdempotencyKey(
+  agentId: string,
+  payload: RapidSolveQuoteJobInput,
+  now: Date,
+): string {
+  const canonical = JSON.stringify([
+    payload.issueState,
+    payload.firstName,
+    payload.lastName,
+    payload.dateOfBirth,
+    payload.gender,
+    payload.rateClass,
+    payload.solveType,
+    payload.amount,
+    payload.deathBenefitOption,
+    payload.strategy,
+    payload.allocation,
+    payload.productCode,
+  ])
+  const digest = createHash('sha256').update(canonical).digest('hex').slice(0, 32)
+  return `national-life:rapid-solve:${agentId}:${digest}:${buildCaseSyncBucket(now)}`
+}
+
+function sanitizeRapidSolveQuoteInput(input: {
+  agentId: string
+  quote: RapidSolveQuoteJobInput
+}): { agentId: string; payload: RapidSolveQuoteJobInput } {
+  const agentId = coerceIdentifier('agentId', input.agentId)
+  const quote = input.quote
+
+  const amount = Number(quote.amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('amount must be a positive number')
+  }
+
+  const allocation = Number(quote.allocation)
+  if (!Number.isFinite(allocation) || allocation < 0 || allocation > 100) {
+    throw new Error('allocation must be between 0 and 100')
+  }
+
+  // MM/DD/YYYY is what the carrier's date picker submits and what
+  // `toCarrierDate` produces, so anything else means a caller built the payload
+  // by hand and got it wrong. Catching it here beats a carrier refusal.
+  if (!/^\d{2}\/\d{2}\/\d{4}$/.test(quote.dateOfBirth)) {
+    throw new Error('dateOfBirth must be MM/DD/YYYY')
+  }
+
+  return {
+    agentId,
+    payload: {
+      issueState: coerceIdentifier('issueState', quote.issueState),
+      firstName: coerceIdentifier('firstName', quote.firstName),
+      lastName: coerceIdentifier('lastName', quote.lastName),
+      dateOfBirth: quote.dateOfBirth,
+      gender: coerceIdentifier('gender', quote.gender),
+      rateClass: coerceIdentifier('rateClass', quote.rateClass),
+      solveType: coerceIdentifier('solveType', quote.solveType),
+      amount,
+      deathBenefitOption: coerceIdentifier('deathBenefitOption', quote.deathBenefitOption),
+      strategy: coerceIdentifier('strategy', quote.strategy),
+      allocation: Math.trunc(allocation),
+      productCode: coerceIdentifier('productCode', quote.productCode),
     },
   }
 }
@@ -449,6 +548,33 @@ export function createBrowserJobService(deps?: BrowserJobServiceDeps) {
       return { jobId: created.id, duplicate: false }
     },
 
+    async enqueueRapidSolveQuote(input: {
+      agentId: string
+      quote: RapidSolveQuoteJobInput
+    }): Promise<{ jobId: string; duplicate: boolean }> {
+      const now = resolveNow(deps)
+      const sanitized = sanitizeRapidSolveQuoteInput(input)
+      const baseKey = buildRapidSolveIdempotencyKey(sanitized.agentId, sanitized.payload, now)
+      const active = await repository.findMostRecentByRetryKeyFamily(baseKey, [...ACTIVE_JOB_STATES])
+
+      if (active) {
+        return { jobId: active.id, duplicate: true }
+      }
+
+      const existing = await repository.findMostRecentByRetryKeyFamily(baseKey)
+
+      const created = await repository.create({
+        agentId: sanitized.agentId,
+        // A prospect has no case. The column is nullable for exactly this.
+        operation: 'GET_RAPID_SOLVE_QUOTE',
+        idempotencyKey: existing ? buildCaseSyncRetryKey(baseKey) : baseKey,
+        input: sanitized.payload,
+        availableAt: now,
+      })
+
+      return { jobId: created.id, duplicate: false }
+    },
+
     async claimNextJob(workerId: string, now = resolveNow(deps)): Promise<ClaimedBrowserJob | null> {
       const safeWorkerId = coerceIdentifier('workerId', workerId)
       return repository.claimNextAvailable({
@@ -563,6 +689,13 @@ export async function enqueueCaseReadSync(input: {
   lookup: { kind: 'EXTERNAL_ID'; value: string }
 }): Promise<{ jobId: string; duplicate: boolean }> {
   return createBrowserJobService().enqueueCaseReadSync(input)
+}
+
+export async function enqueueRapidSolveQuote(input: {
+  agentId: string
+  quote: RapidSolveQuoteJobInput
+}): Promise<{ jobId: string; duplicate: boolean }> {
+  return createBrowserJobService().enqueueRapidSolveQuote(input)
 }
 
 export async function claimNextJob(workerId: string, now?: Date): Promise<ClaimedBrowserJob | null> {

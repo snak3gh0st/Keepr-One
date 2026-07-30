@@ -80,6 +80,11 @@ describe('buildRapidSolveRequest', () => {
     expect(request.PremiumMode).toBe('Monthly')
   })
 
+  it('lets a caller name the product, for when 956 is not the one wanted', () => {
+    const request = buildRapidSolveRequest({ ...input, productCode: '957' }, utc(2026, 3, 20))
+    expect(request.ProductCode).toBe('957')
+  })
+
   it('sends allocation as an integer, as the bundle parses it', () => {
     const request = buildRapidSolveRequest({ ...input, allocation: 99.7 }, utc(2026, 3, 20))
     expect(request.Allocation).toBe(99)

@@ -1,4 +1,11 @@
 import { ZodError, z } from 'zod'
+import {
+  RAPID_SOLVE_PATH,
+  parseRapidSolveResponse,
+  type RapidSolveFailure,
+  type RapidSolveQuote,
+  type RapidSolveRequest,
+} from '../../lib/national-life/rapid-solve'
 import type { BrowserSession, NationalLifeCaseObservation } from './types'
 
 export type AdapterConfig = Readonly<{
@@ -19,12 +26,21 @@ type AdapterLocator = {
   click(): Promise<void>
 }
 
+type AdapterRequestResponse = {
+  ok(): boolean
+  status(): number
+  json(): Promise<unknown>
+}
+
 type AdapterPage = {
   goto(url: string): Promise<void>
   getByLabel(label: string): AdapterLocator
   getByRole(role: 'button' | 'heading' | 'link', options?: { name?: string }): AdapterLocator
   locator(selector: string): AdapterLocator
   url(): string
+  request: {
+    post(url: string, options: { data: unknown }): Promise<AdapterRequestResponse>
+  }
 }
 
 const SELECTOR_NOT_FOUND_CODE = 'SELECTOR_NOT_FOUND'
@@ -32,6 +48,7 @@ const PORTAL_LAYOUT_CHANGED_CODE = 'PORTAL_LAYOUT_CHANGED'
 const UNEXPECTED_APPLICATION_IDENTIFIER_CODE = 'UNEXPECTED_APPLICATION_IDENTIFIER'
 const AUTHENTICATION_STATE_INVALID_CODE = 'AUTHENTICATION_STATE_INVALID'
 const NAVIGATION_ORIGIN_BLOCKED_CODE = 'NAVIGATION_ORIGIN_BLOCKED'
+const RAPID_SOLVE_REQUEST_FAILED_CODE = 'RAPID_SOLVE_REQUEST_FAILED'
 
 export type NationalLifeAuthenticationState =
   | { kind: 'AWAITING_LOGIN'; origin: string }
@@ -202,6 +219,41 @@ export class NationalLifeAdapter {
         communications: [],
         documents: [],
       })
+    } catch (error) {
+      throw this.normalizeError(error)
+    }
+  }
+
+  /// Asks the carrier to price an illustration.
+  ///
+  /// This is the only call in the integration that is not a read. It creates no
+  /// application and files nothing — Rapid Solve is the carrier's own quoting
+  /// tool and this is the request its screen makes — but it is still a POST
+  /// against a real agent account, which is why it goes through the session's
+  /// own browser context rather than a bare fetch, and why nothing calls it
+  /// except a job the agent triggered.
+  ///
+  /// A refusal is returned, not thrown: `Success: false` arrives with HTTP 200
+  /// and carries the carrier's own sentence about why. That sentence is the
+  /// answer the agent needs, and an exception would send it through error
+  /// redaction instead of to the screen.
+  async requestRapidSolveQuote(
+    request: RapidSolveRequest,
+  ): Promise<RapidSolveQuote | RapidSolveFailure> {
+    try {
+      const url = new URL(RAPID_SOLVE_PATH, this.config.loginUrl).toString()
+      const response = await this.getPage().request.post(url, { data: request })
+
+      // Transport-level failure is a real failure: we never got an answer.
+      if (!response.ok()) {
+        throw new NationalLifeAdapterError(
+          RAPID_SOLVE_REQUEST_FAILED_CODE,
+          'National Life did not answer the Rapid Solve request',
+          { status: response.status() },
+        )
+      }
+
+      return parseRapidSolveResponse(await response.json())
     } catch (error) {
       throw this.normalizeError(error)
     }

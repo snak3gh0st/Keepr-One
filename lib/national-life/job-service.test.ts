@@ -545,3 +545,116 @@ describe('National Life browser job service', () => {
     ).rejects.toThrow('Invalid browser job transition')
   })
 })
+
+describe('Rapid Solve quote jobs', () => {
+  const quote = {
+    issueState: 'FL',
+    firstName: 'Ana',
+    lastName: 'Souza',
+    dateOfBirth: '03/10/1986',
+    gender: 'F',
+    rateClass: 'NonTobacco',
+    solveType: 'Specify_Amount',
+    amount: 250_000,
+    deathBenefitOption: 'Level',
+    strategy: 'S&P',
+    allocation: 100,
+    productCode: '956',
+  }
+
+  function createService(repository: ReturnType<typeof createInMemoryRepository>) {
+    return createBrowserJobService({
+      repository,
+      connectionTestScopeId: 'scope-1',
+      now: () => new Date('2026-07-27T12:02:00.000Z'),
+    })
+  }
+
+  it('enqueues without a case, because the insured is a prospect', async () => {
+    const repository = createInMemoryRepository()
+
+    await expect(
+      createService(repository).enqueueRapidSolveQuote({ agentId: 'agent-1', quote }),
+    ).resolves.toEqual({ jobId: expect.any(String), duplicate: false })
+
+    await expect(repository.snapshot()).resolves.toEqual([
+      expect.objectContaining({
+        operation: 'GET_RAPID_SOLVE_QUOTE',
+        caseId: null,
+        input: quote,
+      }),
+    ])
+  })
+
+  it('treats the same question asked twice as one job', async () => {
+    const repository = createInMemoryRepository()
+    const service = createService(repository)
+
+    const first = await service.enqueueRapidSolveQuote({ agentId: 'agent-1', quote })
+    const second = await service.enqueueRapidSolveQuote({ agentId: 'agent-1', quote })
+
+    expect(second).toEqual({ jobId: first.jobId, duplicate: true })
+  })
+
+  // The reason the key is a hash of the input and not agent+prospect: raising the
+  // face amount and asking again is the normal way an agent works, and returning
+  // the first quote's numbers would look like an answer to the second question.
+  it('quotes again when the amount changes', async () => {
+    const repository = createInMemoryRepository()
+    const service = createService(repository)
+
+    const first = await service.enqueueRapidSolveQuote({ agentId: 'agent-1', quote })
+    const second = await service.enqueueRapidSolveQuote({
+      agentId: 'agent-1',
+      quote: { ...quote, amount: 500_000 },
+    })
+
+    expect(second.duplicate).toBe(false)
+    expect(second.jobId).not.toBe(first.jobId)
+  })
+
+  it('quotes again when the solve type changes', async () => {
+    const repository = createInMemoryRepository()
+    const service = createService(repository)
+
+    await service.enqueueRapidSolveQuote({ agentId: 'agent-1', quote })
+    const second = await service.enqueueRapidSolveQuote({
+      agentId: 'agent-1',
+      quote: { ...quote, solveType: 'Premium-AccumulationFocus' },
+    })
+
+    expect(second.duplicate).toBe(false)
+  })
+
+  it('does not carry a field the carrier never asked for', async () => {
+    const repository = createInMemoryRepository()
+
+    await createService(repository).enqueueRapidSolveQuote({
+      agentId: 'agent-1',
+      quote: { ...quote, password: 'secret', debugUrl: 'https://carrier.example/debug' },
+    } as never)
+
+    await expect(repository.snapshot()).resolves.toEqual([
+      expect.objectContaining({ input: quote }),
+    ])
+  })
+
+  it('rejects a date of birth that is not the carrier format', async () => {
+    const service = createService(createInMemoryRepository())
+
+    await expect(
+      service.enqueueRapidSolveQuote({
+        agentId: 'agent-1',
+        quote: { ...quote, dateOfBirth: '1986-03-10' },
+      }),
+    ).rejects.toThrow('dateOfBirth must be MM/DD/YYYY')
+  })
+
+  it('rejects an amount that is not a positive number', async () => {
+    const service = createService(createInMemoryRepository())
+
+    await expect(
+      service.enqueueRapidSolveQuote({ agentId: 'agent-1', quote: { ...quote, amount: 0 } }),
+    ).rejects.toThrow('amount must be a positive number')
+  })
+})

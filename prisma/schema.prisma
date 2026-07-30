@@ -130,6 +130,7 @@ enum BrowserJobState {
 enum BrowserJobOperation {
   TEST_CONNECTION
   SYNC_CASE_READ
+  GET_RAPID_SOLVE_QUOTE
 }
 
 model User {

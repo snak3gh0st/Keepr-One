@@ -7,7 +7,15 @@ import type { NationalLifeEnv } from '../../lib/national-life/env'
 import type {
   BrowserJobRecord,
   CaseReadSyncJobInput,
+  RapidSolveQuoteJobInput,
 } from '../../lib/national-life/job-service'
+import {
+  buildRapidSolveRequest,
+  type RapidSolveFailure,
+  type RapidSolveQuote,
+  type RapidSolveRequest,
+  type SolveType,
+} from '../../lib/national-life/rapid-solve'
 import type { BrowserJobState } from '../../lib/national-life/job-state'
 import { redactDiagnostic } from '../../lib/national-life/redaction'
 import type {
@@ -51,6 +59,9 @@ type NationalLifeJobAdapter = {
   readCase(
     lookup: CaseReadSyncJobInput['lookup'],
   ): Promise<NationalLifeCaseObservation>
+  requestRapidSolveQuote(
+    request: RapidSolveRequest,
+  ): Promise<RapidSolveQuote | RapidSolveFailure>
 }
 
 export type NationalLifeJobStore = {
@@ -84,6 +95,12 @@ export type NationalLifeRunJobDeps = {
   ): SessionContext
   createSession(sessionContext: SessionContext): Promise<BrowserSession>
   createAdapter(session: BrowserSession): NationalLifeJobAdapter
+  /// Serialises against every other thing that opens the carrier browser —
+  /// the connection-attempt loop in this process and the cron scripts in
+  /// theirs. Steel runs one Chrome for this deployment, so two at once kill
+  /// each other mid-navigation. Returns null when the wait ran out, which is
+  /// contention rather than failure and so re-queues instead of failing.
+  runExclusively<T>(work: () => Promise<T>): Promise<T | null>
   applyCaseObservation(input: {
     agentId: string
     caseId: string
@@ -105,6 +122,42 @@ function isCaseReadSyncInput(
   input: BrowserJobRecord['input'],
 ): input is CaseReadSyncJobInput {
   return 'lookup' in input
+}
+
+function isRapidSolveQuoteInput(
+  input: BrowserJobRecord['input'],
+): input is RapidSolveQuoteJobInput {
+  return 'solveType' in input && 'productCode' in input
+}
+
+/// Rebuilds the carrier request from the row. The date crossed the queue as the
+/// carrier's own `MM/DD/YYYY` string, so it is parsed back in UTC — the same
+/// zone `toCarrierDate` wrote it in. Reading it as local time would shift the
+/// day either side of midnight and, through age-nearest-birthday, silently
+/// misprice the quote by a year.
+function rapidSolveRequestFrom(
+  input: RapidSolveQuoteJobInput,
+  now: Date,
+): RapidSolveRequest {
+  const [month, day, year] = input.dateOfBirth.split('/').map(Number)
+
+  return buildRapidSolveRequest(
+    {
+      issueState: input.issueState,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      dateOfBirth: new Date(Date.UTC(year, month - 1, day)),
+      gender: input.gender,
+      rateClass: input.rateClass,
+      solveType: input.solveType as SolveType,
+      amount: input.amount,
+      deathBenefitOption: input.deathBenefitOption,
+      strategy: input.strategy,
+      allocation: input.allocation,
+      productCode: input.productCode,
+    },
+    now,
+  )
 }
 
 function getErrorCode(error: unknown): string | undefined {
@@ -256,7 +309,18 @@ export async function runNationalLifeJob(
     return { kind: 'NOT_CLAIMED' }
   }
 
-  if (!isCaseReadSyncInput(job.input)) {
+  // Checked before any session work, so an operation this worker cannot run
+  // never costs a carrier browser. The operation and the payload have to agree:
+  // a row claiming one and carrying the other is a corrupt job, not a job to
+  // guess at.
+  const quoteInput =
+    job.operation === 'GET_RAPID_SOLVE_QUOTE' && isRapidSolveQuoteInput(job.input)
+      ? job.input
+      : null
+  const caseInput =
+    job.operation === 'SYNC_CASE_READ' && isCaseReadSyncInput(job.input) ? job.input : null
+
+  if (!quoteInput && !caseInput) {
     await deps.jobStore.transitionJob({
       jobId: job.id,
       from: 'RUNNING',
@@ -288,26 +352,63 @@ export async function runNationalLifeJob(
   let browserSession: BrowserSession | undefined
 
   try {
-    browserSession = await deps.createSession(sessionContext)
-    const adapter = deps.createAdapter(browserSession)
-    await adapter.assertAuthenticated()
-    await deps.sessionStore.markUsed(storedSession!.id, deps.now())
+    const ran = await deps.runExclusively(async () => {
+      browserSession = await deps.createSession(sessionContext)
+      const adapter = deps.createAdapter(browserSession)
+      await adapter.assertAuthenticated()
+      await deps.sessionStore.markUsed(storedSession!.id, deps.now())
 
-    const observation = await adapter.readCase(job.input.lookup)
-    const syncResult = await deps.applyCaseObservation({
-      agentId: job.agentId,
-      caseId: job.input.caseId,
-      applicationId: job.input.applicationId,
-      jobId: job.id,
-      observation,
+      // Everything above is shared: claim, session, reconnect-on-unusable,
+      // authentication. Only the question asked of the carrier differs.
+      if (quoteInput) {
+        const quote = await adapter.requestRapidSolveQuote(
+          rapidSolveRequestFrom(quoteInput, deps.now()),
+        )
+
+        // A refusal is an answer. SUCCEEDED means "we asked and the carrier
+        // replied"; FAILED is reserved for not having been able to ask. Routing
+        // a refusal through handleFailure would redact the carrier's own
+        // sentence, which is the one thing the agent needs to read.
+        await deps.jobStore.transitionJob({
+          jobId: job.id,
+          from: 'RUNNING',
+          to: 'SUCCEEDED',
+          result: quote,
+        })
+      } else if (caseInput) {
+        const observation = await adapter.readCase(caseInput.lookup)
+        const syncResult = await deps.applyCaseObservation({
+          agentId: job.agentId,
+          caseId: caseInput.caseId,
+          applicationId: caseInput.applicationId,
+          jobId: job.id,
+          observation,
+        })
+
+        await deps.jobStore.transitionJob({
+          jobId: job.id,
+          from: 'RUNNING',
+          to: 'SUCCEEDED',
+          result: syncResult,
+        })
+      }
+
+      return 'ran'
     })
 
-    await deps.jobStore.transitionJob({
-      jobId: job.id,
-      from: 'RUNNING',
-      to: 'SUCCEEDED',
-      result: syncResult,
-    })
+    // Another carrier browser held the lock past the deadline. Nothing was
+    // asked of the carrier, so this is not a failure — re-queue and let the
+    // next tick try. Failing here would report "we asked and it went wrong"
+    // about a request that was never made.
+    if (ran === null) {
+      await deps.jobStore.transitionJob({
+        jobId: job.id,
+        from: 'RUNNING',
+        to: 'RETRYABLE',
+        safeErrorCode: 'CARRIER_BROWSER_BUSY',
+        availableAt: new Date(deps.now().getTime() + TRANSIENT_RETRY_DELAY_MS),
+      })
+    }
   } catch (error) {
     await handleFailure(job, error, deps)
   } finally {

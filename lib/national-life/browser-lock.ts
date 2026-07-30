@@ -90,3 +90,32 @@ export async function withBrowserLockWaiting<T>(
     await releaseBrowserLock(client)
   }
 }
+
+export type DisconnectableLockClient = LockClient & {
+  $disconnect(): Promise<void>
+}
+
+/// The same lock, held on a connection this call owns and then closes.
+///
+/// A Postgres advisory lock belongs to the connection that took it. The scripts
+/// get away with the shared client because they are short-lived: the process
+/// exits, every connection drops, and the lock goes with it. The runtime never
+/// exits. Prisma pools, so `pg_advisory_unlock` can run on a different
+/// connection than `pg_try_advisory_lock` did, and a lock that leaks there is
+/// held until the worker restarts — blocking every carrier job and every cron
+/// behind it. That is a worse outage than the collision the lock prevents.
+///
+/// Closing a client opened for this one call releases the lock whatever
+/// happened, including on a throw the unlock never reached.
+export async function withOwnedBrowserLockWaiting<T>(
+  createClient: () => DisconnectableLockClient,
+  work: () => Promise<T>,
+  options: WaitForLockOptions = {},
+): Promise<T | null> {
+  const client = createClient()
+  try {
+    return await withBrowserLockWaiting(client, work, options)
+  } finally {
+    await client.$disconnect()
+  }
+}

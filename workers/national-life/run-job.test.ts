@@ -6,6 +6,11 @@ import { encryptBrowserContext } from '../../lib/national-life/browser-context-c
 import type { NationalLifeEnv } from '../../lib/national-life/env'
 import type { BrowserJobRecord } from '../../lib/national-life/job-service'
 import type { BrowserJobState } from '../../lib/national-life/job-state'
+import type {
+  RapidSolveFailure,
+  RapidSolveQuote,
+  RapidSolveRequest,
+} from '../../lib/national-life/rapid-solve'
 import type { BrowserSession, NationalLifeCaseObservation } from './types'
 import {
   runNationalLifeJob,
@@ -178,12 +183,15 @@ function createDeps(options: {
   storedSession?: StoredAgentIntegrationSession | null
   assertAuthenticated?: () => Promise<void>
   readCase?: () => Promise<NationalLifeCaseObservation>
+  requestRapidSolveQuote?: () => Promise<RapidSolveQuote | RapidSolveFailure>
+  browserBusy?: boolean
 }) {
   const store = createStore(options.job ?? buildJob())
   const browser = createBrowserSession()
   const calls: string[] = []
   const invalidations: Array<{ agentId: string; provider: string }> = []
   const used: Array<{ sessionId: string; usedAt: Date }> = []
+  const quoteRequests: RapidSolveRequest[] = []
 
   return {
     calls,
@@ -191,6 +199,7 @@ function createDeps(options: {
     used,
     store,
     browser,
+    quoteRequests,
     deps: {
       env: buildEnv(),
       workerId: 'worker-1',
@@ -238,7 +247,31 @@ function createDeps(options: {
             }
           )
         },
+        async requestRapidSolveQuote(request: RapidSolveRequest) {
+          calls.push('adapter:quote')
+          quoteRequests.push(request)
+          return (
+            options.requestRapidSolveQuote?.() ?? {
+              ok: true as const,
+              faceAmount: 250_000,
+              annualPremium: 3_748.8,
+              monthlyPremium: 312.4,
+              lapseYear: null,
+            }
+          )
+        },
       }),
+      async runExclusively<T>(work: () => Promise<T>) {
+        calls.push('lock:acquire')
+        if (options.browserBusy) {
+          return null
+        }
+        try {
+          return await work()
+        } finally {
+          calls.push('lock:release')
+        }
+      },
       async applyCaseObservation() {
         calls.push('sync:apply')
         return {
@@ -260,10 +293,12 @@ describe('National Life restored-context job orchestration', () => {
     expect(test.calls).toEqual([
       'session-store:find',
       'context:decrypt',
+      'lock:acquire',
       'steel:create-restored',
       'adapter:assert-authenticated',
       'adapter:read',
       'sync:apply',
+      'lock:release',
     ])
     expect(test.used).toEqual([
       { sessionId: 'integration-session-1', usedAt: now },
@@ -355,6 +390,121 @@ describe('National Life restored-context job orchestration', () => {
     })
     expect(JSON.stringify(test.store.current())).not.toContain('sensitive-value')
     expect(test.browser.close).toHaveBeenCalledOnce()
+  })
+
+  const quoteJobInput = {
+    issueState: 'FL',
+    firstName: 'Ana',
+    lastName: 'Souza',
+    dateOfBirth: '03/10/1986',
+    gender: 'F',
+    rateClass: 'NonTobacco',
+    solveType: 'Specify_Amount',
+    amount: 250_000,
+    deathBenefitOption: 'Level',
+    strategy: 'S&P',
+    allocation: 100,
+    productCode: '956',
+  }
+
+  function buildQuoteJob() {
+    return buildJob({
+      operation: 'GET_RAPID_SOLVE_QUOTE',
+      // A prospect has no case.
+      caseId: null,
+      input: quoteJobInput,
+    })
+  }
+
+  it('asks the carrier to price the illustration and stores the answer', async () => {
+    const test = createDeps({ job: buildQuoteJob() })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls).toContain('adapter:quote')
+    expect(test.calls).not.toContain('adapter:read')
+    expect(test.calls).not.toContain('sync:apply')
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'SUCCEEDED',
+      result: { ok: true, monthlyPremium: 312.4 },
+    })
+  })
+
+  it('sends the date and age the carrier expects, through the queue', async () => {
+    const test = createDeps({ job: buildQuoteJob() })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    // Age nearest birthday on 2026-07-28 for a 1986-03-10 birth is 40: the next
+    // birthday is further away than the last one. Reading the stored date as
+    // local time instead of UTC is what would break this.
+    expect(test.quoteRequests.at(-1)).toMatchObject({
+      DateOfBirth: '03/10/1986',
+      IssueAge: 40,
+      ProductCode: '956',
+      PremiumMode: 'Monthly',
+    })
+  })
+
+  // The carrier answers a refusal with HTTP 200 and a sentence. That sentence is
+  // the answer, so the job succeeded — it asked and got a reply. Failing here
+  // would send the sentence through error redaction and leave the agent with a
+  // code instead of a reason.
+  it('treats a carrier refusal as an answer, not a failed job', async () => {
+    const test = createDeps({
+      job: buildQuoteJob(),
+      requestRapidSolveQuote: async () => ({
+        ok: false,
+        message: 'Face amount below the product minimum.',
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'SUCCEEDED',
+      result: { ok: false, message: 'Face amount below the product minimum.' },
+    })
+  })
+
+  it('refuses a job whose operation and payload disagree', async () => {
+    const test = createDeps({
+      job: buildJob({ operation: 'GET_RAPID_SOLVE_QUOTE' }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls).not.toContain('steel:create-restored')
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'FAILED',
+      safeErrorCode: 'UNSUPPORTED_JOB_OPERATION',
+    })
+  })
+
+  // Steel runs one Chrome for this deployment. Before this, the job loop opened
+  // a browser without the lock the cron scripts take, so a sync and a job could
+  // land on the same Chrome and kill each other mid-navigation.
+  it('takes the carrier browser lock before opening a session', async () => {
+    const test = createDeps({})
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls.indexOf('lock:acquire')).toBeLessThan(
+      test.calls.indexOf('steel:create-restored'),
+    )
+    expect(test.calls).toContain('lock:release')
+  })
+
+  it('re-queues rather than fails when another carrier browser holds the lock', async () => {
+    const test = createDeps({ browserBusy: true })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls).not.toContain('steel:create-restored')
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'RETRYABLE',
+      safeErrorCode: 'CARRIER_BROWSER_BUSY',
+    })
   })
 
   it('contains no credential-decrypt or credential-object runtime path', async () => {

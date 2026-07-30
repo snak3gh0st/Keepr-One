@@ -36,6 +36,11 @@ export type RapidSolveInput = {
   deathBenefitOption: string
   strategy: string
   allocation: number
+  /// Defaults to the code the carrier's own script hardcodes. It is a field
+  /// rather than a constant because the screen has to quote Term as well as
+  /// IUL, and whether this endpoint reaches Term is still unanswered — keeping
+  /// it in the input means the answer changes a caller, not the transport.
+  productCode?: string
 }
 
 export type RapidSolveRequest = {
@@ -58,6 +63,10 @@ export type RapidSolveRequest = {
 // Both are hardcoded in the carrier's own script rather than chosen in the UI.
 // Named here so that if a quote ever comes back for the wrong product, the
 // reason is visible instead of buried in a literal.
+//
+// The product code stays the default rather than the only value: it is what the
+// carrier's Rapid Solve screen sends, so it is the only code known to work, but
+// it has not been confirmed which product it is nor whether Term is reachable.
 export const RAPID_SOLVE_PRODUCT_CODE = '956'
 export const RAPID_SOLVE_PREMIUM_MODE = 'Monthly'
 
@@ -104,7 +113,7 @@ export function buildRapidSolveRequest(input: RapidSolveInput, on: Date): RapidS
     DeathBenefitOption: input.deathBenefitOption,
     Strategy: input.strategy,
     Allocation: Math.trunc(input.allocation),
-    ProductCode: RAPID_SOLVE_PRODUCT_CODE,
+    ProductCode: input.productCode ?? RAPID_SOLVE_PRODUCT_CODE,
     PremiumMode: RAPID_SOLVE_PREMIUM_MODE,
   }
 }

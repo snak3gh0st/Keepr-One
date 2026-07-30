@@ -1,10 +1,11 @@
 import { type Server } from 'node:http'
 import type { EventEmitter } from 'node:events'
-import { Prisma } from '@prisma/client'
+import { Prisma, PrismaClient } from '@prisma/client'
 import {
   decryptAttemptRuntime,
   type EncryptedBrowserSecret,
 } from '../../lib/national-life/browser-context-crypto'
+import { withOwnedBrowserLockWaiting } from '../../lib/national-life/browser-lock'
 import { NATIONAL_LIFE_PROVIDER } from '../../lib/national-life/constants'
 import type { NationalLifeEnv } from '../../lib/national-life/env'
 import {
@@ -513,6 +514,23 @@ function createSessionStore(env: NationalLifeEnv) {
   }
 }
 
+/// A client that owns exactly one connection, for holding the carrier browser
+/// lock.
+///
+/// The pool size is the point, not an optimisation. A Postgres advisory lock
+/// belongs to the connection that took it, and Prisma hands any pooled
+/// connection to any query — with a default pool, `pg_advisory_unlock` can run
+/// on a connection that never held the lock, and the release silently does
+/// nothing. At one connection there is nowhere else for it to go.
+///
+/// It also keeps the cost honest: the server allows 100 connections and a
+/// default Prisma pool would claim roughly a tenth of them per job.
+function createLockClient(): PrismaClient {
+  const url = new URL(process.env.DATABASE_URL ?? '')
+  url.searchParams.set('connection_limit', '1')
+  return new PrismaClient({ datasourceUrl: url.toString() })
+}
+
 function createJobRunner(env: NationalLifeEnv) {
   const jobStore = createJobStore(env)
   const sessionStore = createSessionStore(env)
@@ -535,6 +553,10 @@ function createJobRunner(env: NationalLifeEnv) {
           ).toString(),
           allowedOrigins: env.portalOrigins,
         }),
+      // A fresh single-connection client per job, closed when the job ends, so
+      // the advisory lock cannot outlive the work that took it. The worker
+      // process never exits, so a leaked lock here would be permanent.
+      runExclusively: (work) => withOwnedBrowserLockWaiting(createLockClient, work),
       applyCaseObservation,
     }).then(() => undefined)
 }
