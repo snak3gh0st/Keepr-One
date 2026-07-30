@@ -143,6 +143,12 @@ então `status-map.ts` precisa normalizar por prefixo, não por igualdade.
 | `PROJECTED_COMMISSIONS` | 4 | GetJsonResult | ✅ 4 gravados |
 | `TRANSFERS_EXCHANGES` | 0 | GetJsonResult | ✅ vazio de verdade |
 | `COMMISSIONS_OVERVIEW` | — | **date picker** | ⛔ ver abaixo |
+| `PREMIUM_REPORT_AGENCY` | 2 | **server-rendered** | ✅ extraído (agregado) |
+| `COMMISSIONS_EARNING_REPORT` | 8 | GetJsonResult | ⚠️ **duplicata** de PAID_COMMISSIONS |
+| `PAYABLE_GROSS_COMMISSIONS` | 4 | GetJsonResult | ⚠️ **duplicata** de PROJECTED_COMMISSIONS |
+| `LIFE_PENDING_LAPSE` | 0 | GetJsonResult | ✅ vazio de verdade |
+| `LIFE_PERSISTENCY` | — | GetJsonResult | ⛔ resposta não é JSON |
+| `COMMISSIONS_POLICY_HISTORY` | — | não emite XHR | ⛔ provável formulário |
 | `POLICY_PAYMENT_HISTORY` | — | **form por apólice** | ⛔ ver abaixo |
 | `PLACEMENT_REPORT` | — | não emite XHR | ⛔ não investigado |
 
@@ -248,6 +254,13 @@ o limite era de processos, não de RAM.
   (`NationalLifeConnectionAttempt` sem linhas ativas): a sessão autenticada vive
   no banco e é re-semeada.
 - **Não rodar sync concorrente com login interativo** — competem pelos mesmos PIDs.
+
+**Steel roda um Chrome só — jobs concorrentes se matam.** Cinco sondagens
+morreram com `Target page, context or browser has been closed` porque um tick do
+keep-alive começou no meio delas: ao liberar sua sessão, derrubou a outra. O guard
+de login interativo não via outros scripts. Resolvido com advisory lock do
+Postgres (`lib/national-life/browser-lock.ts`), tomado pelo keep-alive e pelos
+três scripts de sync. Sem ele, o sync diário seria morto pelo keep-alive.
 
 **Upsert linha-a-linha é lento.** `persistInforcePolicies` faz um `upsert` por
 apólice; 10 mil linhas levam minutos. Precisa de escrita em lote antes de virar
