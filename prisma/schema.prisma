@@ -176,6 +176,7 @@ model Agent {
   nationalLifeConnectionAttempts NationalLifeConnectionAttempt[]
   browserJobs            BrowserAutomationJob[]
   nationalLifeCaseSnapshots NationalLifeCaseSnapshot[]
+  nationalLifeInforcePolicies NationalLifeInforcePolicy[]
 
   @@index([parentAgentId])
 }
@@ -215,6 +216,55 @@ model NationalLifeCaseSnapshot {
 
   @@unique([agentId, deploymentScope, gridKey, policyNo])
   @@index([agentId, gridKey])
+  @@index([fetchedAt])
+}
+
+/// Raw landing zone for the inforce book grid. Distinct from
+/// NationalLifeCaseSnapshot: this is policy/client demographic data (owner and
+/// insured name, DOB, address, contact, cash value), not a submission-pipeline
+/// case, and the carrier's own field names differ (PolicyNumber, not PolicyNo).
+/// Contains real client PII, stored in plaintext to match how Client already
+/// stores name/email/phone in this schema — same trust boundary, no new gap.
+model NationalLifeInforcePolicy {
+  id                    String   @id @default(cuid())
+  agentId               String
+  agent                 Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope       String
+  policyNumber          String
+  nbPolicyNumber        String?
+  policyStatus          String?
+  policyIssueDate       String?
+  lastStatusChangeDate  String?
+  productClass          String?
+  productName           String?
+  productCode           String?
+  companyCode           String?
+  systemCode            String?
+  planCode              String?
+  agentNumber           String?
+  agentName             String?
+  servicingAgentName    String?
+  servicingAgencyName   String?
+  insuredClientName     String?
+  insuredDob            String?
+  insuredEmail          String?
+  insuredPhoneNumber    String?
+  ownerClientName       String?
+  ownerDob              String?
+  ownerEmail            String?
+  ownerPhoneNumber      String?
+  accumulatedCashValue  String?
+  anticipatedAnnualPremium String?
+  termConversionDate    String?
+  levelPeriodEndDate    String?
+  employerName          String?
+  raw                   Json
+  fetchedAt             DateTime
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([agentId, deploymentScope, policyNumber])
+  @@index([agentId])
   @@index([fetchedAt])
 }
 

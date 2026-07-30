@@ -1,15 +1,24 @@
-// Pulls the National Life agent-portal grids into NationalLifeCaseSnapshot using
-// the stored authenticated session. Read-only against the carrier.
+// Pulls National Life agent-portal grids into the case-snapshot / inforce-policy
+// staging tables using the stored authenticated session. Read-only against the
+// carrier.
 //
 //   tsx scripts/national-life-sync-snapshots.ts [GRID_KEY ...]
 //
-// Defaults to every known grid. Prints counts only, never row values.
+// Defaults to every grid confirmed to expose its data via GetJsonResult. Several
+// registered paths (placement report, transfers/exchanges, payment history,
+// every compensation page) do not fire that request today — see
+// docs/operations/national-life-portal-contract.md — so they are opt-in only
+// until that is understood. Prints counts only, never row values.
 import { decryptBrowserContext } from '../lib/national-life/browser-context-crypto'
 import { getNationalLifeEnv } from '../lib/national-life/env'
 import {
   persistCaseSnapshots,
   toCaseSnapshots,
 } from '../lib/national-life/case-snapshot-service'
+import {
+  persistInforcePolicies,
+  toInforcePolicySnapshots,
+} from '../lib/national-life/inforce-policy-service'
 import {
   NATIONAL_LIFE_GRIDS,
   fetchNationalLifeGrid,
@@ -19,17 +28,56 @@ import {
 import { prisma } from '../lib/prisma'
 import { createSteelBrowserSession } from '../workers/national-life/steel-session'
 
+const CASE_SNAPSHOT_GRIDS: readonly NationalLifeGridKey[] = ['NEW_BUSINESS', 'RECENTLY_CLOSED']
+const INFORCE_POLICY_GRIDS: readonly NationalLifeGridKey[] = ['INFORCE_CLIENTS']
+const DEFAULT_GRIDS: readonly NationalLifeGridKey[] = [
+  ...CASE_SNAPSHOT_GRIDS,
+  ...INFORCE_POLICY_GRIDS,
+]
+
 function resolveGridKeys(): NationalLifeGridKey[] {
   const requested = process.argv.slice(2)
   const known = Object.keys(NATIONAL_LIFE_GRIDS) as NationalLifeGridKey[]
   if (requested.length === 0) {
-    return known
+    return [...DEFAULT_GRIDS]
   }
   const unknown = requested.filter((key) => !known.includes(key as NationalLifeGridKey))
   if (unknown.length > 0) {
     throw new Error(`unknown grid keys: ${unknown.join(', ')} (known: ${known.join(', ')})`)
   }
   return requested as NationalLifeGridKey[]
+}
+
+async function syncGrid(
+  gridKey: NationalLifeGridKey,
+  page: GridPage,
+  env: ReturnType<typeof getNationalLifeEnv>,
+  agentId: string,
+  fetchedAt: Date,
+) {
+  const gridPath = NATIONAL_LIFE_GRIDS[gridKey]
+  const { rows, recordsTotal } = await fetchNationalLifeGrid(page, gridPath, env.portalLoginUrl)
+
+  if (INFORCE_POLICY_GRIDS.includes(gridKey)) {
+    const snapshots = toInforcePolicySnapshots(rows)
+    const { written } = await persistInforcePolicies({
+      agentId,
+      deploymentScope: env.sessionScopeId,
+      snapshots,
+      fetchedAt,
+    })
+    return { recordsTotal, rowsFetched: rows.length, snapshots: snapshots.length, written }
+  }
+
+  const snapshots = toCaseSnapshots(rows)
+  const { written } = await persistCaseSnapshots({
+    agentId,
+    deploymentScope: env.sessionScopeId,
+    gridKey,
+    snapshots,
+    fetchedAt,
+  })
+  return { recordsTotal, rowsFetched: rows.length, snapshots: snapshots.length, written }
 }
 
 async function main() {
@@ -75,30 +123,15 @@ async function main() {
 
   try {
     for (const gridKey of gridKeys) {
-      const gridPath = NATIONAL_LIFE_GRIDS[gridKey]
       try {
-        const { rows, recordsTotal } = await fetchNationalLifeGrid(
-          session.page as unknown as GridPage,
-          gridPath,
-          env.portalLoginUrl,
-        )
-        const snapshots = toCaseSnapshots(rows)
-        const { written } = await persistCaseSnapshots({
-          agentId: stored.agentId,
-          deploymentScope: env.sessionScopeId,
+        const result = await syncGrid(
           gridKey,
-          snapshots,
+          session.page as unknown as GridPage,
+          env,
+          stored.agentId,
           fetchedAt,
-        })
-        console.log(
-          JSON.stringify({
-            gridKey,
-            recordsTotal,
-            rowsFetched: rows.length,
-            snapshots: snapshots.length,
-            written,
-          }),
         )
+        console.log(JSON.stringify({ gridKey, ...result }))
       } catch (error) {
         console.error(
           JSON.stringify({
