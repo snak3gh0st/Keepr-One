@@ -55,6 +55,7 @@ export type StoredAgentIntegrationSession = {
 }
 
 type NationalLifeJobAdapter = {
+  openPortalHome(): Promise<void>
   assertAuthenticated(): Promise<void>
   readCase(
     lookup: CaseReadSyncJobInput['lookup'],
@@ -426,6 +427,10 @@ export async function runNationalLifeJob(
       try {
         browserSession = await deps.createSession(sessionContext)
         const adapter = deps.createAdapter(browserSession)
+        // A restored session opens blank, and the authentication check reads
+        // the page's origin — so without this every job failed before doing
+        // anything, blaming a navigation it had never made.
+        await adapter.openPortalHome()
         await adapter.assertAuthenticated()
         await deps.sessionStore.markUsed(storedSession!.id, deps.now())
 

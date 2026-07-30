@@ -33,7 +33,7 @@ type AdapterRequestResponse = {
 }
 
 type AdapterPage = {
-  goto(url: string): Promise<void>
+  goto(url: string, options?: { waitUntil?: 'domcontentloaded'; timeout?: number }): Promise<void>
   getByLabel(label: string): AdapterLocator
   getByRole(role: 'button' | 'heading' | 'link', options?: { name?: string }): AdapterLocator
   locator(selector: string): AdapterLocator
@@ -104,6 +104,24 @@ export class NationalLifeAdapter {
     private readonly session: BrowserSession,
     private readonly config: AdapterConfig,
   ) {}
+
+  /// Puts the session on the carrier's own site before anything asks whether it
+  /// is still authenticated.
+  ///
+  /// A restored Steel session opens blank, and `about:blank` has no origin the
+  /// allowlist can accept — so `assertAuthenticated` rejected every job before
+  /// it did any work, reporting a navigation the job had never attempted. The
+  /// keep-alive script proves a session the same way, by loading `/agent/`.
+  async openPortalHome(): Promise<void> {
+    try {
+      await this.getPage().goto(new URL('/agent/', this.config.loginUrl).toString(), {
+        waitUntil: 'domcontentloaded',
+        timeout: 45_000,
+      })
+    } catch (error) {
+      throw this.normalizeError(error)
+    }
+  }
 
   async classifyAuthenticationState(): Promise<NationalLifeAuthenticationState> {
     try {

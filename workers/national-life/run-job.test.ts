@@ -235,6 +235,9 @@ function createDeps(options: {
         return browser.session
       },
       createAdapter: () => ({
+        async openPortalHome() {
+          calls.push('adapter:open-portal')
+        },
         async assertAuthenticated() {
           calls.push('adapter:assert-authenticated')
           await options.assertAuthenticated?.()
@@ -305,6 +308,9 @@ describe('National Life restored-context job orchestration', () => {
       'context:decrypt',
       'lock:acquire',
       'steel:create-restored',
+      // A restored session opens blank; the authentication check reads the
+      // page origin, so it has to be on the carrier's site first.
+      'adapter:open-portal',
       'adapter:assert-authenticated',
       'adapter:read',
       'sync:apply',
