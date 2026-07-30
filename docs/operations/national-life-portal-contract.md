@@ -174,6 +174,34 @@ apólice. Isso é volume de requisição relevante contra o carrier. Alternativa
 sob demanda por apólice (quando o usuário abre), ou lote noturno de um
 subconjunto (ex. só `Active`, ou só as com pagamento pendente).
 
+## Sessão: por que um cron desacompanhado não funciona hoje
+
+Medido, não estimado.
+
+- `carrierExpiresAt` derivado dos cookies reais: a sessão da aplicação vale
+  **~20 minutos** a partir do último uso (deslizante).
+- Testado 10,74 h após a expiração (`scripts/national-life-check-session.ts`):
+  abrir `/agent/` com o contexto salvo **redireciona para o login do Auth0 com
+  campo de senha** (`verdict: NEEDS_LOGIN`). Reabrir a URL de login também →
+  `silentReauthWorks: false`.
+- Conclusão: **o cookie de SSO do Auth0 não sobrevive junto**. Não existe
+  re-autenticação silenciosa depois de algumas horas.
+
+Isso colide com uma decisão de produto: o Keepr One **não armazena a senha** do
+carrier (é o que a UI promete). Sem senha guardada não há login desacompanhado.
+Restam apenas:
+
+1. **Keep-alive** com intervalo menor que a janela (~10 min), mantendo a sessão
+   permanentemente viva. ~144 toques/dia no portal, e a sessão nunca "fecha" —
+   decidir se isso é aceitável perante o carrier.
+2. **Login manual antes de cada sincronização** (comportamento atual).
+3. Guardar a senha e automatizar o login — contradiz a promessa da UI; seria uma
+   mudança de produto, não de implementação.
+
+A recaptura de contexto já implementada preserva a rotação de cookies e é
+necessária, mas **não** resolve isto sozinha: ela prolonga a janela enquanto há
+uso, não atravessa 24 h de ociosidade.
+
 ## Limites operacionais descobertos em produção (2026-07-30)
 
 **Steel esgota PIDs e para de subir browser.** O container tinha `pids_limit: 256`.
