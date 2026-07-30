@@ -73,3 +73,42 @@ describe('National Life case snapshot mapping', () => {
     expect(snapshots.find((s) => s.policyNo === 'NL9')?.carrierStatus).toBe('Fresh')
   })
 })
+
+describe('National Life grid field-name drift', () => {
+  it('reads the recently-closed grid, which names status and agent differently', () => {
+    const snapshot = toCaseSnapshot({
+      PolicyNo: '<a href="/x">NL777</a>',
+      InsuredOrAnnuitantName: 'Roe, Ann',
+      PolicyStatus: 'Incomplete - Closed',
+      AgentName: 'Novaes, C',
+      AgentNumber: '99887',
+      AnticipatedAnnualPremiumDollarValue: '2400.00',
+    })
+
+    expect(snapshot).toMatchObject({
+      policyNo: 'NL777',
+      carrierStatus: 'Incomplete - Closed',
+      writingAgentName: 'Novaes, C',
+      writingAgentNumber: '99887',
+      anticipatedAnnualPremium: '2400.00',
+    })
+  })
+
+  it('prefers the primary field name when both are present', () => {
+    const snapshot = toCaseSnapshot({
+      PolicyNo: 'NL1',
+      DerivedStatusDescription: 'Issued',
+      PolicyStatus: 'ignored',
+    })
+    expect(snapshot?.carrierStatus).toBe('Issued')
+  })
+
+  it('falls through a blank primary field to the alternate', () => {
+    const snapshot = toCaseSnapshot({
+      PolicyNo: 'NL1',
+      DerivedStatusDescription: '   ',
+      PolicyStatus: 'Issued',
+    })
+    expect(snapshot?.carrierStatus).toBe('Issued')
+  })
+})

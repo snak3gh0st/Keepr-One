@@ -27,14 +27,22 @@ export type CaseSnapshot = {
   raw: GridRow
 }
 
-function text(row: GridRow, key: string): string | null {
-  const value = row[key]
-  if (typeof value === 'string') {
-    const trimmed = stripMarkup(value)
-    return trimmed.length > 0 ? trimmed : null
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value)
+/// Grids disagree on column names for the same concept: new business calls the
+/// status `DerivedStatusDescription` while recently-closed calls it `PolicyStatus`.
+/// First key that yields a value wins.
+function text(row: GridRow, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = row[key]
+    if (typeof value === 'string') {
+      const trimmed = stripMarkup(value)
+      if (trimmed.length > 0) {
+        return trimmed
+      }
+      continue
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value)
+    }
   }
   return null
 }
@@ -59,22 +67,26 @@ export function toCaseSnapshot(row: GridRow): CaseSnapshot | null {
 
   return {
     policyNo,
-    insuredName: text(row, 'InsuredOrAnnuitantName'),
+    insuredName: text(row, 'InsuredOrAnnuitantName', 'InsuredName', 'ClientName'),
     ownerName: text(row, 'OwnerName'),
-    product: text(row, 'Product'),
-    carrierStatus: text(row, 'DerivedStatusDescription'),
+    product: text(row, 'Product', 'ProductName'),
+    carrierStatus: text(row, 'DerivedStatusDescription', 'PolicyStatus', 'Status'),
     deliveryStatus: text(row, 'DeliveryStatus'),
     actionRequired: text(row, 'ActionRequired'),
     requirements: text(row, 'Requirements'),
     submitDate: text(row, 'SubmitDate'),
     sentDate: text(row, 'SentDate'),
     modalPremium: text(row, 'ModalPremium'),
-    anticipatedAnnualPremium: text(row, 'AnticipatedAnnualPremium'),
+    anticipatedAnnualPremium: text(
+      row,
+      'AnticipatedAnnualPremium',
+      'AnticipatedAnnualPremiumDollarValue',
+    ),
     submitMethod: text(row, 'SubmitMethod'),
     caseManager: text(row, 'CaseManager'),
     agency: text(row, 'Agency'),
-    writingAgentName: text(row, 'WritingAgentName'),
-    writingAgentNumber: text(row, 'WritingAgentNumber'),
+    writingAgentName: text(row, 'WritingAgentName', 'AgentName'),
+    writingAgentNumber: text(row, 'WritingAgentNumber', 'AgentNumber'),
     companyCode: text(row, 'CompanyCode'),
     raw: row,
   }

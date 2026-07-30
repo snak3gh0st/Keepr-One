@@ -118,22 +118,26 @@ export async function fetchNationalLifeGrid(
   const timeoutMs = options.timeoutMs ?? 45_000
 
   const target = new URL(gridPath, portalLoginUrl).toString()
-  const pendingRequest = page.waitForRequest(
-    (request) =>
-      request.method() === 'POST' && request.url().includes(NATIONAL_LIFE_GRID_ENDPOINT_PATH),
-    { timeout: timeoutMs },
-  )
+  // The catch is attached before any await: a grid that never fires the request
+  // would otherwise leave this promise floating and take the process down with an
+  // unhandled rejection once it times out.
+  const pendingRequest = page
+    .waitForRequest(
+      (request) =>
+        request.method() === 'POST' && request.url().includes(NATIONAL_LIFE_GRID_ENDPOINT_PATH),
+      { timeout: timeoutMs },
+    )
+    .catch(() => null)
 
-  await page.goto(target, { waitUntil: 'domcontentloaded', timeout: timeoutMs })
-
-  let captured: {
-    url(): string
-    postData(): string | null
-    headers(): Record<string, string>
-  }
   try {
-    captured = await pendingRequest
+    await page.goto(target, { waitUntil: 'domcontentloaded', timeout: timeoutMs })
   } catch {
+    await pendingRequest
+    throw new NationalLifeGridError('GRID_PAGE_UNREACHABLE', `Could not open ${gridPath}`)
+  }
+
+  const captured = await pendingRequest
+  if (!captured) {
     throw new NationalLifeGridError(
       'GRID_REQUEST_NOT_OBSERVED',
       `Grid at ${gridPath} never issued its JSON request`,
