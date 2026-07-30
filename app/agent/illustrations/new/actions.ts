@@ -52,6 +52,7 @@ export async function requestCarrierQuote(
   const solveType = normalizeText(formData.get('solveType') as string | null)
   const deathBenefitOption = normalizeText(formData.get('deathBenefitOption') as string | null)
   const strategy = normalizeText(formData.get('strategy') as string | null)
+  const clientId = normalizeText(formData.get('clientId') as string | null)
   const amount = Number(normalizeText(formData.get('amount') as string | null))
 
   if (!firstName) return { ok: false, message: 'Informe o nome.' }
@@ -121,6 +122,9 @@ export async function requestCarrierQuote(
         // script fills allocation with 100% the moment one is picked.
         allocation: RAPID_SOLVE_ALLOCATION,
         productCode: RAPID_SOLVE_PRODUCT_CODE,
+        // Present only when the agent quoted for someone already in the book.
+        // A prospect has none, which is the ordinary pre-sale case.
+        ...(clientId ? { clientId } : {}),
       },
     })
 

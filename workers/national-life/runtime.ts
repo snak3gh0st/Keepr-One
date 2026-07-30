@@ -7,6 +7,7 @@ import {
 } from '../../lib/national-life/browser-context-crypto'
 import { withOwnedBrowserLockWaiting } from '../../lib/national-life/browser-lock'
 import { NATIONAL_LIFE_PROVIDER } from '../../lib/national-life/constants'
+import { saveRapidSolveIllustration } from '../../lib/national-life/illustration-service'
 import type { NationalLifeEnv } from '../../lib/national-life/env'
 import {
   createBrowserJobService,
@@ -557,6 +558,7 @@ function createJobRunner(env: NationalLifeEnv) {
       // the advisory lock cannot outlive the work that took it. The worker
       // process never exits, so a leaked lock here would be permanent.
       runExclusively: (work) => withOwnedBrowserLockWaiting(createLockClient, work),
+      saveIllustration: (input) => saveRapidSolveIllustration(input, prisma),
       applyCaseObservation,
     }).then(() => undefined)
 }

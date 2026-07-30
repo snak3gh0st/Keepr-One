@@ -101,6 +101,19 @@ export type NationalLifeRunJobDeps = {
   /// each other mid-navigation. Returns null when the wait ran out, which is
   /// contention rather than failure and so re-queues instead of failing.
   runExclusively<T>(work: () => Promise<T>): Promise<T | null>
+  /// Keeps a priced quote after the screen that asked for it is gone. Written
+  /// here rather than by the browser that polls, so closing the tab cannot
+  /// lose a request already made against the carrier.
+  saveIllustration(input: {
+    agentId: string
+    clientId?: string | null
+    jobId: string
+    insuredName: string
+    insuredDateOfBirth: string
+    productCode: string
+    quote: RapidSolveQuote
+    request: RapidSolveRequest
+  }): Promise<{ illustrationId: string }>
   applyCaseObservation(input: {
     agentId: string
     caseId: string
@@ -419,9 +432,24 @@ export async function runNationalLifeJob(
         // Everything above is shared: claim, session, reconnect-on-unusable,
         // authentication. Only the question asked of the carrier differs.
         if (quoteInput) {
-          const quote = await adapter.requestRapidSolveQuote(
-            rapidSolveRequestFrom(quoteInput, deps.now()),
-          )
+          const request = rapidSolveRequestFrom(quoteInput, deps.now())
+          const quote = await adapter.requestRapidSolveQuote(request)
+
+          // Only a priced quote becomes an illustration. A refusal is a real
+          // answer and the job keeps it, but there is no premium and no face
+          // amount to file, and a row of zeros would read as a quote of zero.
+          if (quote.ok) {
+            await deps.saveIllustration({
+              agentId: job.agentId,
+              clientId: quoteInput.clientId ?? null,
+              jobId: job.id,
+              insuredName: `${quoteInput.firstName} ${quoteInput.lastName}`.trim(),
+              insuredDateOfBirth: quoteInput.dateOfBirth,
+              productCode: quoteInput.productCode,
+              quote,
+              request,
+            })
+          }
 
           // A refusal is an answer. SUCCEEDED means "we asked and the carrier
           // replied"; FAILED is reserved for not having been able to ask.

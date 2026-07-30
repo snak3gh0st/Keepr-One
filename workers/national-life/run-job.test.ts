@@ -195,6 +195,7 @@ function createDeps(options: {
   const invalidations: Array<{ agentId: string; provider: string }> = []
   const used: Array<{ sessionId: string; usedAt: Date }> = []
   const quoteRequests: RapidSolveRequest[] = []
+  const savedIllustrations: Array<{ insuredName: string }> = []
 
   return {
     calls,
@@ -203,6 +204,7 @@ function createDeps(options: {
     store,
     browser,
     quoteRequests,
+    savedIllustrations,
     deps: {
       env: buildEnv(),
       workerId: 'worker-1',
@@ -274,6 +276,11 @@ function createDeps(options: {
         } finally {
           calls.push('lock:release')
         }
+      },
+      async saveIllustration(saved: { insuredName: string }) {
+        calls.push('illustration:save')
+        savedIllustrations.push(saved)
+        return { illustrationId: 'illustration-1' }
       },
       async applyCaseObservation() {
         calls.push('sync:apply')
@@ -454,6 +461,30 @@ describe('National Life restored-context job orchestration', () => {
   // the answer, so the job succeeded — it asked and got a reply. Failing here
   // would send the sentence through error redaction and leave the agent with a
   // code instead of a reason.
+  it('keeps the priced quote, so closing the tab does not lose it', async () => {
+    const test = createDeps({ job: buildQuoteJob() })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.savedIllustrations).toEqual([
+      expect.objectContaining({ insuredName: 'Ana Souza', jobId: 'job-1' }),
+    ])
+  })
+
+  // A refusal is an answer the job keeps, but there is no premium and no face
+  // amount to file: a row of zeros would read as a quote of zero.
+  it('files no illustration when the carrier refused to quote', async () => {
+    const test = createDeps({
+      job: buildQuoteJob(),
+      requestRapidSolveQuote: async () => ({ ok: false, message: 'Below the minimum.' }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.savedIllustrations).toEqual([])
+    expect(test.store.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
+  })
+
   it('treats a carrier refusal as an answer, not a failed job', async () => {
     const test = createDeps({
       job: buildQuoteJob(),

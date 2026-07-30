@@ -177,6 +177,7 @@ model Agent {
   nationalLifeConnectionAttempts NationalLifeConnectionAttempt[]
   browserJobs            BrowserAutomationJob[]
   nationalLifeCaseSnapshots NationalLifeCaseSnapshot[]
+  illustrations          Illustration[]
   nationalLifeInforcePolicies NationalLifeInforcePolicy[]
   nationalLifeReportRows NationalLifeReportRow[]
 
@@ -316,6 +317,7 @@ model Client {
 
   policies Policy[]
   insuranceCases InsuranceCase[]
+  illustrations Illustration[]
 
   @@index([assignedAgentId])
 }
@@ -516,8 +518,16 @@ model BrowserAutomationJob {
 
 model Illustration {
   id              String           @id @default(cuid())
-  caseId          String
-  insuranceCase   InsuranceCase    @relation(fields: [caseId], references: [id])
+  // A quote is pre-sale: the insured is a prospect who has no case and often no
+  // client record either. Requiring a case made the table impossible to write
+  // to — it stayed empty from the day it was created.
+  caseId          String?
+  insuranceCase   InsuranceCase?   @relation(fields: [caseId], references: [id])
+  clientId        String?
+  client          Client?          @relation(fields: [clientId], references: [id])
+  // Always known, and the only thing that scopes a quote to who may read it.
+  agentId         String
+  agent           Agent            @relation(fields: [agentId], references: [id], onDelete: Cascade)
   kind            IllustrationKind
   provider        String?
   externalId      String?
@@ -525,6 +535,10 @@ model Illustration {
   productName     String?
   faceAmount      Decimal?
   premium         Decimal?
+  // Held on the illustration rather than only through a relation, so a quote
+  // for someone who is not in the system yet still says who it was for.
+  insuredName        String?
+  insuredDateOfBirth DateTime?
   documentUrl     String?
   rawPayload      Json?
   createdAt       DateTime         @default(now())
@@ -532,6 +546,8 @@ model Illustration {
   scenarios       IllustrationScenario[]
 
   @@index([caseId])
+  @@index([agentId, createdAt])
+  @@index([clientId])
   @@unique([provider, externalId])
 }
 

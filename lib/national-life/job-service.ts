@@ -58,6 +58,9 @@ export type RapidSolveQuoteJobInput = {
   strategy: string
   allocation: number
   productCode: string
+  /// Set when the agent quoted for someone already in the system. A prospect
+  /// has none, which is the ordinary case for a pre-sale illustration.
+  clientId?: string
 }
 
 export type BrowserJobInput =
@@ -270,6 +273,9 @@ function sanitizeRapidSolveQuoteInput(input: {
       strategy: coerceIdentifier('strategy', quote.strategy),
       allocation: Math.trunc(allocation),
       productCode: coerceIdentifier('productCode', quote.productCode),
+      ...(quote.clientId
+        ? { clientId: coerceIdentifier('clientId', quote.clientId) }
+        : {}),
     },
   }
 }
