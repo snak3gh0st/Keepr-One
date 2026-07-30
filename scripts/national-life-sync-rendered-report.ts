@@ -9,6 +9,7 @@ import { getNationalLifeEnv } from '../lib/national-life/env'
 import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '../lib/national-life/portal-grid-client'
 import { monetaryCells, parseRenderedTable } from '../lib/national-life/rendered-table'
 import { persistReportRows, pruneStaleReportRows } from '../lib/national-life/report-row-service'
+import { tryAcquireBrowserLock, releaseBrowserLock } from '../lib/national-life/browser-lock'
 import { prisma } from '../lib/prisma'
 import { createSteelBrowserSession } from '../workers/national-life/steel-session'
 
@@ -47,6 +48,12 @@ async function main() {
     },
     env.sessionKeys,
   )
+
+  if (!(await tryAcquireBrowserLock(prisma))) {
+    console.error(JSON.stringify({ failed: 'another carrier browser job is running' }))
+    await prisma.$disconnect()
+    return
+  }
 
   const session = await createSteelBrowserSession(env, { sessionContext })
   const fetchedAt = new Date()
@@ -116,6 +123,7 @@ async function main() {
     }
   } finally {
     await session.close()
+    await releaseBrowserLock(prisma)
     await prisma.$disconnect()
   }
 }

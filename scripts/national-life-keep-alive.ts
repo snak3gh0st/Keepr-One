@@ -14,6 +14,7 @@ import {
   decryptBrowserContext,
   encryptBrowserContext,
 } from '../lib/national-life/browser-context-crypto'
+import { tryAcquireBrowserLock, releaseBrowserLock } from '../lib/national-life/browser-lock'
 import { getNationalLifeEnv } from '../lib/national-life/env'
 import {
   countContextCookies,
@@ -52,6 +53,15 @@ async function main() {
     return
   }
 
+  // Steel runs one Chrome: a tick that starts while an extraction is running
+  // kills it mid-navigation. Skipping is always safe — the next tick is minutes
+  // away and well inside the session window.
+  if (!(await tryAcquireBrowserLock(prisma))) {
+    log({ skipped: 'another carrier browser job is running' })
+    await prisma.$disconnect()
+    return
+  }
+
   const stored = await prisma.agentIntegrationSession.findFirst({
     where: {
       provider: 'NATIONAL_LIFE',
@@ -63,6 +73,7 @@ async function main() {
   })
   if (!stored?.keyVersion || !stored.iv || !stored.ciphertext || !stored.authTag) {
     log({ skipped: 'no connected session to keep alive' })
+    await releaseBrowserLock(prisma)
     await prisma.$disconnect()
     return
   }
@@ -139,6 +150,7 @@ async function main() {
     })
   } finally {
     await session.close()
+    await releaseBrowserLock(prisma)
     await prisma.$disconnect()
   }
 }

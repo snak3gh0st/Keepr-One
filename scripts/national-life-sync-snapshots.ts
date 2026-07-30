@@ -38,6 +38,7 @@ import {
   type GridPage,
   type NationalLifeGridKey,
 } from '../lib/national-life/portal-grid-client'
+import { tryAcquireBrowserLock, releaseBrowserLock } from '../lib/national-life/browser-lock'
 import { prisma } from '../lib/prisma'
 import {
   captureSteelSessionContext,
@@ -156,6 +157,12 @@ async function main() {
     env.sessionKeys,
   )
 
+  if (!(await tryAcquireBrowserLock(prisma))) {
+    console.error(JSON.stringify({ failed: 'another carrier browser job is running' }))
+    await prisma.$disconnect()
+    return
+  }
+
   const session = await createSteelBrowserSession(env, { sessionContext })
   const fetchedAt = new Date()
 
@@ -221,6 +228,7 @@ async function main() {
     }
   } finally {
     await session.close()
+    await releaseBrowserLock(prisma)
     await prisma.$disconnect()
   }
 }
