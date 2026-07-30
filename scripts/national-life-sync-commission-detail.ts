@@ -91,7 +91,9 @@ async function main() {
 
   const session = await createSteelBrowserSession(env, { sessionContext })
   const fetchedAt = new Date()
-  const touchedGridKeys = new Set<string>()
+  // Per grid, so a grid that came back empty can be excluded from the prune while
+  // a grid that genuinely returned rows is still cleaned up.
+  const writtenByGridKey = new Map<string, number>()
   let anyFailedOrTruncated = false
 
   try {
@@ -117,7 +119,7 @@ async function main() {
           rows: reportRows,
           fetchedAt,
         })
-        touchedGridKeys.add(gridKey)
+        writtenByGridKey.set(gridKey, (writtenByGridKey.get(gridKey) ?? 0) + written)
         if (truncated) {
           anyFailedOrTruncated = true
         }
@@ -143,20 +145,35 @@ async function main() {
       }
     }
 
-    // Only prune once every statement came back whole: otherwise rows that were
-    // simply not fetched are indistinguishable from rows the carrier removed.
-    if (!anyFailedOrTruncated && touchedGridKeys.size > 0) {
+    // Prune only grids that actually produced rows this run.
+    //
+    // An empty-but-successful fetch is indistinguishable from "the carrier
+    // deleted everything", and treating it as the latter destroyed all 5416
+    // commission detail rows once: the drill-down `?id=` tokens expire, so every
+    // request returned zero records without erroring. Writing nothing is never a
+    // licence to delete.
+    const prunableGridKeys = [...writtenByGridKey.entries()]
+      .filter(([, written]) => written > 0)
+      .map(([gridKey]) => gridKey)
+    const emptyGridKeys = [...writtenByGridKey.entries()]
+      .filter(([, written]) => written === 0)
+      .map(([gridKey]) => gridKey)
+
+    if (!anyFailedOrTruncated && prunableGridKeys.length > 0) {
       const { deleted } = await pruneStaleReportRows({
         agentId: stored.agentId,
         deploymentScope: env.sessionScopeId,
-        gridKeys: [...touchedGridKeys],
+        gridKeys: prunableGridKeys,
         fetchedAt,
       })
-      console.log(JSON.stringify({ prunedStaleRows: deleted }))
-    } else {
+      console.log(JSON.stringify({ prunedStaleRows: deleted, prunedGridKeys: prunableGridKeys }))
+    }
+
+    if (anyFailedOrTruncated || emptyGridKeys.length > 0) {
       console.error(
         JSON.stringify({
-          skippedPrune: 'a statement failed or was truncated; stale rows kept',
+          skippedPrune: 'a fetch failed, was truncated, or returned nothing; stale rows kept',
+          emptyGridKeys,
         }),
       )
     }
