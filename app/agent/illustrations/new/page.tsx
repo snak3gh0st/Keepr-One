@@ -17,7 +17,7 @@ export default async function NewIllustrationPage() {
       <PageHeader
         title="Nova ilustração"
         eyebrow="Carteira"
-        description="Calcule cotações internas de mercado para Term 15, Term 20, Term 30 e IUL."
+        description="Cote o IUL direto na National Life, com os números da própria seguradora."
       >
         <Link
           href="/agent/policies"
@@ -32,16 +32,29 @@ export default async function NewIllustrationPage() {
           <NewIllustrationForm />
         </div>
         <ContextPanel eyebrow="Dica rápida" title="O que enviar">
-          <p>Informe nome, sobrenome, data de nascimento, idade e situação de tabagismo. O sistema calcula as cotações localmente.</p>
+          <p>
+            A seguradora precisa do nome, da data de nascimento, do estado de emissão, do sexo,
+            da classe de risco e da opção de benefício por morte. A idade ela mesma calcula.
+          </p>
           <div className="mt-5 border-t border-white/10 pt-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Tabagismo</p>
-            <p className="mt-2 text-sm text-ink-muted">Use “Não fumante”, “Fumante” ou “Ex-fumante” para manter consistência de cotação.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Classe de risco</p>
+            <p className="mt-2 text-sm text-ink-muted">
+              A National Life tem duas: Standard não-tabagista e Standard tabagista. Não existe classe
+              para ex-fumante — onde ele entra é decisão de subscrição sua.
+            </p>
+          </div>
+          <div className="mt-5 border-t border-white/10 pt-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Cobertura</p>
+            <p className="mt-2 text-sm text-ink-muted">
+              O Rapid Solve cota um único produto, de IUL. Term não é cotado por este portal, e
+              Nova York não está entre os estados de emissão.
+            </p>
           </div>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Integração</p>
             <p className="mt-2 text-sm text-ink-muted">
-              Não há envio automático neste fluxo. A cotação é feita pela formulação de mercado configurada no servidor (local),
-              com ajustes de faixa etária, faixa de cobertura e fator de tabagismo.
+              A cotação é enviada à National Life e a resposta volta na tela. Se a seguradora
+              recusar, o motivo aparece com as palavras dela.
             </p>
           </div>
         </ContextPanel>
