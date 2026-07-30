@@ -22,6 +22,7 @@ COPY workers/national-life/ ./workers/national-life/
 COPY scripts/national-life-runtime.ts ./scripts/national-life-runtime.ts
 COPY scripts/national-life-sync-snapshots.ts ./scripts/national-life-sync-snapshots.ts
 COPY scripts/national-life-sync-commission-detail.ts ./scripts/national-life-sync-commission-detail.ts
+COPY scripts/national-life-check-session.ts ./scripts/national-life-check-session.ts
 COPY scripts/national-life-describe-grids.ts ./scripts/national-life-describe-grids.ts
 COPY scripts/national-life-describe-page.ts ./scripts/national-life-describe-page.ts
 COPY scripts/national-life-find-handler.ts ./scripts/national-life-find-handler.ts
