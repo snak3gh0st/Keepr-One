@@ -32,6 +32,7 @@ type AdapterRequestResponse = {
   ok(): boolean
   status(): number
   json(): Promise<unknown>
+  text(): Promise<string>
 }
 
 type AdapterPage = {
@@ -282,10 +283,21 @@ export class NationalLifeAdapter {
 
       // Transport-level failure is a real failure: we never got an answer.
       if (!response.ok()) {
+        // The server's own account of what went wrong. Three attempts were
+        // spent guessing at a 500 while this was being thrown away — ASP.NET
+        // puts the exception type in the body, and reading it beats another
+        // round of changing one thing and asking the carrier again.
+        let body = ''
+        try {
+          body = (await response.text()).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+        } catch {
+          body = '[unreadable]'
+        }
+
         throw new NationalLifeAdapterError(
           RAPID_SOLVE_REQUEST_FAILED_CODE,
           'National Life did not answer the Rapid Solve request',
-          { status: response.status() },
+          { status: response.status(), body: body.slice(0, 600) },
         )
       }
 
