@@ -174,7 +174,14 @@ tsx scripts/national-life-describe-page.ts /agent/
 
 Uma requisição devolveu **239 rotas** `/agent/`, o mapa completo do portal. Ids
 de drill-down colapsam para `{id}`, então 9 mil links de apólice reportam como um
-template, não como 9 mil rotas.
+template, não como 9 mil rotas. As de negócio estão inventariadas abaixo — a
+ferramenta sem a lista só adia o problema, porque redescobrir exige sessão viva,
+e sessão viva exige um humano logando.
+
+O lock foi verificado depois da rodada: `SELECT ... FROM pg_locks WHERE locktype
+= 'advisory'` voltou vazio, então ele libera limpo. Importa porque o keep-alive
+usa a variante que **pula** na contenção — um lock vazado o faria pular em
+silêncio a cada 10 minutos até a sessão morrer.
 
 O script também **toma o lock do browser agora, e espera por ele** em vez de
 desistir (`withBrowserLockWaiting`). Foi o tick do keep-alive — a cada 10 min pelo
@@ -237,6 +244,49 @@ Life, LSW Annuities, Variable Products) e emite `GetJsonResult`, mas o replay do
 POST devolve `Unexpected end of JSON input` — mesma classe de `LIFE_PERSISTENCY`.
 Steel estava em 16/1024 PIDs na hora, então **não** é exaustão de recurso: é o
 endpoint. Precisa de investigação própria.
+
+### Inventário de rotas de negócio (das 239, 2026-07-30)
+
+Registrado aqui porque a lista é o ativo, não a ferramenta que a produziu: sem
+isto, a próxima sessão precisa de um login humano só para redescobrir onde olhar
+— exatamente o buraco que esta rodada existiu para fechar.
+
+Já resolvidas (sondadas ou extraindo) estão nas tabelas acima. **Ainda não
+sondadas**, em ordem de plausibilidade de conter dado do agente:
+
+```
+/agent/book-of-business/inforce-book/daily-unit-values
+/agent/book-of-business/inforce-book/pip-contribution-increase
+/agent/book-of-business/inforce-book/annuity-flow-report/past-due-contribution
+/agent/book-of-business/inforce-book/annuity-flow-report/payroll-flow-changes
+/agent/book-of-business/new-business/Transfer-Company-Information
+/agent/book-of-business/service-forms
+/agent/compensation/incentives/forecasted-incentives
+/agent/compensation/incentives/premium-report-agency
+/agent/sales-marketing/403b-457-retirement-business/plan-prospectus-report
+/agent/tools/business-tools/national-life-tools/annuity-statements
+/agent/tools/business-tools/illustrations
+```
+
+Duas ressalvas para quem pegar isto:
+
+- `pip-pending-report` foi sondado (0 registros); `pip-contribution-increase`
+  **não**. São páginas diferentes do mesmo programa.
+- `annuity-flow-report` devolveu página de erro, mas seus **dois filhos nunca
+  foram tentados**. "Essa subárvore está quebrada" ainda não é uma conclusão.
+
+Há também cinco rotas `/agent/sso/*` (`foresight`, `foresight-annuity`,
+`igo-eapp`, `xrae-link`, `forms-and-materials-search`): saltos para sistemas
+terceiros, cada um com sua própria autenticação. Nenhum foi sondado e cada um é
+um alvo de integração distinto, não uma página deste portal.
+
+As ~180 rotas restantes são produto, treinamento e marketing — conteúdo
+institucional, sem dado de negócio do agente. Não vale reandar. Para regerar o
+inventário completo a qualquer momento, com sessão viva:
+
+```
+tsx scripts/national-life-describe-page.ts /agent/
+```
 
 ### Rotas sondadas que não rendem grid
 
