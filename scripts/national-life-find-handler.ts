@@ -17,8 +17,12 @@ const maskDigits = (value: string) => value.replace(/\d/g, '#')
 /// Windows around each mention, so the surrounding ajax config is visible without
 /// dumping whole bundles.
 function windowsAround(source: string, symbol: string, radius = 700): string[] {
+  // Case-insensitive: a case-sensitive indexOf silently reported "not found" for
+  // labels that were present, which is worse than no tool at all.
+  const haystack = source.toLowerCase()
+  const needle = symbol.toLowerCase()
   const found: string[] = []
-  let index = source.indexOf(symbol)
+  let index = haystack.indexOf(needle)
   while (index !== -1 && found.length < 6) {
     found.push(
       maskDigits(
@@ -28,7 +32,7 @@ function windowsAround(source: string, symbol: string, radius = 700): string[] {
           .trim(),
       ),
     )
-    index = source.indexOf(symbol, index + symbol.length)
+    index = haystack.indexOf(needle, index + needle.length)
   }
   return found
 }
@@ -113,7 +117,7 @@ async function main() {
         const response = await session.page.request.get(url)
         if (!response.ok()) continue
         const body = await response.text()
-        if (!body.includes(symbol)) continue
+        if (!body.toLowerCase().includes(symbol.toLowerCase())) continue
         const hits = windowsAround(body, symbol)
         console.log(
           JSON.stringify({
