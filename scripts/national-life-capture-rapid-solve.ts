@@ -99,35 +99,43 @@ async function main() {
       })
       await page.waitForTimeout(10_000)
 
-      // Fill exactly what the integration sends, through the page's own controls.
+      // Selectors read out of the page, not deduced from the bundle. The last
+      // attempt clicked `#getQuote` and the button is `#get_quote`, so nothing
+      // was ever submitted.
       await page.fill('#firstName', 'Paulo')
       await page.fill('#lastName', 'Loureiro Campos')
       await page.fill('#birthdate', '02/06/1988')
 
-      // The custom dropdowns are buttons: pick the option whose data-value is
-      // the one the integration uses.
+      // Toggle groups: the value lives on a button inside a named group.
+      for (const [group, value] of [
+        ['select-type', 'Standard_NT'],
+        ['Quote-type', 'Based_on_Target_Premium'],
+        ['Options-type', 'A_Level'],
+      ] as const) {
+        await page.click(`[data-name="${group}"] [data-value="${value}"]`).catch(() => undefined)
+        await page.waitForTimeout(500)
+      }
+
+      // Custom dropdowns: open, then pick.
       for (const [dropdown, value] of [
         ['#ddlIssueState', 'FL'],
         ['#ddlGender', 'Male'],
         ['#Strategy_dropdown', 'SP500PointToPointCapFocus'],
       ] as const) {
         await page.click(dropdown).catch(() => undefined)
-        await page.waitForTimeout(700)
-        await page.click(`[data-value="${value}"]`).catch(() => undefined)
-        await page.waitForTimeout(400)
+        await page.waitForTimeout(800)
+        await page.click(`[data-value="${value}"]:visible`).catch(() => undefined)
+        await page.waitForTimeout(500)
       }
 
-      for (const value of ['Standard_NT', 'Based_on_Target_Premium', 'A_Level']) {
-        await page.click(`.toggle-btn[data-value="${value}"]`).catch(() => undefined)
-        await page.waitForTimeout(400)
-      }
-
+      // Only shown once a premium solve type is selected, which is why the
+      // toggles are set first.
       await page.fill('#premiumAmount', '300').catch(() => undefined)
       await page.waitForTimeout(500)
 
       const before = await page.content()
-      await page.click('#getQuote, .get-quote, button:has-text("Get Quote")').catch(() => undefined)
-      await page.waitForTimeout(15_000)
+      await page.click('#get_quote').catch(() => undefined)
+      await page.waitForTimeout(20_000)
       const after = await page.content()
 
       console.log(
