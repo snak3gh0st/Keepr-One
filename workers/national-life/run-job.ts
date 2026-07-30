@@ -284,6 +284,32 @@ async function requeueForRetry(
   })
 }
 
+/// What went wrong, for the branch that has no idea.
+///
+/// This branch used to store nothing but `UNEXPECTED_WORKER_FAILURE`, so the
+/// first real quote failed in under three seconds and left no way to tell
+/// whether the browser, the lock, the carrier or our own code had done it.
+///
+/// URLs are dropped rather than redacted by key. A Playwright or Steel message
+/// often has the session's debug URL inside the sentence, where a key-based
+/// redactor cannot see it — and this value is persisted and shown.
+export function describeUnexpectedFailure(error: unknown): unknown {
+  const withoutUrls = (text: string) =>
+    text.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[URL]').slice(0, 500)
+
+  if (error instanceof Error) {
+    return redactDiagnostic({
+      name: error.name,
+      message: withoutUrls(error.message),
+      // The first frame is usually enough to say which of our files threw,
+      // and the rest is noise from the runtime's own internals.
+      at: withoutUrls((error.stack ?? '').split('\n')[1]?.trim() ?? ''),
+    })
+  }
+
+  return redactDiagnostic({ message: withoutUrls(String(error)) })
+}
+
 async function handleFailure(
   job: BrowserJobRecord,
   error: unknown,
@@ -322,6 +348,7 @@ async function handleFailure(
     from: 'RUNNING',
     to: 'FAILED',
     safeErrorCode: 'UNEXPECTED_WORKER_FAILURE',
+    safeErrorDetail: describeUnexpectedFailure(error),
   })
 }
 

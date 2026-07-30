@@ -13,6 +13,7 @@ import type {
 } from '../../lib/national-life/rapid-solve'
 import type { BrowserSession, NationalLifeCaseObservation } from './types'
 import {
+  describeUnexpectedFailure,
   runNationalLifeJob,
   type NationalLifeJobStore,
   type StoredAgentIntegrationSession,
@@ -525,6 +526,35 @@ describe('National Life restored-context job orchestration', () => {
     // so it would never be claimed, never fail, and poll as pending forever.
     expect(test.store.current().state).toBe('QUEUED')
     expect(test.store.current().availableAt.getTime()).toBeGreaterThan(now.getTime())
+  })
+
+  it('says what went wrong when it does not recognise the failure', async () => {
+    const test = createDeps({
+      assertAuthenticated: async () => {
+        throw new Error('connect ECONNREFUSED steel')
+      },
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'FAILED',
+      safeErrorCode: 'UNEXPECTED_WORKER_FAILURE',
+      safeErrorDetail: { name: 'Error', message: 'connect ECONNREFUSED steel' },
+    })
+  })
+
+  // These messages routinely carry the session's debug URL inside the sentence,
+  // where a redactor keyed on field names cannot see it — and this value is
+  // stored and shown.
+  it('keeps a session URL out of the stored failure detail', () => {
+    const detail = describeUnexpectedFailure(
+      new Error('navigation failed at https://steel.internal/session/abc?token=secret'),
+    ) as { message: string }
+
+    expect(detail.message).not.toContain('steel.internal')
+    expect(detail.message).not.toContain('secret')
+    expect(detail.message).toContain('[URL]')
   })
 
   it('contains no credential-decrypt or credential-object runtime path', async () => {
