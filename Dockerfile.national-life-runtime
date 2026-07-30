@@ -33,6 +33,7 @@ COPY workers/national-life/types.ts ./workers/national-life/types.ts
 COPY workers/national-life/viewer-broker.ts ./workers/national-life/viewer-broker.ts
 COPY scripts/national-life-runtime.ts ./scripts/national-life-runtime.ts
 COPY scripts/national-life-sync-snapshots.ts ./scripts/national-life-sync-snapshots.ts
+COPY scripts/national-life-describe-grids.ts ./scripts/national-life-describe-grids.ts
 
 ENV NODE_ENV=production
 EXPOSE 3010

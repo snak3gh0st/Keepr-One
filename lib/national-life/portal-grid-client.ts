@@ -8,9 +8,28 @@
 export const NATIONAL_LIFE_GRID_ENDPOINT_PATH = '/agent/Datatable/GetJsonResult'
 
 export const NATIONAL_LIFE_GRIDS = {
+  // New business pipeline.
   NEW_BUSINESS: '/agent/book-of-business/new-business/all-new-business-cases',
   RECENTLY_CLOSED: '/agent/book-of-business/new-business/recently-closed-cases',
+  PLACEMENT_REPORT: '/agent/book-of-business/new-business/placement-report',
+  TRANSFERS_EXCHANGES: '/agent/book-of-business/new-business/transfers-exchanges',
+  // Inforce book — the basis for payment and commission reconciliation.
   INFORCE_CLIENTS: '/agent/book-of-business/inforce-book/all-clients',
+  POLICY_PAYMENT_HISTORY: '/agent/book-of-business/inforce-book/policy-payment-history',
+  PREMIUM_REPORT_AGENCY: '/agent/book-of-business/inforce-book/premium-report-agency',
+  LIFE_PENDING_LAPSE: '/agent/book-of-business/inforce-book/life-pending-lapse-report',
+  LIFE_PERSISTENCY: '/agent/book-of-business/inforce-book/life-persistency-report',
+  CORRESPONDENCE: '/agent/book-of-business/inforce-book/correspondence',
+  // Compensation.
+  COMMISSIONS_OVERVIEW: '/agent/compensation/commissions/overview',
+  PAID_COMMISSIONS: '/agent/compensation/commissions/paid-commissions',
+  COMMISSIONS_EARNING_REPORT:
+    '/agent/compensation/commissions/paid-commissions/commissions-earning-report',
+  COMMISSIONS_POLICY_HISTORY:
+    '/agent/compensation/commissions/paid-commissions/commissions-policy-history',
+  PROJECTED_COMMISSIONS: '/agent/compensation/commissions/projected-commissions',
+  PAYABLE_GROSS_COMMISSIONS:
+    '/agent/compensation/commissions/projected-commissions/payable-gross-commissions',
 } as const
 
 export type NationalLifeGridKey = keyof typeof NATIONAL_LIFE_GRIDS
