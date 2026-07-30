@@ -10,6 +10,23 @@
 /// worse than no number at all: it looks like an answer.
 export const RAPID_SOLVE_PATH = '/agent/RapidSolve/GetQuote'
 
+/// The page the carrier's own quoting tool lives on.
+///
+/// Loaded before the quote is posted. The first attempt posted from elsewhere
+/// in the portal and the endpoint answered HTTP 500 — the request has to come
+/// from the tool's own page, as the carrier's script makes it.
+export const RAPID_SOLVE_PAGE_PATH = '/agent/tools/business-tools/illustrations'
+
+/// Exactly what the carrier's `$.ajax` call sends. Read out of the bundle
+/// rather than assumed: the charset is part of the content type it declares,
+/// and jQuery adds the requested-with header to every same-origin call.
+/// Neither is decoration — posting without them is not the request the
+/// endpoint was written for.
+export const RAPID_SOLVE_HEADERS: Record<string, string> = {
+  'content-type': 'application/json; charset=utf-8',
+  'x-requested-with': 'XMLHttpRequest',
+}
+
 /// Which side of the illustration the carrier solves for. The screen shows
 /// these as three buttons; `Specify_Amount` means "I give the face amount, tell
 /// me the premium", and the other two mean "I give the premium, tell me the

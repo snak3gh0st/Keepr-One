@@ -1,5 +1,7 @@
 import { ZodError, z } from 'zod'
 import {
+  RAPID_SOLVE_HEADERS,
+  RAPID_SOLVE_PAGE_PATH,
   RAPID_SOLVE_PATH,
   parseRapidSolveResponse,
   type RapidSolveFailure,
@@ -39,7 +41,10 @@ type AdapterPage = {
   locator(selector: string): AdapterLocator
   url(): string
   request: {
-    post(url: string, options: { data: unknown }): Promise<AdapterRequestResponse>
+    post(
+      url: string,
+      options: { data: unknown; headers?: Record<string, string> },
+    ): Promise<AdapterRequestResponse>
   }
 }
 
@@ -259,8 +264,21 @@ export class NationalLifeAdapter {
     request: RapidSolveRequest,
   ): Promise<RapidSolveQuote | RapidSolveFailure> {
     try {
+      const page = this.getPage()
+
+      // Posted from the tool's own page, the way the carrier's script does it.
+      // The first attempt posted from elsewhere in the portal and the endpoint
+      // answered HTTP 500.
+      await page.goto(new URL(RAPID_SOLVE_PAGE_PATH, this.config.loginUrl).toString(), {
+        waitUntil: 'domcontentloaded',
+        timeout: 45_000,
+      })
+
       const url = new URL(RAPID_SOLVE_PATH, this.config.loginUrl).toString()
-      const response = await this.getPage().request.post(url, { data: request })
+      const response = await page.request.post(url, {
+        data: request,
+        headers: RAPID_SOLVE_HEADERS,
+      })
 
       // Transport-level failure is a real failure: we never got an answer.
       if (!response.ok()) {
