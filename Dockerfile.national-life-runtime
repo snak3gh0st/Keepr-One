@@ -17,6 +17,7 @@ COPY lib/national-life/case-snapshot-service.ts ./lib/national-life/case-snapsho
 COPY lib/national-life/portal-grid-client.ts ./lib/national-life/portal-grid-client.ts
 COPY lib/national-life/inforce-policy-service.ts ./lib/national-life/inforce-policy-service.ts
 COPY lib/national-life/report-row-service.ts ./lib/national-life/report-row-service.ts
+COPY lib/national-life/commission-detail.ts ./lib/national-life/commission-detail.ts
 COPY lib/national-life/connection-attempt-state.ts ./lib/national-life/connection-attempt-state.ts
 COPY lib/national-life/constants.ts ./lib/national-life/constants.ts
 COPY lib/national-life/env.ts ./lib/national-life/env.ts
@@ -38,6 +39,7 @@ COPY scripts/national-life-sync-snapshots.ts ./scripts/national-life-sync-snapsh
 COPY scripts/national-life-describe-grids.ts ./scripts/national-life-describe-grids.ts
 COPY scripts/national-life-describe-page.ts ./scripts/national-life-describe-page.ts
 COPY scripts/national-life-find-handler.ts ./scripts/national-life-find-handler.ts
+COPY scripts/national-life-sync-commission-detail.ts ./scripts/national-life-sync-commission-detail.ts
 
 ENV NODE_ENV=production
 EXPOSE 3010
