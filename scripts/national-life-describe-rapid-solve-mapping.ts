@@ -21,6 +21,13 @@ import { createSteelBrowserSession } from '../workers/national-life/steel-sessio
 const ILLUSTRATIONS_PATH = '/agent/tools/business-tools/illustrations'
 
 const TOKENS = [
+  // How the amount and the age reach the payload. The endpoint answers HTTP 500
+  // with the exception hidden by customErrors, so the remaining way to tell a
+  // string from a number is to read what the carrier's own script puts there.
+  'faceAmountVal',
+  'premiumAmountVal',
+  'issueAge',
+  'IssueState',
   'SolveType',
   'Based_on_Target_Premium',
   'Min_DB_Max_Cash_Value',
