@@ -261,6 +261,13 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                         >
                           {record.policyNumber ?? "Abrir apólice"}
                         </Link>
+                      ) : record.policyNumber ? (
+                        // The carrier names the policy on every transaction. Most
+                        // of them are not in this book — renewals keep paying
+                        // after a policy leaves inforce — so there is nothing to
+                        // link to, but the number itself is the answer to "which
+                        // policy is this" and hiding it helped nobody.
+                        <span className="font-mono">{record.policyNumber}</span>
                       ) : (
                         <span>Sem apólice vinculada</span>
                       )}

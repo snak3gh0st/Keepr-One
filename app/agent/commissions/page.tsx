@@ -28,6 +28,7 @@ type Record_ = {
 /// rather than promoted.
 function toCommissionRecords(
   rows: Array<{ id: string; raw: unknown; amounts: unknown }>,
+  policyIdByNumber: ReadonlyMap<string, string>,
 ): Record_[] {
   return toCarrierCommissionRecords(rows).map((record) => ({
     id: record.id,
@@ -36,7 +37,10 @@ function toCommissionRecords(
     level: record.level,
     amount: record.amount,
     policy: {
-      id: '',
+      // Empty when the policy is not in this book. That is the common case —
+      // renewals keep paying on policies that have left inforce — and it must
+      // not hide the policy number, which the carrier always gives us.
+      id: policyIdByNumber.get(record.policyNumber) ?? '',
       policyNumber: record.policyNumber,
       agent: { user: { name: record.writingAgentName } },
     },
@@ -66,7 +70,26 @@ export default async function CommissionsPage() {
         },
         select: { id: true, raw: true, amounts: true },
       })
-      carrierRecords = toCommissionRecords(carrierRows)
+
+      // Resolve the ones that do exist locally so their number becomes a link.
+      const numbers = Array.from(
+        new Set(
+          toCarrierCommissionRecords(carrierRows)
+            .map((record) => record.policyNumber)
+            .filter((number) => number && number !== '—'),
+        ),
+      )
+      const localPolicies = numbers.length
+        ? await prisma.policy.findMany({
+            where: { policyNumber: { in: numbers } },
+            select: { id: true, policyNumber: true },
+          })
+        : []
+
+      carrierRecords = toCommissionRecords(
+        carrierRows,
+        new Map(localPolicies.map((policy) => [policy.policyNumber, policy.id])),
+      )
     }
 
     records = [...stored, ...carrierRecords].sort((left, right) =>

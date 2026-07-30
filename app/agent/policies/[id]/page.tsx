@@ -14,6 +14,8 @@ import { PageHeader } from '@/components/PageHeader'
 import { policyStatusLabel } from '@/components/StatusPill'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
 import { ModuleSummary } from '@/components/ModuleSummary'
+import { toCarrierCommissionRecords } from '@/lib/national-life/commission-records'
+import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -38,6 +40,66 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     allowed = canAccessPolicy({ role: 'AGENT', agentScopeIds: scopeIds }, policy)
   }
   if (!allowed) notFound()
+
+  // The carrier's own commission transactions and documents for this policy.
+  // CommissionRecord requires a local policyId and covers fewer than half the
+  // transactions, so a policy that plainly earned commission was reporting
+  // "nenhuma comissão registrada". These rows are already in the database.
+  let carrierCommissions: Array<{
+    id: string
+    agentName: string
+    typeLabel: string
+    level: number
+    period: string
+    amount: number
+  }> = []
+  let carrierDocuments: Array<{ id: string; date: string; type: string }> = []
+
+  if (isNationalLifeConfigured() && policy.policyNumber) {
+    const scopeId = getNationalLifeEnv().sessionScopeId
+    const [commissionRows, documentRows] = await Promise.all([
+      prisma.nationalLifeReportRow.findMany({
+        where: {
+          deploymentScope: scopeId,
+          gridKey: 'COMMISSION_DETAIL_NLD_COMMISSION_EARNING',
+          raw: { path: ['PolicyNumber'], equals: policy.policyNumber },
+        },
+        select: { id: true, raw: true, amounts: true },
+      }),
+      prisma.nationalLifeReportRow.findMany({
+        where: {
+          deploymentScope: scopeId,
+          gridKey: 'CORRESPONDENCE',
+          raw: { path: ['RefPolicyNumber'], equals: policy.policyNumber },
+        },
+        select: { id: true, raw: true },
+      }),
+    ])
+
+    carrierCommissions = toCarrierCommissionRecords(commissionRows)
+      .map((record) => ({
+        id: record.id,
+        agentName: record.writingAgentName || '—',
+        typeLabel: record.type === 'DIRECT' ? 'Direta' : 'Repasse da equipe',
+        level: record.level,
+        period: record.period,
+        amount: record.amount,
+      }))
+      .sort((left, right) => right.period.localeCompare(left.period))
+
+    carrierDocuments = documentRows.map((row) => {
+      const raw = (row.raw ?? {}) as Record<string, unknown>
+      // These fields arrive as rendered anchors, so the label has to be pulled
+      // out of the markup rather than printed as-is.
+      const text = (value: unknown) =>
+        typeof value === 'string' ? value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : ''
+      return {
+        id: row.id,
+        date: text(raw.DocumentDate) || '—',
+        type: text(raw.DocumentType) || text(raw.DocumentCategory) || 'Documento',
+      }
+    })
+  }
 
   const policyDocuments = policy.documents.filter((doc) => !doc.storedPath.includes('/illustrations/'))
   const illustrationDocuments = policy.documents.filter((doc) => doc.storedPath.includes('/illustrations/'))
@@ -107,9 +169,20 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                   <TdNum>${record.amount.toString()}</TdNum>
                 </Tr>
               ))}
+              {carrierCommissions.map((record, i) => (
+                <Tr key={record.id} index={policy.commissionRecords.length + i}>
+                  <Td>{record.agentName}</Td>
+                  <Td>{record.typeLabel}</Td>
+                  <Td className="text-ink-muted">{record.level}</Td>
+                  <Td className="font-mono">{record.period}</Td>
+                  <TdNum>${record.amount.toFixed(2)}</TdNum>
+                </Tr>
+              ))}
             </tbody>
           </Table>
-          {policy.commissionRecords.length === 0 && <EmptyState>Nenhuma comissão registrada ainda.</EmptyState>}
+          {policy.commissionRecords.length === 0 && carrierCommissions.length === 0 && (
+            <EmptyState>Nenhuma comissão registrada ainda.</EmptyState>
+          )}
         </section>
         <aside className="space-y-4 lg:sticky lg:top-[5.75rem]">
           <section className="module-main-surface">
@@ -138,7 +211,31 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                 </li>
               ))}
             </ul>
-            {policyDocuments.length === 0 && <EmptyState>Nenhum documento ainda.</EmptyState>}
+            {carrierDocuments.length > 0 && (
+              <>
+                <p className="mt-4 text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">
+                  Na National Life
+                </p>
+                <ul className="mt-2 divide-y divide-border-steel rounded-md border border-border-steel bg-panel">
+                  {carrierDocuments.map((doc) => (
+                    <li key={doc.id} className="px-4 py-2.5 text-sm">
+                      <span className="text-ink">{doc.type}</span>
+                      <span className="ml-2 text-xs text-ink-muted">{doc.date}</span>
+                    </li>
+                  ))}
+                </ul>
+                {/* Listed, not downloadable: the file lives at the carrier behind
+                    an EncryptedDocumentHandle and fetching it is a separate
+                    decision about volume and storage. Showing that it exists is
+                    still better than claiming there is nothing. */}
+                <p className="mt-2 text-xs text-ink-muted">
+                  Disponíveis no portal da seguradora. Ainda não baixados para cá.
+                </p>
+              </>
+            )}
+            {policyDocuments.length === 0 && carrierDocuments.length === 0 && (
+              <EmptyState>Nenhum documento ainda.</EmptyState>
+            )}
 
             <PolicyUploadForm
               policyId={policy.id}
