@@ -38,14 +38,24 @@ function stripTags(html: string) {
     .replace(/\s+/g, ' ')
 }
 
-/// True when the label appears AND a currency figure shows up close enough
-/// after it to plausibly be its value. A label alone is a heading, not data.
+/// True when the label appears AND a currency figure shows up close enough to
+/// plausibly be its value. A label alone is a heading, not data.
+///
+/// Every occurrence is checked, not just the first. The nav on every page says
+/// "Premium Increase Program", so testing only the first match reported "no
+/// premium on this page" for all 20 pages of the first sample — a false
+/// negative that would have sent the search for premium somewhere else
+/// entirely. The same class of bug as the case-sensitive finder fixed earlier.
 function hasLabelledMoney(text: string, patterns: readonly RegExp[]) {
+  const MONEY = /\$\s?[\d,]+(?:\.\d{2})?/
   for (const pattern of patterns) {
-    const match = pattern.exec(text)
-    if (!match) continue
-    const window = text.slice(match.index, match.index + 160)
-    if (/\$\s?[\d,]+(?:\.\d{2})?/.test(window)) return true
+    const global = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`)
+    for (const match of text.matchAll(global)) {
+      const index = match.index ?? 0
+      // Look both ways: label-above-value and value-left-of-label are both
+      // common in these tables.
+      if (MONEY.test(text.slice(Math.max(0, index - 60), index + 160))) return true
+    }
   }
   return false
 }
@@ -101,7 +111,20 @@ async function main() {
 
   const ran = await withBrowserLockWaiting(prisma, async () => {
     const session = await createSteelBrowserSession(env, { sessionContext })
-    const tally = { probed: 0, reachable: 0, faceAmount: 0, premium: 0, both: 0, failed: 0 }
+    // `anyMoney` and the size spread are the control: this page answers 200 even
+    // for a bogus id, so "reachable" alone proves nothing. A page carrying no
+    // currency at all, or every page being byte-identical, means the sample hit
+    // empty shells and the hit rate says nothing about where premium lives.
+    const tally = {
+      probed: 0,
+      reachable: 0,
+      anyMoney: 0,
+      faceAmount: 0,
+      premium: 0,
+      both: 0,
+      failed: 0,
+    }
+    const sizes = new Set<number>()
     const started = Date.now()
 
     try {
@@ -120,7 +143,10 @@ async function main() {
           if ((response?.status() ?? 0) >= 400) continue
           tally.reachable += 1
 
-          const text = stripTags(await session.page.content())
+          const html = await session.page.content()
+          sizes.add(html.length)
+          const text = stripTags(html)
+          if (/\$\s?[\d,]+(?:\.\d{2})?/.test(text)) tally.anyMoney += 1
           const face = hasLabelledMoney(text, WANTED.faceAmount)
           const premium = hasLabelledMoney(text, WANTED.premium)
           if (face) tally.faceAmount += 1
@@ -144,6 +170,8 @@ async function main() {
       JSON.stringify(
         {
           ...tally,
+          distinctPageSizes: sizes.size,
+          anyMoneyHitRate: rate(tally.anyMoney),
           faceAmountHitRate: rate(tally.faceAmount),
           premiumHitRate: rate(tally.premium),
           bothHitRate: rate(tally.both),

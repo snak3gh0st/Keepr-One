@@ -329,7 +329,50 @@ apólice. Isso é volume de requisição relevante contra o carrier. Alternativa
 sob demanda por apólice (quando o usuário abre), ou lote noturno de um
 subconjunto (ex. só `Active`, ou só as com pagamento pendente).
 
-## Prêmio e capital segurado: onde procurar
+## Prêmio e capital segurado: o caminho das páginas de detalhe está desmentido (2026-07-30)
+
+**Não gastar 9.614 requisições nisso.** Medido com
+`scripts/national-life-sample-policy-details.ts` em três amostras (20 + 8 + 12 =
+40 carregamentos): `faceAmountHitRate` e `premiumHitRate` deram **0% em todas**.
+
+O que torna esse zero confiável, e não um erro de sonda:
+
+- **Controle `anyMoney`**: a página responde HTTP 200 mesmo para um `id` inválido,
+  então "acessível" não prova nada sozinho. O controle mede se há *qualquer* cifra
+  na página. Deu 87,5% numa amostra e 16,7% em outra — páginas reais, com
+  conteúdo variável, não cascas vazias idênticas.
+- **Bug de primeira ocorrência, corrigido antes de concluir**: a primeira versão
+  testava só `pattern.exec()`, a primeira ocorrência. O menu de toda página diz
+  "Premium Increase Program", então o casamento acontecia no nav, não achava `$`
+  perto e desistia — reportando "sem prêmio" em 20 de 20 páginas por falso
+  negativo. Corrigido para varrer todas as ocorrências e olhar 60 caracteres para
+  trás também (rótulo à direita do valor). **Continuou 0%.** Mesma classe do bug
+  de busca case-sensitive já registrado.
+- **Estrutura confirma**: `describe-page` na página de detalhe mostra **uma única
+  tabela**, alimentada por `GetJsonResult` com colunas `Date, Category, Detail`.
+  É um histórico de atendimento, não um resumo financeiro da apólice.
+
+Custo evitado: 13 a 17 horas de tráfego contra o carrier (medido em 4,8–6,4 s por
+página), que não teriam trazido nem prêmio nem capital segurado.
+
+### De onde o prêmio realmente vem
+
+| fonte | cobertura | custo |
+|---|---|---|
+| `COMMISSION_DETAIL_NLD_COMMISSION_EARNING.PremiumAmt` | **2.148 de 9.614 apólices (22%)** | **zero** — já está no banco |
+| `NEW_BUSINESS.AnticipatedAnnualPremium` / `ModalPremium` | os casos de novo negócio | já extraído |
+| `PREMIUM_REPORT_AGENCY` | **agregado da agência, 2 linhas** | não serve por apólice — não voltar aqui |
+
+`PremiumAmt` vem por transação, com `BillingFrequency` (`Monthly`) e
+`PremiumTransaction` (`As Earned`) — é prêmio modal do lançamento, não anualizado.
+Transformar isso em `Policy.premium` exige uma regra (última transação? anualizar
+pela frequência?), que é decisão de negócio, não mecânica.
+
+**Capital segurado (`faceAmount`) segue sem fonte conhecida.** Nenhum grid mapeado
+até agora o carrega. Não inventar: `Policy.faceAmount` continua 0 e a UI deve
+poder dizer "não informado" em vez de exibir zero como se fosse o valor.
+
+## Prêmio e capital segurado: onde se procurou antes
 
 O grid de inforce **não traz** nenhum dos dois — `AAP` e `AccumulatedCashValue`
 vieram nulos nas 9.614 linhas, e só 1 apólice casa com o grid de novos negócios.
