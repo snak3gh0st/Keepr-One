@@ -175,8 +175,47 @@ model Agent {
   integrationSessions    AgentIntegrationSession[]
   nationalLifeConnectionAttempts NationalLifeConnectionAttempt[]
   browserJobs            BrowserAutomationJob[]
+  nationalLifeCaseSnapshots NationalLifeCaseSnapshot[]
 
   @@index([parentAgentId])
+}
+
+/// Raw landing zone for rows read from the National Life agent portal grids.
+/// Deliberately not mapped into Prospect/InsuranceCase/Application yet: that
+/// mapping is a separate decision, and Policy still holds synthetic seed rows.
+/// `raw` keeps the untouched carrier payload so no field is lost to normalisation.
+model NationalLifeCaseSnapshot {
+  id                       String   @id @default(cuid())
+  agentId                  String
+  agent                    Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope          String
+  gridKey                  String
+  policyNo                 String
+  insuredName              String?
+  ownerName                String?
+  product                  String?
+  carrierStatus            String?
+  deliveryStatus           String?
+  actionRequired           String?
+  requirements             String?
+  submitDate               String?
+  sentDate                 String?
+  modalPremium             String?
+  anticipatedAnnualPremium String?
+  submitMethod             String?
+  caseManager              String?
+  agency                   String?
+  writingAgentName         String?
+  writingAgentNumber       String?
+  companyCode              String?
+  raw                      Json
+  fetchedAt                DateTime
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@unique([agentId, deploymentScope, gridKey, policyNo])
+  @@index([agentId, gridKey])
+  @@index([fetchedAt])
 }
 
 model Client {
