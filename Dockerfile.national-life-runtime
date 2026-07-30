@@ -13,6 +13,8 @@ COPY tsconfig.json ./
 COPY lib/prisma.ts ./lib/prisma.ts
 COPY lib/integrations/idempotency.ts ./lib/integrations/idempotency.ts
 COPY lib/national-life/browser-context-crypto.ts ./lib/national-life/browser-context-crypto.ts
+COPY lib/national-life/case-snapshot-service.ts ./lib/national-life/case-snapshot-service.ts
+COPY lib/national-life/portal-grid-client.ts ./lib/national-life/portal-grid-client.ts
 COPY lib/national-life/connection-attempt-state.ts ./lib/national-life/connection-attempt-state.ts
 COPY lib/national-life/constants.ts ./lib/national-life/constants.ts
 COPY lib/national-life/env.ts ./lib/national-life/env.ts
@@ -30,6 +32,7 @@ COPY workers/national-life/steel-session.ts ./workers/national-life/steel-sessio
 COPY workers/national-life/types.ts ./workers/national-life/types.ts
 COPY workers/national-life/viewer-broker.ts ./workers/national-life/viewer-broker.ts
 COPY scripts/national-life-runtime.ts ./scripts/national-life-runtime.ts
+COPY scripts/national-life-sync-snapshots.ts ./scripts/national-life-sync-snapshots.ts
 
 ENV NODE_ENV=production
 EXPOSE 3010
