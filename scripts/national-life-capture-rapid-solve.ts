@@ -133,14 +133,66 @@ async function main() {
       await page.fill('#premiumAmount', '300').catch(() => undefined)
       await page.waitForTimeout(500)
 
+      // What actually got set, before asking for the quote. Two attempts died
+      // to a form that silently refused to submit; the page knows which field
+      // is missing and says so, so read that instead of guessing again.
+      const filled = (await page.evaluate(`(function () {
+        function text(sel) {
+          var el = document.querySelector(sel)
+          return el ? (el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 40) : null
+        }
+        function active(group) {
+          var el = document.querySelector('[data-name="' + group + '"] .toggle-btn.active')
+          return el ? el.getAttribute('data-value') : null
+        }
+        function val(sel) {
+          var el = document.querySelector(sel)
+          return el ? el.value : null
+        }
+        return {
+          firstName: val('#firstName'),
+          lastName: val('#lastName'),
+          birthdate: val('#birthdate'),
+          premiumAmount: val('#premiumAmount'),
+          faceAmount: val('#faceAmount'),
+          allocation: val('#allocation'),
+          issueState: document.querySelector('#ddlIssueState')
+            ? document.querySelector('#ddlIssueState').getAttribute('data-value')
+            : null,
+          issueStateText: text('#ddlIssueState'),
+          gender: document.querySelector('#ddlGender')
+            ? document.querySelector('#ddlGender').getAttribute('data-value')
+            : null,
+          genderText: text('#ddlGender'),
+          strategy: document.querySelector('#Strategy_dropdown')
+            ? document.querySelector('#Strategy_dropdown').getAttribute('data-value')
+            : null,
+          strategyText: text('#Strategy_dropdown'),
+          rateClass: active('select-type'),
+          solveType: active('Quote-type'),
+          deathBenefit: active('Options-type'),
+        }
+      })()`)) as Record<string, string | null>
+
       const before = await page.content()
       await page.click('#get_quote').catch(() => undefined)
       await page.waitForTimeout(20_000)
       const after = await page.content()
 
+      // The page's own validation messages, which name the field it is waiting
+      // for.
+      const validationErrors = (await page.evaluate(`(function () {
+        return Array.prototype.map.call(
+          document.querySelectorAll('.ap-error-text'),
+          function (el) { return (el.textContent || '').replace(/\\s+/g, ' ').trim() }
+        ).filter(Boolean).slice(0, 12)
+      })()`)) as string[]
+
       console.log(
         JSON.stringify(
           {
+            filled,
+            validationErrors,
             requests: seen,
             // What the page told the agent, which is the answer when the
             // request never left.
