@@ -203,12 +203,50 @@ async function main() {
         ).filter(Boolean).slice(0, 12)
       })()`)) as string[]
 
+      // Where the agreement actually lives. `#check` and its label both timed
+      // out, so the control the form is waiting on is some other element, and
+      // guessing at it again would be a fourth blind round.
+      const agreement = (await page.evaluate(`(function () {
+        var out = { checkboxes: [], nearError: null }
+
+        out.checkboxes = Array.prototype.map.call(
+          document.querySelectorAll('input[type=checkbox]'),
+          function (el) {
+            var rect = el.getBoundingClientRect()
+            var label = el.id ? document.querySelector('label[for="' + el.id + '"]') : null
+            return {
+              id: el.id,
+              name: el.getAttribute('name'),
+              className: (el.className || '').toString().slice(0, 60),
+              checked: el.checked,
+              width: Math.round(rect.width),
+              height: Math.round(rect.height),
+              parentHtml: el.parentElement
+                ? el.parentElement.outerHTML.replace(/\\s+/g, ' ').slice(0, 300)
+                : null,
+              labelText: label ? (label.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 60) : null,
+            }
+          },
+        )
+
+        var errors = document.querySelectorAll('.ap-error-text')
+        for (var i = 0; i < errors.length; i++) {
+          if ((errors[i].textContent || '').indexOf('agreement') !== -1) {
+            var box = errors[i].closest('div')
+            out.nearError = box ? box.outerHTML.replace(/\\s+/g, ' ').slice(0, 700) : null
+          }
+        }
+
+        return out
+      })()`)) as { checkboxes: unknown[]; nearError: string | null }
+
       console.log(
         JSON.stringify(
           {
             filled,
             clicks,
             validationErrors,
+            agreement,
             requests: seen,
             // What the page told the agent, which is the answer when the
             // request never left.
