@@ -60,40 +60,65 @@ async function main() {
       })
       await page.waitForTimeout(12_000)
 
-      const form = await page.evaluate(() => {
-        const visible = (el: Element) => {
-          const rect = (el as HTMLElement).getBoundingClientRect()
+      // Passed as source text rather than a function. tsx compiles this file
+      // with esbuild, which injects a `__name` helper into any named function
+      // it hands over — and that helper does not exist in the page, so the
+      // evaluate died with `__name is not defined`.
+      const form = (await page.evaluate(`(function () {
+        function visible(el) {
+          var rect = el.getBoundingClientRect()
           return rect.width > 0 && rect.height > 0
         }
 
         return {
-          inputs: Array.from(document.querySelectorAll('input')).map((el) => ({
-            id: el.id,
-            name: el.getAttribute('name'),
-            type: el.type,
-            placeholder: el.placeholder,
-            visible: visible(el),
-          })),
-          dataValues: Array.from(document.querySelectorAll('[data-value]')).map((el) => ({
-            tag: el.tagName.toLowerCase(),
-            id: el.id,
-            className: (el.className || '').toString().slice(0, 80),
-            dataValue: el.getAttribute('data-value'),
-            parentDataName:
-              el.closest('[data-name]')?.getAttribute('data-name') ?? null,
-            visible: visible(el),
-          })),
-          buttons: Array.from(document.querySelectorAll('button, a.btn, input[type=submit]')).map(
-            (el) => ({
-              tag: el.tagName.toLowerCase(),
+          inputs: Array.prototype.map.call(document.querySelectorAll('input'), function (el) {
+            return {
               id: el.id,
-              className: (el.className || '').toString().slice(0, 80),
-              text: (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40),
+              name: el.getAttribute('name'),
+              type: el.type,
+              placeholder: el.placeholder,
               visible: visible(el),
-            }),
+            }
+          }),
+          dataValues: Array.prototype.map.call(
+            document.querySelectorAll('[data-value]'),
+            function (el) {
+              var group = el.closest('[data-name]')
+              return {
+                tag: el.tagName.toLowerCase(),
+                id: el.id,
+                className: (el.className || '').toString().slice(0, 80),
+                dataValue: el.getAttribute('data-value'),
+                parentDataName: group ? group.getAttribute('data-name') : null,
+                visible: visible(el),
+              }
+            },
+          ),
+          buttons: Array.prototype.map.call(
+            document.querySelectorAll('button, a.btn, input[type=submit]'),
+            function (el) {
+              return {
+                tag: el.tagName.toLowerCase(),
+                id: el.id,
+                className: (el.className || '').toString().slice(0, 80),
+                text: (el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 40),
+                visible: visible(el),
+              }
+            },
           ),
         }
-      })
+      })()`)) as {
+        inputs: Array<{ id: string; name: string | null; type: string; visible: boolean }>
+        dataValues: Array<{
+          tag: string
+          id: string
+          className: string
+          dataValue: string | null
+          parentDataName: string | null
+          visible: boolean
+        }>
+        buttons: Array<{ id: string; className: string; text: string; visible: boolean }>
+      }
 
       console.log(
         JSON.stringify(
