@@ -50,6 +50,15 @@ const INFORCE_POLICY_GRIDS: readonly NationalLifeGridKey[] = ['INFORCE_CLIENTS']
 const REPORT_ROW_GRIDS: readonly NationalLifeGridKey[] = [
   'PAID_COMMISSIONS',
   'PROJECTED_COMMISSIONS',
+  // The service-call log: the only place the portal exposes a client's email,
+  // phone and the agent's own notes. 2710 rows.
+  'CLIENT_INTELLIGENCE',
+  // Documents issued per policy, 64 rows. Listing them is not downloading them.
+  'CORRESPONDENCE',
+  // Two rows, and they are what map a commission's GlobalId to a payee name.
+  'COMMISSIONS_PAYMENT_PORTAL',
+  // Empty today, kept so it reports when a premium increase is submitted.
+  'PIP_PENDING',
 ]
 const DEFAULT_GRIDS: readonly NationalLifeGridKey[] = [
   ...CASE_SNAPSHOT_GRIDS,

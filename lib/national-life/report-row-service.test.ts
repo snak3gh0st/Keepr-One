@@ -157,3 +157,30 @@ describe('National Life report row identity stability', () => {
     )
   })
 })
+
+describe('rowKey for the grids mapped on 2026-07-30', () => {
+  it('keys a service call on the carrier case id', () => {
+    expect(deriveRowKey('CLIENT_INTELLIGENCE', { CaseDetailsId: 90210, CustomerName: 'X' })).toBe(
+      '90210',
+    )
+  })
+
+  it('keys a document on its handle', () => {
+    expect(deriveRowKey('CORRESPONDENCE', { DocumentHandle: 5551, PolicyNumber: 'P1' })).toBe('5551')
+  })
+
+  it('keys a payee on the GlobalId a commission row references', () => {
+    expect(deriveRowKey('COMMISSIONS_PAYMENT_PORTAL', { GlobalId: 'G-7', FullName: 'Y' })).toBe('G-7')
+  })
+
+  it('keys a pending increase on policy and agent together', () => {
+    expect(deriveRowKey('PIP_PENDING', { PolicyNo: 'P9', AgentNumber: 'A2' })).toBe('P9|A2')
+  })
+
+  it('falls back to a content hash rather than colliding when the key is absent', () => {
+    const a = deriveRowKey('CLIENT_INTELLIGENCE', { CustomerName: 'A' })
+    const b = deriveRowKey('CLIENT_INTELLIGENCE', { CustomerName: 'B' })
+    expect(a).not.toBe(b)
+    expect(a).toHaveLength(32)
+  })
+})

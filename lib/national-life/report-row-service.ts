@@ -87,6 +87,17 @@ export function deriveRowKey(gridKey: NationalLifeGridKey, row: GridRow): string
         return [text(row, 'GlobalId'), text(row, 'PayDate')]
       case 'PROJECTED_COMMISSIONS':
         return [text(row, 'AgentNumber'), text(row, 'PaymentDate')]
+      // The carrier gives each of these a natural key. Using it instead of the
+      // row hash means a value the carrier corrects updates the row in place
+      // rather than arriving as a second, contradictory copy.
+      case 'CLIENT_INTELLIGENCE':
+        return [text(row, 'CaseDetailsId')]
+      case 'CORRESPONDENCE':
+        return [text(row, 'DocumentHandle')]
+      case 'COMMISSIONS_PAYMENT_PORTAL':
+        return [text(row, 'GlobalId')]
+      case 'PIP_PENDING':
+        return [text(row, 'PolicyNo'), text(row, 'AgentNumber')]
       default:
         // The per-statement earning detail repeats a policy across transactions,
         // so the transaction type and dates are part of its identity.
