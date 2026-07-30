@@ -27,6 +27,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
   const [query, setQuery] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState(ALL_AGENTS);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [onlyMissingEmail, setOnlyMissingEmail] = useState(false);
   const [page, setPage] = useState(1);
 
   const agents = useMemo(
@@ -55,14 +56,21 @@ export function ClientsList({ clients }: { clients: Client[] }) {
           client.name.toLocaleLowerCase("pt-BR").includes(normalizedQuery) ||
           (client.email ?? "").toLocaleLowerCase("pt-BR").includes(normalizedQuery);
 
-        return matchesAgent && matchesQuery;
+        const matchesContact = !onlyMissingEmail || !client.email;
+
+        return matchesAgent && matchesQuery && matchesContact;
       })
       .sort((a, b) => {
         const byName = collator.compare(a.name, b.name);
         if (byName !== 0) return direction * byName;
         return direction * collator.compare(a.agentName, b.agentName);
       });
-  }, [clients, query, selectedAgentId, sortDirection]);
+  }, [clients, query, selectedAgentId, sortDirection, onlyMissingEmail]);
+
+  const missingEmailCount = useMemo(
+    () => clients.filter((client) => !client.email).length,
+    [clients],
+  );
 
   const pageCount = Math.max(1, Math.ceil(filteredClients.length / CLIENTS_PER_PAGE));
   const currentPage = clampPage(page, pageCount);
@@ -75,12 +83,14 @@ export function ClientsList({ clients }: { clients: Client[] }) {
   const hasActiveFilters =
     query.trim().length > 0 ||
     selectedAgentId !== ALL_AGENTS ||
-    sortDirection !== "asc";
+    sortDirection !== "asc" ||
+    onlyMissingEmail;
 
   function clearFilters() {
     setQuery("");
     setSelectedAgentId(ALL_AGENTS);
     setSortDirection("asc");
+    setOnlyMissingEmail(false);
     setPage(1);
   }
 
@@ -109,6 +119,29 @@ export function ClientsList({ clients }: { clients: Client[] }) {
             : `${filteredClients.length} de ${clients.length} clientes`}
         </p>
       </div>
+
+      {/* A client with no email cannot be reached, and that is the agent's
+          problem to fix rather than a gap to scroll past. The carrier has no
+          more to give: its service log was already matched into these records
+          and covers nobody new. */}
+      {missingEmailCount > 0 && (
+        <button
+          type="button"
+          onClick={() => {
+            setOnlyMissingEmail((value) => !value);
+            setPage(1);
+          }}
+          aria-pressed={onlyMissingEmail}
+          className={`mt-4 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition-colors ${
+            onlyMissingEmail
+              ? "border-teal bg-teal/10 text-teal"
+              : "border-border-steel text-ink-muted hover:text-ink"
+          }`}
+        >
+          <span className="font-mono tabular-nums">{missingEmailCount}</span>
+          <span>sem e-mail cadastrado</span>
+        </button>
+      )}
 
       {clients.length > 0 && (
         <div className="mt-6 grid gap-3 rounded-2xl border border-border-steel/80 bg-panel/55 p-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.7fr)_minmax(180px,0.8fr)_minmax(160px,0.65fr)]">
