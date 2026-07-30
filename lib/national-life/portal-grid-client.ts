@@ -131,9 +131,14 @@ export async function fetchNationalLifeGrid(
 
   try {
     await page.goto(target, { waitUntil: 'domcontentloaded', timeout: timeoutMs })
-  } catch {
+  } catch (error) {
     await pendingRequest
-    throw new NationalLifeGridError('GRID_PAGE_UNREACHABLE', `Could not open ${gridPath}`)
+    // Keep the underlying reason: a navigation aborted by the origin guard and a
+    // slow report page are the same symptom here but need opposite fixes.
+    throw new NationalLifeGridError(
+      'GRID_PAGE_UNREACHABLE',
+      `Could not open ${gridPath}: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
+    )
   }
 
   const captured = await pendingRequest
