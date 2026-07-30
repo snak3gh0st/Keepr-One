@@ -58,6 +58,13 @@ const AMOUNT_FIELDS = [
   'CommRate',
   'ParticipationPercentage',
   'RemainingBalance',
+  // Chargeback statement — money that comes *out* of commission, and was
+  // landing with an empty amounts object because none of these were listed.
+  'GrossPay',
+  'CommissionDollars',
+  'CommissionsHeld',
+  'StartingChargebackBalance',
+  'EndingChargebackBalance',
 ] as const
 
 function extractAmounts(row: GridRow): Record<string, string> {

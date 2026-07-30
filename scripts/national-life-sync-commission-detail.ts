@@ -35,11 +35,14 @@ async function main() {
     throw new Error('no usable CONNECTED National Life session stored')
   }
 
+  // Both the statements and the chargeback rows carry drill-downs: the statement
+  // links to the earning report, and each chargeback row links on to the debt
+  // behind it.
   const statements = await prisma.nationalLifeReportRow.findMany({
     where: {
       agentId: stored.agentId,
       deploymentScope: env.sessionScopeId,
-      gridKey: 'PAID_COMMISSIONS',
+      gridKey: { in: ['PAID_COMMISSIONS', 'COMMISSION_DETAIL_CHARGEBACK'] },
     },
     select: { rowKey: true, raw: true },
   })

@@ -6,7 +6,7 @@ import type { GridRow } from './portal-grid-client'
 /// `?id=<token>` URLs — so the detail is reachable without replaying the page's
 /// `getHierarchyReportDetails` click handler.
 export type CommissionDetailLink = {
-  kind: 'NLD_COMMISSION_EARNING' | 'CHARGEBACK'
+  kind: 'NLD_COMMISSION_EARNING' | 'CHARGEBACK' | 'CHARGEBACK_DEBT'
   path: string
   statementId: string
 }
@@ -23,10 +23,22 @@ const DETAIL_PATTERNS = [
     pattern:
       /href=['"]([^'"]*commissions-earning-report\/chargeback\?id=([A-Za-z0-9]+))['"]/i,
   },
+  {
+    // The chargeback statement's own DetailsLink, which opens the debt behind it.
+    kind: 'CHARGEBACK_DEBT' as const,
+    pattern:
+      /href=['"]([^'"]*commissions-earning-report\/chargeback\/debt\?id=([A-Za-z0-9]+))['"]/i,
+  },
 ]
 
 /// Fields whose rendered markup is known to hold a drill-down anchor.
-const LINK_FIELDS = ['NLDCommEarningAmt', 'ESICommEarningAmt', 'CommChargebackBalance', 'PayStatement'] as const
+const LINK_FIELDS = [
+  'NLDCommEarningAmt',
+  'ESICommEarningAmt',
+  'CommChargebackBalance',
+  'PayStatement',
+  'DetailsLink',
+] as const
 
 export function extractCommissionDetailLinks(row: GridRow): CommissionDetailLink[] {
   const links = new Map<string, CommissionDetailLink>()

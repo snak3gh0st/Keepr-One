@@ -60,3 +60,30 @@ describe('National Life commission detail links', () => {
     ).toEqual([])
   })
 })
+
+describe('National Life chargeback debt drill-down', () => {
+  it('follows the DetailsLink on a chargeback row', () => {
+    const links = extractCommissionDetailLinks({
+      DetailsLink:
+        "<a href='/agent/compensation/commissions/paid-commissions/commissions-earning-report/chargeback/debt?id=77caadc1234bda567b890c12dcc34'>Details<a>",
+    })
+
+    expect(links).toEqual([
+      {
+        kind: 'CHARGEBACK_DEBT',
+        path:
+          '/agent/compensation/commissions/paid-commissions/commissions-earning-report/chargeback/debt?id=77caadc1234bda567b890c12dcc34',
+        statementId: '77caadc1234bda567b890c12dcc34',
+      },
+    ])
+  })
+
+  it('does not confuse the debt link with the chargeback summary link', () => {
+    const links = extractCommissionDetailLinks({
+      CommChargebackBalance: '<a href="/x/commissions-earning-report/chargeback?id=aaa1">$0.00</a>',
+      DetailsLink: "<a href='/x/commissions-earning-report/chargeback/debt?id=bbb2'>Details<a>",
+    })
+
+    expect(links.map((link) => link.kind).sort()).toEqual(['CHARGEBACK', 'CHARGEBACK_DEBT'])
+  })
+})
