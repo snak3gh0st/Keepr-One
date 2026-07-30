@@ -36,6 +36,7 @@ COPY workers/national-life/viewer-broker.ts ./workers/national-life/viewer-broke
 COPY scripts/national-life-runtime.ts ./scripts/national-life-runtime.ts
 COPY scripts/national-life-sync-snapshots.ts ./scripts/national-life-sync-snapshots.ts
 COPY scripts/national-life-describe-grids.ts ./scripts/national-life-describe-grids.ts
+COPY scripts/national-life-describe-page.ts ./scripts/national-life-describe-page.ts
 
 ENV NODE_ENV=production
 EXPOSE 3010
