@@ -133,6 +133,37 @@ export type PersistReportRowsInput = {
   fetchedAt: Date
 }
 
+export type PruneStaleReportRowsInput = {
+  agentId: string
+  deploymentScope: string
+  gridKeys: readonly string[]
+  fetchedAt: Date
+}
+
+/// Drops rows the current run did not refresh.
+///
+/// Needed for two reasons: the carrier removes rows over time, and a change to
+/// how `rowKey` is derived orphans everything written under the old scheme —
+/// which is exactly what happened when transaction type was added to the
+/// commission-detail key and 2992 stale rows were left behind next to the new
+/// ones.
+///
+/// Only safe after a *complete* fetch. If pagination was truncated, un-fetched
+/// rows are indistinguishable from deleted ones, so the caller must not prune.
+export async function pruneStaleReportRows(
+  input: PruneStaleReportRowsInput,
+): Promise<{ deleted: number }> {
+  const { count } = await prisma.nationalLifeReportRow.deleteMany({
+    where: {
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      gridKey: { in: [...input.gridKeys] },
+      fetchedAt: { lt: input.fetchedAt },
+    },
+  })
+  return { deleted: count }
+}
+
 export async function persistReportRows(
   input: PersistReportRowsInput,
 ): Promise<{ written: number }> {

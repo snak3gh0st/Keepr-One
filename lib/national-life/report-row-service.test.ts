@@ -140,3 +140,20 @@ describe('National Life per-policy commission earning detail', () => {
     expect(rows).toHaveLength(1)
   })
 })
+
+describe('National Life report row identity stability', () => {
+  it('keys a paid-commission row the same way across runs', () => {
+    const row = { GlobalId: '77', PayDate: '07/25/2026', FullName: 'X' }
+    expect(deriveRowKey('PAID_COMMISSIONS', row)).toBe(
+      deriveRowKey('PAID_COMMISSIONS', { ...row, FullName: 'Y' }),
+    )
+  })
+
+  it('does not treat a detail row as a statement row', () => {
+    // Guards the branch that distinguishes the two by their own fields.
+    const detail = { PolicyNumber: 'NL1', GrossCommEarned: '1.00', TransactionType: 'FYC' }
+    expect(deriveRowKey('COMMISSION_DETAIL_NLD_COMMISSION_EARNING' as never, detail)).toContain(
+      'NL1',
+    )
+  })
+})

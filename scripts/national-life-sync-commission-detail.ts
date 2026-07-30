@@ -10,7 +10,11 @@ import { decryptBrowserContext } from '../lib/national-life/browser-context-cryp
 import { extractCommissionDetailLinks } from '../lib/national-life/commission-detail'
 import { getNationalLifeEnv } from '../lib/national-life/env'
 import { fetchNationalLifeGrid, type GridPage } from '../lib/national-life/portal-grid-client'
-import { persistReportRows, toReportRows } from '../lib/national-life/report-row-service'
+import {
+  persistReportRows,
+  pruneStaleReportRows,
+  toReportRows,
+} from '../lib/national-life/report-row-service'
 import { prisma } from '../lib/prisma'
 import { createSteelBrowserSession } from '../workers/national-life/steel-session'
 
@@ -77,6 +81,8 @@ async function main() {
 
   const session = await createSteelBrowserSession(env, { sessionContext })
   const fetchedAt = new Date()
+  const touchedGridKeys = new Set<string>()
+  let anyFailedOrTruncated = false
 
   try {
     for (const link of links) {
@@ -101,6 +107,10 @@ async function main() {
           rows: reportRows,
           fetchedAt,
         })
+        touchedGridKeys.add(gridKey)
+        if (truncated) {
+          anyFailedOrTruncated = true
+        }
         console.log(
           JSON.stringify({
             kind: link.kind,
@@ -112,6 +122,7 @@ async function main() {
           }),
         )
       } catch (error) {
+        anyFailedOrTruncated = true
         console.error(
           JSON.stringify({
             kind: link.kind,
@@ -120,6 +131,24 @@ async function main() {
           }),
         )
       }
+    }
+
+    // Only prune once every statement came back whole: otherwise rows that were
+    // simply not fetched are indistinguishable from rows the carrier removed.
+    if (!anyFailedOrTruncated && touchedGridKeys.size > 0) {
+      const { deleted } = await pruneStaleReportRows({
+        agentId: stored.agentId,
+        deploymentScope: env.sessionScopeId,
+        gridKeys: [...touchedGridKeys],
+        fetchedAt,
+      })
+      console.log(JSON.stringify({ prunedStaleRows: deleted }))
+    } else {
+      console.error(
+        JSON.stringify({
+          skippedPrune: 'a statement failed or was truncated; stale rows kept',
+        }),
+      )
     }
   } finally {
     await session.close()
