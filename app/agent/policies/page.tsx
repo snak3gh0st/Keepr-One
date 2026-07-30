@@ -25,6 +25,7 @@ export default async function PoliciesPage() {
     product: string
     premium: unknown
     status: string
+    sourceProvider: string | null
     client: { name: string } | null
   }[] = []
   let loadError = false
@@ -41,7 +42,15 @@ export default async function PoliciesPage() {
   }
   const inforcePolicies = policies.filter((policy) => policy.status === 'INFORCE').length
   const attentionPolicies = policies.filter((policy) => ['PENDING', 'LAPSED', 'CANCELLED'].includes(policy.status)).length
-  const totalPremium = policies.reduce((sum, policy) => sum + decimalToNumber(policy.premium), 0)
+  // A carrier-sourced policy with a zero premium means the portal did not supply
+  // one, not that the premium is zero. Counting those would understate nothing
+  // and overstate coverage of the figure, so they are excluded and reported.
+  const premiumIsKnown = (policy: { premium: unknown; sourceProvider: string | null }) =>
+    policy.sourceProvider === null || decimalToNumber(policy.premium) > 0
+  const policiesWithoutPremium = policies.filter((policy) => !premiumIsKnown(policy)).length
+  const totalPremium = policies
+    .filter(premiumIsKnown)
+    .reduce((sum, policy) => sum + decimalToNumber(policy.premium), 0)
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
@@ -71,7 +80,15 @@ export default async function PoliciesPage() {
           items={[
             { label: 'Apólices', value: policies.length, detail: 'Contratos dentro da sua operação' },
             { label: 'Em vigor', value: inforcePolicies, detail: 'Proteções ativas na carteira', tone: 'green' },
-            { label: 'Prêmio registrado', value: `$${totalPremium.toFixed(0)}`, detail: `${attentionPolicies} item(ns) pedem atenção`, tone: attentionPolicies > 0 ? 'gold' : 'neutral' },
+            {
+              label: 'Prêmio registrado',
+              value: `$${totalPremium.toFixed(0)}`,
+              detail:
+                policiesWithoutPremium > 0
+                  ? `${policiesWithoutPremium} sem prêmio informado pela seguradora`
+                  : `${attentionPolicies} item(ns) pedem atenção`,
+              tone: attentionPolicies > 0 ? 'gold' : 'neutral',
+            },
           ]}
         />
       )}
@@ -85,7 +102,7 @@ export default async function PoliciesPage() {
               policyNumber: p.policyNumber,
               carrier: p.carrier,
               product: p.product,
-              premium: decimalToNumber(p.premium).toFixed(2),
+              premium: premiumIsKnown(p) ? decimalToNumber(p.premium).toFixed(2) : null,
               status: p.status,
               clientName: p.client?.name ?? '—',
             }))}

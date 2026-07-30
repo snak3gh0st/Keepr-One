@@ -15,7 +15,8 @@ type Policy = {
   policyNumber: string;
   carrier: string;
   product: string;
-  premium: string;
+  /// null when the carrier did not supply it, which must not read as zero.
+  premium: string | null;
   status: string;
   clientName: string;
 };
@@ -42,12 +43,16 @@ const USD = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
-function premiumValue(premium: string) {
+function premiumValue(premium: string | null) {
+  if (premium === null) return 0;
   const value = Number(premium);
   return Number.isFinite(value) ? value : 0;
 }
 
-function formatPremium(premium: string) {
+function formatPremium(premium: string | null) {
+  // An unknown premium is shown as unknown. Rendering it as $0.00 would be a
+  // number the carrier never gave us.
+  if (premium === null) return "—";
   const value = Number(premium);
   return Number.isFinite(value) ? USD.format(value) : "—";
 }
