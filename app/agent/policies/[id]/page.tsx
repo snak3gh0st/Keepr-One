@@ -19,6 +19,7 @@ import {
   type ClientServiceEvent,
 } from '@/lib/national-life/client-intelligence'
 import { toCarrierCommissionRecords } from '@/lib/national-life/commission-records'
+import { carrierPolicyNumberVariants } from '@/lib/national-life/policy-number'
 import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -60,7 +61,13 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   let carrierDocuments: Array<{ id: string; date: string; type: string }> = []
   let serviceEvents: ClientServiceEvent[] = []
 
-  if (isNationalLifeConfigured() && policy.policyNumber) {
+  // Every policy in the book is National Life today, so this reads as a
+  // formality. It is not: the carrier rows are matched on policy number alone,
+  // and a second insurer numbering a contract the same way would put its
+  // client's service calls on this screen.
+  const isCarrierNationalLife = /national life/i.test(policy.carrier ?? '')
+
+  if (isNationalLifeConfigured() && isCarrierNationalLife && policy.policyNumber) {
     const scopeId = getNationalLifeEnv().sessionScopeId
     const [commissionRows, documentRows, serviceRows] = await Promise.all([
       prisma.nationalLifeReportRow.findMany({
@@ -75,7 +82,13 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         where: {
           deploymentScope: scopeId,
           gridKey: 'CORRESPONDENCE',
-          raw: { path: ['RefPolicyNumber'], equals: policy.policyNumber },
+          // Correspondence pads the number with a leading `00` and no other
+          // grid does, so matching only our own spelling found nothing: this
+          // section rendered empty for every policy, which reads as a policy
+          // with no documents.
+          OR: carrierPolicyNumberVariants(policy.policyNumber).map((value) => ({
+            raw: { path: ['RefPolicyNumber'], equals: value },
+          })),
         },
         select: { id: true, raw: true },
       }),
@@ -312,17 +325,24 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           </section>
 
           {/* An empty premium field reads as a bug the agent should report. The
-              carrier's inforce book returns these columns null for all 9,614
-              policies, in every status and product class, so the screen says so
-              instead of leaving a blank. */}
-          <section className="module-main-surface">
-            <h2 className="text-base font-semibold text-ink">O que a National Life não fornece</h2>
-            <p className="mt-2 text-sm text-ink-muted">
-              Capital segurado e prêmio por apólice não vêm do portal — as colunas existem no
-              relatório da seguradora e chegam vazias. O prêmio no resumo acima é o registrado
-              aqui, não o da seguradora.
-            </p>
-          </section>
+              inforce book returns these columns null for all 9,614 policies, in
+              every status and product class, so the screen says so instead of
+              leaving a blank.
+
+              Gated on this being a National Life policy: on anyone else's it
+              would be a claim about an insurer we never asked. */}
+          {isCarrierNationalLife && (
+            <section className="module-main-surface">
+              <h2 className="text-base font-semibold text-ink">
+                O que a National Life não fornece
+              </h2>
+              <p className="mt-2 text-sm text-ink-muted">
+                Capital segurado e prêmio por apólice não vêm do portal — as colunas existem no
+                relatório da seguradora e chegam vazias. O prêmio no resumo acima é o registrado
+                aqui, não o da seguradora.
+              </p>
+            </section>
+          )}
           <AnnualReviewCard
             policyId={policy.id}
             reviews={policy.reviews.map((r) => ({
