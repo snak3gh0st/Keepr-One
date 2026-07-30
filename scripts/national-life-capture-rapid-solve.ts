@@ -117,10 +117,14 @@ async function main() {
       // Hidden behind a styled label, which is why checking the input did
       // nothing. Failures are reported now instead of swallowed: three runs
       // were spent blind because every click was wrapped in a silent catch.
+      // `#rapid_checkbox`, not `#check` — that one is the mobile menu, which is
+      // why clicking it timed out on a control that was never part of the form.
+      // Its label is the carrier's condition: agent use only, may be used for a
+      // verbal quote, may not be shown to a consumer, values not guaranteed.
       const clicks: Record<string, string> = {}
       for (const [name, selector] of [
-        ['agreement-label', 'label[for="check"]'],
-        ['agreement-input', '#check'],
+        ['agreement', 'label[for="rapid_checkbox"]'],
+        ['agreement-input', '#rapid_checkbox'],
       ] as const) {
         try {
           await page.click(selector, { timeout: 4_000 })
