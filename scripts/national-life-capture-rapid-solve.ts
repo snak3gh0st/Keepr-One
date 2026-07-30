@@ -106,22 +106,29 @@ async function main() {
       await page.fill('#lastName', 'Loureiro Campos')
       await page.fill('#birthdate', '02/06/1988')
 
-      // By id: selecting the toggle through its group did not take, and the
-      // form stayed on Specify_Amount while asking for a face amount nobody
-      // meant to give it.
-      for (const selector of [
-        '[data-name="select-type"] [data-value="Standard_NT"]',
-        '#Premium-DeathBenefitFocus_btn',
-        '[data-name="Options-type"] [data-value="A_Level"]',
-      ]) {
-        await page.click(selector).catch(() => undefined)
-        await page.waitForTimeout(600)
-      }
+      // The toggles already default to Standard_NT, Specify_Amount and
+      // A_Level — the last run proved it. Fighting a toggle that did not need
+      // to move is what kept the form asking for a face amount while the
+      // premium field stayed hidden. So take the defaults and give it the one
+      // thing it wanted.
+      await page.fill('#faceAmount', '250000')
+      await page.waitForTimeout(600)
 
-      // The form refuses to submit without this, and our direct POST has never
-      // accepted it — which is a live candidate for the HTTP 500, if the
-      // server keeps the acceptance rather than trusting the payload.
-      await page.locator('#check').check({ force: true }).catch(() => undefined)
+      // Hidden behind a styled label, which is why checking the input did
+      // nothing. Failures are reported now instead of swallowed: three runs
+      // were spent blind because every click was wrapped in a silent catch.
+      const clicks: Record<string, string> = {}
+      for (const [name, selector] of [
+        ['agreement-label', 'label[for="check"]'],
+        ['agreement-input', '#check'],
+      ] as const) {
+        try {
+          await page.click(selector, { timeout: 4_000 })
+          clicks[name] = 'clicked'
+        } catch (error) {
+          clicks[name] = String(error).split('\n')[0].slice(0, 120)
+        }
+      }
       await page.waitForTimeout(400)
 
       // Custom dropdowns: open, then pick.
@@ -200,6 +207,7 @@ async function main() {
         JSON.stringify(
           {
             filled,
+            clicks,
             validationErrors,
             requests: seen,
             // What the page told the agent, which is the answer when the
