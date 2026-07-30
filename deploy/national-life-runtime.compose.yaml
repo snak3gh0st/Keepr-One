@@ -44,7 +44,12 @@ services:
       LOG_CUSTOM_EMIT_EVENTS: "false"
       ENABLE_VERBOSE_LOGGING: "false"
     mem_limit: 2g
-    pids_limit: 256
+    # Chrome forks ~25-30 processes per browser and Steel does not reap them when
+    # a session is released: 14 sessions left 58 chrome processes behind and the
+    # container wedged at 253/256 PIDs, failing every launch with a 60s timeout.
+    # Raising the ceiling buys headroom for a daily sync but does not fix the
+    # leak — the container still needs a periodic restart until it is addressed.
+    pids_limit: 1024
     shm_size: 1g
     read_only: true
     tmpfs:
