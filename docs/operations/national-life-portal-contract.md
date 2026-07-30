@@ -132,6 +132,27 @@ Distribuição de status obtida (`NEW_BUSINESS`): `Issued` 417, `PENDING` 96,
 `Issued, Pending EFT - <data>` 12 — note que o status às vezes **embute uma data**,
 então `status-map.ts` precisa normalizar por prefixo, não por igualdade.
 
+## Limites operacionais descobertos em produção (2026-07-30)
+
+**Steel esgota PIDs e para de subir browser.** O container tinha `pids_limit: 256`.
+Chrome forka ~25-30 processos por browser e o Steel **não os reapa** quando a
+sessão é liberada: 14 sessões deixaram 58 processos Chrome e o container ficou em
+253/256 PIDs, fazendo toda criação de sessão falhar com
+`500 Browser launch timeout after 60000ms`. Memória estava folgada (320MB/2GB) —
+o limite era de processos, não de RAM.
+
+- Mitigado: `pids_limit` subiu para 1024 no compose.
+- **Não resolvido**: o vazamento continua. Um cron diário vai reencontrar isso.
+  Até a causa ser tratada, o container precisa de restart periódico.
+- `docker restart` do Steel é seguro quando não há login interativo em andamento
+  (`NationalLifeConnectionAttempt` sem linhas ativas): a sessão autenticada vive
+  no banco e é re-semeada.
+- **Não rodar sync concorrente com login interativo** — competem pelos mesmos PIDs.
+
+**Upsert linha-a-linha é lento.** `persistInforcePolicies` faz um `upsert` por
+apólice; 10 mil linhas levam minutos. Precisa de escrita em lote antes de virar
+job agendado.
+
 ## Escrita / ações (não investigado)
 
 A nav autenticada tem uma seção **`Illustrations`** (além de `Marketing`, `Tools`,
