@@ -106,15 +106,23 @@ async function main() {
       await page.fill('#lastName', 'Loureiro Campos')
       await page.fill('#birthdate', '02/06/1988')
 
-      // Toggle groups: the value lives on a button inside a named group.
-      for (const [group, value] of [
-        ['select-type', 'Standard_NT'],
-        ['Quote-type', 'Based_on_Target_Premium'],
-        ['Options-type', 'A_Level'],
-      ] as const) {
-        await page.click(`[data-name="${group}"] [data-value="${value}"]`).catch(() => undefined)
-        await page.waitForTimeout(500)
+      // By id: selecting the toggle through its group did not take, and the
+      // form stayed on Specify_Amount while asking for a face amount nobody
+      // meant to give it.
+      for (const selector of [
+        '[data-name="select-type"] [data-value="Standard_NT"]',
+        '#Premium-DeathBenefitFocus_btn',
+        '[data-name="Options-type"] [data-value="A_Level"]',
+      ]) {
+        await page.click(selector).catch(() => undefined)
+        await page.waitForTimeout(600)
       }
+
+      // The form refuses to submit without this, and our direct POST has never
+      // accepted it — which is a live candidate for the HTTP 500, if the
+      // server keeps the acceptance rather than trusting the payload.
+      await page.locator('#check').check({ force: true }).catch(() => undefined)
+      await page.waitForTimeout(400)
 
       // Custom dropdowns: open, then pick.
       for (const [dropdown, value] of [
