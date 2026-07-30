@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { ContextPanel } from '@/components/ContextPanel'
 import { ModuleSummary } from '@/components/ModuleSummary'
+import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 import { CommissionsList } from './CommissionsList'
 
 export const dynamic = 'force-dynamic'
@@ -20,6 +21,51 @@ type Record_ = {
   policy: { id: string; policyNumber: string; agent: { user: { name: string } } } | null
 }
 
+/// The carrier's earning detail is one row per commission transaction, which is
+/// the same shape this page already renders. It is read directly rather than
+/// promoted into CommissionRecord because that table requires a Policy row and
+/// only 2329 of 5408 transactions reference a policy in the current book — the
+/// rest are policies that still pay renewals but are no longer inforce. Promoting
+/// only the matching ones would silently show 43% of the agent's commission.
+function toCommissionRecords(
+  rows: Array<{ id: string; raw: unknown; amounts: unknown }>,
+): Record_[] {
+  return rows.flatMap((row) => {
+    const raw = (row.raw ?? {}) as Record<string, unknown>
+    const amounts = (row.amounts ?? {}) as Record<string, unknown>
+    const gross = typeof amounts.GrossCommEarned === 'string' ? amounts.GrossCommEarned : null
+    if (!gross) return []
+
+    const amount = Number(gross.replace(/[$,\s]/g, ''))
+    if (!Number.isFinite(amount)) return []
+
+    const paymentDate = typeof raw.PaymentDate === 'string' ? raw.PaymentDate : ''
+    const [month, , year] = paymentDate.split('/')
+    const period = year && month ? `${year}-${month}` : 'sem-periodo'
+
+    // The carrier labels the agent's role on the transaction, which is exactly
+    // the direct-versus-override split this page shows.
+    const isOverride = raw.WritingAgtLevel === 'Override'
+
+    return [
+      {
+        id: row.id,
+        period,
+        type: isOverride ? 'OVERRIDE' : 'DIRECT',
+        level: isOverride ? 1 : 0,
+        amount,
+        policy: {
+          id: '',
+          policyNumber: typeof raw.PolicyNumber === 'string' ? raw.PolicyNumber : '—',
+          agent: {
+            user: { name: typeof raw.WritingAgtName === 'string' ? raw.WritingAgtName : '' },
+          },
+        },
+      },
+    ]
+  })
+}
+
 export default async function CommissionsPage() {
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
@@ -27,11 +73,28 @@ export default async function CommissionsPage() {
   let loadError = false
 
   try {
-    records = await prisma.commissionRecord.findMany({
+    const stored = await prisma.commissionRecord.findMany({
       where: { agentId: agent.id },
       include: { policy: { include: { agent: { include: { user: true } } } } },
       orderBy: [{ period: 'desc' }, { createdAt: 'desc' }],
     })
+
+    let carrierRecords: Record_[] = []
+    if (isNationalLifeConfigured()) {
+      const carrierRows = await prisma.nationalLifeReportRow.findMany({
+        where: {
+          agentId: agent.id,
+          deploymentScope: getNationalLifeEnv().sessionScopeId,
+          gridKey: 'COMMISSION_DETAIL_NLD_COMMISSION_EARNING',
+        },
+        select: { id: true, raw: true, amounts: true },
+      })
+      carrierRecords = toCommissionRecords(carrierRows)
+    }
+
+    records = [...stored, ...carrierRecords].sort((left, right) =>
+      right.period.localeCompare(left.period),
+    )
   } catch (error) {
     console.error('Commissions query error', error)
     loadError = true
