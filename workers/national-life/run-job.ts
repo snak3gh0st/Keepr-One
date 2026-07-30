@@ -254,6 +254,36 @@ async function requestReconnect(
   })
 }
 
+/// Sends a job back to the queue for a later attempt.
+///
+/// Two transitions, because RUNNING cannot go straight to QUEUED and because
+/// RETRYABLE on its own is a dead end: the only thing that revives a job is
+/// `releaseExpiredLeases`, and that looks exclusively at RUNNING jobs with
+/// lapsed leases. A job parked in RETRYABLE is never claimed and never fails —
+/// it just stops, and the screen polling it shows "pending" forever.
+async function requeueForRetry(
+  job: BrowserJobRecord,
+  deps: Pick<NationalLifeRunJobDeps, 'jobStore' | 'now'>,
+  input: { safeErrorCode: string; safeErrorDetail?: unknown },
+): Promise<void> {
+  const availableAt = new Date(deps.now().getTime() + TRANSIENT_RETRY_DELAY_MS)
+
+  await deps.jobStore.transitionJob({
+    jobId: job.id,
+    from: 'RUNNING',
+    to: 'RETRYABLE',
+    safeErrorCode: input.safeErrorCode,
+    safeErrorDetail: input.safeErrorDetail,
+  })
+
+  await deps.jobStore.transitionJob({
+    jobId: job.id,
+    from: 'RETRYABLE',
+    to: 'QUEUED',
+    availableAt,
+  })
+}
+
 async function handleFailure(
   job: BrowserJobRecord,
   error: unknown,
@@ -281,12 +311,8 @@ async function handleFailure(
   }
 
   if (code && TRANSIENT_CODES.has(code)) {
-    await deps.jobStore.transitionJob({
-      jobId: job.id,
-      from: 'RUNNING',
-      to: 'RETRYABLE',
+    await requeueForRetry(job, deps, {
       safeErrorCode: 'TRANSIENT_WORKER_FAILURE',
-      availableAt: new Date(deps.now().getTime() + TRANSIENT_RETRY_DELAY_MS),
     })
     return
   }
@@ -349,51 +375,59 @@ export async function runNationalLifeJob(
     return { kind: 'COMPLETED' }
   }
 
-  let browserSession: BrowserSession | undefined
-
   try {
     const ran = await deps.runExclusively(async () => {
-      browserSession = await deps.createSession(sessionContext)
-      const adapter = deps.createAdapter(browserSession)
-      await adapter.assertAuthenticated()
-      await deps.sessionStore.markUsed(storedSession!.id, deps.now())
+      // Opened and closed inside the lock. Steel runs one Chrome for this
+      // deployment, so releasing while this session is still tearing down
+      // would let the next holder build a session on top of it — the
+      // "browser has been closed" failure the lock exists to prevent.
+      let browserSession: BrowserSession | undefined
 
-      // Everything above is shared: claim, session, reconnect-on-unusable,
-      // authentication. Only the question asked of the carrier differs.
-      if (quoteInput) {
-        const quote = await adapter.requestRapidSolveQuote(
-          rapidSolveRequestFrom(quoteInput, deps.now()),
-        )
+      try {
+        browserSession = await deps.createSession(sessionContext)
+        const adapter = deps.createAdapter(browserSession)
+        await adapter.assertAuthenticated()
+        await deps.sessionStore.markUsed(storedSession!.id, deps.now())
 
-        // A refusal is an answer. SUCCEEDED means "we asked and the carrier
-        // replied"; FAILED is reserved for not having been able to ask. Routing
-        // a refusal through handleFailure would redact the carrier's own
-        // sentence, which is the one thing the agent needs to read.
-        await deps.jobStore.transitionJob({
-          jobId: job.id,
-          from: 'RUNNING',
-          to: 'SUCCEEDED',
-          result: quote,
-        })
-      } else if (caseInput) {
-        const observation = await adapter.readCase(caseInput.lookup)
-        const syncResult = await deps.applyCaseObservation({
-          agentId: job.agentId,
-          caseId: caseInput.caseId,
-          applicationId: caseInput.applicationId,
-          jobId: job.id,
-          observation,
-        })
+        // Everything above is shared: claim, session, reconnect-on-unusable,
+        // authentication. Only the question asked of the carrier differs.
+        if (quoteInput) {
+          const quote = await adapter.requestRapidSolveQuote(
+            rapidSolveRequestFrom(quoteInput, deps.now()),
+          )
 
-        await deps.jobStore.transitionJob({
-          jobId: job.id,
-          from: 'RUNNING',
-          to: 'SUCCEEDED',
-          result: syncResult,
-        })
+          // A refusal is an answer. SUCCEEDED means "we asked and the carrier
+          // replied"; FAILED is reserved for not having been able to ask.
+          // Routing a refusal through handleFailure would redact the carrier's
+          // own sentence, which is the one thing the agent needs to read.
+          await deps.jobStore.transitionJob({
+            jobId: job.id,
+            from: 'RUNNING',
+            to: 'SUCCEEDED',
+            result: quote,
+          })
+        } else if (caseInput) {
+          const observation = await adapter.readCase(caseInput.lookup)
+          const syncResult = await deps.applyCaseObservation({
+            agentId: job.agentId,
+            caseId: caseInput.caseId,
+            applicationId: caseInput.applicationId,
+            jobId: job.id,
+            observation,
+          })
+
+          await deps.jobStore.transitionJob({
+            jobId: job.id,
+            from: 'RUNNING',
+            to: 'SUCCEEDED',
+            result: syncResult,
+          })
+        }
+
+        return 'ran'
+      } finally {
+        await browserSession?.close()
       }
-
-      return 'ran'
     })
 
     // Another carrier browser held the lock past the deadline. Nothing was
@@ -401,18 +435,10 @@ export async function runNationalLifeJob(
     // next tick try. Failing here would report "we asked and it went wrong"
     // about a request that was never made.
     if (ran === null) {
-      await deps.jobStore.transitionJob({
-        jobId: job.id,
-        from: 'RUNNING',
-        to: 'RETRYABLE',
-        safeErrorCode: 'CARRIER_BROWSER_BUSY',
-        availableAt: new Date(deps.now().getTime() + TRANSIENT_RETRY_DELAY_MS),
-      })
+      await requeueForRetry(job, deps, { safeErrorCode: 'CARRIER_BROWSER_BUSY' })
     }
   } catch (error) {
     await handleFailure(job, error, deps)
-  } finally {
-    await browserSession?.close()
   }
 
   return { kind: 'COMPLETED' }

@@ -162,8 +162,10 @@ function createStore(seed: BrowserJobRecord): NationalLifeJobStore & {
   }
 }
 
-function createBrowserSession() {
-  const close = vi.fn(async () => undefined)
+function createBrowserSession(calls: string[] = []) {
+  const close = vi.fn(async () => {
+    calls.push('browser:close')
+  })
   return {
     session: {
       browser: {},
@@ -187,8 +189,8 @@ function createDeps(options: {
   browserBusy?: boolean
 }) {
   const store = createStore(options.job ?? buildJob())
-  const browser = createBrowserSession()
   const calls: string[] = []
+  const browser = createBrowserSession(calls)
   const invalidations: Array<{ agentId: string; provider: string }> = []
   const used: Array<{ sessionId: string; usedAt: Date }> = []
   const quoteRequests: RapidSolveRequest[] = []
@@ -298,6 +300,7 @@ describe('National Life restored-context job orchestration', () => {
       'adapter:assert-authenticated',
       'adapter:read',
       'sync:apply',
+      'browser:close',
       'lock:release',
     ])
     expect(test.used).toEqual([
@@ -495,16 +498,33 @@ describe('National Life restored-context job orchestration', () => {
     expect(test.calls).toContain('lock:release')
   })
 
+  // Releasing while Chrome is still going down lets the next holder build a
+  // session on top of this one, which is the failure the lock is for.
+  it('closes the carrier browser before releasing the lock', async () => {
+    const test = createDeps({})
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls.indexOf('browser:close')).toBeGreaterThan(-1)
+    expect(test.calls.indexOf('browser:close')).toBeLessThan(
+      test.calls.indexOf('lock:release'),
+    )
+  })
+
   it('re-queues rather than fails when another carrier browser holds the lock', async () => {
     const test = createDeps({ browserBusy: true })
 
     await runNationalLifeJob('job-1', test.deps)
 
     expect(test.calls).not.toContain('steel:create-restored')
-    expect(test.store.transitions.at(-1)).toMatchObject({
-      to: 'RETRYABLE',
-      safeErrorCode: 'CARRIER_BROWSER_BUSY',
-    })
+    expect(test.store.transitions.map((transition) => transition.to)).toEqual([
+      'RETRYABLE',
+      'QUEUED',
+    ])
+    // Parking it in RETRYABLE would strand it: nothing revives a RETRYABLE job,
+    // so it would never be claimed, never fail, and poll as pending forever.
+    expect(test.store.current().state).toBe('QUEUED')
+    expect(test.store.current().availableAt.getTime()).toBeGreaterThan(now.getTime())
   })
 
   it('contains no credential-decrypt or credential-object runtime path', async () => {
