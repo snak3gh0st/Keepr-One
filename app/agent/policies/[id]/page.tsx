@@ -14,6 +14,10 @@ import { PageHeader } from '@/components/PageHeader'
 import { policyStatusLabel } from '@/components/StatusPill'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
 import { ModuleSummary } from '@/components/ModuleSummary'
+import {
+  toClientServiceEvents,
+  type ClientServiceEvent,
+} from '@/lib/national-life/client-intelligence'
 import { toCarrierCommissionRecords } from '@/lib/national-life/commission-records'
 import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 
@@ -54,10 +58,11 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     amount: number
   }> = []
   let carrierDocuments: Array<{ id: string; date: string; type: string }> = []
+  let serviceEvents: ClientServiceEvent[] = []
 
   if (isNationalLifeConfigured() && policy.policyNumber) {
     const scopeId = getNationalLifeEnv().sessionScopeId
-    const [commissionRows, documentRows] = await Promise.all([
+    const [commissionRows, documentRows, serviceRows] = await Promise.all([
       prisma.nationalLifeReportRow.findMany({
         where: {
           deploymentScope: scopeId,
@@ -71,6 +76,17 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           deploymentScope: scopeId,
           gridKey: 'CORRESPONDENCE',
           raw: { path: ['RefPolicyNumber'], equals: policy.policyNumber },
+        },
+        select: { id: true, raw: true },
+      }),
+      // Every time this client touched the carrier. It is also the only grid
+      // that carries an email or a phone number — the inforce book returns
+      // those columns null for every policy it has.
+      prisma.nationalLifeReportRow.findMany({
+        where: {
+          deploymentScope: scopeId,
+          gridKey: 'CLIENT_INTELLIGENCE',
+          raw: { path: ['PolicyNumber'], equals: policy.policyNumber },
         },
         select: { id: true, raw: true },
       }),
@@ -99,6 +115,16 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         type: text(raw.DocumentType) || text(raw.DocumentCategory) || 'Documento',
       }
     })
+
+    serviceEvents = toClientServiceEvents(serviceRows)
+  }
+
+  const atRiskEvents = serviceEvents.filter((event) => event.signal === 'AT_RISK')
+  // The most recent contact detail the carrier has, which is more than the
+  // inforce book ever returns for this policy.
+  const carrierContact = {
+    email: serviceEvents.find((event) => event.email)?.email ?? null,
+    phone: serviceEvents.find((event) => event.phone)?.phone ?? null,
   }
 
   const policyDocuments = policy.documents.filter((doc) => !doc.storedPath.includes('/illustrations/'))
@@ -145,6 +171,46 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         ]}
       />
 
+      {/* The carrier says a client is trying to leave long before the status
+          column changes, and it says so here and nowhere else. Above the fold
+          because a surrender request read next week is a lost policy. */}
+      {atRiskEvents.length > 0 && (
+        <section className="module-main-surface border-l-2 border-danger">
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-danger">
+            Atenção
+          </p>
+          <h2 className="mb-4 mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">
+            {atRiskEvents.length === 1
+              ? 'A seguradora registrou um sinal de risco nesta apólice'
+              : `A seguradora registrou ${atRiskEvents.length} sinais de risco nesta apólice`}
+          </h2>
+          <ul className="space-y-3">
+            {atRiskEvents.slice(0, 5).map((event) => (
+              <li key={event.id} className="border-t border-border-steel pt-3 first:border-t-0 first:pt-0">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-sm font-semibold text-ink">{event.reason ?? 'Contato'}</p>
+                  <p className="text-xs text-ink-muted">
+                    {event.occurredAt
+                      ? event.occurredAt.toLocaleDateString('pt-BR', { timeZone: 'UTC' })
+                      : 'sem data'}
+                    {event.category ? ` • ${event.category}` : ''}
+                  </p>
+                </div>
+                {event.description && (
+                  <p className="mt-1 line-clamp-3 text-sm text-ink-muted">{event.description}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+          {(carrierContact.phone || carrierContact.email) && (
+            <p className="mt-4 border-t border-border-steel pt-3 text-sm text-ink-muted">
+              Contato registrado na seguradora:{' '}
+              {[carrierContact.phone, carrierContact.email].filter(Boolean).join(' • ')}
+            </p>
+          )}
+        </section>
+      )}
+
       <div className="module-content-grid">
         <section className="module-main-surface">
           <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Resultado financeiro</p>
@@ -183,12 +249,79 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           {policy.commissionRecords.length === 0 && carrierCommissions.length === 0 && (
             <EmptyState>Nenhuma comissão registrada ainda.</EmptyState>
           )}
+
+          {serviceEvents.length > 0 && (
+            <div className="mt-8 border-t border-border-steel pt-6">
+              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
+                Registrado pela seguradora
+              </p>
+              <h2 className="mb-5 mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">
+                Histórico de atendimento
+              </h2>
+              <Table>
+                <Thead>
+                  <tr>
+                    <Th>Data</Th>
+                    <Th>Motivo</Th>
+                    <Th>Categoria</Th>
+                    <Th>Atendente</Th>
+                  </tr>
+                </Thead>
+                <tbody>
+                  {serviceEvents.slice(0, 25).map((event) => (
+                    <Tr key={event.id}>
+                      <Td>
+                        {event.occurredAt
+                          ? event.occurredAt.toLocaleDateString('pt-BR', { timeZone: 'UTC' })
+                          : '—'}
+                      </Td>
+                      <Td>
+                        <span className={event.signal === 'AT_RISK' ? 'text-danger' : undefined}>
+                          {event.reason ?? '—'}
+                        </span>
+                      </Td>
+                      <Td>{event.category ?? '—'}</Td>
+                      <Td>{event.agentName ?? '—'}</Td>
+                    </Tr>
+                  ))}
+                </tbody>
+              </Table>
+              {serviceEvents.length > 25 && (
+                <p className="mt-3 text-xs text-ink-muted">
+                  Mostrando os 25 atendimentos mais recentes de {serviceEvents.length}.
+                </p>
+              )}
+            </div>
+          )}
         </section>
         <aside className="space-y-4 lg:sticky lg:top-[5.75rem]">
           <section className="module-main-surface">
             <h2 className="text-base font-semibold text-ink">Cliente</h2>
             <p className="mt-2 text-sm text-ink">{policy.client.name}</p>
             {policy.client.email && <p className="mt-1 text-xs text-ink-muted">{policy.client.email}</p>}
+            {/* Falling back rather than duplicating: the carrier's contact is
+                only worth showing when we do not already have our own. */}
+            {!policy.client.email && carrierContact.email && (
+              <p className="mt-1 text-xs text-ink-muted">
+                {carrierContact.email} <span className="text-ink-muted/70">— via National Life</span>
+              </p>
+            )}
+            {carrierContact.phone && (
+              <p className="mt-1 text-xs text-ink-muted">{carrierContact.phone}</p>
+            )}
+          </section>
+
+          {/* An empty premium field reads as a bug the agent should report. The
+              carrier's inforce book returns these columns null for all 9,614
+              policies, in every status and product class, so the screen says so
+              instead of leaving a blank. */}
+          <section className="module-main-surface">
+            <h2 className="text-base font-semibold text-ink">O que a National Life não fornece</h2>
+            <p className="mt-2 text-sm text-ink-muted">
+              Capital segurado e prêmio por apólice não vêm do portal — as colunas existem no
+              relatório da seguradora e chegam vazias. O prêmio no resumo acima é o registrado
+              aqui, não o da seguradora.
+            </p>
           </section>
           <AnnualReviewCard
             policyId={policy.id}
