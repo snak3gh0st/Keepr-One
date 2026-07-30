@@ -4,6 +4,7 @@
 // client and commission data.
 //
 //   tsx scripts/national-life-describe-grids.ts [GRID_KEY ...]
+import { withBrowserLockWaiting } from '../lib/national-life/browser-lock'
 import { decryptBrowserContext } from '../lib/national-life/browser-context-crypto'
 import { getNationalLifeEnv } from '../lib/national-life/env'
 import {
@@ -65,46 +66,62 @@ async function main() {
     env.sessionKeys,
   )
 
-  const session = await createSteelBrowserSession(env, { sessionContext })
-  try {
-    for (const gridKey of gridKeys) {
-      const gridPath = NATIONAL_LIFE_GRIDS[gridKey]
-      if (!gridPath) {
-        console.error(JSON.stringify({ gridKey, failed: 'unknown grid key' }))
-        continue
+  // Same reason as the page probe: Steel runs one Chrome, and the keep-alive
+  // tick would close this browser mid-fetch. A failed grid open then reads as
+  // "endpoint is dead" — the exact misreading recorded on 2026-07-30.
+  const ran = await withBrowserLockWaiting(prisma, async () => {
+    const session = await createSteelBrowserSession(env, { sessionContext })
+    try {
+      for (const gridKey of gridKeys) {
+        const gridPath = NATIONAL_LIFE_GRIDS[gridKey]
+        if (!gridPath) {
+          console.error(JSON.stringify({ gridKey, failed: 'unknown grid key' }))
+          continue
+        }
+        try {
+          // One short page is enough to learn the shape.
+          const { rows, recordsTotal } = await fetchNationalLifeGrid(
+            session.page as unknown as GridPage,
+            gridPath,
+            env.portalLoginUrl,
+            { pageSize: 1, maxRows: 1 },
+          )
+          const first = rows[0]
+          console.log(
+            JSON.stringify({
+              gridKey,
+              recordsTotal,
+              fields: first
+                ? Object.fromEntries(
+                    Object.entries(first).map(([key, value]) => [key, typeOf(value)]),
+                  )
+                : null,
+            }),
+          )
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              gridKey,
+              failed: error instanceof Error ? error.message : String(error),
+            }),
+          )
+        }
       }
-      try {
-        // One short page is enough to learn the shape.
-        const { rows, recordsTotal } = await fetchNationalLifeGrid(
-          session.page as unknown as GridPage,
-          gridPath,
-          env.portalLoginUrl,
-          { pageSize: 1, maxRows: 1 },
-        )
-        const first = rows[0]
-        console.log(
-          JSON.stringify({
-            gridKey,
-            recordsTotal,
-            fields: first
-              ? Object.fromEntries(
-                  Object.entries(first).map(([key, value]) => [key, typeOf(value)]),
-                )
-              : null,
-          }),
-        )
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            gridKey,
-            failed: error instanceof Error ? error.message : String(error),
-          }),
-        )
-      }
+    } finally {
+      await session.close()
     }
-  } finally {
-    await session.close()
-    await prisma.$disconnect()
+    return 'ran'
+  })
+
+  // After the lock is released: disconnecting inside it would drop the
+  // connection holding it.
+  await prisma.$disconnect()
+
+  if (ran === null) {
+    console.error(
+      JSON.stringify({ failed: 'another carrier browser job held the lock past the wait deadline' }),
+    )
+    process.exit(1)
   }
 }
 

@@ -151,11 +151,11 @@ então `status-map.ts` precisa normalizar por prefixo, não por igualdade.
 | `COMMISSIONS_POLICY_HISTORY` | — | não emite XHR | ⛔ provável formulário |
 | `POLICY_PAYMENT_HISTORY` | — | **form por apólice** | ⛔ ver abaixo |
 | `PLACEMENT_REPORT` | — | não emite XHR | ⛔ redireciona, sem grid |
-| `CLIENT_INTELLIGENCE` | — | GetJsonResult | 🆕 grid mapeado, não extraído |
-| `CORRESPONDENCE` | — | GetJsonResult | 🆕 grid mapeado, não extraído |
-| `COMMISSIONS_PAYMENT_PORTAL` | — | GetJsonResult | 🆕 grid mapeado, não extraído |
-| `PENDING_GROSS_COMMISSIONS` | — | GetJsonResult | 🆕 grid mapeado, não extraído |
-| `PIP_PENDING` | — | GetJsonResult | 🆕 grid mapeado, não extraído |
+| `CLIENT_INTELLIGENCE` | 2710 | GetJsonResult | 🆕 mapeado, **não extraído** |
+| `CORRESPONDENCE` | 64 | GetJsonResult | 🆕 mapeado, **não extraído** |
+| `COMMISSIONS_PAYMENT_PORTAL` | 2 | GetJsonResult | 🆕 mapeado, **não extraído** |
+| `PIP_PENDING` | 0 | GetJsonResult | ✅ vazio de verdade |
+| `PENDING_GROSS_COMMISSIONS` | — | GetJsonResult | ⛔ resposta não é JSON |
 
 ## Como achar rotas sem adivinhar (2026-07-30)
 
@@ -183,30 +183,60 @@ morta". Uma sondagem é barata de adiar e custa uma requisição ao carrier para
 repetir. Passado o prazo ela ainda devolve `null` e sai com código 1: "nunca
 rodou" não pode parecer "rodou e não achou nada".
 
-### Grids novos encontrados (2026-07-30, estrutura verificada, não extraídos)
+### Grids novos encontrados (2026-07-30, campos reais lidos do carrier)
 
-Todos servem `GetJsonResult` — `fetchNationalLifeGrid` já os lê sem código novo.
-Falta o mapeamento linha→modelo e a decisão de onde persistir.
+Nomes de campo abaixo vêm de `national-life-describe-grids.ts` — uma linha por
+grid, só nome e tipo, nunca valores. `fetchNationalLifeGrid` já lê os três
+primeiros sem código novo; falta o mapeamento linha→modelo e a decisão de onde
+persistir.
 
-| rota | colunas observadas |
-|---|---|
-| `client-intelligence` | `FollowUpCaseDetailsId`, `CreatedDate`, Category, Sub Category, Agent, Client, Policy #, **Email**, **Phone**, **Notes** |
-| `correspondence` | `DocumentDate`, Policy/Trust Number, Insured/Annuitant, DocumentType |
-| `commissions-payment-portal` | `GlobalId`, `FullName` |
-| `pending-gross-commissions` | `AgentNumber`, NL Life, NL Annuities, NL Mutual Funds, LSW Life, LSW Annuities, Variable Products |
-| `pip-pending-report` | AgentName, AgentNumber, AgencyName, PolicyNo, AnnuitantName, Product, Increase Submit Date, Expected Increase Amount, Total Contribution Expected |
+**`CLIENT_INTELLIGENCE` — 2.710 registros.** O achado da rodada.
 
-Notas de valor e de risco:
+```
+CreatedDate date-string    AgentName string        CustomerName string
+PolicyNumber string        Description string      CallReason string
+PhoneNumber string         EmailAddress string     CallCategoryID number
+Category html              CaseDetailsId number    SystemCode string
+CompanyCode string         IsFollowUp boolean      CaseDate string
+FollowUpCaseDetailsId html PartyId string          CommissionImpact string
+PolNoSysCodeComCode html   CustomerNameCaseDetailsId html
+CovidFlag boolean          sCovidFlag null
+```
 
-- **`client-intelligence` é o único grid com contato do cliente** (e-mail, telefone)
-  e com notas em texto livre. É também, por isso, o de maior sensibilidade: notas
-  livres podem conter qualquer coisa que o agente digitou. Tratar como PII antes
-  de persistir, não depois.
-- **`commissions-payment-portal` é pequeno mas destrava o resto**: mapeia o
-  `GlobalId` que toda linha de comissão carrega para um nome de beneficiário. É o
-  que responde "de quem é esta comissão" sem heurística.
-- **`pending-gross-commissions`** redireciona para `/personal` e quebra o bruto
-  pendente por linha de produto — dimensão que `PAYABLE_GROSS_COMMISSIONS` não tem.
+É um log de atendimento/follow-up e o **único grid do portal com contato do
+cliente** — `EmailAddress`, `PhoneNumber` — e com texto livre (`Description`,
+`CallReason`). Por isso é o de maior valor e o de maior sensibilidade ao mesmo
+tempo: texto livre contém o que o agente digitou, o que não é previsível. Tratar
+como PII antes de persistir, não depois. `PartyId` é identificador de cliente e
+`CommissionImpact` liga atendimento a dinheiro — as duas pontes mais úteis.
+
+**`CORRESPONDENCE` — 64 registros.** Documentos por apólice.
+
+```
+DocumentDate html          DocumentType html       DocumentCategory html
+PolicyNumber html          RefPolicyNumber string  FirstName string
+LastName html              UserId string           ViewedStatus number
+DocumentHandle number      EncryptedDocumentHandle string
+AgentName null             Annuitant null
+```
+
+`EncryptedDocumentHandle` é o token de download — baixar o documento em si é
+outra decisão (volume e armazenamento), separada de listar.
+
+**`COMMISSIONS_PAYMENT_PORTAL` — 2 registros.** `GlobalId html`, `FullName string`,
+`Corp_Ind string`. Minúsculo e ainda assim o que destrava o resto: mapeia o
+`GlobalId` que toda linha de comissão carrega para um nome de beneficiário, que é
+"de quem é esta comissão" respondido sem heurística. Custo de extração: uma
+requisição.
+
+**`PIP_PENDING` — 0 registros.** Vazio de verdade, não erro.
+
+**`PENDING_GROSS_COMMISSIONS` — falha.** A página renderiza grid (redireciona para
+`/personal`, colunas `AgentNumber`, NL Life, NL Annuities, NL Mutual Funds, LSW
+Life, LSW Annuities, Variable Products) e emite `GetJsonResult`, mas o replay do
+POST devolve `Unexpected end of JSON input` — mesma classe de `LIFE_PERSISTENCY`.
+Steel estava em 16/1024 PIDs na hora, então **não** é exaustão de recurso: é o
+endpoint. Precisa de investigação própria.
 
 ### Rotas sondadas que não rendem grid
 
