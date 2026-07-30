@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/Button'
 import type { AgentSessionSummary } from '@/lib/national-life/interactive-connection-service'
@@ -182,6 +183,14 @@ export function NationalLifeConnectionCard({
             >
               {busy === 'disconnect' ? 'Desconectando...' : 'Desconectar'}
             </Button>
+          )}
+          {connected && (
+            <Link
+              href="/agent/integrations/national-life/data"
+              className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
+            >
+              Ver dados sincronizados
+            </Link>
           )}
           {message && (
             <p
