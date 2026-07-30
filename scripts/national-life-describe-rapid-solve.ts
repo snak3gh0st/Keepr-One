@@ -145,13 +145,52 @@ async function main() {
         .filter((src) => /illustrat|rapid|quote|solve|product/i.test(src))
         .map((src) => maskDigits(src.split('?')[0]))
 
+      // The page has no form action and no inline handler: the wiring lives in
+      // a bundle. Fetching that bundle is a GET for a static asset — it touches
+      // no account state and creates nothing, which is why the contract can be
+      // learned without ever submitting a quote.
+      const bundles: Record<string, unknown> = {}
+      for (const src of scripts) {
+        try {
+          const response = await session.page.request.get(
+            new URL(src, env.portalLoginUrl).toString(),
+          )
+          if (!response.ok()) {
+            bundles[src] = { status: response.status() }
+            continue
+          }
+          const code = await response.text()
+          bundles[src] = {
+            chars: code.length,
+            endpoints: candidateEndpoints(code).slice(0, 20),
+            // Every URL the bundle names, not only the ones matching keywords:
+            // the solve endpoint may be named something unguessable.
+            allUrls: uniq(
+              [...code.matchAll(/["'`](\/[A-Za-z][\w\-/]{3,120})["'`]/g)].map((m) => m[1]),
+            )
+              .filter((url) => !/\.(png|jpe?g|gif|svg|css|woff2?|ttf|ico|map)$/i.test(url))
+              .slice(0, 30),
+            // The keys it puts on the request body are the payload contract.
+            payloadKeys: uniq(
+              [...code.matchAll(/["']?([A-Za-z_$][\w$]{2,40})["']?\s*:\s*(?:\$\(|[A-Za-z_$])/g)].map(
+                (m) => m[1],
+              ),
+            ).slice(0, 60),
+            ajaxTypes: uniq([...code.matchAll(/\btype\s*:\s*["'](\w+)["']/gi)].map((m) => m[1])),
+            dataTypes: uniq([...code.matchAll(/\bdataType\s*:\s*["'](\w+)["']/gi)].map((m) => m[1])),
+          }
+        } catch (error) {
+          bundles[src] = { failed: String(error).slice(0, 120) }
+        }
+      }
+
       console.log(
         JSON.stringify(
           {
             path: RAPID_SOLVE_PATH,
             ...submitWiring(html),
-            candidateEndpoints: candidateEndpoints(html).slice(0, 40),
             relatedScripts: scripts.slice(0, 15),
+            bundles,
             dropdownOptions: dropdownOptions(html),
             htmlChars: html.length,
           },

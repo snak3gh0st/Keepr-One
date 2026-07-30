@@ -626,3 +626,55 @@ que uma submissão ao carrier exige para não duplicar.
    formulário e re-renderiza. Isso decide a implementação inteira, e só se
    descobre **submetendo** — que é a primeira ação de escrita contra a conta real
    do agente. Decisão humana antes, não depois.
+
+### Contrato do Rapid Solve (lido do bundle, sem submissão)
+
+A página não tem `<form action>` nem handler inline — tudo está em
+`/Assets/Agent/js/rapidsolve.js`. Buscar esse arquivo é **GET de asset
+estático**: não toca estado de conta e não cria nada. Foi assim que o contrato
+saiu, sem que nenhuma cotação fosse submetida.
+
+```
+POST /agent/RapidSolve/GetQuote
+Content-Type: application/json; charset=utf-8
+```
+
+Corpo:
+
+```jsonc
+{
+  "IssueState": "…", "FirstName": "…", "LastName": "…",
+  "DateOfBirth": "MM/DD/YYYY",     // formato do date picker, não ISO
+  "IssueAge": 41,                  // ANB — idade na data de aniversário mais próxima
+  "Gender": "…", "RateClass": "…",
+  "SolveType": "Specify_Amount" | "Premium-DeathBenefitFocus" | "Premium-AccumulationFocus",
+  "Amount": 250000,                // capital OU prêmio, conforme SolveType
+  "DeathBenefitOption": "…", "Strategy": "…", "Allocation": 100,
+  "ProductCode": "956",            // ⚠ fixo no script do carrier
+  "PremiumMode": "Monthly"         // ⚠ fixo no script do carrier
+}
+```
+
+Resposta:
+
+```jsonc
+{ "Success": true, "FaceAmount": 0, "AnnualPremium": 0,
+  "MonthlyPremium": 0, "LapseYear": 0 }
+```
+
+Detalhes que mudam a implementação:
+
+- **`Success: false` chega com HTTP 200.** Status não distingue cotação de
+  recusa; é preciso ler o corpo.
+- **`LapseYear: 0` significa "não lapsa"**, não ano zero. `lib/national-life/
+  rapid-solve.ts` converte para `null` para não exibir 0 como se fosse um ano.
+- **`IssueAge` é ANB**, não idade no último aniversário. Usar o errado
+  desprecifica toda cotação em um ano.
+- **`ProductCode: "956"` e `PremiumMode: "Monthly"` são fixos no JS do carrier** —
+  a tela não os escolhe. Se um dia vier cotação de produto errado, é aqui.
+- Existe também `/agent/RapidSolve/EAppSsoRedirect`, que leva a cotação para o
+  e-App. É **escrita** e não foi tocado.
+
+`lib/national-life/rapid-solve.ts` implementa requisição e parse, com testes.
+Falta o transporte: o app web não fala com o Steel diretamente — passa pelo
+runtime via `BrowserJobOperation`, que ainda não tem operação de escrita.
