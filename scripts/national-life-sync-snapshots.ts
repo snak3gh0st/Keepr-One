@@ -65,7 +65,12 @@ async function syncGrid(
   fetchedAt: Date,
 ) {
   const gridPath = NATIONAL_LIFE_GRIDS[gridKey]
-  const { rows, recordsTotal } = await fetchNationalLifeGrid(page, gridPath, env.portalLoginUrl)
+  const { rows, recordsTotal, truncated } = await fetchNationalLifeGrid(
+    page,
+    gridPath,
+    env.portalLoginUrl,
+  )
+  const counts = { recordsTotal, rowsFetched: rows.length, truncated }
 
   if (REPORT_ROW_GRIDS.includes(gridKey)) {
     const reportRows = toReportRows(gridKey, rows)
@@ -76,7 +81,7 @@ async function syncGrid(
       rows: reportRows,
       fetchedAt,
     })
-    return { recordsTotal, rowsFetched: rows.length, snapshots: reportRows.length, written }
+    return { ...counts, snapshots: reportRows.length, written }
   }
 
   if (INFORCE_POLICY_GRIDS.includes(gridKey)) {
@@ -87,7 +92,7 @@ async function syncGrid(
       snapshots,
       fetchedAt,
     })
-    return { recordsTotal, rowsFetched: rows.length, snapshots: snapshots.length, written }
+    return { ...counts, snapshots: snapshots.length, written }
   }
 
   const snapshots = toCaseSnapshots(rows)
@@ -98,7 +103,7 @@ async function syncGrid(
     snapshots,
     fetchedAt,
   })
-  return { recordsTotal, rowsFetched: rows.length, snapshots: snapshots.length, written }
+  return { ...counts, snapshots: snapshots.length, written }
 }
 
 async function main() {

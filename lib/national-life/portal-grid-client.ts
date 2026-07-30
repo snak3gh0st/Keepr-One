@@ -105,6 +105,10 @@ export type FetchGridOptions = {
   timeoutMs?: number
 }
 
+// A runaway-pagination backstop, not a business limit. The inforce book alone
+// reports 10272 rows, so a 10000 ceiling silently dropped 272 of them.
+const DEFAULT_MAX_ROWS = 100_000
+
 /// Loads a grid page, captures its own first JSON call, then pages through the
 /// remainder. Returns every row the carrier reports for that grid.
 export async function fetchNationalLifeGrid(
@@ -112,9 +116,14 @@ export async function fetchNationalLifeGrid(
   gridPath: string,
   portalLoginUrl: string,
   options: FetchGridOptions = {},
-): Promise<{ rows: GridRow[]; recordsTotal: number; endpoint: string }> {
+): Promise<{
+  rows: GridRow[]
+  recordsTotal: number
+  endpoint: string
+  truncated: boolean
+}> {
   const pageSize = options.pageSize ?? 100
-  const maxRows = options.maxRows ?? 10_000
+  const maxRows = options.maxRows ?? DEFAULT_MAX_ROWS
   const timeoutMs = options.timeoutMs ?? 45_000
 
   const target = new URL(gridPath, portalLoginUrl).toString()
@@ -210,5 +219,13 @@ export async function fetchNationalLifeGrid(
     }
   }
 
-  return { rows, recordsTotal: recordsTotal || rows.length, endpoint }
+  const resolvedTotal = recordsTotal || rows.length
+  return {
+    rows,
+    recordsTotal: resolvedTotal,
+    endpoint,
+    // Surfaced rather than left implicit: a caller must be able to tell a
+    // complete extraction from one the backstop cut short.
+    truncated: rows.length < resolvedTotal,
+  }
 }

@@ -166,3 +166,54 @@ describe('National Life portal grid client', () => {
     expect(rowsFrom({})).toEqual([])
   })
 })
+
+describe('National Life grid pagination completeness', () => {
+  it('reports truncation when the backstop cuts a grid short', async () => {
+    const { page } = createPage({
+      pages: [{ recordsTotal: 500, data: [{ PolicyNo: 'a' }, { PolicyNo: 'b' }] }],
+    })
+
+    const result = await fetchNationalLifeGrid(
+      page,
+      '/agent/grid',
+      'https://www.nationallife.com/agent/auth/login',
+      { pageSize: 2, maxRows: 2 },
+    )
+
+    expect(result.rows).toHaveLength(2)
+    expect(result.recordsTotal).toBe(500)
+    expect(result.truncated).toBe(true)
+  })
+
+  it('reports a complete extraction as not truncated', async () => {
+    const { page } = createPage({
+      pages: [{ recordsTotal: 2, data: [{ PolicyNo: 'a' }, { PolicyNo: 'b' }] }],
+    })
+
+    const result = await fetchNationalLifeGrid(
+      page,
+      '/agent/grid',
+      'https://www.nationallife.com/agent/auth/login',
+      { pageSize: 2 },
+    )
+
+    expect(result.truncated).toBe(false)
+  })
+
+  it('pages past ten thousand rows, which the old ceiling silently cut', async () => {
+    const bigPage = Array.from({ length: 100 }, (_, i) => ({ PolicyNo: `p${i}` }))
+    const pages = Array.from({ length: 103 }, () => ({ recordsTotal: 10_272, data: bigPage }))
+    pages[102] = { recordsTotal: 10_272, data: bigPage.slice(0, 72) }
+    const { page } = createPage({ pages })
+
+    const result = await fetchNationalLifeGrid(
+      page,
+      '/agent/grid',
+      'https://www.nationallife.com/agent/auth/login',
+      { pageSize: 100 },
+    )
+
+    expect(result.rows).toHaveLength(10_272)
+    expect(result.truncated).toBe(false)
+  })
+})
