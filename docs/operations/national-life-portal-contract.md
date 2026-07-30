@@ -151,9 +151,9 @@ então `status-map.ts` precisa normalizar por prefixo, não por igualdade.
 | `COMMISSIONS_POLICY_HISTORY` | — | não emite XHR | ⛔ provável formulário |
 | `POLICY_PAYMENT_HISTORY` | — | **form por apólice** | ⛔ ver abaixo |
 | `PLACEMENT_REPORT` | — | não emite XHR | ⛔ redireciona, sem grid |
-| `CLIENT_INTELLIGENCE` | 2710 | GetJsonResult | 🆕 mapeado, **não extraído** |
-| `CORRESPONDENCE` | 64 | GetJsonResult | 🆕 mapeado, **não extraído** |
-| `COMMISSIONS_PAYMENT_PORTAL` | 2 | GetJsonResult | 🆕 mapeado, **não extraído** |
+| `CLIENT_INTELLIGENCE` | 2711 | GetJsonResult | ✅ 2690 gravados |
+| `CORRESPONDENCE` | 64 | GetJsonResult | ✅ 64 gravados |
+| `COMMISSIONS_PAYMENT_PORTAL` | 2 | GetJsonResult | ✅ 2 gravados |
 | `PIP_PENDING` | 0 | GetJsonResult | ✅ vazio de verdade |
 | `PENDING_GROSS_COMMISSIONS` | — | GetJsonResult | ⛔ resposta não é JSON |
 
@@ -382,9 +382,43 @@ apólices diferentes, e só o par (valor, modo) diz qual é qual.
 As 7.466 restantes ficam com `premium = 0` e `premiumMode = NULL`, que o front já
 lê como "não informado" via `premiumIsKnown()` — não como zero.
 
-**Capital segurado (`faceAmount`) segue sem fonte conhecida.** Nenhum grid mapeado
-até agora o carrega. Não inventar: `Policy.faceAmount` continua 0 e a UI deve
-poder dizer "não informado" em vez de exibir zero como se fosse o valor.
+### Capital segurado: sondado até o fim, não existe como dado no portal
+
+Procurado em tudo que havia, e o resultado é negativo em todos:
+
+| onde | resultado |
+|---|---|
+| grids mapeados | nenhuma chave `face`/`death`/`benefit`/`coverage` — verificado no banco, custo zero |
+| páginas de detalhe por apólice | 0% em 40 carregamentos |
+| `illustrations` ("Rapid Solve") | `faceAmount` é **campo de entrada** de cotação, não valor armazenado |
+| `daily-unit-values` | cotação de fundos por subconta, não dado de apólice |
+| `annuity-statements` | página de ajuda, sem tabela |
+
+**Conclusão: o portal do agente não expõe capital segurado como dado.**
+`Policy.faceAmount` fica 0 e a UI precisa poder dizer "não informado".
+
+O único caminho plausível que resta são **os documentos da apólice**:
+`CORRESPONDENCE` traz `EncryptedDocumentHandle`, o token de download do PDF onde
+esse número mora. Isso é extração de documento e OCR/parse, não raspagem de grid
+— outra ordem de esforço, e uma decisão de produto antes de técnica.
+
+## Limite de PIDs do runtime: um erro que parece falha de banco
+
+O container do runtime tinha `pids_limit: 128`, e **isso conta threads, não
+processos**. O worker sozinho ocupa ~72; cada `docker exec ... tsx` acrescenta
+~25. Rodar duas sondagens ao mesmo tempo esgotou o container:
+
+```
+sh: can't fork: Resource temporarily unavailable
+PrismaClientRustPanicError: PANIC: timer has gone away
+```
+
+O segundo erro **parece falha do Postgres e não é** — é fome de thread no
+container. Não diagnosticar banco a partir dele. `docker top` mostra os processos
+reais; `docker stats` mostra a contagem de threads, que é a que bate no limite.
+
+Subido para 512 no compose. Vale notar que é o mesmo padrão já documentado no
+Steel, num container diferente e com um sintoma diferente.
 
 ## Prêmio e capital segurado: onde se procurou antes
 
@@ -505,3 +539,38 @@ nessa tabela sem limpar o seed mistura real com fake no livro de negócios.
 As sondas foram copiadas para dentro do container em execução
 (`/app/scripts/probe-portal.ts`, `probe-network.ts`) e **removidas** ao final.
 Elas descriptografam a sessão e acessam o carrier — não deixar para trás.
+
+## Estado do domínio após a rodada de 2026-07-30
+
+Tudo medido em produção, não estimado.
+
+| tabela | antes | depois |
+|---|---|---|
+| `Policy` com prêmio e modo | 0 | **2.148** de 9.614 |
+| `Client` com e-mail | 180 | **1.585** de 8.824 |
+| `Client` com telefone | 180 | **1.586** de 8.824 |
+| `Client` com data de nascimento | — (sem coluna) | **8.643** de 8.824 |
+| `NationalLifeReportRow` `CLIENT_INTELLIGENCE` | 0 | **2.690** |
+| `NationalLifeReportRow` `CORRESPONDENCE` | 0 | **64** |
+
+Nenhum desses custou requisição ao carrier além do próprio sync dos grids novos.
+
+`CommissionRecord` continua em 0 **de propósito**: exige `policyId` e só 2.329 de
+5.408 transações casam com uma apólice no livro. O dashboard e a página de
+comissões leem `NationalLifeReportRow` por
+`lib/national-life/commission-records.ts`, que é o que mostra 100% da comissão em
+vez de 43%.
+
+### O que continua aberto
+
+- **`faceAmount`**: sem fonte no portal (ver acima). Caminho restante é o PDF via
+  `EncryptedDocumentHandle`.
+- **Cobertura de prêmio**: 22% do livro. Os outros 78% são apólices que não pagaram
+  comissão no período extraído — não há outra fonte conhecida.
+- **Casamento por nome**: cliente e apólice se ligam por `lower(name)` dentro do
+  agente. É frágil contra grafia diferente e é o único identificador que as duas
+  pontas compartilham. `PartyId` do `CLIENT_INTELLIGENCE` pode ser uma chave melhor
+  — não investigado.
+- **Rotas não sondadas**: `pip-contribution-increase`, os dois filhos de
+  `annuity-flow-report`, `Transfer-Company-Information`, `service-forms`,
+  `forecasted-incentives`, `plan-prospectus-report`.
