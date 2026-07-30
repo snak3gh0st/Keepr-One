@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ISSUE_STATES,
   RAPID_SOLVE_PREMIUM_MODE,
   RAPID_SOLVE_PRODUCT_CODE,
+  RATE_CLASSES,
   SOLVE_TYPES,
   buildRapidSolveRequest,
   issueAgeFrom,
@@ -78,6 +80,29 @@ describe('buildRapidSolveRequest', () => {
     const request = buildRapidSolveRequest(input, utc(2026, 3, 20))
     expect(request.ProductCode).toBe('956')
     expect(request.PremiumMode).toBe('Monthly')
+  })
+
+  // Read off the buttons' data-value, which is what the request carries. The
+  // ids that look like these values ended one release in carrier refusals.
+  it('sends the solve type values the carrier accepts, not the button ids', () => {
+    expect(Object.values(SOLVE_TYPES)).toEqual([
+      'Specify_Amount',
+      'Based_on_Target_Premium',
+      'Min_DB_Max_Cash_Value',
+    ])
+    expect(Object.values(SOLVE_TYPES)).not.toContain('Premium-DeathBenefitFocus')
+  })
+
+  it('offers only the two rate classes the screen has', () => {
+    expect(Object.values(RATE_CLASSES)).toEqual(['Standard_NT', 'Standard_Tobacco'])
+  })
+
+  // New York is not on the carrier's list. A prospect there has to be turned
+  // away before the request, not after a refusal.
+  it('does not offer New York', () => {
+    expect(ISSUE_STATES).not.toContain('NY')
+    expect(ISSUE_STATES).toContain('FL')
+    expect(ISSUE_STATES).toHaveLength(50)
   })
 
   it('lets a caller name the product, for when 956 is not the one wanted', () => {

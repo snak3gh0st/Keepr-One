@@ -647,7 +647,7 @@ Corpo:
   "DateOfBirth": "MM/DD/YYYY",     // formato do date picker, não ISO
   "IssueAge": 41,                  // ANB — idade na data de aniversário mais próxima
   "Gender": "…", "RateClass": "…",
-  "SolveType": "Specify_Amount" | "Premium-DeathBenefitFocus" | "Premium-AccumulationFocus",
+  "SolveType": "Specify_Amount" | "Based_on_Target_Premium" | "Min_DB_Max_Cash_Value",
   "Amount": 250000,                // capital OU prêmio, conforme SolveType
   "DeathBenefitOption": "…", "Strategy": "…", "Allocation": 100,
   "ProductCode": "956",            // ⚠ fixo no script do carrier
@@ -672,6 +672,29 @@ Detalhes que mudam a implementação:
   desprecifica toda cotação em um ano.
 - **`ProductCode: "956"` e `PremiumMode: "Monthly"` são fixos no JS do carrier** —
   a tela não os escolhe. Se um dia vier cotação de produto errado, é aqui.
+- **O Rapid Solve cota um único produto.** A sonda de produtos varreu o bundle
+  inteiro e achou exatamente um código: `956`. **Term não é cotável por este
+  endpoint** — o que é uma decisão de produto para a tela de illustration, já
+  que a agência vende Term e IUL.
+- **Os valores de `SolveType` são os `data-value` dos botões, não os ids.** O
+  bundle monta o corpo com
+  `$('[data-name="Quote-type"] .toggle-btn.active').data('value')`, e
+  `Based_on_Target_Premium` / `Min_DB_Max_Cash_Value` só existem no HTML
+  renderizado. `Premium-DeathBenefitFocus` e `Premium-AccumulationFocus` são
+  **ids de elemento** (`..._btn`) e foram registrados aqui como valores de API
+  por engano — enviá-los produz recusa da seguradora, que se lê como "não
+  consigo cotar" em vez de "você perguntou errado".
+
+Valores que a tela aceita, lidos dos `data-value`:
+
+| campo | valores |
+| --- | --- |
+| `SolveType` | `Specify_Amount`, `Based_on_Target_Premium`, `Min_DB_Max_Cash_Value` |
+| `RateClass` | `Standard_NT`, `Standard_Tobacco` — não há preferencial nem agravado |
+| `Gender` | `Male`, `Female` |
+| `DeathBenefitOption` | `A_Level`, `B_Increasing` |
+| `Strategy` | `SP500PointToPointCapFocus` — única; escolhê-la fixa `Allocation` em 100 |
+| `IssueState` | 50 valores. **Nova York não está na lista** — não é omissão, não é oferecido |
 - Existe também `/agent/RapidSolve/EAppSsoRedirect`, que leva a cotação para o
   e-App. É **escrita** e não foi tocado.
 

@@ -14,11 +14,56 @@ export const RAPID_SOLVE_PATH = '/agent/RapidSolve/GetQuote'
 /// these as three buttons; `Specify_Amount` means "I give the face amount, tell
 /// me the premium", and the other two mean "I give the premium, tell me the
 /// death benefit" under different optimisation goals.
+///
+/// These are the buttons' `data-value`, which is what the request carries:
+///
+///   SolveType: $('[data-name="Quote-type"] .toggle-btn.active').data('value')
+///
+/// `Premium-DeathBenefitFocus` and `Premium-AccumulationFocus` are the buttons'
+/// element ids, not their values — the bundle only ever compares them as
+/// `...attr('id') === "Premium-DeathBenefitFocus_btn"`. Sending an id here
+/// would have come back as a carrier refusal, which reads as the carrier
+/// declining to quote rather than as us asking the wrong question.
 export const SOLVE_TYPES = {
   SPECIFY_AMOUNT: 'Specify_Amount',
-  PREMIUM_DEATH_BENEFIT_FOCUS: 'Premium-DeathBenefitFocus',
-  PREMIUM_ACCUMULATION_FOCUS: 'Premium-AccumulationFocus',
+  PREMIUM_DEATH_BENEFIT_FOCUS: 'Based_on_Target_Premium',
+  PREMIUM_ACCUMULATION_FOCUS: 'Min_DB_Max_Cash_Value',
 } as const
+
+/// The only two the screen offers. There is no preferred or substandard class
+/// here, so a rate class is fully determined by the tobacco answer the form
+/// already asks for — with the exception of a former smoker, which the carrier
+/// has no separate value for.
+export const RATE_CLASSES = {
+  STANDARD_NON_TOBACCO: 'Standard_NT',
+  STANDARD_TOBACCO: 'Standard_Tobacco',
+} as const
+
+export const DEATH_BENEFIT_OPTIONS = {
+  LEVEL: 'A_Level',
+  INCREASING: 'B_Increasing',
+} as const
+
+export const GENDERS = {
+  MALE: 'Male',
+  FEMALE: 'Female',
+} as const
+
+/// The single strategy the dropdown offers. Choosing it sets allocation to
+/// 100% in the carrier's own script, so there is nothing to divide.
+export const RAPID_SOLVE_STRATEGY = 'SP500PointToPointCapFocus'
+export const RAPID_SOLVE_ALLOCATION = 100
+
+/// The states the screen will issue in. New York is absent — it is not an
+/// oversight in this list, it is not offered — so a New York prospect has to be
+/// refused before the request rather than after.
+export const ISSUE_STATES = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL',
+  'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME',
+  'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH',
+  'NJ', 'NM', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
+  'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+] as const
 
 export type SolveType = (typeof SOLVE_TYPES)[keyof typeof SOLVE_TYPES]
 
