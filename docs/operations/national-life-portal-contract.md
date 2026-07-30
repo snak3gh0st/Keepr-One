@@ -174,6 +174,36 @@ apólice. Isso é volume de requisição relevante contra o carrier. Alternativa
 sob demanda por apólice (quando o usuário abre), ou lote noturno de um
 subconjunto (ex. só `Active`, ou só as com pagamento pendente).
 
+## Prêmio e capital segurado: onde procurar
+
+O grid de inforce **não traz** nenhum dos dois — `AAP` e `AccumulatedCashValue`
+vieram nulos nas 9.614 linhas, e só 1 apólice casa com o grid de novos negócios.
+Por isso `Policy.premium` e `Policy.faceAmount` estão em 0 e o front mostra "—".
+
+O caminho existe e os identificadores **já estão no banco**: a célula
+`PolicyNumber` do inforce é uma âncora renderizada apontando para
+
+```
+/agent/book-of-business/inforce-book/all-clients/policy-details?id=<32-hex>
+```
+
+um `id` por apólice, gravado em `NationalLifeInforcePolicy.raw`. Mesmo padrão do
+drill-down de comissão, que já funcionou.
+
+Próximo passo, com sessão viva:
+
+```
+tsx scripts/national-life-describe-page.ts \
+  "/agent/book-of-business/inforce-book/all-clients/policy-details?id=<id-real>"
+```
+
+para descobrir se a página é DataTables (reaproveita `fetchNationalLifeGrid`) ou
+server-rendered (precisa de parse próprio).
+
+⚠️ **Escala**: são 9.614 páginas de detalhe, uma por apólice. Mesma decisão
+pendente do histórico de pagamento — sob demanda, lote noturno de um
+subconjunto, ou tudo. Não é decisão técnica.
+
 ## Sessão: por que um cron desacompanhado não funciona hoje
 
 Medido, não estimado.
