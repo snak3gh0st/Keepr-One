@@ -224,7 +224,7 @@ describe('National Life Steel session boundary', () => {
     const session = await createInteractiveSteelSession(buildEnv(), fake.deps)
 
     expect(fake.createInputs).toEqual([{
-      timeout: 600000,
+      timeout: 1500000,
       headless: false,
       solveCaptcha: false,
       persistProfile: false,

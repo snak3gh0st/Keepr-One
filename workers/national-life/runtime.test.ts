@@ -116,6 +116,10 @@ describe('dedicated National Life runtime loops', () => {
 
     expect(test.calls).toContain('error:attempt:RUNTIME_UNIT_FAILED')
     expect(test.calls.join(' ')).not.toContain('safe-failure')
+
+    // The loop now paces itself between units so it cannot hammer a live
+    // carrier page, so the next claim lands one poll interval later.
+    await vi.advanceTimersByTimeAsync(1000)
     expect(test.calls).toContain('attempt:run:attempt-2')
 
     test.signals.emit('SIGTERM')

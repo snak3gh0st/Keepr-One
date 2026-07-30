@@ -73,9 +73,11 @@ function createDeps(options: {
   encryptContextError?: Error
   closeFailures?: number
   reconnectError?: Error
+  disconnectFailures?: number
 }) {
   const calls: string[] = []
   let closeFailures = options.closeFailures ?? 0
+  let disconnectFailures = options.disconnectFailures ?? 0
   let current = structuredClone(options.attempt)
   let completed = false
   const page = {
@@ -92,6 +94,10 @@ function createDeps(options: {
     internalDebugUrl: runtime.debugUrl,
     disconnect: vi.fn(async () => {
       calls.push('steel:disconnect')
+      if (disconnectFailures > 0) {
+        disconnectFailures -= 1
+        throw new Error('steel disconnect failed')
+      }
     }),
     close: vi.fn(async () => {
       calls.push('steel:close')
@@ -248,6 +254,77 @@ describe('National Life interactive connection attempt runtime', () => {
     expect(test.calls).not.toContain('steel:close')
   })
 
+  it('keeps MFA open when the page sits on an unrecognised origin', async () => {
+    const test = createDeps({
+      attempt: buildAttempt('AWAITING_MFA'),
+      reconnectError: Object.assign(new Error('Navigation origin is not allowed'), {
+        code: 'NAVIGATION_ORIGIN_BLOCKED',
+        blockedOrigin: 'https://nlg-prod.us.auth0.com',
+      }),
+    })
+
+    const result = await runNationalLifeConnectionAttempt('attempt-1', test.deps)
+
+    expect(result).toEqual({ kind: 'INTERACTIVE', state: 'AWAITING_MFA' })
+    expect(test.current()).toMatchObject({
+      state: 'AWAITING_MFA',
+      currentOrigin: 'https://nlg-prod.us.auth0.com',
+      safeErrorCode: 'NAVIGATION_ORIGIN_BLOCKED',
+    })
+    expect(test.calls).not.toContain('steel:close')
+  })
+
+  it('keeps MFA open when classification fails after reconnecting', async () => {
+    const test = createDeps({
+      attempt: buildAttempt('AWAITING_MFA'),
+      classifyError: new Error(
+        'Execution context was destroyed, most likely because of a navigation',
+      ),
+    })
+
+    const result = await runNationalLifeConnectionAttempt('attempt-1', test.deps)
+
+    expect(result).toEqual({ kind: 'INTERACTIVE', state: 'AWAITING_MFA' })
+    expect(test.current()).toMatchObject({ state: 'AWAITING_MFA' })
+    expect(test.calls).not.toContain('steel:close')
+    expect(test.calls).toContain('attempt:release-lease')
+  })
+
+  it('keeps MFA open when the local disconnect fails after a transition', async () => {
+    const test = createDeps({
+      attempt: buildAttempt('AWAITING_LOGIN'),
+      authState: {
+        kind: 'AWAITING_MFA',
+        origin: 'https://agent.nationallife.example',
+      },
+      disconnectFailures: 1,
+    })
+
+    const result = await runNationalLifeConnectionAttempt('attempt-1', test.deps)
+
+    expect(result).toEqual({ kind: 'INTERACTIVE', state: 'AWAITING_MFA' })
+    expect(test.current()).toMatchObject({ state: 'AWAITING_MFA' })
+    expect(test.calls).not.toContain('steel:close')
+    expect(test.calls).not.toContain('attempt:FAILED')
+  })
+
+  it('fails terminally once Steel reports the session is gone', async () => {
+    const test = createDeps({
+      attempt: buildAttempt('AWAITING_MFA'),
+      reconnectError: Object.assign(new Error('MFA_SESSION_EXPIRED'), {
+        code: 'MFA_SESSION_EXPIRED',
+      }),
+    })
+
+    const result = await runNationalLifeConnectionAttempt('attempt-1', test.deps)
+
+    expect(result).toEqual({ kind: 'TERMINAL', state: 'FAILED' })
+    expect(test.current()).toMatchObject({
+      state: 'FAILED',
+      safeErrorCode: 'MFA_SESSION_EXPIRED',
+    })
+  })
+
   it('leaves login open without releasing Steel', async () => {
     const test = createDeps({
       attempt: buildAttempt('AWAITING_LOGIN'),
@@ -277,15 +354,18 @@ describe('National Life interactive connection attempt runtime', () => {
     expect(test.calls).toContain('steel:close')
   })
 
-  it('fails and closes on an unexpected origin without exposing it as runtime data', async () => {
+  it('holds the login open on an unexpected origin without exposing it as runtime data', async () => {
     const error = Object.assign(new Error('blocked'), { code: 'NAVIGATION_ORIGIN_BLOCKED' })
     const test = createDeps({ attempt: buildAttempt('AWAITING_LOGIN'), classifyError: error })
     await runNationalLifeConnectionAttempt('attempt-1', test.deps)
+    // The adapter error carries no origin, so nothing about the third-party page
+    // is persisted; only the Steel boundary reports an origin it already parsed.
     expect(test.current()).toMatchObject({
-      state: 'FAILED',
-      safeErrorCode: 'NAVIGATION_ORIGIN_BLOCKED',
+      state: 'AWAITING_LOGIN',
+      currentOrigin: null,
     })
-    expect(test.calls).toContain('steel:close')
+    expect(test.calls).not.toContain('steel:close')
+    expect(test.calls).toContain('attempt:release-lease')
   })
 
   it('never commits a connected summary when context encryption fails', async () => {

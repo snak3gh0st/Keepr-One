@@ -159,22 +159,67 @@ function resolveCrypto(deps: RunConnectionAttemptDeps): ConnectionAttemptCrypto 
   }
 }
 
-function safeErrorCode(error: unknown) {
+const NAVIGATION_ORIGIN_BLOCKED_CODE = 'NAVIGATION_ORIGIN_BLOCKED'
+const STEEL_RECONNECT_FAILED_CODE = 'STEEL_RECONNECT_FAILED'
+const MFA_SESSION_EXPIRED_CODE = 'MFA_SESSION_EXPIRED'
+
+function errorCode(error: unknown): string | undefined {
   if (
     error instanceof Error &&
     'code' in error &&
     typeof (error as { code?: unknown }).code === 'string'
   ) {
-    const code = (error as Error & { code: string }).code
-    if (
-      code === 'NAVIGATION_ORIGIN_BLOCKED' ||
-      code === 'PORTAL_LAYOUT_CHANGED' ||
-      code === 'MFA_SESSION_EXPIRED'
-    ) {
-      return code
-    }
+    return (error as Error & { code: string }).code
+  }
+  return undefined
+}
+
+function safeErrorCode(error: unknown) {
+  const code = errorCode(error)
+  if (
+    code === NAVIGATION_ORIGIN_BLOCKED_CODE ||
+    code === 'PORTAL_LAYOUT_CHANGED' ||
+    code === MFA_SESSION_EXPIRED_CODE ||
+    code === STEEL_RECONNECT_FAILED_CODE
+  ) {
+    return code
   }
   return 'INTERACTIVE_CONNECTION_FAILED'
+}
+
+function blockedOriginFrom(error: unknown): string | undefined {
+  if (
+    error instanceof Error &&
+    'blockedOrigin' in error &&
+    typeof (error as { blockedOrigin?: unknown }).blockedOrigin === 'string'
+  ) {
+    return (error as Error & { blockedOrigin: string }).blockedOrigin
+  }
+  return undefined
+}
+
+// Local teardown of the CDP client must never escalate into releasing the Steel
+// session: a human may be mid-MFA on that browser.
+async function safeDisconnect(session: BrowserSession | undefined) {
+  if (!session) {
+    return
+  }
+  try {
+    await session.disconnect()
+  } catch {
+    // The next poll reconnects; the carrier page stays alive either way.
+  }
+}
+
+async function safeClose(session: BrowserSession | undefined) {
+  if (!session) {
+    return
+  }
+  try {
+    await session.close()
+  } catch {
+    // Best-effort cleanup only.
+  }
 }
 
 export async function runNationalLifeConnectionAttempt(
@@ -238,12 +283,10 @@ async function openPortal(
       currentOrigin: new URL(deps.env.portalLoginUrl).origin,
       now: deps.now(),
     })
-    await session.disconnect()
+    await safeDisconnect(session)
     return { kind: 'INTERACTIVE', state: 'AWAITING_LOGIN' }
   } catch (error) {
-    if (session) {
-      await session.close()
-    }
+    await safeClose(session)
     await deps.store.transition({
       attemptId: attempt.id,
       workerId: deps.workerId,
@@ -273,9 +316,26 @@ async function monitorPortal(
     return { kind: 'TERMINAL', state: 'FAILED' }
   }
 
-  let session: BrowserSession | undefined
+  // Decrypted up front: an unreadable runtime blob can never be fixed by
+  // retrying, so it must not reach the recoverable path below.
+  let runtime: AttemptRuntime
   try {
-    const runtime = resolveCrypto(deps).decryptRuntime(encryptedRuntime, attempt)
+    runtime = resolveCrypto(deps).decryptRuntime(encryptedRuntime, attempt)
+  } catch {
+    await deps.store.transition({
+      attemptId: attempt.id,
+      workerId: deps.workerId,
+      from: attempt.state,
+      to: 'FAILED',
+      safeErrorCode: 'ATTEMPT_RUNTIME_MISSING',
+      now: deps.now(),
+    })
+    return { kind: 'TERMINAL', state: 'FAILED' }
+  }
+
+  let session: BrowserSession | undefined
+  let authenticated = false
+  try {
     session = await deps.reconnectSession(runtime)
     const authentication = await deps
       .createAdapter(session)
@@ -290,10 +350,13 @@ async function monitorPortal(
         currentOrigin: authentication.origin,
         now: deps.now(),
       })
-      await session.disconnect()
+      await safeDisconnect(session)
       return { kind: 'INTERACTIVE', state: authentication.kind }
     }
 
+    // Past this point the human is done and any failure is ours to own, so the
+    // recoverable path below must not swallow it.
+    authenticated = true
     const context = await deps.captureContext(session.steelSessionId)
     const encryptedContext = resolveCrypto(deps).encryptContext(context, attempt)
     await deps.store.complete({
@@ -304,20 +367,23 @@ async function monitorPortal(
       carrierExpiresAt: null,
       now: deps.now(),
     })
-    await session.close()
+    await safeClose(session)
     return { kind: 'CONNECTED' }
   } catch (error) {
-    if (!session && isRetryableInteractiveFailure(attempt, error)) {
-      await deps.store.releaseLease(attempt.id)
-      return {
-        kind: 'INTERACTIVE',
-        state: attempt.state === 'AWAITING_MFA' ? 'AWAITING_MFA' : 'AWAITING_LOGIN',
-      }
+    const interactiveState = interactiveStateOf(attempt)
+    if (
+      !authenticated &&
+      interactiveState &&
+      isRecoverableInteractiveFailure(error)
+    ) {
+      // The carrier browser is still live and a human may be mid-MFA on it.
+      // Drop only the local CDP client and let the next poll try again.
+      await safeDisconnect(session)
+      await recordInteractiveObservation(attempt, interactiveState, deps, error)
+      return { kind: 'INTERACTIVE', state: interactiveState }
     }
 
-    if (session) {
-      await session.close()
-    }
+    await safeClose(session)
     await deps.store.transition({
       attemptId: attempt.id,
       workerId: deps.workerId,
@@ -330,19 +396,54 @@ async function monitorPortal(
   }
 }
 
-function isRetryableInteractiveFailure(
+function interactiveStateOf(
   attempt: StoredConnectionAttempt,
+): 'AWAITING_LOGIN' | 'AWAITING_MFA' | undefined {
+  if (attempt.state === 'AWAITING_LOGIN' || attempt.state === 'AWAITING_MFA') {
+    return attempt.state
+  }
+  return undefined
+}
+
+// While the attempt is interactive the human owns that browser, and no failure
+// here proves it is gone: a transport blip is transient, an off-allowlist page
+// only means the login walked through a hop we do not recognise yet, and an
+// unreadable page usually means it navigated mid-classification. Only a session
+// Steel has already declared dead is terminal. The attempt TTL and the user's
+// cancel button bound the retries.
+function isRecoverableInteractiveFailure(error: unknown) {
+  return errorCode(error) !== MFA_SESSION_EXPIRED_CODE
+}
+
+// Surfaces the unrecognised origin on the attempt row so the missing entry in
+// NATIONAL_LIFE_PORTAL_ORIGINS is visible without reproducing blind. Stays in
+// the same state, so the viewer keeps running.
+async function recordInteractiveObservation(
+  attempt: StoredConnectionAttempt,
+  interactiveState: 'AWAITING_LOGIN' | 'AWAITING_MFA',
+  deps: RunConnectionAttemptDeps,
   error: unknown,
 ) {
-  if (attempt.state !== 'AWAITING_LOGIN' && attempt.state !== 'AWAITING_MFA') {
-    return false
+  const blockedOrigin = blockedOriginFrom(error)
+
+  if (blockedOrigin && blockedOrigin !== attempt.currentOrigin) {
+    try {
+      await deps.store.transition({
+        attemptId: attempt.id,
+        workerId: deps.workerId,
+        from: interactiveState,
+        to: interactiveState,
+        currentOrigin: blockedOrigin,
+        safeErrorCode: safeErrorCode(error),
+        now: deps.now(),
+      })
+      return
+    } catch {
+      // Fall through: releasing the lease matters more than the diagnostic.
+    }
   }
 
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 'STEEL_RECONNECT_FAILED'
-  )
+  await deps.store.releaseLease(attempt.id)
 }
 
 async function cleanupAttemptRecord(

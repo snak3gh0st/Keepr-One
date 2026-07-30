@@ -72,8 +72,12 @@ export function assertAllowedNavigation(targetUrl: string, allowedOrigins: reado
   if (!normalizedOrigins.has(parsedUrl.origin)) {
     const error = new Error('Navigation origin is not allowed') as Error & {
       code: string
+      blockedOrigin: string
     }
     error.code = NAVIGATION_ORIGIN_BLOCKED_CODE
+    // Origin only, never the full URL: carrier and Auth0 callbacks carry
+    // one-time codes and MFA tokens in the query string.
+    error.blockedOrigin = parsedUrl.origin
     throw error
   }
 
@@ -169,7 +173,9 @@ export async function reconnectSteelBrowserSession(
       throw error
     }
 
-    const reconnectError = new Error('Steel browser reconnect failed') as Error & {
+    const reconnectError = new Error('Steel browser reconnect failed', {
+      cause: error,
+    }) as Error & {
       code: string
     }
     reconnectError.code = STEEL_RECONNECT_FAILED_CODE

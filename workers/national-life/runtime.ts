@@ -131,6 +131,11 @@ async function runWorkLoop(
         durationMs: Date.now() - unitStartedAt,
       })
     }
+
+    // An interactive attempt stays claimable for its whole lifetime, so without
+    // this pause the loop reconnects to the live carrier page as fast as CDP
+    // allows while a human is typing an MFA code into it.
+    await waitForNextPoll(signal)
   }
 }
 
