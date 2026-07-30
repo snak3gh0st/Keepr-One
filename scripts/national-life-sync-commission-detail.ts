@@ -17,7 +17,11 @@ import {
 } from '../lib/national-life/report-row-service'
 import { tryAcquireBrowserLock, releaseBrowserLock } from '../lib/national-life/browser-lock'
 import { prisma } from '../lib/prisma'
-import { createSteelBrowserSession } from '../workers/national-life/steel-session'
+import { persistRefreshedSessionContext } from '../lib/national-life/persist-session-context'
+import {
+  captureSteelSessionContext,
+  createSteelBrowserSession,
+} from '../workers/national-life/steel-session'
 
 async function main() {
   const env = getNationalLifeEnv()
@@ -177,6 +181,21 @@ async function main() {
         }),
       )
     }
+
+    // Keep the cookies this run was handed. Without it the login-time cookies
+    // are replayed forever while the live ones rotate and are lost on close,
+    // and a stale stored session is what sends a human back through MFA.
+    console.log(
+      JSON.stringify(
+        await persistRefreshedSessionContext({
+          steelSessionId: session.steelSessionId,
+          env,
+          stored,
+          prisma,
+          capture: captureSteelSessionContext,
+        }),
+      ),
+    )
   } finally {
     await session.close()
     await releaseBrowserLock(prisma)

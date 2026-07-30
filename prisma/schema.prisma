@@ -305,6 +305,10 @@ model Client {
   name            String
   email           String?
   phone           String?
+  // The carrier reports it on every inforce policy, for 98% of the book. Stored
+  // as a date rather than the carrier's MM/DD/YYYY string so age and birthdays
+  // are computable instead of needing to be re-parsed at every call site.
+  dateOfBirth     DateTime?
   assignedAgentId String
   assignedAgent   Agent    @relation(fields: [assignedAgentId], references: [id])
   createdAt       DateTime @default(now())

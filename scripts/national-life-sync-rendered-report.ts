@@ -11,7 +11,11 @@ import { monetaryCells, parseRenderedTable } from '../lib/national-life/rendered
 import { persistReportRows, pruneStaleReportRows } from '../lib/national-life/report-row-service'
 import { tryAcquireBrowserLock, releaseBrowserLock } from '../lib/national-life/browser-lock'
 import { prisma } from '../lib/prisma'
-import { createSteelBrowserSession } from '../workers/national-life/steel-session'
+import { persistRefreshedSessionContext } from '../lib/national-life/persist-session-context'
+import {
+  captureSteelSessionContext,
+  createSteelBrowserSession,
+} from '../workers/national-life/steel-session'
 
 async function main() {
   const env = getNationalLifeEnv()
@@ -121,6 +125,20 @@ async function main() {
         )
       }
     }
+
+    // Same reason as the other syncs: the cookies this run received have to be
+    // stored, or the login-time ones are replayed until they stop working.
+    console.log(
+      JSON.stringify(
+        await persistRefreshedSessionContext({
+          steelSessionId: session.steelSessionId,
+          env,
+          stored,
+          prisma,
+          capture: captureSteelSessionContext,
+        }),
+      ),
+    )
   } finally {
     await session.close()
     await releaseBrowserLock(prisma)
