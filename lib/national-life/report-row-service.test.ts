@@ -85,3 +85,58 @@ describe('National Life report row mapping', () => {
     expect(rows.find((row) => row.rowKey === '1|07/25/2026')?.label).toBe('Fresh')
   })
 })
+
+describe('National Life per-policy commission earning detail', () => {
+  const DETAIL_ROW = {
+    PolicyNumber: 'NL123456',
+    NBPolicyNumber: 'NB999',
+    InsuredName: 'Doe, Jane',
+    PayeeName: 'FNB INVESTMENTS CORP',
+    Product: 'FlexLife II',
+    GrossCommEarned: '1234.56',
+    PremiumAmt: '500.00',
+    CommRate: '0.55',
+    ParticipationPercentage: '100',
+    TransactionType: 'FYC',
+    CompensationType: 'Commission',
+    IncomeClass: 'Life',
+    PaymentDate: '07/25/2026',
+    ProcessDate: '07/24/2026',
+    PremiumEffDate: '07/01/2026',
+  }
+
+  it('lifts the commissioning figures into amounts', () => {
+    const row = toReportRow('COMMISSION_DETAIL_NLD_COMMISSION_EARNING' as never, DETAIL_ROW)
+
+    expect(row.amounts).toMatchObject({
+      GrossCommEarned: '1234.56',
+      PremiumAmt: '500.00',
+      CommRate: '0.55',
+      ParticipationPercentage: '100',
+    })
+  })
+
+  it('labels the row by policy, not by the payee that repeats across rows', () => {
+    const row = toReportRow('COMMISSION_DETAIL_NLD_COMMISSION_EARNING' as never, DETAIL_ROW)
+    expect(row.label).toBe('NL123456')
+    expect(row.primaryDate).toBe('07/25/2026')
+  })
+
+  it('keeps two transactions on the same policy apart', () => {
+    const rows = toReportRows('COMMISSION_DETAIL_NLD_COMMISSION_EARNING' as never, [
+      DETAIL_ROW,
+      { ...DETAIL_ROW, TransactionType: 'REN', GrossCommEarned: '10.00' },
+    ])
+
+    expect(rows).toHaveLength(2)
+  })
+
+  it('still collapses a genuinely identical transaction row', () => {
+    const rows = toReportRows('COMMISSION_DETAIL_NLD_COMMISSION_EARNING' as never, [
+      DETAIL_ROW,
+      { ...DETAIL_ROW },
+    ])
+
+    expect(rows).toHaveLength(1)
+  })
+})

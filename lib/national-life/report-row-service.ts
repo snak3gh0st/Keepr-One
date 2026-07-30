@@ -40,16 +40,24 @@ function text(row: GridRow, ...keys: string[]): string | null {
 /// Field names that carry money, per report. Several arrive wrapped in markup
 /// (links to a statement), so the text is extracted before it is kept.
 const AMOUNT_FIELDS = [
+  // Statement level.
   'NLDCommEarningAmt',
   'ESICommEarningAmt',
   'CommChargebackBalance',
   'DeductionBalances',
+  // Projected, by line of business.
   'NLLifeAmount',
   'NLAnnuitiesAmount',
   'NLMutualFundsAmount',
   'LSWLifeAmount',
   'LSWAnnuitiesAmount',
   'VariableProductAmount',
+  // Per-policy earning detail — the actual commissioning figures.
+  'GrossCommEarned',
+  'PremiumAmt',
+  'CommRate',
+  'ParticipationPercentage',
+  'RemainingBalance',
 ] as const
 
 function extractAmounts(row: GridRow): Record<string, string> {
@@ -73,6 +81,17 @@ export function deriveRowKey(gridKey: NationalLifeGridKey, row: GridRow): string
       case 'PROJECTED_COMMISSIONS':
         return [text(row, 'AgentNumber'), text(row, 'PaymentDate')]
       default:
+        // The per-statement earning detail repeats a policy across transactions,
+        // so the transaction type and dates are part of its identity.
+        if (row.PolicyNumber !== undefined && row.GrossCommEarned !== undefined) {
+          return [
+            text(row, 'PolicyNumber'),
+            text(row, 'TransactionType'),
+            text(row, 'PremiumEffDate'),
+            text(row, 'ProcessDate'),
+            text(row, 'GrossCommEarned'),
+          ]
+        }
         return []
     }
   })()
@@ -88,8 +107,10 @@ export function deriveRowKey(gridKey: NationalLifeGridKey, row: GridRow): string
 export function toReportRow(gridKey: NationalLifeGridKey, row: GridRow): ReportRow {
   return {
     rowKey: deriveRowKey(gridKey, row),
-    primaryDate: text(row, 'PayDate', 'PaymentDate', 'SubmitDate', 'ConcatParam'),
-    label: text(row, 'FullName', 'AgentName', 'AgentNumber'),
+    primaryDate: text(row, 'PayDate', 'PaymentDate', 'ProcessDate', 'SubmitDate', 'ConcatParam'),
+    // Policy first: on the earning detail the policy is what identifies the row
+    // to a reader, while the payee name repeats across hundreds of rows.
+    label: text(row, 'PolicyNumber', 'FullName', 'AgentName', 'AgentNumber'),
     amounts: extractAmounts(row),
     raw: row,
   }
