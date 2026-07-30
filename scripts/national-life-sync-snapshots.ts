@@ -20,6 +20,10 @@ import {
   toInforcePolicySnapshots,
 } from '../lib/national-life/inforce-policy-service'
 import {
+  persistReportRows,
+  toReportRows,
+} from '../lib/national-life/report-row-service'
+import {
   NATIONAL_LIFE_GRIDS,
   fetchNationalLifeGrid,
   type GridPage,
@@ -30,9 +34,14 @@ import { createSteelBrowserSession } from '../workers/national-life/steel-sessio
 
 const CASE_SNAPSHOT_GRIDS: readonly NationalLifeGridKey[] = ['NEW_BUSINESS', 'RECENTLY_CLOSED']
 const INFORCE_POLICY_GRIDS: readonly NationalLifeGridKey[] = ['INFORCE_CLIENTS']
+const REPORT_ROW_GRIDS: readonly NationalLifeGridKey[] = [
+  'PAID_COMMISSIONS',
+  'PROJECTED_COMMISSIONS',
+]
 const DEFAULT_GRIDS: readonly NationalLifeGridKey[] = [
   ...CASE_SNAPSHOT_GRIDS,
   ...INFORCE_POLICY_GRIDS,
+  ...REPORT_ROW_GRIDS,
 ]
 
 function resolveGridKeys(): NationalLifeGridKey[] {
@@ -57,6 +66,18 @@ async function syncGrid(
 ) {
   const gridPath = NATIONAL_LIFE_GRIDS[gridKey]
   const { rows, recordsTotal } = await fetchNationalLifeGrid(page, gridPath, env.portalLoginUrl)
+
+  if (REPORT_ROW_GRIDS.includes(gridKey)) {
+    const reportRows = toReportRows(gridKey, rows)
+    const { written } = await persistReportRows({
+      agentId,
+      deploymentScope: env.sessionScopeId,
+      gridKey,
+      rows: reportRows,
+      fetchedAt,
+    })
+    return { recordsTotal, rowsFetched: rows.length, snapshots: reportRows.length, written }
+  }
 
   if (INFORCE_POLICY_GRIDS.includes(gridKey)) {
     const snapshots = toInforcePolicySnapshots(rows)

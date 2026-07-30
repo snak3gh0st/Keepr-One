@@ -16,6 +16,7 @@ COPY lib/national-life/browser-context-crypto.ts ./lib/national-life/browser-con
 COPY lib/national-life/case-snapshot-service.ts ./lib/national-life/case-snapshot-service.ts
 COPY lib/national-life/portal-grid-client.ts ./lib/national-life/portal-grid-client.ts
 COPY lib/national-life/inforce-policy-service.ts ./lib/national-life/inforce-policy-service.ts
+COPY lib/national-life/report-row-service.ts ./lib/national-life/report-row-service.ts
 COPY lib/national-life/connection-attempt-state.ts ./lib/national-life/connection-attempt-state.ts
 COPY lib/national-life/constants.ts ./lib/national-life/constants.ts
 COPY lib/national-life/env.ts ./lib/national-life/env.ts

@@ -177,6 +177,7 @@ model Agent {
   browserJobs            BrowserAutomationJob[]
   nationalLifeCaseSnapshots NationalLifeCaseSnapshot[]
   nationalLifeInforcePolicies NationalLifeInforcePolicy[]
+  nationalLifeReportRows NationalLifeReportRow[]
 
   @@index([parentAgentId])
 }
@@ -265,6 +266,35 @@ model NationalLifeInforcePolicy {
 
   @@unique([agentId, deploymentScope, policyNumber])
   @@index([agentId])
+  @@index([fetchedAt])
+}
+
+/// Generic landing zone for the portal's report grids — paid commissions,
+/// projected commissions, and whatever else is mapped later.
+///
+/// One table rather than one per report: these are statement-level summaries (8
+/// and 4 rows respectively, not transaction ledgers) whose columns differ
+/// completely from each other, so typed columns per report would be mostly nulls.
+/// `raw` holds the carrier row verbatim and `amounts` the numeric fields pulled
+/// out of it, which is what a front end needs without a migration per report.
+model NationalLifeReportRow {
+  id              String   @id @default(cuid())
+  agentId         String
+  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope String
+  gridKey         String
+  /// Deterministic per-report identity, so a re-sync updates instead of duplicating.
+  rowKey          String
+  primaryDate     String?
+  label           String?
+  amounts         Json
+  raw             Json
+  fetchedAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([agentId, deploymentScope, gridKey, rowKey])
+  @@index([agentId, gridKey])
   @@index([fetchedAt])
 }
 
