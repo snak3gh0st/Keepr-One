@@ -704,3 +704,68 @@ truncar: bater no limite é indistinguível de a lista terminar ali.
 `lib/national-life/rapid-solve.ts` implementa requisição e parse, com testes.
 Falta o transporte: o app web não fala com o Steel diretamente — passa pelo
 runtime via `BrowserJobOperation`, que ainda não tem operação de escrita.
+
+## Mapa do que é acionável (2026-07-30, fim do dia)
+
+Escrito depois de um dia inteiro no portal, para a próxima sessão executar em
+vez de redescobrir. As contagens foram medidas no `lifeos`, não estimadas.
+
+### Já extraído e no banco
+
+| dado | linhas | onde aparece |
+| --- | --- | --- |
+| Apólices inforce | 9.614 | `NationalLifeInforcePolicy`, tela de apólices |
+| Clientes | 8.824 | `Client` — 1.585 com e-mail |
+| Comissões por apólice | 5.408 | tela da apólice |
+| Atendimentos (client intelligence) | 2.690 | tela da apólice, com sinal de risco |
+| Casos (snapshots) | 802 | `NationalLifeCaseSnapshot` |
+| Correspondência | 64 | tela da apólice |
+
+### Confirmado indisponível
+
+**Prêmio por apólice e capital segurado não vêm do portal.** As colunas `AAP` e
+`AccumulatedCashValue` existem no relatório inforce e chegam nulas — verificado
+agrupando por status e classe de produto, não por amostra: 3.647 IUL ativas,
+3.624 Term ativas, e todas as demais, sem exceção. Também vêm nulos e-mail,
+telefone e endereço do segurado e do titular.
+
+### Cotação (Rapid Solve) — bloqueada no carrier
+
+Transporte, tela e persistência prontos e testados. O `POST
+/agent/RapidSolve/GetQuote` responde **HTTP 500** com a exceção escondida pelo
+`customErrors` do ASP.NET.
+
+Já eliminado por evidência, para ninguém refazer:
+
+- autenticação e origem da página (o job navega para a ferramenta antes de postar)
+- `content-type: application/json; charset=utf-8` e `x-requested-with`, iguais aos do `$.ajax` do bundle
+- token antiforgery — **o script do carrier não envia nenhum**, então nunca foi CSRF
+- tipo do `Amount` — o bundle usa `parseFloat`, é número, e é o que mandamos
+- nomes e valores dos campos, conferidos um a um contra o `formData` do bundle
+
+> O aceite de termo visto na página **não é do quote**. A mesma página hospeda a
+> seção de e-App, e um seletor de erro amplo demais misturou as duas. O único
+> erro do formulário de cotação era falta de capital segurado, por o toggle de
+> solve type não ter trocado.
+
+Próximo passo mais barato: capturar o `GetQuote` do navegador de um humano
+logado, com payload e headers. Se lá funciona, a diferença aparece na
+comparação; se lá também dá 500, o problema não é do nosso código — pode ser
+licenciamento do agente no estado, produto indisponível para a conta, ou o
+endpoint quebrado.
+
+### Não explorado, e o que cada um custa
+
+| alvo | rota | o que é |
+| --- | --- | --- |
+| **iGo e-App** | `/agent/sso/igo-eapp` | Submissão de proposta. Sistema **terceiro**, autenticação própria — não é uma página deste portal, é uma integração inteira. |
+| Foresight | `/agent/sso/foresight` | Idem, vida. |
+| Foresight Annuity | `/agent/sso/foresight-annuity` | Idem, anuidade. |
+| XRAE | `/agent/sso/xrae-link` | Idem. |
+| Documentos por apólice | `CORRESPONDENCE` | 64 documentos para 9.614 apólices. Não é truncamento de paginação — o client pagina e o carrier parou. Suspeita de filtro de data padrão; sonda escrita em `national-life-describe-correspondence-filter.ts`, não rodada. Traz `EncryptedDocumentHandle`, que dá acesso ao PDF. |
+| Drill-down por apólice | `policy-details?id=<32-hex>` | Id opaco vindo do grid inforce. Sessão anterior achou "Death Benefit" de forma inconsistente. |
+| Drill-down por cliente | `client-information-details?id=<32-hex>` | Idem, nunca aberto. |
+
+Os quatro SSO são alvos de integração distintos, cada um com sua própria
+autenticação. Nenhum foi sondado, e "é só um link" é a leitura errada: o portal
+entrega o salto, não os dados.
