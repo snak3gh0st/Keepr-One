@@ -91,3 +91,38 @@ export async function refreshStoredCarrierSession(
   const updated = await store.updateContext(input)
   return { refreshed: updated === 1 }
 }
+
+/// Guarded so a refresh can never resurrect a session the app has already
+/// invalidated, and never crosses a deployment scope.
+export function createPrismaSessionRefreshStore(
+  prismaClient: {
+    agentIntegrationSession: {
+      updateMany(args: unknown): Promise<{ count: number }>
+    }
+  },
+  deploymentScope: string,
+): SessionRefreshStore {
+  return {
+    async updateContext(input) {
+      const { count } = await prismaClient.agentIntegrationSession.updateMany({
+        where: {
+          id: input.sessionId,
+          deploymentScope,
+          provider: 'NATIONAL_LIFE',
+          purpose: 'CARRIER_SESSION',
+          status: 'CONNECTED',
+        },
+        data: {
+          keyVersion: input.encryptedContext.keyVersion,
+          algorithm: input.encryptedContext.algorithm,
+          iv: input.encryptedContext.iv,
+          ciphertext: input.encryptedContext.ciphertext,
+          authTag: input.encryptedContext.authTag,
+          carrierExpiresAt: input.carrierExpiresAt,
+          lastUsedAt: input.refreshedAt,
+        },
+      })
+      return count
+    },
+  }
+}

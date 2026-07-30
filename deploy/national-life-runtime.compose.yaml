@@ -43,12 +43,13 @@ services:
       ENABLE_CDP_LOGGING: "false"
       LOG_CUSTOM_EMIT_EVENTS: "false"
       ENABLE_VERBOSE_LOGGING: "false"
+    # Steel's API is PID 1 here and never reaps orphaned Chrome grandchildren, so
+    # every released session left zombies behind: 78 of them had accumulated when
+    # the container wedged at 253/256 PIDs and failed every launch with a 60s
+    # timeout. `init` puts a real reaper at PID 1, which is the actual fix; the
+    # raised ceiling is only headroom.
+    init: true
     mem_limit: 2g
-    # Chrome forks ~25-30 processes per browser and Steel does not reap them when
-    # a session is released: 14 sessions left 58 chrome processes behind and the
-    # container wedged at 253/256 PIDs, failing every launch with a 60s timeout.
-    # Raising the ceiling buys headroom for a daily sync but does not fix the
-    # leak — the container still needs a periodic restart until it is addressed.
     pids_limit: 1024
     shm_size: 1g
     read_only: true

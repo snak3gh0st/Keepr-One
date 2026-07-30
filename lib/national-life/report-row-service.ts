@@ -164,40 +164,48 @@ export async function pruneStaleReportRows(
   return { deleted: count }
 }
 
+/// One round trip per chunk instead of per row; see persistInforcePolicies.
+const UPSERT_CHUNK_SIZE = 500
+
 export async function persistReportRows(
   input: PersistReportRowsInput,
 ): Promise<{ written: number }> {
   let written = 0
 
-  for (const row of input.rows) {
-    const data = {
-      primaryDate: row.primaryDate,
-      label: row.label,
-      amounts: row.amounts as Prisma.InputJsonValue,
-      raw: row.raw as Prisma.InputJsonValue,
-      fetchedAt: input.fetchedAt,
-    }
+  for (let offset = 0; offset < input.rows.length; offset += UPSERT_CHUNK_SIZE) {
+    const chunk = input.rows.slice(offset, offset + UPSERT_CHUNK_SIZE)
+    await prisma.$transaction(chunk.map((row) => buildReportRowUpsert(input, row)))
+    written += chunk.length
+  }
 
-    await prisma.nationalLifeReportRow.upsert({
-      where: {
-        agentId_deploymentScope_gridKey_rowKey: {
-          agentId: input.agentId,
-          deploymentScope: input.deploymentScope,
-          gridKey: input.gridKey,
-          rowKey: row.rowKey,
-        },
-      },
-      create: {
+  return { written }
+}
+
+function buildReportRowUpsert(input: PersistReportRowsInput, row: ReportRow) {
+  const data = {
+    primaryDate: row.primaryDate,
+    label: row.label,
+    amounts: row.amounts as Prisma.InputJsonValue,
+    raw: row.raw as Prisma.InputJsonValue,
+    fetchedAt: input.fetchedAt,
+  }
+
+  return prisma.nationalLifeReportRow.upsert({
+    where: {
+      agentId_deploymentScope_gridKey_rowKey: {
         agentId: input.agentId,
         deploymentScope: input.deploymentScope,
         gridKey: input.gridKey,
         rowKey: row.rowKey,
-        ...data,
       },
-      update: data,
-    })
-    written += 1
-  }
-
-  return { written }
+    },
+    create: {
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      gridKey: input.gridKey,
+      rowKey: row.rowKey,
+      ...data,
+    },
+    update: data,
+  })
 }

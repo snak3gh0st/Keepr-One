@@ -9,8 +9,17 @@
 // every compensation page) do not fire that request today — see
 // docs/operations/national-life-portal-contract.md — so they are opt-in only
 // until that is understood. Prints counts only, never row values.
-import { decryptBrowserContext } from '../lib/national-life/browser-context-crypto'
+import {
+  decryptBrowserContext,
+  encryptBrowserContext,
+} from '../lib/national-life/browser-context-crypto'
 import { getNationalLifeEnv } from '../lib/national-life/env'
+import {
+  countContextCookies,
+  createPrismaSessionRefreshStore,
+  deriveCarrierExpiresAt,
+  refreshStoredCarrierSession,
+} from '../lib/national-life/session-refresh'
 import {
   persistCaseSnapshots,
   toCaseSnapshots,
@@ -30,7 +39,10 @@ import {
   type NationalLifeGridKey,
 } from '../lib/national-life/portal-grid-client'
 import { prisma } from '../lib/prisma'
-import { createSteelBrowserSession } from '../workers/national-life/steel-session'
+import {
+  captureSteelSessionContext,
+  createSteelBrowserSession,
+} from '../workers/national-life/steel-session'
 
 const CASE_SNAPSHOT_GRIDS: readonly NationalLifeGridKey[] = ['NEW_BUSINESS', 'RECENTLY_CLOSED']
 const INFORCE_POLICY_GRIDS: readonly NationalLifeGridKey[] = ['INFORCE_CLIENTS']
@@ -166,6 +178,46 @@ async function main() {
           }),
         )
       }
+    }
+    // Persist whatever the carrier handed back during this run. Without this the
+    // cookies captured at login are replayed forever and the stored session can
+    // only get staler, which is what forces a fresh MFA login.
+    try {
+      const refreshedContext = await captureSteelSessionContext(session.steelSessionId, env)
+      const carrierExpiresAt = deriveCarrierExpiresAt(refreshedContext, env.portalOrigins)
+      const { refreshed } = await refreshStoredCarrierSession(
+        {
+          sessionId: stored.id,
+          encryptedContext: encryptBrowserContext(
+            refreshedContext,
+            {
+              agentId: stored.agentId,
+              scopeId: env.sessionScopeId,
+              provider: 'NATIONAL_LIFE',
+              purpose: 'AUTHENTICATED_BROWSER_CONTEXT',
+              formatVersion: 1,
+            },
+            { version: env.sessionKeyVersion, base64Key: env.sessionKeys[env.sessionKeyVersion] },
+          ),
+          carrierExpiresAt,
+          refreshedAt: new Date(),
+        },
+        createPrismaSessionRefreshStore(prisma, env.sessionScopeId),
+      )
+      console.log(
+        JSON.stringify({
+          sessionRefreshed: refreshed,
+          cookies: countContextCookies(refreshedContext),
+          carrierExpiresAt: carrierExpiresAt?.toISOString() ?? null,
+        }),
+      )
+    } catch (error) {
+      // A failed refresh must never fail the extraction that already succeeded.
+      console.error(
+        JSON.stringify({
+          sessionRefreshFailed: error instanceof Error ? error.message : String(error),
+        }),
+      )
     }
   } finally {
     await session.close()

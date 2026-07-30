@@ -113,54 +113,62 @@ export type PersistSnapshotsInput = {
   fetchedAt: Date
 }
 
+/// One round trip per chunk instead of per row; see persistInforcePolicies.
+const UPSERT_CHUNK_SIZE = 500
+
 export async function persistCaseSnapshots(
   input: PersistSnapshotsInput,
 ): Promise<{ written: number }> {
   let written = 0
 
-  for (const snapshot of input.snapshots) {
-    const data = {
-      insuredName: snapshot.insuredName,
-      ownerName: snapshot.ownerName,
-      product: snapshot.product,
-      carrierStatus: snapshot.carrierStatus,
-      deliveryStatus: snapshot.deliveryStatus,
-      actionRequired: snapshot.actionRequired,
-      requirements: snapshot.requirements,
-      submitDate: snapshot.submitDate,
-      sentDate: snapshot.sentDate,
-      modalPremium: snapshot.modalPremium,
-      anticipatedAnnualPremium: snapshot.anticipatedAnnualPremium,
-      submitMethod: snapshot.submitMethod,
-      caseManager: snapshot.caseManager,
-      agency: snapshot.agency,
-      writingAgentName: snapshot.writingAgentName,
-      writingAgentNumber: snapshot.writingAgentNumber,
-      companyCode: snapshot.companyCode,
-      raw: snapshot.raw as Prisma.InputJsonValue,
-      fetchedAt: input.fetchedAt,
-    }
+  for (let offset = 0; offset < input.snapshots.length; offset += UPSERT_CHUNK_SIZE) {
+    const chunk = input.snapshots.slice(offset, offset + UPSERT_CHUNK_SIZE)
+    await prisma.$transaction(chunk.map((snapshot) => buildCaseSnapshotUpsert(input, snapshot)))
+    written += chunk.length
+  }
 
-    await prisma.nationalLifeCaseSnapshot.upsert({
-      where: {
-        agentId_deploymentScope_gridKey_policyNo: {
-          agentId: input.agentId,
-          deploymentScope: input.deploymentScope,
-          gridKey: input.gridKey,
-          policyNo: snapshot.policyNo,
-        },
-      },
-      create: {
+  return { written }
+}
+
+function buildCaseSnapshotUpsert(input: PersistSnapshotsInput, snapshot: CaseSnapshot) {
+  const data = {
+    insuredName: snapshot.insuredName,
+    ownerName: snapshot.ownerName,
+    product: snapshot.product,
+    carrierStatus: snapshot.carrierStatus,
+    deliveryStatus: snapshot.deliveryStatus,
+    actionRequired: snapshot.actionRequired,
+    requirements: snapshot.requirements,
+    submitDate: snapshot.submitDate,
+    sentDate: snapshot.sentDate,
+    modalPremium: snapshot.modalPremium,
+    anticipatedAnnualPremium: snapshot.anticipatedAnnualPremium,
+    submitMethod: snapshot.submitMethod,
+    caseManager: snapshot.caseManager,
+    agency: snapshot.agency,
+    writingAgentName: snapshot.writingAgentName,
+    writingAgentNumber: snapshot.writingAgentNumber,
+    companyCode: snapshot.companyCode,
+    raw: snapshot.raw as Prisma.InputJsonValue,
+    fetchedAt: input.fetchedAt,
+  }
+
+  return prisma.nationalLifeCaseSnapshot.upsert({
+    where: {
+      agentId_deploymentScope_gridKey_policyNo: {
         agentId: input.agentId,
         deploymentScope: input.deploymentScope,
         gridKey: input.gridKey,
         policyNo: snapshot.policyNo,
-        ...data,
       },
-      update: data,
-    })
-    written += 1
-  }
-
-  return { written }
+    },
+    create: {
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      gridKey: input.gridKey,
+      policyNo: snapshot.policyNo,
+      ...data,
+    },
+    update: data,
+  })
 }

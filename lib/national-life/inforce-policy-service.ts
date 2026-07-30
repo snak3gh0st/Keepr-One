@@ -120,27 +120,43 @@ export type PersistInforcePoliciesInput = {
   fetchedAt: Date
 }
 
+/// One round trip per chunk instead of per row. Ten thousand policies as
+/// individual awaited upserts took minutes, which is too slow to sit inside a
+/// scheduled job.
+const UPSERT_CHUNK_SIZE = 500
+
 export async function persistInforcePolicies(
   input: PersistInforcePoliciesInput,
 ): Promise<{ written: number }> {
   let written = 0
 
-  for (const snapshot of input.snapshots) {
-    const { raw, policyNumber, ...rest } = snapshot
-    const data = { ...rest, raw: raw as Prisma.InputJsonValue, fetchedAt: input.fetchedAt }
+  for (let offset = 0; offset < input.snapshots.length; offset += UPSERT_CHUNK_SIZE) {
+    const chunk = input.snapshots.slice(offset, offset + UPSERT_CHUNK_SIZE)
 
-    await prisma.nationalLifeInforcePolicy.upsert({
-      where: {
-        agentId_deploymentScope_policyNumber: {
-          agentId: input.agentId,
-          deploymentScope: input.deploymentScope,
-          policyNumber,
-        },
-      },
-      create: { agentId: input.agentId, deploymentScope: input.deploymentScope, policyNumber, ...data },
-      update: data,
-    })
-    written += 1
+    await prisma.$transaction(
+      chunk.map((snapshot) => {
+        const { raw, policyNumber, ...rest } = snapshot
+        const data = { ...rest, raw: raw as Prisma.InputJsonValue, fetchedAt: input.fetchedAt }
+
+        return prisma.nationalLifeInforcePolicy.upsert({
+          where: {
+            agentId_deploymentScope_policyNumber: {
+              agentId: input.agentId,
+              deploymentScope: input.deploymentScope,
+              policyNumber,
+            },
+          },
+          create: {
+            agentId: input.agentId,
+            deploymentScope: input.deploymentScope,
+            policyNumber,
+            ...data,
+          },
+          update: data,
+        })
+      }),
+    )
+    written += chunk.length
   }
 
   return { written }
