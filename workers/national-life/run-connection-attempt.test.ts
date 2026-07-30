@@ -72,6 +72,7 @@ function createDeps(options: {
   classifyError?: Error & { code?: string }
   encryptContextError?: Error
   closeFailures?: number
+  reconnectError?: Error
 }) {
   const calls: string[] = []
   let closeFailures = options.closeFailures ?? 0
@@ -148,6 +149,7 @@ function createDeps(options: {
     },
     async reconnectSession() {
       calls.push('steel:reconnect')
+      if (options.reconnectError) throw options.reconnectError
       return session as BrowserSession
     },
     async captureContext() {
@@ -225,6 +227,25 @@ describe('National Life interactive connection attempt runtime', () => {
       'steel:close',
     ])
     expect(test.completed()).toBe(true)
+  })
+
+  it('keeps MFA open when a transient reconnect fails', async () => {
+    const test = createDeps({
+      attempt: buildAttempt('AWAITING_MFA'),
+      reconnectError: Object.assign(
+        new Error('temporary Steel reconnect failure'),
+        { code: 'STEEL_RECONNECT_FAILED' },
+      ),
+    })
+
+    await runNationalLifeConnectionAttempt('attempt-1', test.deps)
+
+    expect(test.current()).toMatchObject({
+      state: 'AWAITING_MFA',
+      safeErrorCode: null,
+    })
+    expect(test.calls).toContain('attempt:release-lease')
+    expect(test.calls).not.toContain('steel:close')
   })
 
   it('leaves login open without releasing Steel', async () => {

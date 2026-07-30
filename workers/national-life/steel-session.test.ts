@@ -66,6 +66,7 @@ function createFakeSessionDeps(options?: {
   now?: string
   browserCloseFailures?: number
   releaseFailures?: number
+  connectBrowserError?: Error
   context?: SessionContext
 }) {
   const createSession =
@@ -152,7 +153,10 @@ function createFakeSessionDeps(options?: {
         },
       },
     }),
-    connectBrowser: async () => browser as never,
+    connectBrowser: async () => {
+      if (options?.connectBrowserError) throw options.connectBrowserError
+      return browser as never
+    },
     now: () => new Date(options?.now ?? '2026-07-27T12:00:00.000Z'),
   }
 
@@ -395,6 +399,60 @@ describe('National Life Steel session boundary', () => {
 
     await session.close()
     expect(fake.releaseCalls).toEqual(['steel-session-2'])
+  })
+
+  it('keeps a live Steel session when a reconnect transport fails', async () => {
+    const fake = createFakeSessionDeps({
+      retrieveSession: {
+        id: 'steel-session-retry',
+        debugUrl: 'https://steel.example/session/retry',
+        websocketUrl: 'wss://steel.example/devtools/session-retry',
+        status: 'live',
+      },
+      connectBrowserError: new Error('temporary browser transport failure'),
+    })
+
+    const reconnect = reconnectSteelBrowserSession(
+      {
+        steelSessionId: 'steel-session-retry',
+        debugUrl: 'https://steel.example/session/retry',
+        expiresAt: '2026-07-27T12:05:00.000Z',
+      },
+      buildEnv(),
+      fake.deps,
+    )
+
+    await expect(reconnect).rejects.toMatchObject({
+      code: 'STEEL_RECONNECT_FAILED',
+    })
+
+    expect(fake.releaseCalls).toEqual([])
+  })
+
+  it('preserves the origin-blocked error during reconnect', async () => {
+    const fake = createFakeSessionDeps({
+      retrieveSession: {
+        id: 'steel-session-origin',
+        debugUrl: 'https://steel.example/session/origin',
+        websocketUrl: 'wss://steel.example/devtools/session-origin',
+        status: 'live',
+      },
+      pageUrl: 'https://unexpected.example/login',
+    })
+
+    await expect(
+      reconnectSteelBrowserSession(
+        {
+          steelSessionId: 'steel-session-origin',
+          debugUrl: 'https://steel.example/session/origin',
+          expiresAt: '2026-07-27T12:05:00.000Z',
+        },
+        buildEnv(),
+        fake.deps,
+      ),
+    ).rejects.toMatchObject({ code: 'NAVIGATION_ORIGIN_BLOCKED' })
+
+    expect(fake.releaseCalls).toEqual([])
   })
 
   it('fails expired reconnects with MFA_SESSION_EXPIRED and releases the preserved Steel session', async () => {

@@ -307,6 +307,14 @@ async function monitorPortal(
     await session.close()
     return { kind: 'CONNECTED' }
   } catch (error) {
+    if (!session && isRetryableInteractiveFailure(attempt, error)) {
+      await deps.store.releaseLease(attempt.id)
+      return {
+        kind: 'INTERACTIVE',
+        state: attempt.state === 'AWAITING_MFA' ? 'AWAITING_MFA' : 'AWAITING_LOGIN',
+      }
+    }
+
     if (session) {
       await session.close()
     }
@@ -320,6 +328,21 @@ async function monitorPortal(
     })
     return { kind: 'TERMINAL', state: 'FAILED' }
   }
+}
+
+function isRetryableInteractiveFailure(
+  attempt: StoredConnectionAttempt,
+  error: unknown,
+) {
+  if (attempt.state !== 'AWAITING_LOGIN' && attempt.state !== 'AWAITING_MFA') {
+    return false
+  }
+
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'STEEL_RECONNECT_FAILED'
+  )
 }
 
 async function cleanupAttemptRecord(

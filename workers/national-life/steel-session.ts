@@ -55,6 +55,8 @@ export type SteelSessionDeps = {
 const DEFAULT_ROUTE_PATTERN = '**/*'
 const ABOUT_BLANK_URL = 'about:blank'
 const MFA_SESSION_EXPIRED_CODE = 'MFA_SESSION_EXPIRED'
+const NAVIGATION_ORIGIN_BLOCKED_CODE = 'NAVIGATION_ORIGIN_BLOCKED'
+const STEEL_RECONNECT_FAILED_CODE = 'STEEL_RECONNECT_FAILED'
 
 export function assertAllowedNavigation(targetUrl: string, allowedOrigins: readonly string[]): URL {
   let parsedUrl: URL
@@ -68,7 +70,11 @@ export function assertAllowedNavigation(targetUrl: string, allowedOrigins: reado
   const normalizedOrigins = normalizeAllowedOrigins(allowedOrigins)
 
   if (!normalizedOrigins.has(parsedUrl.origin)) {
-    throw new Error('Navigation origin is not allowed')
+    const error = new Error('Navigation origin is not allowed') as Error & {
+      code: string
+    }
+    error.code = NAVIGATION_ORIGIN_BLOCKED_CODE
+    throw error
   }
 
   return parsedUrl
@@ -153,8 +159,21 @@ export async function reconnectSteelBrowserSession(
   try {
     return await connectManagedSession(remoteSession, steelClient, env, deps)
   } catch (error) {
-    await safeReleaseSteelSession(steelClient, remoteSession.id)
-    throw error
+    // Keep the live carrier page available for the next poll after a transient
+    // reconnect transport failure during MFA.
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      (error as { code?: unknown }).code === NAVIGATION_ORIGIN_BLOCKED_CODE
+    ) {
+      throw error
+    }
+
+    const reconnectError = new Error('Steel browser reconnect failed') as Error & {
+      code: string
+    }
+    reconnectError.code = STEEL_RECONNECT_FAILED_CODE
+    throw reconnectError
   }
 }
 
