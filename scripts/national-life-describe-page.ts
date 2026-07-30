@@ -7,8 +7,10 @@
 //
 // Structure only: table headers, form field names, request URLs and shapes.
 // Never cell values — these pages hold real client and commission data.
+import { withBrowserLockWaiting } from '../lib/national-life/browser-lock'
 import { decryptBrowserContext } from '../lib/national-life/browser-context-crypto'
 import { getNationalLifeEnv } from '../lib/national-life/env'
+import { portalRoutesIn } from '../lib/national-life/portal-routes'
 import { prisma } from '../lib/prisma'
 import { createSteelBrowserSession } from '../workers/national-life/steel-session'
 
@@ -25,6 +27,7 @@ function stripTags(value: string) {
 function uniq(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)))
 }
+
 
 function describeHtml(html: string) {
   const tables = html.match(/<table[\s\S]*?<\/table>/gi) ?? []
@@ -64,6 +67,9 @@ function describeHtml(html: string) {
       ),
     ).slice(0, 15),
     dataAttributes: uniq((html.match(/\sdata-[a-z0-9-]+/gi) ?? []).map((a) => a.trim())).slice(0, 30),
+    // Reported in full rather than sampled: a truncated route list reads as a
+    // complete map of the portal and sends the next investigation guessing.
+    routes: portalRoutesIn(html),
     htmlChars: html.length,
   }
 }
@@ -106,58 +112,77 @@ async function main() {
     env.sessionKeys,
   )
 
-  const session = await createSteelBrowserSession(env, { sessionContext })
+  // Steel runs a single Chrome, so the keep-alive tick that fires every ten
+  // minutes would otherwise close this probe's browser mid-navigation — the
+  // failure that killed five probes and was misread as dead routes. Waiting
+  // rather than skipping: a probe is cheap to delay and costs a carrier hit to
+  // repeat.
+  const ran = await withBrowserLockWaiting(prisma, async () => {
+    const session = await createSteelBrowserSession(env, { sessionContext })
 
-  const requests: string[] = []
-  session.page.on('request', (request) => {
-    const type = request.resourceType()
-    if (type !== 'xhr' && type !== 'fetch') return
-    const url = request.url()
-    if (!url.includes('nationallife.com')) return
-    requests.push(
-      `${request.method()} ${maskDigits(url.split('?')[0])} body=${maskDigits(
-        (request.postData() ?? '').slice(0, 200),
-      )}`,
-    )
+    const requests: string[] = []
+    session.page.on('request', (request) => {
+      const type = request.resourceType()
+      if (type !== 'xhr' && type !== 'fetch') return
+      const url = request.url()
+      if (!url.includes('nationallife.com')) return
+      requests.push(
+        `${request.method()} ${maskDigits(url.split('?')[0])} body=${maskDigits(
+          (request.postData() ?? '').slice(0, 200),
+        )}`,
+      )
+    })
+
+    try {
+      for (const path of paths) {
+        requests.length = 0
+        const target = new URL(path, env.portalLoginUrl).toString()
+        try {
+          const response = await session.page.goto(target, {
+            waitUntil: 'domcontentloaded',
+            timeout: 45_000,
+          })
+          await session.page.waitForTimeout(8_000)
+          const html = await session.page.content()
+          console.log(
+            JSON.stringify(
+              {
+                path,
+                status: response?.status() ?? null,
+                landedOn: maskDigits(session.page.url()),
+                ...describeHtml(html),
+                xhr: uniq(requests).slice(0, 15),
+              },
+              null,
+              2,
+            ),
+          )
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              path,
+              failed: error instanceof Error ? error.message.split('\n')[0] : String(error),
+              xhr: uniq(requests).slice(0, 15),
+            }),
+          )
+        }
+      }
+    } finally {
+      await session.close()
+    }
+    return 'ran'
   })
 
-  try {
-    for (const path of paths) {
-      requests.length = 0
-      const target = new URL(path, env.portalLoginUrl).toString()
-      try {
-        const response = await session.page.goto(target, {
-          waitUntil: 'domcontentloaded',
-          timeout: 45_000,
-        })
-        await session.page.waitForTimeout(8_000)
-        const html = await session.page.content()
-        console.log(
-          JSON.stringify(
-            {
-              path,
-              status: response?.status() ?? null,
-              landedOn: maskDigits(session.page.url()),
-              ...describeHtml(html),
-              xhr: uniq(requests).slice(0, 15),
-            },
-            null,
-            2,
-          ),
-        )
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            path,
-            failed: error instanceof Error ? error.message.split('\n')[0] : String(error),
-            xhr: uniq(requests).slice(0, 15),
-          }),
-        )
-      }
-    }
-  } finally {
-    await session.close()
-    await prisma.$disconnect()
+  // Disconnecting inside the lock would drop the connection that holds it.
+  await prisma.$disconnect()
+
+  if (ran === null) {
+    // Non-zero: "another job held the browser" must not look like "probed and
+    // found nothing" to whatever ran this.
+    console.error(
+      JSON.stringify({ failed: 'another carrier browser job held the lock past the wait deadline' }),
+    )
+    process.exit(1)
   }
 }
 
