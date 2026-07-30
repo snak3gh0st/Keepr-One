@@ -8,9 +8,9 @@ import {
   ISSUE_STATES,
   RAPID_SOLVE_ALLOCATION,
   RAPID_SOLVE_PRODUCT_CODE,
-  RAPID_SOLVE_STRATEGY,
   RATE_CLASSES,
   SOLVE_TYPES,
+  STRATEGIES,
   toCarrierDate,
 } from '@/lib/national-life/rapid-solve'
 
@@ -27,6 +27,7 @@ const RATE_CLASS_VALUES = new Set<string>(Object.values(RATE_CLASSES))
 const GENDER_VALUES = new Set<string>(Object.values(GENDERS))
 const DEATH_BENEFIT_VALUES = new Set<string>(Object.values(DEATH_BENEFIT_OPTIONS))
 const ISSUE_STATE_VALUES = new Set<string>(ISSUE_STATES)
+const STRATEGY_VALUES = new Set<string>(Object.values(STRATEGIES))
 
 /// Asks National Life to price the illustration, instead of estimating it here.
 ///
@@ -50,6 +51,7 @@ export async function requestCarrierQuote(
   const rateClass = normalizeText(formData.get('rateClass') as string | null)
   const solveType = normalizeText(formData.get('solveType') as string | null)
   const deathBenefitOption = normalizeText(formData.get('deathBenefitOption') as string | null)
+  const strategy = normalizeText(formData.get('strategy') as string | null)
   const amount = Number(normalizeText(formData.get('amount') as string | null))
 
   if (!firstName) return { ok: false, message: 'Informe o nome.' }
@@ -77,6 +79,9 @@ export async function requestCarrierQuote(
   }
   if (!SOLVE_TYPE_VALUES.has(solveType)) {
     return { ok: false, message: 'Escolha o que a seguradora deve calcular.' }
+  }
+  if (!STRATEGY_VALUES.has(strategy)) {
+    return { ok: false, message: 'Escolha a estratégia de índice.' }
   }
 
   // The same field carries face amount or premium depending on the solve type,
@@ -111,9 +116,9 @@ export async function requestCarrierQuote(
         solveType,
         amount,
         deathBenefitOption,
-        // Neither is a choice: the dropdown offers one strategy, and picking it
-        // sets allocation to 100 in the carrier's own script.
-        strategy: RAPID_SOLVE_STRATEGY,
+        strategy,
+        // Not a choice: the request carries one strategy, and the carrier's
+        // script fills allocation with 100% the moment one is picked.
         allocation: RAPID_SOLVE_ALLOCATION,
         productCode: RAPID_SOLVE_PRODUCT_CODE,
       },

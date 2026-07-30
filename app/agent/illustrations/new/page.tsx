@@ -34,7 +34,8 @@ export default async function NewIllustrationPage() {
         <ContextPanel eyebrow="Dica rápida" title="O que enviar">
           <p>
             A seguradora precisa do nome, da data de nascimento, do estado de emissão, do sexo,
-            da classe de risco e da opção de benefício por morte. A idade ela mesma calcula.
+            da classe de risco, da opção de benefício por morte e da estratégia de índice.
+            A idade ela mesma calcula.
           </p>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Classe de risco</p>

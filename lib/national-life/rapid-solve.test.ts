@@ -5,6 +5,7 @@ import {
   RAPID_SOLVE_PRODUCT_CODE,
   RATE_CLASSES,
   SOLVE_TYPES,
+  STRATEGIES,
   buildRapidSolveRequest,
   issueAgeFrom,
   parseRapidSolveResponse,
@@ -95,6 +96,16 @@ describe('buildRapidSolveRequest', () => {
 
   it('offers only the two rate classes the screen has', () => {
     expect(Object.values(RATE_CLASSES)).toEqual(['Standard_NT', 'Standard_Tobacco'])
+  })
+
+  // A capped probe reported one strategy off a page with exactly sixty values.
+  // Hardcoding it would have left two thirds of the dropdown unreachable.
+  it('offers all three index strategies', () => {
+    expect(Object.values(STRATEGIES)).toEqual([
+      'SP500PointToPointCapFocus',
+      'SP500PointToPointParFocus',
+      'SP500PointToPointOnePercentFloor',
+    ])
   })
 
   // New York is not on the carrier's list. A prospect there has to be turned

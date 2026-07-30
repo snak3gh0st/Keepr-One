@@ -100,10 +100,13 @@ export function renderedOptions(html: string): Record<string, string[]> {
     ).slice(0, 60)
   }
 
+  // Not capped. An earlier run came back with exactly 60 values against a
+  // 60-item cap, which is what truncation looks like — and the cut fell on the
+  // strategy list, which decides whether the screen asks for a strategy at all.
   for (const match of html.matchAll(
     /data-(?:value|option|product)=["']([^"']{1,60})["']/gi,
   )) {
-    result['data-attributes'] = uniq([...(result['data-attributes'] ?? []), match[1]]).slice(0, 60)
+    result['data-attributes'] = uniq([...(result['data-attributes'] ?? []), match[1]])
   }
 
   return result

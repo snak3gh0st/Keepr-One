@@ -10,6 +10,7 @@ import {
   ISSUE_STATES,
   RATE_CLASSES,
   SOLVE_TYPES,
+  STRATEGIES,
 } from "@/lib/national-life/rapid-solve";
 import { requestCarrierQuote } from "./new/actions";
 import { useRapidSolveQuote } from "./useRapidSolveQuote";
@@ -138,6 +139,16 @@ export function NewIllustrationForm() {
             </option>
             <option value={DEATH_BENEFIT_OPTIONS.LEVEL}>A — nivelado</option>
             <option value={DEATH_BENEFIT_OPTIONS.INCREASING}>B — crescente</option>
+          </Select>
+        </Field>
+        <Field label="Estratégia de índice">
+          <Select name="strategy" required defaultValue="" className="w-full">
+            <option value="" disabled>
+              Selecione...
+            </option>
+            <option value={STRATEGIES.CAP_FOCUS}>S&P 500 — foco em teto</option>
+            <option value={STRATEGIES.PAR_FOCUS}>S&P 500 — foco em participação</option>
+            <option value={STRATEGIES.ONE_PERCENT_FLOOR}>S&P 500 — piso de 1%</option>
           </Select>
         </Field>
 

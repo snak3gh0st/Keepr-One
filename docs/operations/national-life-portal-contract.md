@@ -685,7 +685,10 @@ Detalhes que mudam a implementação:
   por engano — enviá-los produz recusa da seguradora, que se lê como "não
   consigo cotar" em vez de "você perguntou errado".
 
-Valores que a tela aceita, lidos dos `data-value`:
+Valores que a tela aceita, lidos dos `data-value`. A primeira sonda limitou a
+lista a sessenta itens e a página tem exatamente sessenta valores — o corte caiu
+na lista de estratégias e reportou uma só. Ao ler listas desta página, não
+truncar: bater no limite é indistinguível de a lista terminar ali.
 
 | campo | valores |
 | --- | --- |
@@ -693,7 +696,7 @@ Valores que a tela aceita, lidos dos `data-value`:
 | `RateClass` | `Standard_NT`, `Standard_Tobacco` — não há preferencial nem agravado |
 | `Gender` | `Male`, `Female` |
 | `DeathBenefitOption` | `A_Level`, `B_Increasing` |
-| `Strategy` | `SP500PointToPointCapFocus` — única; escolhê-la fixa `Allocation` em 100 |
+| `Strategy` | `SP500PointToPointCapFocus`, `SP500PointToPointParFocus`, `SP500PointToPointOnePercentFloor` — escolher uma fixa `Allocation` em 100 |
 | `IssueState` | 50 valores. **Nova York não está na lista** — não é omissão, não é oferecido |
 - Existe também `/agent/RapidSolve/EAppSsoRedirect`, que leva a cotação para o
   e-App. É **escrita** e não foi tocado.

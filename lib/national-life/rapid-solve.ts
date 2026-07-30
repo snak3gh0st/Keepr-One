@@ -49,9 +49,20 @@ export const GENDERS = {
   FEMALE: 'Female',
 } as const
 
-/// The single strategy the dropdown offers. Choosing it sets allocation to
-/// 100% in the carrier's own script, so there is nothing to divide.
-export const RAPID_SOLVE_STRATEGY = 'SP500PointToPointCapFocus'
+/// The three index strategies the dropdown offers.
+///
+/// A first probe reported one, because its option list was capped at sixty and
+/// the page has exactly sixty values — the cut landed on this list. Hardcoding
+/// the first would have left agents unable to quote the other two while the
+/// code claimed there were no others.
+export const STRATEGIES = {
+  CAP_FOCUS: 'SP500PointToPointCapFocus',
+  PAR_FOCUS: 'SP500PointToPointParFocus',
+  ONE_PERCENT_FLOOR: 'SP500PointToPointOnePercentFloor',
+} as const
+
+/// The request carries one strategy, and the carrier's script fills allocation
+/// with 100% the moment one is chosen. There is nothing to divide between.
 export const RAPID_SOLVE_ALLOCATION = 100
 
 /// The states the screen will issue in. New York is absent — it is not an
