@@ -318,6 +318,10 @@ export function describeUnexpectedFailure(error: unknown): unknown {
       // The first frame is usually enough to say which of our files threw,
       // and the rest is noise from the runtime's own internals.
       at: withoutUrls((error.stack ?? '').split('\n')[1]?.trim() ?? ''),
+      // Where an adapter error keeps the fact that matters — the HTTP status
+      // the carrier answered with. Dropping it left "the carrier did not
+      // answer" without saying how it did not answer.
+      detail: getErrorSafeDetail(error),
     })
   }
 
@@ -361,7 +365,10 @@ async function handleFailure(
     jobId: job.id,
     from: 'RUNNING',
     to: 'FAILED',
-    safeErrorCode: 'UNEXPECTED_WORKER_FAILURE',
+    // When our own code named the failure, say that name. Overwriting
+    // `RAPID_SOLVE_REQUEST_FAILED` with `UNEXPECTED_WORKER_FAILURE` threw away
+    // the one word that said where to look.
+    safeErrorCode: code ?? 'UNEXPECTED_WORKER_FAILURE',
     safeErrorDetail: describeUnexpectedFailure(error),
   })
 }
