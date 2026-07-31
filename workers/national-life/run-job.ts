@@ -53,6 +53,10 @@ export type StoredAgentIntegrationSession = {
   carrierExpiresAt: Date | null
   lastConnectedAt: Date
   lastUsedAt: Date | null
+  /// The browser the human logged in on, if it is still being held. Null means
+  /// no live browser — the ordinary state, and the one that existed before this
+  /// field: the job builds its own from the stored context.
+  liveSteelSessionId: string | null
 }
 
 type NationalLifeJobAdapter = {
@@ -115,6 +119,14 @@ export type NationalLifeRunJobDeps = {
     storedSession: StoredAgentIntegrationSession,
   ): SessionContext
   createSession(sessionContext: SessionContext): Promise<BrowserSession>
+  /// Reattaches to the browser the human logged in on, when one is still held.
+  ///
+  /// This is the difference between a browser that already holds the
+  /// illustration tool's token in page memory and one that does not: a rebuilt
+  /// browser has to cross the identity provider again, and crossing is what
+  /// burns the carrier session. Failure here is ordinary — the browser may be
+  /// long gone — and falls back to `createSession`.
+  reattachSession(steelSessionId: string): Promise<BrowserSession>
   createAdapter(session: BrowserSession): NationalLifeJobAdapter
   /// Serialises against every other thing that opens the carrier browser —
   /// the connection-attempt loop in this process and the cron scripts in
@@ -408,6 +420,29 @@ async function handleFailure(
   })
 }
 
+/// The browser this job will drive.
+///
+/// Prefers the one the human logged in on, because it still holds the
+/// illustration tool's in-memory token; falls back to building one from the
+/// stored cookies, which is what every job did before the browser was kept.
+/// The fallback is not a degraded mode to be alarmed about — it is the old
+/// behaviour, and it is correct, just more expensive at the identity provider.
+async function openCarrierBrowser(
+  storedSession: StoredAgentIntegrationSession,
+  sessionContext: SessionContext,
+  deps: NationalLifeRunJobDeps,
+): Promise<BrowserSession> {
+  if (storedSession.liveSteelSessionId) {
+    try {
+      return await deps.reattachSession(storedSession.liveSteelSessionId)
+    } catch {
+      // Gone: Steel restarted, the session hit its ceiling, or the day rolled
+      // over. Nothing to report — the cookies still work.
+    }
+  }
+  return deps.createSession(sessionContext)
+}
+
 export async function runNationalLifeJob(
   jobId: string,
   deps: NationalLifeRunJobDeps,
@@ -471,7 +506,7 @@ export async function runNationalLifeJob(
       let browserSession: BrowserSession | undefined
 
       try {
-        browserSession = await deps.createSession(sessionContext)
+        browserSession = await openCarrierBrowser(storedSession!, sessionContext, deps)
         const adapter = deps.createAdapter(browserSession)
         // A restored session opens blank, and the authentication check reads
         // the page's origin — so without this every job failed before doing

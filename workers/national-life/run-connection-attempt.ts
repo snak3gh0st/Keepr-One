@@ -52,6 +52,17 @@ export type CompleteAttemptInput = {
   workerId: string
   encryptedContext: EncryptedBrowserSecret
   carrierExpiresAt: Date | null
+  /// The Steel session the human logged in on, handed over rather than closed.
+  ///
+  /// The illustration tool keeps its token in the page's memory, so a browser
+  /// rebuilt from cookies wakes up without one and has to cross the identity
+  /// provider again — which is what kept burning the session. Jobs reattach to
+  /// this one instead.
+  ///
+  /// Null is a legitimate value, not a failure: it means no live browser was
+  /// handed over and every job builds its own from the stored context, which is
+  /// exactly the behaviour that existed before.
+  liveSteelSessionId: string | null
   now: Date
 }
 
@@ -365,9 +376,18 @@ async function monitorPortal(
       workerId: deps.workerId,
       encryptedContext,
       carrierExpiresAt: null,
+      liveSteelSessionId: session.steelSessionId,
       now: deps.now(),
     })
-    await safeClose(session)
+    // Disconnect, never close. This is the browser the human just authenticated
+    // on, and the illustration tool's token lives in its page memory — closing
+    // it here is what forced every later job to cross the identity provider
+    // again, which is what burns the carrier session. Dropping only the local
+    // CDP client leaves the browser standing for the jobs to reattach to.
+    //
+    // The cookies were captured above regardless, so if this browser is gone by
+    // the time a job looks for it, the job builds its own and nothing is lost.
+    await safeDisconnect(session)
     return { kind: 'CONNECTED' }
   } catch (error) {
     const interactiveState = interactiveStateOf(attempt)

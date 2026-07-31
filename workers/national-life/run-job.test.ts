@@ -129,6 +129,7 @@ function buildStoredSession(
     carrierExpiresAt: new Date('2026-07-28T20:00:00.000Z'),
     lastConnectedAt: now,
     lastUsedAt: null,
+    liveSteelSessionId: null,
     ...overrides,
   }
 }
@@ -204,6 +205,7 @@ function createDeps(options: {
   renderForesightReport?: () => { caseName: string; bytes: Buffer; mimeType: string } | null
   browserBusy?: boolean
   saveContext?: () => void
+  reattachError?: Error
 }) {
   const store = createStore(options.job ?? buildJob())
   const calls: string[] = []
@@ -213,6 +215,7 @@ function createDeps(options: {
   const quoteRequests: RapidSolveRequest[] = []
   const savedIllustrations: Array<{ insuredName: string }> = []
   const savedContexts: Array<{ sessionId: string; context: SessionContext }> = []
+  const reattached: string[] = []
 
   return {
     calls,
@@ -223,6 +226,7 @@ function createDeps(options: {
     quoteRequests,
     savedIllustrations,
     savedContexts,
+    reattached,
     deps: {
       env: buildEnv(),
       workerId: 'worker-1',
@@ -255,6 +259,12 @@ function createDeps(options: {
         calls.push('context:decrypt')
         expect(session.id).toBe('integration-session-1')
         return restoredContext
+      },
+      async reattachSession(steelSessionId: string) {
+        calls.push('steel:reattach')
+        reattached.push(steelSessionId)
+        if (options.reattachError) throw options.reattachError
+        return browser.session
       },
       async createSession(sessionContext: SessionContext) {
         calls.push('steel:create-restored')
@@ -590,6 +600,38 @@ describe('National Life restored-context job orchestration', () => {
     await runNationalLifeJob('job-1', test.deps)
 
     expect(test.calls).toContain('browser:close')
+    expect(test.deps.jobStore.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
+  })
+
+  // The browser the human logged in on holds the illustration tool's token in
+  // page memory, so reattaching to it is the whole point: a browser rebuilt
+  // from cookies has to cross the identity provider again, and crossing is what
+  // burns the carrier session.
+  it('reattaches to the browser the human logged in on', async () => {
+    const test = createDeps({
+      storedSession: buildStoredSession({ liveSteelSessionId: 'steel-live-1' }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.reattached).toEqual(['steel-live-1'])
+    expect(test.calls).not.toContain('steel:create-restored')
+    expect(test.deps.jobStore.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
+  })
+
+  // The held browser can be gone — Steel restarted, the session timed out, the
+  // day rolled over. Falling back to the cookies is exactly what happened
+  // before this existed, so the worst case is the old behaviour and never less.
+  it('falls back to a fresh browser when the held one is gone', async () => {
+    const test = createDeps({
+      storedSession: buildStoredSession({ liveSteelSessionId: 'steel-live-1' }),
+      reattachError: new Error('steel session not found'),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.reattached).toEqual(['steel-live-1'])
+    expect(test.calls).toContain('steel:create-restored')
     expect(test.deps.jobStore.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
   })
 

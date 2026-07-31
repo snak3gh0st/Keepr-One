@@ -460,6 +460,26 @@ model AgentIntegrationSession {
   // here predicts the next one.
   illustrationSsoReachable  Boolean?
   illustrationSsoCheckedAt  DateTime?
+  /// The browser the human actually logged in on, kept alive instead of thrown
+  /// away.
+  ///
+  /// The illustration tool's token lives in the page's memory — `auth0-spa-js`
+  /// defaults to `cacheLocation: memory`, and the stored context confirms it:
+  /// the identity provider's `localStorage` holds only orphaned `/authorize`
+  /// transactions, never a cached token. So a browser rebuilt from cookies
+  /// wakes up without one and has to cross the identity provider again, which
+  /// is what has been burning the session. The browser that logged in is the
+  /// one that has the token, so jobs reattach to it.
+  ///
+  /// Stored in the clear on purpose: Steel has no public route and lives on a
+  /// private Docker network, so the handle is useless without access there —
+  /// and anyone who has that already has the running browser. Encrypting it
+  /// beside a cookie jar that grants the same access would be ceremony.
+  ///
+  /// Null is the ordinary state, not an error: it means no live browser is
+  /// held and every job builds its own from the stored context, exactly as
+  /// before this column existed.
+  liveSteelSessionId String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

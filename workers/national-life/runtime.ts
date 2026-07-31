@@ -237,6 +237,7 @@ const integrationSessionSelect = {
   carrierExpiresAt: true,
   lastConnectedAt: true,
   lastUsedAt: true,
+  liveSteelSessionId: true,
 } satisfies Prisma.AgentIntegrationSessionSelect
 
 function normalizedAttempt(
@@ -387,6 +388,7 @@ function createAttemptStore(
             ciphertext: input.encryptedContext.ciphertext,
             authTag: input.encryptedContext.authTag,
             carrierExpiresAt: input.carrierExpiresAt,
+            liveSteelSessionId: input.liveSteelSessionId,
             lastConnectedAt: input.now,
             lastUsedAt: null,
           },
@@ -399,6 +401,7 @@ function createAttemptStore(
             ciphertext: input.encryptedContext.ciphertext,
             authTag: input.encryptedContext.authTag,
             carrierExpiresAt: input.carrierExpiresAt,
+            liveSteelSessionId: input.liveSteelSessionId,
             lastConnectedAt: input.now,
             lastUsedAt: null,
           },
@@ -588,6 +591,16 @@ function createJobRunner(env: NationalLifeEnv) {
       sessionStore,
       createSession: (sessionContext) =>
         createSteelBrowserSession(env, { sessionContext }),
+      // The debug URL is only meaningful to the viewer broker, which is not in
+      // play for a queued job; the id is what identifies the browser to Steel.
+      // `debugUrl` and `expiresAt` only mean something to the viewer broker,
+      // which is not in play for a queued job. The id is what identifies the
+      // browser to Steel, and Steel's own timeout is what ends it.
+      reattachSession: (steelSessionId) =>
+        reconnectSteelBrowserSession(
+          { steelSessionId, debugUrl: '', expiresAt: new Date(0).toISOString() },
+          env,
+        ),
       captureContext: (session) =>
         captureSteelSessionContext(session.steelSessionId, env),
       createAdapter: (session) =>
