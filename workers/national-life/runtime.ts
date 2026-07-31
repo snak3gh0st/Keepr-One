@@ -559,6 +559,22 @@ function createJobRunner(env: NationalLifeEnv) {
       // process never exits, so a leaked lock here would be permanent.
       runExclusively: (work) => withOwnedBrowserLockWaiting(createLockClient, work),
       saveIllustration: (input) => saveRapidSolveIllustration(input, prisma),
+      // Guarded on the row still existing: the agent can delete a quote while
+      // the carrier is still rendering it, and an update that matches nothing
+      // is the right outcome there, not a failed job.
+      saveIllustrationDocument: async (input) => {
+        await prisma.illustration.updateMany({
+          where: { id: input.illustrationId },
+          data: {
+            // Prisma wants a plain Uint8Array; a Node Buffer is one, but its
+            // backing store is typed loosely enough that the compiler will not
+            // take it as given.
+            documentBytes: new Uint8Array(input.bytes),
+            documentMimeType: input.mimeType,
+            documentFetchedAt: input.fetchedAt,
+          },
+        })
+      },
       applyCaseObservation,
     }).then(() => undefined)
 }

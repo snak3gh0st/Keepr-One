@@ -188,6 +188,7 @@ function createDeps(options: {
   assertAuthenticated?: () => Promise<void>
   readCase?: () => Promise<NationalLifeCaseObservation>
   requestRapidSolveQuote?: () => Promise<RapidSolveQuote | RapidSolveFailure>
+  renderForesightReport?: () => { caseName: string; bytes: Buffer; mimeType: string } | null
   browserBusy?: boolean
 }) {
   const store = createStore(options.job ?? buildJob())
@@ -236,6 +237,12 @@ function createDeps(options: {
         return browser.session
       },
       createAdapter: () => ({
+        async renderForesightReport() {
+          calls.push('foresight:render')
+          return options.renderForesightReport === undefined
+            ? { caseName: 'RP-Teste-QQ-1', bytes: Buffer.from('%PDF-1.7'), mimeType: 'application/pdf' }
+            : options.renderForesightReport()
+        },
         async openPortalHome() {
           calls.push('adapter:open-portal')
         },
@@ -285,6 +292,9 @@ function createDeps(options: {
         calls.push('illustration:save')
         savedIllustrations.push(saved)
         return { illustrationId: 'illustration-1' }
+      },
+      async saveIllustrationDocument() {
+        calls.push('illustration:document')
       },
       async applyCaseObservation() {
         calls.push('sync:apply')
@@ -468,6 +478,46 @@ describe('National Life restored-context job orchestration', () => {
   // the answer, so the job succeeded — it asked and got a reply. Failing here
   // would send the sentence through error redaction and leave the agent with a
   // code instead of a reason.
+  // The PDF arrives long after the numbers did, from a different carrier
+  // system, so it is filed on the row rather than returned as a job result.
+  it('files the rendered PDF on the illustration it belongs to', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'GENERATE_ILLUSTRATION_PDF',
+        caseId: null,
+        input: { illustrationId: 'illustration-1' },
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls).toContain('foresight:render')
+    expect(test.calls).toContain('illustration:document')
+    expect(test.deps.jobStore.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
+  })
+
+  // A case the carrier cannot find is an answer, not a crash: the quote may
+  // predate the tool ever seeing it. Failing would route a plain "not there"
+  // through error redaction and leave the agent with a code.
+  it('succeeds without a document when the carrier has no such case', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'GENERATE_ILLUSTRATION_PDF',
+        caseId: null,
+        input: { illustrationId: 'illustration-1' },
+      }),
+      renderForesightReport: () => null,
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls).not.toContain('illustration:document')
+    expect(test.deps.jobStore.transitions.at(-1)).toMatchObject({
+      to: 'SUCCEEDED',
+      result: { rendered: false },
+    })
+  })
+
   it('keeps the priced quote, so closing the tab does not lose it', async () => {
     const test = createDeps({ job: buildQuoteJob() })
 

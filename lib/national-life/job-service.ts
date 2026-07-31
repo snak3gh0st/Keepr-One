@@ -63,10 +63,21 @@ export type RapidSolveQuoteJobInput = {
   clientId?: string
 }
 
+/// Asks the carrier to render an illustration it already holds as a case.
+///
+/// Carries the illustration row rather than the carrier's case name because the
+/// row is what the document has to end up on; the case name is how Foresight
+/// finds it, and a quick quote is named RP-<surname>-QQ-<stamp> on their side.
+export type IllustrationPdfJobInput = {
+  illustrationId: string
+  caseNameFragment?: string
+}
+
 export type BrowserJobInput =
   | ConnectionTestJobInput
   | CaseReadSyncJobInput
   | RapidSolveQuoteJobInput
+  | IllustrationPdfJobInput
 
 /// Three outcomes the screen has to tell apart, and it must not collapse them.
 /// ANSWERED means the carrier replied — including a reply that refuses to

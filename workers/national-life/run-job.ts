@@ -7,6 +7,7 @@ import type { NationalLifeEnv } from '../../lib/national-life/env'
 import type {
   BrowserJobRecord,
   CaseReadSyncJobInput,
+  IllustrationPdfJobInput,
   RapidSolveQuoteJobInput,
 } from '../../lib/national-life/job-service'
 import {
@@ -63,6 +64,9 @@ type NationalLifeJobAdapter = {
   requestRapidSolveQuote(
     request: RapidSolveRequest,
   ): Promise<RapidSolveQuote | RapidSolveFailure>
+  renderForesightReport(
+    caseNameFragment?: string,
+  ): Promise<{ caseName: string; bytes: Buffer; mimeType: string } | null>
 }
 
 export type NationalLifeJobStore = {
@@ -115,6 +119,15 @@ export type NationalLifeRunJobDeps = {
     quote: RapidSolveQuote
     request: RapidSolveRequest
   }): Promise<{ illustrationId: string }>
+  /// Files the rendered PDF on the illustration it belongs to. Separate from
+  /// saveIllustration because the document arrives long after the numbers did,
+  /// from a different carrier system, and may never arrive at all.
+  saveIllustrationDocument(input: {
+    illustrationId: string
+    bytes: Buffer
+    mimeType: string
+    fetchedAt: Date
+  }): Promise<void>
   applyCaseObservation(input: {
     agentId: string
     caseId: string
@@ -142,6 +155,12 @@ function isRapidSolveQuoteInput(
   input: BrowserJobRecord['input'],
 ): input is RapidSolveQuoteJobInput {
   return 'solveType' in input && 'productCode' in input
+}
+
+function isIllustrationPdfInput(
+  input: BrowserJobRecord['input'],
+): input is IllustrationPdfJobInput {
+  return 'illustrationId' in input
 }
 
 /// Rebuilds the carrier request from the row. The date crossed the queue as the
@@ -393,8 +412,12 @@ export async function runNationalLifeJob(
       : null
   const caseInput =
     job.operation === 'SYNC_CASE_READ' && isCaseReadSyncInput(job.input) ? job.input : null
+  const pdfInput =
+    job.operation === 'GENERATE_ILLUSTRATION_PDF' && isIllustrationPdfInput(job.input)
+      ? job.input
+      : null
 
-  if (!quoteInput && !caseInput) {
+  if (!quoteInput && !caseInput && !pdfInput) {
     await deps.jobStore.transitionJob({
       jobId: job.id,
       from: 'RUNNING',
@@ -472,6 +495,32 @@ export async function runNationalLifeJob(
             from: 'RUNNING',
             to: 'SUCCEEDED',
             result: quote,
+          })
+        } else if (pdfInput) {
+          // The carrier holds the case; we hold the row it belongs to. A case
+          // it cannot find is an answer, not a crash — the quote may predate
+          // the tool ever seeing it — so it succeeds with `rendered: false`
+          // rather than routing a plain "not there" through error redaction.
+          const rendered = await adapter.renderForesightReport(pdfInput.caseNameFragment)
+
+          if (rendered) {
+            await deps.saveIllustrationDocument({
+              illustrationId: pdfInput.illustrationId,
+              bytes: rendered.bytes,
+              mimeType: rendered.mimeType,
+              fetchedAt: deps.now(),
+            })
+          }
+
+          await deps.jobStore.transitionJob({
+            jobId: job.id,
+            from: 'RUNNING',
+            to: 'SUCCEEDED',
+            // Never the bytes: a job result is read back into the UI and a
+            // megabyte and a half of PDF does not belong in it.
+            result: rendered
+              ? { rendered: true, caseName: rendered.caseName, bytes: rendered.bytes.byteLength }
+              : { rendered: false },
           })
         } else if (caseInput) {
           const observation = await adapter.readCase(caseInput.lookup)
