@@ -79,14 +79,56 @@ describe('NationalLifeConnectionCard', () => {
           lastConnectedAt: '2026-07-28T12:00:00.000Z',
           lastUsedAt: '2026-07-28T12:05:00.000Z',
           carrierExpiresAt: '2026-07-28T20:00:00.000Z',
+          illustrationSsoReachable: true,
+          illustrationSsoCheckedAt: '2026-07-28T12:05:00.000Z',
         }}
       />,
     )
 
     expect(screen.getByText('Conectada')).toBeInTheDocument()
     expect(screen.getByText('Última conexão')).toBeInTheDocument()
-    expect(screen.getByText('Último uso')).toBeInTheDocument()
+    expect(screen.getByText('Última verificação')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Desconectar' })).toBeInTheDocument()
+  })
+
+  it('never offers a session deadline, because the value behind it is a bot cookie', () => {
+    render(
+      <NationalLifeConnectionCard
+        summary={{
+          provider: 'NATIONAL_LIFE',
+          status: 'CONNECTED',
+          lastConnectedAt: '2026-07-28T12:00:00.000Z',
+          lastUsedAt: '2026-07-28T12:05:00.000Z',
+          carrierExpiresAt: '2026-07-28T20:00:00.000Z',
+          illustrationSsoReachable: null,
+          illustrationSsoCheckedAt: null,
+        }}
+      />,
+    )
+
+    expect(screen.queryByText('Validade da sessão')).not.toBeInTheDocument()
+    // Nothing crossed the SSO jump yet, which is not the same as knowing it is
+    // unreachable — the card must not claim either way.
+    expect(screen.getByText('Não verificada')).toBeInTheDocument()
+  })
+
+  it('says the illustration is out of reach when the last jump hit the login wall', () => {
+    render(
+      <NationalLifeConnectionCard
+        summary={{
+          provider: 'NATIONAL_LIFE',
+          status: 'CONNECTED',
+          lastConnectedAt: '2026-07-28T12:00:00.000Z',
+          lastUsedAt: '2026-07-28T12:05:00.000Z',
+          carrierExpiresAt: null,
+          illustrationSsoReachable: false,
+          illustrationSsoCheckedAt: '2026-07-28T12:05:00.000Z',
+        }}
+      />,
+    )
+
+    expect(screen.getByText('Ilustração (Foresight)')).toBeInTheDocument()
+    expect(screen.getByText('Requer novo login')).toBeInTheDocument()
   })
 
   it('closes after authentication, refreshes the summary, and announces success', async () => {

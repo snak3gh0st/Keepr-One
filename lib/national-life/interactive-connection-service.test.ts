@@ -162,6 +162,8 @@ function createMemoryRepository() {
         carrierExpiresAt: input.carrierExpiresAt,
         lastConnectedAt: input.now,
         lastUsedAt: null,
+      illustrationSsoReachable: null,
+      illustrationSsoCheckedAt: null,
       })
       calls.push('attempt:delete')
       attempts.delete(attemptKey(input.agentId))
@@ -415,6 +417,8 @@ describe('National Life owned interactive connection service', () => {
       lastConnectedAt: now,
       lastUsedAt: null,
       carrierExpiresAt: null,
+      illustrationSsoReachable: null,
+      illustrationSsoCheckedAt: null,
     })
     expect(JSON.stringify(summary)).not.toMatch(/cipher|runtime|nonce|debug|steel/i)
   })

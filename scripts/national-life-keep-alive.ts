@@ -154,6 +154,20 @@ async function main() {
       } catch (error) {
         ssoJump = { failed: String(error).split('\n')[0].slice(0, 200) }
       }
+
+      // Recorded so the agent can be told the illustration is out of reach
+      // before clicking towards a PDF that will not come. Only written when the
+      // jump actually produced a verdict: a navigation failure knows nothing,
+      // and nothing is worse than false confidence in either direction.
+      if (typeof ssoJump.authenticated === 'boolean') {
+        await prisma.agentIntegrationSession.updateMany({
+          where: { id: stored.id, deploymentScope: env.sessionScopeId, status: 'CONNECTED' },
+          data: {
+            illustrationSsoReachable: ssoJump.authenticated,
+            illustrationSsoCheckedAt: new Date(),
+          },
+        })
+      }
     }
 
     // Captured after the jump so a renewed Auth0 cookie is what gets stored.

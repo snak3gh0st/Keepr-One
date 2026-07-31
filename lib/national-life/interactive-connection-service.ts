@@ -48,8 +48,16 @@ export type AgentSessionSummary = {
   provider: 'NATIONAL_LIFE'
   status: 'CONNECTED' | 'SESSION_EXPIRED'
   lastConnectedAt: Date
+  /// Written only after an authenticated page answered, so it is a timestamped
+  /// successful check and not merely "we tried".
   lastUsedAt: Date | null
+  /// Derived from the shortest cookie expiry, measured to be Cloudflare's bot
+  /// cookie. Kept for diagnostics; never presented as a session deadline.
   carrierExpiresAt: Date | null
+  /// What the last keep-alive tick found on the far side of the SSO jump, or
+  /// null when no tick has crossed it. Says nothing about the next tick.
+  illustrationSsoReachable: boolean | null
+  illustrationSsoCheckedAt: Date | null
 }
 
 export type AgentSessionHealth = {
@@ -98,6 +106,8 @@ export type StoredIntegrationSession = {
   carrierExpiresAt: Date | null
   lastConnectedAt: Date
   lastUsedAt: Date | null
+  illustrationSsoReachable: boolean | null
+  illustrationSsoCheckedAt: Date | null
 }
 
 export type InteractiveConnectionRepository = {
@@ -228,6 +238,8 @@ const sessionSelect = {
   carrierExpiresAt: true,
   lastConnectedAt: true,
   lastUsedAt: true,
+  illustrationSsoReachable: true,
+  illustrationSsoCheckedAt: true,
 } satisfies Prisma.AgentIntegrationSessionSelect
 
 function normalizeAttempt(
@@ -879,6 +891,8 @@ export async function getAgentSessionSummary(
     lastConnectedAt: session.lastConnectedAt,
     lastUsedAt: session.lastUsedAt,
     carrierExpiresAt: session.carrierExpiresAt,
+    illustrationSsoReachable: session.illustrationSsoReachable,
+    illustrationSsoCheckedAt: session.illustrationSsoCheckedAt,
   }
 }
 

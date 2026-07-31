@@ -14,11 +14,12 @@ import type { ActiveNationalLifeAttempt } from './useNationalLifeConnectionAttem
 
 type SerializableSessionSummary = Omit<
   AgentSessionSummary,
-  'lastConnectedAt' | 'lastUsedAt' | 'carrierExpiresAt'
+  'lastConnectedAt' | 'lastUsedAt' | 'carrierExpiresAt' | 'illustrationSsoCheckedAt'
 > & {
   lastConnectedAt: Date | string
   lastUsedAt: Date | string | null
   carrierExpiresAt: Date | string | null
+  illustrationSsoCheckedAt: Date | string | null
 }
 
 function formatDateTime(value: Date | string | null) {
@@ -146,19 +147,41 @@ export function NationalLifeConnectionCard({
             </div>
             <div className="px-5 py-4 sm:px-6">
               <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                Último uso
+                Última verificação
               </dt>
+              {/* Written only after an authenticated page answered, so this is a
+                  successful check and not merely the last attempt. It replaced a
+                  "Validade da sessão" that was showing Cloudflare's 30-minute bot
+                  cookie: the portal answered authenticated three minutes past it.
+                  No cookie predicts when the session dies — only a check. */}
               <dd className="mt-2 font-mono text-sm text-ink">
                 {formatDateTime(summary.lastUsedAt)}
               </dd>
             </div>
             <div className="px-5 py-4 sm:px-6">
               <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                Validade da sessão
+                Ilustração (Foresight)
               </dt>
-              <dd className="mt-2 font-mono text-sm text-ink">
-                {formatDateTime(summary.carrierExpiresAt)}
+              {/* The PDF path sits behind the carrier's Auth0 tenant, which dies
+                  while the portal session lives. Knowing before clicking beats
+                  finding out at the login wall. Null is its own answer: nothing
+                  has crossed the jump, which is not the same as unreachable. */}
+              <dd
+                className={`mt-2 font-mono text-sm ${
+                  summary.illustrationSsoReachable === false ? 'text-gold' : 'text-ink'
+                }`}
+              >
+                {summary.illustrationSsoReachable === null
+                  ? 'Não verificada'
+                  : summary.illustrationSsoReachable
+                    ? 'Disponível'
+                    : 'Requer novo login'}
               </dd>
+              {summary.illustrationSsoCheckedAt && (
+                <p className="mt-1 text-xs text-ink-muted">
+                  em {formatDateTime(summary.illustrationSsoCheckedAt)}
+                </p>
+              )}
             </div>
           </dl>
         )}

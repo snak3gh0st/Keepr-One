@@ -445,9 +445,20 @@ model AgentIntegrationSession {
   iv                 String?
   ciphertext         String?
   authTag            String?
+  // Derived from the shortest cookie expiry, which measured on 2026-07-31 is
+  // Cloudflare's 30-minute bot cookie — the portal answered authenticated three
+  // minutes past it. Kept because the probe output references it, but it is not
+  // a session deadline and is no longer shown as one.
   carrierExpiresAt   DateTime?
   lastConnectedAt    DateTime
   lastUsedAt         DateTime?
+  // The illustration path (Foresight) sits behind the carrier's Auth0 tenant,
+  // whose session dies while the portal session lives. Each keep-alive tick
+  // that crosses the SSO jump records what it found, so the agent learns the
+  // PDF is out of reach before clicking towards it. Last tick only — nothing
+  // here predicts the next one.
+  illustrationSsoReachable  Boolean?
+  illustrationSsoCheckedAt  DateTime?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
