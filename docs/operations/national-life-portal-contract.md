@@ -1155,15 +1155,35 @@ execução — rotacionava o cookie `auth0` dentro do browser e **jogava a
 rotação fora ao fechar**. O job seguinte decriptava o contexto antigo e
 apresentava um cookie superado, que é o que o IdP trata como replay.
 
-Isto explica os dois dias com uma causa só:
+⚠️ **Retificado no mesmo dia: isto NÃO explica a morte do Auth0.** Escrevi acima
+que a causa estava achada. Está errado, e o próprio keep-alive desmente:
+`scripts/national-life-keep-alive.ts` captura o contexto **depois** do salto e
+persiste — o comentário no código diz isso em letras claras. Ou seja, o
+experimento do keep-alive cruzava **e persistia**, e ainda assim matou a sessão
+em ~7 min.
 
-| | por que morria |
-| --- | --- |
-| keep-alive ligado | cruzava a cada 10 min, descartava a rotação toda vez → morte em ~7 min |
-| keep-alive desligado | cruzava uma vez por job, descartava igual → morte logo depois do job |
-| 2026-07-30, ~11 h | **nenhum job de Foresight rodou nesse intervalo** — nada cruzou, nada foi descartado |
+Com a variável certa isolada, as três observações ficam assim:
 
-O keep-alive não era a doença, era o sintoma mais rápido.
+| rodada | cruzou `/authorize`? | persistiu depois? | Foresight viveu |
+| --- | --- | --- | --- |
+| 2026-07-30 | **não** | — | **~11 h** |
+| 07-31, keep-alive ligado | sim, a cada 10 min | **sim** | ~7 min |
+| 07-31, job de PDF 14:53 | sim, uma vez | **não** | morto às 15:03 |
+
+**Cruzar correlaciona 2/2 com a morte. Persistir não discrimina nada.** A
+hipótese que sobra de pé é a mais incômoda: atravessar o `/authorize` é o que
+queima a sessão, com ou sem persistência.
+
+Consequência de produto, e é grande: se for isso, a janela de ~80 min depois do
+login humano é **limite duro**, e geração de PDF desacompanhada não existe sem
+senha guardada ou sem outro caminho de entrada. Não decidir isso por conta.
+
+O experimento que discrimina, uma variável só: login novo, **um** cruzamento
+(um job de PDF, que agora persiste), e verificar dali a uma hora. Se morrer
+mesmo assim, é o cruzamento e a persistência nunca foi a alavanca.
+
+O bug do worker abaixo é real e vale por si — descartar uma rotação é errado em
+qualquer leitura — mas **não** está estabelecido como a causa.
 
 Corrigido: `NationalLifeRunJobDeps` ganhou `captureContext(session)` e
 `sessionStore.saveContext(...)`, chamados no `finally` **antes** do `close()`.
@@ -1174,9 +1194,28 @@ Dois testes cobrem: a ordem captura-antes-de-fechar, e o job seguir
 `SUCCEEDED` quando a persistência quebra.
 
 ⚠️ **O que isto ainda não prova.** Que a sessão passe a viver horas *com* jobs
-cruzando é previsão, não medição. Medir é o de sempre: login novo, rodar um
-job de Foresight, e verificar dali a uma hora se o salto ainda entra
-autenticado.
+cruzando é previsão, e depois da retificação acima é uma previsão **fraca**.
+Medir é o de sempre: login novo, rodar um job de Foresight, e verificar dali a
+uma hora se o salto ainda entra autenticado.
+
+### `illustrationSsoReachable` está mentindo na tela (achado 2026-07-31)
+
+O campo existe para avisar o agente *antes* de ele pedir um PDF que não vem, e é
+renderizado em duas telas: `NationalLifeConnectionCard.tsx` e a de admin.
+
+Só que quem escreve nele é **exclusivamente** o keep-alive, e só quando
+`NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP=true` — que está **desligado, e deve
+continuar**. Resultado medido hoje: `illustrationSsoReachable = true`,
+`illustrationSsoCheckedAt = 13:50`, enquanto a verdade virou ~15:03 e um job
+falhou às 15:38 com `FORESIGHT_SSO_EXPIRED`. A tela que existe para avisar
+estava afirmando o contrário do fato, durante o incidente.
+
+Conserto que não custa cruzamento nenhum: **derivar do resultado dos jobs**. Um
+job que renderiza prova que estava alcançável; um que falha com
+`FORESIGHT_SSO_EXPIRED` prova que não estava. Os jobs já cruzam o SSO — o
+desfecho deles *é* a medição, de graça. Somado a envelhecer o valor: se
+`illustrationSsoCheckedAt` for velho demais, mostrar "não verificado" em vez de
+um booleano parado.
 
 #### Desenho que isso habilita
 
