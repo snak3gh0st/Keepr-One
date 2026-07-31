@@ -895,6 +895,59 @@ abertura — está nos bundles que a página carrega, e é o que
 não rodou com sucesso**: as três tentativas caíram no muro, porque o SSO morreu
 antes. É a primeira coisa a rodar na próxima janela viva.
 
+### Resolvido: o keep-alive matava o SSO, e o contrato do PDF está mapeado
+
+Com a flag **desligada** às 13:52, a sessão de 13:44 — cujo último cruzamento de
+`/authorize` foi 13:50 — respondeu `NWI/Main/Layout.aspx` **autenticada** em uma
+verificação feita bem depois. Sem toque periódico no IdP, ela vive. Com toque a
+cada 10 min, morria em ~7. **A hipótese da inversão está confirmada: o keep-alive
+do SSO era a causa, não o remédio.**
+
+Regra operacional que decorre, e que a sonda agora cumpre: **quem cruza o SSO
+recaptura e persiste o contexto**, em `finally`. Cruzar rotaciona o cookie
+`auth0`; descartar o cookie rotacionado deixa o próximo job apresentando um
+superado, que é o que o IdP trata como replay.
+
+#### O contrato de geração do PDF
+
+Lido dos próprios bundles do Foresight (`ForeSight.Release-5.3.65.30.js`,
+`ForeSight.Release.Controls`, `Main.Release`), 23 endpoints ao todo:
+
+| endpoint | papel |
+| --- | --- |
+| `PageService.asmx/IllustrateCase` | roda a ilustração |
+| `PageService.asmx/RenderReports` | gera o relatório |
+| `PageService.asmx/GetReportProgress` | acompanha até ficar pronto |
+| `PageService.asmx/LaunchReportLoadingDialog` | diálogo de progresso |
+| `PageService.asmx/SetupReportDisplay` | prepara a exibição |
+| `/Main/DocuSignReportDisplay.aspx` | entrega o documento |
+| `PageService.asmx/AbortReports` | cancela |
+
+Ou seja o fluxo é **`IllustrateCase` → `RenderReports` → poll `GetReportProgress`
+→ `SetupReportDisplay` → buscar o documento**. É a mesma forma do Rapid Solve:
+serviço JSON com antiforgery, não tela.
+
+Resto do contrato, útil para o que vem depois: `GetPolicyInformation`,
+`SetupSave`, `SetupSaveAs`, `SetupCopyTo`, `SetupClose`, `SetupInsMark`,
+`ExpandCollapseMenuItem`, `CloseDialog`, e `WidgetService.asmx/GetQuickCalcData`.
+
+#### ⚠️ `SetupEAppLauncher` muda a decisão sobre o iGo
+
+`PageService.asmx/SetupEAppLauncher`, somado ao `WidgetService.asmx/GetEAppStatus`
+já visto na abertura, diz que **o e-App é lançado de dentro do Foresight**. A
+integração separada com `federate.ipipeline.com` provavelmente é desnecessária:
+o caminho ilustração → proposta já existe dentro da ferramenta que a sessão do
+portal alcança. Ver `docs/architecture/national-life-igo-eapp.md`, cuja premissa
+— iGo como sistema terceiro a integrar à parte — precisa ser revista à luz disto.
+
+#### Desenho que isso habilita
+
+O PDF **não** precisa de sessão Auth0 permanentemente viva. Precisa dela viva no
+instante do pedido. Então o salto entra dentro do job de gerar a ilustração:
+cruzar, chamar `IllustrateCase`/`RenderReports`, buscar o documento, persistir o
+contexto, sair. Nada toca o IdP fora disso — que é exatamente a condição sob a
+qual ele foi medido sobrevivendo.
+
 ### A inversão: o keep-alive do SSO é o suspeito de **matar** a sessão
 
 Confrontando os dois dias, com a variável certa isolada:

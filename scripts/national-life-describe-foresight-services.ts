@@ -12,10 +12,21 @@
 // with the session already in the browser and never calls a service, submits a
 // form, or names a person.
 import { withBrowserLockWaiting } from '../lib/national-life/browser-lock'
-import { decryptBrowserContext } from '../lib/national-life/browser-context-crypto'
+import {
+  decryptBrowserContext,
+  encryptBrowserContext,
+} from '../lib/national-life/browser-context-crypto'
 import { getNationalLifeEnv } from '../lib/national-life/env'
+import {
+  createPrismaSessionRefreshStore,
+  deriveCarrierExpiresAt,
+  refreshStoredCarrierSession,
+} from '../lib/national-life/session-refresh'
 import { prisma } from '../lib/prisma'
-import { createSteelBrowserSession } from '../workers/national-life/steel-session'
+import {
+  captureSteelSessionContext,
+  createSteelBrowserSession,
+} from '../workers/national-life/steel-session'
 
 const FORESIGHT_PATH = '/agent/sso/foresight'
 
@@ -159,6 +170,37 @@ async function main() {
         ),
       )
     } finally {
+      // Crossing `/authorize` rotates the Auth0 cookie. A run that crosses and
+      // then throws the rotated cookie away leaves the *next* job presenting a
+      // superseded one, which is what an IdP treats as replay — the suspected
+      // reason this session kept dying minutes after a login. So the context is
+      // recaptured and persisted before the browser goes away, exactly as the
+      // keep-alive does. In `finally` because a run that fails halfway has
+      // still rotated the cookie, and that is precisely when losing it hurts.
+      try {
+        const refreshed = await captureSteelSessionContext(session.steelSessionId, env)
+        await refreshStoredCarrierSession(
+          {
+            sessionId: stored.id,
+            encryptedContext: encryptBrowserContext(
+              refreshed,
+              {
+                agentId: stored.agentId,
+                scopeId: env.sessionScopeId,
+                provider: 'NATIONAL_LIFE',
+                purpose: 'AUTHENTICATED_BROWSER_CONTEXT',
+                formatVersion: 1,
+              },
+              { version: env.sessionKeyVersion, base64Key: env.sessionKeys[env.sessionKeyVersion] },
+            ),
+            carrierExpiresAt: deriveCarrierExpiresAt(refreshed, env.portalOrigins),
+            refreshedAt: new Date(),
+          },
+          createPrismaSessionRefreshStore(prisma, env.sessionScopeId),
+        )
+      } catch (error) {
+        console.error(JSON.stringify({ persistFailed: String(error).slice(0, 200) }))
+      }
       await session.close()
     }
     return 'ran'
