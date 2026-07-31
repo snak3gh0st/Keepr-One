@@ -908,7 +908,10 @@ Antes de ligar a flag, olhar também `jumpMoved.live.vanished`: se o salto derru
 o cookie do SSO, o keep-alive — que recaptura *depois* do salto — gravaria o jar
 degradado por cima de um bom, piorando a cada tique.
 Rode duas vezes, fresco e ~15 min depois: decaimento é pergunta de duas amostras.
-Cada login humano compra ~20 minutos, então a sonda mede tudo de uma vez.
+E com o keep-alive rodando não há corrida contra o relógio — a leitura acima
+mostra a sessão viva 12 h após o login, porque cada tique desliza a janela. A
+sonda **não** precisa ser tiro único; a restrição real é colocar o arquivo dentro
+do container.
 
 `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP=true` faz cada tique do keep-alive atravessar
 `/agent/sso/foresight` antes de recapturar o contexto — o `/authorize` renova a
