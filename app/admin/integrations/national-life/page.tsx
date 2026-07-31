@@ -51,8 +51,12 @@ export default async function NationalLifeAdminPage() {
                   <th className="px-6 py-3 font-semibold">Agente</th>
                   <th className="px-6 py-3 font-semibold">Status</th>
                   <th className="px-6 py-3 font-semibold">Última conexão</th>
-                  <th className="px-6 py-3 font-semibold">Último uso</th>
-                  <th className="px-6 py-3 font-semibold">Expira em</th>
+                  <th className="px-6 py-3 font-semibold">Última verificação</th>
+                  {/* "Expira em" mostrava o menor prazo de cookie, que é o
+                      cookie de bot da Cloudflare — o portal respondeu
+                      autenticado depois dele. No lugar vai o que o último salto
+                      SSO encontrou, que é o que decide se a ilustração sai. */}
+                  <th className="px-6 py-3 font-semibold">Ilustração</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-steel">
@@ -77,7 +81,16 @@ export default async function NationalLifeAdminPage() {
                       {formatDateTime(agent.lastUsedAt)}
                     </td>
                     <td className="px-6 py-4 font-mono text-xs text-ink">
-                      {formatDateTime(agent.carrierExpiresAt)}
+                      {agent.illustrationSsoReachable === null
+                        ? '—'
+                        : agent.illustrationSsoReachable
+                          ? 'Disponível'
+                          : 'Requer novo login'}
+                      {agent.illustrationSsoCheckedAt && (
+                        <span className="block text-ink-muted">
+                          {formatDateTime(agent.illustrationSsoCheckedAt)}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

@@ -37,6 +37,8 @@ beforeEach(() => {
       lastConnectedAt: new Date('2026-07-28T12:00:00.000Z'),
       lastUsedAt: new Date('2026-07-28T12:05:00.000Z'),
       carrierExpiresAt: new Date('2026-07-28T20:00:00.000Z'),
+      illustrationSsoReachable: false,
+      illustrationSsoCheckedAt: new Date('2026-07-28T12:05:00.000Z'),
     },
   ])
 })
@@ -49,8 +51,12 @@ describe('National Life admin health page', () => {
     expect(screen.getByText('Ana Costa')).toBeInTheDocument()
     expect(screen.getByText('Conectada')).toBeInTheDocument()
     expect(screen.getByText('Última conexão')).toBeInTheDocument()
-    expect(screen.getByText('Último uso')).toBeInTheDocument()
-    expect(screen.getByText('Expira em')).toBeInTheDocument()
+    expect(screen.getByText('Última verificação')).toBeInTheDocument()
+    // O prazo saiu: era o cookie de bot da Cloudflare. No lugar, o que decide
+    // se a ilustração sai — e o admin precisa disso para triar.
+    expect(screen.queryByText('Expira em')).not.toBeInTheDocument()
+    expect(screen.getByText('Ilustração')).toBeInTheDocument()
+    expect(screen.getByText('Requer novo login')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /conectar|desconectar/i })).not.toBeInTheDocument()
     expect(screen.queryByTitle(/portal/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/viewer|exportar contexto|impersonar/i)).not.toBeInTheDocument()

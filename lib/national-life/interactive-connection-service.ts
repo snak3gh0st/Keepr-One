@@ -67,6 +67,8 @@ export type AgentSessionHealth = {
   lastConnectedAt: Date
   lastUsedAt: Date | null
   carrierExpiresAt: Date | null
+  illustrationSsoReachable: boolean | null
+  illustrationSsoCheckedAt: Date | null
 }
 
 export type StartConnectionResult =
@@ -914,5 +916,7 @@ export async function listAgentSessionHealthForAdmin(
     lastConnectedAt: session.lastConnectedAt,
     lastUsedAt: session.lastUsedAt,
     carrierExpiresAt: session.carrierExpiresAt,
+    illustrationSsoReachable: session.illustrationSsoReachable,
+    illustrationSsoCheckedAt: session.illustrationSsoCheckedAt,
   }))
 }

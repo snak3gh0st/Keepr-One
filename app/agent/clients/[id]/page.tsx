@@ -1,0 +1,208 @@
+export const dynamic = 'force-dynamic'
+
+import Link from 'next/link'
+import { notFound } from 'next/navigation'
+import { prisma } from '@/lib/prisma'
+import { requireRole } from '@/lib/require-role'
+import { getCurrentAgent } from '@/lib/agent-context'
+import { getDownlineIds } from '@/lib/hierarchy'
+import { Shell } from '@/components/Shell'
+import { PageHeader } from '@/components/PageHeader'
+import { ModuleSummary } from '@/components/ModuleSummary'
+import { policyStatusLabel } from '@/components/StatusPill'
+import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
+import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
+
+const currency = (value: number) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(value)
+
+const date = (value: Date | null) => (value ? value.toLocaleDateString('pt-BR') : '—')
+
+/// Everything the book already knows about one person, in one place.
+///
+/// This route was being linked to from the illustrations list and did not
+/// exist — the link 404'd. The quotes were the reason to build it: a quote
+/// names an insured and a premium, and until now it could be read from the
+/// illustrations list but never from the client it belongs to.
+export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const session = await requireRole('ADMIN', 'AGENT')
+
+  const client = await prisma.client.findUnique({
+    where: { id },
+    include: {
+      assignedAgent: { include: { user: { select: { name: true } } } },
+      policies: { orderBy: { createdAt: 'desc' } },
+      insuranceCases: { orderBy: { createdAt: 'desc' } },
+      illustrations: { orderBy: { createdAt: 'desc' }, take: 50 },
+    },
+  })
+  if (!client) notFound()
+
+  // Same scope rule the policy detail page uses: an agent sees their own book
+  // and their downline's, and nothing else. A 404 rather than a 403, so the
+  // page never confirms that a client exists to someone who may not see them.
+  let allowed = session.user.role === 'ADMIN'
+  if (session.user.role === 'AGENT') {
+    const agent = await getCurrentAgent()
+    const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
+    const scopeIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
+    allowed = scopeIds.includes(client.assignedAgentId)
+  }
+  if (!allowed) notFound()
+
+  const inforce = client.policies.filter((policy) => policy.status === 'INFORCE').length
+
+  return (
+    <Shell role={session.user.role === 'ADMIN' ? 'ADMIN' : 'AGENT'} userName={session.user.name ?? ''}>
+      <PageHeader
+        title={client.name}
+        eyebrow="Cliente"
+        description={[client.email, client.phone].filter(Boolean).join(' · ') || 'Sem contato registrado'}
+      />
+
+      <ModuleSummary
+        items={[
+          { label: 'Apólices em vigor', value: `${inforce} / ${client.policies.length}`, detail: 'Proteções ativas' },
+          { label: 'Casos', value: String(client.insuranceCases.length), detail: 'Processos abertos' },
+          { label: 'Cotações', value: String(client.illustrations.length), detail: 'Pedidas à seguradora' },
+          { label: 'Nascimento', value: date(client.dateOfBirth), detail: 'Data informada pela seguradora' },
+        ]}
+      />
+
+      <section className="module-main-surface">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.08em] text-ink-muted">
+          Apólices
+        </h2>
+        <Table>
+          <Thead>
+            <tr>
+              <Th>Apólice</Th>
+              <Th>Produto</Th>
+              <Th>Status</Th>
+              <Th className="text-right">Capital segurado</Th>
+            </tr>
+          </Thead>
+          <tbody>
+            {client.policies.map((policy) => (
+              <Tr key={policy.id}>
+                <Td>
+                  <Link
+                    href={`/agent/policies/${policy.id}`}
+                    className="text-teal hover:text-teal-deep"
+                  >
+                    {policy.policyNumber}
+                  </Link>
+                </Td>
+                <Td>{policy.product}</Td>
+                <Td>{policyStatusLabel[policy.status] ?? policy.status}</Td>
+                <TdNum>{policy.faceAmount ? currency(Number(policy.faceAmount)) : '—'}</TdNum>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
+        {client.policies.length === 0 && <EmptyState>Nenhuma apólice.</EmptyState>}
+      </section>
+
+      <section className="module-main-surface">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.08em] text-ink-muted">
+          Cotações
+        </h2>
+        <Table>
+          <Thead>
+            <tr>
+              <Th>Data</Th>
+              <Th>Segurado</Th>
+              <Th>Produto</Th>
+              <Th className="text-right">Capital segurado</Th>
+              <Th className="text-right">Prêmio mensal</Th>
+            </tr>
+          </Thead>
+          <tbody>
+            {client.illustrations.map((illustration) => {
+              const quote = summarizeQuotePayload(illustration.rawPayload)
+              const asked = [
+                quote.issueAge === null ? null : `${quote.issueAge} anos`,
+                quote.gender,
+                quote.issueState,
+                quote.rateClass,
+              ].filter(Boolean)
+
+              return (
+                <Tr key={illustration.id}>
+                  <Td>{illustration.createdAt.toLocaleDateString('pt-BR')}</Td>
+                  <Td>
+                    <span className="block">{illustration.insuredName ?? '—'}</span>
+                    {asked.length > 0 && (
+                      <span className="mt-0.5 block text-xs text-ink-muted">
+                        {asked.join(' · ')}
+                      </span>
+                    )}
+                  </Td>
+                  <Td>{illustration.productName ?? '—'}</Td>
+                  <TdNum>
+                    {illustration.faceAmount ? currency(Number(illustration.faceAmount)) : '—'}
+                  </TdNum>
+                  <TdNum>
+                    <span className="block">
+                      {illustration.premium ? currency(Number(illustration.premium)) : '—'}
+                    </span>
+                    {quote.annualPremium !== null && (
+                      <span className="mt-0.5 block text-xs font-normal text-ink-muted">
+                        {currency(quote.annualPremium)} /ano
+                      </span>
+                    )}
+                  </TdNum>
+                </Tr>
+              )
+            })}
+          </tbody>
+        </Table>
+        {client.illustrations.length === 0 ? (
+          <EmptyState>Nenhuma cotação para este cliente.</EmptyState>
+        ) : (
+          // The carrier's condition travels with the number, wherever it shows.
+          <p className="mt-4 border-l-2 border-border-steel pl-3 text-xs leading-5 text-ink-muted">
+            Uso interno do corretor. Pode ser usado para uma cotação verbal ao cliente, mas não
+            pode ser exibido a ele. Os valores não são garantidos e dependem de aprovação de
+            proposta completa na emissão.
+          </p>
+        )}
+      </section>
+
+      <section className="module-main-surface">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.08em] text-ink-muted">
+          Casos
+        </h2>
+        <Table>
+          <Thead>
+            <tr>
+              <Th>Aberto em</Th>
+              <Th>Status</Th>
+            </tr>
+          </Thead>
+          <tbody>
+            {client.insuranceCases.map((insuranceCase) => (
+              <Tr key={insuranceCase.id}>
+                <Td>
+                  <Link
+                    href={`/agent/cases/${insuranceCase.id}`}
+                    className="text-teal hover:text-teal-deep"
+                  >
+                    {insuranceCase.createdAt.toLocaleDateString('pt-BR')}
+                  </Link>
+                </Td>
+                <Td>{insuranceCase.status}</Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
+        {client.insuranceCases.length === 0 && <EmptyState>Nenhum caso.</EmptyState>}
+      </section>
+    </Shell>
+  )
+}

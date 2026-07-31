@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useId, useMemo, useState } from "react";
 import { EmptyState } from "@/components/Table";
 import { EntityCard, EntityCardList } from "@/components/EntityCard";
@@ -254,7 +255,14 @@ export function ClientsList({ clients }: { clients: Client[] }) {
                 <EntityCard key={client.id} index={index}>
                   <Avatar name={client.name} />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-ink">{client.name}</p>
+                    {/* A lista sabia tudo sobre o cliente e não levava a lugar
+                        nenhum. A página de detalhe reúne apólices, cotações e
+                        casos da pessoa. */}
+                    <p className="truncate font-medium text-ink">
+                      <Link href={`/agent/clients/${client.id}`} className="hover:text-teal">
+                        {client.name}
+                      </Link>
+                    </p>
                     <p className="truncate text-xs text-ink-muted">
                       {client.email ?? "Sem e-mail cadastrado"}
                     </p>

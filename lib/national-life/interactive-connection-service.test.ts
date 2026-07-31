@@ -443,6 +443,8 @@ describe('National Life owned interactive connection service', () => {
       lastConnectedAt: now,
       lastUsedAt: null,
       carrierExpiresAt: null,
+      illustrationSsoReachable: null,
+      illustrationSsoCheckedAt: null,
     }])
     expect(JSON.stringify(health)).not.toMatch(/cipher|viewer|token|debug|steel/i)
   })
