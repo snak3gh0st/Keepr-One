@@ -73,7 +73,14 @@ async function main() {
       const seen: Array<Record<string, unknown>> = []
 
       page.on('response', async (response) => {
-        if (!response.url().includes('RapidSolve')) return
+        // Anything that could carry the illustration as a document, not only
+        // the quote call: the numbers come back from GetQuote, but the PDF an
+        // agent hands over is produced somewhere else.
+        const url = response.url()
+        const interesting =
+          url.includes('RapidSolve') ||
+          /illustration|report|document|pdf|print|download/i.test(url)
+        if (!interesting) return
         const request = response.request()
         let body: unknown = null
         try {
@@ -250,13 +257,39 @@ async function main() {
         return out
       })()`)) as { checkboxes: unknown[]; nearError: string | null }
 
+      // What the carrier offers once it has quoted. The agent needs the
+      // illustration as a document, and GetQuote returns only figures — so
+      // whatever produces the PDF is named here.
+      const resultActions = (await page.evaluate(`(function () {
+        var area = document.querySelector('#quote_result_buttons') ||
+                   document.querySelector('#Quote_Result') ||
+                   document.body
+        return {
+          buttonsHtml: area
+            ? area.outerHTML.replace(/\\s+/g, ' ').slice(0, 1500)
+            : null,
+          actions: Array.prototype.map.call(
+            document.querySelectorAll('#Quote_Result button, #Quote_Result a, #quote_result_buttons button, #quote_result_buttons a'),
+            function (el) {
+              return {
+                tag: el.tagName.toLowerCase(),
+                id: el.id,
+                className: (el.className || '').toString().slice(0, 70),
+                href: el.getAttribute('href'),
+                text: (el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 40),
+              }
+            },
+          ),
+        }
+      })()`)) as { buttonsHtml: string | null; actions: unknown[] }
+
       console.log(
         JSON.stringify(
           {
             filled,
             clicks,
             validationErrors,
-            agreement,
+            resultActions,
             requests: seen,
             // What the page told the agent, which is the answer when the
             // request never left.
