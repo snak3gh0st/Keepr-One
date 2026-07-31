@@ -7,7 +7,11 @@
 ///
 /// Codes come from `lib/national-life/rapid-solve.ts`, which reads them off the
 /// carrier's own bundle.
-const LABELS = {
+// Exported only so the test suite can assert its own table stays the same
+// size as this map (catching an added code the table forgot, the direction a
+// per-entry equality check can't catch on its own). Callers outside this
+// module still go through `carrierLabel`, never this map directly.
+export const LABELS = {
   solveType: {
     Specify_Amount: 'Specified face amount',
     Based_on_Target_Premium: 'Premium-based, death benefit focus',

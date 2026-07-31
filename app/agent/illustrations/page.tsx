@@ -7,6 +7,7 @@ import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
 import { getIllustrationPdfStatuses } from '@/lib/national-life/job-service'
 import { illustrationPdfMessage } from '@/lib/national-life/illustration-pdf-status'
 import { QUOTE_DISCLAIMER } from '@/lib/national-life/quote-disclaimer'
+import { formatCarrierInstant } from '@/lib/national-life/carrier-instant'
 import { IllustrationPdfButton } from './IllustrationPdfButton'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
@@ -93,7 +94,10 @@ export default async function IllustrationsPage() {
 
               return (
               <Tr key={illustration.id}>
-                <Td>{illustration.createdAt.toLocaleDateString('pt-BR')}</Td>
+                {/* createdAt is an instant, formatted the same way as on
+                    app/agent/illustrations/[id]/page.tsx — see
+                    formatCarrierInstant for why it is not UTC-pinned. */}
+                <Td>{formatCarrierInstant(illustration.createdAt)}</Td>
                 <Td>
                   <Link
                     href={`/agent/illustrations/${illustration.id}`}

@@ -16,7 +16,12 @@ export type QuoteStatus =
             faceAmount: number
             annualPremium: number
             monthlyPremium: number
-            lapseYear: number | null
+            /// Mirrors `LapseYear` in `lib/national-life/rapid-solve.ts`: a
+            /// number is a real projected year, 'NEVER' is the carrier's
+            /// confirmed "does not lapse", and null is "not known" — the
+            /// three must never collapse into each other on this screen
+            /// either.
+            lapseYear: number | 'NEVER' | null
           }
         | { ok: false; message: string }
     }

@@ -7,6 +7,8 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
 import { carrierLabel } from '@/lib/national-life/rapid-solve-labels'
 import { QUOTE_DISCLAIMER } from '@/lib/national-life/quote-disclaimer'
+import { formatCarrierInstant } from '@/lib/national-life/carrier-instant'
+import type { LapseYear } from '@/lib/national-life/rapid-solve'
 import { IllustrationPdfButton } from '../IllustrationPdfButton'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
@@ -18,6 +20,9 @@ const currency = (value: number) =>
     maximumFractionDigits: 0,
   }).format(value)
 
+// insuredDateOfBirth is a UTC-midnight calendar date, not an instant — see
+// the comment on formatCarrierInstant for why it keeps its own UTC-pinned
+// formatter instead of that shared one.
 const day = (value: Date) =>
   new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeZone: 'UTC' }).format(value)
 
@@ -32,10 +37,23 @@ function Fact({ label, value }: { label: string; value: string | null }) {
   )
 }
 
+/// 'NEVER' is the carrier's confirmed answer ("this policy does not lapse"),
+/// a real fact and distinct from null, which means the carrier said nothing
+/// parseable. Only 'NEVER' may read as "Não lapsa" — null must fall through
+/// to Fact's own "—", never to this string.
+function lapseLabel(value: LapseYear): string | null {
+  if (value === 'NEVER') return 'Não lapsa'
+  if (value === null) return null
+  return `Ano ${value}`
+}
+
 export default async function QuoteSummaryPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const agent = await getCurrentAgent()
-  const user = await prisma.user.findUnique({ where: { id: agent.userId } })
+  const user = await prisma.user.findUnique({
+    where: { id: agent.userId },
+    select: { name: true },
+  })
 
   // Scoped in the query, not checked after it: a quote names an insured and a
   // premium, and someone else's id must be indistinguishable from a missing one.
@@ -135,11 +153,10 @@ export default async function QuoteSummaryPage({ params }: { params: Promise<{ i
               label="Prêmio anual"
               value={facts.annualPremium !== null ? currency(facts.annualPremium) : null}
             />
-            {/* null is "does not lapse", not year zero. */}
-            <Fact
-              label="Lapse"
-              value={facts.lapseYear === null ? 'Não lapsa' : `Ano ${facts.lapseYear}`}
-            />
+            {/* 'NEVER' is the carrier's confirmed "does not lapse"; null is
+                "not known" and renders as Fact's own "—", never as either
+                of those two. */}
+            <Fact label="Lapse" value={lapseLabel(facts.lapseYear)} />
           </dl>
         </section>
       </div>
@@ -151,7 +168,8 @@ export default async function QuoteSummaryPage({ params }: { params: Promise<{ i
             lib/national-life/quote-disclaimer.ts, so the two screens cannot
             drift apart. */}
         <p>
-          Números fornecidos por National Life (Rapid Solve) em {day(illustration.createdAt)}.{' '}
+          Números fornecidos por National Life (Rapid Solve) em{' '}
+          {formatCarrierInstant(illustration.createdAt)}.{' '}
           {QUOTE_DISCLAIMER} O documento oficial é a ilustração em PDF da seguradora.
         </p>
         <div className="mt-3">

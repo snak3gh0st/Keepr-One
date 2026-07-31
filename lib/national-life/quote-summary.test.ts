@@ -109,15 +109,36 @@ describe('summarizeQuotePayload — campos do resumo', () => {
     expect(facts.ok).toBe(true)
   })
 
-  // `lapseYear: 0` from the carrier means "does not lapse"; the adapter already
-  // converts it to null. Null has to stay null here, because a screen that
-  // prints 0 reads as "lapses in year zero".
-  it('keeps "does not lapse" distinct from a year', () => {
+  // This stored row predates the fix that tells "carrier confirmed never
+  // lapses" apart from "not known" (see the LapseYear doc comment in
+  // lib/national-life/rapid-solve.ts). Its raw payload already has
+  // `lapseYear: null`, and null is the only honest reading of it now: a
+  // pre-fix null could have started life as either a real carrier "does not
+  // lapse" (LapseYear: 0) or an unparseable answer, and that distinction was
+  // destroyed before this fix existed — nothing at read time can recover it.
+  it('reads a pre-fix stored null as "not known", never as a fabricated "never"', () => {
     expect(summarizeQuotePayload(realPayload).lapseYear).toBeNull()
+  })
+
+  // Carrier behaviour: a real projected lapse year.
+  it('keeps a real lapse year distinct from the other two states', () => {
     expect(
       summarizeQuotePayload({ ...realPayload, response: { ...realPayload.response, lapseYear: 12 } })
         .lapseYear,
     ).toBe(12)
+  })
+
+  // Carrier behaviour: the carrier confirmed the policy never lapses. Stored
+  // by the parser as the literal 'NEVER', never as a raw 0 — this function
+  // must not re-derive that from a stored 0, because by the time a payload is
+  // stored, only the parse site is allowed to have made that call.
+  it('keeps "does not lapse" distinct from a year and from not-known', () => {
+    expect(
+      summarizeQuotePayload({
+        ...realPayload,
+        response: { ...realPayload.response, lapseYear: 'NEVER' },
+      }).lapseYear,
+    ).toBe('NEVER')
   })
 
   // A refusal is a real answer. It must not read as a quote of zero.

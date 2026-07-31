@@ -23,6 +23,17 @@ const currency = (value: number) =>
     minimumFractionDigits: 2,
   }).format(value);
 
+// 'NEVER' is the carrier's confirmed "does not lapse" (LapseYear: 0); null is
+// "the carrier said nothing parseable". Only 'NEVER' may read as "Não lapsa"
+// — collapsing null into the same label would put an unread carrier answer on
+// screen as a definite fact, which is the one thing this panel exists not to
+// do. Mirrors lapseLabel on app/agent/illustrations/[id]/page.tsx.
+function lapseLabel(value: number | "NEVER" | null): string {
+  if (value === "NEVER") return "Não lapsa";
+  if (value === null) return "—";
+  return `Ano ${value}`;
+}
+
 // Which side of the illustration the carrier solves for decides whether the
 // amount field is a face amount or a premium — the carrier sends both in the
 // same field, keyed by this.
@@ -241,11 +252,7 @@ export function NewIllustrationForm() {
                   <tr>
                     <td className="py-2 pr-3 text-sm text-ink-muted">Lapso projetado</td>
                     <td className="py-2 text-sm font-semibold text-ink">
-                      {/* The carrier sends 0 for "does not lapse", which the
-                          parser turns into null so it never prints as year zero. */}
-                      {status.quote.lapseYear === null
-                        ? "Não lapsa"
-                        : `Ano ${status.quote.lapseYear}`}
+                      {lapseLabel(status.quote.lapseYear)}
                     </td>
                   </tr>
                 </tbody>
