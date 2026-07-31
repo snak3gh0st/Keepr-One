@@ -116,11 +116,18 @@ confunde desprecifica a conversa.
 
 ### Procedência, que é o que atende compliance
 
-Bloco fixo, sempre visível:
+Bloco fixo, sempre visível: de onde vieram os números e quando, **a condição do
+carrier copiada palavra por palavra da lista** (`app/agent/illustrations/page.tsx`,
+que já a carrega e cujo comentário diz que ela viaja junto com o número), e o
+ponteiro para o documento oficial.
 
-> Números fornecidos por National Life (Rapid Solve) em `<data da cotação>`.
-> Servem para cotação verbal. O documento oficial é a ilustração em PDF da
-> seguradora.
+⚠️ **Corrigido durante a execução.** A primeira versão desta spec escreveu uma
+condição própria e mais curta — "servem para cotação verbal" — que **perdia**
+*"não pode ser exibido a ele"* e *"os valores não são garantidos"*. Era a falha
+mais séria do desenho: esta página mostra mais números, maiores e sozinhos, e é
+justamente a que alguém teria vontade de virar para o cliente. Duas telas
+enunciando a mesma condição regulada com palavras diferentes é pior que
+qualquer uma das duas sozinha — a lista é a fonte, e se copia dela.
 
 Quando a ilustração já tem PDF gravado, o bloco linka para
 `/api/illustrations/[id]/document`. Quando não tem, oferece o botão que
