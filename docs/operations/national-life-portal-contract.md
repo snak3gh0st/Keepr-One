@@ -859,6 +859,74 @@ Consequência para quem for integrar o Foresight: a primeira pergunta não é
 mede a tela de login e conclui a coisa errada, que foi o que aconteceu aqui
 duas vezes em sequência, com respostas opostas.
 
+### Medido em 2026-07-31 03:55 UTC: confirmado, o Auth0 morre e o portal não
+
+O par que faltava, dentro do mesmo intervalo de keep-alive:
+
+| às | o quê | resultado |
+| --- | --- | --- |
+| 03:50:15 | keep-alive tocou `/agent/` | **autenticado** — só grava `lastUsedAt` depois de ver logout sem campo de senha |
+| ~03:55 | `describe-foresight` saltou | `nlg-prod.auth0.com/login`, com `btn-login` e `entercodetxt` |
+
+12 h após o login. Cadeia completa e sem bloqueio de origem:
+`/agent/sso/foresight` → `/nwi/Main/FormPostAuth0.aspx` → `/authorize` →
+`/login`. **A sessão Auth0 decai independentemente da do portal, e o keep-alive
+como está não a alcança.** A ressalva abaixo fica registrada porque explica por
+que isto precisou de uma terceira medição.
+
+Consequência direta para o experimento seguinte: **não se renova sessão morta.**
+Ligar `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP` agora não ressuscita nada. O teste
+válido é ligar a flag **antes** de um login novo, para que todo tique atravesse o
+`/authorize` desde o início da vida da sessão, e horas depois perguntar de novo
+ao `describe-foresight` se o Foresight ainda entra autenticado.
+
+#### O que a sonda mediu, e o critério que ela derrubou
+
+Mesma sessão, minutos depois:
+
+| cookie | antes do salto | depois do salto |
+| --- | --- | --- |
+| `nlg-prod.auth0.com \| auth0` | `2026-08-02T16:10:39` | `2026-08-03T04:04:17` (+713 min) |
+| `nlg-prod.auth0.com \| auth0_compat` | idem | idem |
+| `nlg-prod.auth0.com \| _csrf` | `2026-08-09T16:08` | `2026-08-10T04:04` |
+
+Login foi 16:10 e a sonda rodou 04:04: os dois valores são exatamente
+**momento + 3 dias**. O cookie `auth0` é rolante de 3 dias e **o salto o renova**.
+
+E mesmo assim o salto caiu no muro de login. Então o cookie tinha mais dois dias
+de validade enquanto a sessão por trás dele já estava morta. **Prazo de cookie
+não é proxy da sessão do servidor** — o critério "prazo que avança = janela
+ociosa" escrito abaixo está *refutado por esta medição*, e fica registrado só
+para que ninguém o reinvente. O único veredicto confiável é onde o salto
+**cai**.
+
+Dois achados que continuam valendo, e são os que decidem:
+
+- `portalTouchMoved` não moveu **nenhum** cookie do Auth0 — só analytics. Tocar
+  `/agent/` de fato nunca alcança o IdP; o salto alcança. O mecanismo por trás da
+  flag está confirmado.
+- `jumpMoved.live.vanished` e `.appeared` vieram **vazios**, e `live` e `steel`
+  vieram idênticos (o snapshot do Steel não está velho). O salto que cai no muro
+  não degrada o jar, então o keep-alive recapturar depois dele é seguro. **É o
+  sinal verde para ligar a flag.**
+
+Como o cookie sobrevive 3 dias e a sessão morreu em ~12 h, o que expirou é o
+lado servidor do SSO do tenant. Se esse prazo for de **inatividade**, um tique a
+cada 10 min atravessando o `/authorize` o segura — e é exatamente o que a flag
+faz. Se for **absoluto**, morre igual às 12 h e a resposta é credencial. Os dados
+de hoje não separam os dois; só o experimento acima separa.
+
+#### Ponta solta: o Auth0 tem dois domínios aqui
+
+`mfa.nationallife.com` é o domínio customizado do mesmo tenant e tem o seu
+próprio par `auth0`/`auth0_compat`, gravado no login (16:10:37) e **não renovado
+pelo salto** — que vai para o domínio canônico `nlg-prod.auth0.com`. No Auth0 os
+dois domínios são jars de sessão distintos. Se a sessão SSO que o Foresight
+consulta viver no domínio customizado, renovar o canônico não adianta. Some-se
+que `mfa.nationallife.com` **não está** em `NATIONAL_LIFE_PORTAL_ORIGINS`, então
+qualquer navegação de documento para lá é abortada pelo guard. Verificar
+`blockedOrigins` na saída da sonda antes de concluir qualquer coisa sobre isto.
+
 ### Ressalva: "o Auth0 morre antes do portal" ainda não foi medido
 
 Reler as duas sondagens acima com cuidado: a que falhou rodou **3 minutos antes
@@ -892,10 +960,11 @@ execução só:
 | `/agent/sso/foresight` | cai na ferramenta ou no muro do Auth0? — mesmo navegador, mesmo minuto |
 | diff dos prazos | o toque no portal moveu algum prazo do Auth0? e o salto? |
 
-O discriminador é `jumpMoved.live.moved`: **prazo que avança = janela ociosa**,
-que um keep-alive atravessando o salto segura. **Prazo que não se move = vida
-absoluta**, e nenhum toque resolve — aí a decisão é sobre credencial, não sobre
-engenharia.
+⚠️ O discriminador proposto aqui — `jumpMoved.live.moved`, "prazo que avança =
+janela ociosa" — **foi refutado na primeira execução**: o cookie `auth0` avançou
+para momento+3d enquanto o salto caía no muro de login. Ler a seção acima. O que
+a sonda entrega de útil é o par de veredictos no mesmo minuto, o `vanished`, e a
+confirmação de que o toque no portal não move nada do Auth0.
 
 Duas leituras, de duas fontes, de propósito: `live` é o cookie jar do próprio
 navegador, `steel` é o `sessions.context()`. O resto do código só chama o Steel
