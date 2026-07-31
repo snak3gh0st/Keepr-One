@@ -10,6 +10,16 @@
 //
 // Uses a real browser: the portal is behind Akamai, so a bare HTTP request with
 // the cookie jar is not a safe substitute.
+//
+// Touching `/agent/` renews the portal session and nothing else. The SSO targets
+// downstream — Foresight, where a client's illustration PDF comes from — sit
+// behind the carrier's Auth0 tenant, whose session has its own clock. With
+// `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP=true` each tick also traverses
+// `/agent/sso/foresight`, which round-trips `/authorize` and renews that window
+// too *if it is idle-based*. Measure with
+// `scripts/national-life-probe-foresight-session.ts` before turning it on: if
+// the Auth0 deadline never moves, the lifetime is absolute and the extra traffic
+// buys nothing.
 import {
   decryptBrowserContext,
   encryptBrowserContext,
@@ -120,6 +130,33 @@ async function main() {
       return
     }
 
+    // Strictly after the expiry decision above, and it never feeds into one: an
+    // Auth0 login wall means the downstream SSO session is gone, not that the
+    // portal session this job exists to protect is. Acting on it would throw
+    // away a live session and force a human to log in again.
+    let ssoJump: Record<string, unknown> | undefined
+    if (env.keepAliveSsoJump) {
+      try {
+        await session.page.goto(new URL('/agent/sso/foresight', env.portalLoginUrl).toString(), {
+          waitUntil: 'domcontentloaded',
+          timeout: 45_000,
+        })
+        // The jump posts through a WebForms shell before Auth0 answers.
+        await session.page.waitForTimeout(8_000)
+        const jumpHtml = await session.page.content()
+        const landedOn = session.page.url()
+        ssoJump = {
+          // Origin and path only: the SSO chain carries one-time codes in the query.
+          landedOn: landedOn.split('?')[0],
+          onAuth0: /auth0\.com/i.test(landedOn),
+          authenticated: !/<input[^>]+type=["']password["']/i.test(jumpHtml),
+        }
+      } catch (error) {
+        ssoJump = { failed: String(error).split('\n')[0].slice(0, 200) }
+      }
+    }
+
+    // Captured after the jump so a renewed Auth0 cookie is what gets stored.
     const refreshedContext = await captureSteelSessionContext(session.steelSessionId, env)
     const carrierExpiresAt = deriveCarrierExpiresAt(refreshedContext, env.portalOrigins)
     const { refreshed } = await refreshStoredCarrierSession(
@@ -147,6 +184,7 @@ async function main() {
       refreshed,
       cookies: countContextCookies(refreshedContext),
       carrierExpiresAt: carrierExpiresAt?.toISOString() ?? null,
+      ...(ssoJump ? { ssoJump } : {}),
     })
   } finally {
     await session.close()

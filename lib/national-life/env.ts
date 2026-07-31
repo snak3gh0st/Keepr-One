@@ -18,6 +18,7 @@ type RawNationalLifeEnv = {
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED?: string
   NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS?: string
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS?: string
+  NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP?: string
   BETTER_AUTH_URL?: string
 }
 
@@ -38,6 +39,7 @@ export type NationalLifeEnv = {
   interactiveLoginEnabled: boolean
   interactiveLoginAgentIds: ReadonlySet<string>
   interactiveLoginAllAgents: boolean
+  keepAliveSsoJump: boolean
 }
 
 const rawNationalLifeEnvSchema = z.object({
@@ -57,6 +59,7 @@ const rawNationalLifeEnvSchema = z.object({
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED: z.string().trim().min(1),
   NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: z.string(),
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS: z.string().trim().min(1).default('false'),
+  NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP: z.string().trim().min(1).default('false'),
   BETTER_AUTH_URL: z.string().trim().min(1),
 })
 
@@ -265,6 +268,8 @@ export function getNationalLifeEnv(): NationalLifeEnv {
       process.env.NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS,
     NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS:
       process.env.NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS,
+    NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP:
+      process.env.NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP,
     BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
   }
   const parsed = rawNationalLifeEnvSchema.parse(rawEnv)
@@ -302,6 +307,13 @@ export function getNationalLifeEnv(): NationalLifeEnv {
   const interactiveLoginAllAgents = parseBoolean(
     'NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS',
     parsed.NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS,
+  )
+  // Off until a probe shows the downstream SSO window is idle-based. Turning it
+  // on adds an `/authorize` round trip to every keep-alive tick, so it is a
+  // deliberate change in how often the carrier's IdP is touched.
+  const keepAliveSsoJump = parseBoolean(
+    'NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP',
+    parsed.NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP,
   )
   parseHttpsOrigin('BETTER_AUTH_URL', parsed.BETTER_AUTH_URL)
   if (interactiveLoginAllAgents && interactiveLoginAgentIds.size > 0) {
@@ -347,6 +359,7 @@ export function getNationalLifeEnv(): NationalLifeEnv {
     interactiveLoginEnabled,
     interactiveLoginAgentIds,
     interactiveLoginAllAgents,
+    keepAliveSsoJump,
   }
   return cachedEnv
 }

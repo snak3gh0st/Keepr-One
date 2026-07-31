@@ -162,6 +162,14 @@ describe('National Life secure runtime environment', () => {
     expect(env.interactiveLoginAgentIds).toEqual(new Set())
   })
 
+  it('leaves the keep-alive SSO jump off unless it is explicitly turned on', async () => {
+    expect((await parse()).keepAliveSsoJump).toBe(false)
+    expect((await parse({ NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP: 'true' })).keepAliveSsoJump).toBe(true)
+    await expect(parse({ NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP: 'yes' })).rejects.toThrow(
+      /KEEP_ALIVE_SSO_JUMP/,
+    )
+  })
+
   it('rejects identical worker IDs for concurrent runtime fixtures', async () => {
     vi.resetModules()
     const {

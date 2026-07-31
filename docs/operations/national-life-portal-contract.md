@@ -858,3 +858,43 @@ Consequência para quem for integrar o Foresight: a primeira pergunta não é
 "como gerar o PDF", é **"como manter a sessão Auth0 viva"** — sem isso a sonda
 mede a tela de login e conclui a coisa errada, que foi o que aconteceu aqui
 duas vezes em sequência, com respostas opostas.
+
+### Ressalva: "o Auth0 morre antes do portal" ainda não foi medido
+
+Reler as duas sondagens acima com cuidado: a que falhou rodou **3 minutos antes
+do `carrierExpiresAt`**, quando a sessão do portal também estava no fim. Nenhuma
+execução até hoje reportou os dois veredictos — portal e Foresight — do mesmo
+navegador, no mesmo minuto. Então "o Auth0 decai antes do portal" é compatível
+com os dados, mas igualmente compatível com "tudo expirou junto". É hipótese,
+não medição.
+
+Some-se a isso que `deriveCarrierExpiresAt` tira o **mínimo** entre cookies de
+`nationallife.com` **e** de `nlg-prod.auth0.com`. Se o cookie mais curto for o do
+Auth0, o `carrierExpiresAt` que já está gravado no banco *é* o prazo do Auth0 —
+e o "~20 min deslizante" da seção anterior estaria medindo outra coisa.
+
+`scripts/national-life-probe-foresight-session.ts` fecha essa lacuna numa
+execução só:
+
+| passo | o que responde |
+| --- | --- |
+| contexto salvo | inventário de cookies (domínio, nome, prazo — nunca o valor) |
+| `/agent/` | o portal ainda está autenticado? |
+| `/agent/sso/foresight` | cai na ferramenta ou no muro do Auth0? — mesmo navegador, mesmo minuto |
+| diff dos prazos | o toque no portal moveu algum prazo do Auth0? e o salto? |
+
+O discriminador é `jumpMoved.moved`: **prazo que avança = janela ociosa**, que um
+keep-alive atravessando o salto segura. **Prazo que não se move = vida absoluta**,
+e nenhum toque resolve — aí a decisão é sobre credencial, não sobre engenharia.
+Rode duas vezes, fresco e ~15 min depois: decaimento é pergunta de duas amostras.
+Cada login humano compra ~20 minutos, então a sonda mede tudo de uma vez.
+
+`NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP=true` faz cada tique do keep-alive atravessar
+`/agent/sso/foresight` antes de recapturar o contexto — o `/authorize` renova a
+janela do Auth0 *se* ela for ociosa. Nasce **desligado**: ligar sem a medição só
+acrescenta ~144 idas ao IdP do carrier por dia sem saber se compram algo.
+
+Regra que o código garante: **só o `/agent/` pode marcar `SESSION_EXPIRED`.** O
+resultado do salto é registrado no log e nunca vira decisão — um muro do Auth0
+significa que o SSO a jusante caiu, não que a sessão do portal caiu, e agir sobre
+ele jogaria fora uma sessão viva e obrigaria um humano a logar de novo.
