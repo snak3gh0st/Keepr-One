@@ -1198,6 +1198,49 @@ cruzando é previsão, e depois da retificação acima é uma previsão **fraca*
 Medir é o de sempre: login novo, rodar um job de Foresight, e verificar dali a
 uma hora se o salto ainda entra autenticado.
 
+### A causa provável, e ela não é nenhuma das duas anteriores (2026-07-31)
+
+Veio de uma observação do operador, não do código: **no navegador dele o agente
+loga uma vez e passa o dia** mandando ilustração e proposta sem relogar. Se um
+humano consegue, a diferença está em como nós seguramos a sessão — não no
+carrier.
+
+`scripts/national-life-describe-session-context.ts` leu a forma do contexto
+guardado (só nomes, hosts e contagens — nunca valores):
+
+```jsonc
+topLevelKeys: ["cookies", "indexedDB", "localStorage", "sessionStorage"]
+cookiesByDomain: { "nlg-prod.auth0.com": 5, "www.nationallife.com": 10,
+                   ".nationallife.com": 8, "mfa.nationallife.com": 5, … }
+localStorage["https://nlg-prod.auth0.com"]: 3 chaves, TODAS `com.auth0.auth.<state>`
+sessionStorage: nada na origem do Auth0
+indexedDB: vazio
+```
+
+Duas leituras, e a segunda é a que importa:
+
+1. **Não é "só cookies".** Levamos `localStorage` e `sessionStorage` junto — a
+   hipótese de que perdíamos armazenamento está **descartada**.
+2. **Não existe `@@auth0spajs@@::…`** no `localStorage` do Auth0. Esse é o cache
+   de token do `auth0-spa-js`; sem ele, o cache é **em memória**, que é o padrão
+   da biblioteca. As três chaves presentes são `com.auth0.auth.<state>`, ou seja
+   **transações de `/authorize` órfãs**, empilhadas.
+
+Daí a explicação que cobre tudo: **o token do Foresight vive na memória da
+página.** O navegador do agente nunca morre, então ele nunca precisa reautorizar.
+O nosso é **criado e destruído a cada job** (`createSteelBrowserSession` +
+`close()`, sem `persistProfile`), então toda execução perde o token e é obrigada
+a cruzar o `/authorize` de novo — deixando uma transação órfã por vez, que é
+exatamente o que se vê acumulado.
+
+Ou seja: **cruzar não é a doença, é o sintoma de jogar o navegador fora.**
+Corrige a leitura anterior deste documento, que tratava o cruzamento como causa.
+
+Isso ainda é inferência forte, não medição: falta provar que dois jobs no mesmo
+navegador, com uma hora de intervalo, dispensam o segundo `/authorize`. Mas o
+experimento a fazer mudou — e a peça já existe no código:
+`reconnectSteelBrowserSession`, hoje usada só pelo fluxo interativo.
+
 ### `illustrationSsoReachable` está mentindo na tela (achado 2026-07-31)
 
 O campo existe para avisar o agente *antes* de ele pedir um PDF que não vem, e é
