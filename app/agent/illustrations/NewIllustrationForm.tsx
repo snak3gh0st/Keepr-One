@@ -12,6 +12,7 @@ import {
   SOLVE_TYPES,
   STRATEGIES,
 } from "@/lib/national-life/rapid-solve";
+import { QUOTE_DISCLAIMER } from "@/lib/national-life/quote-disclaimer";
 import { requestCarrierQuote } from "./new/actions";
 import { useRapidSolveQuote } from "./useRapidSolveQuote";
 
@@ -213,9 +214,7 @@ export function NewIllustrationForm() {
                 shows the same number without asking, and the restriction
                 travels with the number rather than with the checkbox. */}
             <p className="mt-3 border-l-2 border-border-steel pl-3 text-xs leading-5 text-ink-muted">
-              Uso interno do corretor. Pode ser usado para uma cotação verbal ao cliente, mas
-              não pode ser exibido a ele. Os valores não são garantidos e dependem de aprovação
-              de proposta completa na emissão.
+              {QUOTE_DISCLAIMER}
             </p>
 
             <div className="mt-4 overflow-x-auto">
