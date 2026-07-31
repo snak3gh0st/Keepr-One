@@ -775,3 +775,20 @@ endpoint quebrado.
 Os quatro SSO são alvos de integração distintos, cada um com sua própria
 autenticação. Nenhum foi sondado, e "é só um link" é a leitura errada: o portal
 entrega o salto, não os dados.
+
+### A cotação vem com uma condição de uso (2026-07-30)
+
+O formulário do Rapid Solve não cota sem que o corretor marque `#rapid_checkbox`,
+cujo texto é:
+
+> This is for agent use only. This may be used to provide a verbal quote to a
+> consumer, but may not be shown to a consumer. Benefits and values shown are not
+> guaranteed. The assumptions on which they are based are subject to change by
+> the insurer and subject to approval of a completed application at issue.
+
+A restrição acompanha o **número**, não o checkbox. Nossa tela mostra o mesmo
+valor sem pedir aceite, então reproduz a condição junto do resultado.
+
+Hoje não há exposição: `app/client/policies/[id]` lista apenas PDFs anexados,
+não linhas de `Illustration`. Se algum dia uma tela de cliente ler essa tabela,
+isso viola a condição da seguradora — não é preferência de produto.

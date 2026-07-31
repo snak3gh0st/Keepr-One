@@ -208,6 +208,16 @@ export function NewIllustrationForm() {
               <p className="text-xs text-ink-muted">Produto de IUL • prêmio mensal</p>
             </div>
 
+            {/* The carrier's own condition, which an agent has to accept on its
+                site before it will quote. Reproduced here because our screen
+                shows the same number without asking, and the restriction
+                travels with the number rather than with the checkbox. */}
+            <p className="mt-3 border-l-2 border-border-steel pl-3 text-xs leading-5 text-ink-muted">
+              Uso interno do corretor. Pode ser usado para uma cotação verbal ao cliente, mas
+              não pode ser exibido a ele. Os valores não são garantidos e dependem de aprovação
+              de proposta completa na emissão.
+            </p>
+
             <div className="mt-4 overflow-x-auto">
               <table className="w-full border-collapse">
                 <tbody>
