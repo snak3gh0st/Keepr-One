@@ -859,6 +859,42 @@ Consequência para quem for integrar o Foresight: a primeira pergunta não é
 mede a tela de login e conclui a coisa errada, que foi o que aconteceu aqui
 duas vezes em sequência, com respostas opostas.
 
+### O Foresight por dentro (mapeado 2026-07-31 13:28, sessão viva)
+
+A ferramenta é WebForms clássico com **serviços ASMX JSON** — o que importa,
+porque significa que existe contrato chamável, como o Rapid Solve, e não só tela.
+
+Cadeia completa de entrada, agora com o retorno visível:
+`/agent/sso/foresight` → `/nwi/Main/FormPostAuth0.aspx` →
+`nlg-prod.auth0.com/authorize` → **`/NWI/Main/LoginCallback.ashx`** →
+`/NWI/Main/FormPost.aspx` → `/NWI/Main/Layout.aspx`.
+
+Estrutura: `Layout.aspx` é casca. O trabalho acontece no iframe
+`ctl00_mobilityPH_iframeMain` → `StartPage.aspx` (*NLGroup Illustrations -
+Foresight Web*), e há um segundo iframe de modal (`modalDialog__Iframe`).
+Versão do app: `ForeSight.Release-5.3.65.30.js`.
+
+Serviços que a própria abertura já chama:
+
+| endpoint | verbo |
+| --- | --- |
+| `PageService.asmx/GetApplications` | POST |
+| `ValidationMessagesService.asmx/GetAllMessages` | POST |
+| `WidgetService.asmx/GetState` | GET |
+| `WidgetService.asmx/GetInsuredInformation` | GET |
+| `WidgetService.asmx/GetEAppStatus` | GET |
+| `WidgetService.asmx/GetQuickCalcStatus` | GET |
+
+Note `GetEAppStatus`: **o Foresight já sabe do e-App**, o que sugere que a ponte
+ilustração → proposta existe dentro da própria ferramenta e talvez não precise
+passar pelo salto separado do iGo.
+
+Falta o endpoint que produz o documento. Ele não aparece nas chamadas de
+abertura — está nos bundles que a página carrega, e é o que
+`scripts/national-life-describe-foresight-services.ts` lê. **Esse script ainda
+não rodou com sucesso**: as três tentativas caíram no muro, porque o SSO morreu
+antes. É a primeira coisa a rodar na próxima janela viva.
+
 ### 2026-07-31 13:36 UTC: o salto **não** segura o Auth0, e o "12 h" era limite superior
 
 Login novo às 13:25:00, com `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP=true` já ligado —
