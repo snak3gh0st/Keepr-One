@@ -170,6 +170,27 @@ async function main() {
         return read
       })
 
+      // What an agent can actually click to start a new illustration. The
+      // earlier probe looked for <button>/<input> and found none, so the tool
+      // drives itself from anchors and elements carrying handlers — which is
+      // what has to be named before anything can be driven.
+      const startPage = page.frames().find((frame) => /StartPage\.aspx/i.test(frame.url()))
+      const startPageControls = startPage
+        ? await startPage.evaluate(() => {
+            const seen: Array<{ tag: string; id: string; text: string }> = []
+            for (const node of Array.from(
+              document.querySelectorAll('a, [onclick], [id*="new" i], [id*="menu" i], li'),
+            )) {
+              const text = (node.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60)
+              const id = (node as HTMLElement).id ?? ''
+              if (!text && !id) continue
+              seen.push({ tag: node.tagName.toLowerCase(), id, text })
+              if (seen.length >= 60) break
+            }
+            return seen
+          })
+        : []
+
       const perBundle = bundles.map((bundle) => {
         const endpoints = serviceEndpoints(bundle.body)
         return {
@@ -196,6 +217,7 @@ async function main() {
                 callSites(bundles.map((bundle) => bundle.body).join("\n"), endpoint),
               ]),
             ),
+            startPageControls,
             endpointCount: all.length,
             endpoints: all.slice(0, 120),
           },

@@ -987,6 +987,30 @@ Forma do job que isso impõe:
 O passo 2 é o que ainda não foi medido, e é onde a captura de requisição real
 (como fizemos no Rapid Solve) vale mais que leitura estática.
 
+#### Indício forte: a cotação do Rapid Solve **já é um caso** no Foresight
+
+O painel *Recent* da `StartPage` lista, com link de postback por linha
+(`ctl00_mobilityPH_pnlRecent_grdRecent_ctlNN_lnkCaseName`):
+
+```
+RP-Teste-QQ-073026223730     RP-Loureiro-QQ-073026223622
+RP-Campos-QQ-073026215605    RP-Campos-QQ-073026215150
+Fabio Filho IUL              Danielle Reis IUL / Term
+```
+
+`QQ` lê como *Quick Quote*, `073026` é 30/07/26 — o dia das cotações Rapid Solve
+— e os sobrenomes são os que usamos nelas. Ou seja: **a cotação que o app já
+produz aparece do outro lado como caso ilustrável**, e o passo 2 deixa de ser
+"criar um caso do zero" para ser "abrir o caso que a cotação criou".
+
+Se confirmar, o caminho de pré-venda inteiro fica: Rapid Solve (já pronto) →
+caso no Foresight (aparentemente automático) → abrir pelo *Recent* →
+`SetupReportDisplay`/`RenderReports`/`GetReportProgress` → `ReportDisplay.rspx`.
+
+⚠️ Ainda é indício, não medição: esses casos também poderiam ter sido criados à
+mão pelo agente na ferramenta. Confirmar é barato — pedir uma cotação nova pelo
+app e ver se um `RP-…-QQ-<timestamp>` correspondente aparece no *Recent*.
+
 Resto do contrato, útil para o que vem depois: `GetPolicyInformation`,
 `SetupSave`, `SetupSaveAs`, `SetupCopyTo`, `SetupClose`, `SetupInsMark`,
 `ExpandCollapseMenuItem`, `CloseDialog`, e `WidgetService.asmx/GetQuickCalcData`.
