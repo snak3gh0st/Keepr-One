@@ -834,3 +834,27 @@ Esse sim é uma integração à parte, e a sondagem nem chegou a carregar a pág
 
 Ou seja, para o pedido "quero a ilustração em PDF para o cliente": o caminho é
 o Foresight, e ele começa onde a sondagem parou — `NWI/Main/Layout.aspx`.
+
+### Foresight tem autenticação própria, e ela decai antes do portal
+
+Duas sondagens do mesmo `/agent/sso/foresight`, com minutos de diferença:
+
+| momento | onde caiu |
+| --- | --- |
+| sessão mais fresca | `www.nationallife.com/NWI/Main/Layout.aspx`, autenticado |
+| sessão a 3 min de expirar | `nlg-prod.auth0.com/login`, tela de login |
+
+A cadeia real é `/agent/sso/foresight` → `/nwi/Main/FormPostAuth0.aspx` →
+`nlg-prod.auth0.com/authorize` → ou o app, ou o login.
+
+Então **"o Foresight entra autenticado" não é propriedade do sistema, é estado**.
+Ele depende da sessão Auth0, não dos cookies do portal — e as duas morrem em
+tempos diferentes. Isto é a descoberta operacional: **o keep-alive preserva o
+portal e não preserva o SSO a jusante.** Ver [[project_national_life_session_limits]]:
+a sessão do carrier morre em ~20 min e a re-autenticação silenciosa foi medida
+como morta.
+
+Consequência para quem for integrar o Foresight: a primeira pergunta não é
+"como gerar o PDF", é **"como manter a sessão Auth0 viva"** — sem isso a sonda
+mede a tela de login e conclui a coisa errada, que foi o que aconteceu aqui
+duas vezes em sequência, com respostas opostas.
