@@ -275,10 +275,29 @@ export class NationalLifeAdapter {
         timeout: 45_000,
       })
 
+      // The antiforgery token, read from the page that was just loaded.
+      //
+      // Five attempts were spent on HTTP 500 while this was missing, and the
+      // bundle is why: its `$.ajax` call declares no headers, so the contract
+      // was written down as "the carrier sends no token". Capturing the
+      // browser's own request showed one on every call — added elsewhere, not
+      // in the quoting script. The endpoint rejects the post without it, and
+      // ASP.NET reports that rejection as a 500 with the reason hidden.
+      const token = await page
+        .locator('input[name="__RequestVerificationToken"]')
+        .getAttribute('value')
+
+      if (!token) {
+        throw new NationalLifeAdapterError(
+          RAPID_SOLVE_REQUEST_FAILED_CODE,
+          'National Life did not render an antiforgery token on the illustration page',
+        )
+      }
+
       const url = new URL(RAPID_SOLVE_PATH, this.config.loginUrl).toString()
       const response = await page.request.post(url, {
         data: request,
-        headers: RAPID_SOLVE_HEADERS,
+        headers: { ...RAPID_SOLVE_HEADERS, __requestverificationtoken: token },
       })
 
       // Transport-level failure is a real failure: we never got an answer.

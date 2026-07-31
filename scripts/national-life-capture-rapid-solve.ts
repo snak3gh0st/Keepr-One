@@ -84,10 +84,16 @@ async function main() {
         seen.push({
           url: response.url().split('?')[0],
           status: response.status(),
+          // Names and shapes, never values: the antiforgery token is a
+          // credential for this session, and the first run of this script
+          // printed one in full.
           requestHeaders: Object.fromEntries(
-            Object.entries(await request.allHeaders()).filter(([name]) =>
-              /content-type|requested-with|verification|accept$/i.test(name),
-            ),
+            Object.entries(await request.allHeaders())
+              .filter(([name]) => /content-type|requested-with|verification|accept$/i.test(name))
+              .map(([name, value]) => [
+                name,
+                /verification/i.test(name) ? `[present, ${value.length} chars]` : value,
+              ]),
           ),
           payload: describePayload(body),
         })

@@ -739,7 +739,13 @@ Já eliminado por evidência, para ninguém refazer:
 
 - autenticação e origem da página (o job navega para a ferramenta antes de postar)
 - `content-type: application/json; charset=utf-8` e `x-requested-with`, iguais aos do `$.ajax` do bundle
-- token antiforgery — **o script do carrier não envia nenhum**, então nunca foi CSRF
+- ~~token antiforgery — o script do carrier não envia nenhum, então nunca foi CSRF~~
+  **ERRADO, e era essa a causa.** Capturar o request do próprio navegador mostrou
+  `__requestverificationtoken` como header em toda chamada. O `$.ajax` do bundle
+  não declara `headers`, e daí veio a conclusão errada — o token é adicionado em
+  outro lugar. Sem ele o endpoint recusa, e o ASP.NET reporta a recusa como 500
+  com o motivo escondido. Lido de `input[name="__RequestVerificationToken"]` na
+  própria página, como o grid client já fazia para os relatórios.
 - tipo do `Amount` — o bundle usa `parseFloat`, é número, e é o que mandamos
 - nomes e valores dos campos, conferidos um a um contra o `formData` do bundle
 
