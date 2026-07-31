@@ -182,46 +182,45 @@ async function main() {
         return 'ran'
       }
 
-      // Through the tool's own client, both verbs: the earlier mapping saw the
-      // widget services called as GET and the page services as POST, and
-      // guessing wrong reads as "the service has nothing" rather than as "asked
-      // the wrong way".
-      report.services = await holder.evaluate(
-        async ([token, services]) => {
-          const w = window as never as {
-            $ITAjax: {
-              sendRequest(url: string, args: unknown[]): Promise<unknown>
-              sendGetRequest?(url: string, args: unknown[]): Promise<unknown>
-            }
-            appPath: string
-          }
-          const out: Record<string, unknown> = {}
-          for (const service of services as readonly string[]) {
-            const url = `${w.appPath}/Main/${service}`
-            try {
-              out[service] = { verb: 'POST', body: await w.$ITAjax.sendRequest(url, [token]) }
-            } catch (postError) {
-              try {
-                out[service] = {
-                  verb: 'GET',
-                  body: await w.$ITAjax.sendGetRequest?.(url, [token]),
+      // One service per evaluate, re-reading the frame each time. The first
+      // attempt put all five in a single long-running evaluate and lost the lot
+      // to "Resulting promise was garbage collected" — the case postback
+      // navigates the frame out from under it. Now a navigation costs one
+      // answer instead of all of them, and each failure is reported as itself.
+      const services: Record<string, unknown> = {}
+      for (const service of SERVICES) {
+        const frame = page.mainFrame()
+        services[service] = await frame
+          .evaluate(
+            async ([token, name]) => {
+              const w = window as never as {
+                $ITAjax: {
+                  sendRequest(url: string, args: unknown[]): Promise<unknown>
+                  sendGetRequest?(url: string, args: unknown[]): Promise<unknown>
                 }
-              } catch {
-                out[service] = { failed: String(postError).slice(0, 120) }
+                appPath: string
               }
-            }
-          }
-          return out
-        },
-        [tokenId, SERVICES] as const,
-      )
+              const url = `${w.appPath}/Main/${name}`
+              try {
+                return { verb: 'POST', body: await w.$ITAjax.sendRequest(url, [token]) }
+              } catch (postError) {
+                try {
+                  return { verb: 'GET', body: await w.$ITAjax.sendGetRequest?.(url, [token]) }
+                } catch {
+                  return { failed: String(postError).slice(0, 140) }
+                }
+              }
+            },
+            [tokenId, service] as const,
+          )
+          .catch((error) => ({ failed: String(error).slice(0, 140) }))
+        await page.waitForTimeout(1_500)
+      }
+      report.services = services
 
       // Shape only. See the file header.
       report.services = Object.fromEntries(
-        Object.entries(report.services as Record<string, unknown>).map(([name, result]) => [
-          name,
-          describeShape(result),
-        ]),
+        Object.entries(services).map(([name, result]) => [name, describeShape(result)]),
       )
     } finally {
       try {
