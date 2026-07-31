@@ -42,3 +42,6 @@ next-env.d.ts
 
 # local isolated feature worktrees
 .worktrees/
+
+# Agent scratch, not project source.
+.superpowers/
