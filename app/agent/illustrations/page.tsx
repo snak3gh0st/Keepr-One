@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
+import { IllustrationPdfButton } from './IllustrationPdfButton'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
@@ -144,7 +145,7 @@ export default async function IllustrationsPage() {
                       Abrir PDF
                     </a>
                   ) : (
-                    <span className="text-ink-muted">—</span>
+                    <IllustrationPdfButton illustrationId={illustration.id} />
                   )}
                 </Td>
               </Tr>

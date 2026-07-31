@@ -614,6 +614,44 @@ export function createBrowserJobService(deps?: BrowserJobServiceDeps) {
       return { jobId: created.id, duplicate: false }
     },
 
+    /// Asks the carrier to render an illustration it already holds.
+    ///
+    /// Keyed on the illustration alone, unlike a quote: re-rendering the same
+    /// illustration is the same request no matter how often it is clicked, and
+    /// there is no payload that could change its meaning. Rendering twice would
+    /// cost a carrier browser and hand back the same document.
+    async enqueueIllustrationPdf(input: {
+      agentId: string
+      illustrationId: string
+      caseNameFragment?: string
+    }): Promise<{ jobId: string; duplicate: boolean }> {
+      const agentId = coerceIdentifier('agentId', input.agentId)
+      const illustrationId = coerceIdentifier('illustrationId', input.illustrationId)
+      const now = resolveNow(deps)
+      const baseKey = `national-life:illustration-pdf:${agentId}:${illustrationId}`
+
+      const active = await repository.findMostRecentByRetryKeyFamily(baseKey, [
+        ...ACTIVE_JOB_STATES,
+      ])
+      if (active) {
+        return { jobId: active.id, duplicate: true }
+      }
+
+      const existing = await repository.findMostRecentByRetryKeyFamily(baseKey)
+      const created = await repository.create({
+        agentId,
+        operation: 'GENERATE_ILLUSTRATION_PDF',
+        idempotencyKey: existing ? buildCaseSyncRetryKey(baseKey) : baseKey,
+        input: {
+          illustrationId,
+          ...(input.caseNameFragment ? { caseNameFragment: input.caseNameFragment } : {}),
+        },
+        availableAt: now,
+      })
+
+      return { jobId: created.id, duplicate: false }
+    },
+
     /// What the illustration screen is allowed to know about a quote it asked
     /// for. Deliberately not the job record: the screen needs the carrier's
     /// answer, not lease owners and attempt counts.
@@ -771,6 +809,14 @@ export async function enqueueRapidSolveQuote(input: {
   quote: RapidSolveQuoteJobInput
 }): Promise<{ jobId: string; duplicate: boolean }> {
   return createBrowserJobService().enqueueRapidSolveQuote(input)
+}
+
+export async function enqueueIllustrationPdf(input: {
+  agentId: string
+  illustrationId: string
+  caseNameFragment?: string
+}): Promise<{ jobId: string; duplicate: boolean }> {
+  return createBrowserJobService().enqueueIllustrationPdf(input)
 }
 
 export async function getOwnedQuoteStatus(
