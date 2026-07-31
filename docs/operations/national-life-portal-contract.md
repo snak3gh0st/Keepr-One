@@ -1103,25 +1103,38 @@ iPipeline mesmo assim — o que se economiza é transporte, não o mapa de campo
 O detalhe de risco: `SetupEAppLauncher` leva **só o `sessionTokenId`**, então
 lança a proposta do caso que estiver aberto. Escrita sem alvo explícito.
 
-### Quanto tempo o Auth0 durou sem keep-alive (medido 2026-07-31)
+### O Auth0 morreu de novo em 2026-07-31, e **não se sabe por quê**
 
-Com `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP` desligado, na mesma sessão:
+Três carimbos observados, com `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP` desligado:
 
 | momento | evento |
 | --- | --- |
 | 13:44 UTC | login do carrier |
-| 14:53 UTC | job de PDF cruzou o SSO e renderizou — **vivo aos 69 min** |
-| 15:03 UTC | `/agent/sso/foresight` caiu em `nlg-prod.auth0.com/login` — **morto aos 79 min** |
+| 14:53 UTC | job de PDF **cruzou o SSO** e renderizou — vivo aos 69 min |
+| 15:03 UTC | `/agent/sso/foresight` caiu em `nlg-prod.auth0.com/login` — morto aos 79 min |
 
-Os cookies do portal ainda diziam `carrierExpiresAt 15:30`, ou seja o portal
-sobreviveria mais 27 min. Confirma de novo que **as duas sessões morrem em
-tempos diferentes** e que a de baixo é o Auth0.
+Os cookies do portal ainda diziam `carrierExpiresAt 15:30`: o portal
+sobreviveria mais 27 min. Reconfirma que **as duas sessões morrem em tempos
+diferentes** e que a de baixo é o Auth0.
 
-Então "sem cruzamento ela vive horas" era otimista demais: **a janela útil do
-Foresight está entre 69 e 79 minutos após o login**, não em horas. O desenho
-que decorre não muda — cruzar dentro do job, uma vez, e persistir o contexto —
-mas o custo operacional sim: qualquer trabalho no Foresight precisa caber nessa
-janela, ou pedir login novo no meio.
+⚠️ **Não leia isto como "a sessão dura ~79 min".** Seria uma amostra só,
+apresentada como intervalo, e contradiz a medição de **~11 h** registrada
+logo abaixo para 2026-07-30 sem cruzamento periódico. A variável não
+controlada é o próprio job das 14:53: **ele cruzou o `/authorize`**, e morte
+em menos de dez minutos depois de um cruzamento é exatamente a assinatura do
+keep-alive, só que com um tique em vez de muitos.
+
+As duas leituras seguem abertas:
+
+1. o Auth0 tem tempo de vida próprio na casa de ~80 min — e aí as 11 h de
+   07-30 ficam sem explicação;
+2. o cruzamento das 14:53 rotacionou o cookie e a persistência não fechou o
+   ciclo — o mesmo modo de falha do keep-alive, com n=1.
+
+Distinguir é barato e vale a próxima janela: depois de um login novo, **não
+cruzar nada** e verificar o Foresight a cada ~30 min. Se viver horas sem
+cruzamento, é (2), e a regra "quem cruza persiste" precisa de auditoria, não
+o tempo de vida do IdP.
 
 #### Desenho que isso habilita
 
