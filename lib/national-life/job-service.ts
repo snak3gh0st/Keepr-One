@@ -2,6 +2,10 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { BrowserAutomationJob, BrowserJobOperation, Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { NATIONAL_LIFE_MAX_JOB_ATTEMPTS, NATIONAL_LIFE_PROVIDER } from './constants'
+import {
+  latestPdfStatusByIllustration,
+  type IllustrationPdfStatus,
+} from './illustration-pdf-status'
 import { assertBrowserJobTransition, type BrowserJobState } from './job-state'
 import type { RapidSolveFailure, RapidSolveQuote } from './rapid-solve'
 import { redactDiagnostic } from './redaction'
@@ -144,6 +148,12 @@ export type BrowserJobRepository = {
   }): Promise<BrowserJobRecord | null>
   listExpiredRunningJobs(now: Date): Promise<BrowserJobRecord[]>
   findOwnedById(agentId: string, jobId: string): Promise<BrowserJobRecord | null>
+  /// Newest first. One query for a whole screen, rather than one per row.
+  listRecentByOperation(input: {
+    agentId: string
+    operation: BrowserJobOperation
+    limit: number
+  }): Promise<BrowserJobRecord[]>
 }
 
 export type BrowserJobServiceDeps = {
@@ -531,6 +541,17 @@ const prismaBrowserJobRepository: BrowserJobRepository = {
 
     return job ? fromPrismaBrowserJob(job) : null
   },
+
+  async listRecentByOperation({ agentId, operation, limit }) {
+    // Scoped by agent in the query, same reason as `findOwnedById`.
+    const jobs = await prisma.browserAutomationJob.findMany({
+      where: { agentId, operation },
+      orderBy: [{ createdAt: 'desc' }],
+      take: limit,
+    })
+
+    return jobs.map(fromPrismaBrowserJob)
+  },
 }
 
 function resolveRepository(deps?: BrowserJobServiceDeps): BrowserJobRepository {
@@ -650,6 +671,24 @@ export function createBrowserJobService(deps?: BrowserJobServiceDeps) {
       })
 
       return { jobId: created.id, duplicate: false }
+    },
+
+    /// Where each pending or failed render stands, keyed by illustration.
+    ///
+    /// Without this the screen had no way to say anything after "pedido
+    /// enviado": a render that failed looked exactly like one still running,
+    /// forever. The cap is generous relative to the rows a screen shows, so the
+    /// newest attempt for every visible illustration is in range.
+    async getIllustrationPdfStatuses(
+      agentId: string,
+    ): Promise<Map<string, IllustrationPdfStatus>> {
+      const jobs = await repository.listRecentByOperation({
+        agentId: coerceIdentifier('agentId', agentId),
+        operation: 'GENERATE_ILLUSTRATION_PDF',
+        limit: 200,
+      })
+
+      return latestPdfStatusByIllustration(jobs)
     },
 
     /// What the illustration screen is allowed to know about a quote it asked
@@ -817,6 +856,12 @@ export async function enqueueIllustrationPdf(input: {
   caseNameFragment?: string
 }): Promise<{ jobId: string; duplicate: boolean }> {
   return createBrowserJobService().enqueueIllustrationPdf(input)
+}
+
+export async function getIllustrationPdfStatuses(
+  agentId: string,
+): Promise<Map<string, IllustrationPdfStatus>> {
+  return createBrowserJobService().getIllustrationPdfStatuses(agentId)
 }
 
 export async function getOwnedQuoteStatus(

@@ -85,6 +85,16 @@ function createInMemoryRepository(
       )
     },
 
+    async listRecentByOperation({ agentId, operation, limit }) {
+      return structuredClone(
+        jobs
+          .filter((job) => job.agentId === agentId && job.operation === operation)
+          .slice()
+          .reverse()
+          .slice(0, limit),
+      )
+    },
+
     async findMostRecentByRetryKeyFamily(baseKey, states) {
       return (
         structuredClone(

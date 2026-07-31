@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
+import { getIllustrationPdfStatuses } from '@/lib/national-life/job-service'
+import { illustrationPdfMessage } from '@/lib/national-life/illustration-pdf-status'
 import { IllustrationPdfButton } from './IllustrationPdfButton'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
@@ -43,6 +45,9 @@ export default async function IllustrationsPage() {
       client: { select: { id: true, name: true } },
     },
   })
+
+  // One query for the whole table, so the row can say where its render stands.
+  const pdfStatus = await getIllustrationPdfStatuses(agent.id)
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
@@ -145,7 +150,19 @@ export default async function IllustrationsPage() {
                       Abrir PDF
                     </a>
                   ) : (
-                    <IllustrationPdfButton illustrationId={illustration.id} />
+                    <>
+                      <IllustrationPdfButton illustrationId={illustration.id} />
+                      {/* Without this the row went silent after "pedido
+                          enviado": a render that failed looked exactly like one
+                          still running. The carrier's illustration tool has its
+                          own login and it expires early, so the common failure
+                          is not a broken quote — it is "connect again". */}
+                      {pdfStatus.get(illustration.id) && (
+                        <p className="mt-1 text-xs text-ink-muted">
+                          {illustrationPdfMessage(pdfStatus.get(illustration.id)!)}
+                        </p>
+                      )}
+                    </>
                   )}
                 </Td>
               </Tr>
