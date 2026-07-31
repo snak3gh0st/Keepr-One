@@ -1136,6 +1136,48 @@ cruzar nada** e verificar o Foresight a cada ~30 min. Se viver horas sem
 cruzamento, é (2), e a regra "quem cruza persiste" precisa de auditoria, não
 o tempo de vida do IdP.
 
+#### ✅ Era (2), e era bug nosso: o worker nunca persistia o contexto
+
+A auditoria acima foi feita e achou a coisa. A regra "quem cruza o SSO
+recaptura e persiste em `finally`" era cumprida **só pelos scripts**.
+`workers/national-life/run-job.ts` tinha, no `finally`, exatamente isto:
+
+```ts
+} finally {
+  await browserSession?.close()   // e mais nada
+}
+```
+
+`captureSteelSessionContext` só era chamado no caminho de **conexão**
+(`createAttemptRunner`), nunca no de **job**. Então todo job que tocava o
+Foresight — e `renderForesightReport` navega para `/agent/sso/foresight` a cada
+execução — rotacionava o cookie `auth0` dentro do browser e **jogava a
+rotação fora ao fechar**. O job seguinte decriptava o contexto antigo e
+apresentava um cookie superado, que é o que o IdP trata como replay.
+
+Isto explica os dois dias com uma causa só:
+
+| | por que morria |
+| --- | --- |
+| keep-alive ligado | cruzava a cada 10 min, descartava a rotação toda vez → morte em ~7 min |
+| keep-alive desligado | cruzava uma vez por job, descartava igual → morte logo depois do job |
+| 2026-07-30, ~11 h | **nenhum job de Foresight rodou nesse intervalo** — nada cruzou, nada foi descartado |
+
+O keep-alive não era a doença, era o sintoma mais rápido.
+
+Corrigido: `NationalLifeRunJobDeps` ganhou `captureContext(session)` e
+`sessionStore.saveContext(...)`, chamados no `finally` **antes** do `close()`.
+A persistência nunca falha o job — o carrier já foi perguntado e já respondeu,
+e erro ali faria um retry perguntar duas vezes. A escrita é guardada em
+`status: 'CONNECTED'`, para não ressuscitar sessão desconectada de propósito.
+Dois testes cobrem: a ordem captura-antes-de-fechar, e o job seguir
+`SUCCEEDED` quando a persistência quebra.
+
+⚠️ **O que isto ainda não prova.** Que a sessão passe a viver horas *com* jobs
+cruzando é previsão, não medição. Medir é o de sempre: login novo, rodar um
+job de Foresight, e verificar dali a uma hora se o salto ainda entra
+autenticado.
+
 #### Desenho que isso habilita
 
 O PDF **não** precisa de sessão Auth0 permanentemente viva. Precisa dela viva no
