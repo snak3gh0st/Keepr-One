@@ -895,6 +895,42 @@ abertura — está nos bundles que a página carrega, e é o que
 não rodou com sucesso**: as três tentativas caíram no muro, porque o SSO morreu
 antes. É a primeira coisa a rodar na próxima janela viva.
 
+### A inversão: o keep-alive do SSO é o suspeito de **matar** a sessão
+
+Confrontando os dois dias, com a variável certa isolada:
+
+| | 2026-07-30 | 2026-07-31 |
+| --- | --- | --- |
+| salto atravessado a cada 10 min | **não** (flag inexistente) | **sim** |
+| Foresight alcançável | **~11 h após o login** | **morto em ~7 min** |
+
+Ontem a sondagem achou o Foresight autenticado cerca de onze horas depois do
+login, com o keep-alive tocando **só o portal**. Hoje, cruzando o `/authorize` a
+cada poucos minutos, morreu em sete. A intervenção criada para manter a sessão
+viva correlaciona com a morte rápida; a ausência dela, com sobrevivência longa.
+
+Mecanismo plausível, coerente com o que já foi medido: cada `/authorize` **gira**
+o cookie `auth0` (visto: foi para momento+3d). Cada job monta um navegador novo a
+partir do contexto salvo, então basta um script que cruze o salto e **não**
+persista o cookie girado para que o próximo job apresente um cookie superado —
+que é exatamente o sinal que um IdP trata como replay e responde invalidando a
+sessão. `describe-foresight` e a sonda fazem isso: cruzam e não persistem.
+
+**Ação tomada (13:52 UTC):** `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP` removido do
+env-file e container recriado (`printenv` = `false`). A sessão de 13:44, viva às
+13:50, segue recebendo só toque de portal. O teste é **não olhar**: uma única
+verificação horas depois. Se continuar alcançável, a hipótese está confirmada.
+
+#### Consequência de produto, se confirmar
+
+Não é preciso manter o Auth0 vivo continuamente — é preciso que ele esteja vivo
+**no instante em que o agente pede o PDF**. Isso é mais simples e mais barato do
+que um keep-alive: o salto vira parte do próprio job de gerar a ilustração, e
+nada toca o IdP fora disso. Regra que decorre da hipótese e vale desde já:
+**todo job que cruzar o SSO precisa recapturar e persistir o contexto**, como o
+keep-alive faz e as sondas não fazem — cruzar sem persistir é o que envenena a
+sessão seguinte.
+
 ### 2026-07-31 13:36 UTC: o salto **não** segura o Auth0, e o "12 h" era limite superior
 
 Login novo às 13:25:00, com `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP=true` já ligado —
