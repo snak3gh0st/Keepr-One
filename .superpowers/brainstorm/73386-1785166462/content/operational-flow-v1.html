@@ -1,0 +1,67 @@
+<h2>Fluxo operacional completo</h2>
+<p class="subtitle">Uma conexão individual por agente, com sincronização automática e submissão sempre revisada.</p>
+
+<div class="section">
+  <div class="label">1 · Conectar conta National Life</div>
+  <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;align-items:center">
+    <div class="card" style="padding:14px"><strong>Agente</strong><p>Informa usuário e senha</p></div>
+    <div style="text-align:center;font-size:24px">→</div>
+    <div class="card" style="padding:14px"><strong>Fyntra server</strong><p>Valida permissão</p></div>
+    <div style="text-align:center;font-size:24px">→</div>
+    <div class="card" style="padding:14px"><strong>Vault</strong><p>Criptografa e versiona</p></div>
+    <div style="text-align:center;font-size:24px">→</div>
+    <div class="card" style="padding:14px"><strong>Teste</strong><p>Browser faz login; MFA pausa</p></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">2 · Sincronizar underwriting</div>
+  <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;align-items:center">
+    <div class="card" style="padding:14px"><strong>Fila</strong><p>Manual ou agendada</p></div>
+    <div style="text-align:center;font-size:24px">→</div>
+    <div class="card" style="padding:14px"><strong>Browser</strong><p>Abre portal e busca casos</p></div>
+    <div style="text-align:center;font-size:24px">→</div>
+    <div class="card" style="padding:14px"><strong>Adapter NLG</strong><p>Normaliza status, notas e requirements</p></div>
+    <div style="text-align:center;font-size:24px">→</div>
+    <div class="card" style="padding:14px"><strong>Fyntra</strong><p>Atualiza timeline e cria alertas</p></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">3 · Criar e submeter application</div>
+  <div style="display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:7px;align-items:center">
+    <div class="card" style="padding:12px"><strong>Caso</strong><p>Dados e documentos</p></div>
+    <div style="text-align:center;font-size:22px">→</div>
+    <div class="card" style="padding:12px"><strong>Preflight</strong><p>Campos obrigatórios</p></div>
+    <div style="text-align:center;font-size:22px">→</div>
+    <div class="card" style="padding:12px"><strong>Draft NLG</strong><p>Browser preenche</p></div>
+    <div style="text-align:center;font-size:22px">→</div>
+    <div class="card" style="padding:12px;border:2px solid var(--accent)"><strong>Revisão humana</strong><p>Agente confirma</p></div>
+    <div style="text-align:center;font-size:22px">→</div>
+    <div class="card" style="padding:12px"><strong>Submissão</strong><p>ID externo e acompanhamento</p></div>
+  </div>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">Regra de criação da policy</div>
+  <div class="mockup-body">
+    <p><strong>Application submetida não vira policy automaticamente.</strong> O Fyntra cria a policy somente quando a National Life reportar emissão/placement, preservando o portal do carrier como fonte oficial.</p>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve-flow" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Aprovar este fluxo</h3>
+      <p>Seguir para estados de erro, intervenção e recuperação.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="adjust-flow" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Quero ajustar</h3>
+      <p>Indique no terminal qual etapa deve mudar.</p>
+    </div>
+  </div>
+</div>

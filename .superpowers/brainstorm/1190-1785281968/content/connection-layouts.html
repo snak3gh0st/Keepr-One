@@ -1,0 +1,118 @@
+<style>
+  .layout-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; margin-top:24px; }
+  .layout-card { border:1px solid #d9dfdf; border-radius:16px; overflow:hidden; background:#fff; cursor:pointer; transition:.18s ease; }
+  .layout-card:hover { transform:translateY(-2px); box-shadow:0 12px 30px rgba(20,46,48,.10); }
+  .layout-card.selected { border:2px solid #0d7c78; box-shadow:0 0 0 4px rgba(13,124,120,.12); }
+  .preview { height:320px; background:#edf1f0; position:relative; overflow:hidden; font-family:Inter,system-ui,sans-serif; }
+  .app-shell { height:100%; display:grid; grid-template-columns:55px 1fr; }
+  .side { background:#173b3d; padding:14px 10px; color:#c7d8d8; }
+  .side b { display:block; width:28px; height:28px; border-radius:8px; background:#e9f4ef; color:#173b3d; text-align:center; line-height:28px; margin-bottom:20px; }
+  .side i { display:block; width:28px; height:5px; background:#668183; border-radius:4px; margin:10px 0; }
+  .main { padding:15px; position:relative; }
+  .topline { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:10px; color:#526668; }
+  .title { font-size:15px; font-weight:750; color:#183b3d; }
+  .connection-card { border:1px solid #d5dedc; border-radius:10px; background:#fff; padding:13px; }
+  .connection-card strong { font-size:11px; color:#183b3d; }
+  .connection-card p { font-size:8px; color:#637477; margin:4px 0 10px; }
+  .connect-btn { display:inline-block; background:#0d7c78; color:white; padding:7px 10px; border-radius:6px; font-size:8px; font-weight:700; }
+  .browser { background:#fff; border:1px solid #ccd6d5; border-radius:11px; overflow:hidden; box-shadow:0 14px 40px rgba(15,42,44,.20); }
+  .browser-chrome { background:#173b3d; color:#e7f3f1; padding:8px 10px; display:flex; align-items:center; gap:6px; font-size:8px; }
+  .dot { width:6px; height:6px; border-radius:50%; background:#7f9a9b; }
+  .secure { margin-left:5px; padding:4px 8px; flex:1; border-radius:5px; background:#274d4f; white-space:nowrap; overflow:hidden; }
+  .secure em { color:#79d0b7; font-style:normal; }
+  .portal { min-height:175px; padding:20px; text-align:center; background:linear-gradient(140deg,#f7faf9,#e8f1ed); }
+  .nlg { color:#164d7b; font-weight:800; font-size:14px; margin:10px 0 18px; }
+  .field { height:22px; background:#fff; border:1px solid #cbd7d5; border-radius:4px; margin:7px auto; max-width:145px; text-align:left; padding:0 7px; line-height:22px; font-size:7px; color:#819091; }
+  .login { background:#166ca4; color:white; border-radius:4px; padding:6px 18px; display:inline-block; font-size:8px; margin-top:3px; }
+  .trust { font-size:7px; color:#5f7173; margin-top:13px; }
+  .modal-mask { position:absolute; inset:0; background:rgba(12,35,37,.54); padding:18px; display:flex; align-items:center; }
+  .modal-mask .browser { width:100%; }
+  .inline-browser { margin-top:12px; }
+  .drawer-mask { position:absolute; inset:0; background:rgba(12,35,37,.22); }
+  .drawer { position:absolute; top:0; right:0; bottom:0; width:83%; background:#f6f9f8; padding:12px; box-shadow:-10px 0 26px rgba(15,42,44,.18); }
+  .drawer .browser { margin-top:10px; }
+  .card-copy { padding:16px; }
+  .badge { display:inline-flex; border-radius:99px; padding:4px 8px; background:#e3f4ef; color:#0d726e; font-size:11px; font-weight:750; margin-bottom:8px; }
+  .card-copy h3 { margin:0 0 6px; font-size:17px; }
+  .card-copy p { margin:0; font-size:13px; line-height:1.45; color:#667477; }
+  @media(max-width:900px){ .layout-grid{grid-template-columns:1fr;} }
+</style>
+
+<h2>Como o login da National Life deve aparecer?</h2>
+<p class="subtitle">Todas as opções usam a mesma sessão segura do Steel Browser. A diferença é somente a experiência apresentada ao agente.</p>
+
+<div class="layout-grid">
+  <div class="layout-card" data-choice="modal" onclick="toggleSelect(this)">
+    <div class="preview">
+      <div class="app-shell">
+        <div class="side"><b>K</b><i></i><i></i><i></i><i></i></div>
+        <div class="main">
+          <div class="topline"><span class="title">Conexão National Life</span><span>Agente</span></div>
+          <div class="connection-card">
+            <strong>National Life Group</strong>
+            <p>Conecte sua conta para sincronizar casos e requisitos.</p>
+            <span class="connect-btn">Conectar conta</span>
+          </div>
+          <div class="modal-mask">
+            <div class="browser">
+              <div class="browser-chrome"><span class="dot"></span><span class="dot"></span><span class="secure"><em>● Seguro</em> · nationallife.com/agent</span></div>
+              <div class="portal"><div class="nlg">National Life Group</div><div class="field">Usuário</div><div class="field">Senha</div><span class="login">Entrar</span><div class="trust">Sessão isolada · A Fyntra não vê sua senha</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-copy">
+      <span class="badge">A · Recomendado</span>
+      <h3>Janela segura central</h3>
+      <p>Foco total no login e MFA. Fecha automaticamente após conectar e devolve o agente à mesma tela.</p>
+    </div>
+  </div>
+
+  <div class="layout-card" data-choice="inline" onclick="toggleSelect(this)">
+    <div class="preview">
+      <div class="app-shell">
+        <div class="side"><b>K</b><i></i><i></i><i></i><i></i></div>
+        <div class="main">
+          <div class="topline"><span class="title">Conexão National Life</span><span>Agente</span></div>
+          <div class="browser inline-browser">
+            <div class="browser-chrome"><span class="dot"></span><span class="dot"></span><span class="secure"><em>● Seguro</em> · nationallife.com/agent</span></div>
+            <div class="portal"><div class="nlg">National Life Group</div><div class="field">Usuário</div><div class="field">Senha</div><span class="login">Entrar</span><div class="trust">Sessão isolada · expira em 05:00</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-copy">
+      <span class="badge">B</span>
+      <h3>Navegador dentro da página</h3>
+      <p>A sessão ocupa a área principal. Parece mais permanente, mas deixa a página visualmente pesada mesmo sendo usada raramente.</p>
+    </div>
+  </div>
+
+  <div class="layout-card" data-choice="drawer" onclick="toggleSelect(this)">
+    <div class="preview">
+      <div class="app-shell">
+        <div class="side"><b>K</b><i></i><i></i><i></i><i></i></div>
+        <div class="main">
+          <div class="topline"><span class="title">Conexão National Life</span><span>Agente</span></div>
+          <div class="connection-card"><strong>National Life Group</strong><p>Status: requer autenticação</p><span class="connect-btn">Continuar login</span></div>
+          <div class="drawer-mask"></div>
+          <div class="drawer">
+            <div class="topline"><strong>Entrar na National Life</strong><span>Fechar ×</span></div>
+            <div class="browser">
+              <div class="browser-chrome"><span class="secure"><em>● Seguro</em> · nationallife.com/agent</span></div>
+              <div class="portal"><div class="nlg">National Life Group</div><div class="field">Usuário</div><div class="field">Senha</div><span class="login">Entrar</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-copy">
+      <span class="badge">C</span>
+      <h3>Painel lateral</h3>
+      <p>Mantém algum contexto da Fyntra visível, mas oferece menos espaço para desafios de MFA e páginas responsivas do portal.</p>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:20px">Clique na opção que transmite mais confiança e simplicidade. Minha recomendação é a janela segura central.</p>

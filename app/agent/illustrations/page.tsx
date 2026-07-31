@@ -137,7 +137,7 @@ export default async function IllustrationsPage() {
                     // A condição do carrier vale igual aqui: é o PDF que o
                     // agente lê, não o que ele entrega ao cliente.
                     <a
-                      href={`/api/illustrations//document`}
+                      href={`/api/illustrations/${illustration.id}/document`}
                       target="_blank"
                       rel="noreferrer"
                       className="text-teal hover:text-teal-deep"

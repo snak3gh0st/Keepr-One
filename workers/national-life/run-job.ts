@@ -94,7 +94,23 @@ export type NationalLifeRunJobDeps = {
     ): Promise<StoredAgentIntegrationSession | null>
     markUsed(sessionId: string, usedAt: Date): Promise<void>
     invalidate(agentId: string, provider: string): Promise<void>
+    /// Writes the context back as the browser left it. See `captureContext`.
+    saveContext(
+      sessionId: string,
+      context: SessionContext,
+      capturedAt: Date,
+    ): Promise<void>
   }
+  /// Reads the live browser's cookies at the end of a job.
+  ///
+  /// Crossing the carrier's SSO — which the Foresight report does on every run
+  /// — rotates the `auth0` cookie inside this browser. Closing without writing
+  /// the rotation back leaves the next job presenting a superseded cookie, and
+  /// the IdP treats that as replay: the session dies with nobody having logged
+  /// out. The standalone scripts have always done this in `finally`; the worker
+  /// did not, which is why the session died ten minutes after the PDF job of
+  /// 2026-07-31 14:53 UTC.
+  captureContext(session: BrowserSession): Promise<SessionContext>
   decryptContext?(
     storedSession: StoredAgentIntegrationSession,
   ): SessionContext
@@ -542,6 +558,23 @@ export async function runNationalLifeJob(
 
         return 'ran'
       } finally {
+        // Before the close, not after: the cookies have to be read while the
+        // browser is still up. Never allowed to fail the job — the carrier was
+        // already asked and already answered, and reporting an error over a
+        // lost rotation would make a retry ask again.
+        if (browserSession) {
+          try {
+            await deps.sessionStore.saveContext(
+              storedSession!.id,
+              await deps.captureContext(browserSession),
+              deps.now(),
+            )
+          } catch {
+            // Nothing to do here but leave the stored context as it was. The
+            // next job either works or asks for a reconnect, which is the
+            // same path an ordinary expiry takes.
+          }
+        }
         await browserSession?.close()
       }
     })

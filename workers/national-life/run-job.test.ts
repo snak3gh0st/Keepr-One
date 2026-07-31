@@ -31,6 +31,19 @@ const restoredContext: SessionContext = {
   ],
 }
 
+/// What the browser holds *after* the job — the `auth0` cookie rotated by the
+/// SSO crossing, which is the whole reason the context has to be written back.
+const capturedContext: SessionContext = {
+  cookies: [
+    {
+      name: 'carrier-session',
+      value: 'opaque-session-value',
+      domain: '.nationallife.example',
+    },
+    { name: 'auth0', value: 'rotated-by-the-crossing', domain: '.auth0.example' },
+  ],
+}
+
 function buildEnv(): NationalLifeEnv {
   return {
     steelBaseUrl: 'https://steel.example',
@@ -190,6 +203,7 @@ function createDeps(options: {
   requestRapidSolveQuote?: () => Promise<RapidSolveQuote | RapidSolveFailure>
   renderForesightReport?: () => { caseName: string; bytes: Buffer; mimeType: string } | null
   browserBusy?: boolean
+  saveContext?: () => void
 }) {
   const store = createStore(options.job ?? buildJob())
   const calls: string[] = []
@@ -198,6 +212,7 @@ function createDeps(options: {
   const used: Array<{ sessionId: string; usedAt: Date }> = []
   const quoteRequests: RapidSolveRequest[] = []
   const savedIllustrations: Array<{ insuredName: string }> = []
+  const savedContexts: Array<{ sessionId: string; context: SessionContext }> = []
 
   return {
     calls,
@@ -207,6 +222,7 @@ function createDeps(options: {
     browser,
     quoteRequests,
     savedIllustrations,
+    savedContexts,
     deps: {
       env: buildEnv(),
       workerId: 'worker-1',
@@ -225,6 +241,15 @@ function createDeps(options: {
         async invalidate(agentId: string, provider: string) {
           invalidations.push({ agentId, provider })
         },
+        async saveContext(sessionId: string, context: SessionContext) {
+          options.saveContext?.()
+          savedContexts.push({ sessionId, context })
+        },
+      },
+      async captureContext(session: BrowserSession) {
+        calls.push('context:capture')
+        expect(session).toBe(browser.session)
+        return capturedContext
       },
       decryptContext(session: StoredAgentIntegrationSession) {
         calls.push('context:decrypt')
@@ -325,6 +350,8 @@ describe('National Life restored-context job orchestration', () => {
       'adapter:assert-authenticated',
       'adapter:read',
       'sync:apply',
+      // Read while the browser is still up, so an SSO rotation is not lost.
+      'context:capture',
       'browser:close',
       'lock:release',
     ])
@@ -516,6 +543,54 @@ describe('National Life restored-context job orchestration', () => {
       to: 'SUCCEEDED',
       result: { rendered: false },
     })
+  })
+
+  // Crossing the carrier's SSO rotates the `auth0` cookie inside the live
+  // browser. A job that crosses and then closes without writing the rotation
+  // back leaves the next one presenting a superseded cookie, which the IdP
+  // reads as replay — the session dies with nobody having logged out. The
+  // standalone scripts already do this in `finally`; the worker did not, and
+  // that is what killed the session ten minutes after the PDF job of
+  // 2026-07-31 14:53 UTC.
+  it('writes the browser context back before closing, so the SSO rotation survives', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'GENERATE_ILLUSTRATION_PDF',
+        caseId: null,
+        input: { illustrationId: 'illustration-1' },
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.savedContexts).toEqual([
+      { sessionId: 'integration-session-1', context: capturedContext },
+    ])
+    // Capture has to happen while the browser is still up.
+    expect(test.calls.indexOf('context:capture')).toBeLessThan(
+      test.calls.indexOf('browser:close'),
+    )
+  })
+
+  // The carrier was already asked and already answered. Losing the rotation is
+  // bad, but reporting a failed job over it would be worse: the agent would
+  // see an error for work that succeeded, and a retry would ask again.
+  it('still succeeds when the context cannot be written back', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'GENERATE_ILLUSTRATION_PDF',
+        caseId: null,
+        input: { illustrationId: 'illustration-1' },
+      }),
+      saveContext: () => {
+        throw new Error('steel went away')
+      },
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls).toContain('browser:close')
+    expect(test.deps.jobStore.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
   })
 
   it('keeps the priced quote, so closing the tab does not lose it', async () => {

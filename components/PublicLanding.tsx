@@ -13,6 +13,11 @@ const marqueeItems = [
   "Equipe conectada",
 ];
 
+const appLoginUrl = `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://app.keeprone.com").replace(
+  /\/$/,
+  "",
+)}\/login`;
+
 const footerSignals = [
   "Registro completo",
   "Carteira acompanhada",
@@ -101,7 +106,7 @@ export function PublicLanding() {
               <a href="#planos">Planos</a>
             </div>
 
-            <Link className="landing-nav-cta" href="/login">
+              <Link className="landing-nav-cta" href={appLoginUrl}>
               Entrar
               <span aria-hidden="true">↗</span>
             </Link>
@@ -141,7 +146,7 @@ export function PublicLanding() {
                 Conhecer a plataforma
                 <span aria-hidden="true">↓</span>
               </a>
-              <Link className="landing-button landing-button-ghost" href="/login">
+              <Link className="landing-button landing-button-ghost" href={appLoginUrl}>
                 Entrar na Keepr One
                 <span aria-hidden="true">↗</span>
               </Link>
@@ -623,7 +628,7 @@ export function PublicLanding() {
                 </a>
                 <Link
                   className="landing-final-secondary"
-                  href="/login"
+                  href={appLoginUrl}
                 >
                   Já sou cliente
                   <span aria-hidden="true">↗</span>
@@ -717,7 +722,7 @@ export function PublicLanding() {
                 <h2>O próximo passo fica claro.</h2>
               </div>
 
-              <Link className="landing-footer-entry" href="/login">
+              <Link className="landing-footer-entry" href={appLoginUrl}>
                 <span>Acessar a plataforma</span>
                 <i aria-hidden="true">↗</i>
               </Link>
@@ -770,7 +775,7 @@ export function PublicLanding() {
                   <span>Planos</span>
                   <i aria-hidden="true">↗</i>
                 </a>
-                <Link href="/login">
+                <Link href={appLoginUrl}>
                   <span>Entrar</span>
                   <i aria-hidden="true">↗</i>
                 </Link>

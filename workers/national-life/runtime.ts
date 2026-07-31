@@ -1,10 +1,13 @@
 import { type Server } from 'node:http'
 import type { EventEmitter } from 'node:events'
 import { Prisma, PrismaClient } from '@prisma/client'
+import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
 import {
   decryptAttemptRuntime,
+  encryptBrowserContext,
   type EncryptedBrowserSecret,
 } from '../../lib/national-life/browser-context-crypto'
+import { deriveCarrierExpiresAt } from '../../lib/national-life/session-refresh'
 import { withOwnedBrowserLockWaiting } from '../../lib/national-life/browser-lock'
 import { NATIONAL_LIFE_PROVIDER } from '../../lib/national-life/constants'
 import { saveRapidSolveIllustration } from '../../lib/national-life/illustration-service'
@@ -494,6 +497,47 @@ function createSessionStore(env: NationalLifeEnv) {
         data: { lastUsedAt: usedAt },
       })
     },
+    // Guarded on the row still being CONNECTED: a job that ran while the agent
+    // disconnected must not write a live context back into a session that was
+    // deliberately invalidated.
+    async saveContext(sessionId: string, context: SessionContext, capturedAt: Date) {
+      const stored = await prisma.agentIntegrationSession.findUnique({
+        where: { id: sessionId },
+        select: { agentId: true, status: true },
+      })
+      if (!stored || stored.status !== 'CONNECTED') {
+        return
+      }
+      const encrypted = encryptBrowserContext(
+        context,
+        {
+          agentId: stored.agentId,
+          scopeId: env.sessionScopeId,
+          provider: NATIONAL_LIFE_PROVIDER,
+          purpose: 'AUTHENTICATED_BROWSER_CONTEXT',
+          formatVersion: 1,
+        },
+        { version: env.sessionKeyVersion, base64Key: env.sessionKeys[env.sessionKeyVersion] },
+      )
+      await prisma.agentIntegrationSession.updateMany({
+        where: {
+          id: sessionId,
+          deploymentScope: env.sessionScopeId,
+          provider: NATIONAL_LIFE_PROVIDER,
+          purpose: SESSION_PURPOSE,
+          status: 'CONNECTED',
+        },
+        data: {
+          keyVersion: encrypted.keyVersion,
+          algorithm: encrypted.algorithm,
+          iv: encrypted.iv,
+          ciphertext: encrypted.ciphertext,
+          authTag: encrypted.authTag,
+          carrierExpiresAt: deriveCarrierExpiresAt(context, env.portalOrigins),
+          lastUsedAt: capturedAt,
+        },
+      })
+    },
     async invalidate(agentId: string, provider: string) {
       await prisma.agentIntegrationSession.updateMany({
         where: {
@@ -544,6 +588,8 @@ function createJobRunner(env: NationalLifeEnv) {
       sessionStore,
       createSession: (sessionContext) =>
         createSteelBrowserSession(env, { sessionContext }),
+      captureContext: (session) =>
+        captureSteelSessionContext(session.steelSessionId, env),
       createAdapter: (session) =>
         new NationalLifeAdapter(session, {
           carrierId: NATIONAL_LIFE_PROVIDER,
