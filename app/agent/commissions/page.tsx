@@ -5,10 +5,9 @@ import { decimalToNumber } from '@/lib/decimal'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { ErrorBanner } from '@/components/ErrorBanner'
-import { ContextPanel } from '@/components/ContextPanel'
-import { ModuleSummary } from '@/components/ModuleSummary'
 import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 import { toCarrierCommissionRecords } from '@/lib/national-life/commission-records'
+import { getDownlineIds } from '@/lib/hierarchy'
 import { CommissionsList } from './CommissionsList'
 
 export const dynamic = 'force-dynamic'
@@ -49,7 +48,11 @@ function toCommissionRecords(
 
 export default async function CommissionsPage() {
   const agent = await getCurrentAgent()
-  const user = await prisma.user.findUnique({ where: { id: agent.userId } })
+  const [user, allAgents] = await Promise.all([
+    prisma.user.findUnique({ where: { id: agent.userId } }),
+    prisma.agent.findMany({ select: { id: true, parentAgentId: true } }),
+  ])
+  const scopeAgentIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
   let records: Record_[] = []
   let loadError = false
 
@@ -81,7 +84,10 @@ export default async function CommissionsPage() {
       )
       const localPolicies = numbers.length
         ? await prisma.policy.findMany({
-            where: { policyNumber: { in: numbers } },
+            where: {
+              agentId: { in: scopeAgentIds },
+              policyNumber: { in: numbers },
+            },
             select: { id: true, policyNumber: true },
           })
         : []
@@ -100,74 +106,51 @@ export default async function CommissionsPage() {
     loadError = true
   }
 
-  const periods = Array.from(new Set(records.map((r) => r.period)))
-  const byPeriod = periods.map((period) => {
-    const rows = records.filter((r) => r.period === period)
-    const subtotal = rows.reduce((sum, r) => sum + decimalToNumber(r.amount), 0)
-    return { period, rows, subtotal }
-  })
-  const totalAmount = records.reduce((sum, record) => sum + decimalToNumber(record.amount), 0)
-  const directAmount = records
-    .filter((record) => record.type === 'DIRECT')
-    .reduce((sum, record) => sum + decimalToNumber(record.amount), 0)
-  const overrideAmount = totalAmount - directAmount
-
+  const rowsByPeriod = new Map<string, Record_[]>()
+  for (const record of records) {
+    const periodRows = rowsByPeriod.get(record.period) ?? []
+    periodRows.push(record)
+    rowsByPeriod.set(record.period, periodRows)
+  }
+  const byPeriod = Array.from(rowsByPeriod, ([period, rows]) => ({ period, rows }))
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
-      <PageHeader title="Comissões" eyebrow="Resultado financeiro" description="Entenda quanto veio da sua produção, quanto veio da equipe e qual apólice originou cada lançamento.">
+      <PageHeader
+        title="Comissões"
+        eyebrow="Extrato financeiro"
+        description="Acompanhe o valor de cada lançamento, identifique a apólice de origem e diferencie sua produção dos repasses da equipe."
+      >
         <Link
           href="/agent/policies"
-          className="inline-flex items-center border border-white/20 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/10"
+          className="commission-header-link"
         >
           Ver apólices
+          <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
+            <path d="M4.5 9h9M10 5.5 13.5 9 10 12.5" />
+          </svg>
         </Link>
-        <span className="inline-flex rounded-full bg-gold-pale px-3 py-1.5 text-xs font-semibold text-gold-ink">{records.length} lançamentos</span>
       </PageHeader>
       {loadError && (
         <ErrorBanner>
           Não foi possível carregar seu extrato agora. Tente atualizar a página.
         </ErrorBanner>
       )}
-
       {!loadError && (
-        <ModuleSummary
-          label="Resumo das comissões"
-          items={[
-            { label: 'Total registrado', value: `$${totalAmount.toFixed(0)}`, detail: `${periods.length} período(s) com movimento`, tone: 'green' },
-            { label: 'Produção direta', value: `$${directAmount.toFixed(0)}`, detail: 'Comissão das suas próprias vendas' },
-            { label: 'Produção da equipe', value: `$${overrideAmount.toFixed(0)}`, detail: 'Repasses gerados pela sua equipe', tone: 'gold' },
-          ]}
+        <CommissionsList
+          byPeriod={byPeriod.map(({ period, rows }) => ({
+            period,
+            rows: rows.map((record) => ({
+              id: record.id,
+              policyNumber: record.policy?.policyNumber ?? null,
+              policyId: record.policy?.id ?? null,
+              agentName: record.policy?.agent.user.name ?? 'Não informado',
+              type: record.type === 'DIRECT' ? 'DIRECT' : 'OVERRIDE',
+              level: record.level,
+              amount: decimalToNumber(record.amount).toFixed(2),
+            })),
+          }))}
         />
       )}
-
-      <div className="module-content-grid">
-      <section className="min-w-0">
-        {!loadError && (
-          <CommissionsList
-            byPeriod={byPeriod.map(({ period, rows, subtotal }) => ({
-              period,
-              subtotal: subtotal.toFixed(2),
-              rows: rows.map((record) => ({
-                id: record.id,
-                policyNumber: record.policy?.policyNumber ?? null,
-                policyId: record.policy?.id ?? null,
-                agentName: record.policy?.agent.user.name ?? '—',
-                typeLabel: record.type === 'DIRECT' ? 'Direta' : 'Repasse',
-                level: record.level,
-                amount: decimalToNumber(record.amount).toFixed(2),
-              })),
-            }))}
-          />
-        )}
-      </section>
-      <ContextPanel eyebrow="Continue por aqui" title="Origem de cada resultado">
-        <p>Cada lançamento mostra o período, a origem da venda e o nível da comissão dentro da sua hierarquia.</p>
-        <div className="mt-5 border-t border-white/10 pt-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Nível 0</p>
-          <p className="mt-2">Venda direta feita por você.</p>
-        </div>
-      </ContextPanel>
-      </div>
     </Shell>
   )
 }

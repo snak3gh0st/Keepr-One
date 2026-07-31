@@ -21,6 +21,8 @@ import {
   KeeprDashboardMotion,
 } from '@/components/KeeprDashboardMotion'
 import { OperationSignals, type OperationSignal } from '@/components/OperationSignals'
+import { getAgentPromotionSnapshot } from '@/lib/agent-promotion'
+import { JourneyDashboardPreview } from './JourneyDashboardPreview'
 
 function BreakdownList({
   title,
@@ -96,15 +98,47 @@ function formatCurrency(value: number): string {
   }).format(value)
 }
 
+function formatCurrencyNumber(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 0,
+  }).format(value)
+}
+
+function formatMonthName(period: string): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    month: 'long',
+    timeZone: 'UTC',
+  }).format(new Date(`${period}-01T00:00:00.000Z`))
+}
+
+function formatMonthShort(period: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    timeZone: 'UTC',
+  }).format(new Date(`${period}-01T00:00:00.000Z`))
+}
+
 function Delta({ value }: { value: number | null }) {
   if (value === null) return null
-  const positive = value >= 0
+  const positive = value > 0
+  const negative = value < 0
+  const accessibleLabel = positive
+    ? `Aumento de ${Math.abs(value).toFixed(0)} por cento`
+    : negative
+      ? `Queda de ${Math.abs(value).toFixed(0)} por cento`
+      : 'Sem variação percentual'
+  const toneClass = positive
+    ? 'bg-success-pale text-success'
+    : negative
+      ? 'bg-danger-pale text-danger'
+      : 'bg-white/10 text-paper/70'
+
   return (
     <span
-      aria-label={`${positive ? 'Aumento' : 'Queda'} de ${Math.abs(value).toFixed(0)} por cento`}
-      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-mono text-[11px] font-semibold ${positive ? 'bg-success-pale text-success' : 'bg-danger-pale text-danger'}`}
+      aria-label={accessibleLabel}
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-mono text-[11px] font-semibold ${toneClass}`}
     >
-      <span aria-hidden>{positive ? '↗' : '↘'}</span>
+      <span aria-hidden>{positive ? '↗' : negative ? '↘' : '→'}</span>
       {Math.abs(value).toFixed(0)}%
     </span>
   )
@@ -126,8 +160,11 @@ function safeGroupCount(groupCount: unknown): number {
 
 export default async function AgentDashboard() {
   const agent = await getCurrentAgent()
-  const user = await prisma.user.findUnique({ where: { id: agent.userId } })
-  const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
+  const [user, allAgents, promotion] = await Promise.all([
+    prisma.user.findUnique({ where: { id: agent.userId } }),
+    prisma.agent.findMany({ select: { id: true, parentAgentId: true } }),
+    getAgentPromotionSnapshot(agent.id),
+  ])
   const downlineIds = getDownlineIds(allAgents, agent.id)
   const scope = [agent.id, ...downlineIds]
 
@@ -297,11 +334,17 @@ export default async function AgentDashboard() {
 
   const firstName = ((user?.name ?? '').trim() || 'Agente').split(/\s+/)[0]
   const commissionDelta = loadError ? null : percentChange(commissionThisMonth, commissionLastMonth)
+  const currentMonthName = formatMonthName(currentP)
+  const previousMonthName = formatMonthName(previousP)
+  const currentPeriodLabel = `${formatMonthShort(currentP)} ${currentP.slice(0, 4)}`
+  const commissionNumberValue = loadError ? '—' : formatCurrencyNumber(commissionThisMonth)
+  const hasCommissionComparison = commissionDelta !== null && commissionLastMonth !== 0
+  const hasNoPreviousCommissionValue = !loadError && commissionThisMonth > 0 && commissionLastMonth === 0
   const commissionTrendMap = new Map(commissionByPeriod.map((bucket) => [bucket.period, bucket.total]))
   const commissionTrend = Array.from({ length: 6 }, (_, index) => {
     const period = shiftPeriod(currentP, index - 5)
     return {
-      label: period.slice(5),
+      label: formatMonthShort(period),
       tooltipLabel: new Intl.DateTimeFormat('pt-BR', {
         month: 'long',
         year: 'numeric',
@@ -379,7 +422,7 @@ export default async function AgentDashboard() {
                     data-hero-reveal
                     className="mt-4 max-w-4xl text-[clamp(2.35rem,4.1vw,4.35rem)] font-medium leading-[0.98] tracking-[-0.06em]"
                   >
-                    Estas são suas comissões neste mês.
+                    Suas comissões de {currentMonthName}.
                   </h1>
                 </div>
                 <Link
@@ -391,20 +434,44 @@ export default async function AgentDashboard() {
                 </Link>
               </div>
 
-              <div data-hero-reveal className="mt-7 flex flex-wrap items-end gap-x-4 gap-y-3">
-                <p className="font-mono text-[clamp(3.5rem,6vw,6.25rem)] font-medium leading-[0.84] tracking-[-0.072em] tabular-nums">
-                  {moneyValue(commissionThisMonth)}
+              <div data-hero-reveal className="mt-7">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-paper/42">
+                  Total registrado <span aria-hidden>·</span> USD
                 </p>
-                <div className="pb-1 sm:pb-2">
-                  <Delta value={commissionDelta} />
-                  <p className="mt-2 text-xs text-paper/48">comparado ao mês anterior</p>
+                <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3">
+                  <p
+                    aria-label={loadError ? 'Total de comissões indisponível' : `Total de ${formatCurrency(commissionThisMonth)} em comissões`}
+                    className="flex items-start gap-2"
+                  >
+                    {!loadError && (
+                      <span aria-hidden className="mt-[0.48em] text-[clamp(0.9rem,1.4vw,1.2rem)] font-semibold tracking-[0.14em] text-mint">
+                        US$
+                      </span>
+                    )}
+                    <span aria-hidden className="font-mono text-[clamp(3.5rem,6vw,6.25rem)] font-medium leading-[0.84] tracking-[-0.072em] tabular-nums">
+                      {commissionNumberValue}
+                    </span>
+                  </p>
+
+                  {hasCommissionComparison && (
+                    <div className="pb-1 sm:pb-2">
+                      <Delta value={commissionDelta} />
+                      <p className="mt-2 text-xs text-paper/48">em relação a {previousMonthName}</p>
+                    </div>
+                  )}
+
+                  {hasNoPreviousCommissionValue && (
+                    <p className="pb-1 text-xs text-paper/48 sm:pb-2">
+                      Sem valor registrado em {previousMonthName}
+                    </p>
+                  )}
                 </div>
               </div>
 
               <div data-hero-reveal className="mt-7 rounded-[20px] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
                 <div className="mb-4 flex items-center justify-between">
                   <p className="text-xs font-medium text-paper/52">Comissões registradas · 6 meses</p>
-                  <p className="font-mono text-xs text-paper/46">Período {currentP}</p>
+                  <p className="font-mono text-xs text-paper/46">Período {currentPeriodLabel}</p>
                 </div>
                 <TrendChart
                   data={commissionTrend}
@@ -468,7 +535,14 @@ export default async function AgentDashboard() {
           </div>
         </div>
 
-        <section aria-label="Resumo da operação" className="mt-16 grid grid-flow-dense grid-cols-1 gap-4 lg:grid-cols-12">
+        <JourneyDashboardPreview
+          personalPc={promotion.personalPc}
+          agencyPc={promotion.agencyPc}
+          mode={promotion.mode}
+          loadError={promotion.loadError}
+        />
+
+        <section aria-label="Resumo da operação" className="mt-12 grid grid-flow-dense grid-cols-1 gap-4 lg:grid-cols-12">
           <Link href="/agent/cases" className="keepr-card keepr-card-interactive group relative min-h-[250px] overflow-hidden rounded-[28px] p-7 lg:col-span-4" data-stack-card>
             <div aria-hidden className="absolute -bottom-20 -right-12 h-52 w-52 rounded-full bg-teal-pale transition-transform duration-700 ease-out group-hover:scale-105" />
             <div className="relative flex h-full flex-col justify-between">
