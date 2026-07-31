@@ -13,21 +13,21 @@ describe('QUOTE_DISCLAIMER', () => {
   // with different legal weight, and calling a quote a "proposta" implies a
   // commitment nobody has made yet.
   it('says this is a quote, not a proposal', () => {
-    expect(QUOTE_DISCLAIMER).toContain('Cotação, não proposta')
+    expect(QUOTE_DISCLAIMER).toContain('Quote, not an application')
   })
 
   // The numbers are demonstrative, not a promise. Losing this clause is how a
   // screen ends up looking like it guarantees a premium or a payout the
   // carrier has not actually committed to.
   it('says the values are not guaranteed', () => {
-    expect(QUOTE_DISCLAIMER).toContain('não são garantidos')
+    expect(QUOTE_DISCLAIMER).toContain('not guaranteed')
   })
 
   // The one instruction that keeps this screen out of a client's hands. If
   // this clause disappears, an agent has no textual reason not to forward the
   // page straight to the client it was never cleared for.
   it('says it must not be shown to the client', () => {
-    expect(QUOTE_DISCLAIMER).toContain('não pode ser exibido a ele')
+    expect(QUOTE_DISCLAIMER).toContain('must not be shown to them')
   })
 })
 
@@ -65,7 +65,7 @@ describe('QUOTE_DISCLAIMER usage', () => {
   }
 
   it('is never hand-copied outside the constant that owns it', () => {
-    const needle = 'Cotação, não proposta'
+    const needle = 'Quote, not an application'
 
     const offenders = ['app', 'components', 'lib']
       .flatMap((dir) => sourceFiles(join(ROOT, dir)))
