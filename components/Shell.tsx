@@ -37,6 +37,10 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
       matches: ["/agent/cases", "/agent/clients", "/agent/activities"],
     },
     { href: "/agent/policies", label: "Apólices", icon: "document", group: "Carteira" },
+    // The quotes were being written to the database and shown nowhere: the
+    // screen that asked for one displayed it until the page reloaded, and
+    // there was no route that listed them.
+    { href: "/agent/illustrations", label: "Ilustrações", icon: "document", group: "Carteira" },
     { href: "/agent/commissions", label: "Comissões", icon: "money", group: "Carteira" },
     { href: "/agent/hierarchy", label: "Equipe", icon: "hierarchy", group: "Gestão" },
     {
