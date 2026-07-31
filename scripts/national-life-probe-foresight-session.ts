@@ -212,7 +212,17 @@ async function main() {
         }
       }
 
-      const capture = async () => summarizeCookies(await captureSteelSessionContext(session.steelSessionId, env))
+      // Read the deadlines twice, from two places. Steel's `sessions.context()`
+      // is only ever called once per job elsewhere, at the end — whether it
+      // reflects live cookie state mid-session or a snapshot that settles on
+      // release has never been checked. A stale snapshot would report "nothing
+      // moved", which is indistinguishable from the absolute-lifetime verdict
+      // and would end this investigation on a confident wrong answer. The
+      // browser's own jar is the primary signal; Steel is the cross-check.
+      const capture = async () => ({
+        live: summarizeCookies({ cookies: await page.context().cookies() }),
+        steel: summarizeCookies(await captureSteelSessionContext(session.steelSessionId, env)),
+      })
 
       const seeded = summarizeCookies(sessionContext as SessionContext)
 
@@ -237,9 +247,18 @@ async function main() {
             portal,
             foresight,
             cookies: { seeded, afterPortal, afterJump },
-            // Did touching the portal renew an Auth0 deadline? Did the jump?
-            portalTouchMoved: shiftedExpiries(seeded, afterPortal),
-            jumpMoved: shiftedExpiries(afterPortal, afterJump),
+            // The measurement: did the jump renew an Auth0 deadline? Read
+            // `live` first. If `live` and `steel` disagree, the Steel snapshot
+            // is stale — which is a finding about the tool, not about the
+            // carrier, and must not be read as "the deadline is absolute".
+            jumpMoved: {
+              live: shiftedExpiries(afterPortal.live, afterJump.live),
+              steel: shiftedExpiries(afterPortal.steel, afterJump.steel),
+            },
+            // Context: the seeded side comes from the decrypted database row and
+            // the other from a live jar, so churn here is source difference as
+            // much as renewal. Not the signal.
+            portalTouchMoved: shiftedExpiries(seeded, afterPortal.live),
           },
           null,
           2,

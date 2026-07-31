@@ -883,9 +883,21 @@ execução só:
 | `/agent/sso/foresight` | cai na ferramenta ou no muro do Auth0? — mesmo navegador, mesmo minuto |
 | diff dos prazos | o toque no portal moveu algum prazo do Auth0? e o salto? |
 
-O discriminador é `jumpMoved.moved`: **prazo que avança = janela ociosa**, que um
-keep-alive atravessando o salto segura. **Prazo que não se move = vida absoluta**,
-e nenhum toque resolve — aí a decisão é sobre credencial, não sobre engenharia.
+O discriminador é `jumpMoved.live.moved`: **prazo que avança = janela ociosa**,
+que um keep-alive atravessando o salto segura. **Prazo que não se move = vida
+absoluta**, e nenhum toque resolve — aí a decisão é sobre credencial, não sobre
+engenharia.
+
+Duas leituras, de duas fontes, de propósito: `live` é o cookie jar do próprio
+navegador, `steel` é o `sessions.context()`. O resto do código só chama o Steel
+uma vez por job, no fim, então nunca se verificou se ele reflete o estado vivo no
+meio da sessão. **Se `live` e `steel` discordarem, o snapshot do Steel está velho
+— isso é achado sobre a ferramenta, não sobre o carrier, e não pode ser lido como
+"o prazo é absoluto".**
+
+Antes de ligar a flag, olhar também `jumpMoved.live.vanished`: se o salto derruba
+o cookie do SSO, o keep-alive — que recaptura *depois* do salto — gravaria o jar
+degradado por cima de um bom, piorando a cada tique.
 Rode duas vezes, fresco e ~15 min depois: decaimento é pergunta de duas amostras.
 Cada login humano compra ~20 minutos, então a sonda mede tudo de uma vez.
 
