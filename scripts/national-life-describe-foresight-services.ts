@@ -56,6 +56,34 @@ export function documentEndpoints(endpoints: readonly string[]): string[] {
   )
 }
 
+/// The code around a call, which is where the payload shape lives.
+///
+/// Knowing that `PageService.asmx/RenderReports` exists says nothing about what
+/// it wants. The bundle builds the request right next to the URL, so a window of
+/// source either side of each occurrence is the cheapest way to read the
+/// contract — the same way the Rapid Solve request was recovered.
+export function callSites(
+  source: string,
+  method: string,
+  windowChars = 320,
+): string[] {
+  const sites: string[] = []
+  let index = source.indexOf(method)
+
+  while (index !== -1 && sites.length < 4) {
+    sites.push(
+      source
+        .slice(Math.max(0, index - windowChars), index + windowChars)
+        // Minified bundles are one long line; collapsing whitespace keeps the
+        // output readable without changing what it says.
+        .replace(/\s+/g, ' '),
+    )
+    index = source.indexOf(method, index + method.length)
+  }
+
+  return sites
+}
+
 async function main() {
   const env = getNationalLifeEnv()
 
@@ -162,6 +190,12 @@ async function main() {
             bundles: perBundle.map(({ src, chars }) => ({ src, chars })),
             // The answer to "where does the PDF come from", if it is named at all.
             documentEndpoints: documentEndpoints(all),
+            callSites: Object.fromEntries(
+              documentEndpoints(all).map((endpoint) => [
+                endpoint,
+                callSites(bundles.map((bundle) => bundle.body).join("\n"), endpoint),
+              ]),
+            ),
             endpointCount: all.length,
             endpoints: all.slice(0, 120),
           },

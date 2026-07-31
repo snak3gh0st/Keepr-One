@@ -923,9 +923,37 @@ Lido dos próprios bundles do Foresight (`ForeSight.Release-5.3.65.30.js`,
 | `/Main/DocuSignReportDisplay.aspx` | entrega o documento |
 | `PageService.asmx/AbortReports` | cancela |
 
-Ou seja o fluxo é **`IllustrateCase` → `RenderReports` → poll `GetReportProgress`
-→ `SetupReportDisplay` → buscar o documento**. É a mesma forma do Rapid Solve:
-serviço JSON com antiforgery, não tela.
+Lido o código em volta de cada chamada, a sequência e os argumentos saíram em
+claro (`ForeSight.Main.Controls.ReportLoading` e `InformationContainer`):
+
+```js
+// 1. prepara, com a hora local formatada "h:mm:ss AM/PM"
+sendRequest(appPath + "/Main/PageService.asmx/SetupReportDisplay",
+            [$ITCommon.sessionTokenId(), "10:02:37 AM"])
+// 2. dispara
+sendRequest(appPath + "/Main/PageService.asmx/RenderReports",
+            [$ITCommon.sessionTokenId()])
+// 3. acompanha até terminar; a resposta traz HasException
+sendRequest(appPath + "/Main/PageService.asmx/GetReportProgress",
+            [$ITCommon.sessionTokenId()])
+// 4. o documento
+appPath + "/Main/ReportDisplay.rspx?SessionTokenId=" + $ITCommon.sessionTokenId()
+```
+
+Três fatos que isso fixa:
+
+- **O único parâmetro real é `sessionTokenId`.** Não é o antiforgery do Rapid
+  Solve: é um token de sessão do próprio Foresight, exposto no cliente por
+  `$ITCommon.sessionTokenId()` e portanto legível da página.
+- **O documento sai de `/Main/ReportDisplay.rspx`**, não do `.asmx`. O
+  `DocuSignReportDisplay.aspx` é outra variante, para o fluxo de assinatura.
+- **A hora é argumento**, formatada pelo cliente — detalhe pequeno que quebraria
+  a chamada se fosse enviada em ISO.
+
+O que ainda falta descobrir é o passo anterior: como carregar/definir o caso que
+será ilustrado (`PageService.asmx/IllustrateCase`) — os bundles não mostraram o
+call site dele nesta leitura, e é o que liga uma cotação nossa a um relatório
+dele.
 
 Resto do contrato, útil para o que vem depois: `GetPolicyInformation`,
 `SetupSave`, `SetupSaveAs`, `SetupCopyTo`, `SetupClose`, `SetupInsMark`,
