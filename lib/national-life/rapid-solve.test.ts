@@ -128,7 +128,22 @@ describe('buildRapidSolveRequest', () => {
 })
 
 describe('parseRapidSolveResponse', () => {
-  it('reads a successful quote', () => {
+  // Carrier behaviour: the policy is projected to lapse in a named year.
+  it('keeps a real lapse year', () => {
+    const result = parseRapidSolveResponse({
+      Success: true,
+      FaceAmount: 1,
+      AnnualPremium: 1,
+      MonthlyPremium: 1,
+      LapseYear: 2061,
+    })
+    expect(result).toMatchObject({ ok: true, lapseYear: 2061 })
+  })
+
+  // Carrier behaviour: `LapseYear: 0`, which per the carrier's own contract
+  // means "this policy does not lapse" — a positive fact, not an absence of
+  // one, so it must not collapse into the same value as "not known".
+  it('reads LapseYear 0 as the carrier confirming the policy never lapses', () => {
     expect(
       parseRapidSolveResponse({
         Success: true,
@@ -142,20 +157,32 @@ describe('parseRapidSolveResponse', () => {
       faceAmount: 250000,
       annualPremium: 3600,
       monthlyPremium: 300,
-      // 0 means "does not lapse" to the carrier, not year zero.
-      lapseYear: null,
+      lapseYear: 'NEVER',
     })
   })
 
-  it('keeps a real lapse year', () => {
-    const result = parseRapidSolveResponse({
-      Success: true,
-      FaceAmount: 1,
-      AnnualPremium: 1,
-      MonthlyPremium: 1,
-      LapseYear: 2061,
-    })
-    expect(result).toMatchObject({ ok: true, lapseYear: 2061 })
+  // Carrier behaviour: the field is missing, or arrives as a non-numeric
+  // token such as "N/A". Neither is the carrier confirming anything, so this
+  // must read as "not known" — never as 'NEVER' and never as a fake zero.
+  it('reads a missing or unparseable LapseYear as not known, not as never-lapses', () => {
+    expect(
+      parseRapidSolveResponse({
+        Success: true,
+        FaceAmount: 250000,
+        AnnualPremium: 3600,
+        MonthlyPremium: 300,
+      }),
+    ).toMatchObject({ ok: true, lapseYear: null })
+
+    expect(
+      parseRapidSolveResponse({
+        Success: true,
+        FaceAmount: 250000,
+        AnnualPremium: 3600,
+        MonthlyPremium: 300,
+        LapseYear: 'N/A',
+      }),
+    ).toMatchObject({ ok: true, lapseYear: null })
   })
 
   it('treats a body that says Success false as a failure, despite HTTP 200', () => {
@@ -168,11 +195,30 @@ describe('parseRapidSolveResponse', () => {
   it('falls back to a readable message when the carrier gives none', () => {
     const result = parseRapidSolveResponse({ Success: false })
     expect(result.ok).toBe(false)
-    expect((result as { message: string }).message).toMatch(/illustration/i)
+    expect((result as { message: string }).message).toMatch(/cotação/i)
   })
 
   it('refuses a success with no figures rather than showing zeros as an answer', () => {
     expect(parseRapidSolveResponse({ Success: true })).toEqual({
+      ok: false,
+      message: 'A seguradora respondeu sem valores.',
+    })
+  })
+
+  // "N/A" strips down to no digits at all, which is honestly unparseable —
+  // not the digit 0. Before this was fixed, stripping non-numeric characters
+  // left an empty string, and `Number('')` is 0, so all three figures
+  // silently became real zeros instead of null, and this row would have
+  // slipped past the "no figures" refusal above as a false "quote" of zero.
+  it('treats "N/A" figures as unparseable, not as zero', () => {
+    expect(
+      parseRapidSolveResponse({
+        Success: true,
+        FaceAmount: 'N/A',
+        AnnualPremium: 'N/A',
+        MonthlyPremium: 'N/A',
+      }),
+    ).toEqual({
       ok: false,
       message: 'A seguradora respondeu sem valores.',
     })

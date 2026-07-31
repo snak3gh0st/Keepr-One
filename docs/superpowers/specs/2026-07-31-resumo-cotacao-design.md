@@ -116,11 +116,41 @@ confunde desprecifica a conversa.
 
 ### Procedência, que é o que atende compliance
 
-Bloco fixo, sempre visível:
+Bloco fixo, sempre visível: de onde vieram os números e quando, **a condição do
+carrier copiada palavra por palavra da lista** (`app/agent/illustrations/page.tsx`,
+que já a carrega e cujo comentário diz que ela viaja junto com o número), e o
+ponteiro para o documento oficial.
 
-> Números fornecidos por National Life (Rapid Solve) em `<data da cotação>`.
-> Servem para cotação verbal. O documento oficial é a ilustração em PDF da
-> seguradora.
+⚠️ **Corrigido duas vezes durante a execução.**
+
+**Primeiro:** esta spec escreveu uma condição própria e mais curta — "servem
+para cotação verbal" — que **perdia** *"não pode ser exibido a ele"* e *"os
+valores não são garantidos"*. Era a falha mais séria do desenho: esta página
+mostra mais números, maiores e sozinhos, e é justamente a que alguém teria
+vontade de virar para o cliente.
+
+**Depois, por decisão do dono do produto:** a condição passou a dizer também o
+que a peça **não é**. Texto vigente, idêntico nas duas telas:
+
+> Cotação, não proposta. Os valores são demonstrativos (illustration) — não são
+> garantidos e dependem de aprovação de proposta completa na emissão. Uso
+> interno do corretor: pode servir para uma cotação verbal ao cliente, mas não
+> pode ser exibido a ele.
+
+Duas mudanças que valem explicar. **"Cotação, não proposta"** separa
+explicitamente cotação de *application* — são coisas diferentes, e a confusão
+entre elas é a que custa caro. E **"demonstrativos (illustration)"** usa o termo
+do setor de propósito: é o que a seguradora chama de illustration, e o agente
+precisa reconhecer a palavra. Isso não contradiz a regra de não batizar a página
+de "Ilustração" — o título segue **Resumo da cotação**; a palavra aparece como
+glosa do que os valores são, não como nome do documento.
+
+**Regra que fica:** a condição vive em **uma constante só**
+(`lib/national-life/quote-disclaimer.ts`), lida pelas duas telas, com teste que
+falha se um dos três pontos — cotação-não-proposta, valores não garantidos, não
+exibir ao cliente — for perdido numa reescrita futura. Duas telas enunciando a
+mesma condição regulada com palavras diferentes é pior que qualquer uma das duas
+sozinha, e copiar à mão foi o que já falhou uma vez aqui.
 
 Quando a ilustração já tem PDF gravado, o bloco linka para
 `/api/illustrations/[id]/document`. Quando não tem, oferece o botão que

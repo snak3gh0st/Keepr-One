@@ -12,6 +12,7 @@ import {
   SOLVE_TYPES,
   STRATEGIES,
 } from "@/lib/national-life/rapid-solve";
+import { QUOTE_DISCLAIMER } from "@/lib/national-life/quote-disclaimer";
 import { requestCarrierQuote } from "./new/actions";
 import { useRapidSolveQuote } from "./useRapidSolveQuote";
 
@@ -21,6 +22,17 @@ const currency = (value: number) =>
     currency: "USD",
     minimumFractionDigits: 2,
   }).format(value);
+
+// 'NEVER' is the carrier's confirmed "does not lapse" (LapseYear: 0); null is
+// "the carrier said nothing parseable". Only 'NEVER' may read as "Não lapsa"
+// — collapsing null into the same label would put an unread carrier answer on
+// screen as a definite fact, which is the one thing this panel exists not to
+// do. Mirrors lapseLabel on app/agent/illustrations/[id]/page.tsx.
+function lapseLabel(value: number | "NEVER" | null): string {
+  if (value === "NEVER") return "Não lapsa";
+  if (value === null) return "—";
+  return `Ano ${value}`;
+}
 
 // Which side of the illustration the carrier solves for decides whether the
 // amount field is a face amount or a premium — the carrier sends both in the
@@ -213,9 +225,7 @@ export function NewIllustrationForm() {
                 shows the same number without asking, and the restriction
                 travels with the number rather than with the checkbox. */}
             <p className="mt-3 border-l-2 border-border-steel pl-3 text-xs leading-5 text-ink-muted">
-              Uso interno do corretor. Pode ser usado para uma cotação verbal ao cliente, mas
-              não pode ser exibido a ele. Os valores não são garantidos e dependem de aprovação
-              de proposta completa na emissão.
+              {QUOTE_DISCLAIMER}
             </p>
 
             <div className="mt-4 overflow-x-auto">
@@ -242,11 +252,7 @@ export function NewIllustrationForm() {
                   <tr>
                     <td className="py-2 pr-3 text-sm text-ink-muted">Lapso projetado</td>
                     <td className="py-2 text-sm font-semibold text-ink">
-                      {/* The carrier sends 0 for "does not lapse", which the
-                          parser turns into null so it never prints as year zero. */}
-                      {status.quote.lapseYear === null
-                        ? "Não lapsa"
-                        : `Ano ${status.quote.lapseYear}`}
+                      {lapseLabel(status.quote.lapseYear)}
                     </td>
                   </tr>
                 </tbody>

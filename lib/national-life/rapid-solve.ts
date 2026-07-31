@@ -191,15 +191,23 @@ export function buildRapidSolveRequest(input: RapidSolveInput, on: Date): RapidS
   }
 }
 
+/// The three shapes a lapse answer can take, and they must never collapse
+/// into each other:
+///   - a number: the carrier named a real year the policy is projected to lapse.
+///   - 'NEVER': the carrier sent `LapseYear: 0`, which per the carrier's own
+///     contract means "this policy does not lapse" — a positive fact, not an
+///     absence of one.
+///   - null: the carrier said nothing parseable (missing field, "N/A", ...).
+///     This is the only state that renders as "—"; it must not be read as
+///     either of the other two.
+export type LapseYear = number | 'NEVER' | null
+
 export type RapidSolveQuote = {
   ok: true
   faceAmount: number
   annualPremium: number
   monthlyPremium: number
-  /// The year the policy is projected to lapse. The carrier sends 0 to mean
-  /// "does not lapse", which is the opposite of what a 0 normally reads as, so
-  /// it becomes null here rather than year zero.
-  lapseYear: number | null
+  lapseYear: LapseYear
 }
 
 export type RapidSolveFailure = { ok: false; message: string }
@@ -207,10 +215,25 @@ export type RapidSolveFailure = { ok: false; message: string }
 function numberFrom(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string') {
-    const parsed = Number(value.replace(/[^0-9.-]/g, ''))
+    const stripped = value.replace(/[^0-9.-]/g, '')
+    // "N/A", "-", "" and the like strip down to nothing digit-bearing.
+    // `Number('')` is 0, which would otherwise turn an unparseable string
+    // into a fake zero — indistinguishable from a genuine one. No digits at
+    // all means honestly unparseable, not zero.
+    if (!/\d/.test(stripped)) return null
+    const parsed = Number(stripped)
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
+}
+
+/// Turns the carrier's raw `LapseYear` into the three-state answer above.
+/// Kept apart from `numberFrom` because 0 means something specific only for
+/// this field — nowhere else does a carrier zero mean "positive fact".
+function lapseYearFrom(value: unknown): LapseYear {
+  const parsed = numberFrom(value)
+  if (parsed === null) return null
+  return parsed === 0 ? 'NEVER' : parsed
 }
 
 export function parseRapidSolveResponse(raw: unknown): RapidSolveQuote | RapidSolveFailure {
@@ -225,7 +248,7 @@ export function parseRapidSolveResponse(raw: unknown): RapidSolveQuote | RapidSo
     const message =
       typeof payload.Message === 'string' && payload.Message.trim() !== ''
         ? payload.Message
-        : 'A seguradora não conseguiu calcular esta illustration.'
+        : 'A seguradora não conseguiu calcular esta cotação.'
     return { ok: false, message }
   }
 
@@ -239,12 +262,11 @@ export function parseRapidSolveResponse(raw: unknown): RapidSolveQuote | RapidSo
     return { ok: false, message: 'A seguradora respondeu sem valores.' }
   }
 
-  const lapseYear = numberFrom(payload.LapseYear)
   return {
     ok: true,
     faceAmount: faceAmount ?? 0,
     annualPremium: annualPremium ?? 0,
     monthlyPremium: monthlyPremium ?? 0,
-    lapseYear: lapseYear === null || lapseYear === 0 ? null : lapseYear,
+    lapseYear: lapseYearFrom(payload.LapseYear),
   }
 }
