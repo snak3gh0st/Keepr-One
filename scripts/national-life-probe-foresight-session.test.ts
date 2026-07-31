@@ -2,9 +2,26 @@ import { describe, expect, it } from 'vitest'
 import {
   classifyLanding,
   hopPaths,
+  jumpPathFromArgv,
   shiftedExpiries,
   summarizeCookies,
 } from './national-life-probe-foresight-session'
+
+describe('jumpPathFromArgv', () => {
+  it('measures Foresight when asked for nothing', () => {
+    expect(jumpPathFromArgv([])).toBe('/agent/sso/foresight')
+  })
+
+  it('takes another SSO jump, so iGo does not need a second copy of the probe', () => {
+    expect(jumpPathFromArgv(['/agent/sso/igo-eapp'])).toBe('/agent/sso/igo-eapp')
+  })
+
+  it('ignores anything that is not a same-origin path', () => {
+    // An absolute URL would send the stored carrier session somewhere the
+    // portal never pointed it.
+    expect(jumpPathFromArgv(['https://evil.example/steal'])).toBe('/agent/sso/foresight')
+  })
+})
 
 const at = (iso: string) => new Date(iso).getTime() / 1000
 

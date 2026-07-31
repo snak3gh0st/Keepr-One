@@ -80,7 +80,12 @@ services:
       DATABASE_URL: "${DATABASE_URL:?DATABASE_URL is required}"
       BETTER_AUTH_URL: "${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}"
       STEEL_BASE_URL: http://national-life-steel:3000
-      NATIONAL_LIFE_PORTAL_ORIGINS: https://www.nationallife.com,https://nlg-prod.auth0.com
+      # The navigation guard aborts any document navigation outside this list.
+      # `federate.ipipeline.com` is the iGo e-App hand-off — a genuinely third
+      # party system (iPipeline), unlike Foresight which is the carrier's own
+      # origin. It is listed so the jump can be *measured*; reaching it does not
+      # authorise submitting anything. See docs/architecture/national-life-igo-eapp.md.
+      NATIONAL_LIFE_PORTAL_ORIGINS: https://www.nationallife.com,https://nlg-prod.auth0.com,https://federate.ipipeline.com
       NATIONAL_LIFE_PORTAL_LOGIN_URL: https://www.nationallife.com/agent/auth/login?returnUrl=%2Fagent%2F
       NATIONAL_LIFE_SESSION_SCOPE_ID: "${NATIONAL_LIFE_SESSION_SCOPE_ID:?NATIONAL_LIFE_SESSION_SCOPE_ID is required}"
       NATIONAL_LIFE_SESSION_KEY_VERSION: "${NATIONAL_LIFE_SESSION_KEY_VERSION:?NATIONAL_LIFE_SESSION_KEY_VERSION is required}"

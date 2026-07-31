@@ -35,7 +35,20 @@ import {
 } from '../workers/national-life/steel-session'
 
 const PORTAL_PATH = '/agent/'
-const FORESIGHT_PATH = '/agent/sso/foresight'
+const DEFAULT_JUMP_PATH = '/agent/sso/foresight'
+
+/// Which SSO jump to measure. The portal has five, and the question — "is the
+/// portal alive while this jump is dead?" — is the same for every one of them,
+/// so the target is an argument rather than a second copy of this file.
+///
+///   tsx scripts/national-life-probe-foresight-session.ts /agent/sso/igo-eapp
+///
+/// Only a same-origin path is accepted: an absolute URL here would send the
+/// stored carrier session somewhere the portal never pointed it.
+export function jumpPathFromArgv(argv: readonly string[]): string {
+  const supplied = argv.find((value) => value.startsWith('/'))
+  return supplied ?? DEFAULT_JUMP_PATH
+}
 
 export type CookieFact = {
   key: string
@@ -177,6 +190,8 @@ async function main() {
     env.sessionKeys,
   )
 
+  const jumpPath = jumpPathFromArgv(process.argv.slice(2))
+
   const ran = await withBrowserLockWaiting(prisma, async () => {
     const session = await createSteelBrowserSession(env, { sessionContext })
     const page = session.page
@@ -238,7 +253,7 @@ async function main() {
       const portal = await visit(PORTAL_PATH)
       const afterPortal = await capture()
 
-      const foresight = await visit(FORESIGHT_PATH)
+      const foresight = await visit(jumpPath)
       const afterJump = await capture()
 
       console.log(
@@ -253,6 +268,7 @@ async function main() {
             blockedOrigins: Array.from(blocked).sort(),
             // The measurement that never existed: both verdicts, one browser,
             // one minute.
+            jumpPath,
             portal,
             foresight,
             cookies: { seeded, afterPortal, afterJump },
