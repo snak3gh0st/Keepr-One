@@ -792,3 +792,26 @@ valor sem pedir aceite, então reproduz a condição junto do resultado.
 Hoje não há exposição: `app/client/policies/[id]` lista apenas PDFs anexados,
 não linhas de `Illustration`. Se algum dia uma tela de cliente ler essa tabela,
 isso viola a condição da seguradora — não é preferência de produto.
+
+### O Rapid Solve não gera documento (2026-07-30, verificado)
+
+Cotação submetida com sucesso pelo formulário do carrier (HTTP 200). A área de
+resultado oferece exatamente duas ações:
+
+| controle | texto |
+| --- | --- |
+| `#continue_to_eapp` | SEND TO eAPP (abre em nova aba) |
+| `#startover` | START OVER |
+
+Não há imprimir, baixar, e-mail nem gerar PDF. Isso não é uma opção escondida:
+casa com o termo que a ferramenta obriga a aceitar — *"may be used to provide a
+verbal quote"*. O Rapid Solve entrega **números para uma conversa**, não um
+documento para entregar ao cliente.
+
+Então a ilustração como PDF vem de outro lugar, e o candidato é
+`/agent/sso/foresight` — o sistema de ilustração da National Life, um dos cinco
+saltos SSO, com autenticação própria e nunca sondado. `/agent/sso/igo-eapp` é o
+sistema de **proposta**, que é para onde o botão acima leva, não o de ilustração.
+
+Consequência de produto: pedir "a ilustração em PDF no app" é integrar o
+Foresight, não estender o que foi construído hoje.
