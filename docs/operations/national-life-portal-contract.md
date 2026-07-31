@@ -1057,6 +1057,31 @@ caso no Foresight (aparentemente automático) → abrir pelo *Recent* →
 mão pelo agente na ferramenta. Confirmar é barato — pedir uma cotação nova pelo
 app e ver se um `RP-…-QQ-<timestamp>` correspondente aparece no *Recent*.
 
+**Tentado em 2026-07-31 15:03 UTC, bloqueado pelo muro do Auth0** — a sessão de
+13:44 já tinha morrido do lado do IdP (ver a medição de 69–79 min acima). O
+experimento continua armado e é o primeiro a rodar na próxima janela viva:
+
+```
+# 1. antes — lê o painel Recent sem abrir caso nenhum
+docker exec keeprone-national-life-national-life-runtime-1 \
+  npx tsx scripts/national-life-list-foresight-cases.ts
+# 2. a cotação, com um sobrenome que não esteja na lista acima
+docker exec keeprone-national-life-national-life-runtime-1 \
+  npx tsx scripts/national-life-request-quote.ts <sobrenome>
+# 3. depois — o mesmo `before`, procurando RP-<sobrenome>-QQ-<carimbo>
+docker exec keeprone-national-life-national-life-runtime-1 \
+  npx tsx scripts/national-life-list-foresight-cases.ts
+```
+
+Por que um script novo em vez do de relatório: **abrir um caso muda qual caso
+está corrente na sessão do Foresight**, que é justamente o que se quer medir. O
+`national-life-list-foresight-cases.ts` pousa na `StartPage`, lê os
+`lnkCaseName` e sai — e recaptura o contexto no `finally`, como manda a regra do
+cruzamento.
+
+O sobrenome virou argumento obrigatório do `request-quote` porque `Loureiro` e
+`Campos` já estão no *Recent*: reusar um deles torna o "depois" ilegível.
+
 Resto do contrato, útil para o que vem depois: `GetPolicyInformation`,
 `SetupSave`, `SetupSaveAs`, `SetupCopyTo`, `SetupClose`, `SetupInsMark`,
 `ExpandCollapseMenuItem`, `CloseDialog`, e `WidgetService.asmx/GetQuickCalcData`.
@@ -1069,6 +1094,34 @@ integração separada com `federate.ipipeline.com` provavelmente é desnecessár
 o caminho ilustração → proposta já existe dentro da ferramenta que a sessão do
 portal alcança. Ver `docs/architecture/national-life-igo-eapp.md`, cuja premissa
 — iGo como sistema terceiro a integrar à parte — precisa ser revista à luz disto.
+
+**Revisado em 2026-07-31.** A premissa não caiu inteira: o salto medido em
+2026-07-30 termina em `federate.ipipeline.com` e o iGo é mesmo da iPipeline. O
+que muda é que existe um **segundo caminho**, por dentro do Foresight, que
+dispensa o salto SSO separado. E `Launcher` provavelmente entrega para a
+iPipeline mesmo assim — o que se economiza é transporte, não o mapa de campos.
+O detalhe de risco: `SetupEAppLauncher` leva **só o `sessionTokenId`**, então
+lança a proposta do caso que estiver aberto. Escrita sem alvo explícito.
+
+### Quanto tempo o Auth0 durou sem keep-alive (medido 2026-07-31)
+
+Com `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP` desligado, na mesma sessão:
+
+| momento | evento |
+| --- | --- |
+| 13:44 UTC | login do carrier |
+| 14:53 UTC | job de PDF cruzou o SSO e renderizou — **vivo aos 69 min** |
+| 15:03 UTC | `/agent/sso/foresight` caiu em `nlg-prod.auth0.com/login` — **morto aos 79 min** |
+
+Os cookies do portal ainda diziam `carrierExpiresAt 15:30`, ou seja o portal
+sobreviveria mais 27 min. Confirma de novo que **as duas sessões morrem em
+tempos diferentes** e que a de baixo é o Auth0.
+
+Então "sem cruzamento ela vive horas" era otimista demais: **a janela útil do
+Foresight está entre 69 e 79 minutos após o login**, não em horas. O desenho
+que decorre não muda — cruzar dentro do job, uma vez, e persistir o contexto —
+mas o custo operacional sim: qualquer trabalho no Foresight precisa caber nessa
+janela, ou pedir login novo no meio.
 
 #### Desenho que isso habilita
 
