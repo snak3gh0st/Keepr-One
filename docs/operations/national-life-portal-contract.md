@@ -950,6 +950,36 @@ Três fatos que isso fixa:
 - **A hora é argumento**, formatada pelo cliente — detalhe pequeno que quebraria
   a chamada se fosse enviada em ISO.
 
+#### ✅ FUNCIONA: PDF gerado por automação em 2026-07-31 14:18 UTC
+
+`scripts/national-life-generate-foresight-report.ts` abriu o caso
+`RP-Teste-QQ-073026223730` pelo painel *Recent* e produziu o documento:
+
+```json
+"steps": {
+  "setup":    { "WindowId": "501c9dac…", "IsEntityValid": true, "IsDocuSign": false },
+  "render":   null,
+  "progress": { "Progress": 0.99, "IsComplete": false, "HasException": false }
+},
+"document": { "status": 200, "contentType": "application/pdf",
+              "bytes": 1551929, "looksLikePdf": true }
+```
+
+**1,5 MB de `application/pdf`, com assinatura `%PDF` conferida.** O caminho da
+ilustração em PDF está resolvido de ponta a ponta.
+
+Detalhes que a execução ensinou, e que valem para o job de produção:
+
+- Chamar o cliente do próprio Foresight (`$ITAjax.sendRequest`) de dentro da
+  página evitou reverter o formato de fio do ASMX. Mesmo transporte, mesma
+  sessão, zero chance de errar a serialização — vale como padrão.
+- `RenderReports` responde `null`: é dispara-e-esquece, não devolve o documento.
+- `GetReportProgress` ficou em `Progress: 0.99` com `IsComplete: false` **e o PDF
+  já estava disponível**. Ou seja o poll não deve esperar `IsComplete`; buscar o
+  documento quando `Progress` se aproxima de 1 (ou simplesmente tentar buscar) é
+  o comportamento correto. Esperar `IsComplete` travaria para sempre.
+- O `sessionTokenId` veio do frame `Layout.aspx`, não do `StartPage`.
+
 #### O achado que define a implementação: a sessão é **stateful**
 
 Os call sites de `IllustrateCase` e `SetupEAppLauncher` fecham o quadro:
