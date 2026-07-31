@@ -8,6 +8,10 @@ import {
   type RapidSolveQuote,
   type RapidSolveRequest,
 } from '../../lib/national-life/rapid-solve'
+import {
+  isPdfPayload,
+  reportTimeStamp as foresightReportTimeStamp,
+} from '../../lib/national-life/foresight-report'
 import type { BrowserSession, NationalLifeCaseObservation } from './types'
 
 export type AdapterConfig = Readonly<{
@@ -35,17 +39,31 @@ type AdapterRequestResponse = {
   text(): Promise<string>
 }
 
+/// Foresight is an iframed WebForms app, so reading it means addressing frames
+/// and running its own client inside them — capability the case-reading side of
+/// this adapter never needed.
+type AdapterFrame = {
+  url(): string
+  click(selector: string): Promise<void>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  evaluate<Result, Arg = undefined>(fn: any, arg?: Arg): Promise<Result>
+}
+
 type AdapterPage = {
   goto(url: string, options?: { waitUntil?: 'domcontentloaded'; timeout?: number }): Promise<void>
   getByLabel(label: string): AdapterLocator
   getByRole(role: 'button' | 'heading' | 'link', options?: { name?: string }): AdapterLocator
   locator(selector: string): AdapterLocator
   url(): string
+  waitForTimeout(ms: number): Promise<void>
+  frames(): AdapterFrame[]
+  mainFrame(): AdapterFrame
   request: {
     post(
       url: string,
       options: { data: unknown; headers?: Record<string, string> },
     ): Promise<AdapterRequestResponse>
+    get(url: string): Promise<AdapterRequestResponse & { body(): Promise<Buffer> }>
   }
 }
 
@@ -55,6 +73,10 @@ const UNEXPECTED_APPLICATION_IDENTIFIER_CODE = 'UNEXPECTED_APPLICATION_IDENTIFIE
 const AUTHENTICATION_STATE_INVALID_CODE = 'AUTHENTICATION_STATE_INVALID'
 const NAVIGATION_ORIGIN_BLOCKED_CODE = 'NAVIGATION_ORIGIN_BLOCKED'
 const RAPID_SOLVE_REQUEST_FAILED_CODE = 'RAPID_SOLVE_REQUEST_FAILED'
+const FORESIGHT_SSO_PATH = '/agent/sso/foresight'
+const FORESIGHT_REPORT_PATH = '/NWI/Main/ReportDisplay.rspx'
+const FORESIGHT_SSO_EXPIRED_CODE = 'FORESIGHT_SSO_EXPIRED'
+const FORESIGHT_REPORT_FAILED_CODE = 'FORESIGHT_REPORT_FAILED'
 
 export type NationalLifeAuthenticationState =
   | { kind: 'AWAITING_LOGIN'; origin: string }
@@ -435,6 +457,127 @@ export class NationalLifeAdapter {
     }
 
     return new Error(String(error))
+  }
+
+  /// Renders an existing Foresight case to PDF and returns the bytes.
+  ///
+  /// Measured working 2026-07-31: 1.5 MB of `application/pdf`. Three things
+  /// about it are not guesses and must not be "simplified" away.
+  ///
+  /// The calls go through the tool's own `$ITAjax.sendRequest` from inside the
+  /// page rather than posting the ASMX payload ourselves. Same transport, same
+  /// session, and no chance of getting a serialisation subtly wrong — the
+  /// lesson the Rapid Solve antiforgery cost five attempts to learn.
+  ///
+  /// Crossing the SSO rotates the Auth0 cookie, so whoever calls this has to
+  /// persist the refreshed context afterwards. Dropping the rotated cookie
+  /// leaves the next job presenting a superseded one, which is what killed
+  /// these sessions minutes after login until it was found.
+  ///
+  /// Progress never reaches `IsComplete`; the document is served at 0.99.
+  async renderForesightReport(
+    caseNameFragment?: string,
+  ): Promise<{ caseName: string; bytes: Buffer; mimeType: string } | null> {
+    const page = this.getPage()
+
+    await page.goto(new URL(FORESIGHT_SSO_PATH, this.config.loginUrl).toString(), {
+      waitUntil: 'domcontentloaded',
+      timeout: 60_000,
+    })
+    await page.waitForTimeout(15_000)
+
+    if (/auth0\.com/i.test(page.url())) {
+      throw new NationalLifeAdapterError(
+        FORESIGHT_SSO_EXPIRED_CODE,
+        'National Life illustration tool asked for a new login',
+      )
+    }
+
+    const startPage = page.frames().find((frame) => /StartPage\.aspx/i.test(frame.url()))
+    if (!startPage) {
+      throw this.toPortalLayoutChanged(FORESIGHT_SSO_EXPIRED_CODE)
+    }
+
+    const cases = await startPage.evaluate<Array<{ id: string; name: string }>>(() =>
+      Array.from(document.querySelectorAll('a[id*="lnkCaseName"]')).map((node) => ({
+        id: (node as HTMLElement).id,
+        name: (node.textContent ?? '').trim(),
+      })),
+    )
+    const target = caseNameFragment
+      ? cases.find((entry) =>
+          entry.name.toLowerCase().includes(caseNameFragment.toLowerCase()),
+        )
+      : cases.find((entry) => /-QQ-/i.test(entry.name)) ?? cases[0]
+    if (!target) {
+      return null
+    }
+
+    // A WebForms postback link is driven by its handler, so a click that misses
+    // is followed by invoking the handler directly rather than failing.
+    await startPage
+      .click(`[id="${target.id}"]`)
+      .catch(async () => {
+        await startPage.evaluate<void, string>(
+          (id: string) => (document.getElementById(id) as HTMLElement | null)?.click(),
+          target.id,
+        )
+      })
+    await page.waitForTimeout(20_000)
+
+    const holder = page.mainFrame()
+    const token = await holder
+      .evaluate<string | null>(() => {
+        const common = (window as unknown as { $ITCommon?: { sessionTokenId(): string } })
+          .$ITCommon
+        return common ? common.sessionTokenId() : null
+      })
+      .catch(() => null)
+    if (!token) {
+      throw this.toPortalLayoutChanged(FORESIGHT_SSO_EXPIRED_CODE)
+    }
+
+    await holder.evaluate<void, readonly [string, string]>(
+      async ([sessionToken, stamp]: readonly [string, string]) => {
+        const runtime = window as unknown as {
+          $ITAjax: { sendRequest(url: string, args: unknown[]): Promise<unknown> }
+          appPath: string
+        }
+        const base = `${runtime.appPath}/Main/PageService.asmx`
+        await runtime.$ITAjax.sendRequest(`${base}/SetupReportDisplay`, [sessionToken, stamp])
+        await runtime.$ITAjax.sendRequest(`${base}/RenderReports`, [sessionToken])
+
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          const progress = (await runtime.$ITAjax.sendRequest(`${base}/GetReportProgress`, [
+            sessionToken,
+          ])) as { Progress?: number; IsComplete?: boolean; HasException?: boolean } | null
+          if (progress?.HasException) return
+          if (progress?.IsComplete || (progress?.Progress ?? 0) >= 0.99) return
+          await new Promise((resolve) => setTimeout(resolve, 3_000))
+        }
+      },
+      [token, foresightReportTimeStamp(new Date())] as const,
+    )
+
+    const documentUrl = new URL(
+      `${FORESIGHT_REPORT_PATH}?SessionTokenId=${encodeURIComponent(token)}`,
+      this.config.loginUrl,
+    ).toString()
+    const response = await page.request.get(documentUrl)
+    const bytes = Buffer.from(await response.body())
+
+    // Status 200 is not proof of a document: the carrier serves an HTML page
+    // when the session lapses mid-render, and storing that as a PDF would
+    // surface as a corrupt file much later, far from its cause.
+    if (!isPdfPayload(bytes)) {
+      throw new NationalLifeAdapterError(
+        FORESIGHT_REPORT_FAILED_CODE,
+        'National Life returned no illustration document',
+        { status: response.status(), bytes: bytes.byteLength },
+      )
+    }
+
+    return { caseName: target.name, bytes, mimeType: 'application/pdf' }
   }
 
   private toPortalLayoutChanged(safeCode = SELECTOR_NOT_FOUND_CODE) {

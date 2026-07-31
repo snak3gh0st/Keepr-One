@@ -1,6 +1,18 @@
 /// Decisions the Foresight report flow needs, kept out of the browser script so
 /// they can be tested without a carrier session.
 
+/// The local time string the tool builds for itself before asking for a report.
+/// Sending an ISO timestamp would be the kind of mismatch that fails quietly,
+/// so the format is reproduced exactly: `h:mm:ss AM/PM`, no leading zero on the
+/// hour, and 12 rather than 0 at noon and midnight.
+export function reportTimeStamp(at: Date): string {
+  const hours24 = at.getHours()
+  const suffix = hours24 >= 12 ? 'PM' : 'AM'
+  const hours = hours24 % 12 === 0 ? 12 : hours24 % 12
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${hours}:${pad(at.getMinutes())}:${pad(at.getSeconds())} ${suffix}`
+}
+
 type ReportProgress = {
   Progress?: number
   IsComplete?: boolean
