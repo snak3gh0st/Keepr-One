@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
+import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
@@ -33,6 +34,10 @@ export default async function IllustrationsPage() {
       premium: true,
       productName: true,
       provider: true,
+      // Both sides of the carrier exchange were persisted; the question is what
+      // makes the answer mean anything. Two quotes at the same face amount are
+      // different quotes if the insured is not the same age or rate class.
+      rawPayload: true,
       client: { select: { id: true, name: true } },
     },
   })
@@ -65,10 +70,29 @@ export default async function IllustrationsPage() {
             </tr>
           </Thead>
           <tbody>
-            {illustrations.map((illustration) => (
+            {illustrations.map((illustration) => {
+              const quote = summarizeQuotePayload(illustration.rawPayload)
+              // Age, state and rate class in one line under the name: it is the
+              // question the carrier answered, and without it the premium below
+              // is a number with no meaning attached.
+              const asked = [
+                quote.issueAge === null ? null : `${quote.issueAge} anos`,
+                quote.gender,
+                quote.issueState,
+                quote.rateClass,
+              ].filter(Boolean)
+
+              return (
               <Tr key={illustration.id}>
                 <Td>{illustration.createdAt.toLocaleDateString('pt-BR')}</Td>
-                <Td>{illustration.insuredName ?? '—'}</Td>
+                <Td>
+                  <span className="block">{illustration.insuredName ?? '—'}</span>
+                  {asked.length > 0 && (
+                    <span className="mt-0.5 block text-xs text-ink-muted">
+                      {asked.join(' · ')}
+                    </span>
+                  )}
+                </Td>
                 <Td>
                   {illustration.client ? (
                     <Link
@@ -83,15 +107,31 @@ export default async function IllustrationsPage() {
                     <span className="text-ink-muted">Prospect</span>
                   )}
                 </Td>
-                <Td>{illustration.productName ?? '—'}</Td>
+                <Td>
+                  <span className="block">{illustration.productName ?? '—'}</span>
+                  {quote.strategy && (
+                    <span className="mt-0.5 block text-xs text-ink-muted">{quote.strategy}</span>
+                  )}
+                </Td>
                 <TdNum>
                   {illustration.faceAmount ? currency(Number(illustration.faceAmount)) : '—'}
                 </TdNum>
                 <TdNum>
-                  {illustration.premium ? currency(Number(illustration.premium)) : '—'}
+                  <span className="block">
+                    {illustration.premium ? currency(Number(illustration.premium)) : '—'}
+                  </span>
+                  {/* The carrier returns both, and an agent quotes whichever the
+                      client asks for. Storing one and dropping the other made
+                      the annual figure a second round trip for no reason. */}
+                  {quote.annualPremium !== null && (
+                    <span className="mt-0.5 block text-xs font-normal text-ink-muted">
+                      {currency(quote.annualPremium)} /ano
+                    </span>
+                  )}
                 </TdNum>
               </Tr>
-            ))}
+              )
+            })}
           </tbody>
         </Table>
 
