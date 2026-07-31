@@ -4,11 +4,23 @@ import { prisma } from '@/lib/prisma'
 
 const configuredBaseURL = process.env.BETTER_AUTH_URL
 const localBaseURL = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : undefined
-const baseURL = configuredBaseURL ?? localBaseURL
+const baseURL = configuredBaseURL ?? localBaseURL ?? 'https://app.keeprone.com'
+
+const fallbackTrustedOrigins = [
+  'https://app.keeprone.com',
+  'https://www.keeprone.com',
+  'https://keeprone.com',
+  'https://app.keepr.one',
+  'https://www.keepr.one',
+  'https://keepr.one',
+]
 
 const trustedOrigins = [
   configuredBaseURL,
   process.env.NEXT_PUBLIC_APP_URL,
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
+  process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : undefined,
+  ...fallbackTrustedOrigins,
   ...(process.env.NODE_ENV === 'development'
     ? ['http://localhost:3000', 'http://127.0.0.1:3000']
     : []),
