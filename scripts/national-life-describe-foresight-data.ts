@@ -196,7 +196,7 @@ async function main() {
             appPath: string
           }
           const out: Record<string, unknown> = {}
-          for (const service of services as string[]) {
+          for (const service of services as readonly string[]) {
             const url = `${w.appPath}/Main/${service}`
             try {
               out[service] = { verb: 'POST', body: await w.$ITAjax.sendRequest(url, [token]) }
@@ -213,7 +213,7 @@ async function main() {
           }
           return out
         },
-        [tokenId, [...SERVICES]] as const,
+        [tokenId, SERVICES] as const,
       )
 
       // Shape only. See the file header.
