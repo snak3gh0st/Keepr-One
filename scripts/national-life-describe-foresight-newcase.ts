@@ -120,7 +120,8 @@ async function main() {
 
       // 1. Every control the start page offers. The one that begins a case is
       //    in here somewhere, and its id is what a job would have to click.
-      report.controls = await startPage.evaluate(() =>
+      const readControls = (frame: typeof startPage) =>
+        frame.evaluate(() =>
         Array.from(document.querySelectorAll('a,button,input[type=button],input[type=submit]'))
           .map((node) => ({
             tag: node.tagName.toLowerCase(),
@@ -128,7 +129,19 @@ async function main() {
             text: (node.textContent ?? (node as HTMLInputElement).value ?? '').trim().slice(0, 60),
           }))
           .filter((entry) => entry.text || entry.id),
-      )
+        )
+
+      // The start page is only the inner document. The tool's own chrome — and
+      // with it whatever begins a case — lives in the frame around it, which is
+      // why looking only inside found nothing but help links.
+      report.controls = {} as Record<string, unknown>
+      for (const frame of page.frames()) {
+        const url = frame.url().split('?')[0]
+        if (!url || url === 'about:blank') continue
+        ;(report.controls as Record<string, unknown>)[url] = await readControls(
+          frame as typeof startPage,
+        ).catch(() => null)
+      }
 
       // 2. Any product wording already present on the page. The agent says the
       //    tool offers Term, FlexLife and IUL; this is where that shows up as
@@ -158,15 +171,27 @@ async function main() {
       // 4. The bundles, read as static assets with the session already in the
       //    browser. This is the same technique that produced the report
       //    contract without a single service being called.
-      const scriptUrls = await startPage.evaluate(() =>
-        Array.from(document.querySelectorAll('script[src]')).map(
-          (node) => (node as HTMLScriptElement).src,
+      const scriptUrls = [
+        ...new Set(
+          (
+            await Promise.all(
+              page.frames().map((frame) =>
+                frame
+                  .evaluate(() =>
+                    Array.from(document.querySelectorAll('script[src]')).map(
+                      (node) => (node as HTMLScriptElement).src,
+                    ),
+                  )
+                  .catch(() => [] as string[]),
+              ),
+            )
+          ).flat(),
         ),
-      )
+      ]
       report.scriptCount = scriptUrls.length
 
       const endpoints = new Set<string>()
-      for (const url of scriptUrls.slice(0, 25)) {
+      for (const url of scriptUrls.slice(0, 40)) {
         const source = await page
           .evaluate(async (target) => {
             const response = await fetch(target, { credentials: 'include' })
