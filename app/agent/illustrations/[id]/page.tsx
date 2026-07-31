@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
 import { carrierLabel } from '@/lib/national-life/rapid-solve-labels'
+import { QUOTE_DISCLAIMER } from '@/lib/national-life/quote-disclaimer'
 import { IllustrationPdfButton } from '../IllustrationPdfButton'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
@@ -144,14 +145,14 @@ export default async function QuoteSummaryPage({ params }: { params: Promise<{ i
       </div>
 
       <section className="mt-10 border-t border-white/10 pt-6 text-sm text-ink-muted">
-        {/* Condition copied verbatim from app/agent/illustrations/page.tsx — this
-            page shows the same carrier numbers, larger and alone, so it carries
-            the same condition word for word. Change one, change both. */}
+        {/* Same shared condition as app/agent/illustrations/page.tsx — this page
+            shows the same carrier numbers, larger and alone, so it carries the
+            same condition word for word. One string, read from
+            lib/national-life/quote-disclaimer.ts, so the two screens cannot
+            drift apart. */}
         <p>
-          Números fornecidos por National Life (Rapid Solve) em {day(illustration.createdAt)}. Uso
-          interno do corretor. Pode ser usado para uma cotação verbal ao cliente, mas não pode ser
-          exibido a ele. Os valores não são garantidos e dependem de aprovação de proposta completa
-          na emissão. O documento oficial é a ilustração em PDF da seguradora.
+          Números fornecidos por National Life (Rapid Solve) em {day(illustration.createdAt)}.{' '}
+          {QUOTE_DISCLAIMER} O documento oficial é a ilustração em PDF da seguradora.
         </p>
         <div className="mt-3">
           {illustration.documentFetchedAt ? (

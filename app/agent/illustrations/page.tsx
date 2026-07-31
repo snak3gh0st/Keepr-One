@@ -6,6 +6,7 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
 import { getIllustrationPdfStatuses } from '@/lib/national-life/job-service'
 import { illustrationPdfMessage } from '@/lib/national-life/illustration-pdf-status'
+import { QUOTE_DISCLAIMER } from '@/lib/national-life/quote-disclaimer'
 import { IllustrationPdfButton } from './IllustrationPdfButton'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
@@ -184,9 +185,7 @@ export default async function IllustrationsPage() {
           // The carrier's condition travels with the number, so it appears
           // wherever the number does.
           <p className="mt-4 border-l-2 border-border-steel pl-3 text-xs leading-5 text-ink-muted">
-            Uso interno do corretor. Pode ser usado para uma cotação verbal ao cliente, mas não
-            pode ser exibido a ele. Os valores não são garantidos e dependem de aprovação de
-            proposta completa na emissão.
+            {QUOTE_DISCLAIMER}
           </p>
         )}
       </section>
