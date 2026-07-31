@@ -551,6 +551,14 @@ model Illustration {
   insuredName        String?
   insuredDateOfBirth DateTime?
   documentUrl     String?
+  // The illustration PDF as the carrier rendered it. Held as bytes rather than
+  // on disk because the carrier runtime is a separate container from the web
+  // app, so a file written there is not readable here; at ~1.5 MB a document
+  // and this volume that is a fair trade, and moving to object storage later
+  // does not change how a caller asks for it.
+  documentBytes     Bytes?
+  documentMimeType  String?
+  documentFetchedAt DateTime?
   rawPayload      Json?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt

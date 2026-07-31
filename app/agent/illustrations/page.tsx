@@ -34,6 +34,7 @@ export default async function IllustrationsPage() {
       premium: true,
       productName: true,
       provider: true,
+      documentFetchedAt: true,
       // Both sides of the carrier exchange were persisted; the question is what
       // makes the answer mean anything. Two quotes at the same face amount are
       // different quotes if the insured is not the same age or rate class.
@@ -67,6 +68,7 @@ export default async function IllustrationsPage() {
               <Th>Produto</Th>
               <Th className="text-right">Capital segurado</Th>
               <Th className="text-right">Prêmio mensal</Th>
+              <Th>Documento</Th>
             </tr>
           </Thead>
           <tbody>
@@ -129,6 +131,22 @@ export default async function IllustrationsPage() {
                     </span>
                   )}
                 </TdNum>
+                <Td>
+                  {illustration.documentFetchedAt ? (
+                    // A condição do carrier vale igual aqui: é o PDF que o
+                    // agente lê, não o que ele entrega ao cliente.
+                    <a
+                      href={`/api/illustrations//document`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-teal hover:text-teal-deep"
+                    >
+                      Abrir PDF
+                    </a>
+                  ) : (
+                    <span className="text-ink-muted">—</span>
+                  )}
+                </Td>
               </Tr>
               )
             })}

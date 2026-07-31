@@ -120,6 +120,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               <Th>Produto</Th>
               <Th className="text-right">Capital segurado</Th>
               <Th className="text-right">Prêmio mensal</Th>
+              <Th>Documento</Th>
             </tr>
           </Thead>
           <tbody>
@@ -157,6 +158,20 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                       </span>
                     )}
                   </TdNum>
+                  <Td>
+                    {illustration.documentFetchedAt ? (
+                      <a
+                        href={`/api/illustrations/${illustration.id}/document`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-teal hover:text-teal-deep"
+                      >
+                        Abrir PDF
+                      </a>
+                    ) : (
+                      <span className="text-ink-muted">—</span>
+                    )}
+                  </Td>
                 </Tr>
               )
             })}
