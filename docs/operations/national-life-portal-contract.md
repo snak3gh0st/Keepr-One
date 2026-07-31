@@ -815,3 +815,22 @@ sistema de **proposta**, que é para onde o botão acima leva, não o de ilustra
 
 Consequência de produto: pedir "a ilustração em PDF no app" é integrar o
 Foresight, não estender o que foi construído hoje.
+
+### Onde os saltos SSO caem (2026-07-30, sondado)
+
+| alvo | cai em | sessão viaja? |
+| --- | --- | --- |
+| `/agent/sso/foresight` | `https://www.nationallife.com/NWI/Main/Layout.aspx` — *NLGroup Illustrations - Foresight Web* | **sim**, sem tela de login |
+| `/agent/sso/igo-eapp` | salta por `nlg-prod.auth0.com` e termina em `federate.ipipeline.com` | navegação falhou |
+
+Corrige o que ficou escrito acima nesta mesma sessão: **o Foresight não é
+sistema terceiro.** É a mesma origem do portal, já na allowlist
+(`NATIONAL_LIFE_PORTAL_ORIGINS`), e a sessão salva já entra autenticada. É o
+sistema de ilustração da National Life e está alcançável hoje, com o que já
+existe — não é uma integração nova.
+
+O **iGo** é terceiro de verdade: iPipeline, com autenticação própria via Auth0.
+Esse sim é uma integração à parte, e a sondagem nem chegou a carregar a página.
+
+Ou seja, para o pedido "quero a ilustração em PDF para o cliente": o caminho é
+o Foresight, e ele começa onde a sondagem parou — `NWI/Main/Layout.aspx`.
