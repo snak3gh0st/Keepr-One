@@ -94,7 +94,12 @@ export default async function IllustrationsPage() {
               <Tr key={illustration.id}>
                 <Td>{illustration.createdAt.toLocaleDateString('pt-BR')}</Td>
                 <Td>
-                  <span className="block">{illustration.insuredName ?? '—'}</span>
+                  <Link
+                    href={`/agent/illustrations/${illustration.id}`}
+                    className="text-teal hover:text-teal-deep"
+                  >
+                    {illustration.insuredName ?? '—'}
+                  </Link>
                   {asked.length > 0 && (
                     <span className="mt-0.5 block text-xs text-ink-muted">
                       {asked.join(' · ')}
