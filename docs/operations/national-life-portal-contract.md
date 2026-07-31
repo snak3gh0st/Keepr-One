@@ -1241,6 +1241,28 @@ navegador, com uma hora de intervalo, dispensam o segundo `/authorize`. Mas o
 experimento a fazer mudou — e a peça já existe no código:
 `reconnectSteelBrowserSession`, hoje usada só pelo fluxo interativo.
 
+#### Entrar direto no `Layout.aspx` não salva — mas rendeu o teste de vida barato
+
+Medido 2026-07-31 16:42 UTC, com o Auth0 já morto havia ~1h40:
+
+```json
+{ "landedOn": "https://www.nationallife.com/NWI/Main/Unsecure/ShowMessage.aspx",
+  "title": "ForeSight Mobility", "caseCount": null }
+```
+
+**A sessão do Foresight morre junto.** Não dá para pular o cruzamento a partir
+de uma sessão morta: o app do carrier devolve a própria página de aviso.
+
+⚠️ E uma armadilha que quase virou conclusão errada: o `title` continua
+**"ForeSight Mobility"** nessa página. A primeira versão da sonda casava o título
+e reportou `AUTHENTICATED` sobre um navegador deslogado. **O título é
+decoração; o caminho é o fato** — quem decide é o segmento `/Unsecure/`.
+
+O que sobra de valor, e é bastante: `/NWI/Main/Layout.aspx` responde
+`/Unsecure/ShowMessage.aspx` quando a ferramenta não está utilizável — **sem
+cruzar o `/authorize`**. É o teste de vida mais barato que existe para a
+ilustração, e alimenta o `illustrationSsoReachable` sem custo nenhum de sessão.
+
 ### `illustrationSsoReachable` está mentindo na tela (achado 2026-07-31)
 
 O campo existe para avisar o agente *antes* de ele pedir um PDF que não vem, e é

@@ -35,17 +35,25 @@ import {
 
 const DIRECT_PATH = '/NWI/Main/Layout.aspx'
 
-/// The tool answers with its own name when the session is good, and bounces to
-/// the identity provider when it is not. Anything else is worth seeing raw
-/// rather than being collapsed into a boolean.
+/// Where the tool actually put us.
+///
+/// The title is not evidence. Measured 2026-07-31: a dead session lands on
+/// `/NWI/Main/Unsecure/ShowMessage.aspx` still titled *ForeSight Mobility*, so
+/// matching the name alone reported a dead session as authenticated — this
+/// function said `AUTHENTICATED` about a logged-out browser on its first run.
+///
+/// The `Unsecure/` segment is the real signal, and it is a useful one: it means
+/// the tool can be asked whether it is usable **without crossing the identity
+/// provider at all**, which is the cheapest liveness check available.
 export function readEntryVerdict(input: {
   url: string
-  title: string
   hasPasswordField: boolean
-}): 'AUTHENTICATED' | 'AUTH0_WALL' | 'UNKNOWN' {
-  if (/auth0\.com/i.test(input.url)) return 'AUTH0_WALL'
-  if (input.hasPasswordField) return 'AUTH0_WALL'
-  if (/foresight|illustration/i.test(input.title)) return 'AUTHENTICATED'
+  hasStartPageFrame: boolean
+}): 'USABLE' | 'SESSION_GONE' | 'AUTH0_WALL' | 'UNKNOWN' {
+  if (/auth0\.com/i.test(input.url) || input.hasPasswordField) return 'AUTH0_WALL'
+  if (/\/Unsecure\//i.test(input.url)) return 'SESSION_GONE'
+  // Only the working surface counts: the Recent panel is what a render clicks.
+  if (input.hasStartPageFrame) return 'USABLE'
   return 'UNKNOWN'
 }
 
@@ -100,17 +108,21 @@ async function main() {
         .evaluate(() => Boolean(document.querySelector('input[type="password"]')))
         .catch(() => false)
 
+      // The Recent panel is the proof the tool is really usable, not just
+      // serving a shell: those links are what a render job clicks.
+      const startPage = page.frames().find((frame) => /StartPage\.aspx/i.test(frame.url()))
+
       report.landedOn = page.url().split('?')[0]
       report.title = title
-      report.verdict = readEntryVerdict({ url: page.url(), title, hasPasswordField })
+      report.verdict = readEntryVerdict({
+        url: page.url(),
+        hasPasswordField,
+        hasStartPageFrame: Boolean(startPage),
+      })
       report.frames = page
         .frames()
         .map((frame) => frame.url().split('?')[0])
         .filter((url) => url && url !== 'about:blank')
-
-      // The Recent panel is the proof the tool is really usable, not just
-      // serving a shell: those links are what a render job clicks.
-      const startPage = page.frames().find((frame) => /StartPage\.aspx/i.test(frame.url()))
       report.caseCount = startPage
         ? await startPage
             .evaluate(() => document.querySelectorAll('a[id*="lnkCaseName"]').length)
