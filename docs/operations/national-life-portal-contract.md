@@ -980,6 +980,22 @@ Detalhes que a execução ensinou, e que valem para o job de produção:
   o comportamento correto. Esperar `IsComplete` travaria para sempre.
 - O `sessionTokenId` veio do frame `Layout.aspx`, não do `StartPage`.
 
+#### ✅ Ciclo completo em produção, 2026-07-31 14:53 UTC
+
+Job real na fila (`GENERATE_ILLUSTRATION_PDF`), executado pelo worker:
+
+```
+job   → SUCCEEDED {"rendered": true, "caseName": "RP-Teste-QQ-073026223730", "bytes": 1551912}
+linha → application/pdf | 1.551.912 bytes | documentFetchedAt 14:53:39
+```
+
+Fila → worker → adapter → Foresight → PDF → gravado em `Illustration`. A rota
+`/api/illustrations/[id]/document` serve, e o botão "Gerar PDF" enfileira.
+
+Note o `caseName`: o caso aberto foi um `RP-…-QQ-`, ou seja **um quick quote**.
+Continua faltando a confirmação limpa de que a cotação do Rapid Solve cria esse
+caso sozinha — custa uma cotação nova e um olhar no *Recent*.
+
 #### O achado que define a implementação: a sessão é **stateful**
 
 Os call sites de `IllustrateCase` e `SetupEAppLauncher` fecham o quadro:
