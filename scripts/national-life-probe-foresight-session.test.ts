@@ -109,7 +109,31 @@ describe('classifyLanding', () => {
   it('calls a page with a log out link authenticated', () => {
     expect(
       classifyLanding('<a>Log Out</a>', 'https://www.nationallife.com/NWI/Main/Layout.aspx'),
-    ).toEqual({ verdict: 'AUTHENTICATED', onAuth0: false })
+    ).toEqual({
+      verdict: 'AUTHENTICATED',
+      hasPasswordField: false,
+      looksLikeMfa: false,
+      hasLogout: true,
+      onAuth0: false,
+    })
+  })
+
+  it('does not call an authenticated page NEEDS_MFA because it mentions a text message', () => {
+    // The live /agent/ page did exactly this on 2026-07-31: no redirect, a log
+    // out link, and an MFA-looking phrase somewhere in the markup.
+    const landing = classifyLanding(
+      '<a>Log Out</a><p>we can send a text message</p>',
+      'https://www.nationallife.com/agent/',
+    )
+
+    expect(landing.verdict).toBe('AUTHENTICATED')
+    expect(landing.looksLikeMfa).toBe(true)
+  })
+
+  it('still reports a challenge screen that offers no way out', () => {
+    expect(classifyLanding('<p>Enter the verification code</p>', 'https://x').verdict).toBe(
+      'NEEDS_MFA',
+    )
   })
 
   it('flags the Auth0 origin so a wall is not mistaken for a dead portal', () => {

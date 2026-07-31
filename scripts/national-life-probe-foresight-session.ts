@@ -121,13 +121,22 @@ export function classifyLanding(html: string, url: string) {
   const hasLogout = /log\s?out|sign\s?out/i.test(html)
 
   return {
+    // A log out link outranks an MFA-looking phrase: a challenge screen does not
+    // offer to log you out, but an authenticated portal page can easily mention
+    // a text message. Reading the phrase first called the live `/agent/` page
+    // NEEDS_MFA on 2026-07-31, which is how this ordering was found.
     verdict: hasPasswordField
       ? 'NEEDS_LOGIN'
-      : looksLikeMfa
-        ? 'NEEDS_MFA'
-        : hasLogout
-          ? 'AUTHENTICATED'
+      : hasLogout
+        ? 'AUTHENTICATED'
+        : looksLikeMfa
+          ? 'NEEDS_MFA'
           : 'UNKNOWN',
+    // The raw signals travel with the verdict so a reader can second-guess it
+    // instead of trusting one regex with the whole conclusion.
+    hasPasswordField,
+    looksLikeMfa,
+    hasLogout,
     // An Auth0 wall reached through the jump says nothing about the portal
     // session, and must never be read as one.
     onAuth0: /auth0\.com/i.test(url),
