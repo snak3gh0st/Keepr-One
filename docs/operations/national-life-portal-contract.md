@@ -1263,6 +1263,50 @@ O que sobra de valor, e é bastante: `/NWI/Main/Layout.aspx` responde
 cruzar o `/authorize`**. É o teste de vida mais barato que existe para a
 ilustração, e alimenta o `illustrationSsoReachable` sem custo nenhum de sessão.
 
+### Foresight por dentro, segunda passada (2026-07-31 22:34 UTC, sessão viva)
+
+Duas correções e um achado.
+
+**Term é cotável, e eu tinha dito o contrário.** O painel *Recent* respondeu com
+casos **separados por produto**:
+
+```
+Fabio Filho IUL      Fabio Filho Term      Danielle Reis IUL
+RP-Teste-QQ-…        RP-Loureiro-QQ-…      RP-Campos-QQ-… (×3)
+```
+
+O que o documento sempre disse foi *"Term não é cotável **por este endpoint**"*,
+escopado ao Rapid Solve — cuja sonda varreu o bundle *do Rapid Solve*. Tratar
+isso como limite do portal foi erro de leitura, não do registro. **O Foresight
+cota Term e IUL, e cada um vira um caso próprio.**
+
+**A `StartPage` não tem ação de criar caso.** Varrendo os dois frames:
+
+| frame | controles |
+| --- | --- |
+| `Layout.aspx` (a casca) | Exit, Preferences, InsMark, **Copy To**, **Close**, **Save As**, **Save**, **Run Reports** |
+| `StartPage.aspx` (o miolo) | Producer, Recent, Support Information, In The Spotlight, Learn More, Release Notes |
+
+Repare no que a casca oferece: são **operações sobre um caso já aberto**. Salvar,
+salvar como, copiar para, fechar, rodar relatórios. **Nenhum "New Case" em lugar
+nenhum.** Ou seja, criar caso não começa aqui — começa em outro lugar do portal
+e entra no Foresight já criado, exatamente como o quick quote do Rapid Solve
+aparece como `RP-…-QQ-`. Onde é esse outro lugar continua não medido.
+
+**O candidato a dados estruturados tem nome.** Dos 25 endpoints, o balde que
+importa:
+
+```
+WidgetService.asmx/GetQuickCalcData      ← o mais promissor
+PageService.asmx/GetPolicyInformation
+WidgetService.asmx/GetInsuredInformation
+PageService.asmx/IllustrateCase
+```
+
+Se `GetQuickCalcData` devolver os valores da ilustração, a apresentação se monta
+com **dado da seguradora** em vez de número extraído de PDF. Não foi chamado —
+chamar é ação, e o mapa vinha primeiro.
+
 ### `illustrationSsoReachable` está mentindo na tela (achado 2026-07-31)
 
 O campo existe para avisar o agente *antes* de ele pedir um PDF que não vem, e é
