@@ -39,8 +39,17 @@ describe('documentEndpoints', () => {
         'ReportService.asmx/GeneratePdf',
         'Output.aspx',
         'PageService.asmx/GetApplications',
+        'PageService.asmx/IllustrateCase',
+        'PageService.asmx/SetupEAppLauncher',
       ]),
-    ).toEqual(['ReportService.asmx/GeneratePdf', 'Output.aspx'])
+    ).toEqual([
+      'ReportService.asmx/GeneratePdf',
+      'Output.aspx',
+      // O passo que liga uma cotação nossa a um relatório deles, e o que
+      // lança a proposta de dentro da própria ferramenta.
+      'PageService.asmx/IllustrateCase',
+      'PageService.asmx/SetupEAppLauncher',
+    ])
   })
 
   it('returns nothing rather than guessing when no endpoint looks like a document', () => {

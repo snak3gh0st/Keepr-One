@@ -52,7 +52,7 @@ export function serviceEndpoints(source: string): string[] {
 /// full list still gets reported — a wrong guess here should cost nothing.
 export function documentEndpoints(endpoints: readonly string[]): string[] {
   return endpoints.filter((endpoint) =>
-    /pdf|print|report|output|export|document|illustration|proposal|present/i.test(endpoint),
+    /pdf|print|report|output|export|document|illustrat|proposal|present|eapp/i.test(endpoint),
   )
 }
 

@@ -950,10 +950,42 @@ Três fatos que isso fixa:
 - **A hora é argumento**, formatada pelo cliente — detalhe pequeno que quebraria
   a chamada se fosse enviada em ISO.
 
-O que ainda falta descobrir é o passo anterior: como carregar/definir o caso que
-será ilustrado (`PageService.asmx/IllustrateCase`) — os bundles não mostraram o
-call site dele nesta leitura, e é o que liga uma cotação nossa a um relatório
-dele.
+#### O achado que define a implementação: a sessão é **stateful**
+
+Os call sites de `IllustrateCase` e `SetupEAppLauncher` fecham o quadro:
+
+```js
+// ForeSight.Main.Controls.InforcePolicyInformation.illustrateClicked
+sendRequest(appPath + "/main/PageService.asmx/IllustrateCase",
+            [$ITCommon.sessionTokenId()])
+// ForeSight.Controls.EApp.submitEApp
+sendGetRequest("PageService.asmx/SetupEAppLauncher",
+               [$ITCommon.sessionTokenId()])
+```
+
+**Nenhum deles recebe qual caso.** Todo o contrato — ilustrar, renderizar,
+acompanhar, exibir, lançar o e-App — leva **só o `sessionTokenId`**. Isso quer
+dizer que o *caso corrente* mora no servidor, na sessão do Foresight, e cada
+chamada opera sobre "o que está aberto agora".
+
+Consequência direta para o desenho, e não é detalhe: **não é uma API stateless
+como o Rapid Solve.** Não dá para "pedir o PDF da cotação X" com uma requisição.
+O job precisa primeiro **colocar o caso na sessão** — abrindo a apólice ou
+criando a ilustração pela ferramenta — e só então chamar os três serviços. O
+`IllustrateCase` que os bundles mostram nasce de
+`InforcePolicyInformation.illustrateClicked`, ou seja, do diálogo de uma apólice
+em vigor: é "ilustre esta apólice", não "ilustre este caso qualquer".
+
+Forma do job que isso impõe:
+
+1. cruzar o SSO (e persistir o contexto ao sair, sempre);
+2. navegar até deixar o caso desejado corrente na sessão do Foresight;
+3. ler `$ITCommon.sessionTokenId()` da página;
+4. `SetupReportDisplay` → `RenderReports` → poll `GetReportProgress`;
+5. baixar `/Main/ReportDisplay.rspx?SessionTokenId=…`.
+
+O passo 2 é o que ainda não foi medido, e é onde a captura de requisição real
+(como fizemos no Rapid Solve) vale mais que leitura estática.
 
 Resto do contrato, útil para o que vem depois: `GetPolicyInformation`,
 `SetupSave`, `SetupSaveAs`, `SetupCopyTo`, `SetupClose`, `SetupInsMark`,
