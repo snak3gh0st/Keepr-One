@@ -880,6 +880,29 @@ válido é ligar a flag **antes** de um login novo, para que todo tique atravess
 `/authorize` desde o início da vida da sessão, e horas depois perguntar de novo
 ao `describe-foresight` se o Foresight ainda entra autenticado.
 
+#### Estado em produção (2026-07-31 04:30 UTC): armado, faltando o login
+
+Feito no btapps: checkout do runtime em `origin/main`, imagem reconstruída,
+`NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP=true` gravado em
+`/root/keeprone-national-life-runtime.env`, container recriado. Verificado dentro
+do container (`printenv` = `true`).
+
+Um tique manual do keep-alive com a flag ligada:
+
+```json
+{"alive":true,"refreshed":true,"cookies":29,
+ "ssoJump":{"landedOn":"https://nlg-prod.auth0.com/login","onAuth0":true,"authenticated":false}}
+```
+
+O muro do Auth0 foi registrado e **ignorado** — a sessão do portal seguiu
+`CONNECTED`. A regra "só o `/agent/` marca `SESSION_EXPIRED`" está demonstrada em
+produção, com o caso adversário real, não em teste.
+
+Falta só o que exige humano: **um login novo do carrier**. A partir dele o
+crontab (`*/10`) atravessa o `/authorize` desde o primeiro tique; ~12 h depois,
+rodar `describe-foresight`. Entrou autenticado → prazo de inatividade, a flag
+resolveu. Muro na mesma marca → prazo absoluto, e é decisão de credencial.
+
 #### O que a sonda mediu, e o critério que ela derrubou
 
 Mesma sessão, minutos depois:
@@ -915,6 +938,30 @@ lado servidor do SSO do tenant. Se esse prazo for de **inatividade**, um tique a
 cada 10 min atravessando o `/authorize` o segura — e é exatamente o que a flag
 faz. Se for **absoluto**, morre igual às 12 h e a resposta é credencial. Os dados
 de hoje não separam os dois; só o experimento acima separa.
+
+#### `carrierExpiresAt` está medindo um cookie da Cloudflare, não a sessão
+
+O jar da sonda mostra quem é o mínimo que `deriveCarrierExpiresAt` escolhe:
+`.insider.nationallife.com|__cf_bm` (Cloudflare bot management, 30 min fixos) e
+`.nationallife.com|_hjSession_990012` (Hotjar, 30 min). Os dois expiravam
+`04:20:11` e `04:20:12` — e o `carrierExpiresAt` gravado era `04:20:12`. A sonda
+rodou às `04:23:25`, **3,2 min depois do prazo**, e o portal respondeu
+`AUTHENTICATED`.
+
+Ou seja o campo nunca mediu autenticação: mede o cookie de bot da Cloudflare, que
+renova a cada requisição. É daí que veio o "~20 min deslizante" desta doc.
+
+E não há conserto por filtro: os cookies de sessão reais do portal
+(`ASP.NET_SessionId`, `ITMAuthentication`, `naac`, `ncac`) **não têm prazo** —
+são cookies de sessão. Excluir analytics deixaria só os do Auth0, rolantes de 3
+dias, que também não predizem nada: a sessão morreu em 12 h com eles válidos por
+mais dois. **Nenhum prazo de cookie prevê a morte da sessão; só uma sonda
+autenticada.** O comentário em `deriveCarrierExpiresAt` já dizia isso; a medição
+agora mostra o quanto.
+
+⚠️ Consequência de produto, não resolvida aqui: o card do agente e a página de
+admin exibem esse valor como se fosse o prazo da sessão. É informação enganosa
+para quem lê — decidir se vira "última verificação bem-sucedida" ou some.
 
 #### Ponta solta: o Auth0 tem dois domínios aqui
 
