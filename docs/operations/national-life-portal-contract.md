@@ -873,6 +873,15 @@ Some-se a isso que `deriveCarrierExpiresAt` tira o **mínimo** entre cookies de
 Auth0, o `carrierExpiresAt` que já está gravado no banco *é* o prazo do Auth0 —
 e o "~20 min deslizante" da seção anterior estaria medindo outra coisa.
 
+Lido direto no `lifeos` (`ssh btdb`) em 2026-07-31 03:51 UTC, com o keep-alive
+rodando: `lastConnectedAt` 2026-07-30 16:10, `lastUsedAt` 03:50:15,
+`carrierExpiresAt` 04:20:12 — **~30 min depois do último toque, 12 h depois do
+login**. Ou seja o prazo mínimo *desliza a cada tique*: é cookie renovado pelo
+toque no portal, não um relógio absoluto de 11 h como a leitura anterior sugeriu.
+O que a sonda ainda precisa separar é se algum cookie do Auth0 acompanha esse
+deslize ou fica parado — é literalmente a mesma pergunta, agora com nome de
+campo.
+
 `scripts/national-life-probe-foresight-session.ts` fecha essa lacuna numa
 execução só:
 
