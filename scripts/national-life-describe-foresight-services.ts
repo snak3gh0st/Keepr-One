@@ -83,6 +83,22 @@ async function main() {
     const session = await createSteelBrowserSession(env, { sessionContext })
     const page = session.page
     try {
+      const hops: string[] = []
+      page.on('framenavigated', (frame) => {
+        if (frame === page.mainFrame()) hops.push(frame.url().split('?')[0])
+      })
+
+      // Touch the portal before jumping. Measured 2026-07-31: jumping cold from
+      // the stored context landed on the Auth0 wall twice in a row, in the same
+      // minutes that keep-alive — which loads `/agent/` first — reported the
+      // jump authenticated. The warm portal session in this browser is part of
+      // what makes FormPostAuth0 hand over instead of bouncing to login.
+      await page.goto(new URL('/agent/', env.portalLoginUrl).toString(), {
+        waitUntil: 'domcontentloaded',
+        timeout: 45_000,
+      })
+      await page.waitForTimeout(4_000)
+
       await page.goto(new URL(FORESIGHT_PATH, env.portalLoginUrl).toString(), {
         waitUntil: 'domcontentloaded',
         timeout: 60_000,
@@ -91,7 +107,7 @@ async function main() {
 
       const landedOn = page.url().split('?')[0]
       if (/auth0\.com/i.test(landedOn)) {
-        console.log(JSON.stringify({ landedOn, skipped: 'Auth0 wall — needs a fresh login' }))
+        console.log(JSON.stringify({ landedOn, hops, skipped: 'Auth0 wall after a warm portal touch' }))
         return 'ran'
       }
 
@@ -131,6 +147,7 @@ async function main() {
         JSON.stringify(
           {
             landedOn,
+            hops,
             bundles: perBundle.map(({ src, chars }) => ({ src, chars })),
             // The answer to "where does the PDF come from", if it is named at all.
             documentEndpoints: documentEndpoints(all),

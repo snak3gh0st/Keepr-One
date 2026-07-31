@@ -859,6 +859,36 @@ Consequência para quem for integrar o Foresight: a primeira pergunta não é
 mede a tela de login e conclui a coisa errada, que foi o que aconteceu aqui
 duas vezes em sequência, com respostas opostas.
 
+### 2026-07-31 13:36 UTC: o salto **não** segura o Auth0, e o "12 h" era limite superior
+
+Login novo às 13:25:00, com `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP=true` já ligado —
+ou seja, todo tique atravessando `/authorize` desde o primeiro minuto.
+
+| hora | o quê | Foresight |
+| --- | --- | --- |
+| 13:26:06 | tique keep-alive | alcançável |
+| ~13:28 | `describe-foresight` mapeou a ferramenta | alcançável |
+| 13:30:23 | tique keep-alive | alcançável |
+| ~13:32, ~13:34, ~13:36 | sondas | muro do Auth0 |
+| 13:36:41 | tique keep-alive | muro do Auth0 |
+
+**A sessão Auth0 morreu ~7 minutos depois do login, com o salto sendo
+atravessado a cada 2 a 4 minutos.** Atravessar o `/authorize` não a mantém viva:
+o experimento respondeu, muito mais rápido do que se esperava, e respondeu não.
+
+Corrige o que esta doc afirmou horas antes: **o "12 h" nunca foi medido.** Ontem
+só se sabia que estava morto às 03:55; ninguém olhou no intervalo. Era limite
+superior, não duração — e hoje mostra que a morte cabe em minutos.
+
+⚠️ Confundidor honesto, ainda não descartado: as próprias sondas podem ter
+matado a sessão. Entre 13:26 e 13:32 entrei no Foresight de verdade uma vez
+(`describe-foresight` carrega `StartPage.aspx` e os `WidgetService`), e fechar o
+navegador no meio de uma sessão da ferramenta é candidato plausível a derrubar o
+SSO. Separar isso agora é barato e **não custa código nenhum**: a coluna
+`illustrationSsoReachable` grava o veredicto de cada tique, então basta um login
+novo e **nenhuma sonda** — o instante em que ela vira `false` é a hora da morte,
+medida limpa. Só depois disso vale concluir se a decisão é de credencial.
+
 ### Medido em 2026-07-31 03:55 UTC: confirmado, o Auth0 morre e o portal não
 
 O par que faltava, dentro do mesmo intervalo de keep-alive:
