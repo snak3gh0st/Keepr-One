@@ -9,6 +9,7 @@ import {
 import type { NationalLifeConnectionAttemptState } from '../../lib/national-life/connection-attempt-state'
 import type { NationalLifeEnv } from '../../lib/national-life/env'
 import type { NationalLifeAdapter } from './adapter'
+import { traceReason, type ConnectionTrace } from './connection-trace'
 import type { BrowserSession, InteractiveBrowserSession } from './types'
 
 export type StoredConnectionAttempt = {
@@ -88,6 +89,10 @@ export type RunConnectionAttemptDeps = {
   captureContext(steelSessionId: string): Promise<SessionContext>
   createAdapter(session: BrowserSession): Pick<NationalLifeAdapter, 'classifyAuthenticationState'>
   crypto?: ConnectionAttemptCrypto
+  /// One line per decision on the way through. Optional so tests that do not
+  /// care can leave it out; production always supplies it, because a login
+  /// costs a human and an MFA code and must not produce a mystery.
+  trace?: ConnectionTrace
 }
 
 export type RunConnectionAttemptResult =
@@ -241,6 +246,12 @@ export async function runNationalLifeConnectionAttempt(
   if (!attempt) {
     return { kind: 'NOT_CLAIMED' }
   }
+  deps.trace?.({
+    step: 'claimed',
+    attemptId,
+    state: attempt.state,
+    expiresInMs: attempt.expiresAt.getTime() - deps.now().getTime(),
+  })
 
   if (attempt.expiresAt <= deps.now() && attempt.state !== 'EXPIRED') {
     await deps.store.transition({
@@ -251,6 +262,7 @@ export async function runNationalLifeConnectionAttempt(
       safeErrorCode: 'CONNECTION_ATTEMPT_EXPIRED',
       now: deps.now(),
     })
+    deps.trace?.({ step: 'expired', attemptId, state: attempt.state })
     await cleanupAttemptRecord({ ...attempt, state: 'EXPIRED' }, deps)
     return { kind: 'TERMINAL', state: 'EXPIRED' }
   }
@@ -260,6 +272,7 @@ export async function runNationalLifeConnectionAttempt(
     attempt.state === 'EXPIRED' ||
     attempt.state === 'FAILED'
   ) {
+    deps.trace?.({ step: 'terminal', attemptId, state: attempt.state })
     await cleanupAttemptRecord(attempt, deps)
     return { kind: 'TERMINAL', state: attempt.state }
   }
@@ -278,6 +291,11 @@ async function openPortal(
   let session: InteractiveBrowserSession | undefined
   try {
     session = await deps.createInteractiveSession()
+    deps.trace?.({
+      step: 'session-created',
+      attemptId: attempt.id,
+      steelSessionId: session.steelSessionId,
+    })
     await session.page.goto(deps.env.portalLoginUrl)
     const runtime: AttemptRuntime = {
       steelSessionId: session.steelSessionId,
@@ -297,6 +315,13 @@ async function openPortal(
     await safeDisconnect(session)
     return { kind: 'INTERACTIVE', state: 'AWAITING_LOGIN' }
   } catch (error) {
+    // `session` still undefined means the browser was never created — the exact
+    // fact that could not be established after 2026-07-31's login.
+    deps.trace?.(
+      session
+        ? { step: 'failed', attemptId: attempt.id, reason: traceReason(error) }
+        : { step: 'session-create-failed', attemptId: attempt.id, reason: traceReason(error) },
+    )
     await safeClose(session)
     await deps.store.transition({
       attemptId: attempt.id,
@@ -348,9 +373,23 @@ async function monitorPortal(
   let authenticated = false
   try {
     session = await deps.reconnectSession(runtime)
+    // Which browser it came back on. If a login ever completes on a session id
+    // Steel does not have, this line is what says so at the time rather than
+    // hours later.
+    deps.trace?.({
+      step: 'session-reconnected',
+      attemptId: attempt.id,
+      steelSessionId: session.steelSessionId,
+    })
     const authentication = await deps
       .createAdapter(session)
       .classifyAuthenticationState()
+    deps.trace?.({
+      step: 'classified',
+      attemptId: attempt.id,
+      kind: authentication.kind,
+      origin: authentication.origin,
+    })
 
     if (authentication.kind !== 'AUTHENTICATED') {
       await deps.store.transition({
@@ -387,9 +426,15 @@ async function monitorPortal(
     //
     // The cookies were captured above regardless, so if this browser is gone by
     // the time a job looks for it, the job builds its own and nothing is lost.
+    deps.trace?.({
+      step: 'completed',
+      attemptId: attempt.id,
+      steelSessionId: session.steelSessionId,
+    })
     await safeDisconnect(session)
     return { kind: 'CONNECTED' }
   } catch (error) {
+    deps.trace?.({ step: 'failed', attemptId: attempt.id, reason: traceReason(error) })
     const interactiveState = interactiveStateOf(attempt)
     if (
       !authenticated &&

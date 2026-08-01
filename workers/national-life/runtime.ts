@@ -20,6 +20,7 @@ import type { BrowserJobState } from '../../lib/national-life/job-state'
 import { prisma } from '../../lib/prisma'
 import { applyCaseObservation } from '../../lib/national-life/sync-service'
 import { NationalLifeAdapter } from './adapter'
+import { writeConnectionTrace } from './connection-trace'
 import {
   runNationalLifeConnectionAttempt,
   type CompleteAttemptInput,
@@ -448,6 +449,8 @@ function createAttemptRunner(env: NationalLifeEnv) {
         ).toString(),
         allowedOrigins: env.portalOrigins,
       }),
+    // A login costs a human and an MFA code. It must not produce a mystery.
+    trace: writeConnectionTrace,
   }
   return (attemptId: string) =>
     runNationalLifeConnectionAttempt(attemptId, deps).then(() => undefined)
