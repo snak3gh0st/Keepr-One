@@ -30,11 +30,13 @@ export function PageHeader({
   eyebrow,
   description,
   children,
+  variant,
 }: {
-  title: string
-  eyebrow?: string
-  description?: React.ReactNode
-  children?: React.ReactNode
+  title: string;
+  eyebrow?: string;
+  description?: React.ReactNode;
+  children?: React.ReactNode;
+  variant?: "black-achievement";
 }) {
   const root = useRef<HTMLElement>(null);
 
@@ -70,6 +72,21 @@ export function PageHeader({
         });
 
         if (root.current) observer.observe(root.current);
+
+        if (variant === "black-achievement") {
+          gsap.fromTo(
+            "[data-module-black-wash]",
+            { scaleX: 0.86, opacity: 0 },
+            {
+              scaleX: 1,
+              opacity: 1,
+              duration: 1.05,
+              ease: "power3.out",
+              clearProps: "transform,opacity",
+            },
+          );
+        }
+
         return () => observer.disconnect();
       }
     },
@@ -77,7 +94,18 @@ export function PageHeader({
   );
 
   return (
-    <header ref={root} className="module-header keepr-noise">
+    <header
+      ref={root}
+      className="module-header keepr-noise"
+      data-variant={variant}
+    >
+      {variant === "black-achievement" ? (
+        <span
+          className="module-header-black-wash"
+          data-module-black-wash
+          aria-hidden="true"
+        />
+      ) : null}
       <div className="module-header-main">
         <div className="module-header-title" data-module-header-item>
           {eyebrow && <p>{eyebrow}</p>}

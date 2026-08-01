@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/require-role'
 
@@ -8,9 +9,9 @@ import { requireRole } from '@/lib/require-role'
 // rather than silently exposing agent data — it never bypasses the
 // "must have an Agent record" invariant, it only widens *who* is allowed to
 // even attempt to load one.
-export async function getCurrentAgent() {
+export const getCurrentAgent = cache(async function getCurrentAgent() {
   const session = await requireRole('ADMIN', 'AGENT')
   const agent = await prisma.agent.findUnique({ where: { userId: session.user.id } })
   if (!agent) throw new Error('Signed-in user has no Agent record')
   return agent
-}
+})

@@ -20,10 +20,10 @@ export default async function NewIllustrationPage() {
         description="Cote o IUL direto na National Life, com os números da própria seguradora."
       >
         <Link
-          href="/agent/policies"
+          href="/agent/illustrations"
           className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
         >
-          ← Voltar
+          Voltar para ilustrações
         </Link>
       </PageHeader>
 

@@ -11,58 +11,52 @@ import { formatCarrierInstant } from '@/lib/national-life/carrier-instant'
 import { IllustrationPdfButton } from './IllustrationPdfButton'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
-import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
-
-const currency = (value: number) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(value)
+import {
+  IllustrationsWorkspace,
+  type IllustrationWorkspaceItem,
+} from './IllustrationsWorkspace'
 
 export default async function IllustrationsPage() {
   const agent = await getCurrentAgent()
-  const user = await prisma.user.findUnique({ where: { id: agent.userId } })
-
-  // Scoped to the agent who asked for them. A quote names an insured and a
-  // premium, and the only thing that says who may read it is who requested it.
-  const illustrations = await prisma.illustration.findMany({
-    where: { agentId: agent.id },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
-    select: {
-      id: true,
-      createdAt: true,
-      insuredName: true,
-      insuredDateOfBirth: true,
-      faceAmount: true,
-      premium: true,
-      productName: true,
-      provider: true,
-      documentFetchedAt: true,
-      // Both sides of the carrier exchange were persisted; the question is what
-      // makes the answer mean anything. Two quotes at the same face amount are
-      // different quotes if the insured is not the same age or rate class.
-      rawPayload: true,
-      client: { select: { id: true, name: true } },
-    },
-  })
-
-  // One query for the whole table, so the row can say where its render stands.
-  const pdfStatus = await getIllustrationPdfStatuses(agent.id)
+  const [user, illustrations, pdfStatus] = await Promise.all([
+    prisma.user.findUnique({ where: { id: agent.userId } }),
+    // Scoped to the agent who asked for them. A quote names an insured and a
+    // premium, and the only thing that says who may read it is who requested it.
+    prisma.illustration.findMany({
+      where: { agentId: agent.id },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        createdAt: true,
+        insuredName: true,
+        faceAmount: true,
+        premium: true,
+        productName: true,
+        documentFetchedAt: true,
+        // Both sides of the carrier exchange were persisted; the question is what
+        // makes the answer mean anything. Two quotes at the same face amount are
+        // different quotes if the insured is not the same age or rate class.
+        rawPayload: true,
+        client: { select: { id: true, name: true } },
+      },
+    }),
+    // One query for the whole list, so every item can say where its render stands.
+    getIllustrationPdfStatuses(agent.id),
+  ])
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <PageHeader
         title="Ilustrações"
-        eyebrow="Carteira"
-        description="Cotações pedidas à seguradora, com os números que ela devolveu."
+        eyebrow="Pré-venda"
+        description="Simule coberturas, compare prêmio e recupere cada documento sem perder o histórico do segurado."
       >
         <Link
           href="/agent/illustrations/new"
           className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
         >
-          Nova cotação
+          Nova ilustração
         </Link>
       </PageHeader>
 

@@ -169,8 +169,17 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         eyebrow="Detalhe da apólice"
         description={`Contrato de ${policy.client.name} com documentos, revisão e comissão organizados em uma única visão.`}
       >
-        <Link href="/agent/policies" className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper hover:bg-white/[0.06]">
-          ← Voltar à carteira
+        <Link
+          href="/agent/policies"
+          className="module-detail-back"
+          aria-label="Voltar para a lista de apólices"
+        >
+          <span className="module-detail-back-icon" aria-hidden="true">
+            <svg viewBox="0 0 20 20" fill="none">
+              <path d="m11.75 5.25-4.5 4.75 4.5 4.75M7.5 10h7.25" />
+            </svg>
+          </span>
+          <span>Voltar para apólices</span>
         </Link>
       </PageHeader>
 
