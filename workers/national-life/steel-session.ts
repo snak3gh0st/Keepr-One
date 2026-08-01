@@ -2,7 +2,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { Steel } from 'steel-sdk'
 import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
 import {
-  NATIONAL_LIFE_CONNECTION_ATTEMPT_TTL_MS,
+  NATIONAL_LIFE_CARRIER_BROWSER_TTL_MS,
   NATIONAL_LIFE_JOB_TIMEOUT_MS,
 } from '../../lib/national-life/constants'
 import type { NationalLifeEnv } from '../../lib/national-life/env'
@@ -113,7 +113,16 @@ export async function createInteractiveSteelSession(
 ): Promise<InteractiveBrowserSession> {
   const steelClient = createSteelClient(env, deps)
   const remoteSession = await steelClient.sessions.create({
-    timeout: NATIONAL_LIFE_CONNECTION_ATTEMPT_TTL_MS,
+    // A workday, not the login deadline. The human still has only
+    // NATIONAL_LIFE_CONNECTION_ATTEMPT_TTL_MS to finish authenticating — that
+    // is enforced by the attempt's own `expiresAt` — but the browser they log
+    // in on has to outlive the login, because the illustration tool keeps its
+    // token in that page's memory and every job that rebuilds a browser from
+    // cookies has to cross the identity provider again.
+    //
+    // Steel's timeout is a hard ceiling and cannot be extended on a live
+    // session, so this is the whole lifetime: one login per day.
+    timeout: NATIONAL_LIFE_CARRIER_BROWSER_TTL_MS,
     headless: false,
     solveCaptcha: false,
     persistProfile: false,

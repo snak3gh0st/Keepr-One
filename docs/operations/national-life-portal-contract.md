@@ -1155,15 +1155,35 @@ execução — rotacionava o cookie `auth0` dentro do browser e **jogava a
 rotação fora ao fechar**. O job seguinte decriptava o contexto antigo e
 apresentava um cookie superado, que é o que o IdP trata como replay.
 
-Isto explica os dois dias com uma causa só:
+⚠️ **Retificado no mesmo dia: isto NÃO explica a morte do Auth0.** Escrevi acima
+que a causa estava achada. Está errado, e o próprio keep-alive desmente:
+`scripts/national-life-keep-alive.ts` captura o contexto **depois** do salto e
+persiste — o comentário no código diz isso em letras claras. Ou seja, o
+experimento do keep-alive cruzava **e persistia**, e ainda assim matou a sessão
+em ~7 min.
 
-| | por que morria |
-| --- | --- |
-| keep-alive ligado | cruzava a cada 10 min, descartava a rotação toda vez → morte em ~7 min |
-| keep-alive desligado | cruzava uma vez por job, descartava igual → morte logo depois do job |
-| 2026-07-30, ~11 h | **nenhum job de Foresight rodou nesse intervalo** — nada cruzou, nada foi descartado |
+Com a variável certa isolada, as três observações ficam assim:
 
-O keep-alive não era a doença, era o sintoma mais rápido.
+| rodada | cruzou `/authorize`? | persistiu depois? | Foresight viveu |
+| --- | --- | --- | --- |
+| 2026-07-30 | **não** | — | **~11 h** |
+| 07-31, keep-alive ligado | sim, a cada 10 min | **sim** | ~7 min |
+| 07-31, job de PDF 14:53 | sim, uma vez | **não** | morto às 15:03 |
+
+**Cruzar correlaciona 2/2 com a morte. Persistir não discrimina nada.** A
+hipótese que sobra de pé é a mais incômoda: atravessar o `/authorize` é o que
+queima a sessão, com ou sem persistência.
+
+Consequência de produto, e é grande: se for isso, a janela de ~80 min depois do
+login humano é **limite duro**, e geração de PDF desacompanhada não existe sem
+senha guardada ou sem outro caminho de entrada. Não decidir isso por conta.
+
+O experimento que discrimina, uma variável só: login novo, **um** cruzamento
+(um job de PDF, que agora persiste), e verificar dali a uma hora. Se morrer
+mesmo assim, é o cruzamento e a persistência nunca foi a alavanca.
+
+O bug do worker abaixo é real e vale por si — descartar uma rotação é errado em
+qualquer leitura — mas **não** está estabelecido como a causa.
 
 Corrigido: `NationalLifeRunJobDeps` ganhou `captureContext(session)` e
 `sessionStore.saveContext(...)`, chamados no `finally` **antes** do `close()`.
@@ -1174,9 +1194,137 @@ Dois testes cobrem: a ordem captura-antes-de-fechar, e o job seguir
 `SUCCEEDED` quando a persistência quebra.
 
 ⚠️ **O que isto ainda não prova.** Que a sessão passe a viver horas *com* jobs
-cruzando é previsão, não medição. Medir é o de sempre: login novo, rodar um
-job de Foresight, e verificar dali a uma hora se o salto ainda entra
-autenticado.
+cruzando é previsão, e depois da retificação acima é uma previsão **fraca**.
+Medir é o de sempre: login novo, rodar um job de Foresight, e verificar dali a
+uma hora se o salto ainda entra autenticado.
+
+### A causa provável, e ela não é nenhuma das duas anteriores (2026-07-31)
+
+Veio de uma observação do operador, não do código: **no navegador dele o agente
+loga uma vez e passa o dia** mandando ilustração e proposta sem relogar. Se um
+humano consegue, a diferença está em como nós seguramos a sessão — não no
+carrier.
+
+`scripts/national-life-describe-session-context.ts` leu a forma do contexto
+guardado (só nomes, hosts e contagens — nunca valores):
+
+```jsonc
+topLevelKeys: ["cookies", "indexedDB", "localStorage", "sessionStorage"]
+cookiesByDomain: { "nlg-prod.auth0.com": 5, "www.nationallife.com": 10,
+                   ".nationallife.com": 8, "mfa.nationallife.com": 5, … }
+localStorage["https://nlg-prod.auth0.com"]: 3 chaves, TODAS `com.auth0.auth.<state>`
+sessionStorage: nada na origem do Auth0
+indexedDB: vazio
+```
+
+Duas leituras, e a segunda é a que importa:
+
+1. **Não é "só cookies".** Levamos `localStorage` e `sessionStorage` junto — a
+   hipótese de que perdíamos armazenamento está **descartada**.
+2. **Não existe `@@auth0spajs@@::…`** no `localStorage` do Auth0. Esse é o cache
+   de token do `auth0-spa-js`; sem ele, o cache é **em memória**, que é o padrão
+   da biblioteca. As três chaves presentes são `com.auth0.auth.<state>`, ou seja
+   **transações de `/authorize` órfãs**, empilhadas.
+
+Daí a explicação que cobre tudo: **o token do Foresight vive na memória da
+página.** O navegador do agente nunca morre, então ele nunca precisa reautorizar.
+O nosso é **criado e destruído a cada job** (`createSteelBrowserSession` +
+`close()`, sem `persistProfile`), então toda execução perde o token e é obrigada
+a cruzar o `/authorize` de novo — deixando uma transação órfã por vez, que é
+exatamente o que se vê acumulado.
+
+Ou seja: **cruzar não é a doença, é o sintoma de jogar o navegador fora.**
+Corrige a leitura anterior deste documento, que tratava o cruzamento como causa.
+
+Isso ainda é inferência forte, não medição: falta provar que dois jobs no mesmo
+navegador, com uma hora de intervalo, dispensam o segundo `/authorize`. Mas o
+experimento a fazer mudou — e a peça já existe no código:
+`reconnectSteelBrowserSession`, hoje usada só pelo fluxo interativo.
+
+#### Entrar direto no `Layout.aspx` não salva — mas rendeu o teste de vida barato
+
+Medido 2026-07-31 16:42 UTC, com o Auth0 já morto havia ~1h40:
+
+```json
+{ "landedOn": "https://www.nationallife.com/NWI/Main/Unsecure/ShowMessage.aspx",
+  "title": "ForeSight Mobility", "caseCount": null }
+```
+
+**A sessão do Foresight morre junto.** Não dá para pular o cruzamento a partir
+de uma sessão morta: o app do carrier devolve a própria página de aviso.
+
+⚠️ E uma armadilha que quase virou conclusão errada: o `title` continua
+**"ForeSight Mobility"** nessa página. A primeira versão da sonda casava o título
+e reportou `AUTHENTICATED` sobre um navegador deslogado. **O título é
+decoração; o caminho é o fato** — quem decide é o segmento `/Unsecure/`.
+
+O que sobra de valor, e é bastante: `/NWI/Main/Layout.aspx` responde
+`/Unsecure/ShowMessage.aspx` quando a ferramenta não está utilizável — **sem
+cruzar o `/authorize`**. É o teste de vida mais barato que existe para a
+ilustração, e alimenta o `illustrationSsoReachable` sem custo nenhum de sessão.
+
+### Foresight por dentro, segunda passada (2026-07-31 22:34 UTC, sessão viva)
+
+Duas correções e um achado.
+
+**Term é cotável, e eu tinha dito o contrário.** O painel *Recent* respondeu com
+casos **separados por produto**:
+
+```
+Fabio Filho IUL      Fabio Filho Term      Danielle Reis IUL
+RP-Teste-QQ-…        RP-Loureiro-QQ-…      RP-Campos-QQ-… (×3)
+```
+
+O que o documento sempre disse foi *"Term não é cotável **por este endpoint**"*,
+escopado ao Rapid Solve — cuja sonda varreu o bundle *do Rapid Solve*. Tratar
+isso como limite do portal foi erro de leitura, não do registro. **O Foresight
+cota Term e IUL, e cada um vira um caso próprio.**
+
+**A `StartPage` não tem ação de criar caso.** Varrendo os dois frames:
+
+| frame | controles |
+| --- | --- |
+| `Layout.aspx` (a casca) | Exit, Preferences, InsMark, **Copy To**, **Close**, **Save As**, **Save**, **Run Reports** |
+| `StartPage.aspx` (o miolo) | Producer, Recent, Support Information, In The Spotlight, Learn More, Release Notes |
+
+Repare no que a casca oferece: são **operações sobre um caso já aberto**. Salvar,
+salvar como, copiar para, fechar, rodar relatórios. **Nenhum "New Case" em lugar
+nenhum.** Ou seja, criar caso não começa aqui — começa em outro lugar do portal
+e entra no Foresight já criado, exatamente como o quick quote do Rapid Solve
+aparece como `RP-…-QQ-`. Onde é esse outro lugar continua não medido.
+
+**O candidato a dados estruturados tem nome.** Dos 25 endpoints, o balde que
+importa:
+
+```
+WidgetService.asmx/GetQuickCalcData      ← o mais promissor
+PageService.asmx/GetPolicyInformation
+WidgetService.asmx/GetInsuredInformation
+PageService.asmx/IllustrateCase
+```
+
+Se `GetQuickCalcData` devolver os valores da ilustração, a apresentação se monta
+com **dado da seguradora** em vez de número extraído de PDF. Não foi chamado —
+chamar é ação, e o mapa vinha primeiro.
+
+### `illustrationSsoReachable` está mentindo na tela (achado 2026-07-31)
+
+O campo existe para avisar o agente *antes* de ele pedir um PDF que não vem, e é
+renderizado em duas telas: `NationalLifeConnectionCard.tsx` e a de admin.
+
+Só que quem escreve nele é **exclusivamente** o keep-alive, e só quando
+`NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP=true` — que está **desligado, e deve
+continuar**. Resultado medido hoje: `illustrationSsoReachable = true`,
+`illustrationSsoCheckedAt = 13:50`, enquanto a verdade virou ~15:03 e um job
+falhou às 15:38 com `FORESIGHT_SSO_EXPIRED`. A tela que existe para avisar
+estava afirmando o contrário do fato, durante o incidente.
+
+Conserto que não custa cruzamento nenhum: **derivar do resultado dos jobs**. Um
+job que renderiza prova que estava alcançável; um que falha com
+`FORESIGHT_SSO_EXPIRED` prova que não estava. Os jobs já cruzam o SSO — o
+desfecho deles *é* a medição, de graça. Somado a envelhecer o valor: se
+`illustrationSsoCheckedAt` for velho demais, mostrar "não verificado" em vez de
+um booleano parado.
 
 #### Desenho que isso habilita
 

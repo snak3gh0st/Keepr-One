@@ -225,7 +225,13 @@ describe('National Life Steel session boundary', () => {
     const session = await createInteractiveSteelSession(buildEnv(), fake.deps)
 
     expect(fake.createInputs).toEqual([{
-      timeout: 1500000,
+      // A workday, not the 25-minute login deadline. This browser has to
+      // outlive the login: it holds the illustration tool's token in page
+      // memory, and a job that rebuilds a browser from cookies has to cross
+      // the identity provider again — which is what burns the carrier session.
+      // Steel cannot extend a live session's timeout, so the whole lifetime is
+      // chosen here.
+      timeout: 43_200_000,
       headless: false,
       solveCaptcha: false,
       persistProfile: false,

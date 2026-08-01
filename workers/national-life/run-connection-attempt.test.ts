@@ -81,6 +81,7 @@ function createDeps(options: {
   let disconnectFailures = options.disconnectFailures ?? 0
   let current = structuredClone(options.attempt)
   let completed = false
+  let completedInput: unknown = null
   const page = {
     goto: vi.fn(async () => {
       calls.push('page:goto-login')
@@ -142,8 +143,9 @@ function createDeps(options: {
         }
         calls.push(`attempt:${input.to}`)
       },
-      async complete() {
+      async complete(input: unknown) {
         completed = true
+        completedInput = input
         calls.push('attempt:complete-transaction')
       },
       async releaseLease() {
@@ -199,6 +201,7 @@ function createDeps(options: {
     session,
     current: () => current,
     completed: () => completed,
+    completedWith: () => completedInput as Record<string, unknown> | null,
   }
 }
 
@@ -231,9 +234,26 @@ describe('National Life interactive connection attempt runtime', () => {
       'steel:context',
       'context:encrypt',
       'attempt:complete-transaction',
-      'steel:close',
+      // Disconnect, not close. The browser the human just logged in on holds
+      // the illustration tool's token in page memory — `auth0-spa-js` caches
+      // in memory by default — so releasing it here is what forced every later
+      // job to cross the identity provider again and burn the session.
+      'steel:disconnect',
     ])
     expect(test.completed()).toBe(true)
+  })
+
+  // The handle is what lets a job reattach to that browser instead of building
+  // a cold one from cookies. Without it the session is kept alive and then
+  // orphaned, which is worse than closing it.
+  it('hands the live browser over to the jobs that will reuse it', async () => {
+    const test = createDeps({ attempt: buildAttempt('AWAITING_MFA') })
+
+    await runNationalLifeConnectionAttempt('attempt-1', test.deps)
+
+    expect(test.completedWith()).toMatchObject({
+      liveSteelSessionId: runtime.steelSessionId,
+    })
   })
 
   it('keeps MFA open when a transient reconnect fails', async () => {

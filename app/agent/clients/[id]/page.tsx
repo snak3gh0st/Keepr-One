@@ -12,6 +12,7 @@ import { ModuleSummary } from '@/components/ModuleSummary'
 import { policyStatusLabel } from '@/components/StatusPill'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
 import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
+import { QUOTE_DISCLAIMER } from '@/lib/national-life/quote-disclaimer'
 
 const currency = (value: number) =>
   new Intl.NumberFormat('en-US', {
@@ -182,9 +183,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         ) : (
           // The carrier's condition travels with the number, wherever it shows.
           <p className="mt-4 border-l-2 border-border-steel pl-3 text-xs leading-5 text-ink-muted">
-            Uso interno do corretor. Pode ser usado para uma cotação verbal ao cliente, mas não
-            pode ser exibido a ele. Os valores não são garantidos e dependem de aprovação de
-            proposta completa na emissão.
+            {QUOTE_DISCLAIMER}
           </p>
         )}
       </section>
