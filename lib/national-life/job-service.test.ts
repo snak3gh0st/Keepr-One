@@ -1,3 +1,6 @@
+import { readFileSync, readdirSync } from 'node:fs'
+import { extname, join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Prisma } from '@prisma/client'
 import { describe, expect, it } from 'vitest'
 import { assertBrowserJobTransition, type BrowserJobState } from './job-state'
@@ -823,5 +826,184 @@ describe('releaseJobsBlockedOnCarrierLogin', () => {
       availableAt: now,
       safeErrorCode: null,
     })
+  })
+})
+
+// The invariant the whole park-and-drain design rests on: a carrier session
+// can flip to CONNECTED only alongside releaseJobsBlockedOnCarrierLogin
+// running in the *same* transaction. Break that pairing and a job parked on
+// FORESIGHT_SSO_EXPIRED can end up connected on one side and still parked on
+// the other, with nothing left to requeue it until some unrelated code path
+// happens to touch it. Today there are exactly two call sites — this file's
+// own doc comments on releaseJobsBlockedOnCarrierLogin name them — and both
+// hold up. But nothing in the type system stops a third: a new upsert that
+// sets status: 'CONNECTED' without the drain call would compile, typecheck,
+// and pass every other test in this suite.
+//
+// So, the same way quote-disclaimer.test.ts guards its own invariant, this
+// reads the source directly: find every `agentIntegrationSession.upsert` that
+// writes CONNECTED under lib/ and workers/, and require
+// releaseJobsBlockedOnCarrierLogin inside the same `$transaction` block.
+// Plain brace/paren matching over source text, not an AST — the two real call
+// sites are simple enough that it holds, and staying source-level means this
+// test needs no database and no Prisma mock to catch the mistake.
+describe('the CONNECTED-drain invariant', () => {
+  const ROOT = fileURLToPath(new URL('../..', import.meta.url))
+  const SCAN_DIRS = ['lib', 'workers']
+  const UPSERT_MARKER = 'agentIntegrationSession.upsert('
+  const CONNECTED_MARKER = "status: 'CONNECTED'"
+  const DRAIN_CALL = 'releaseJobsBlockedOnCarrierLogin('
+  const TRANSACTION_MARKER = '.$transaction('
+
+  function sourceFiles(dir: string): string[] {
+    const files: string[] = []
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        files.push(...sourceFiles(full))
+      } else if (
+        entry.isFile() &&
+        extname(entry.name) === '.ts' &&
+        !entry.name.endsWith('.test.ts') &&
+        !entry.name.endsWith('.d.ts')
+      ) {
+        files.push(full)
+      }
+    }
+    return files
+  }
+
+  function indicesOf(source: string, marker: string): number[] {
+    const indices: number[] = []
+    let from = 0
+    let at = source.indexOf(marker, from)
+    while (at !== -1) {
+      indices.push(at)
+      from = at + marker.length
+      at = source.indexOf(marker, from)
+    }
+    return indices
+  }
+
+  // Depth-counts from an opening delimiter to its match. Works for both `()`
+  // and `{}` — the callers just pass the pair they mean.
+  function matchingDelimiter(source: string, openIndex: number, open: string, close: string): number {
+    let depth = 0
+    for (let i = openIndex; i < source.length; i++) {
+      if (source[i] === open) depth++
+      else if (source[i] === close) {
+        depth--
+        if (depth === 0) return i
+      }
+    }
+    return -1
+  }
+
+  function lineOf(source: string, index: number): number {
+    let line = 1
+    for (let i = 0; i < index; i++) {
+      if (source[i] === '\n') line++
+    }
+    return line
+  }
+
+  /// The body span of every `something.$transaction(async (x) => { ... })` in
+  /// the file. Filters out the array-of-writes form of `$transaction` (used
+  /// elsewhere in this codebase for batched upserts with no callback body) by
+  /// requiring the text between the marker and the next `{` to end in `=>` —
+  /// true for a block-bodied arrow immediately opening that brace, and
+  /// essentially never true of unrelated code the brace search might otherwise
+  /// wander into.
+  function transactionBodySpans(source: string): Array<{ start: number; end: number }> {
+    return indicesOf(source, TRANSACTION_MARKER).flatMap((at) => {
+      const bodyOpen = source.indexOf('{', at + TRANSACTION_MARKER.length)
+      if (bodyOpen === -1) return []
+      const signature = source.slice(at + TRANSACTION_MARKER.length, bodyOpen)
+      if (!signature.trim().endsWith('=>')) return []
+      const bodyEnd = matchingDelimiter(source, bodyOpen, '{', '}')
+      if (bodyEnd === -1) return []
+      return [{ start: bodyOpen, end: bodyEnd }]
+    })
+  }
+
+  function findConnectedDrainViolations(): string[] {
+    const violations: string[] = []
+    const files = SCAN_DIRS.flatMap((dir) => sourceFiles(join(ROOT, dir)))
+
+    for (const file of files) {
+      const source = readFileSync(file, 'utf8')
+      const relativePath = relative(ROOT, file)
+      const transactionSpans = transactionBodySpans(source)
+
+      for (const upsertAt of indicesOf(source, UPSERT_MARKER)) {
+        const argsOpen = upsertAt + UPSERT_MARKER.length - 1
+        const argsClose = matchingDelimiter(source, argsOpen, '(', ')')
+        if (argsClose === -1) continue
+
+        const args = source.slice(argsOpen, argsClose + 1)
+        if (!args.includes(CONNECTED_MARKER)) continue
+
+        const line = lineOf(source, upsertAt)
+        const enclosing = transactionSpans.find(
+          (span) => span.start <= upsertAt && upsertAt <= span.end,
+        )
+
+        if (!enclosing) {
+          violations.push(
+            `${relativePath}:${line} — sets status: 'CONNECTED' outside any $transaction block, so ` +
+              'releaseJobsBlockedOnCarrierLogin cannot run atomically with it. A job parked on ' +
+              'FORESIGHT_SSO_EXPIRED for this agent has no guaranteed moment it gets requeued.',
+          )
+          continue
+        }
+
+        const body = source.slice(enclosing.start, enclosing.end + 1)
+        if (!body.includes(DRAIN_CALL)) {
+          violations.push(
+            `${relativePath}:${line} — sets status: 'CONNECTED' without calling ` +
+              'releaseJobsBlockedOnCarrierLogin in the same transaction. A job parked on ' +
+              'FORESIGHT_SSO_EXPIRED for this agent can end up connected while still parked, ' +
+              'with nothing left to drain it.',
+          )
+        }
+      }
+    }
+
+    return violations
+  }
+
+  it('pairs every CONNECTED upsert with the drain, in the same transaction', () => {
+    expect(findConnectedDrainViolations()).toEqual([])
+  })
+
+  // A scan that silently finds nothing would make the assertion above pass
+  // for the wrong reason. This pins the scan to the two files this branch
+  // actually has a connect site in, so a change to ROOT, the markers, or the
+  // directory walk that quietly stops finding real code fails here instead of
+  // passing everywhere by accident. Naming the files (rather than asserting a
+  // bare count) is what keeps *this* test's own failure useful: a legitimate
+  // third connect site is expected to change this list, and the diff says
+  // which path showed up or went missing instead of just "3 not 2". Line
+  // numbers are deliberately not part of the expectation — those move for
+  // reasons that have nothing to do with this invariant.
+  it('actually scans both existing call sites', () => {
+    const files = SCAN_DIRS.flatMap((dir) => sourceFiles(join(ROOT, dir)))
+    const connectedUpsertFiles = files
+      .filter((file) => {
+        const source = readFileSync(file, 'utf8')
+        return indicesOf(source, UPSERT_MARKER).some((upsertAt) => {
+          const argsOpen = upsertAt + UPSERT_MARKER.length - 1
+          const argsClose = matchingDelimiter(source, argsOpen, '(', ')')
+          return argsClose !== -1 && source.slice(argsOpen, argsClose + 1).includes(CONNECTED_MARKER)
+        })
+      })
+      .map((file) => relative(ROOT, file))
+      .sort()
+
+    expect(connectedUpsertFiles).toEqual([
+      join('lib', 'national-life', 'interactive-connection-service.ts'),
+      join('workers', 'national-life', 'runtime.ts'),
+    ])
   })
 })

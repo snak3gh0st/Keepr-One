@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import {
   carrierSyncLabel,
   type CarrierSyncState,
@@ -14,8 +15,17 @@ import {
 /// invites pressing, and pressing something that usually does nothing teaches
 /// that it means nothing — so only the state that asks for something is
 /// clickable.
+///
+/// Refetches on every route change, not just on mount. `Shell` (the only place
+/// this is rendered) never unmounts across a client-side navigation, so a
+/// mount-only fetch would leave this reading "Precisa de você" long after the
+/// agent followed it, connected, and the queue drained — until a hard reload.
+/// This is still not polling: nothing here re-fires on a timer or while the
+/// agent sits still on one screen, which is what the plan's "sem polling
+/// contínuo, sem notificação" ruled out. It only re-fires on navigation.
 export function CarrierSyncBadge() {
   const [state, setState] = useState<CarrierSyncState | null>(null)
+  const pathname = usePathname()
 
   useEffect(() => {
     let alive = true
@@ -26,7 +36,7 @@ export function CarrierSyncBadge() {
     return () => {
       alive = false
     }
-  }, [])
+  }, [pathname])
 
   if (!state) return null
 
@@ -52,7 +62,7 @@ export function CarrierSyncBadge() {
   }
 
   return (
-    <span className="shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs">
+    <span className="shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs text-ink-muted">
       <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
       {label}
     </span>

@@ -13,9 +13,14 @@ export type IllustrationPdfStatus =
 /// worker will pick it up again, and telling the agent it failed would send
 /// them to click a button the queue is about to press itself.
 ///
-/// `ACTION_REQUIRED` sai daqui: ele significa que um humano precisa agir, e
-/// dizer "gerando" sobre um pedido parado é a mesma mudez que fez a integração
-/// ser lida como quebrada.
+/// `ACTION_REQUIRED` has never belonged in this set. Before the BLOCKED branch
+/// below existed, a job in `ACTION_REQUIRED` matched nothing here and produced
+/// no map entry at all — the row stayed silent about a request that was
+/// actually parked on a human login, the same muteness that made the whole
+/// integration read as broken. It still must not join WORKING_STATES: saying
+/// "gerando" over a parked request would just be a different way of being
+/// wrong. What changed is that the row now speaks for that case instead of
+/// staying quiet.
 const WORKING_STATES: ReadonlySet<string> = new Set([
   'QUEUED',
   'RUNNING',
