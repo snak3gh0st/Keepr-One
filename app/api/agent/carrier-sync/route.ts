@@ -7,6 +7,8 @@ import {
 } from '@/lib/national-life/constants'
 import { isNationalLifeConfigured } from '@/lib/national-life/env'
 import { carrierSyncState } from '@/lib/national-life/carrier-sync-state'
+import { getNationalLifeEnv } from '@/lib/national-life/env'
+import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
 
 /// What the top bar asks once, on mount. Deliberately not a poll: the badge is
 /// a reassurance, not a live monitor, and a request per agent per few seconds
@@ -18,7 +20,7 @@ export async function GET() {
   }
   try {
     const agent = await getCurrentAgent()
-    const [working, blocked] = await Promise.all([
+    const [working, blocked, sync] = await Promise.all([
       prisma.browserAutomationJob.count({
         where: {
           agentId: agent.id,
@@ -36,8 +38,12 @@ export async function GET() {
           safeErrorCode: { in: [...NATIONAL_LIFE_LOGIN_REQUIRED_CODES] },
         },
       }),
+      getNationalLifeSyncStatus(agent.id, getNationalLifeEnv().sessionScopeId),
     ])
-    return NextResponse.json({ state: carrierSyncState({ working, blocked }) })
+    return NextResponse.json({
+      state: carrierSyncState({ working, blocked }),
+      ...(sync ? { sync } : {}),
+    })
   } catch {
     // A badge that does not know what it is saying is worse than no badge —
     // that is how the illustration reachability flag lied for hours.

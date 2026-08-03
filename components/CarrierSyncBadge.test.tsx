@@ -18,6 +18,18 @@ function answerWith(state: unknown) {
   return { fetchMock, json }
 }
 
+function answerWithSync() {
+  const fetchMock = vi.fn(async () => ({
+    ok: true,
+    json: async () => ({
+      state: { kind: 'IN_SYNC' },
+      sync: { runId: 'run-1', completed: 3, total: 9, shouldPoll: true },
+    }),
+  }))
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
 beforeEach(() => {
   mocks.pathname = '/agent'
 })
@@ -28,6 +40,13 @@ afterEach(() => {
 })
 
 describe('CarrierSyncBadge', () => {
+  it('shows the active National Life sync progress in the compact badge', async () => {
+    const fetchMock = answerWithSync()
+    render(<CarrierSyncBadge />)
+    expect(await screen.findByText('Atualizando 3/9')).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
   it('is quiet when the account is up to date', async () => {
     answerWith({ kind: 'IN_SYNC' })
     render(<CarrierSyncBadge />)

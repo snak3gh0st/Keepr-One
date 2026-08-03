@@ -5,19 +5,27 @@ const mocks = vi.hoisted(() => ({
   getCurrentAgent: vi.fn(),
   count: vi.fn(),
   isConfigured: vi.fn(),
+  getStatus: vi.fn(),
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
 vi.mock('@/lib/prisma', () => ({
   prisma: { browserAutomationJob: { count: mocks.count } },
 }))
-vi.mock('@/lib/national-life/env', () => ({ isNationalLifeConfigured: mocks.isConfigured }))
+vi.mock('@/lib/national-life/env', () => ({
+  getNationalLifeEnv: () => ({ sessionScopeId: 'scope-1' }),
+  isNationalLifeConfigured: mocks.isConfigured,
+}))
+vi.mock('@/lib/national-life/sync-run-service', () => ({
+  getNationalLifeSyncStatus: mocks.getStatus,
+}))
 
 import { GET } from './route'
 
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.isConfigured.mockReturnValue(true)
+  mocks.getStatus.mockResolvedValue(null)
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1' })
 })
 

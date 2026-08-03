@@ -1,25 +1,30 @@
 import Link from 'next/link'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentSessionSummary } from '@/lib/national-life/interactive-connection-service'
-import { isNationalLifeConfigured } from '@/lib/national-life/env'
+import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
+import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
 import { prisma } from '@/lib/prisma'
 import { ContextPanel } from '@/components/ContextPanel'
 import { PageHeader } from '@/components/PageHeader'
 import { Shell } from '@/components/Shell'
 import { EmptyState } from '@/components/Table'
 import { NationalLifeConnectionCard } from './NationalLifeConnectionCard'
+import { NationalLifeSyncProgress } from './NationalLifeSyncProgress'
 
 export const dynamic = 'force-dynamic'
 
 export default async function NationalLifeConnectionPage() {
   const agent = await getCurrentAgent()
   const configured = isNationalLifeConfigured()
-  const [user, summary] = await Promise.all([
+  const [user, summary, syncStatus] = await Promise.all([
     prisma.user.findUnique({
       where: { id: agent.userId },
       select: { name: true, role: true },
     }),
     configured ? getAgentSessionSummary(agent.id) : Promise.resolve(null),
+    configured
+      ? getNationalLifeSyncStatus(agent.id, getNationalLifeEnv().sessionScopeId)
+      : Promise.resolve(null),
   ])
 
   const role = user?.role === 'ADMIN' ? 'ADMIN' : 'AGENT'
@@ -41,7 +46,9 @@ export default async function NationalLifeConnectionPage() {
       </PageHeader>
 
       {configured ? (
-        <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <>
+          <NationalLifeSyncProgress initialStatus={syncStatus} />
+          <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
           <div className="max-w-5xl">
             <NationalLifeConnectionCard summary={summary} />
           </div>
@@ -63,7 +70,8 @@ export default async function NationalLifeConnectionPage() {
               </p>
             </div>
           </ContextPanel>
-        </div>
+          </div>
+        </>
       ) : (
         <div className="mt-8 max-w-5xl">
           <EmptyState>
