@@ -4,11 +4,8 @@
 //
 //   tsx scripts/national-life-sync-snapshots.ts [GRID_KEY ...]
 //
-// Defaults to every grid confirmed to expose its data via GetJsonResult. Several
-// registered paths (placement report, transfers/exchanges, payment history,
-// every compensation page) do not fire that request today — see
-// docs/operations/national-life-portal-contract.md — so they are opt-in only
-// until that is understood. Prints counts only, never row values.
+// Defaults to every grid confirmed to expose its data via GetJsonResult. Prints
+// counts only, never row values. The same runner is used by the durable worker.
 import {
   decryptBrowserContext,
   encryptBrowserContext,
@@ -21,23 +18,13 @@ import {
   refreshStoredCarrierSession,
 } from '../lib/national-life/session-refresh'
 import {
-  persistCaseSnapshots,
-  toCaseSnapshots,
-} from '../lib/national-life/case-snapshot-service'
-import {
-  persistInforcePolicies,
-  toInforcePolicySnapshots,
-} from '../lib/national-life/inforce-policy-service'
-import {
-  persistReportRows,
-  toReportRows,
-} from '../lib/national-life/report-row-service'
-import {
-  NATIONAL_LIFE_GRIDS,
-  fetchNationalLifeGrid,
   type GridPage,
   type NationalLifeGridKey,
 } from '../lib/national-life/portal-grid-client'
+import {
+  NATIONAL_LIFE_SYNC_GRID_KEYS,
+  syncNationalLifeGrid,
+} from '../lib/national-life/sync-grid'
 import { tryAcquireBrowserLock, releaseBrowserLock } from '../lib/national-life/browser-lock'
 import { prisma } from '../lib/prisma'
 import {
@@ -45,30 +32,11 @@ import {
   createSteelBrowserSession,
 } from '../workers/national-life/steel-session'
 
-const CASE_SNAPSHOT_GRIDS: readonly NationalLifeGridKey[] = ['NEW_BUSINESS', 'RECENTLY_CLOSED']
-const INFORCE_POLICY_GRIDS: readonly NationalLifeGridKey[] = ['INFORCE_CLIENTS']
-const REPORT_ROW_GRIDS: readonly NationalLifeGridKey[] = [
-  'PAID_COMMISSIONS',
-  'PROJECTED_COMMISSIONS',
-  // The service-call log: the only place the portal exposes a client's email,
-  // phone and the agent's own notes. 2710 rows.
-  'CLIENT_INTELLIGENCE',
-  // Documents issued per policy, 64 rows. Listing them is not downloading them.
-  'CORRESPONDENCE',
-  // Two rows, and they are what map a commission's GlobalId to a payee name.
-  'COMMISSIONS_PAYMENT_PORTAL',
-  // Empty today, kept so it reports when a premium increase is submitted.
-  'PIP_PENDING',
-]
-const DEFAULT_GRIDS: readonly NationalLifeGridKey[] = [
-  ...CASE_SNAPSHOT_GRIDS,
-  ...INFORCE_POLICY_GRIDS,
-  ...REPORT_ROW_GRIDS,
-]
+const DEFAULT_GRIDS: readonly NationalLifeGridKey[] = NATIONAL_LIFE_SYNC_GRID_KEYS
 
 function resolveGridKeys(): NationalLifeGridKey[] {
   const requested = process.argv.slice(2)
-  const known = Object.keys(NATIONAL_LIFE_GRIDS) as NationalLifeGridKey[]
+  const known: readonly string[] = [...NATIONAL_LIFE_SYNC_GRID_KEYS]
   if (requested.length === 0) {
     return [...DEFAULT_GRIDS]
   }
@@ -77,55 +45,6 @@ function resolveGridKeys(): NationalLifeGridKey[] {
     throw new Error(`unknown grid keys: ${unknown.join(', ')} (known: ${known.join(', ')})`)
   }
   return requested as NationalLifeGridKey[]
-}
-
-async function syncGrid(
-  gridKey: NationalLifeGridKey,
-  page: GridPage,
-  env: ReturnType<typeof getNationalLifeEnv>,
-  agentId: string,
-  fetchedAt: Date,
-) {
-  const gridPath = NATIONAL_LIFE_GRIDS[gridKey]
-  const { rows, recordsTotal, truncated } = await fetchNationalLifeGrid(
-    page,
-    gridPath,
-    env.portalLoginUrl,
-  )
-  const counts = { recordsTotal, rowsFetched: rows.length, truncated }
-
-  if (REPORT_ROW_GRIDS.includes(gridKey)) {
-    const reportRows = toReportRows(gridKey, rows)
-    const { written } = await persistReportRows({
-      agentId,
-      deploymentScope: env.sessionScopeId,
-      gridKey,
-      rows: reportRows,
-      fetchedAt,
-    })
-    return { ...counts, snapshots: reportRows.length, written }
-  }
-
-  if (INFORCE_POLICY_GRIDS.includes(gridKey)) {
-    const snapshots = toInforcePolicySnapshots(rows)
-    const { written } = await persistInforcePolicies({
-      agentId,
-      deploymentScope: env.sessionScopeId,
-      snapshots,
-      fetchedAt,
-    })
-    return { ...counts, snapshots: snapshots.length, written }
-  }
-
-  const snapshots = toCaseSnapshots(rows)
-  const { written } = await persistCaseSnapshots({
-    agentId,
-    deploymentScope: env.sessionScopeId,
-    gridKey,
-    snapshots,
-    fetchedAt,
-  })
-  return { ...counts, snapshots: snapshots.length, written }
 }
 
 async function main() {
@@ -178,13 +97,14 @@ async function main() {
   try {
     for (const gridKey of gridKeys) {
       try {
-        const result = await syncGrid(
+        const result = await syncNationalLifeGrid({
           gridKey,
-          session.page as unknown as GridPage,
-          env,
-          stored.agentId,
+          page: session.page as unknown as GridPage,
+          agentId: stored.agentId,
+          deploymentScope: env.sessionScopeId,
+          portalLoginUrl: env.portalLoginUrl,
           fetchedAt,
-        )
+        })
         console.log(JSON.stringify({ gridKey, ...result }))
       } catch (error) {
         console.error(
