@@ -20,6 +20,7 @@ import {
 import type { BrowserJobState } from '../../lib/national-life/job-state'
 import { prisma } from '../../lib/prisma'
 import { applyCaseObservation } from '../../lib/national-life/sync-service'
+import { startNationalLifeSync } from '../../lib/national-life/sync-run-service'
 import { NationalLifeAdapter } from './adapter'
 import { writeConnectionTrace } from './connection-trace'
 import {
@@ -412,6 +413,11 @@ function createAttemptStore(
         // carries the why, and names the other call site.
         await releaseJobsBlockedOnCarrierLogin(transaction, {
           agentId: input.agentId,
+          now: input.now,
+        })
+        await startNationalLifeSync(transaction, {
+          agentId: input.agentId,
+          deploymentScope: env.sessionScopeId,
           now: input.now,
         })
 

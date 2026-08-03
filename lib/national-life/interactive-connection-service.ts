@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import type { EncryptedBrowserSecret } from './browser-context-crypto'
 import type { NationalLifeConnectionAttemptState } from './connection-attempt-state'
 import { releaseJobsBlockedOnCarrierLogin } from './job-service'
+import { startNationalLifeSync } from './sync-run-service'
 import {
   NATIONAL_LIFE_CONNECTION_ATTEMPT_TTL_MS,
   NATIONAL_LIFE_CONNECTION_RATE_LIMIT,
@@ -495,6 +496,11 @@ const prismaRepository: InteractiveConnectionRepository = {
       // carries the why, and names the other call site.
       await releaseJobsBlockedOnCarrierLogin(transaction, {
         agentId: input.agentId,
+        now: input.now,
+      })
+      await startNationalLifeSync(transaction, {
+        agentId: input.agentId,
+        deploymentScope: input.deploymentScope,
         now: input.now,
       })
       const deleted = await transaction.nationalLifeConnectionAttempt.deleteMany({

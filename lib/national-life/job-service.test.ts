@@ -7,6 +7,7 @@ import { assertBrowserJobTransition, type BrowserJobState } from './job-state'
 import {
   createBrowserJobService,
   releaseJobsBlockedOnCarrierLogin,
+  shouldWaitForSyncStage,
   type BrowserJobRepository,
 } from './job-service'
 
@@ -195,6 +196,24 @@ function createInMemoryRepository(
 }
 
 describe('National Life browser job service', () => {
+  it('blocks a sync stage while an earlier stage in the same run is not terminal', () => {
+    expect(
+      shouldWaitForSyncStage(
+        { syncRunId: 'run-1', syncStageIndex: 2 },
+        ['SUCCEEDED', 'RUNNING'],
+      ),
+    ).toBe(true)
+    expect(
+      shouldWaitForSyncStage(
+        { syncRunId: 'run-1', syncStageIndex: 2 },
+        ['SUCCEEDED', 'FAILED'],
+      ),
+    ).toBe(false)
+    expect(shouldWaitForSyncStage({ syncRunId: null, syncStageIndex: null }, ['RUNNING'])).toBe(
+      false,
+    )
+  })
+
   it('deduplicates an active case sync by agent, case and five-minute bucket', async () => {
     const repository = createInMemoryRepository([
       buildJob({

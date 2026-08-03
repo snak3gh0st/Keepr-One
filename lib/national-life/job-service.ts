@@ -81,11 +81,17 @@ export type IllustrationPdfJobInput = {
   caseNameFragment?: string
 }
 
+export type NationalLifeGridJobInput = {
+  syncRunId: string
+  gridKey: import('./portal-grid-client').NationalLifeGridKey
+}
+
 export type BrowserJobInput =
   | ConnectionTestJobInput
   | CaseReadSyncJobInput
   | RapidSolveQuoteJobInput
   | IllustrationPdfJobInput
+  | NationalLifeGridJobInput
 
 /// Three outcomes the screen has to tell apart, and it must not collapse them.
 /// ANSWERED means the carrier replied — including a reply that refuses to
@@ -121,6 +127,9 @@ export type BrowserJobRecord = {
   continuationCiphertext: string | null
   continuationAuthTag: string | null
   continuationExpiresAt: Date | null
+  syncRunId?: string | null
+  syncStageIndex?: number | null
+  syncGridKey?: string | null
 }
 
 export type ClaimedBrowserJob = BrowserJobRecord
@@ -461,6 +470,24 @@ const prismaBrowserJobRepository: BrowserJobRepository = {
           return null
         }
 
+        if (
+          shouldWaitForSyncStage(candidate, candidate.syncRunId
+            ? await tx.browserAutomationJob.findMany({
+                where: {
+                  syncRunId: candidate.syncRunId,
+                  syncStageIndex:
+                    candidate.syncStageIndex === null
+                      ? undefined
+                      : { lt: candidate.syncStageIndex },
+                },
+                select: { state: true },
+              }).then((jobs) => jobs.map((job) => job.state))
+            : [])
+        ) {
+          excludedJobIds.add(candidate.id)
+          continue
+        }
+
         const claimed = await tx.browserAutomationJob.updateMany({
           where: {
             id: candidate.id,
@@ -556,6 +583,22 @@ const prismaBrowserJobRepository: BrowserJobRepository = {
 
     return jobs.map(fromPrismaBrowserJob)
   },
+}
+
+const TERMINAL_SYNC_STAGE_STATES: ReadonlySet<BrowserJobState> = new Set([
+  'SUCCEEDED',
+  'FAILED',
+  'CANCELLED',
+])
+
+export function shouldWaitForSyncStage(
+  candidate: Pick<BrowserJobRecord, 'syncRunId' | 'syncStageIndex'>,
+  earlierStates: readonly BrowserJobState[],
+): boolean {
+  if (!candidate.syncRunId || candidate.syncStageIndex === null || candidate.syncStageIndex === undefined) {
+    return false
+  }
+  return earlierStates.some((state) => !TERMINAL_SYNC_STAGE_STATES.has(state))
 }
 
 function resolveRepository(deps?: BrowserJobServiceDeps): BrowserJobRepository {
