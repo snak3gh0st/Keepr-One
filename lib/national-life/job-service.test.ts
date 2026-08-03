@@ -1,6 +1,11 @@
+import type { Prisma } from '@prisma/client'
 import { describe, expect, it } from 'vitest'
 import { assertBrowserJobTransition, type BrowserJobState } from './job-state'
-import { createBrowserJobService, type BrowserJobRepository } from './job-service'
+import {
+  createBrowserJobService,
+  releaseJobsBlockedOnCarrierLogin,
+  type BrowserJobRepository,
+} from './job-service'
 
 type TestJob = Awaited<ReturnType<ReturnType<typeof createBrowserJobService>['claimNextJob']>> extends infer T
   ? Exclude<T, null>
@@ -767,5 +772,56 @@ describe('Rapid Solve quote jobs', () => {
     await expect(
       service.enqueueRapidSolveQuote({ agentId: 'agent-1', quote: { ...quote, amount: 0 } }),
     ).rejects.toThrow('amount must be a positive number')
+  })
+})
+
+// The drain exists once so that neither connect path can forget it. Both call
+// sites run inside a Prisma transaction, which no suite here executes — so the
+// query itself is what gets pinned. Widen the filter and a login starts
+// reviving jobs it cannot fix; narrow the write and the job wakes still
+// carrying the error that parked it.
+describe('releaseJobsBlockedOnCarrierLogin', () => {
+  const now = new Date('2026-08-03T12:00:00.000Z')
+
+  function recordUpdateMany() {
+    const calls: Prisma.BrowserAutomationJobUpdateManyArgs[] = []
+    const transaction = {
+      browserAutomationJob: {
+        async updateMany(args: Prisma.BrowserAutomationJobUpdateManyArgs) {
+          calls.push(args)
+          return { count: 0 }
+        },
+      },
+    } as unknown as Prisma.TransactionClient
+
+    return { transaction, calls }
+  }
+
+  it('revives only the jobs parked for the login that just happened', async () => {
+    const { transaction, calls } = recordUpdateMany()
+
+    await releaseJobsBlockedOnCarrierLogin(transaction, { agentId: 'agent-1', now })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].where).toEqual({
+      agentId: 'agent-1',
+      provider: 'NATIONAL_LIFE',
+      state: 'ACTION_REQUIRED',
+      safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
+    })
+  })
+
+  // availableAt is what claimNextJob filters on (lte now), so the revived job
+  // is claimable on the very next poll rather than a cycle late.
+  it('queues the job for immediate pickup and clears what parked it', async () => {
+    const { transaction, calls } = recordUpdateMany()
+
+    await releaseJobsBlockedOnCarrierLogin(transaction, { agentId: 'agent-1', now })
+
+    expect(calls[0].data).toEqual({
+      state: 'QUEUED',
+      availableAt: now,
+      safeErrorCode: null,
+    })
   })
 })

@@ -491,10 +491,8 @@ const prismaRepository: InteractiveConnectionRepository = {
           lastUsedAt: null,
         },
       })
-      // Same transaction as the connect, same reason as the runtime's own
-      // attempt loop: this is the second place a carrier session gets marked
-      // CONNECTED, and a queue that only drains from one of them is a queue
-      // the other can silently leave parked.
+      // Same transaction as the connect — releaseJobsBlockedOnCarrierLogin
+      // carries the why, and names the other call site.
       await releaseJobsBlockedOnCarrierLogin(transaction, {
         agentId: input.agentId,
         now: input.now,

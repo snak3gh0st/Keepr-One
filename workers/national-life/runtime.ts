@@ -408,10 +408,8 @@ function createAttemptStore(
             lastUsedAt: null,
           },
         })
-        // Same transaction as the connect on purpose: either the session is
-        // good and the queue moves, or nothing changed. A window where the
-        // session connected and the queue stayed parked is a queue nobody
-        // drains.
+        // Same transaction as the connect — releaseJobsBlockedOnCarrierLogin
+        // carries the why, and names the other call site.
         await releaseJobsBlockedOnCarrierLogin(transaction, {
           agentId: input.agentId,
           now: input.now,
