@@ -15,6 +15,7 @@ import { authClient } from "@/lib/auth-client";
 import { Logo } from "@/components/Logo";
 import { Avatar } from "@/components/Avatar";
 import { NavIcon, type NavIconName } from "@/components/NavIcon";
+import { CarrierSyncBadge } from "@/components/CarrierSyncBadge";
 import type { JacketTone, PromotionIdentity } from "@/lib/promotion-journey";
 
 gsap.registerPlugin(useGSAP);
@@ -438,10 +439,7 @@ export function Shell({
                       {rankTitle}
                     </p>
                     <span className="shell-topbar-separator hidden h-1 w-1 shrink-0 rounded-full sm:block" />
-                    <span className="shell-connection hidden shrink-0 items-center gap-1.5 text-xs sm:flex">
-                      <span className="shell-connection-dot h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_0_4px_oklch(0.46_0.11_155/0.1)]" />
-                      Operação conectada
-                    </span>
+                    {role === 'AGENT' && <CarrierSyncBadge />}
                   </div>
                 </div>
               </div>
@@ -455,10 +453,7 @@ export function Shell({
                     {currentPage}
                   </p>
                   <span className="shell-topbar-separator hidden h-1 w-1 rounded-full bg-border-steel sm:block" />
-                  <span className="shell-connection hidden items-center gap-1.5 text-xs text-ink-muted sm:flex">
-                    <span className="shell-connection-dot h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_0_4px_oklch(0.46_0.11_155/0.1)]" />
-                    Operação conectada
-                  </span>
+                  {role === 'AGENT' && <CarrierSyncBadge />}
                 </div>
               </div>
             )}
