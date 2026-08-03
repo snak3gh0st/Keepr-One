@@ -117,4 +117,20 @@ describe('illustrationPdfMessage', () => {
       'Aguardando você conectar na seguradora.',
     )
   })
+
+  // The portal-level reconnect park is the same user action as the carrier
+  // SSO park: the next connection drains both. It must not disappear merely
+  // because it uses the older safe code.
+  it('also speaks when the portal asks for a reconnect', () => {
+    const status = latestPdfStatusByIllustration([
+      job({ state: 'ACTION_REQUIRED', safeErrorCode: 'NATIONAL_LIFE_RECONNECT_REQUIRED' }),
+    ])
+    expect(status.get('ill-1')).toEqual({
+      state: 'BLOCKED',
+      safeErrorCode: 'NATIONAL_LIFE_RECONNECT_REQUIRED',
+    })
+    expect(illustrationPdfMessage(status.get('ill-1')!)).toBe(
+      'Aguardando você conectar na seguradora.',
+    )
+  })
 })

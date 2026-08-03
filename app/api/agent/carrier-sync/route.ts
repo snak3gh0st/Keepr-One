@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
+import {
+  NATIONAL_LIFE_LOGIN_REQUIRED_CODES,
+  NATIONAL_LIFE_PROVIDER,
+} from '@/lib/national-life/constants'
 import { isNationalLifeConfigured } from '@/lib/national-life/env'
 import { carrierSyncState } from '@/lib/national-life/carrier-sync-state'
 
@@ -28,12 +31,9 @@ export async function GET() {
           agentId: agent.id,
           provider: NATIONAL_LIFE_PROVIDER,
           state: 'ACTION_REQUIRED',
-          // Only the park a carrier login actually revives — see
-          // `releaseJobsBlockedOnCarrierLogin` in `job-service.ts`. Counting
-          // `NATIONAL_LIFE_RECONNECT_REQUIRED` here too would tell the agent
-          // that connecting clears the badge, and it would not: that code has
-          // no path back to QUEUED. These two filters must not drift apart.
-          safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
+          // Keep this filter identical to the transaction drain: every code
+          // counted here is one a fresh carrier login actually revives.
+          safeErrorCode: { in: [...NATIONAL_LIFE_LOGIN_REQUIRED_CODES] },
         },
       }),
     ])

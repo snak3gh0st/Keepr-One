@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { BrowserAutomationJob, BrowserJobOperation, Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { NATIONAL_LIFE_MAX_JOB_ATTEMPTS, NATIONAL_LIFE_PROVIDER } from './constants'
+import {
+  NATIONAL_LIFE_LOGIN_REQUIRED_CODES,
+  NATIONAL_LIFE_MAX_JOB_ATTEMPTS,
+  NATIONAL_LIFE_PROVIDER,
+} from './constants'
 import {
   latestPdfStatusByIllustration,
   type IllustrationPdfStatus,
@@ -902,10 +906,9 @@ export async function releaseExpiredLeases(now?: Date): Promise<number> {
 /// `completeOwnedAttempt`), so the drain lives once here rather than being
 /// copied into each.
 ///
-/// `FORESIGHT_SSO_EXPIRED` only: that is the one refusal this exact login
-/// fixes. The older `NATIONAL_LIFE_RECONNECT_REQUIRED` park (from
-/// `requestReconnect` in the worker) has no revival path today, on purpose —
-/// see `illustration-pdf-status.ts` for why the screen does not promise one.
+/// Both login-required parks: the carrier SSO can expire mid-job, or the
+/// portal can reject its saved authentication state. Either way, the next
+/// human connection is the event that makes the job claimable again.
 export async function releaseJobsBlockedOnCarrierLogin(
   tx: Prisma.TransactionClient,
   input: { agentId: string; now: Date },
@@ -916,7 +919,7 @@ export async function releaseJobsBlockedOnCarrierLogin(
       agentId: input.agentId,
       provider: NATIONAL_LIFE_PROVIDER,
       state: 'ACTION_REQUIRED',
-      safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
+      safeErrorCode: { in: [...NATIONAL_LIFE_LOGIN_REQUIRED_CODES] },
     },
     data: { state: 'QUEUED', availableAt: input.now, safeErrorCode: null },
   })

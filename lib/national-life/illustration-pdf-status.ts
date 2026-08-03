@@ -1,4 +1,8 @@
 import type { BrowserJobRecord } from './job-service'
+import {
+  FORESIGHT_SSO_EXPIRED,
+  isNationalLifeLoginRequiredCode,
+} from './constants'
 
 /// What the illustration row is allowed to know about the render it asked for.
 ///
@@ -44,11 +48,9 @@ export function latestPdfStatusByIllustration(
     if (typeof illustrationId !== 'string' || byIllustration.has(illustrationId)) {
       continue
     }
-    // Scoped to the one code the connect-time drain actually clears. Every
-    // other ACTION_REQUIRED (the portal-level NATIONAL_LIFE_RECONNECT_REQUIRED
-    // from requestReconnect) has no path back to QUEUED today, so showing
-    // "connect and this continues" for it would be a promise nothing keeps.
-    if (job.state === 'ACTION_REQUIRED' && job.safeErrorCode === 'FORESIGHT_SSO_EXPIRED') {
+    // Keep this classification aligned with the connect-time drain: every
+    // login-required park speaks as waiting for the same human action.
+    if (job.state === 'ACTION_REQUIRED' && isNationalLifeLoginRequiredCode(job.safeErrorCode)) {
       byIllustration.set(illustrationId, {
         state: 'BLOCKED',
         safeErrorCode: job.safeErrorCode,
@@ -66,11 +68,11 @@ export function latestPdfStatusByIllustration(
 
 /// The sentence the agent reads.
 ///
-/// `FORESIGHT_SSO_EXPIRED` is the one that matters most and the one that used
-/// to be invisible: the carrier's illustration tool has its own login, it dies
-/// well before the portal's, and when it does there is nothing wrong with the
-/// quote — someone just has to connect again. Saying "falhou" there sends the
-/// agent looking for a problem that is not in the data.
+/// `FORESIGHT_SSO_EXPIRED` matters most because the carrier's illustration
+/// tool has its own login, it dies well before the portal's, and when it does
+/// there is nothing wrong with the quote — someone just has to connect again.
+/// Saying "falhou" there sends the agent looking for a problem that is not in
+/// the data. The portal-level reconnect code follows the same blocked path.
 export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
   if (status.state === 'WORKING') {
     // The number comes from measuring a full illustration opening in the
@@ -82,7 +84,7 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
   }
 
   switch (status.safeErrorCode) {
-    case 'FORESIGHT_SSO_EXPIRED':
+    case FORESIGHT_SSO_EXPIRED:
       return 'A seguradora pediu login novo. Reconecte a integração e peça de novo.'
     case 'CARRIER_BROWSER_BUSY':
       return 'A seguradora estava ocupada. Pode pedir de novo.'

@@ -4,6 +4,10 @@ import {
   type EncryptedBrowserSecret,
 } from '../../lib/national-life/browser-context-crypto'
 import type { NationalLifeEnv } from '../../lib/national-life/env'
+import {
+  FORESIGHT_SSO_EXPIRED,
+  NATIONAL_LIFE_RECONNECT_REQUIRED,
+} from '../../lib/national-life/constants'
 import type {
   BrowserJobRecord,
   CaseReadSyncJobInput,
@@ -26,8 +30,6 @@ import type {
 
 const TRANSIENT_RETRY_DELAY_MS = 2 * 60_000
 const AUTHENTICATION_STATE_INVALID = 'AUTHENTICATION_STATE_INVALID'
-const RECONNECT_REQUIRED = 'NATIONAL_LIFE_RECONNECT_REQUIRED'
-const FORESIGHT_SSO_EXPIRED = 'FORESIGHT_SSO_EXPIRED'
 const MANUAL_REVIEW_CODES = new Set([
   'PORTAL_LAYOUT_CHANGED',
   'SCHEMA_VALIDATION_FAILED',
@@ -312,7 +314,7 @@ async function requestReconnect(
     jobId: job.id,
     from: 'RUNNING',
     to: 'ACTION_REQUIRED',
-    safeErrorCode: RECONNECT_REQUIRED,
+    safeErrorCode: NATIONAL_LIFE_RECONNECT_REQUIRED,
   })
 }
 
@@ -391,7 +393,7 @@ async function handleFailure(
     return
   }
 
-  // A dead carrier session is the one refusal a login fixes, so the request
+  // A dead carrier session is a refusal a login fixes, so the request
   // waits for one instead of being thrown away. The worker only claims QUEUED,
   // so nothing here keeps knocking on the carrier while it waits — which
   // matters, because crossing the identity provider is what burns the session.

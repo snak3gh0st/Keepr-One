@@ -1,4 +1,22 @@
 export const NATIONAL_LIFE_PROVIDER = 'NATIONAL_LIFE' as const
+export const FORESIGHT_SSO_EXPIRED = 'FORESIGHT_SSO_EXPIRED' as const
+export const NATIONAL_LIFE_RECONNECT_REQUIRED = 'NATIONAL_LIFE_RECONNECT_REQUIRED' as const
+/// Parks that a successful carrier login can revive. Keep this list shared by
+/// the worker drain and every surface that tells the agent a job is waiting.
+export const NATIONAL_LIFE_LOGIN_REQUIRED_CODES = [
+  FORESIGHT_SSO_EXPIRED,
+  NATIONAL_LIFE_RECONNECT_REQUIRED,
+] as const
+
+export function isNationalLifeLoginRequiredCode(
+  value: unknown,
+): value is (typeof NATIONAL_LIFE_LOGIN_REQUIRED_CODES)[number] {
+  return (
+    typeof value === 'string' &&
+    (NATIONAL_LIFE_LOGIN_REQUIRED_CODES as readonly string[]).includes(value)
+  )
+}
+
 export const NATIONAL_LIFE_MAX_JOB_ATTEMPTS = 3
 export const NATIONAL_LIFE_JOB_TIMEOUT_MS = 5 * 60_000
 // Covers an SMS/e-mail MFA round-trip with headroom. This bounds how long the

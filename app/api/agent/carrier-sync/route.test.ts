@@ -34,17 +34,19 @@ describe('carrier sync badge route', () => {
         state: { in: ['QUEUED', 'RUNNING', 'RETRYABLE'] },
       },
     })
-    // Must mirror releaseJobsBlockedOnCarrierLogin's filter exactly: plain
-    // ACTION_REQUIRED also matches NATIONAL_LIFE_RECONNECT_REQUIRED parks,
-    // which nothing ever drains back to QUEUED. Counting those would tell the
-    // agent that connecting clears the badge, and it would not — this test
-    // exists so the two filters can't silently drift apart again.
+    // Must mirror releaseJobsBlockedOnCarrierLogin's filter exactly: both
+    // ACTION_REQUIRED codes are parks that a fresh carrier login revives.
+    // Keeping the count aligned with the drain prevents the badge from going
+    // quiet while a job is still waiting, or from inviting a login that cannot
+    // clear the state it reports.
     expect(mocks.count).toHaveBeenNthCalledWith(2, {
       where: {
         agentId: 'agent-1',
         provider: NATIONAL_LIFE_PROVIDER,
         state: 'ACTION_REQUIRED',
-        safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
+        safeErrorCode: {
+          in: ['FORESIGHT_SSO_EXPIRED', 'NATIONAL_LIFE_RECONNECT_REQUIRED'],
+        },
       },
     })
     expect(response.status).toBe(200)
@@ -53,7 +55,7 @@ describe('carrier sync badge route', () => {
     })
   })
 
-  it('reports NEEDS_YOU only from the FORESIGHT_SSO_EXPIRED-scoped count', async () => {
+  it('reports NEEDS_YOU from the login-required count', async () => {
     mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1)
 
     const response = await GET()

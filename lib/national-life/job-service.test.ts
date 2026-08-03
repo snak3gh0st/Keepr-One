@@ -810,7 +810,9 @@ describe('releaseJobsBlockedOnCarrierLogin', () => {
       agentId: 'agent-1',
       provider: 'NATIONAL_LIFE',
       state: 'ACTION_REQUIRED',
-      safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
+      safeErrorCode: {
+        in: ['FORESIGHT_SSO_EXPIRED', 'NATIONAL_LIFE_RECONNECT_REQUIRED'],
+      },
     })
   })
 
@@ -832,7 +834,7 @@ describe('releaseJobsBlockedOnCarrierLogin', () => {
 // The invariant the whole park-and-drain design rests on: a carrier session
 // can flip to CONNECTED only alongside releaseJobsBlockedOnCarrierLogin
 // running in the *same* transaction. Break that pairing and a job parked on
-// FORESIGHT_SSO_EXPIRED can end up connected on one side and still parked on
+// a login-required code can end up connected on one side and still parked on
 // the other, with nothing left to requeue it until some unrelated code path
 // happens to touch it. Today there are exactly two call sites — this file's
 // own doc comments on releaseJobsBlockedOnCarrierLogin name them — and both
@@ -953,7 +955,7 @@ describe('the CONNECTED-drain invariant', () => {
           violations.push(
             `${relativePath}:${line} — sets status: 'CONNECTED' outside any $transaction block, so ` +
               'releaseJobsBlockedOnCarrierLogin cannot run atomically with it. A job parked on ' +
-              'FORESIGHT_SSO_EXPIRED for this agent has no guaranteed moment it gets requeued.',
+              'a login-required job for this agent has no guaranteed moment it gets requeued.',
           )
           continue
         }
@@ -963,7 +965,7 @@ describe('the CONNECTED-drain invariant', () => {
           violations.push(
             `${relativePath}:${line} — sets status: 'CONNECTED' without calling ` +
               'releaseJobsBlockedOnCarrierLogin in the same transaction. A job parked on ' +
-              'FORESIGHT_SSO_EXPIRED for this agent can end up connected while still parked, ' +
+              'a login-required job for this agent can end up connected while still parked, ' +
               'with nothing left to drain it.',
           )
         }
