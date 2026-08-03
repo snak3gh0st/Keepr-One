@@ -5,10 +5,10 @@ import { describe, expect, it, vi, afterEach } from 'vitest'
 import { CarrierSyncBadge } from './CarrierSyncBadge'
 
 function answerWith(state: unknown) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => ({ ok: true, json: async () => ({ state }) })),
-  )
+  const json = vi.fn(async () => ({ state }))
+  const fetchMock = vi.fn(async () => ({ ok: true, json }))
+  vi.stubGlobal('fetch', fetchMock)
+  return { fetchMock, json }
 }
 
 afterEach(() => {
@@ -39,9 +39,24 @@ describe('CarrierSyncBadge', () => {
   })
 
   // A badge that cannot read its state renders nothing rather than guessing.
+  //
+  // Checking emptiness alone proves nothing: useState(null) already renders
+  // nothing on the very first synchronous pass, before fetch has even
+  // resolved — a `waitFor` that only polls textContent would pass even if
+  // fetch, `.then` and `.catch` were deleted outright. So this asserts the
+  // request was actually issued, then waits for the mocked `json()` to have
+  // been called — which only happens once the fetch → json chain really ran —
+  // before checking the DOM again, so a component that wrongly rendered
+  // something on a null state would still be caught after settling.
   it('renders nothing when the state is unknown', async () => {
-    answerWith(null)
+    const { fetchMock, json } = answerWith(null)
     const { container } = render(<CarrierSyncBadge />)
-    await waitFor(() => expect(container.textContent).toBe(''))
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/agent/carrier-sync')
+
+    await waitFor(() => {
+      expect(json).toHaveBeenCalled()
+      expect(container.textContent).toBe('')
+    })
   })
 })
