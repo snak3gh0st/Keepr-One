@@ -132,6 +132,16 @@ enum BrowserJobOperation {
   SYNC_CASE_READ
   GET_RAPID_SOLVE_QUOTE
   GENERATE_ILLUSTRATION_PDF
+  SYNC_NATIONAL_LIFE_GRID
+}
+
+enum NationalLifeSyncRunState {
+  QUEUED
+  RUNNING
+  PAUSED
+  COMPLETED
+  PARTIAL
+  FAILED
 }
 
 model User {
@@ -177,6 +187,7 @@ model Agent {
   integrationSessions    AgentIntegrationSession[]
   nationalLifeConnectionAttempts NationalLifeConnectionAttempt[]
   browserJobs            BrowserAutomationJob[]
+  nationalLifeSyncRuns   NationalLifeSyncRun[]
   nationalLifeCaseSnapshots NationalLifeCaseSnapshot[]
   illustrations          Illustration[]
   nationalLifeInforcePolicies NationalLifeInforcePolicy[]
@@ -523,6 +534,10 @@ model BrowserAutomationJob {
   insuranceCase          InsuranceCase?      @relation(fields: [caseId], references: [id], onDelete: Cascade)
   provider               String
   operation              BrowserJobOperation
+  syncRunId              String?
+  syncRun                NationalLifeSyncRun? @relation(fields: [syncRunId], references: [id], onDelete: Cascade)
+  syncStageIndex         Int?
+  syncGridKey            String?
   state                  BrowserJobState     @default(QUEUED)
   idempotencyKey         String              @unique
   input                  Json
@@ -546,6 +561,28 @@ model BrowserAutomationJob {
   @@index([state, availableAt])
   @@index([agentId, createdAt])
   @@index([caseId, createdAt])
+  @@index([syncRunId, syncStageIndex, state])
+}
+
+model NationalLifeSyncRun {
+  id              String                   @id @default(cuid())
+  agentId         String
+  agent           Agent                    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope String                   @default("SINGLE_DEPLOYMENT")
+  provider        String                   @default("NATIONAL_LIFE")
+  state           NationalLifeSyncRunState @default(QUEUED)
+  totalStages     Int
+  completedStages Int                      @default(0)
+  failedStages    Int                      @default(0)
+  currentGridKey  String?
+  safeErrorCode   String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  jobs            BrowserAutomationJob[]
+
+  @@index([agentId, deploymentScope, state, createdAt])
 }
 
 model Illustration {
