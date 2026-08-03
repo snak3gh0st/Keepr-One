@@ -203,6 +203,13 @@ function createDeps(options: {
   readCase?: () => Promise<NationalLifeCaseObservation>
   requestRapidSolveQuote?: () => Promise<RapidSolveQuote | RapidSolveFailure>
   renderForesightReport?: () => { caseName: string; bytes: Buffer; mimeType: string } | null
+  syncGrid?: () => Promise<{
+    recordsTotal: number
+    rowsFetched: number
+    truncated: boolean
+    snapshots: number
+    written: number
+  }>
   browserBusy?: boolean
   saveContext?: () => void
   reattachError?: Error
@@ -216,6 +223,7 @@ function createDeps(options: {
   const savedIllustrations: Array<{ insuredName: string }> = []
   const savedContexts: Array<{ sessionId: string; context: SessionContext }> = []
   const reattached: string[] = []
+  const reconciledRuns: string[] = []
 
   return {
     calls,
@@ -227,6 +235,7 @@ function createDeps(options: {
     savedIllustrations,
     savedContexts,
     reattached,
+    reconciledRuns,
     deps: {
       env: buildEnv(),
       workerId: 'worker-1',
@@ -311,7 +320,24 @@ function createDeps(options: {
             }
           )
         },
+        async syncGrid() {
+          calls.push('adapter:sync-grid')
+          return (
+            options.syncGrid?.() ?? {
+              recordsTotal: 2,
+              rowsFetched: 2,
+              truncated: false,
+              snapshots: 2,
+              written: 2,
+            }
+          )
+        },
       }),
+      syncRunStore: {
+        async reconcile(runId: string) {
+          reconciledRuns.push(runId)
+        },
+      },
       async runExclusively<T>(work: () => Promise<T>) {
         calls.push('lock:acquire')
         if (options.browserBusy) {
@@ -492,6 +518,25 @@ describe('National Life restored-context job orchestration', () => {
     expect(test.store.transitions.at(-1)).toMatchObject({
       to: 'SUCCEEDED',
       result: { ok: true, monthlyPremium: 312.4 },
+    })
+  })
+
+  it('runs one allowlisted grid and reconciles its durable sync run', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'SYNC_NATIONAL_LIFE_GRID',
+        caseId: null,
+        input: { syncRunId: 'run-1', gridKey: 'NEW_BUSINESS' },
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls).toContain('adapter:sync-grid')
+    expect(test.reconciledRuns).toEqual(['run-1'])
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'SUCCEEDED',
+      result: { recordsTotal: 2, rowsFetched: 2, written: 2 },
     })
   })
 

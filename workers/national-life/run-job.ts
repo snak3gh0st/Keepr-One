@@ -12,6 +12,7 @@ import type {
   BrowserJobRecord,
   CaseReadSyncJobInput,
   IllustrationPdfJobInput,
+  NationalLifeGridJobInput,
   RapidSolveQuoteJobInput,
 } from '../../lib/national-life/job-service'
 import {
@@ -22,6 +23,10 @@ import {
   type SolveType,
 } from '../../lib/national-life/rapid-solve'
 import type { BrowserJobState } from '../../lib/national-life/job-state'
+import {
+  NATIONAL_LIFE_SYNC_GRID_KEYS,
+  type GridSyncResult,
+} from '../../lib/national-life/sync-grid'
 import { redactDiagnostic } from '../../lib/national-life/redaction'
 import type {
   BrowserSession,
@@ -74,6 +79,12 @@ type NationalLifeJobAdapter = {
   renderForesightReport(
     caseNameFragment?: string,
   ): Promise<{ caseName: string; bytes: Buffer; mimeType: string } | null>
+  syncGrid(input: {
+    gridKey: NationalLifeGridJobInput['gridKey']
+    agentId: string
+    deploymentScope: string
+    fetchedAt: Date
+  }): Promise<GridSyncResult>
 }
 
 export type NationalLifeJobStore = {
@@ -170,6 +181,9 @@ export type NationalLifeRunJobDeps = {
     requirementChanges: number
     communicationChanges: number
   }>
+  syncRunStore: {
+    reconcile(runId: string, agentId: string): Promise<void>
+  }
 }
 
 export type RunNationalLifeJobResult =
@@ -192,6 +206,18 @@ function isIllustrationPdfInput(
   input: BrowserJobRecord['input'],
 ): input is IllustrationPdfJobInput {
   return 'illustrationId' in input
+}
+
+function isNationalLifeGridInput(
+  input: BrowserJobRecord['input'],
+): input is NationalLifeGridJobInput {
+  return (
+    'syncRunId' in input &&
+    typeof input.syncRunId === 'string' &&
+    'gridKey' in input &&
+    typeof input.gridKey === 'string' &&
+    (NATIONAL_LIFE_SYNC_GRID_KEYS as readonly string[]).includes(input.gridKey)
+  )
 }
 
 /// Rebuilds the carrier request from the row. The date crossed the queue as the
@@ -484,14 +510,21 @@ export async function runNationalLifeJob(
     job.operation === 'GENERATE_ILLUSTRATION_PDF' && isIllustrationPdfInput(job.input)
       ? job.input
       : null
+  const gridInput =
+    job.operation === 'SYNC_NATIONAL_LIFE_GRID' && isNationalLifeGridInput(job.input)
+      ? job.input
+      : null
 
-  if (!quoteInput && !caseInput && !pdfInput) {
+  if (!quoteInput && !caseInput && !pdfInput && !gridInput) {
     await deps.jobStore.transitionJob({
       jobId: job.id,
       from: 'RUNNING',
       to: 'FAILED',
       safeErrorCode: 'UNSUPPORTED_JOB_OPERATION',
     })
+    if (typeof job.input === 'object' && 'syncRunId' in job.input && typeof job.input.syncRunId === 'string') {
+      await deps.syncRunStore.reconcile(job.input.syncRunId, job.agentId)
+    }
     return { kind: 'COMPLETED' }
   }
 
@@ -501,6 +534,7 @@ export async function runNationalLifeJob(
   )
   if (!isUsableSession(storedSession, deps.now())) {
     await requestReconnect(job, deps)
+    if (gridInput) await deps.syncRunStore.reconcile(gridInput.syncRunId, job.agentId)
     return { kind: 'COMPLETED' }
   }
 
@@ -511,6 +545,7 @@ export async function runNationalLifeJob(
       : decryptStoredContext(storedSession!, deps.env)
   } catch {
     await requestReconnect(job, deps)
+    if (gridInput) await deps.syncRunStore.reconcile(gridInput.syncRunId, job.agentId)
     return { kind: 'COMPLETED' }
   }
 
@@ -606,6 +641,20 @@ export async function runNationalLifeJob(
             to: 'SUCCEEDED',
             result: syncResult,
           })
+        } else if (gridInput) {
+          const result = await adapter.syncGrid({
+            gridKey: gridInput.gridKey,
+            agentId: job.agentId,
+            deploymentScope: deps.env.sessionScopeId,
+            fetchedAt: deps.now(),
+          })
+
+          await deps.jobStore.transitionJob({
+            jobId: job.id,
+            from: 'RUNNING',
+            to: 'SUCCEEDED',
+            result,
+          })
         }
 
         return 'ran'
@@ -640,6 +689,10 @@ export async function runNationalLifeJob(
     }
   } catch (error) {
     await handleFailure(job, error, deps)
+  }
+
+  if (gridInput) {
+    await deps.syncRunStore.reconcile(gridInput.syncRunId, job.agentId)
   }
 
   return { kind: 'COMPLETED' }

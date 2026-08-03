@@ -20,7 +20,10 @@ import {
 import type { BrowserJobState } from '../../lib/national-life/job-state'
 import { prisma } from '../../lib/prisma'
 import { applyCaseObservation } from '../../lib/national-life/sync-service'
-import { startNationalLifeSync } from '../../lib/national-life/sync-run-service'
+import {
+  reconcileNationalLifeSync,
+  startNationalLifeSync,
+} from '../../lib/national-life/sync-run-service'
 import { NationalLifeAdapter } from './adapter'
 import { writeConnectionTrace } from './connection-trace'
 import {
@@ -224,6 +227,9 @@ const jobSelect = {
   continuationCiphertext: true,
   continuationAuthTag: true,
   continuationExpiresAt: true,
+  syncRunId: true,
+  syncStageIndex: true,
+  syncGridKey: true,
 } satisfies Prisma.BrowserAutomationJobSelect
 
 const integrationSessionSelect = {
@@ -651,8 +657,20 @@ function createJobRunner(env: NationalLifeEnv) {
           },
         })
       },
-      applyCaseObservation,
-    }).then(() => undefined)
+       applyCaseObservation,
+       syncRunStore: {
+         async reconcile(runId: string, agentId: string) {
+           await prisma.$transaction((transaction) =>
+             reconcileNationalLifeSync(transaction, {
+               runId,
+               agentId,
+               deploymentScope: env.sessionScopeId,
+               now: new Date(),
+             }),
+           )
+         },
+       },
+     }).then(() => undefined)
 }
 
 function createViewerDeps(
