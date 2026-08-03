@@ -762,6 +762,51 @@ describe('National Life restored-context job orchestration', () => {
     expect(detail.message).toContain('[URL]')
   })
 
+  // A dead carrier session is not a failed request — it is a request waiting for
+  // a human to connect. Failing it throws away work the agent asked for and
+  // makes them ask again; parking keeps it and lets the next login carry it out.
+  it('parks a request the carrier refused for want of a session', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'GENERATE_ILLUSTRATION_PDF',
+        caseId: null,
+        input: { illustrationId: 'illustration-1' },
+      }),
+      renderForesightReport: () => {
+        const error = new Error('carrier asked for a new login') as Error & { code?: string }
+        error.code = 'FORESIGHT_SSO_EXPIRED'
+        throw error
+      },
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.deps.jobStore.transitions.at(-1)).toMatchObject({
+      to: 'ACTION_REQUIRED',
+      safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
+    })
+  })
+
+  // Everything else still fails. Parking is for the one cause a login fixes.
+  it('still fails a request the carrier refused on its merits', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'GENERATE_ILLUSTRATION_PDF',
+        caseId: null,
+        input: { illustrationId: 'illustration-1' },
+      }),
+      renderForesightReport: () => {
+        const error = new Error('report failed') as Error & { code?: string }
+        error.code = 'FORESIGHT_REPORT_FAILED'
+        throw error
+      },
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.deps.jobStore.transitions.at(-1)?.to).not.toBe('ACTION_REQUIRED')
+  })
+
   it('contains no credential-decrypt or credential-object runtime path', async () => {
     const forbidden = [
       `pass${'word'}`,

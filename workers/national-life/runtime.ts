@@ -14,6 +14,7 @@ import { saveRapidSolveIllustration } from '../../lib/national-life/illustration
 import type { NationalLifeEnv } from '../../lib/national-life/env'
 import {
   createBrowserJobService,
+  releaseJobsBlockedOnCarrierLogin,
   type BrowserJobRecord,
 } from '../../lib/national-life/job-service'
 import type { BrowserJobState } from '../../lib/national-life/job-state'
@@ -407,6 +408,13 @@ function createAttemptStore(
             lastUsedAt: null,
           },
         })
+        // Same transaction as the connect — releaseJobsBlockedOnCarrierLogin
+        // carries the why, and names the other call site.
+        await releaseJobsBlockedOnCarrierLogin(transaction, {
+          agentId: input.agentId,
+          now: input.now,
+        })
+
         await transaction.nationalLifeConnectionAttempt.delete({
           where: { id: input.attemptId },
         })

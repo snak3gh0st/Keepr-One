@@ -52,9 +52,20 @@ beforeEach(() => {
     })),
   })
   mocks.signOut.mockResolvedValue(undefined)
+  // Every AGENT-role render now mounts CarrierSyncBadge, which fetches on
+  // mount. These tests are about the shell chrome, not the badge — which has
+  // its own suite in CarrierSyncBadge.test.tsx — so the answer here is fixed
+  // and quiet.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true, json: async () => ({ state: null }) })),
+  )
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 describe('Shell sign-out ordering', () => {
   it.each(['Sair', 'Sair da conta'])(
@@ -83,8 +94,15 @@ describe('Shell sign-out ordering', () => {
 })
 
 describe('Shell achievement band', () => {
-  it('shows a jacket achievement without hiding the current module', () => {
+  it('shows a jacket achievement without hiding the current module', async () => {
     mocks.pathname = '/agent/policies'
+    // Overrides the beforeEach stub so this test also proves the topbar
+    // mounts CarrierSyncBadge in the achievement branch — the one place that
+    // exercises it besides CarrierSyncBadge.test.tsx.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ state: { kind: 'IN_SYNC' } }) })),
+    )
 
     render(
       <AgentPromotionProvider initialIdentity={BLUE_JACKET}>
@@ -98,10 +116,17 @@ describe('Shell achievement band', () => {
     expect(band).toHaveAttribute('data-achievement-tone', 'blue')
     expect(screen.getByText('Agency Vice President')).toBeInTheDocument()
     expect(screen.getAllByText('Apólices')).not.toHaveLength(0)
-    expect(screen.getByText('Operação conectada')).toBeInTheDocument()
+    expect(await screen.findByText('Em dia')).toBeInTheDocument()
   })
 
-  it('keeps pre-jacket ranks in the neutral shell', () => {
+  it('keeps pre-jacket ranks in the neutral shell', async () => {
+    // Same override, this time for the non-achievement branch — the other of
+    // the two spots that used to hardcode "Operação conectada".
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ state: { kind: 'IN_SYNC' } }) })),
+    )
+
     const { container } = render(
       <AgentPromotionProvider initialIdentity={STANDARD_RANK}>
         <Shell role="AGENT" userName="Ana">
@@ -113,6 +138,7 @@ describe('Shell achievement band', () => {
     expect(container.querySelector('[data-achievement-tone]')).toBeNull()
     expect(screen.queryByText('Regional Leader')).not.toBeInTheDocument()
     expect(screen.getAllByText('Hoje')).not.toHaveLength(0)
+    expect(await screen.findByText('Em dia')).toBeInTheDocument()
   })
 
   it('persists a local preview achievement after the Journey shell unmounts', async () => {
@@ -152,6 +178,13 @@ describe('Shell achievement band', () => {
 
   it('does not apply an agent achievement to non-agent shells', () => {
     mocks.pathname = '/admin'
+    // If this ever answered "Em dia", CarrierSyncBadge would have mounted for
+    // an ADMIN shell despite the `role === 'AGENT'` gate — and fetch would
+    // have been called at all, which the assertion below also checks.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ state: { kind: 'IN_SYNC' } }) })),
+    )
 
     render(
       <AgentPromotionProvider initialIdentity={BLUE_JACKET}>
@@ -163,5 +196,7 @@ describe('Shell achievement band', () => {
 
     expect(screen.queryByLabelText('Conquista atual: Blue Jacket')).toBeNull()
     expect(screen.getByText('Painel administrativo')).toBeInTheDocument()
+    expect(screen.queryByText('Em dia')).toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

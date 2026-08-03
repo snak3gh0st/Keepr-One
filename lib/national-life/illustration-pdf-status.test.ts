@@ -95,7 +95,42 @@ describe('illustrationPdfMessage', () => {
     )
   })
 
-  it('says the render is under way while it is', () => {
-    expect(illustrationPdfMessage({ state: 'WORKING' })).toBe('Gerando na seguradora…')
+  // The range comes from measuring a real illustration opening at the
+  // carrier: minutes, not seconds. Without it, silence reads as broken.
+  it('says how long a render in flight usually takes', () => {
+    expect(illustrationPdfMessage({ state: 'WORKING' })).toBe(
+      'PDF a caminho — costuma levar de 2 a 5 minutos.',
+    )
+  })
+
+  // ACTION_REQUIRED means a human has to connect. Reporting it as "gerando" is
+  // the silence that made the integration read as broken on 2026-07-31.
+  it('tells the agent when a render is waiting on them', () => {
+    const status = latestPdfStatusByIllustration([
+      job({ state: 'ACTION_REQUIRED', safeErrorCode: 'FORESIGHT_SSO_EXPIRED' }),
+    ])
+    expect(status.get('ill-1')).toEqual({
+      state: 'BLOCKED',
+      safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
+    })
+    expect(illustrationPdfMessage(status.get('ill-1')!)).toBe(
+      'Aguardando você conectar na seguradora.',
+    )
+  })
+
+  // The portal-level reconnect park is the same user action as the carrier
+  // SSO park: the next connection drains both. It must not disappear merely
+  // because it uses the older safe code.
+  it('also speaks when the portal asks for a reconnect', () => {
+    const status = latestPdfStatusByIllustration([
+      job({ state: 'ACTION_REQUIRED', safeErrorCode: 'NATIONAL_LIFE_RECONNECT_REQUIRED' }),
+    ])
+    expect(status.get('ill-1')).toEqual({
+      state: 'BLOCKED',
+      safeErrorCode: 'NATIONAL_LIFE_RECONNECT_REQUIRED',
+    })
+    expect(illustrationPdfMessage(status.get('ill-1')!)).toBe(
+      'Aguardando você conectar na seguradora.',
+    )
   })
 })

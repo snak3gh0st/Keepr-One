@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { BrowserAutomationJob, BrowserJobOperation, Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { NATIONAL_LIFE_MAX_JOB_ATTEMPTS, NATIONAL_LIFE_PROVIDER } from './constants'
+import {
+  NATIONAL_LIFE_LOGIN_REQUIRED_CODES,
+  NATIONAL_LIFE_MAX_JOB_ATTEMPTS,
+  NATIONAL_LIFE_PROVIDER,
+} from './constants'
 import {
   latestPdfStatusByIllustration,
   type IllustrationPdfStatus,
@@ -888,4 +892,35 @@ export async function transitionJob(input: {
 
 export async function releaseExpiredLeases(now?: Date): Promise<number> {
   return createBrowserJobService().releaseExpiredLeases(now)
+}
+
+/// Requeues every job parked for want of a carrier login, for the agent whose
+/// login just went through.
+///
+/// Takes a transaction client rather than the module's own `prisma`, so it
+/// composes into whichever transaction just moved the carrier session to
+/// CONNECTED: either the session is good and the queue moves, or nothing
+/// changed. A window where the session connected and the queue stayed parked
+/// is a queue nobody drains — and there is more than one place a session gets
+/// connected (the runtime's own attempt loop, and the interactive service's
+/// `completeOwnedAttempt`), so the drain lives once here rather than being
+/// copied into each.
+///
+/// Both login-required parks: the carrier SSO can expire mid-job, or the
+/// portal can reject its saved authentication state. Either way, the next
+/// human connection is the event that makes the job claimable again.
+export async function releaseJobsBlockedOnCarrierLogin(
+  tx: Prisma.TransactionClient,
+  input: { agentId: string; now: Date },
+): Promise<void> {
+  assertBrowserJobTransition('ACTION_REQUIRED', 'QUEUED')
+  await tx.browserAutomationJob.updateMany({
+    where: {
+      agentId: input.agentId,
+      provider: NATIONAL_LIFE_PROVIDER,
+      state: 'ACTION_REQUIRED',
+      safeErrorCode: { in: [...NATIONAL_LIFE_LOGIN_REQUIRED_CODES] },
+    },
+    data: { state: 'QUEUED', availableAt: input.now, safeErrorCode: null },
+  })
 }
