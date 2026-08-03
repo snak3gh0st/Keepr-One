@@ -15,6 +15,17 @@ import {
   IllustrationsWorkspace,
   type IllustrationWorkspaceItem,
 } from './IllustrationsWorkspace'
+// Restored to unbreak the build: the workspace migration landed half done —
+// the new component is imported but never rendered, and the table it was meant
+// to replace is still here without its import. See the note in the commit.
+import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
+
+const currency = (value: number) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(value)
 
 export default async function IllustrationsPage() {
   const agent = await getCurrentAgent()
