@@ -271,8 +271,17 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
           </div>
         }
       >
-        <Link href="/agent/cases" className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper hover:bg-white/[0.06]">
-          ← Voltar às oportunidades
+        <Link
+          href="/agent/cases"
+          className="module-detail-back"
+          aria-label="Voltar para o CRM"
+        >
+          <span className="module-detail-back-icon" aria-hidden="true">
+            <svg viewBox="0 0 20 20" fill="none">
+              <path d="m11.75 5.25-4.5 4.75 4.5 4.75M7.5 10h7.25" />
+            </svg>
+          </span>
+          <span>Voltar para o CRM</span>
         </Link>
         <div className="flex flex-wrap items-center gap-2">
           {primary && (

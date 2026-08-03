@@ -6,13 +6,15 @@ import { getDownlineWithLevels, getUplineIds } from '@/lib/hierarchy'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { HierarchyCanvas } from './HierarchyCanvas'
+import { HierarchyMetrics } from './HierarchyMetrics'
 import { ContextPanel } from '@/components/ContextPanel'
-import { ModuleSummary } from '@/components/ModuleSummary'
 
 export default async function HierarchyPage() {
   const agent = await getCurrentAgent()
-  const user = await prisma.user.findUnique({ where: { id: agent.userId } })
-  const allAgents = await prisma.agent.findMany({ include: { user: true } })
+  const [user, allAgents] = await Promise.all([
+    prisma.user.findUnique({ where: { id: agent.userId } }),
+    prisma.agent.findMany({ include: { user: true } }),
+  ])
 
   const uplineIds = getUplineIds(allAgents, agent.id)
   const downline = getDownlineWithLevels(allAgents, agent.id)
@@ -35,13 +37,10 @@ export default async function HierarchyPage() {
         <span className="inline-flex rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal">{canvasAgents.length} agentes</span>
       </PageHeader>
 
-      <ModuleSummary
-        label="Resumo da estrutura"
-        items={[
-          { label: 'Linha acima', value: uplineIds.length, detail: 'Lideranças conectadas à sua posição' },
-          { label: 'Equipe abaixo', value: downline.length, detail: 'Agentes conectados à sua estrutura', tone: 'green' },
-          { label: 'Profundidade', value: Math.max(0, ...downline.map((item) => item.level)), detail: 'Maior nível abaixo de você' },
-        ]}
+      <HierarchyMetrics
+        uplineCount={uplineIds.length}
+        downlineCount={downline.length}
+        depth={Math.max(0, ...downline.map((item) => item.level))}
       />
 
       <div className="module-content-grid">

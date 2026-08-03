@@ -260,8 +260,8 @@ export function NewIllustrationForm() {
             </div>
           </div>
           <p>
-            <Link href="/agent/policies" className="text-sm text-ink-muted hover:text-ink">
-              Voltar para apólices
+            <Link href="/agent/illustrations" className="text-sm text-ink-muted hover:text-ink">
+              Ver todas as ilustrações
             </Link>
           </p>
         </div>
