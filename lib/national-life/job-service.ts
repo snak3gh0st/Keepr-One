@@ -889,3 +889,35 @@ export async function transitionJob(input: {
 export async function releaseExpiredLeases(now?: Date): Promise<number> {
   return createBrowserJobService().releaseExpiredLeases(now)
 }
+
+/// Requeues every job parked for want of a carrier login, for the agent whose
+/// login just went through.
+///
+/// Takes a transaction client rather than the module's own `prisma`, so it
+/// composes into whichever transaction just moved the carrier session to
+/// CONNECTED: either the session is good and the queue moves, or nothing
+/// changed. A window where the session connected and the queue stayed parked
+/// is a queue nobody drains — and there is more than one place a session gets
+/// connected (the runtime's own attempt loop, and the interactive service's
+/// `completeOwnedAttempt`), so the drain lives once here rather than being
+/// copied into each.
+///
+/// `FORESIGHT_SSO_EXPIRED` only: that is the one refusal this exact login
+/// fixes. The older `NATIONAL_LIFE_RECONNECT_REQUIRED` park (from
+/// `requestReconnect` in the worker) has no revival path today, on purpose —
+/// see `illustration-pdf-status.ts` for why the screen does not promise one.
+export async function releaseJobsBlockedOnCarrierLogin(
+  tx: Prisma.TransactionClient,
+  input: { agentId: string; now: Date },
+): Promise<void> {
+  assertBrowserJobTransition('ACTION_REQUIRED', 'QUEUED')
+  await tx.browserAutomationJob.updateMany({
+    where: {
+      agentId: input.agentId,
+      provider: NATIONAL_LIFE_PROVIDER,
+      state: 'ACTION_REQUIRED',
+      safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
+    },
+    data: { state: 'QUEUED', availableAt: input.now, safeErrorCode: null },
+  })
+}

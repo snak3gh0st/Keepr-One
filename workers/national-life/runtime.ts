@@ -14,6 +14,7 @@ import { saveRapidSolveIllustration } from '../../lib/national-life/illustration
 import type { NationalLifeEnv } from '../../lib/national-life/env'
 import {
   createBrowserJobService,
+  releaseJobsBlockedOnCarrierLogin,
   type BrowserJobRecord,
 } from '../../lib/national-life/job-service'
 import type { BrowserJobState } from '../../lib/national-life/job-state'
@@ -411,14 +412,9 @@ function createAttemptStore(
         // good and the queue moves, or nothing changed. A window where the
         // session connected and the queue stayed parked is a queue nobody
         // drains.
-        await transaction.browserAutomationJob.updateMany({
-          where: {
-            agentId: input.agentId,
-            provider: NATIONAL_LIFE_PROVIDER,
-            state: 'ACTION_REQUIRED',
-            safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
-          },
-          data: { state: 'QUEUED', availableAt: input.now, safeErrorCode: null },
+        await releaseJobsBlockedOnCarrierLogin(transaction, {
+          agentId: input.agentId,
+          now: input.now,
         })
 
         await transaction.nationalLifeConnectionAttempt.delete({

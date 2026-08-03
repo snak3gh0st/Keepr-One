@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { EncryptedBrowserSecret } from './browser-context-crypto'
 import type { NationalLifeConnectionAttemptState } from './connection-attempt-state'
+import { releaseJobsBlockedOnCarrierLogin } from './job-service'
 import {
   NATIONAL_LIFE_CONNECTION_ATTEMPT_TTL_MS,
   NATIONAL_LIFE_CONNECTION_RATE_LIMIT,
@@ -489,6 +490,14 @@ const prismaRepository: InteractiveConnectionRepository = {
           lastConnectedAt: input.now,
           lastUsedAt: null,
         },
+      })
+      // Same transaction as the connect, same reason as the runtime's own
+      // attempt loop: this is the second place a carrier session gets marked
+      // CONNECTED, and a queue that only drains from one of them is a queue
+      // the other can silently leave parked.
+      await releaseJobsBlockedOnCarrierLogin(transaction, {
+        agentId: input.agentId,
+        now: input.now,
       })
       const deleted = await transaction.nationalLifeConnectionAttempt.deleteMany({
         where: {
