@@ -90,6 +90,7 @@ function createFakeSessionDeps(options?: {
   const routeHandlers: RouteHandler[] = []
   const routePatterns: string[] = []
   let browserCloseCount = 0
+  let browserDisconnectCount = 0
   let releaseCount = 0
   let createCalls = 0
   const createInputs: unknown[] = []
@@ -122,6 +123,12 @@ function createFakeSessionDeps(options?: {
         remainingBrowserCloseFailures -= 1
         throw new Error('browser.close failed')
       }
+    },
+    _connection: {
+      close: () => {
+        browserDisconnectCount += 1
+
+      },
     },
   }
 
@@ -166,6 +173,7 @@ function createFakeSessionDeps(options?: {
     routeHandlers,
     routePatterns,
     getBrowserCloseCount: () => browserCloseCount,
+    getBrowserDisconnectCount: () => browserDisconnectCount,
     getReleaseCount: () => releaseCount,
     getCreateCalls: () => createCalls,
     createInputs,
@@ -296,7 +304,8 @@ describe('National Life Steel session boundary', () => {
     await session.close()
 
     expect(fake.getCreateCalls()).toBe(1)
-    expect(fake.getBrowserCloseCount()).toBe(1)
+    expect(fake.getBrowserCloseCount()).toBe(0)
+    expect(fake.getBrowserDisconnectCount()).toBe(1)
     expect(fake.getReleaseCount()).toBe(1)
     expect(fake.releaseCalls).toEqual(['steel-session-1'])
   })
@@ -308,31 +317,15 @@ describe('National Life Steel session boundary', () => {
 
     await session.disconnect()
 
-    expect(fake.getBrowserCloseCount()).toBe(1)
+    expect(fake.getBrowserCloseCount()).toBe(0)
+    expect(fake.getBrowserDisconnectCount()).toBe(1)
     expect(fake.getReleaseCount()).toBe(0)
 
     await session.close()
     await session.close()
 
-    expect(fake.getBrowserCloseCount()).toBe(1)
-    expect(fake.getReleaseCount()).toBe(1)
-    expect(fake.releaseCalls).toEqual(['steel-session-1'])
-  })
-
-  it('retries browser cleanup after a transient close failure without double-releasing Steel', async () => {
-    const fake = createFakeSessionDeps({ browserCloseFailures: 1 })
-
-    const session = await createSteelBrowserSession(buildEnv(), fake.deps)
-
-    await expect(session.close()).rejects.toThrow('browser.close failed')
-
-    expect(fake.getBrowserCloseCount()).toBe(1)
-    expect(fake.getReleaseCount()).toBe(1)
-    expect(fake.releaseCalls).toEqual(['steel-session-1'])
-
-    await session.close()
-
-    expect(fake.getBrowserCloseCount()).toBe(2)
+    expect(fake.getBrowserCloseCount()).toBe(0)
+    expect(fake.getBrowserDisconnectCount()).toBe(1)
     expect(fake.getReleaseCount()).toBe(1)
     expect(fake.releaseCalls).toEqual(['steel-session-1'])
   })
@@ -344,13 +337,15 @@ describe('National Life Steel session boundary', () => {
 
     await expect(session.close()).rejects.toThrow('steel release failed')
 
-    expect(fake.getBrowserCloseCount()).toBe(1)
+    expect(fake.getBrowserCloseCount()).toBe(0)
+    expect(fake.getBrowserDisconnectCount()).toBe(1)
     expect(fake.getReleaseCount()).toBe(1)
     expect(fake.releaseCalls).toEqual(['steel-session-1'])
 
     await session.close()
 
-    expect(fake.getBrowserCloseCount()).toBe(1)
+    expect(fake.getBrowserCloseCount()).toBe(0)
+    expect(fake.getBrowserDisconnectCount()).toBe(1)
     expect(fake.getReleaseCount()).toBe(2)
     expect(fake.releaseCalls).toEqual(['steel-session-1', 'steel-session-1'])
   })

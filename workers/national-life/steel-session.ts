@@ -35,7 +35,12 @@ type ManagedPage = Pick<Page, 'url'>
 
 type ManagedContext = Pick<BrowserContext, 'pages' | 'newPage' | 'route'>
 
-type ManagedBrowser = Pick<Browser, 'contexts' | 'newContext' | 'close'>
+type ManagedBrowser = Pick<Browser, 'contexts' | 'newContext' | 'close'> & {
+  /// Playwright does not expose a public disconnect method for CDP browsers.
+  /// The pinned implementation keeps the transport on this private boundary;
+  /// closing that transport detaches the client without sending Browser.close.
+  _connection: { close(): void }
+}
 
 type SteelClient = {
   sessions: {
@@ -288,7 +293,11 @@ function createBrowserSession(
     if (!browserDisconnectInFlight) {
       browserDisconnectInFlight = (async () => {
         try {
-          await browser.close()
+          // Playwright's public `close()` sends Browser.close when connected
+          // through CDP. That releases the Steel session and destroys the
+          // Foresight page state. Closing only the private CDP transport drops
+          // this worker's client and leaves the authenticated browser alive.
+          browser._connection.close()
           browserDisconnected = true
         } finally {
           browserDisconnectInFlight = undefined
@@ -347,7 +356,7 @@ function createBrowserSession(
   }
 
   return {
-    browser: browser as Browser,
+    browser: browser as unknown as Browser,
     context: context as BrowserContext,
     page: page as Page,
     steelSessionId: remoteSession.id,
@@ -406,11 +415,11 @@ async function safeReleaseSteelSession(steelClient: SteelClient, sessionId: stri
   }
 }
 
-export async function defaultConnectBrowser(websocketUrl: string) {
+export async function defaultConnectBrowser(websocketUrl: string): Promise<ManagedBrowser> {
   // Steel proxies the private Chrome DevTools socket. Chromium rejects the
   // service-name host header at that inner endpoint, so retain localhost
   // while keeping the proxy itself reachable only on the private network.
-  return chromium.connectOverCDP(websocketUrl, {
+  return (await chromium.connectOverCDP(websocketUrl, {
     headers: { Host: 'localhost' },
-  })
+  })) as unknown as ManagedBrowser
 }

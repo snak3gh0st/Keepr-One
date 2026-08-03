@@ -182,6 +182,9 @@ function createBrowserSession(calls: string[] = []) {
   const close = vi.fn(async () => {
     calls.push('browser:close')
   })
+  const disconnect = vi.fn(async () => {
+    calls.push('browser:disconnect')
+  })
   return {
     session: {
       browser: {},
@@ -190,7 +193,7 @@ function createBrowserSession(calls: string[] = []) {
       steelSessionId: 'steel-session-1',
       debugUrl: 'https://steel.example/internal/session-1',
       close,
-      disconnect: vi.fn(),
+      disconnect,
     } as unknown as BrowserSession,
     close,
   }
@@ -661,6 +664,8 @@ describe('National Life restored-context job orchestration', () => {
 
     expect(test.reattached).toEqual(['steel-live-1'])
     expect(test.calls).not.toContain('steel:create-restored')
+    expect(test.calls).toContain('browser:disconnect')
+    expect(test.calls).not.toContain('browser:close')
     expect(test.deps.jobStore.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
   })
 

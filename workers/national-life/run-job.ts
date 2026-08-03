@@ -470,20 +470,31 @@ async function handleFailure(
 /// stored cookies, which is what every job did before the browser was kept.
 /// The fallback is not a degraded mode to be alarmed about — it is the old
 /// behaviour, and it is correct, just more expensive at the identity provider.
+type OpenCarrierBrowserResult = {
+  session: BrowserSession
+  reusedLiveSession: boolean
+}
+
 async function openCarrierBrowser(
   storedSession: StoredAgentIntegrationSession,
   sessionContext: SessionContext,
   deps: NationalLifeRunJobDeps,
-): Promise<BrowserSession> {
+): Promise<OpenCarrierBrowserResult> {
   if (storedSession.liveSteelSessionId) {
     try {
-      return await deps.reattachSession(storedSession.liveSteelSessionId)
+      return {
+        session: await deps.reattachSession(storedSession.liveSteelSessionId),
+        reusedLiveSession: true,
+      }
     } catch {
       // Gone: Steel restarted, the session hit its ceiling, or the day rolled
       // over. Nothing to report — the cookies still work.
     }
   }
-  return deps.createSession(sessionContext)
+  return {
+    session: await deps.createSession(sessionContext),
+    reusedLiveSession: false,
+  }
 }
 
 export async function runNationalLifeJob(
@@ -556,9 +567,12 @@ export async function runNationalLifeJob(
       // would let the next holder build a session on top of it — the
       // "browser has been closed" failure the lock exists to prevent.
       let browserSession: BrowserSession | undefined
+      let reusedLiveSession = false
 
       try {
-        browserSession = await openCarrierBrowser(storedSession!, sessionContext, deps)
+        const opened = await openCarrierBrowser(storedSession!, sessionContext, deps)
+        browserSession = opened.session
+        reusedLiveSession = opened.reusedLiveSession
         const adapter = deps.createAdapter(browserSession)
         // A restored session opens blank, and the authentication check reads
         // the page's origin — so without this every job failed before doing
@@ -676,7 +690,16 @@ export async function runNationalLifeJob(
             // same path an ordinary expiry takes.
           }
         }
-        await browserSession?.close()
+        if (browserSession) {
+          // A reattached browser belongs to the authenticated session, not to
+          // this job. Disconnect the CDP client but keep Steel/Foresight alive.
+          // A fallback browser belongs to this job and is released here.
+          if (reusedLiveSession) {
+            await browserSession.disconnect()
+          } else {
+            await browserSession.close()
+          }
+        }
       }
     })
 
