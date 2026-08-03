@@ -44,9 +44,11 @@ describe('National Life sync status route', () => {
     const response = await GET()
 
     expect(mocks.getStatus).toHaveBeenCalledWith('agent-1', 'scope-1')
-    await expect(response.json()).resolves.toEqual({
+    const body = await response.json()
+    expect(body).toEqual({
       run: expect.objectContaining({ runId: 'run-1', completed: 3, total: 9, percent: 33 }),
     })
+    expect(body.run.safeErrorCode).toBeUndefined()
   })
 
   it('returns no run when the integration is not configured', async () => {
