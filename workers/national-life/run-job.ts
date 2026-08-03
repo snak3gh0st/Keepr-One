@@ -27,6 +27,7 @@ import type {
 const TRANSIENT_RETRY_DELAY_MS = 2 * 60_000
 const AUTHENTICATION_STATE_INVALID = 'AUTHENTICATION_STATE_INVALID'
 const RECONNECT_REQUIRED = 'NATIONAL_LIFE_RECONNECT_REQUIRED'
+const FORESIGHT_SSO_EXPIRED = 'FORESIGHT_SSO_EXPIRED'
 const MANUAL_REVIEW_CODES = new Set([
   'PORTAL_LAYOUT_CHANGED',
   'SCHEMA_VALIDATION_FAILED',
@@ -387,6 +388,20 @@ async function handleFailure(
 
   if (code === AUTHENTICATION_STATE_INVALID) {
     await requestReconnect(job, deps)
+    return
+  }
+
+  // A dead carrier session is the one refusal a login fixes, so the request
+  // waits for one instead of being thrown away. The worker only claims QUEUED,
+  // so nothing here keeps knocking on the carrier while it waits — which
+  // matters, because crossing the identity provider is what burns the session.
+  if (code === FORESIGHT_SSO_EXPIRED) {
+    await deps.jobStore.transitionJob({
+      jobId: job.id,
+      from: 'RUNNING',
+      to: 'ACTION_REQUIRED',
+      safeErrorCode: FORESIGHT_SSO_EXPIRED,
+    })
     return
   }
 

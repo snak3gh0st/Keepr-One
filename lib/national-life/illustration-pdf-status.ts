@@ -6,11 +6,16 @@ import type { BrowserJobRecord } from './job-service'
 /// why" — not lease owners, attempt counts, or an error code in English.
 export type IllustrationPdfStatus =
   | { state: 'WORKING' }
+  | { state: 'BLOCKED'; safeErrorCode: string | null }
   | { state: 'FAILED'; safeErrorCode: string | null }
 
 /// Everything the queue still intends to act on. `RETRYABLE` belongs here: the
 /// worker will pick it up again, and telling the agent it failed would send
 /// them to click a button the queue is about to press itself.
+///
+/// `ACTION_REQUIRED` sai daqui: ele significa que um humano precisa agir, e
+/// dizer "gerando" sobre um pedido parado é a mesma mudez que fez a integração
+/// ser lida como quebrada.
 const WORKING_STATES: ReadonlySet<string> = new Set([
   'QUEUED',
   'RUNNING',
@@ -34,7 +39,16 @@ export function latestPdfStatusByIllustration(
     if (typeof illustrationId !== 'string' || byIllustration.has(illustrationId)) {
       continue
     }
-    if (WORKING_STATES.has(job.state)) {
+    // Scoped to the one code the connect-time drain actually clears. Every
+    // other ACTION_REQUIRED (the portal-level NATIONAL_LIFE_RECONNECT_REQUIRED
+    // from requestReconnect) has no path back to QUEUED today, so showing
+    // "connect and this continues" for it would be a promise nothing keeps.
+    if (job.state === 'ACTION_REQUIRED' && job.safeErrorCode === 'FORESIGHT_SSO_EXPIRED') {
+      byIllustration.set(illustrationId, {
+        state: 'BLOCKED',
+        safeErrorCode: job.safeErrorCode,
+      })
+    } else if (WORKING_STATES.has(job.state)) {
       byIllustration.set(illustrationId, { state: 'WORKING' })
     } else if (job.state === 'FAILED') {
       byIllustration.set(illustrationId, { state: 'FAILED', safeErrorCode: job.safeErrorCode })
@@ -54,7 +68,12 @@ export function latestPdfStatusByIllustration(
 /// agent looking for a problem that is not in the data.
 export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
   if (status.state === 'WORKING') {
-    return 'Gerando na seguradora…'
+    // The number comes from measuring a full illustration opening in the
+    // carrier's tool: minutes, not seconds. Without it, silence reads as broken.
+    return 'PDF a caminho — costuma levar de 2 a 5 minutos.'
+  }
+  if (status.state === 'BLOCKED') {
+    return 'Aguardando você conectar na seguradora.'
   }
 
   switch (status.safeErrorCode) {

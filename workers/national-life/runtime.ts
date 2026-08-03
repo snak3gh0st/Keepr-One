@@ -407,6 +407,20 @@ function createAttemptStore(
             lastUsedAt: null,
           },
         })
+        // Same transaction as the connect on purpose: either the session is
+        // good and the queue moves, or nothing changed. A window where the
+        // session connected and the queue stayed parked is a queue nobody
+        // drains.
+        await transaction.browserAutomationJob.updateMany({
+          where: {
+            agentId: input.agentId,
+            provider: NATIONAL_LIFE_PROVIDER,
+            state: 'ACTION_REQUIRED',
+            safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
+          },
+          data: { state: 'QUEUED', availableAt: input.now, safeErrorCode: null },
+        })
+
         await transaction.nationalLifeConnectionAttempt.delete({
           where: { id: input.attemptId },
         })
