@@ -948,8 +948,8 @@ export async function releaseExpiredLeases(now?: Date): Promise<number> {
   return createBrowserJobService().releaseExpiredLeases(now)
 }
 
-/// Requeues every job parked for want of a carrier login, for the agent whose
-/// login just went through.
+/// Requeues jobs parked for want of a carrier login in the scope whose login
+/// just went through. Legacy jobs predate per-job scope and remain compatible.
 ///
 /// Takes a transaction client rather than the module's own `prisma`, so it
 /// composes into whichever transaction just moved the carrier session to
@@ -965,7 +965,7 @@ export async function releaseExpiredLeases(now?: Date): Promise<number> {
 /// human connection is the event that makes the job claimable again.
 export async function releaseJobsBlockedOnCarrierLogin(
   tx: Prisma.TransactionClient,
-  input: { agentId: string; now: Date },
+  input: { agentId: string; deploymentScope: string; now: Date },
 ): Promise<void> {
   assertBrowserJobTransition('ACTION_REQUIRED', 'QUEUED')
   await tx.browserAutomationJob.updateMany({
@@ -974,6 +974,11 @@ export async function releaseJobsBlockedOnCarrierLogin(
       provider: NATIONAL_LIFE_PROVIDER,
       state: 'ACTION_REQUIRED',
       safeErrorCode: { in: [...NATIONAL_LIFE_LOGIN_REQUIRED_CODES] },
+      OR: [
+        { deploymentScope: input.deploymentScope },
+        // Existing jobs have no direct scope; preserve their prior behavior.
+        { deploymentScope: null },
+      ],
     },
     data: { state: 'QUEUED', availableAt: input.now, safeErrorCode: null },
   })

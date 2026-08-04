@@ -496,6 +496,7 @@ const prismaRepository: InteractiveConnectionRepository = {
       // carries the why, and names the other call site.
       await releaseJobsBlockedOnCarrierLogin(transaction, {
         agentId: input.agentId,
+        deploymentScope: input.deploymentScope,
         now: input.now,
       })
       await startNationalLifeSync(transaction, {

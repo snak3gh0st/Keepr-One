@@ -419,6 +419,7 @@ function createAttemptStore(
         // carries the why, and names the other call site.
         await releaseJobsBlockedOnCarrierLogin(transaction, {
           agentId: input.agentId,
+          deploymentScope: env.sessionScopeId,
           now: input.now,
         })
         await startNationalLifeSync(transaction, {

@@ -819,10 +819,14 @@ describe('releaseJobsBlockedOnCarrierLogin', () => {
     return { transaction, calls }
   }
 
-  it('revives only the jobs parked for the login that just happened', async () => {
+  it('revives only this scope and legacy jobs, never a second scope', async () => {
     const { transaction, calls } = recordUpdateMany()
 
-    await releaseJobsBlockedOnCarrierLogin(transaction, { agentId: 'agent-1', now })
+    await releaseJobsBlockedOnCarrierLogin(transaction, {
+      agentId: 'agent-1',
+      deploymentScope: 'scope-a',
+      now,
+    })
 
     expect(calls).toHaveLength(1)
     expect(calls[0].where).toEqual({
@@ -832,6 +836,10 @@ describe('releaseJobsBlockedOnCarrierLogin', () => {
       safeErrorCode: {
         in: ['FORESIGHT_SSO_EXPIRED', 'NATIONAL_LIFE_RECONNECT_REQUIRED'],
       },
+      OR: [
+        { deploymentScope: 'scope-a' },
+        { deploymentScope: null },
+      ],
     })
   })
 
@@ -840,7 +848,11 @@ describe('releaseJobsBlockedOnCarrierLogin', () => {
   it('queues the job for immediate pickup and clears what parked it', async () => {
     const { transaction, calls } = recordUpdateMany()
 
-    await releaseJobsBlockedOnCarrierLogin(transaction, { agentId: 'agent-1', now })
+    await releaseJobsBlockedOnCarrierLogin(transaction, {
+      agentId: 'agent-1',
+      deploymentScope: 'scope-a',
+      now,
+    })
 
     expect(calls[0].data).toEqual({
       state: 'QUEUED',
