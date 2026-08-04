@@ -93,6 +93,7 @@ const FORESIGHT_REPORT_PATH = '/NWI/Main/ReportDisplay.rspx'
 const FORESIGHT_SSO_EXPIRED_CODE = 'FORESIGHT_SSO_EXPIRED'
 const FORESIGHT_REPORT_FAILED_CODE = 'FORESIGHT_REPORT_FAILED'
 const FORESIGHT_CASE_NOT_FOUND_CODE = 'FORESIGHT_CASE_NOT_FOUND'
+const FORESIGHT_CASE_AMBIGUOUS_CODE = 'FORESIGHT_CASE_AMBIGUOUS'
 
 export type ForesightReadResult = {
   cases: ForesightCaseListing[]
@@ -402,13 +403,20 @@ export class NationalLifeAdapter {
         return { cases, selectedCase: null, services: [] }
       }
 
-      const target = candidates.find(({ listing }) => listing.externalKey === input.targetCaseKey)
-      if (!target) {
+      const matches = candidates.filter(({ listing }) => listing.externalKey === input.targetCaseKey)
+      if (matches.length === 0) {
         throw new NationalLifeAdapterError(
           FORESIGHT_CASE_NOT_FOUND_CODE,
           'National Life Foresight case was not found in Recent',
         )
       }
+      if (matches.length > 1) {
+        throw new NationalLifeAdapterError(
+          FORESIGHT_CASE_AMBIGUOUS_CODE,
+          'National Life Foresight case key matched more than one Recent case',
+        )
+      }
+      const [target] = matches
 
       await startPage.click(`[id="${target.domId}"]`)
       await this.getPage().waitForTimeout(20_000)
@@ -656,12 +664,31 @@ export class NationalLifeAdapter {
         name: (node.textContent ?? '').trim(),
       })),
     )
-    const target = caseKey
-      ? cases.find((entry) => entry.name === caseKey) ??
-        cases.find((entry) => entry.name.toLowerCase().includes(caseKey.toLowerCase()))
-      : cases.find((entry) => /-QQ-/i.test(entry.name)) ?? cases[0]
-    if (!target) {
-      return null
+    let target: { id: string; name: string } | undefined
+    if (caseKey) {
+      const exactMatches = cases.filter((entry) => entry.name === caseKey)
+      const matches =
+        exactMatches.length > 0
+          ? exactMatches
+          : cases.filter((entry) => entry.name.toLowerCase().includes(caseKey.toLowerCase()))
+      if (matches.length === 0) {
+        throw new NationalLifeAdapterError(
+          FORESIGHT_CASE_NOT_FOUND_CODE,
+          'National Life Foresight report case was not found in Recent',
+        )
+      }
+      if (matches.length > 1) {
+        throw new NationalLifeAdapterError(
+          FORESIGHT_CASE_AMBIGUOUS_CODE,
+          'National Life Foresight report case key matched more than one Recent case',
+        )
+      }
+      ;[target] = matches
+    } else {
+      target = cases.find((entry) => /-QQ-/i.test(entry.name)) ?? cases[0]
+      if (!target) {
+        return null
+      }
     }
 
     // A WebForms postback link is driven by its handler, so a click that misses
@@ -734,7 +761,7 @@ export class NationalLifeAdapter {
   private toPortalLayoutChanged(safeCode = SELECTOR_NOT_FOUND_CODE) {
     return new NationalLifeAdapterError(PORTAL_LAYOUT_CHANGED_CODE, 'National Life portal layout changed', {
       safeCode,
-      portalUrl: this.getPage().url(),
+      portalUrl: safePortalUrl(this.getPage().url()),
     })
   }
 }
@@ -755,6 +782,15 @@ function isForesightServiceFailure(value: unknown): boolean {
     !Array.isArray(value) &&
     typeof (value as { failed?: unknown }).failed === 'string'
   )
+}
+
+function safePortalUrl(value: string): string | null {
+  try {
+    const url = new URL(value)
+    return url.origin === 'null' ? null : `${url.origin}${url.pathname}`
+  } catch {
+    return null
+  }
 }
 
 function normalizeWhitespace(value: string | null | undefined) {

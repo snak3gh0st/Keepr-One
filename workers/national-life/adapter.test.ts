@@ -241,6 +241,49 @@ describe('National Life deterministic adapter', () => {
     expect(fixture.serviceCalls).toEqual([])
   })
 
+  it('rejects an ambiguous Foresight detail key without opening either duplicate case', async () => {
+    const fixture = createForesightSession({
+      caseNames: ['RP-Silva-QQ-08032026', 'Maria Silva', 'Maria Silva'],
+    })
+    const adapter = createAdapter(fixture.session, fixture.origin)
+
+    await expect(adapter.readForesight({ targetCaseKey: 'Maria Silva' })).rejects.toMatchObject({
+      code: 'FORESIGHT_CASE_AMBIGUOUS',
+    })
+    expect(fixture.clickedCaseIds).toEqual([])
+    expect(fixture.serviceCalls).toEqual([])
+  })
+
+  it('rejects an ambiguous legacy Foresight report fragment without selecting a case', async () => {
+    const fixture = createForesightSession({ caseNames: ['Maria Silva', 'Maria Santos'] })
+    const adapter = createAdapter(fixture.session, fixture.origin)
+
+    await expect(adapter.renderForesightReport('Maria')).rejects.toMatchObject({
+      code: 'FORESIGHT_CASE_AMBIGUOUS',
+    })
+    expect(fixture.clickedCaseIds).toEqual([])
+  })
+
+  it('omits query and fragment material from portal layout diagnostics', async () => {
+    const fixture = createForesightSession({
+      missingStartPage: true,
+      layoutUrl: 'https://carrier.example.test/NWI/Main/Start.aspx?session=secret-value#oauth-fragment',
+    })
+    const adapter = createAdapter(fixture.session, fixture.origin)
+
+    const error = await adapter.readForesight({}).then(
+      () => null,
+      (reason: unknown) => reason,
+    )
+
+    expect(error).toMatchObject({
+      code: 'PORTAL_LAYOUT_CHANGED',
+      safeDetail: { portalUrl: 'https://carrier.example.test/NWI/Main/Start.aspx' },
+    })
+    expect(JSON.stringify((error as { safeDetail?: unknown }).safeDetail)).not.toContain('secret-value')
+    expect(JSON.stringify((error as { safeDetail?: unknown }).safeDetail)).not.toContain('oauth-fragment')
+  })
+
   it('classifies an Auth0 Foresight handoff before reading a frame or case', async () => {
     const fixture = createForesightSession({ auth0AfterSso: true })
     const adapter = createAdapter(fixture.session, fixture.origin)
@@ -254,15 +297,23 @@ describe('National Life deterministic adapter', () => {
   })
 })
 
-function createForesightSession(options: { auth0AfterSso?: boolean } = {}) {
+function createForesightSession(options: {
+  auth0AfterSso?: boolean
+  caseNames?: string[]
+  missingStartPage?: boolean
+  layoutUrl?: string
+} = {}) {
   const origin = 'https://carrier.example.test'
   const navigations: string[] = []
   const clickedCaseIds: string[] = []
   const serviceCalls: string[] = []
-  const anchors = [
-    { id: 'lnkCaseName0', html: '<a id="lnkCaseName0">RP-Silva-QQ-08032026</a>' },
-    { id: 'lnkCaseName1', html: '<a id="lnkCaseName1">Maria Silva</a>' },
-  ]
+  const anchors = (options.caseNames ?? ['RP-Silva-QQ-08032026', 'Maria Silva']).map(
+    (name, index) => ({
+      id: `lnkCaseName${index}`,
+      name,
+      html: `<a id="lnkCaseName${index}">${name}</a>`,
+    }),
+  )
   let currentUrl = `${origin}/agent/`
   let startPageReads = 0
   let selectedCaseId: string | null = null
@@ -286,7 +337,14 @@ function createForesightSession(options: { auth0AfterSso?: boolean } = {}) {
     },
     async evaluate<Result>(fn: unknown) {
       startPageReads += 1
-      return (String(fn).includes('lnkCaseName') ? anchors : null) as Result
+      const source = String(fn)
+      if (source.includes('outerHTML')) {
+        return anchors.map(({ id, html }) => ({ id, html })) as Result
+      }
+      if (source.includes('lnkCaseName')) {
+        return anchors.map(({ id, name }) => ({ id, name })) as Result
+      }
+      return null as Result
     },
   }
   const runtimeFrame = () => {
@@ -325,12 +383,16 @@ function createForesightSession(options: { auth0AfterSso?: boolean } = {}) {
       currentUrl =
         options.auth0AfterSso && parsed.pathname === '/agent/sso/foresight'
           ? 'https://nlg-prod.auth0.com/login'
-          : parsed.toString()
+          : options.layoutUrl && parsed.pathname === '/agent/sso/foresight'
+            ? options.layoutUrl
+            : parsed.toString()
     },
     url: () => currentUrl,
     async waitForTimeout() {},
     frames() {
-      return options.auth0AfterSso ? [outerFrame] : [outerFrame, startPage, runtimeFrame()]
+      return options.auth0AfterSso || options.missingStartPage
+        ? [outerFrame]
+        : [outerFrame, startPage, runtimeFrame()]
     },
   }
 
