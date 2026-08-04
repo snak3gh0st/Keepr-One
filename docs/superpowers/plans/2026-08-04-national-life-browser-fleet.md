@@ -54,7 +54,7 @@
 - Produces `NationalLifeEnv.browserProvider`, `browserShardId`, `maxInteractiveSessions`, `maxSessionsPerShard`, `interactiveReconnectBaseDelayMs`, `interactiveReconnectMaxDelayMs`.
 - Accepts only `steel` or `browserless` as provider values and rejects zero/negative capacities, invalid delays and wildcard portal origins.
 
-- [ ] **Step 1: Extend the environment tests first.** Add cases proving that `BROWSER_PROVIDER=steel|browserless` parses, capacities are positive, maximum sessions are not below per-shard capacity, retry delays are ordered, and the exact origins include `https://nlg-prod.us.auth0.com` and `https://mfa.nationallife.com`.
+- [ ] **Step 1: Extend the environment tests first.** Add cases proving that `NATIONAL_LIFE_BROWSER_PROVIDER=steel|browserless` parses, capacities are positive, maximum sessions are not below per-shard capacity, retry delays are ordered, and the exact origins include `https://nlg-prod.us.auth0.com` and `https://mfa.nationallife.com`.
 
 - [ ] **Step 2: Run the focused tests to verify the new contract fails.**
 
