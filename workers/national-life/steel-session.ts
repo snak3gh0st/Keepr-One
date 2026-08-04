@@ -11,6 +11,7 @@ import type {
   BrowserSessionContinuation,
   InteractiveBrowserSession,
 } from './types'
+import type { InteractiveBrowserHandle } from './browser-provider'
 
 type RemoteSteelSession = {
   id: string
@@ -55,6 +56,11 @@ export type SteelSessionDeps = {
   createSteelClient?: (env: NationalLifeEnv) => SteelClient
   connectBrowser?: (websocketUrl: string) => Promise<ManagedBrowser>
   now?: () => Date
+}
+
+type SteelInteractiveHandleDeps = SteelSessionDeps & {
+  deploymentScope: string
+  sessionContext?: SessionContext
 }
 
 const DEFAULT_ROUTE_PATTERN = '**/*'
@@ -145,6 +151,55 @@ export async function createInteractiveSteelSession(
     await safeReleaseSteelSession(steelClient, remoteSession.id)
     throw error
   }
+}
+
+export async function createSteelInteractiveHandle(
+  env: NationalLifeEnv,
+  input: SteelInteractiveHandleDeps,
+): Promise<InteractiveBrowserHandle> {
+  const steelClient = createSteelClient(env, input)
+  const remoteSession = await steelClient.sessions.create({
+    timeout: NATIONAL_LIFE_CARRIER_BROWSER_TTL_MS,
+    headless: false,
+    solveCaptcha: false,
+    persistProfile: false,
+    debugConfig: { interactive: true, systemCursor: true },
+    dimensions: { width: 1600, height: 1000 },
+    ...(input.sessionContext ? { sessionContext: input.sessionContext } : {}),
+  })
+
+  return {
+    provider: 'steel',
+    browserSessionId: remoteSession.id,
+    deploymentScope: input.deploymentScope,
+    viewerTarget: remoteSession.sessionViewerUrl ?? null,
+  }
+}
+
+export async function attachSteelInteractiveHandle(
+  handle: InteractiveBrowserHandle,
+  env: NationalLifeEnv,
+  deps?: SteelSessionDeps,
+): Promise<BrowserSession> {
+  const steelClient = createSteelClient(env, deps)
+  const remoteSession = await steelClient.sessions.retrieve(handle.browserSessionId)
+  if (remoteSession.status !== 'live') {
+    throw new Error('Steel browser session is not live')
+  }
+  try {
+    return await connectManagedSession(remoteSession, steelClient, env, deps)
+  } catch (error) {
+    await safeReleaseSteelSession(steelClient, remoteSession.id)
+    throw error
+  }
+}
+
+export async function releaseSteelInteractiveHandle(
+  handle: InteractiveBrowserHandle,
+  env: NationalLifeEnv,
+  deps?: SteelSessionDeps,
+): Promise<void> {
+  await createSteelClient(env, deps).sessions.release(handle.browserSessionId).then(() => undefined)
 }
 
 export async function captureSteelSessionContext(
@@ -361,7 +416,7 @@ function createBrowserSession(
     }
   }
 
-  return {
+  const session = {
     browser: browser as unknown as Browser,
     context: context as BrowserContext,
     page: page as Page,
@@ -369,7 +424,10 @@ function createBrowserSession(
     debugUrl: remoteSession.debugUrl,
     close,
     disconnect,
-  }
+    release: releaseSteel,
+  } as BrowserSession & { release(): Promise<void> }
+
+  return session
 }
 
 function normalizeAllowedOrigins(allowedOrigins: readonly string[]) {
