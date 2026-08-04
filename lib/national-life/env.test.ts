@@ -23,6 +23,12 @@ const REQUIRED_ENV = {
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ENABLED: 'true',
   NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: 'agent-1,agent-2',
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS: 'false',
+  NATIONAL_LIFE_BROWSER_PROVIDER: 'steel',
+  NATIONAL_LIFE_BROWSER_SHARD_ID: 'national-life-shard-1',
+  NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS: '10',
+  NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD: '2',
+  NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS: '1000',
+  NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS: '30000',
   BETTER_AUTH_URL: 'https://app.keepr.one',
 } as const
 
@@ -69,6 +75,63 @@ describe('National Life secure runtime environment', () => {
       'https://www.keeprone.com',
       'https://app.keeprone.com',
     ])
+    expect(env.browserProvider).toBe('steel')
+    expect(env.browserShardId).toBe('national-life-shard-1')
+    expect(env.maxInteractiveSessions).toBe(10)
+    expect(env.maxSessionsPerShard).toBe(2)
+    expect(env.interactiveReconnectBaseDelayMs).toBe(1000)
+    expect(env.interactiveReconnectMaxDelayMs).toBe(30000)
+  })
+
+  it.each(['steel', 'browserless'] as const)(
+    'accepts the %s browser provider',
+    async (provider) => {
+      const env = await parse({ NATIONAL_LIFE_BROWSER_PROVIDER: provider })
+
+      expect(env.browserProvider).toBe(provider)
+    },
+  )
+
+  it('rejects invalid browser capacity and reconnect configuration', async () => {
+    await expect(
+      parse({ NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS: '0' }),
+    ).rejects.toThrow(/MAX_INTERACTIVE_SESSIONS/)
+    await expect(
+      parse({ NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD: '-1' }),
+    ).rejects.toThrow(/MAX_SESSIONS_PER_SHARD/)
+    await expect(
+      parse({
+        NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS: '1',
+        NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD: '2',
+      }),
+    ).rejects.toThrow(/MAX_INTERACTIVE_SESSIONS/)
+    await expect(
+      parse({ NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS: '0' }),
+    ).rejects.toThrow(/RECONNECT_BASE_DELAY/)
+    await expect(
+      parse({
+        NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS: '30000',
+        NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS: '1000',
+      }),
+    ).rejects.toThrow(/RECONNECT_MAX_DELAY/)
+  })
+
+  it('rejects unsupported browser providers', async () => {
+    await expect(
+      parse({ NATIONAL_LIFE_BROWSER_PROVIDER: 'playwright' }),
+    ).rejects.toThrow(/BROWSER_PROVIDER/)
+  })
+
+  it('includes the exact observed Auth0 and MFA origins', async () => {
+    const env = await parse({
+      NATIONAL_LIFE_PORTAL_ORIGINS:
+        'https://www.nationallife.com,https://nlg-prod.auth0.com,https://nlg-prod.us.auth0.com,https://mfa.nationallife.com',
+      NATIONAL_LIFE_PORTAL_LOGIN_URL:
+        'https://www.nationallife.com/agent/auth/login?returnUrl=%2Fagent%2F',
+    })
+
+    expect(env.portalOrigins).toContain('https://nlg-prod.us.auth0.com')
+    expect(env.portalOrigins).toContain('https://mfa.nationallife.com')
   })
 
   it('reports the integration disabled when any required setting is missing', async () => {

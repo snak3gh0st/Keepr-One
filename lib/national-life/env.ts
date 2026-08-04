@@ -1,5 +1,11 @@
 import { Buffer } from 'node:buffer'
 import { z } from 'zod'
+import {
+  NATIONAL_LIFE_DEFAULT_BROWSER_PROVIDER,
+  NATIONAL_LIFE_DEFAULT_BROWSER_SHARD_ID,
+  NATIONAL_LIFE_DEFAULT_RECONNECT_BASE_DELAY_MS,
+  NATIONAL_LIFE_DEFAULT_RECONNECT_MAX_DELAY_MS,
+} from './constants'
 
 type RawNationalLifeEnv = {
   STEEL_BASE_URL?: string
@@ -19,6 +25,12 @@ type RawNationalLifeEnv = {
   NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS?: string
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS?: string
   NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP?: string
+  NATIONAL_LIFE_BROWSER_PROVIDER?: string
+  NATIONAL_LIFE_BROWSER_SHARD_ID?: string
+  NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS?: string
+  NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD?: string
+  NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS?: string
+  NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS?: string
   BETTER_AUTH_URL?: string
 }
 
@@ -40,7 +52,27 @@ export type NationalLifeEnv = {
   interactiveLoginAgentIds: ReadonlySet<string>
   interactiveLoginAllAgents: boolean
   keepAliveSsoJump: boolean
+  /** Optional only for legacy test doubles; the parser return type is complete. */
+  browserProvider?: 'steel' | 'browserless'
+  browserShardId?: string
+  maxInteractiveSessions?: number
+  maxSessionsPerShard?: number
+  interactiveReconnectBaseDelayMs?: number
+  interactiveReconnectMaxDelayMs?: number
 }
+
+export type ConfiguredNationalLifeEnv = NationalLifeEnv &
+  Required<
+    Pick<
+      NationalLifeEnv,
+      | 'browserProvider'
+      | 'browserShardId'
+      | 'maxInteractiveSessions'
+      | 'maxSessionsPerShard'
+      | 'interactiveReconnectBaseDelayMs'
+      | 'interactiveReconnectMaxDelayMs'
+    >
+  >
 
 const rawNationalLifeEnvSchema = z.object({
   STEEL_BASE_URL: z.string().trim().min(1),
@@ -60,6 +92,27 @@ const rawNationalLifeEnvSchema = z.object({
   NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: z.string(),
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS: z.string().trim().min(1).default('false'),
   NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP: z.string().trim().min(1).default('false'),
+  NATIONAL_LIFE_BROWSER_PROVIDER: z
+    .enum(['steel', 'browserless'])
+    .default(NATIONAL_LIFE_DEFAULT_BROWSER_PROVIDER),
+  NATIONAL_LIFE_BROWSER_SHARD_ID: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .default(NATIONAL_LIFE_DEFAULT_BROWSER_SHARD_ID),
+  NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS: z.string().trim().min(1),
+  NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD: z.string().trim().min(1),
+  NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS: z
+    .string()
+    .trim()
+    .min(1)
+    .default(String(NATIONAL_LIFE_DEFAULT_RECONNECT_BASE_DELAY_MS)),
+  NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS: z
+    .string()
+    .trim()
+    .min(1)
+    .default(String(NATIONAL_LIFE_DEFAULT_RECONNECT_MAX_DELAY_MS)),
   BETTER_AUTH_URL: z.string().trim().min(1),
 })
 
@@ -188,6 +241,17 @@ function parseViewerPort(value: string) {
   return port
 }
 
+function parsePositiveInteger(name: string, value: string) {
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`${name} must be a positive integer`)
+  }
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer`)
+  }
+  return parsed
+}
+
 function parseBoolean(name: string, value: string) {
   if (value !== 'true' && value !== 'false') {
     throw new Error(`${name} must be true or false`)
@@ -230,9 +294,9 @@ export function assertDistinctNationalLifeRuntimeWorkerIds(
   }
 }
 
-let cachedEnv: NationalLifeEnv | undefined
+let cachedEnv: ConfiguredNationalLifeEnv | undefined
 
-export function getNationalLifeEnv(): NationalLifeEnv {
+export function getNationalLifeEnv(): ConfiguredNationalLifeEnv {
   if (cachedEnv) {
     return cachedEnv
   }
@@ -271,6 +335,16 @@ export function getNationalLifeEnv(): NationalLifeEnv {
     NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP:
       process.env.NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP,
     BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
+    NATIONAL_LIFE_BROWSER_PROVIDER: process.env.NATIONAL_LIFE_BROWSER_PROVIDER,
+    NATIONAL_LIFE_BROWSER_SHARD_ID: process.env.NATIONAL_LIFE_BROWSER_SHARD_ID,
+    NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS:
+      process.env.NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS,
+    NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD:
+      process.env.NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD,
+    NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS:
+      process.env.NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS,
+    NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS:
+      process.env.NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS,
   }
   const parsed = rawNationalLifeEnvSchema.parse(rawEnv)
   const steelBaseUrl = parseSteelBaseUrl(parsed.STEEL_BASE_URL)
@@ -331,6 +405,33 @@ export function getNationalLifeEnv(): NationalLifeEnv {
     )
   }
 
+  const maxInteractiveSessions = parsePositiveInteger(
+    'NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS',
+    parsed.NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS,
+  )
+  const maxSessionsPerShard = parsePositiveInteger(
+    'NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD',
+    parsed.NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD,
+  )
+  if (maxInteractiveSessions < maxSessionsPerShard) {
+    throw new Error(
+      'NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS must be at least NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD',
+    )
+  }
+  const interactiveReconnectBaseDelayMs = parsePositiveInteger(
+    'NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS',
+    parsed.NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS,
+  )
+  const interactiveReconnectMaxDelayMs = parsePositiveInteger(
+    'NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS',
+    parsed.NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS,
+  )
+  if (interactiveReconnectBaseDelayMs > interactiveReconnectMaxDelayMs) {
+    throw new Error(
+      'NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS must be at least the base delay',
+    )
+  }
+
   cachedEnv = {
     steelBaseUrl: steelBaseUrl.toString().replace(/\/$/, ''),
     steelApiKey: parsed.STEEL_API_KEY,
@@ -360,6 +461,12 @@ export function getNationalLifeEnv(): NationalLifeEnv {
     interactiveLoginAgentIds,
     interactiveLoginAllAgents,
     keepAliveSsoJump,
+    browserProvider: parsed.NATIONAL_LIFE_BROWSER_PROVIDER,
+    browserShardId: parsed.NATIONAL_LIFE_BROWSER_SHARD_ID,
+    maxInteractiveSessions,
+    maxSessionsPerShard,
+    interactiveReconnectBaseDelayMs,
+    interactiveReconnectMaxDelayMs,
   }
   return cachedEnv
 }
