@@ -62,3 +62,37 @@ Additional verification:
 - No live Foresight session was used; verification is pure/local only.
 - The existing data discovery script still uses the carrier client's POST transport for the already-allowlisted `Get*` reads. This task did not add or broaden those calls.
 - The baseline lacks the data-script test file named by the brief; the missing path is documented above rather than creating an unrelated test file.
+
+## Review round 1 fix report
+
+### Findings addressed
+
+- Empty matching case anchors no longer create an index gap. The data discovery script now retains each matching anchor’s ID and HTML together, parses that anchor independently, and only then filters empty listings. A regression test covers an empty `lnkCaseName` anchor before a valid case.
+- `classifyEndpoints(...).data` now contains only discovered members of `FORESIGHT_READ_SERVICES`. Broad discovery heuristics remain available in `product` and `newCase`, but `GetProductList` and other non-allowlisted endpoints are no longer advertised as operational reads. Tests cover both allowlisted and heuristic-only endpoints.
+- The shape-only observation concern is deferred. Constructing `ForesightServiceObservation` belongs with the later browser adapter/worker boundary and would widen this pure contract/discovery fix.
+
+### Fix verification
+
+Focused command:
+
+```text
+pnpm exec vitest run lib/national-life/foresight-sync.test.ts scripts/national-life-describe-foresight-data.test.ts scripts/national-life-describe-foresight-newcase.test.ts scripts/national-life-describe-foresight-services.test.ts
+```
+
+Result:
+
+```text
+Test Files  3 passed (3)
+Tests       22 passed (22)
+```
+
+Additional fix checks:
+
+- Targeted ESLint: passed with no output.
+- `pnpm exec tsc --noEmit --pretty false`: passed with no output.
+- `git diff --check`: passed.
+- Touched discovery scripts still contain no new report/e-App/case-creation call and no Rapid Solve import.
+
+### Fix commit
+
+The fix will be included in the atomic commit recorded as `HEAD` after this report append; the final SHA is returned in the handoff.

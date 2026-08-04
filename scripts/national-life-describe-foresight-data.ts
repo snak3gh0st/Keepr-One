@@ -105,16 +105,20 @@ async function main() {
         return 'ran'
       }
 
-      const caseDocument = await startPage.evaluate(() => ({
-        html: document.documentElement.outerHTML,
-        ids: Array.from(document.querySelectorAll('a[id*="lnkCaseName"]')).map(
-          (node) => (node as HTMLElement).id,
-        ),
-      }))
-      const cases = parseForesightCaseListings(caseDocument.html).map((listing, index) => ({
-        ...listing,
-        id: caseDocument.ids[index],
-      }))
+      const caseAnchors = await startPage.evaluate(() =>
+        Array.from(document.querySelectorAll('a[id*="lnkCaseName"]')).map((node) => ({
+          id: (node as HTMLElement).id,
+          html: node.outerHTML,
+        })),
+      )
+      // Parse each anchor with its id attached. Empty matching anchors are
+      // intentionally skipped without shifting the id of a later case.
+      const cases = caseAnchors.flatMap((anchor) =>
+        parseForesightCaseListings(anchor.html).map((listing) => ({
+          ...listing,
+          id: anchor.id,
+        })),
+      )
       // A named case rather than a quick quote by default: a quick quote is five
       // numbers, and the question is whether a full illustration yields more.
       const target = wanted

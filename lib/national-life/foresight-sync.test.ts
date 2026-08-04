@@ -31,6 +31,16 @@ describe('Foresight read contract', () => {
     ])
   })
 
+  it('does not let an empty matching anchor shift the following case', () => {
+    expect(
+      parseForesightCaseListings(
+        '<a id="lnkCaseName0"></a><a id="lnkCaseName1">Valid case</a>',
+      ),
+    ).toEqual([
+      { externalKey: 'Valid case', displayName: 'Valid case', caseKind: 'CASE', product: null },
+    ])
+  })
+
   it('accepts only the five read services', () => {
     expect(FORESIGHT_READ_SERVICES).toHaveLength(5)
     expect(isForesightReadService('WidgetService.asmx/GetQuickCalcData')).toBe(true)

@@ -12,7 +12,8 @@ describe('classifyEndpoints', () => {
 
     expect(found.product).toContain('PageService.asmx/GetProductList')
     expect(found.newCase).toContain('PageService.asmx/CreateNewCase')
-    expect(found.data).toContain('WidgetService.asmx/GetQuickCalcData')
+    expect(found.data).toEqual(['WidgetService.asmx/GetQuickCalcData'])
+    expect(found.data).not.toContain('PageService.asmx/GetProductList')
   })
 
   // The report family produces a document. The whole point of the `data` bucket
@@ -30,13 +31,13 @@ describe('classifyEndpoints', () => {
     expect(found.newCase).toEqual([])
   })
 
-  // An endpoint can legitimately answer two questions at once — a product
-  // getter is both "product" and "data" — and hiding it from one bucket to keep
-  // the lists tidy would be the probe deciding for the reader.
-  it('lets one endpoint appear under more than one question', () => {
-    const found = classifyEndpoints(['PageService.asmx/GetTermProducts'])
+  it('keeps discovery-only product heuristics out of the operational read bucket', () => {
+    const found = classifyEndpoints([
+      'PageService.asmx/GetTermProducts',
+      'WidgetService.asmx/GetQuickCalcStatus',
+    ])
     expect(found.product).toEqual(['PageService.asmx/GetTermProducts'])
-    expect(found.data).toEqual(['PageService.asmx/GetTermProducts'])
+    expect(found.data).toEqual(['WidgetService.asmx/GetQuickCalcStatus'])
   })
 
   it('has nothing to report about an empty bundle', () => {
