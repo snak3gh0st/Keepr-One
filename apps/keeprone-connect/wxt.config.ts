@@ -12,13 +12,16 @@ const manifestKeyPath = resolve(__dirname, '.keys/manifest-key.txt')
 const manifestKey = existsSync(manifestKeyPath)
   ? readFileSync(manifestKeyPath, 'utf8').trim()
   : undefined
+const isChromeWebStoreBuild = process.env.WXT_CHROME_WEB_STORE === 'true'
 
 export default defineConfig({
   manifest: {
     name: 'KeeproneConnect',
     description: 'KeeproneConnect sincroniza dados do National Life no seu navegador, com segurança.',
     version: '0.1.0',
-    ...(manifestKey ? { key: manifestKey } : {}),
+    // Chrome Web Store rejects the development-only key field. Keep it for
+    // unpacked local builds so the smoke-test extension retains its stable ID.
+    ...(!isChromeWebStoreBuild && manifestKey ? { key: manifestKey } : {}),
     permissions: ['storage', 'tabs'],
     host_permissions: ['https://www.nationallife.com/*', `${keeprOrigin}/*`],
     externally_connectable: {
