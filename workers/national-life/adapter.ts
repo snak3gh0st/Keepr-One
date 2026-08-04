@@ -13,6 +13,16 @@ import {
   reportTimeStamp as foresightReportTimeStamp,
 } from '../../lib/national-life/foresight-report'
 import {
+  FORESIGHT_READ_SERVICES,
+  describeForesightShape,
+  isForesightReadService,
+  parseForesightCaseListings,
+  redactForesightPayload,
+  summarizeForesightCase,
+  type ForesightCaseListing,
+  type ForesightServiceObservation,
+} from '../../lib/national-life/foresight-sync'
+import {
   syncNationalLifeGrid,
   type GridSyncResult,
 } from '../../lib/national-life/sync-grid'
@@ -82,6 +92,14 @@ const FORESIGHT_SSO_PATH = '/agent/sso/foresight'
 const FORESIGHT_REPORT_PATH = '/NWI/Main/ReportDisplay.rspx'
 const FORESIGHT_SSO_EXPIRED_CODE = 'FORESIGHT_SSO_EXPIRED'
 const FORESIGHT_REPORT_FAILED_CODE = 'FORESIGHT_REPORT_FAILED'
+const FORESIGHT_CASE_NOT_FOUND_CODE = 'FORESIGHT_CASE_NOT_FOUND'
+const FORESIGHT_CASE_AMBIGUOUS_CODE = 'FORESIGHT_CASE_AMBIGUOUS'
+
+export type ForesightReadResult = {
+  cases: ForesightCaseListing[]
+  selectedCase: ForesightCaseListing | null
+  services: ForesightServiceObservation[]
+}
 
 export type NationalLifeAuthenticationState =
   | { kind: 'AWAITING_LOGIN'; origin: string }
@@ -369,8 +387,146 @@ export class NationalLifeAdapter {
     }
   }
 
+  /// Reads the Foresight Recent panel and, only when a caller supplies an exact
+  /// carrier key, the five known read services for that one selected case.
+  ///
+  /// The tool is stateful: case selection changes the session token, so every
+  /// service is intentionally awaited before the next begins and the runtime
+  /// frame is rediscovered after each request.
+  async readForesight(input: { targetCaseKey?: string }): Promise<ForesightReadResult> {
+    try {
+      const startPage = await this.warmForesightStartPage()
+      const candidates = await this.readForesightCaseCandidates(startPage)
+      const cases = candidates.map(({ listing }) => listing)
+
+      if (!input.targetCaseKey) {
+        return { cases, selectedCase: null, services: [] }
+      }
+
+      const matches = candidates.filter(({ listing }) => listing.externalKey === input.targetCaseKey)
+      if (matches.length === 0) {
+        throw new NationalLifeAdapterError(
+          FORESIGHT_CASE_NOT_FOUND_CODE,
+          'National Life Foresight case was not found in Recent',
+        )
+      }
+      if (matches.length > 1) {
+        throw new NationalLifeAdapterError(
+          FORESIGHT_CASE_AMBIGUOUS_CODE,
+          'National Life Foresight case key matched more than one Recent case',
+        )
+      }
+      const [target] = matches
+
+      await startPage.click(`[id="${target.domId}"]`)
+      await this.getPage().waitForTimeout(20_000)
+
+      let selectedCase = target.listing
+      const services: ForesightServiceObservation[] = []
+      for (const serviceName of FORESIGHT_READ_SERVICES) {
+        if (!isForesightReadService(serviceName)) {
+          throw this.toPortalLayoutChanged()
+        }
+
+        const { frame, sessionToken } = await this.findForesightRuntimeFrame()
+        let payload: unknown
+        let validationState: ForesightServiceObservation['validationState'] = 'VALID'
+        try {
+          payload = await frame.evaluate<unknown, readonly [string, string]>(
+            async ([token, name]: readonly [string, string]) => {
+              const runtime = window as unknown as {
+                $ITAjax: { sendRequest(url: string, args: unknown[]): Promise<unknown> }
+                appPath: string
+              }
+              return runtime.$ITAjax.sendRequest(`${runtime.appPath}/Main/${name}`, [token])
+            },
+            [sessionToken, serviceName] as const,
+          )
+        } catch {
+          payload = { failed: 'FORESIGHT_SERVICE_READ_FAILED' }
+          validationState = 'INVALID'
+        }
+
+        if (isForesightServiceFailure(payload)) {
+          validationState = 'INVALID'
+        }
+        const summary = summarizeForesightCase(payload)
+        selectedCase = {
+          ...selectedCase,
+          caseKind: summary.caseKind ?? selectedCase.caseKind,
+          product: summary.product ?? selectedCase.product,
+        }
+        services.push({
+          serviceName,
+          payloadShape: describeForesightShape(payload),
+          payload: redactForesightPayload(payload),
+          validationState,
+        })
+      }
+
+      return { cases, selectedCase, services }
+    } catch (error) {
+      throw this.normalizeError(error)
+    }
+  }
+
   private getPage(): AdapterPage {
     return this.session.page as unknown as AdapterPage
+  }
+
+  private async warmForesightStartPage(): Promise<AdapterFrame> {
+    const page = this.getPage()
+    await this.openPortalHome()
+    await page.waitForTimeout(4_000)
+    await page.goto(new URL(FORESIGHT_SSO_PATH, this.config.loginUrl).toString(), {
+      waitUntil: 'domcontentloaded',
+      timeout: 60_000,
+    })
+    await page.waitForTimeout(15_000)
+
+    if (/auth0\.com/i.test(page.url())) {
+      throw new NationalLifeAdapterError(
+        FORESIGHT_SSO_EXPIRED_CODE,
+        'National Life illustration tool asked for a new login',
+      )
+    }
+
+    const startPage = page.frames().find((frame) => /StartPage\.aspx/i.test(frame.url()))
+    if (!startPage) {
+      throw this.toPortalLayoutChanged(FORESIGHT_SSO_EXPIRED_CODE)
+    }
+
+    return startPage
+  }
+
+  private async readForesightCaseCandidates(startPage: AdapterFrame) {
+    const anchors = await startPage.evaluate<Array<{ id: string; html: string }>>(() =>
+      Array.from(document.querySelectorAll('a[id*="lnkCaseName"]')).map((node) => ({
+        id: (node as HTMLElement).id,
+        html: (node as HTMLElement).outerHTML,
+      })),
+    )
+
+    return anchors.flatMap(({ id, html }) =>
+      parseForesightCaseListings(html).map((listing) => ({ listing, domId: id })),
+    )
+  }
+
+  private async findForesightRuntimeFrame(): Promise<{ frame: AdapterFrame; sessionToken: string }> {
+    for (const frame of this.getPage().frames()) {
+      const sessionToken = await frame
+        .evaluate<string | null>(() => {
+          const common = (window as unknown as { $ITCommon?: { sessionTokenId(): string } })
+            .$ITCommon
+          return common ? common.sessionTokenId() : null
+        })
+        .catch(() => null)
+      if (sessionToken) {
+        return { frame, sessionToken }
+      }
+    }
+
+    throw this.toPortalLayoutChanged(FORESIGHT_SSO_EXPIRED_CODE)
   }
 
   private async requireCarrierPage(expectedPage?: string) {
@@ -497,27 +653,10 @@ export class NationalLifeAdapter {
   ///
   /// Progress never reaches `IsComplete`; the document is served at 0.99.
   async renderForesightReport(
-    caseNameFragment?: string,
+    caseKey?: string,
   ): Promise<{ caseName: string; bytes: Buffer; mimeType: string } | null> {
     const page = this.getPage()
-
-    await page.goto(new URL(FORESIGHT_SSO_PATH, this.config.loginUrl).toString(), {
-      waitUntil: 'domcontentloaded',
-      timeout: 60_000,
-    })
-    await page.waitForTimeout(15_000)
-
-    if (/auth0\.com/i.test(page.url())) {
-      throw new NationalLifeAdapterError(
-        FORESIGHT_SSO_EXPIRED_CODE,
-        'National Life illustration tool asked for a new login',
-      )
-    }
-
-    const startPage = page.frames().find((frame) => /StartPage\.aspx/i.test(frame.url()))
-    if (!startPage) {
-      throw this.toPortalLayoutChanged(FORESIGHT_SSO_EXPIRED_CODE)
-    }
+    const startPage = await this.warmForesightStartPage()
 
     const cases = await startPage.evaluate<Array<{ id: string; name: string }>>(() =>
       Array.from(document.querySelectorAll('a[id*="lnkCaseName"]')).map((node) => ({
@@ -525,13 +664,31 @@ export class NationalLifeAdapter {
         name: (node.textContent ?? '').trim(),
       })),
     )
-    const target = caseNameFragment
-      ? cases.find((entry) =>
-          entry.name.toLowerCase().includes(caseNameFragment.toLowerCase()),
+    let target: { id: string; name: string } | undefined
+    if (caseKey) {
+      const exactMatches = cases.filter((entry) => entry.name === caseKey)
+      const matches =
+        exactMatches.length > 0
+          ? exactMatches
+          : cases.filter((entry) => entry.name.toLowerCase().includes(caseKey.toLowerCase()))
+      if (matches.length === 0) {
+        throw new NationalLifeAdapterError(
+          FORESIGHT_CASE_NOT_FOUND_CODE,
+          'National Life Foresight report case was not found in Recent',
         )
-      : cases.find((entry) => /-QQ-/i.test(entry.name)) ?? cases[0]
-    if (!target) {
-      return null
+      }
+      if (matches.length > 1) {
+        throw new NationalLifeAdapterError(
+          FORESIGHT_CASE_AMBIGUOUS_CODE,
+          'National Life Foresight report case key matched more than one Recent case',
+        )
+      }
+      ;[target] = matches
+    } else {
+      target = cases.find((entry) => /-QQ-/i.test(entry.name)) ?? cases[0]
+      if (!target) {
+        return null
+      }
     }
 
     // A WebForms postback link is driven by its handler, so a click that misses
@@ -604,7 +761,7 @@ export class NationalLifeAdapter {
   private toPortalLayoutChanged(safeCode = SELECTOR_NOT_FOUND_CODE) {
     return new NationalLifeAdapterError(PORTAL_LAYOUT_CHANGED_CODE, 'National Life portal layout changed', {
       safeCode,
-      portalUrl: this.getPage().url(),
+      portalUrl: safePortalUrl(this.getPage().url()),
     })
   }
 }
@@ -616,6 +773,24 @@ function hasErrorCode(error: unknown, code: string): error is Error & { code: st
     typeof (error as { code?: unknown }).code === 'string' &&
     (error as { code: string }).code === code
   )
+}
+
+function isForesightServiceFailure(value: unknown): boolean {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    typeof (value as { failed?: unknown }).failed === 'string'
+  )
+}
+
+function safePortalUrl(value: string): string | null {
+  try {
+    const url = new URL(value)
+    return url.origin === 'null' ? null : `${url.origin}${url.pathname}`
+  } catch {
+    return null
+  }
 }
 
 function normalizeWhitespace(value: string | null | undefined) {

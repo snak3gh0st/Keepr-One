@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { BrowserAutomationJob, BrowserJobOperation, Prisma } from '@prisma/client'
+import { Prisma, type BrowserAutomationJob, type BrowserJobOperation } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import {
   NATIONAL_LIFE_LOGIN_REQUIRED_CODES,
@@ -10,6 +10,7 @@ import {
   latestPdfStatusByIllustration,
   type IllustrationPdfStatus,
 } from './illustration-pdf-status'
+import type { ForesightRunStore } from './foresight-run-service'
 import { assertBrowserJobTransition, type BrowserJobState } from './job-state'
 import type { RapidSolveFailure, RapidSolveQuote } from './rapid-solve'
 import { redactDiagnostic } from './redaction'
@@ -86,12 +87,25 @@ export type NationalLifeGridJobInput = {
   gridKey: import('./portal-grid-client').NationalLifeGridKey
 }
 
+export type ForesightReadJobInput = {
+  foresightRunId: string
+  mode: 'INVENTORY' | 'DETAIL'
+  targetCaseId?: string
+}
+
+export type ForesightPdfJobInput = {
+  caseSnapshotId: string
+  caseKey: string
+}
+
 export type BrowserJobInput =
   | ConnectionTestJobInput
   | CaseReadSyncJobInput
   | RapidSolveQuoteJobInput
   | IllustrationPdfJobInput
   | NationalLifeGridJobInput
+  | ForesightReadJobInput
+  | ForesightPdfJobInput
 
 /// Three outcomes the screen has to tell apart, and it must not collapse them.
 /// ANSWERED means the carrier replied — including a reply that refuses to
@@ -105,6 +119,7 @@ export type RapidSolveQuoteStatus =
 export type BrowserJobRecord = {
   id: string
   agentId: string
+  deploymentScope?: string | null
   caseId: string | null
   provider: string
   operation: BrowserJobOperation
@@ -136,6 +151,7 @@ export type ClaimedBrowserJob = BrowserJobRecord
 
 export type CreateBrowserJobInput = {
   agentId: string
+  deploymentScope?: string | null
   caseId?: string | null
   operation: BrowserJobOperation
   idempotencyKey: string
@@ -172,6 +188,12 @@ export type BrowserJobRepository = {
 export type BrowserJobServiceDeps = {
   repository?: BrowserJobRepository
   connectionTestScopeId?: string
+  foresightRunStore?: Pick<ForesightRunStore, 'start'>
+  findForesightCaseSnapshot?(input: {
+    agentId: string
+    deploymentScope: string
+    caseSnapshotId: string
+  }): Promise<{ id: string; externalKey: string } | null>
   now?: () => Date
 }
 
@@ -318,6 +340,52 @@ function sanitizeConnectionTestScopeId(scopeId: string): string {
   return coerceIdentifier('scopeId', scopeId)
 }
 
+function sanitizeForesightMode(value: unknown): 'INVENTORY' | 'DETAIL' {
+  if (value !== 'INVENTORY' && value !== 'DETAIL') {
+    throw new Error('mode must be INVENTORY or DETAIL')
+  }
+  return value
+}
+
+function coerceExactForesightCaseKey(caseKey: string): string {
+  const normalized = coerceIdentifier('caseKey', caseKey)
+  if (normalized !== caseKey) {
+    throw new Error('caseKey must match the owned Foresight case exactly')
+  }
+  return caseKey
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+}
+
+async function resolveForesightRunStore(
+  deps?: BrowserJobServiceDeps,
+): Promise<Pick<ForesightRunStore, 'start'>> {
+  if (deps?.foresightRunStore) return deps.foresightRunStore
+  const { foresightRunStore } = await import('./foresight-run-service')
+  return foresightRunStore
+}
+
+async function findOwnedForesightCaseSnapshot(
+  input: { agentId: string; deploymentScope: string; caseSnapshotId: string },
+  deps?: BrowserJobServiceDeps,
+): Promise<{ id: string; externalKey: string } | null> {
+  if (deps?.findForesightCaseSnapshot) {
+    return deps.findForesightCaseSnapshot(input)
+  }
+
+  return prisma.nationalLifeForesightCaseSnapshot.findFirst({
+    where: {
+      id: input.caseSnapshotId,
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      provider: NATIONAL_LIFE_PROVIDER,
+    },
+    select: { id: true, externalKey: true },
+  })
+}
+
 function buildClaimLeaseExpiry(now: Date): Date {
   return new Date(now.getTime() + LEASE_DURATION_MS)
 }
@@ -429,6 +497,7 @@ const prismaBrowserJobRepository: BrowserJobRepository = {
     const job = await prisma.browserAutomationJob.create({
       data: {
         agentId: input.agentId,
+        deploymentScope: input.deploymentScope ?? null,
         caseId: input.caseId ?? null,
         provider: NATIONAL_LIFE_PROVIDER,
         operation: input.operation,
@@ -720,6 +789,99 @@ export function createBrowserJobService(deps?: BrowserJobServiceDeps) {
       return { jobId: created.id, duplicate: false }
     },
 
+    async enqueueForesightRead(input: {
+      agentId: string
+      deploymentScope: string
+      mode: 'INVENTORY' | 'DETAIL'
+      targetCaseId?: string
+    }): Promise<{ runId: string; jobId: string; duplicate: boolean }> {
+      const agentId = coerceIdentifier('agentId', input.agentId)
+      const deploymentScope = coerceIdentifier('deploymentScope', input.deploymentScope)
+      const mode = sanitizeForesightMode(input.mode)
+      const targetCaseId = input.targetCaseId
+        ? coerceIdentifier('targetCaseId', input.targetCaseId)
+        : undefined
+
+      if (mode === 'DETAIL' && !targetCaseId) {
+        throw new Error('targetCaseId is required for DETAIL mode')
+      }
+      if (mode === 'INVENTORY' && targetCaseId) {
+        throw new Error('targetCaseId is not allowed for INVENTORY mode')
+      }
+
+      if (targetCaseId) {
+        const snapshot = await findOwnedForesightCaseSnapshot(
+          { agentId, deploymentScope, caseSnapshotId: targetCaseId },
+          deps,
+        )
+        if (!snapshot) {
+          throw new Error('targetCaseId must identify an owned Foresight case snapshot')
+        }
+      }
+
+      const runStore = await resolveForesightRunStore(deps)
+      return runStore.start({
+        agentId,
+        deploymentScope,
+        mode,
+        ...(targetCaseId ? { targetCaseId } : {}),
+        now: resolveNow(deps),
+      })
+    },
+
+    async enqueueForesightPdf(input: {
+      agentId: string
+      deploymentScope: string
+      caseSnapshotId: string
+      caseKey: string
+    }): Promise<{ jobId: string; duplicate: boolean }> {
+      const agentId = coerceIdentifier('agentId', input.agentId)
+      const deploymentScope = coerceIdentifier('deploymentScope', input.deploymentScope)
+      const caseSnapshotId = coerceIdentifier('caseSnapshotId', input.caseSnapshotId)
+      const caseKey = coerceExactForesightCaseKey(input.caseKey)
+      const snapshot = await findOwnedForesightCaseSnapshot(
+        { agentId, deploymentScope, caseSnapshotId },
+        deps,
+      )
+
+      if (!snapshot) {
+        throw new Error('caseSnapshotId must identify an owned Foresight case snapshot')
+      }
+      if (snapshot.externalKey !== caseKey) {
+        throw new Error('caseKey must match the owned Foresight case exactly')
+      }
+
+      const now = resolveNow(deps)
+      const baseKey = `national-life:foresight-pdf:${agentId}:${deploymentScope}:${caseSnapshotId}`
+      const active = await repository.findMostRecentByRetryKeyFamily(baseKey, [
+        ...ACTIVE_JOB_STATES,
+      ])
+      if (active) {
+        return { jobId: active.id, duplicate: true }
+      }
+
+      const existing = await repository.findMostRecentByRetryKeyFamily(baseKey)
+      try {
+        const created = await repository.create({
+          agentId,
+          deploymentScope,
+          operation: 'GENERATE_FORESIGHT_PDF',
+          idempotencyKey: existing ? buildCaseSyncRetryKey(baseKey) : baseKey,
+          input: { caseSnapshotId, caseKey },
+          availableAt: now,
+        })
+        return { jobId: created.id, duplicate: false }
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error
+
+        const activeAfterRace = await repository.findMostRecentByRetryKeyFamily(baseKey, [
+          ...ACTIVE_JOB_STATES,
+        ])
+        if (!activeAfterRace) throw error
+        return { jobId: activeAfterRace.id, duplicate: true }
+      }
+    },
+
     /// Where each pending or failed render stands, keyed by illustration.
     ///
     /// Without this the screen had no way to say anything after "pedido
@@ -905,6 +1067,24 @@ export async function enqueueIllustrationPdf(input: {
   return createBrowserJobService().enqueueIllustrationPdf(input)
 }
 
+export async function enqueueForesightRead(input: {
+  agentId: string
+  deploymentScope: string
+  mode: 'INVENTORY' | 'DETAIL'
+  targetCaseId?: string
+}): Promise<{ runId: string; jobId: string; duplicate: boolean }> {
+  return createBrowserJobService().enqueueForesightRead(input)
+}
+
+export async function enqueueForesightPdf(input: {
+  agentId: string
+  deploymentScope: string
+  caseSnapshotId: string
+  caseKey: string
+}): Promise<{ jobId: string; duplicate: boolean }> {
+  return createBrowserJobService().enqueueForesightPdf(input)
+}
+
 export async function getIllustrationPdfStatuses(
   agentId: string,
 ): Promise<Map<string, IllustrationPdfStatus>> {
@@ -937,8 +1117,8 @@ export async function releaseExpiredLeases(now?: Date): Promise<number> {
   return createBrowserJobService().releaseExpiredLeases(now)
 }
 
-/// Requeues every job parked for want of a carrier login, for the agent whose
-/// login just went through.
+/// Requeues jobs parked for want of a carrier login in the scope whose login
+/// just went through. Legacy jobs predate per-job scope and remain compatible.
 ///
 /// Takes a transaction client rather than the module's own `prisma`, so it
 /// composes into whichever transaction just moved the carrier session to
@@ -954,7 +1134,7 @@ export async function releaseExpiredLeases(now?: Date): Promise<number> {
 /// human connection is the event that makes the job claimable again.
 export async function releaseJobsBlockedOnCarrierLogin(
   tx: Prisma.TransactionClient,
-  input: { agentId: string; now: Date },
+  input: { agentId: string; deploymentScope: string; now: Date },
 ): Promise<void> {
   assertBrowserJobTransition('ACTION_REQUIRED', 'QUEUED')
   await tx.browserAutomationJob.updateMany({
@@ -963,6 +1143,11 @@ export async function releaseJobsBlockedOnCarrierLogin(
       provider: NATIONAL_LIFE_PROVIDER,
       state: 'ACTION_REQUIRED',
       safeErrorCode: { in: [...NATIONAL_LIFE_LOGIN_REQUIRED_CODES] },
+      OR: [
+        { deploymentScope: input.deploymentScope },
+        // Existing jobs have no direct scope; preserve their prior behavior.
+        { deploymentScope: null },
+      ],
     },
     data: { state: 'QUEUED', availableAt: input.now, safeErrorCode: null },
   })

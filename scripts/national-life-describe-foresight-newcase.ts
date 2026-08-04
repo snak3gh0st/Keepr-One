@@ -30,6 +30,7 @@ import {
   captureSteelSessionContext,
   createSteelBrowserSession,
 } from '../workers/national-life/steel-session'
+import { FORESIGHT_READ_SERVICES } from '../lib/national-life/foresight-sync'
 
 const FORESIGHT_PATH = '/agent/sso/foresight'
 
@@ -50,9 +51,9 @@ export function classifyEndpoints(endpoints: readonly string[]): {
   return {
     product: pick(/product|plan|solution|portfolio|term|flex|iul|universal/i),
     newCase: pick(/new|create|add|start|wizard|setup(?!Report)|initial/i),
-    // Deliberately excludes the report family: those produce a document, and
-    // the question here is whether anything produces *values*.
-    data: pick(/get(?!Report)|calc|value|ledger|grid|summary|result|illustrat/i),
+    // Operational reads are exactly the shared allowlist. Broader endpoint
+    // discovery remains in the product/newCase buckets above.
+    data: FORESIGHT_READ_SERVICES.filter((service) => endpoints.includes(service)),
   }
 }
 

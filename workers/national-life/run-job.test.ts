@@ -204,8 +204,37 @@ function createDeps(options: {
   storedSession?: StoredAgentIntegrationSession | null
   assertAuthenticated?: () => Promise<void>
   readCase?: () => Promise<NationalLifeCaseObservation>
+  readForesight?: (input: { targetCaseKey?: string }) => Promise<{
+    cases: Array<{
+      externalKey: string
+      displayName: string
+      caseKind: string | null
+      product: string | null
+    }>
+    selectedCase: {
+      externalKey: string
+      displayName: string
+      caseKind: string | null
+      product: string | null
+    } | null
+    services: Array<{
+      serviceName: string
+      payloadShape: unknown
+      payload: unknown
+      validationState: 'VALID' | 'INVALID'
+    }>
+  }>
+  foresightCase?: {
+    id: string
+    externalKey: string
+    displayName: string
+  } | null
   requestRapidSolveQuote?: () => Promise<RapidSolveQuote | RapidSolveFailure>
-  renderForesightReport?: () => { caseName: string; bytes: Buffer; mimeType: string } | null
+  renderForesightReport?: (caseKey?: string) => {
+    caseName: string
+    bytes: Buffer
+    mimeType: string
+  } | null
   syncGrid?: () => Promise<{
     recordsTotal: number
     rowsFetched: number
@@ -227,6 +256,23 @@ function createDeps(options: {
   const savedContexts: Array<{ sessionId: string; context: SessionContext }> = []
   const reattached: string[] = []
   const reconciledRuns: string[] = []
+  const savedForesightInventories: Array<{
+    runId: string
+    agentId: string
+    deploymentScope: string
+    cases: Array<{ externalKey: string }>
+  }> = []
+  const savedForesightServices: Array<{ caseSnapshotId: string }> = []
+  const savedForesightProgress: Array<Record<string, unknown>> = []
+  const savedForesightDocuments: Array<{
+    agentId: string
+    deploymentScope: string
+    caseSnapshotId: string
+    reportKey: string
+  }> = []
+  const foresightReadInputs: Array<{ targetCaseKey?: string }> = []
+  const foresightReportInputs: Array<string | undefined> = []
+  const reconciledForesightRuns: string[] = []
 
   return {
     calls,
@@ -239,6 +285,13 @@ function createDeps(options: {
     savedContexts,
     reattached,
     reconciledRuns,
+    savedForesightInventories,
+    savedForesightServices,
+    savedForesightProgress,
+    savedForesightDocuments,
+    foresightReadInputs,
+    foresightReportInputs,
+    reconciledForesightRuns,
     deps: {
       env: buildEnv(),
       workerId: 'worker-1',
@@ -284,11 +337,28 @@ function createDeps(options: {
         return browser.session
       },
       createAdapter: () => ({
-        async renderForesightReport() {
+        async readForesight(input: { targetCaseKey?: string }) {
+          calls.push('foresight:read')
+          foresightReadInputs.push(input)
+          return options.readForesight?.(input) ?? {
+            cases: [
+              {
+                externalKey: 'foresight-case-1',
+                displayName: 'Foresight case one',
+                caseKind: 'CASE',
+                product: 'IUL',
+              },
+            ],
+            selectedCase: null,
+            services: [],
+          }
+        },
+        async renderForesightReport(caseKey?: string) {
           calls.push('foresight:render')
+          foresightReportInputs.push(caseKey)
           return options.renderForesightReport === undefined
             ? { caseName: 'RP-Teste-QQ-1', bytes: Buffer.from('%PDF-1.7'), mimeType: 'application/pdf' }
-            : options.renderForesightReport()
+            : options.renderForesightReport(caseKey)
         },
         async openPortalHome() {
           calls.push('adapter:open-portal')
@@ -339,6 +409,43 @@ function createDeps(options: {
       syncRunStore: {
         async reconcile(runId: string) {
           reconciledRuns.push(runId)
+        },
+      },
+      foresightRunStore: {
+        async start() {
+          throw new Error('Foresight run start is not used by the worker')
+        },
+        async findCase() {
+          return options.foresightCase ?? null
+        },
+        async saveInventory(input: {
+          runId: string
+          agentId: string
+          deploymentScope: string
+          cases: Array<{ externalKey: string }>
+        }) {
+          savedForesightInventories.push(input)
+          return new Map([['foresight-case-1', 'snapshot-1']])
+        },
+        async saveService(input: { caseSnapshotId: string }) {
+          savedForesightServices.push(input)
+        },
+        async saveDocument(input: {
+          agentId: string
+          deploymentScope: string
+          caseSnapshotId: string
+          reportKey: string
+        }) {
+          savedForesightDocuments.push(input)
+        },
+        async updateProgress(input: { patch: Record<string, unknown> }) {
+          savedForesightProgress.push(input.patch)
+        },
+        async reconcile(input: { runId: string }) {
+          reconciledForesightRuns.push(input.runId)
+        },
+        async getStatus() {
+          return null
         },
       },
       async runExclusively<T>(work: () => Promise<T>) {
@@ -541,6 +648,261 @@ describe('National Life restored-context job orchestration', () => {
       to: 'SUCCEEDED',
       result: { recordsTotal: 2, rowsFetched: 2, written: 2 },
     })
+  })
+
+  it('persists every Foresight inventory listing without service observations', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'SYNC_FORESIGHT_READ',
+        caseId: null,
+        input: { foresightRunId: 'foresight-run-1', mode: 'INVENTORY' },
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls).toContain('foresight:read')
+    expect(test.savedForesightInventories).toEqual([
+      expect.objectContaining({
+        runId: 'foresight-run-1',
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        cases: [expect.objectContaining({ externalKey: 'foresight-case-1' })],
+      }),
+    ])
+    expect(test.savedForesightServices).toEqual([])
+    expect(test.reconciledForesightRuns).toEqual(['foresight-run-1'])
+    expect(test.store.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
+  })
+
+  it('persists one Foresight detail service at a time with progress for the exact owned case', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'SYNC_FORESIGHT_READ',
+        caseId: null,
+        input: {
+          foresightRunId: 'foresight-run-1',
+          mode: 'DETAIL',
+          targetCaseId: 'snapshot-1',
+        },
+      }),
+      foresightCase: {
+        id: 'snapshot-1',
+        externalKey: 'exact-foresight-case-key',
+        displayName: 'Exact Foresight case',
+      },
+      readForesight: async () => ({
+        cases: [],
+        selectedCase: {
+          externalKey: 'exact-foresight-case-key',
+          displayName: 'Exact Foresight case',
+          caseKind: 'CASE',
+          product: 'IUL',
+        },
+        services: [
+          {
+            serviceName: 'WidgetService.asmx/GetQuickCalcData',
+            payloadShape: { premium: 'number' },
+            payload: { premium: 100 },
+            validationState: 'VALID',
+          },
+          {
+            serviceName: 'WidgetService.asmx/GetState',
+            payloadShape: { state: 'string(4)' },
+            payload: { state: 'OPEN' },
+            validationState: 'VALID',
+          },
+        ],
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.foresightReadInputs).toEqual([
+      { targetCaseKey: 'exact-foresight-case-key' },
+    ])
+    expect(test.savedForesightServices).toEqual([
+      expect.objectContaining({
+        caseSnapshotId: 'snapshot-1',
+        observation: expect.objectContaining({ serviceName: 'WidgetService.asmx/GetQuickCalcData' }),
+      }),
+      expect.objectContaining({
+        caseSnapshotId: 'snapshot-1',
+        observation: expect.objectContaining({ serviceName: 'WidgetService.asmx/GetState' }),
+      }),
+    ])
+    expect(test.savedForesightProgress).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ totalServices: 2, completedServices: 0 }),
+        expect.objectContaining({ completedServices: 1, currentService: 'WidgetService.asmx/GetQuickCalcData' }),
+        expect.objectContaining({ completedServices: 2, currentService: 'WidgetService.asmx/GetState' }),
+      ]),
+    )
+    expect(test.reconciledForesightRuns).toEqual(['foresight-run-1'])
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'SUCCEEDED',
+      result: { caseSnapshotId: 'snapshot-1', servicesRead: 2 },
+    })
+  })
+
+  it('rejects an unowned Foresight detail snapshot before opening a browser', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'SYNC_FORESIGHT_READ',
+        caseId: null,
+        input: {
+          foresightRunId: 'foresight-run-1',
+          mode: 'DETAIL',
+          targetCaseId: 'snapshot-missing',
+        },
+      }),
+      foresightCase: null,
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls).not.toContain('steel:create-restored')
+    expect(test.calls).not.toContain('adapter:open-portal')
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'FAILED',
+      safeErrorCode: 'FORESIGHT_CASE_NOT_FOUND',
+    })
+    expect(test.reconciledForesightRuns).toEqual(['foresight-run-1'])
+  })
+
+  it('persists a Foresight PDF only on the exact owned case snapshot', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'GENERATE_FORESIGHT_PDF',
+        caseId: null,
+        input: { caseSnapshotId: 'snapshot-1', caseKey: 'exact-foresight-case-key' },
+      }),
+      foresightCase: {
+        id: 'snapshot-1',
+        externalKey: 'exact-foresight-case-key',
+        displayName: 'Exact Foresight case',
+      },
+      renderForesightReport: () => ({
+        caseName: 'exact-foresight-case-key',
+        bytes: Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(1_025)]),
+        mimeType: 'application/pdf',
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.foresightReportInputs).toEqual(['exact-foresight-case-key'])
+    expect(test.savedForesightDocuments).toEqual([
+      expect.objectContaining({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        caseSnapshotId: 'snapshot-1',
+        reportKey: 'foresight-report',
+      }),
+    ])
+    expect(test.calls).not.toContain('illustration:document')
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'SUCCEEDED',
+      result: { caseSnapshotId: 'snapshot-1', rendered: true },
+    })
+  })
+
+  it('fails a non-PDF Foresight report without persisting a document', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'GENERATE_FORESIGHT_PDF',
+        caseId: null,
+        input: { caseSnapshotId: 'snapshot-1', caseKey: 'exact-foresight-case-key' },
+      }),
+      foresightCase: {
+        id: 'snapshot-1',
+        externalKey: 'exact-foresight-case-key',
+        displayName: 'Exact Foresight case',
+      },
+      renderForesightReport: () => ({
+        caseName: 'exact-foresight-case-key',
+        bytes: Buffer.from('<html>carrier error</html>'),
+        mimeType: 'text/html',
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.savedForesightDocuments).toEqual([])
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'FAILED',
+      safeErrorCode: 'FORESIGHT_REPORT_FAILED',
+    })
+  })
+
+  it('rejects a Foresight PDF rendered for a different case than the exact requested key', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'GENERATE_FORESIGHT_PDF',
+        caseId: null,
+        input: { caseSnapshotId: 'snapshot-1', caseKey: 'exact-foresight-case-key' },
+      }),
+      foresightCase: {
+        id: 'snapshot-1',
+        externalKey: 'exact-foresight-case-key',
+        displayName: 'Exact Foresight case',
+      },
+      renderForesightReport: () => ({
+        caseName: 'similarly named case',
+        bytes: Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(1_025)]),
+        mimeType: 'application/pdf',
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.savedForesightDocuments).toEqual([])
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'FAILED',
+      safeErrorCode: 'FORESIGHT_CASE_NOT_FOUND',
+    })
+  })
+
+  it('pauses only the matching Foresight run when its SSO session expires', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'SYNC_FORESIGHT_READ',
+        caseId: null,
+        input: { foresightRunId: 'foresight-run-1', mode: 'INVENTORY' },
+      }),
+      readForesight: async () => {
+        throw Object.assign(new Error('Foresight requested another login'), {
+          code: 'FORESIGHT_SSO_EXPIRED',
+        })
+      },
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.invalidations).toEqual([])
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'ACTION_REQUIRED',
+      safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
+    })
+    expect(test.reconciledForesightRuns).toEqual(['foresight-run-1'])
+    expect(test.reconciledRuns).toEqual([])
+  })
+
+  it('disconnects, without closing or releasing, a live session reattached for a Foresight read', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'SYNC_FORESIGHT_READ',
+        caseId: null,
+        input: { foresightRunId: 'foresight-run-1', mode: 'INVENTORY' },
+      }),
+      storedSession: buildStoredSession({ liveSteelSessionId: 'steel-live-1' }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.calls).toContain('foresight:read')
+    expect(test.calls).toContain('browser:disconnect')
+    expect(test.calls).not.toContain('browser:close')
   })
 
   it('sends the date and age the carrier expects, through the queue', async () => {

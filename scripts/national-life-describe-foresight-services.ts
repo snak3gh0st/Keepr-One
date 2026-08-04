@@ -27,6 +27,7 @@ import {
   captureSteelSessionContext,
   createSteelBrowserSession,
 } from '../workers/national-life/steel-session'
+import { isForesightReadService } from '../lib/national-life/foresight-sync'
 
 const FORESIGHT_PATH = '/agent/sso/foresight'
 
@@ -197,6 +198,7 @@ async function main() {
           src: bundle.src.split('?')[0],
           chars: bundle.chars,
           documentEndpoints: documentEndpoints(endpoints),
+          readServices: endpoints.filter(isForesightReadService),
           endpoints: endpoints.slice(0, 60),
         }
       })
@@ -211,6 +213,7 @@ async function main() {
             bundles: perBundle.map(({ src, chars }) => ({ src, chars })),
             // The answer to "where does the PDF come from", if it is named at all.
             documentEndpoints: documentEndpoints(all),
+            readServices: all.filter(isForesightReadService),
             callSites: Object.fromEntries(
               documentEndpoints(all).map((endpoint) => [
                 endpoint,

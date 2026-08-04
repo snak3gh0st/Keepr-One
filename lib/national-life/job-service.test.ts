@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { extname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { describe, expect, it } from 'vitest'
 import { assertBrowserJobTransition, type BrowserJobState } from './job-state'
 import {
@@ -23,6 +23,7 @@ function buildJob(
   return {
     id: overrides.id ?? `job-${Math.random().toString(36).slice(2, 10)}`,
     agentId: overrides.agentId,
+    deploymentScope: overrides.deploymentScope ?? null,
     caseId: overrides.caseId ?? null,
     provider: overrides.provider ?? 'NATIONAL_LIFE',
     operation: overrides.operation,
@@ -123,6 +124,7 @@ function createInMemoryRepository(
       const created = buildJob({
         id: `job-${jobs.length + 1}`,
         agentId: input.agentId,
+        deploymentScope: input.deploymentScope ?? null,
         caseId: input.caseId ?? null,
         operation: input.operation,
         idempotencyKey: input.idempotencyKey,
@@ -797,6 +799,357 @@ describe('Rapid Solve quote jobs', () => {
   })
 })
 
+describe('Foresight jobs', () => {
+  const now = new Date('2026-08-04T14:30:00.000Z')
+  const ownedSnapshot = {
+    id: 'snapshot-1',
+    agentId: 'agent-1',
+    deploymentScope: 'scope-1',
+    externalKey: 'RP-Silva-QQ-08032026',
+  }
+
+  function createService(options: {
+    snapshots?: Array<typeof ownedSnapshot>
+    startResult?: { runId: string; jobId: string; duplicate: boolean }
+  } = {}) {
+    const repository = createInMemoryRepository()
+    const starts: Array<{
+      agentId: string
+      deploymentScope: string
+      mode: 'INVENTORY' | 'DETAIL'
+      targetCaseId?: string
+      now: Date
+    }> = []
+    const snapshotLookups: Array<{
+      agentId: string
+      deploymentScope: string
+      caseSnapshotId: string
+    }> = []
+    const snapshots = options.snapshots ?? [ownedSnapshot]
+    const service = createBrowserJobService({
+      repository,
+      now: () => now,
+      foresightRunStore: {
+        async start(input) {
+          starts.push(input)
+          return options.startResult ?? {
+            runId: 'foresight-run-1',
+            jobId: 'foresight-job-1',
+            duplicate: false,
+          }
+        },
+      },
+      async findForesightCaseSnapshot(input) {
+        snapshotLookups.push(input)
+        return (
+          snapshots.find(
+            (snapshot) =>
+              snapshot.id === input.caseSnapshotId &&
+              snapshot.agentId === input.agentId &&
+              snapshot.deploymentScope === input.deploymentScope,
+          ) ?? null
+        )
+      },
+    })
+
+    return { repository, service, starts, snapshotLookups }
+  }
+
+  function createConcurrentUniquePdfRepository() {
+    const repository = createInMemoryRepository()
+    let activeLookupCalls = 0
+    let releaseActiveLookups!: () => void
+    const bothActiveLookupsReached = new Promise<void>((resolve) => {
+      releaseActiveLookups = resolve
+    })
+    let existingLookupCalls = 0
+    let releaseExistingLookups!: () => void
+    const bothExistingLookupsReached = new Promise<void>((resolve) => {
+      releaseExistingLookups = resolve
+    })
+    const findMostRecent = repository.findMostRecentByRetryKeyFamily.bind(repository)
+    repository.findMostRecentByRetryKeyFamily = async (baseKey, states) => {
+      if (states?.length) {
+        activeLookupCalls += 1
+        if (activeLookupCalls === 2) releaseActiveLookups()
+        if (activeLookupCalls <= 2) {
+          await bothActiveLookupsReached
+          return null
+        }
+      } else {
+        existingLookupCalls += 1
+        if (existingLookupCalls === 2) releaseExistingLookups()
+        if (existingLookupCalls <= 2) {
+          await bothExistingLookupsReached
+          return null
+        }
+      }
+      return findMostRecent(baseKey, states)
+    }
+    let createCalls = 0
+    const createdIdempotencyKeys = new Set<string>()
+    let releaseCreates!: () => void
+    const bothCreatesReached = new Promise<void>((resolve) => {
+      releaseCreates = resolve
+    })
+    const create = repository.create.bind(repository)
+
+    repository.create = async (input) => {
+      createCalls += 1
+      if (createCalls === 2) releaseCreates()
+      await bothCreatesReached
+
+      if (createdIdempotencyKeys.has(input.idempotencyKey)) {
+        throw new Prisma.PrismaClientKnownRequestError('duplicate idempotency key', {
+          code: 'P2002',
+          clientVersion: 'test',
+        })
+      }
+
+      createdIdempotencyKeys.add(input.idempotencyKey)
+      return create(input)
+    }
+
+    return repository
+  }
+
+  it.each([
+    [{ agentId: 'https://carrier.example/agent', deploymentScope: 'scope-1', mode: 'INVENTORY' }],
+    [{ agentId: 'agent-1', deploymentScope: 'https://carrier.example/scope', mode: 'INVENTORY' }],
+    [{ agentId: 'agent-1', deploymentScope: 'scope-1', mode: '' }],
+  ])('rejects a URL or empty mode before creating a Foresight run', async (input) => {
+    const test = createService()
+
+    await expect(test.service.enqueueForesightRead(input as never)).rejects.toThrow()
+    expect(test.starts).toEqual([])
+  })
+
+  it('rejects empty identifiers and URLs before creating a Foresight PDF job', async () => {
+    const test = createService()
+    const validInput = {
+      agentId: 'agent-1',
+      deploymentScope: 'scope-1',
+      caseSnapshotId: 'snapshot-1',
+      caseKey: ownedSnapshot.externalKey,
+    }
+
+    for (const input of [
+      { ...validInput, agentId: 'https://carrier.example/agent' },
+      { ...validInput, deploymentScope: 'https://carrier.example/scope' },
+      { ...validInput, caseSnapshotId: '' },
+      { ...validInput, caseKey: '' },
+    ]) {
+      await expect(test.service.enqueueForesightPdf(input)).rejects.toThrow()
+    }
+
+    expect(test.snapshotLookups).toEqual([])
+    await expect(test.repository.snapshot()).resolves.toEqual([])
+  })
+
+  it('keeps inventory and detail requests separate and requires exactly one detail target', async () => {
+    const test = createService()
+
+    await expect(
+      test.service.enqueueForesightRead({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        mode: 'DETAIL',
+      }),
+    ).rejects.toThrow('targetCaseId is required for DETAIL mode')
+    await expect(
+      test.service.enqueueForesightRead({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        mode: 'INVENTORY',
+        targetCaseId: 'snapshot-1',
+      }),
+    ).rejects.toThrow('targetCaseId is not allowed for INVENTORY mode')
+    expect(test.starts).toEqual([])
+    expect(test.snapshotLookups).toEqual([])
+  })
+
+  it('rejects unknown, cross-agent, and cross-scope detail snapshot ids identically', async () => {
+    const test = createService({
+      snapshots: [{ ...ownedSnapshot, agentId: 'agent-2' }],
+    })
+    const input = {
+      agentId: 'agent-1',
+      deploymentScope: 'scope-1',
+      mode: 'DETAIL' as const,
+      targetCaseId: 'snapshot-1',
+    }
+
+    await expect(test.service.enqueueForesightRead(input)).rejects.toThrow(
+      'targetCaseId must identify an owned Foresight case snapshot',
+    )
+    await expect(
+      test.service.enqueueForesightRead({ ...input, targetCaseId: 'snapshot-missing' }),
+    ).rejects.toThrow('targetCaseId must identify an owned Foresight case snapshot')
+    await expect(
+      createService().service.enqueueForesightRead({ ...input, deploymentScope: 'scope-2' }),
+    ).rejects.toThrow('targetCaseId must identify an owned Foresight case snapshot')
+    expect(test.starts).toEqual([])
+  })
+
+  it('returns the active same-scope read run as a duplicate', async () => {
+    const test = createService({
+      startResult: { runId: 'run-active', jobId: 'job-active', duplicate: true },
+    })
+
+    await expect(
+      test.service.enqueueForesightRead({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        mode: 'DETAIL',
+        targetCaseId: 'snapshot-1',
+      }),
+    ).resolves.toEqual({ runId: 'run-active', jobId: 'job-active', duplicate: true })
+    expect(test.starts).toEqual([
+      {
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        mode: 'DETAIL',
+        targetCaseId: 'snapshot-1',
+        now,
+      },
+    ])
+  })
+
+  it('keeps the Foresight read path out of Rapid Solve and illustration PDF operations', async () => {
+    const test = createService()
+
+    await test.service.enqueueForesightRead({
+      agentId: 'agent-1',
+      deploymentScope: 'scope-1',
+      mode: 'INVENTORY',
+    })
+
+    await expect(test.repository.snapshot()).resolves.not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          operation: expect.stringMatching(/GET_RAPID_SOLVE_QUOTE|GENERATE_ILLUSTRATION_PDF/),
+        }),
+      ]),
+    )
+    expect(test.starts).toHaveLength(1)
+  })
+
+  it('enqueues an owned snapshot PDF with its validated exact case key', async () => {
+    const test = createService()
+
+    await expect(
+      test.service.enqueueForesightPdf({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        caseSnapshotId: 'snapshot-1',
+        caseKey: 'RP-Silva-QQ-08032026',
+      }),
+    ).resolves.toEqual({ jobId: 'job-1', duplicate: false })
+    await expect(test.repository.snapshot()).resolves.toEqual([
+      expect.objectContaining({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        operation: 'GENERATE_FORESIGHT_PDF',
+        idempotencyKey: 'national-life:foresight-pdf:agent-1:scope-1:snapshot-1',
+        input: {
+          caseSnapshotId: 'snapshot-1',
+          caseKey: 'RP-Silva-QQ-08032026',
+        },
+      }),
+    ])
+  })
+
+  it('deduplicates the same Foresight PDF in one agent deployment scope', async () => {
+    const test = createService()
+    const input = {
+      agentId: 'agent-1',
+      deploymentScope: 'scope-1',
+      caseSnapshotId: 'snapshot-1',
+      caseKey: ownedSnapshot.externalKey,
+    }
+
+    const first = await test.service.enqueueForesightPdf(input)
+    await expect(test.service.enqueueForesightPdf(input)).resolves.toEqual({
+      jobId: first.jobId,
+      duplicate: true,
+    })
+    await expect(test.repository.snapshot()).resolves.toEqual([
+      expect.objectContaining({
+        operation: 'GENERATE_FORESIGHT_PDF',
+        idempotencyKey: 'national-life:foresight-pdf:agent-1:scope-1:snapshot-1',
+      }),
+    ])
+  })
+
+  it('returns the active PDF when concurrent creation collides on the unique key', async () => {
+    const repository = createConcurrentUniquePdfRepository()
+    const service = createBrowserJobService({
+      repository,
+      now: () => now,
+      async findForesightCaseSnapshot(input) {
+        return input.caseSnapshotId === ownedSnapshot.id &&
+          input.agentId === ownedSnapshot.agentId &&
+          input.deploymentScope === ownedSnapshot.deploymentScope
+          ? ownedSnapshot
+          : null
+      },
+    })
+    const input = {
+      agentId: 'agent-1',
+      deploymentScope: 'scope-1',
+      caseSnapshotId: 'snapshot-1',
+      caseKey: ownedSnapshot.externalKey,
+    }
+
+    await expect(Promise.all([
+      service.enqueueForesightPdf(input),
+      service.enqueueForesightPdf(input),
+    ])).resolves.toEqual([
+      { jobId: 'job-1', duplicate: false },
+      { jobId: 'job-1', duplicate: true },
+    ])
+    await expect(repository.snapshot()).resolves.toHaveLength(1)
+  })
+
+  it('rejects a cross-agent PDF snapshot and a non-exact case key', async () => {
+    const test = createService()
+
+    await expect(
+      test.service.enqueueForesightPdf({
+        agentId: 'agent-2',
+        deploymentScope: 'scope-1',
+        caseSnapshotId: 'snapshot-1',
+        caseKey: ownedSnapshot.externalKey,
+      }),
+    ).rejects.toThrow('caseSnapshotId must identify an owned Foresight case snapshot')
+    await expect(
+      test.service.enqueueForesightPdf({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        caseSnapshotId: 'snapshot-1',
+        caseKey: 'Silva',
+      }),
+    ).rejects.toThrow('caseKey must match the owned Foresight case exactly')
+    await expect(
+      test.service.enqueueForesightPdf({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-2',
+        caseSnapshotId: 'snapshot-1',
+        caseKey: ownedSnapshot.externalKey,
+      }),
+    ).rejects.toThrow('caseSnapshotId must identify an owned Foresight case snapshot')
+    await expect(
+      test.service.enqueueForesightPdf({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        caseSnapshotId: 'snapshot-1',
+        caseKey: ` ${ownedSnapshot.externalKey}`,
+      }),
+    ).rejects.toThrow('caseKey must match the owned Foresight case exactly')
+    await expect(test.repository.snapshot()).resolves.toEqual([])
+  })
+})
+
 // The drain exists once so that neither connect path can forget it. Both call
 // sites run inside a Prisma transaction, which no suite here executes — so the
 // query itself is what gets pinned. Widen the filter and a login starts
@@ -819,10 +1172,14 @@ describe('releaseJobsBlockedOnCarrierLogin', () => {
     return { transaction, calls }
   }
 
-  it('revives only the jobs parked for the login that just happened', async () => {
+  it('revives only this scope and legacy jobs, never a second scope', async () => {
     const { transaction, calls } = recordUpdateMany()
 
-    await releaseJobsBlockedOnCarrierLogin(transaction, { agentId: 'agent-1', now })
+    await releaseJobsBlockedOnCarrierLogin(transaction, {
+      agentId: 'agent-1',
+      deploymentScope: 'scope-a',
+      now,
+    })
 
     expect(calls).toHaveLength(1)
     expect(calls[0].where).toEqual({
@@ -832,6 +1189,10 @@ describe('releaseJobsBlockedOnCarrierLogin', () => {
       safeErrorCode: {
         in: ['FORESIGHT_SSO_EXPIRED', 'NATIONAL_LIFE_RECONNECT_REQUIRED'],
       },
+      OR: [
+        { deploymentScope: 'scope-a' },
+        { deploymentScope: null },
+      ],
     })
   })
 
@@ -840,7 +1201,11 @@ describe('releaseJobsBlockedOnCarrierLogin', () => {
   it('queues the job for immediate pickup and clears what parked it', async () => {
     const { transaction, calls } = recordUpdateMany()
 
-    await releaseJobsBlockedOnCarrierLogin(transaction, { agentId: 'agent-1', now })
+    await releaseJobsBlockedOnCarrierLogin(transaction, {
+      agentId: 'agent-1',
+      deploymentScope: 'scope-a',
+      now,
+    })
 
     expect(calls[0].data).toEqual({
       state: 'QUEUED',

@@ -50,6 +50,16 @@ export function illustrationDocumentFilename(
   return `${who || 'ilustracao'}-${when}.pdf`
 }
 
+export function buildForesightDocumentFilename(caseName: string, at: Date): string {
+  const safeName = caseName
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 60)
+  return `${safeName || 'foresight-case'}-${at.toISOString().slice(0, 10)}.pdf`
+}
+
 /// A response is only a document if it actually is one. The carrier serves an
 /// HTML error page with status 200 when the session lapses mid-render, and
 /// storing that as a PDF would surface as a corrupt file much later.

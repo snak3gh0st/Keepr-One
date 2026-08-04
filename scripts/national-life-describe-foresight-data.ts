@@ -32,6 +32,11 @@ import {
   captureSteelSessionContext,
   createSteelBrowserSession,
 } from '../workers/national-life/steel-session'
+import {
+  FORESIGHT_READ_SERVICES,
+  describeForesightShape,
+  parseForesightCaseListings,
+} from '../lib/national-life/foresight-sync'
 
 const FORESIGHT_PATH = '/agent/sso/foresight'
 
@@ -39,49 +44,6 @@ const FORESIGHT_PATH = '/agent/sso/foresight'
 ///
 /// All are `Get*`. Nothing here computes, saves, or launches anything — the
 /// question is only what the tool is already willing to say.
-const SERVICES = [
-  'WidgetService.asmx/GetQuickCalcData',
-  'WidgetService.asmx/GetQuickCalcStatus',
-  'WidgetService.asmx/GetInsuredInformation',
-  'WidgetService.asmx/GetState',
-  'PageService.asmx/GetPolicyInformation',
-] as const
-
-/// A value's shape with its content removed.
-///
-/// Depth-limited because an illustration ledger is deeply nested and the point
-/// is to learn whether year-by-year rows exist, not to transcribe them. An
-/// array reports its length and the shape of its first element — which is
-/// exactly what says "there are 60 rows and each has these columns".
-export function describeShape(value: unknown, depth = 0): unknown {
-  if (value === null) return 'null'
-  if (Array.isArray(value)) {
-    return depth >= 3
-      ? `array(${value.length})`
-      : { array: value.length, of: value.length ? describeShape(value[0], depth + 1) : 'empty' }
-  }
-  switch (typeof value) {
-    case 'number':
-      return 'number'
-    case 'boolean':
-      return 'boolean'
-    // Length rather than content: a name, a state code and a formatted dollar
-    // figure are all strings, and only one of them is safe to print.
-    case 'string':
-      return `string(${value.length})`
-    case 'object': {
-      if (depth >= 3) return 'object'
-      const shape: Record<string, unknown> = {}
-      for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-        shape[key] = describeShape(nested, depth + 1)
-      }
-      return shape
-    }
-    default:
-      return typeof value
-  }
-}
-
 async function main() {
   const env = getNationalLifeEnv()
   const wanted = process.argv.slice(2).find((value) => !value.startsWith('-'))
@@ -143,23 +105,31 @@ async function main() {
         return 'ran'
       }
 
-      const cases = await startPage.evaluate(() =>
+      const caseAnchors = await startPage.evaluate(() =>
         Array.from(document.querySelectorAll('a[id*="lnkCaseName"]')).map((node) => ({
           id: (node as HTMLElement).id,
-          name: (node.textContent ?? '').trim(),
+          html: node.outerHTML,
+        })),
+      )
+      // Parse each anchor with its id attached. Empty matching anchors are
+      // intentionally skipped without shifting the id of a later case.
+      const cases = caseAnchors.flatMap((anchor) =>
+        parseForesightCaseListings(anchor.html).map((listing) => ({
+          ...listing,
+          id: anchor.id,
         })),
       )
       // A named case rather than a quick quote by default: a quick quote is five
       // numbers, and the question is whether a full illustration yields more.
       const target = wanted
-        ? cases.find((entry) => entry.name.toLowerCase().includes(wanted.toLowerCase()))
-        : cases.find((entry) => !/-QQ-/i.test(entry.name)) ?? cases[0]
+        ? cases.find((entry) => entry.displayName.toLowerCase().includes(wanted.toLowerCase()))
+        : cases.find((entry) => entry.caseKind !== 'QUICK_QUOTE') ?? cases[0]
       if (!target) {
         report.skipped = 'no case matched'
-        report.available = cases.map((entry) => entry.name)
+        report.available = cases.map((entry) => entry.displayName)
         return 'ran'
       }
-      report.openedCase = target.name
+      report.openedCase = target.displayName
 
       await startPage.click(`[id="${target.id}"]`).catch(async () => {
         await startPage.evaluate(
@@ -188,7 +158,7 @@ async function main() {
       // navigates the frame out from under it. Now a navigation costs one
       // answer instead of all of them, and each failure is reported as itself.
       const services: Record<string, unknown> = {}
-      for (const service of SERVICES) {
+      for (const service of FORESIGHT_READ_SERVICES) {
         const frame = page.mainFrame()
         services[service] = await frame
           .evaluate(
@@ -220,7 +190,7 @@ async function main() {
 
       // Shape only. See the file header.
       report.services = Object.fromEntries(
-        Object.entries(services).map(([name, result]) => [name, describeShape(result)]),
+        Object.entries(services).map(([name, result]) => [name, describeForesightShape(result)]),
       )
     } finally {
       try {

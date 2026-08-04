@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { type Server } from 'node:http'
 import type { EventEmitter } from 'node:events'
 import { Prisma, PrismaClient } from '@prisma/client'
@@ -11,6 +12,12 @@ import { deriveCarrierExpiresAt } from '../../lib/national-life/session-refresh'
 import { withOwnedBrowserLockWaiting } from '../../lib/national-life/browser-lock'
 import { NATIONAL_LIFE_PROVIDER } from '../../lib/national-life/constants'
 import { saveRapidSolveIllustration } from '../../lib/national-life/illustration-service'
+import { createForesightRunStore } from '../../lib/national-life/foresight-run-service'
+import {
+  upsertForesightCaseSnapshot,
+  upsertForesightDocument,
+  upsertForesightServiceSnapshot,
+} from '../../lib/national-life/foresight-snapshot-service'
 import type { NationalLifeEnv } from '../../lib/national-life/env'
 import {
   createBrowserJobService,
@@ -419,6 +426,7 @@ function createAttemptStore(
         // carries the why, and names the other call site.
         await releaseJobsBlockedOnCarrierLogin(transaction, {
           agentId: input.agentId,
+          deploymentScope: env.sessionScopeId,
           now: input.now,
         })
         await startNationalLifeSync(transaction, {
@@ -492,6 +500,122 @@ function createJobStore(env: NationalLifeEnv): NationalLifeJobStore {
       return job ? normalizedJob(job) : null
     },
     transitionJob: (input) => service.transitionJob(input),
+  }
+}
+
+function createForesightRunWorkerStore(env: NationalLifeEnv) {
+  const runStore = createForesightRunStore(prisma)
+  const assertScope = (deploymentScope: string) => {
+    if (deploymentScope !== env.sessionScopeId) {
+      throw new Error('Foresight worker deployment scope was rejected')
+    }
+  }
+
+  return {
+    ...runStore,
+    async findCase(input: {
+      agentId: string
+      deploymentScope: string
+      caseSnapshotId: string
+    }) {
+      assertScope(input.deploymentScope)
+      return prisma.nationalLifeForesightCaseSnapshot.findFirst({
+        where: {
+          id: input.caseSnapshotId,
+          agentId: input.agentId,
+          deploymentScope: input.deploymentScope,
+          provider: NATIONAL_LIFE_PROVIDER,
+        },
+        select: { id: true, externalKey: true, displayName: true },
+      })
+    },
+    async saveInventory(input: {
+      runId: string
+      agentId: string
+      deploymentScope: string
+      cases: Array<{
+        externalKey: string
+        displayName: string
+        caseKind: string | null
+        product: string | null
+      }>
+      observedAt: Date
+    }) {
+      assertScope(input.deploymentScope)
+      const caseSnapshotIds = new Map<string, string>()
+      for (const listing of input.cases) {
+        const snapshot = await upsertForesightCaseSnapshot({
+          agentId: input.agentId,
+          deploymentScope: input.deploymentScope,
+          provider: NATIONAL_LIFE_PROVIDER,
+          externalKey: listing.externalKey,
+          displayName: listing.displayName,
+          caseKind: listing.caseKind,
+          product: listing.product,
+          status: null,
+          state: null,
+          observedAt: input.observedAt,
+          raw: listing,
+        })
+        caseSnapshotIds.set(listing.externalKey, snapshot.id)
+      }
+      return caseSnapshotIds
+    },
+    async saveService(input: {
+      agentId: string
+      deploymentScope: string
+      caseSnapshotId: string
+      observation: {
+        serviceName: string
+        payloadShape: unknown
+        payload: unknown
+        validationState: string
+      }
+      observedAt: Date
+    }) {
+      assertScope(input.deploymentScope)
+      await upsertForesightServiceSnapshot({
+        agentId: input.agentId,
+        deploymentScope: input.deploymentScope,
+        provider: NATIONAL_LIFE_PROVIDER,
+        caseSnapshotId: input.caseSnapshotId,
+        serviceName: input.observation.serviceName,
+        payloadShape: input.observation.payloadShape,
+        payload: input.observation.payload,
+        validationState: input.observation.validationState,
+        observedAt: input.observedAt,
+      })
+    },
+    async saveDocument(input: {
+      agentId: string
+      deploymentScope: string
+      caseSnapshotId: string
+      reportKey: string
+      caseName: string
+      filename?: string
+      bytes: Buffer
+      mimeType: string
+      fetchedAt: Date
+    }) {
+      assertScope(input.deploymentScope)
+      await upsertForesightDocument({
+        agentId: input.agentId,
+        deploymentScope: input.deploymentScope,
+        provider: NATIONAL_LIFE_PROVIDER,
+        caseSnapshotId: input.caseSnapshotId,
+        reportKey: input.reportKey,
+        // The key already scopes the document to its stored case. Avoid
+        // deriving a filename from an untrusted carrier label.
+        filename: input.filename ?? 'foresight-report.pdf',
+        mimeType: input.mimeType,
+        byteSize: input.bytes.byteLength,
+        contentHash: createHash('sha256').update(input.bytes).digest('hex'),
+        bytes: input.bytes,
+        renderState: 'RENDERED',
+        safeErrorCode: null,
+        fetchedAt: input.fetchedAt,
+      })
+    },
   }
 }
 
@@ -605,6 +729,7 @@ function createLockClient(): PrismaClient {
 function createJobRunner(env: NationalLifeEnv) {
   const jobStore = createJobStore(env)
   const sessionStore = createSessionStore(env)
+  const foresightRunStore = createForesightRunWorkerStore(env)
   return (jobId: string) =>
     runNationalLifeJob(jobId, {
       env,
@@ -658,6 +783,7 @@ function createJobRunner(env: NationalLifeEnv) {
         })
       },
        applyCaseObservation,
+       foresightRunStore,
        syncRunStore: {
          async reconcile(runId: string, agentId: string) {
            await prisma.$transaction((transaction) =>

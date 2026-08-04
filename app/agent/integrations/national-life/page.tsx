@@ -3,6 +3,7 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentSessionSummary } from '@/lib/national-life/interactive-connection-service'
 import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
+import { foresightRunStore } from '@/lib/national-life/foresight-run-service'
 import { prisma } from '@/lib/prisma'
 import { ContextPanel } from '@/components/ContextPanel'
 import { PageHeader } from '@/components/PageHeader'
@@ -10,13 +11,14 @@ import { Shell } from '@/components/Shell'
 import { EmptyState } from '@/components/Table'
 import { NationalLifeConnectionCard } from './NationalLifeConnectionCard'
 import { NationalLifeSyncProgress } from './NationalLifeSyncProgress'
+import { NationalLifeForesightProgress } from './NationalLifeForesightProgress'
 
 export const dynamic = 'force-dynamic'
 
 export default async function NationalLifeConnectionPage() {
   const agent = await getCurrentAgent()
   const configured = isNationalLifeConfigured()
-  const [user, summary, syncStatus] = await Promise.all([
+  const [user, summary, syncStatus, foresightStatus] = await Promise.all([
     prisma.user.findUnique({
       where: { id: agent.userId },
       select: { name: true, role: true },
@@ -24,6 +26,9 @@ export default async function NationalLifeConnectionPage() {
     configured ? getAgentSessionSummary(agent.id) : Promise.resolve(null),
     configured
       ? getNationalLifeSyncStatus(agent.id, getNationalLifeEnv().sessionScopeId)
+      : Promise.resolve(null),
+    configured
+      ? foresightRunStore.getStatus(agent.id, getNationalLifeEnv().sessionScopeId)
       : Promise.resolve(null),
   ])
 
@@ -48,6 +53,7 @@ export default async function NationalLifeConnectionPage() {
       {configured ? (
         <>
           <NationalLifeSyncProgress initialStatus={syncStatus} />
+          <NationalLifeForesightProgress initialStatus={foresightStatus} />
           <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
           <div className="max-w-5xl">
             <NationalLifeConnectionCard summary={summary} />
