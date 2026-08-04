@@ -7,12 +7,14 @@ import { ErrorBanner } from '@/components/ErrorBanner'
 import { ModuleSummary } from '@/components/ModuleSummary'
 import { PageHeader } from '@/components/PageHeader'
 import { Shell } from '@/components/Shell'
+import { foresightRunStore } from '@/lib/national-life/foresight-run-service'
 import {
   NationalLifeDataTabs,
   type CaseRow,
   type CommissionRow,
   type InforceRow,
 } from './NationalLifeDataTabs'
+import { ForesightCaseTabs, type ForesightCaseRow } from './ForesightCaseTabs'
 
 export const dynamic = 'force-dynamic'
 
@@ -92,9 +94,11 @@ export default async function NationalLifeDataPage() {
   let commissions: CommissionRow[] = []
   let lastSyncedAt: Date | null = null
   let loadError = false
+  let foresightCases: ForesightCaseRow[] = []
+  let foresightRun: Awaited<ReturnType<typeof foresightRunStore.getStatus>> = null
 
   try {
-    const [caseRows, inforceRows, reportRows, session] = await Promise.all([
+    const [caseRows, inforceRows, reportRows, session, foresightRows, currentForesightRun] = await Promise.all([
       prisma.nationalLifeCaseSnapshot.findMany({
         where: { agentId: agent.id, deploymentScope },
         select: caseSelect,
@@ -119,6 +123,21 @@ export default async function NationalLifeDataPage() {
         },
         select: { lastConnectedAt: true, lastUsedAt: true },
       }),
+      prisma.nationalLifeForesightCaseSnapshot.findMany({
+        where: { agentId: agent.id, deploymentScope, provider: 'NATIONAL_LIFE' },
+        select: {
+          id: true,
+          displayName: true,
+          caseKind: true,
+          product: true,
+          status: true,
+          state: true,
+          observedAt: true,
+          _count: { select: { services: true } },
+        },
+        orderBy: [{ observedAt: 'desc' }, { displayName: 'asc' }],
+      }),
+      foresightRunStore.getStatus(agent.id, deploymentScope),
     ])
 
     cases = caseRows
@@ -126,6 +145,8 @@ export default async function NationalLifeDataPage() {
     commissions = reportRows.map(toCommissionRow)
     // lastUsedAt advances on every sync; lastConnectedAt only on a fresh login.
     lastSyncedAt = session?.lastUsedAt ?? session?.lastConnectedAt ?? null
+    foresightCases = foresightRows.map(({ _count, ...row }) => ({ ...row, serviceCount: _count.services }))
+    foresightRun = currentForesightRun
   } catch (error) {
     console.error('National Life data query error', error)
     loadError = true
@@ -206,6 +227,16 @@ export default async function NationalLifeDataPage() {
           </div>
         </ContextPanel>
       </div>
+      <section className="mt-8 module-main-surface">
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Foresight</p>
+            <h2 className="mt-1 text-xl font-semibold text-paper">Casos observados no portal</h2>
+          </div>
+          <p className="text-sm text-paper/55">Leitura somente leitura · {foresightCases.length} casos</p>
+        </div>
+        <ForesightCaseTabs cases={foresightCases} run={foresightRun} />
+      </section>
     </Shell>
   )
 }
