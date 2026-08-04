@@ -11,10 +11,18 @@ import {
 import type {
   BrowserJobRecord,
   CaseReadSyncJobInput,
+  ForesightPdfJobInput,
+  ForesightReadJobInput,
   IllustrationPdfJobInput,
   NationalLifeGridJobInput,
   RapidSolveQuoteJobInput,
 } from '../../lib/national-life/job-service'
+import type { ForesightRunStore } from '../../lib/national-life/foresight-run-service'
+import { isPdfPayload } from '../../lib/national-life/foresight-report'
+import type {
+  ForesightCaseListing,
+  ForesightServiceObservation,
+} from '../../lib/national-life/foresight-sync'
 import {
   buildRapidSolveRequest,
   type RapidSolveFailure,
@@ -70,6 +78,11 @@ export type StoredAgentIntegrationSession = {
 type NationalLifeJobAdapter = {
   openPortalHome(): Promise<void>
   assertAuthenticated(): Promise<void>
+  readForesight(input: { targetCaseKey?: string }): Promise<{
+    cases: ForesightCaseListing[]
+    selectedCase: ForesightCaseListing | null
+    services: ForesightServiceObservation[]
+  }>
   readCase(
     lookup: CaseReadSyncJobInput['lookup'],
   ): Promise<NationalLifeCaseObservation>
@@ -97,6 +110,39 @@ export type NationalLifeJobStore = {
     safeErrorCode?: string
     safeErrorDetail?: unknown
     availableAt?: Date
+  }): Promise<void>
+}
+
+export type ForesightRunWorkerStore = ForesightRunStore & {
+  findCase(input: {
+    agentId: string
+    deploymentScope: string
+    caseSnapshotId: string
+  }): Promise<{ id: string; externalKey: string; displayName: string } | null>
+  saveInventory(input: {
+    runId: string
+    agentId: string
+    deploymentScope: string
+    cases: ForesightCaseListing[]
+    observedAt: Date
+  }): Promise<Map<string, string>>
+  saveService(input: {
+    runId: string
+    agentId: string
+    deploymentScope: string
+    caseSnapshotId: string
+    observation: ForesightServiceObservation
+    observedAt: Date
+  }): Promise<void>
+  saveDocument(input: {
+    agentId: string
+    deploymentScope: string
+    caseSnapshotId: string
+    reportKey: string
+    caseName: string
+    bytes: Buffer
+    mimeType: string
+    fetchedAt: Date
   }): Promise<void>
 }
 
@@ -184,6 +230,7 @@ export type NationalLifeRunJobDeps = {
   syncRunStore: {
     reconcile(runId: string, agentId: string): Promise<void>
   }
+  foresightRunStore: ForesightRunWorkerStore
 }
 
 export type RunNationalLifeJobResult =
@@ -218,6 +265,51 @@ function isNationalLifeGridInput(
     typeof input.gridKey === 'string' &&
     (NATIONAL_LIFE_SYNC_GRID_KEYS as readonly string[]).includes(input.gridKey)
   )
+}
+
+function isForesightReadInput(
+  input: BrowserJobRecord['input'],
+): input is ForesightReadJobInput {
+  if (
+    'foresightRunId' in input &&
+    typeof input.foresightRunId === 'string' &&
+    input.foresightRunId.length > 0 &&
+    'mode' in input &&
+    (input.mode === 'INVENTORY' || input.mode === 'DETAIL')
+  ) {
+    return input.mode === 'INVENTORY'
+      ? !('targetCaseId' in input)
+      : 'targetCaseId' in input &&
+          typeof input.targetCaseId === 'string' &&
+          input.targetCaseId.length > 0
+  }
+  return false
+}
+
+function isForesightPdfInput(
+  input: BrowserJobRecord['input'],
+): input is ForesightPdfJobInput {
+  return (
+    'caseSnapshotId' in input &&
+    typeof input.caseSnapshotId === 'string' &&
+    input.caseSnapshotId.length > 0 &&
+    'caseKey' in input &&
+    typeof input.caseKey === 'string' &&
+    input.caseKey.length > 0
+  )
+}
+
+async function reconcileForesightRun(
+  input: ForesightReadJobInput | null,
+  job: BrowserJobRecord,
+  deps: Pick<NationalLifeRunJobDeps, 'env' | 'foresightRunStore'>,
+): Promise<void> {
+  if (!input) return
+  await deps.foresightRunStore.reconcile({
+    runId: input.foresightRunId,
+    agentId: job.agentId,
+    deploymentScope: deps.env.sessionScopeId,
+  })
 }
 
 /// Rebuilds the carrier request from the row. The date crossed the queue as the
@@ -525,8 +617,16 @@ export async function runNationalLifeJob(
     job.operation === 'SYNC_NATIONAL_LIFE_GRID' && isNationalLifeGridInput(job.input)
       ? job.input
       : null
+  const foresightReadInput =
+    job.operation === 'SYNC_FORESIGHT_READ' && isForesightReadInput(job.input)
+      ? job.input
+      : null
+  const foresightPdfInput =
+    job.operation === 'GENERATE_FORESIGHT_PDF' && isForesightPdfInput(job.input)
+      ? job.input
+      : null
 
-  if (!quoteInput && !caseInput && !pdfInput && !gridInput) {
+  if (!quoteInput && !caseInput && !pdfInput && !gridInput && !foresightReadInput && !foresightPdfInput) {
     await deps.jobStore.transitionJob({
       jobId: job.id,
       from: 'RUNNING',
@@ -539,6 +639,45 @@ export async function runNationalLifeJob(
     return { kind: 'COMPLETED' }
   }
 
+  const foresightDetailSnapshot =
+    foresightReadInput?.mode === 'DETAIL'
+      ? await deps.foresightRunStore.findCase({
+          agentId: job.agentId,
+          deploymentScope: deps.env.sessionScopeId,
+          caseSnapshotId: foresightReadInput.targetCaseId!,
+        })
+      : null
+  if (foresightReadInput?.mode === 'DETAIL' && !foresightDetailSnapshot) {
+    await deps.jobStore.transitionJob({
+      jobId: job.id,
+      from: 'RUNNING',
+      to: 'FAILED',
+      safeErrorCode: 'FORESIGHT_CASE_NOT_FOUND',
+    })
+    await reconcileForesightRun(foresightReadInput, job, deps)
+    return { kind: 'COMPLETED' }
+  }
+
+  const foresightPdfSnapshot = foresightPdfInput
+    ? await deps.foresightRunStore.findCase({
+        agentId: job.agentId,
+        deploymentScope: deps.env.sessionScopeId,
+        caseSnapshotId: foresightPdfInput.caseSnapshotId,
+      })
+    : null
+  if (
+    foresightPdfInput &&
+    (!foresightPdfSnapshot || foresightPdfSnapshot.externalKey !== foresightPdfInput.caseKey)
+  ) {
+    await deps.jobStore.transitionJob({
+      jobId: job.id,
+      from: 'RUNNING',
+      to: 'FAILED',
+      safeErrorCode: 'FORESIGHT_CASE_NOT_FOUND',
+    })
+    return { kind: 'COMPLETED' }
+  }
+
   const storedSession = await deps.sessionStore.findForAgent(
     job.agentId,
     job.provider,
@@ -546,6 +685,7 @@ export async function runNationalLifeJob(
   if (!isUsableSession(storedSession, deps.now())) {
     await requestReconnect(job, deps)
     if (gridInput) await deps.syncRunStore.reconcile(gridInput.syncRunId, job.agentId)
+    await reconcileForesightRun(foresightReadInput, job, deps)
     return { kind: 'COMPLETED' }
   }
 
@@ -557,6 +697,7 @@ export async function runNationalLifeJob(
   } catch {
     await requestReconnect(job, deps)
     if (gridInput) await deps.syncRunStore.reconcile(gridInput.syncRunId, job.agentId)
+    await reconcileForesightRun(foresightReadInput, job, deps)
     return { kind: 'COMPLETED' }
   }
 
@@ -639,6 +780,43 @@ export async function runNationalLifeJob(
               ? { rendered: true, caseName: rendered.caseName, bytes: rendered.bytes.byteLength }
               : { rendered: false },
           })
+        } else if (foresightPdfInput && foresightPdfSnapshot) {
+          const rendered = await adapter.renderForesightReport(foresightPdfInput.caseKey)
+          if (!rendered) {
+            throw Object.assign(new Error('Foresight did not return a report'), {
+              code: 'FORESIGHT_REPORT_FAILED',
+            })
+          }
+          if (rendered.caseName !== foresightPdfInput.caseKey) {
+            throw Object.assign(new Error('Foresight rendered a different case'), {
+              code: 'FORESIGHT_CASE_NOT_FOUND',
+            })
+          }
+          if (rendered.mimeType !== 'application/pdf' || !isPdfPayload(rendered.bytes)) {
+            throw Object.assign(new Error('Foresight returned an invalid report payload'), {
+              code: 'FORESIGHT_REPORT_FAILED',
+            })
+          }
+          await deps.foresightRunStore.saveDocument({
+            agentId: job.agentId,
+            deploymentScope: deps.env.sessionScopeId,
+            caseSnapshotId: foresightPdfSnapshot.id,
+            reportKey: 'foresight-report',
+            caseName: rendered.caseName,
+            bytes: rendered.bytes,
+            mimeType: rendered.mimeType,
+            fetchedAt: deps.now(),
+          })
+          await deps.jobStore.transitionJob({
+            jobId: job.id,
+            from: 'RUNNING',
+            to: 'SUCCEEDED',
+            result: {
+              caseSnapshotId: foresightPdfSnapshot.id,
+              rendered: true,
+              bytes: rendered.bytes.byteLength,
+            },
+          })
         } else if (caseInput) {
           const observation = await adapter.readCase(caseInput.lookup)
           const syncResult = await deps.applyCaseObservation({
@@ -669,6 +847,93 @@ export async function runNationalLifeJob(
             to: 'SUCCEEDED',
             result,
           })
+        } else if (foresightReadInput) {
+          const observedAt = deps.now()
+          if (foresightReadInput.mode === 'INVENTORY') {
+            const result = await adapter.readForesight({})
+            await deps.foresightRunStore.saveInventory({
+              runId: foresightReadInput.foresightRunId,
+              agentId: job.agentId,
+              deploymentScope: deps.env.sessionScopeId,
+              cases: result.cases,
+              observedAt,
+            })
+            await deps.foresightRunStore.updateProgress({
+              runId: foresightReadInput.foresightRunId,
+              agentId: job.agentId,
+              deploymentScope: deps.env.sessionScopeId,
+              patch: {
+                totalCases: result.cases.length,
+                inventoriedCases: result.cases.length,
+                totalServices: 0,
+                completedServices: 0,
+                currentCaseName: null,
+                currentService: null,
+              },
+            })
+            await deps.jobStore.transitionJob({
+              jobId: job.id,
+              from: 'RUNNING',
+              to: 'SUCCEEDED',
+              result: { inventoriedCases: result.cases.length },
+            })
+          } else {
+            const snapshot = foresightDetailSnapshot
+            if (!snapshot) {
+              throw Object.assign(new Error('Foresight case snapshot was not found'), {
+                code: 'FORESIGHT_CASE_NOT_FOUND',
+              })
+            }
+
+            const result = await adapter.readForesight({ targetCaseKey: snapshot.externalKey })
+            if (result.selectedCase?.externalKey !== snapshot.externalKey) {
+              throw Object.assign(new Error('Foresight returned a different case'), {
+                code: 'FORESIGHT_CASE_NOT_FOUND',
+              })
+            }
+            await deps.foresightRunStore.updateProgress({
+              runId: foresightReadInput.foresightRunId,
+              agentId: job.agentId,
+              deploymentScope: deps.env.sessionScopeId,
+              patch: {
+                totalCases: 1,
+                inventoriedCases: 1,
+                totalServices: result.services.length,
+                completedServices: 0,
+                currentCaseName: snapshot.displayName,
+                currentService: null,
+              },
+            })
+            for (const [index, observation] of result.services.entries()) {
+              await deps.foresightRunStore.saveService({
+                runId: foresightReadInput.foresightRunId,
+                agentId: job.agentId,
+                deploymentScope: deps.env.sessionScopeId,
+                caseSnapshotId: snapshot.id,
+                observation,
+                observedAt,
+              })
+              await deps.foresightRunStore.updateProgress({
+                runId: foresightReadInput.foresightRunId,
+                agentId: job.agentId,
+                deploymentScope: deps.env.sessionScopeId,
+                patch: {
+                  totalCases: 1,
+                  inventoriedCases: 1,
+                  totalServices: result.services.length,
+                  completedServices: index + 1,
+                  currentCaseName: snapshot.displayName,
+                  currentService: observation.serviceName,
+                },
+              })
+            }
+            await deps.jobStore.transitionJob({
+              jobId: job.id,
+              from: 'RUNNING',
+              to: 'SUCCEEDED',
+              result: { caseSnapshotId: snapshot.id, servicesRead: result.services.length },
+            })
+          }
         }
 
         return 'ran'
@@ -717,6 +982,7 @@ export async function runNationalLifeJob(
   if (gridInput) {
     await deps.syncRunStore.reconcile(gridInput.syncRunId, job.agentId)
   }
+  await reconcileForesightRun(foresightReadInput, job, deps)
 
   return { kind: 'COMPLETED' }
 }

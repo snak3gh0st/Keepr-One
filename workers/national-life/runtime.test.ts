@@ -8,7 +8,12 @@ import {
 
 function createDeps(options: {
   attempts?: Array<{ id: string } | null>
-  jobs?: Array<{ id: string } | null>
+  jobs?: Array<{
+    id: string
+    operation?: 'SYNC_NATIONAL_LIFE_GRID' | 'SYNC_FORESIGHT_READ'
+    syncRunId?: string
+    syncStageIndex?: number
+  } | null>
   runAttempt?: (id: string) => Promise<void>
   runJob?: (id: string) => Promise<void>
 }) {
@@ -93,6 +98,47 @@ describe('dedicated National Life runtime loops', () => {
 
     expect(test.calls).toContain('attempt:run:attempt-1')
     expect(test.calls).toContain('job:run:job-1')
+
+    test.signals.emit('SIGTERM')
+    await vi.runAllTimersAsync()
+    await running
+    vi.useRealTimers()
+  })
+
+  it('runs the Foresight job selected after the existing ordered grid jobs', async () => {
+    vi.useFakeTimers()
+    const test = createDeps({
+      jobs: [
+        { id: 'grid-0', operation: 'SYNC_NATIONAL_LIFE_GRID', syncRunId: 'grid-run-1', syncStageIndex: 0 },
+        { id: 'grid-1', operation: 'SYNC_NATIONAL_LIFE_GRID', syncRunId: 'grid-run-1', syncStageIndex: 1 },
+        { id: 'grid-2', operation: 'SYNC_NATIONAL_LIFE_GRID', syncRunId: 'grid-run-1', syncStageIndex: 2 },
+        { id: 'grid-3', operation: 'SYNC_NATIONAL_LIFE_GRID', syncRunId: 'grid-run-1', syncStageIndex: 3 },
+        { id: 'grid-4', operation: 'SYNC_NATIONAL_LIFE_GRID', syncRunId: 'grid-run-1', syncStageIndex: 4 },
+        { id: 'grid-5', operation: 'SYNC_NATIONAL_LIFE_GRID', syncRunId: 'grid-run-1', syncStageIndex: 5 },
+        { id: 'grid-6', operation: 'SYNC_NATIONAL_LIFE_GRID', syncRunId: 'grid-run-1', syncStageIndex: 6 },
+        { id: 'grid-7', operation: 'SYNC_NATIONAL_LIFE_GRID', syncRunId: 'grid-run-1', syncStageIndex: 7 },
+        { id: 'grid-8', operation: 'SYNC_NATIONAL_LIFE_GRID', syncRunId: 'grid-run-1', syncStageIndex: 8 },
+        { id: 'foresight-inventory', operation: 'SYNC_FORESIGHT_READ' },
+        null,
+      ],
+    })
+
+    const running = runNationalLifeRuntime(test.deps)
+    await flush()
+    await vi.advanceTimersByTimeAsync(9_000)
+
+    expect(test.calls.filter((call) => call.startsWith('job:run:'))).toEqual([
+      'job:run:grid-0',
+      'job:run:grid-1',
+      'job:run:grid-2',
+      'job:run:grid-3',
+      'job:run:grid-4',
+      'job:run:grid-5',
+      'job:run:grid-6',
+      'job:run:grid-7',
+      'job:run:grid-8',
+      'job:run:foresight-inventory',
+    ])
 
     test.signals.emit('SIGTERM')
     await vi.runAllTimersAsync()
