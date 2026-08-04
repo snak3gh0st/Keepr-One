@@ -10,6 +10,7 @@ import {
   latestPdfStatusByIllustration,
   type IllustrationPdfStatus,
 } from './illustration-pdf-status'
+import type { ForesightRunStore } from './foresight-run-service'
 import { assertBrowserJobTransition, type BrowserJobState } from './job-state'
 import type { RapidSolveFailure, RapidSolveQuote } from './rapid-solve'
 import { redactDiagnostic } from './redaction'
@@ -89,8 +90,12 @@ export type NationalLifeGridJobInput = {
 export type ForesightReadJobInput = {
   foresightRunId: string
   mode: 'INVENTORY' | 'DETAIL'
-  targetCaseId: string | null
-  deploymentScope: string
+  targetCaseId?: string
+}
+
+export type ForesightPdfJobInput = {
+  caseSnapshotId: string
+  caseKey: string
 }
 
 export type BrowserJobInput =
@@ -100,6 +105,7 @@ export type BrowserJobInput =
   | IllustrationPdfJobInput
   | NationalLifeGridJobInput
   | ForesightReadJobInput
+  | ForesightPdfJobInput
 
 /// Three outcomes the screen has to tell apart, and it must not collapse them.
 /// ANSWERED means the carrier replied — including a reply that refuses to
@@ -182,6 +188,12 @@ export type BrowserJobRepository = {
 export type BrowserJobServiceDeps = {
   repository?: BrowserJobRepository
   connectionTestScopeId?: string
+  foresightRunStore?: Pick<ForesightRunStore, 'start'>
+  findForesightCaseSnapshot?(input: {
+    agentId: string
+    deploymentScope: string
+    caseSnapshotId: string
+  }): Promise<{ id: string; externalKey: string } | null>
   now?: () => Date
 }
 
@@ -326,6 +338,48 @@ function sanitizeRapidSolveQuoteInput(input: {
 
 function sanitizeConnectionTestScopeId(scopeId: string): string {
   return coerceIdentifier('scopeId', scopeId)
+}
+
+function sanitizeForesightMode(value: unknown): 'INVENTORY' | 'DETAIL' {
+  if (value !== 'INVENTORY' && value !== 'DETAIL') {
+    throw new Error('mode must be INVENTORY or DETAIL')
+  }
+  return value
+}
+
+function coerceExactForesightCaseKey(caseKey: string): string {
+  const normalized = coerceIdentifier('caseKey', caseKey)
+  if (normalized !== caseKey) {
+    throw new Error('caseKey must match the owned Foresight case exactly')
+  }
+  return caseKey
+}
+
+async function resolveForesightRunStore(
+  deps?: BrowserJobServiceDeps,
+): Promise<Pick<ForesightRunStore, 'start'>> {
+  if (deps?.foresightRunStore) return deps.foresightRunStore
+  const { foresightRunStore } = await import('./foresight-run-service')
+  return foresightRunStore
+}
+
+async function findOwnedForesightCaseSnapshot(
+  input: { agentId: string; deploymentScope: string; caseSnapshotId: string },
+  deps?: BrowserJobServiceDeps,
+): Promise<{ id: string; externalKey: string } | null> {
+  if (deps?.findForesightCaseSnapshot) {
+    return deps.findForesightCaseSnapshot(input)
+  }
+
+  return prisma.nationalLifeForesightCaseSnapshot.findFirst({
+    where: {
+      id: input.caseSnapshotId,
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      provider: NATIONAL_LIFE_PROVIDER,
+    },
+    select: { id: true, externalKey: true },
+  })
 }
 
 function buildClaimLeaseExpiry(now: Date): Date {
@@ -731,6 +785,89 @@ export function createBrowserJobService(deps?: BrowserJobServiceDeps) {
       return { jobId: created.id, duplicate: false }
     },
 
+    async enqueueForesightRead(input: {
+      agentId: string
+      deploymentScope: string
+      mode: 'INVENTORY' | 'DETAIL'
+      targetCaseId?: string
+    }): Promise<{ runId: string; jobId: string; duplicate: boolean }> {
+      const agentId = coerceIdentifier('agentId', input.agentId)
+      const deploymentScope = coerceIdentifier('deploymentScope', input.deploymentScope)
+      const mode = sanitizeForesightMode(input.mode)
+      const targetCaseId = input.targetCaseId
+        ? coerceIdentifier('targetCaseId', input.targetCaseId)
+        : undefined
+
+      if (mode === 'DETAIL' && !targetCaseId) {
+        throw new Error('targetCaseId is required for DETAIL mode')
+      }
+      if (mode === 'INVENTORY' && targetCaseId) {
+        throw new Error('targetCaseId is not allowed for INVENTORY mode')
+      }
+
+      if (targetCaseId) {
+        const snapshot = await findOwnedForesightCaseSnapshot(
+          { agentId, deploymentScope, caseSnapshotId: targetCaseId },
+          deps,
+        )
+        if (!snapshot) {
+          throw new Error('targetCaseId must identify an owned Foresight case snapshot')
+        }
+      }
+
+      const runStore = await resolveForesightRunStore(deps)
+      return runStore.start({
+        agentId,
+        deploymentScope,
+        mode,
+        ...(targetCaseId ? { targetCaseId } : {}),
+        now: resolveNow(deps),
+      })
+    },
+
+    async enqueueForesightPdf(input: {
+      agentId: string
+      deploymentScope: string
+      caseSnapshotId: string
+      caseKey: string
+    }): Promise<{ jobId: string; duplicate: boolean }> {
+      const agentId = coerceIdentifier('agentId', input.agentId)
+      const deploymentScope = coerceIdentifier('deploymentScope', input.deploymentScope)
+      const caseSnapshotId = coerceIdentifier('caseSnapshotId', input.caseSnapshotId)
+      const caseKey = coerceExactForesightCaseKey(input.caseKey)
+      const snapshot = await findOwnedForesightCaseSnapshot(
+        { agentId, deploymentScope, caseSnapshotId },
+        deps,
+      )
+
+      if (!snapshot) {
+        throw new Error('caseSnapshotId must identify an owned Foresight case snapshot')
+      }
+      if (snapshot.externalKey !== caseKey) {
+        throw new Error('caseKey must match the owned Foresight case exactly')
+      }
+
+      const now = resolveNow(deps)
+      const baseKey = `national-life:foresight-pdf:${agentId}:${deploymentScope}:${caseSnapshotId}`
+      const active = await repository.findMostRecentByRetryKeyFamily(baseKey, [
+        ...ACTIVE_JOB_STATES,
+      ])
+      if (active) {
+        return { jobId: active.id, duplicate: true }
+      }
+
+      const existing = await repository.findMostRecentByRetryKeyFamily(baseKey)
+      const created = await repository.create({
+        agentId,
+        deploymentScope,
+        operation: 'GENERATE_FORESIGHT_PDF',
+        idempotencyKey: existing ? buildCaseSyncRetryKey(baseKey) : baseKey,
+        input: { caseSnapshotId, caseKey },
+        availableAt: now,
+      })
+      return { jobId: created.id, duplicate: false }
+    },
+
     /// Where each pending or failed render stands, keyed by illustration.
     ///
     /// Without this the screen had no way to say anything after "pedido
@@ -914,6 +1051,24 @@ export async function enqueueIllustrationPdf(input: {
   caseNameFragment?: string
 }): Promise<{ jobId: string; duplicate: boolean }> {
   return createBrowserJobService().enqueueIllustrationPdf(input)
+}
+
+export async function enqueueForesightRead(input: {
+  agentId: string
+  deploymentScope: string
+  mode: 'INVENTORY' | 'DETAIL'
+  targetCaseId?: string
+}): Promise<{ runId: string; jobId: string; duplicate: boolean }> {
+  return createBrowserJobService().enqueueForesightRead(input)
+}
+
+export async function enqueueForesightPdf(input: {
+  agentId: string
+  deploymentScope: string
+  caseSnapshotId: string
+  caseKey: string
+}): Promise<{ jobId: string; duplicate: boolean }> {
+  return createBrowserJobService().enqueueForesightPdf(input)
 }
 
 export async function getIllustrationPdfStatuses(
