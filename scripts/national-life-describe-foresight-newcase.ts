@@ -30,6 +30,7 @@ import {
   captureSteelSessionContext,
   createSteelBrowserSession,
 } from '../workers/national-life/steel-session'
+import { isForesightReadService } from '../lib/national-life/foresight-sync'
 
 const FORESIGHT_PATH = '/agent/sso/foresight'
 
@@ -52,7 +53,12 @@ export function classifyEndpoints(endpoints: readonly string[]): {
     newCase: pick(/new|create|add|start|wizard|setup(?!Report)|initial/i),
     // Deliberately excludes the report family: those produce a document, and
     // the question here is whether anything produces *values*.
-    data: pick(/get(?!Report)|calc|value|ledger|grid|summary|result|illustrat/i),
+    data: Array.from(
+      new Set([
+        ...pick(/get(?!Report)|calc|value|ledger|grid|summary|result|illustrat/i),
+        ...endpoints.filter(isForesightReadService),
+      ]),
+    ).sort(),
   }
 }
 
