@@ -72,4 +72,6 @@ git diff --check                         passed
 - Fix-loop round 1 replaced the prior optional-field workaround with a typed `NationalLifeRuntimeEnv`. Shared web configuration uses `getNationalLifeEnv()` and no longer requires runtime-only capacities; the runtime entry uses `getNationalLifeRuntimeEnv()`, which fails closed when capacities are absent. The connection-attempt worker dependency accepts only the required runtime type.
 - Focused fix-loop verification: `pnpm exec vitest run lib/national-life/env.test.ts deploy/national-life-runtime.compose.test.ts` passed with 4 files and 55 tests; `pnpm exec tsc --noEmit` passed with no output.
 - Fix-loop commit: `6a5c26f388f5262f864a3b8cfba1e0931a09de98` — `fix: separate National Life web and runtime config`.
+- Fix-loop round 2 commit: `1eb739040295915a163792279dd5cb9be2d1c163` — `fix: align National Life env example origins`.
+- Round 2 verification: `pnpm exec vitest run deploy/national-life-runtime.compose.test.ts` passed, 2 files and 8 tests.
 - This task is configuration-only. Browser provider adapters, durable shard scheduling, capacity admission, reconnect orchestration, load testing, and production deployment remain outside Task 1.
