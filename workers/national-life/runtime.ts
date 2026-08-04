@@ -73,12 +73,22 @@ export function getClaimableConnectionAttemptStates() {
   return [...CLAIMABLE_ATTEMPT_STATES]
 }
 
-export function getClaimableConnectionAttemptWhere(now: Date): Prisma.NationalLifeConnectionAttemptWhereInput {
+export function getClaimableConnectionAttemptWhere(
+  now: Date,
+  workerId?: string,
+): Prisma.NationalLifeConnectionAttemptWhereInput {
+  const leaseConditions: Prisma.NationalLifeConnectionAttemptWhereInput[] = [
+    { leaseOwner: null },
+    { leaseExpiresAt: { lte: now } },
+  ]
+  if (workerId) {
+    leaseConditions.push({ leaseOwner: workerId })
+  }
   return {
     state: { in: getClaimableConnectionAttemptStates() },
     AND: [
-      { OR: [{ leaseOwner: null }, { leaseExpiresAt: { lte: now } }] },
       { OR: [{ nextPollAt: { lte: now } }, { nextPollAt: null }] },
+      { OR: leaseConditions },
     ],
   }
 }
@@ -293,7 +303,7 @@ function normalizedJob(
   }
 }
 
-function createAttemptStore(
+export function createNationalLifeAttemptStore(
   env: NationalLifeEnv,
 ): RunConnectionAttemptDeps['store'] {
   return {
@@ -306,12 +316,7 @@ function createAttemptStore(
             deploymentScope: env.sessionScopeId,
             provider: NATIONAL_LIFE_PROVIDER,
             purpose: ATTEMPT_PURPOSE,
-            state: { in: getClaimableConnectionAttemptStates() },
-            OR: [
-              { leaseOwner: null },
-              { leaseExpiresAt: { lte: now } },
-              { leaseOwner: workerId },
-            ],
+            ...getClaimableConnectionAttemptWhere(now, workerId),
           },
           data: { leaseOwner: workerId, leaseExpiresAt },
         })
@@ -518,7 +523,7 @@ function createAttemptStore(
 }
 
 function createAttemptRunner(env: NationalLifeRuntimeEnv) {
-  const store = createAttemptStore(env)
+  const store = createNationalLifeAttemptStore(env)
   const deps: RunConnectionAttemptDeps = {
     env,
     workerId: env.runtimeWorkerId,

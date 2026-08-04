@@ -328,7 +328,7 @@ async function openPortal(
       deploymentScope: deps.env.sessionScopeId,
       provider: 'NATIONAL_LIFE',
       purpose: 'INTERACTIVE_CONNECTION_ATTEMPT',
-      state: attempt.state,
+      state: 'OPENING_PORTAL',
       workerId: deps.workerId,
       browserProvider: deps.env.browserProvider,
       browserShardId: deps.env.browserShardId,
@@ -556,7 +556,7 @@ async function recordInteractiveObservation(
   }
 
   const delay = Math.min(
-    deps.env.interactiveReconnectBaseDelayMs * 2 ** retryCount,
+    deps.env.interactiveReconnectBaseDelayMs * 2 ** attempt.reconnectAttemptCount,
     deps.env.interactiveReconnectMaxDelayMs,
   )
   await deps.store.scheduleInteractiveRetry({

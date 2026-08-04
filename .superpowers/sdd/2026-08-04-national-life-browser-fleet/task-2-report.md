@@ -18,11 +18,11 @@ Focused command:
 pnpm exec vitest run workers/national-life/runtime.test.ts workers/national-life/run-connection-attempt.test.ts
 ```
 
-Result: 4 test files passed, 38 tests passed.
+Result: 4 test files passed, 40 tests passed.
 
-Per request, no broad suite, Prisma validation, or unrelated checks were run.
+`pnpm exec prisma validate` passed. `pnpm exec tsc --noEmit` was attempted and reported stale generated Prisma client types for the newly added schema fields; Prisma client regeneration was interrupted before completion. No broad suite or unrelated checks were run.
 
 ## Concerns
 
 - The retry budget is currently the Task 2 runtime constant of five reconnect attempts; provider capacity/adapters remain later-task work.
-- Production migration application and full type validation remain outside the focused validation run.
+- Production migration application remains unverified. Typecheck remains blocked by the stale generated Prisma client in the local environment.

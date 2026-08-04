@@ -319,7 +319,7 @@ describe('National Life interactive connection attempt runtime', () => {
       attemptId: 'attempt-1',
       state: 'AWAITING_LOGIN',
       reconnectAttemptCount: 3,
-      nextPollAt: new Date('2026-07-28T12:00:08.000Z'),
+      nextPollAt: new Date('2026-07-28T12:00:04.000Z'),
       lastTransportFailureAt: now,
     })
     expect(test.current()).toMatchObject({ state: 'AWAITING_LOGIN' })

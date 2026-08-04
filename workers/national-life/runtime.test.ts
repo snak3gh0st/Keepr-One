@@ -1,11 +1,28 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
+import type { NationalLifeEnv } from '../../lib/national-life/env'
+
+const repository = vi.hoisted(() => ({
+  $transaction: vi.fn(),
+  nationalLifeConnectionAttempt: {
+    updateMany: vi.fn(),
+    findUnique: vi.fn(),
+  },
+}))
+
+vi.mock('../../lib/prisma', () => ({ prisma: repository }))
+
 import {
+  createNationalLifeAttemptStore,
   getClaimableConnectionAttemptWhere,
   getClaimableConnectionAttemptStates,
   runNationalLifeRuntime,
   type RuntimeDeps,
 } from './runtime'
+
+function buildStoreEnv(): NationalLifeEnv {
+  return { sessionScopeId: 'scope-1' } as NationalLifeEnv
+}
 
 function createDeps(options: {
   attempts?: Array<{ id: string } | null>
@@ -96,6 +113,99 @@ describe('dedicated National Life runtime loops', () => {
         ]),
       }),
     )
+  })
+
+  it('guards the transactional claim update with due-time and ownership predicates', async () => {
+    const updateMany = repository.nationalLifeConnectionAttempt.updateMany
+    const findUnique = repository.nationalLifeConnectionAttempt.findUnique
+    updateMany.mockResolvedValueOnce({ count: 1 })
+    findUnique.mockResolvedValueOnce(null)
+    repository.$transaction.mockImplementationOnce(async (callback) => callback(repository))
+
+    await createNationalLifeAttemptStore(buildStoreEnv()).claim(
+      'attempt-1',
+      'worker-1',
+      new Date('2026-08-04T12:00:00.000Z'),
+    )
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'attempt-1',
+        deploymentScope: 'scope-1',
+        provider: 'NATIONAL_LIFE',
+        purpose: 'INTERACTIVE_CONNECTION_ATTEMPT',
+        state: { in: ['OPENING_PORTAL', 'AWAITING_LOGIN', 'AWAITING_MFA'] },
+        AND: [
+          { OR: [{ nextPollAt: { lte: new Date('2026-08-04T12:00:00.000Z') } }, { nextPollAt: null }] },
+          { OR: [{ leaseOwner: null }, { leaseExpiresAt: { lte: new Date('2026-08-04T12:00:00.000Z') } }, { leaseOwner: 'worker-1' }] },
+        ],
+      },
+      data: {
+        leaseOwner: 'worker-1',
+        leaseExpiresAt: new Date('2026-08-04T12:00:15.000Z'),
+      },
+    })
+  })
+
+  it('guards retry scheduling and shard assignment at the store boundary', async () => {
+    const updateMany = repository.nationalLifeConnectionAttempt.updateMany
+    updateMany.mockClear()
+    updateMany.mockResolvedValue({ count: 1 })
+    const store = createNationalLifeAttemptStore(buildStoreEnv())
+    const retryAt = new Date('2026-08-04T12:00:04.000Z')
+    const failedAt = new Date('2026-08-04T12:00:00.000Z')
+
+    await store.scheduleInteractiveRetry({
+      attemptId: 'attempt-1',
+      deploymentScope: 'scope-1',
+      provider: 'NATIONAL_LIFE',
+      purpose: 'INTERACTIVE_CONNECTION_ATTEMPT',
+      state: 'AWAITING_MFA',
+      workerId: 'worker-1',
+      reconnectAttemptCount: 2,
+      nextPollAt: retryAt,
+      lastTransportFailureAt: failedAt,
+    })
+    await store.assignBrowserShard({
+      attemptId: 'attempt-1',
+      deploymentScope: 'scope-1',
+      provider: 'NATIONAL_LIFE',
+      purpose: 'INTERACTIVE_CONNECTION_ATTEMPT',
+      state: 'AWAITING_MFA',
+      workerId: 'worker-1',
+      browserProvider: 'steel',
+      browserShardId: 'shard-1',
+    })
+
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: 'attempt-1',
+        deploymentScope: 'scope-1',
+        provider: 'NATIONAL_LIFE',
+        purpose: 'INTERACTIVE_CONNECTION_ATTEMPT',
+        state: 'AWAITING_MFA',
+        leaseOwner: 'worker-1',
+      },
+      data: {
+        reconnectAttemptCount: 2,
+        nextPollAt: retryAt,
+        lastTransportFailureAt: failedAt,
+        safeErrorCode: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      },
+    })
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        id: 'attempt-1',
+        deploymentScope: 'scope-1',
+        provider: 'NATIONAL_LIFE',
+        purpose: 'INTERACTIVE_CONNECTION_ATTEMPT',
+        state: 'AWAITING_MFA',
+        leaseOwner: 'worker-1',
+      },
+      data: { browserProvider: 'steel', browserShardId: 'shard-1' },
+    })
   })
 
   it('claims interactive attempts and read-only jobs independently', async () => {
