@@ -85,7 +85,7 @@ services:
       # party system (iPipeline), unlike Foresight which is the carrier's own
       # origin. It is listed so the jump can be *measured*; reaching it does not
       # authorise submitting anything. See docs/architecture/national-life-igo-eapp.md.
-      NATIONAL_LIFE_PORTAL_ORIGINS: https://www.nationallife.com,https://nlg-prod.auth0.com,https://federate.ipipeline.com
+      NATIONAL_LIFE_PORTAL_ORIGINS: https://www.nationallife.com,https://nlg-prod.auth0.com,https://nlg-prod.us.auth0.com,https://mfa.nationallife.com,https://federate.ipipeline.com
       NATIONAL_LIFE_PORTAL_LOGIN_URL: https://www.nationallife.com/agent/auth/login?returnUrl=%2Fagent%2F
       NATIONAL_LIFE_SESSION_SCOPE_ID: "${NATIONAL_LIFE_SESSION_SCOPE_ID:?NATIONAL_LIFE_SESSION_SCOPE_ID is required}"
       NATIONAL_LIFE_SESSION_KEY_VERSION: "${NATIONAL_LIFE_SESSION_KEY_VERSION:?NATIONAL_LIFE_SESSION_KEY_VERSION is required}"
@@ -109,6 +109,12 @@ services:
       # still authenticated. Only useful from the start of a session's life —
       # it renews, it does not resurrect.
       NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP: "${NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP:-false}"
+      NATIONAL_LIFE_BROWSER_PROVIDER: "${NATIONAL_LIFE_BROWSER_PROVIDER:-steel}"
+      NATIONAL_LIFE_BROWSER_SHARD_ID: "${NATIONAL_LIFE_BROWSER_SHARD_ID:-national-life-shard-1}"
+      NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS: "${NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS:?NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS is required}"
+      NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD: "${NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD:?NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD is required}"
+      NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS: "${NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS:-1000}"
+      NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS: "${NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS:-30000}"
     mem_limit: 768m
     # Counts threads, not processes. The worker alone sits at ~72 of them, and
     # each `docker exec ... tsx` adds roughly 25 more, so at 128 a second

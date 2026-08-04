@@ -1,0 +1,147 @@
+import 'server-only'
+
+import { createHash, timingSafeEqual, webcrypto } from 'node:crypto'
+import type { PrismaClient } from '@prisma/client'
+import { z } from 'zod'
+import { publicP256JwkSchema } from './contracts'
+
+export const LOCAL_CONNECTOR_SIGNATURE_WINDOW_MS = 5 * 60_000
+export const LOCAL_CONNECTOR_SIGNATURE_HEADERS = {
+  deviceId: 'x-fyntra-device-id',
+  jti: 'x-fyntra-jti',
+  timestamp: 'x-fyntra-timestamp',
+  bodyHash: 'x-fyntra-body-sha256',
+  signature: 'x-fyntra-signature',
+} as const
+
+const signedHeadersSchema = z.strictObject({
+  deviceId: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
+  jti: z.string().min(16).max(128).regex(/^[A-Za-z0-9._:-]+$/),
+  timestamp: z.string().datetime({ offset: true }),
+  bodyHash: z.string().regex(/^[a-f0-9]{64}$/),
+  signature: z.string().min(80).max(160).regex(/^[A-Za-z0-9_-]+$/),
+})
+
+type SignatureDb = Pick<
+  PrismaClient,
+  'nationalLifeConnectorDevice' | 'nationalLifeConnectorReplay' | '$transaction'
+>
+
+export class LocalConnectorSignatureError extends Error {
+  constructor() {
+    super('INVALID_DEVICE_SIGNATURE')
+  }
+}
+
+export function sha256Hex(body: Uint8Array): string {
+  return createHash('sha256').update(body).digest('hex')
+}
+
+export function canonicalDeviceMessage(input: {
+  method: string
+  pathname: string
+  jti: string
+  timestamp: string
+  bodyHash: string
+}): string {
+  return [
+    input.method.toUpperCase(),
+    input.pathname,
+    input.jti,
+    input.timestamp,
+    input.bodyHash,
+  ].join('\n')
+}
+
+function readSignedHeaders(headers: Headers) {
+  return signedHeadersSchema.parse({
+    deviceId: headers.get(LOCAL_CONNECTOR_SIGNATURE_HEADERS.deviceId),
+    jti: headers.get(LOCAL_CONNECTOR_SIGNATURE_HEADERS.jti),
+    timestamp: headers.get(LOCAL_CONNECTOR_SIGNATURE_HEADERS.timestamp),
+    bodyHash: headers.get(LOCAL_CONNECTOR_SIGNATURE_HEADERS.bodyHash),
+    signature: headers.get(LOCAL_CONNECTOR_SIGNATURE_HEADERS.signature),
+  })
+}
+
+function equalHash(expected: string, actual: string): boolean {
+  const expectedBytes = Buffer.from(expected, 'hex')
+  const actualBytes = Buffer.from(actual, 'hex')
+  return expectedBytes.length === actualBytes.length && timingSafeEqual(expectedBytes, actualBytes)
+}
+
+export async function verifyLocalConnectorDeviceRequest(
+  db: SignatureDb,
+  input: {
+    method: string
+    pathname: string
+    headers: Headers
+    body: Uint8Array
+    now?: Date
+  },
+): Promise<{ deviceId: string; agentId: string; jti: string }> {
+  try {
+    const now = input.now ?? new Date()
+    const signed = readSignedHeaders(input.headers)
+    const signedAt = new Date(signed.timestamp)
+    if (
+      !Number.isFinite(signedAt.getTime()) ||
+      Math.abs(now.getTime() - signedAt.getTime()) > LOCAL_CONNECTOR_SIGNATURE_WINDOW_MS
+    ) {
+      throw new LocalConnectorSignatureError()
+    }
+
+    const actualBodyHash = sha256Hex(input.body)
+    if (!equalHash(signed.bodyHash, actualBodyHash)) {
+      throw new LocalConnectorSignatureError()
+    }
+
+    const device = await db.nationalLifeConnectorDevice.findFirst({
+      where: { id: signed.deviceId, status: 'ACTIVE', revokedAt: null },
+      select: { id: true, agentId: true, publicKeyJwk: true },
+    })
+    if (!device) throw new LocalConnectorSignatureError()
+
+    const publicKeyJwk = publicP256JwkSchema.parse(device.publicKeyJwk)
+    const key = await webcrypto.subtle.importKey(
+      'jwk',
+      publicKeyJwk,
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['verify'],
+    )
+    const message = canonicalDeviceMessage({
+      method: input.method,
+      pathname: input.pathname,
+      jti: signed.jti,
+      timestamp: signed.timestamp,
+      bodyHash: signed.bodyHash,
+    })
+    const valid = await webcrypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      key,
+      Buffer.from(signed.signature, 'base64url'),
+      new TextEncoder().encode(message),
+    )
+    if (!valid) throw new LocalConnectorSignatureError()
+
+    await db.$transaction(async (tx) => {
+      await tx.nationalLifeConnectorReplay.create({
+        data: {
+          deviceId: device.id,
+          jti: signed.jti,
+          expiresAt: new Date(signedAt.getTime() + LOCAL_CONNECTOR_SIGNATURE_WINDOW_MS),
+          createdAt: now,
+          updatedAt: now,
+        },
+      })
+      await tx.nationalLifeConnectorDevice.update({
+        where: { id: device.id },
+        data: { lastSeenAt: now, updatedAt: now },
+      })
+    })
+
+    return { deviceId: device.id, agentId: device.agentId, jti: signed.jti }
+  } catch {
+    throw new LocalConnectorSignatureError()
+  }
+}

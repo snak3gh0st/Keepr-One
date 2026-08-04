@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { EncryptedBrowserSecret, AttemptRuntime } from '../../lib/national-life/browser-context-crypto'
-import type { NationalLifeEnv } from '../../lib/national-life/env'
+import type { NationalLifeRuntimeEnv } from '../../lib/national-life/env'
 import type { NationalLifeAuthenticationState } from './adapter'
 import type { BrowserSession, InteractiveBrowserSession } from './types'
 import {
@@ -24,7 +24,7 @@ const runtime: AttemptRuntime = {
   expiresAt: '2026-07-28T12:10:00.000Z',
 }
 
-function buildEnv(): NationalLifeEnv {
+function buildEnv(): NationalLifeRuntimeEnv {
   return {
     steelBaseUrl: 'https://steel.example',
     steelApiKey: 'steel-key',
@@ -43,6 +43,12 @@ function buildEnv(): NationalLifeEnv {
     interactiveLoginAllAgents: false,
     keepAliveSsoJump: false,
     viewerAppOrigins: ['https://app.keepr.one'],
+    browserProvider: 'steel',
+    browserShardId: 'national-life-shard-1',
+    maxInteractiveSessions: 10,
+    maxSessionsPerShard: 2,
+    interactiveReconnectBaseDelayMs: 1000,
+    interactiveReconnectMaxDelayMs: 30000,
   }
 }
 
@@ -62,6 +68,11 @@ function buildAttempt(
     runtimeAuthTag: state === 'OPENING_PORTAL' ? null : encrypted.authTag,
     currentOrigin: null,
     safeErrorCode: null,
+    reconnectAttemptCount: 0,
+    nextPollAt: null,
+    browserProvider: null,
+    browserShardId: null,
+    lastTransportFailureAt: null,
     expiresAt: new Date('2026-07-28T12:10:00.000Z'),
     ...overrides,
   }
@@ -82,6 +93,7 @@ function createDeps(options: {
   let current = structuredClone(options.attempt)
   let completed = false
   let completedInput: unknown = null
+  let scheduledRetryInput: unknown = null
   const page = {
     goto: vi.fn(async () => {
       calls.push('page:goto-login')
@@ -143,6 +155,21 @@ function createDeps(options: {
         }
         calls.push(`attempt:${input.to}`)
       },
+      async scheduleInteractiveRetry(input) {
+        scheduledRetryInput = input
+        calls.push('attempt:schedule-retry')
+        current = {
+          ...current,
+          reconnectAttemptCount: input.reconnectAttemptCount,
+          nextPollAt: input.nextPollAt,
+          lastTransportFailureAt: input.lastTransportFailureAt,
+          currentOrigin: input.currentOrigin ?? current.currentOrigin,
+          safeErrorCode: input.safeErrorCode ?? null,
+        }
+      },
+      async assignBrowserShard() {
+        calls.push('attempt:assign-shard')
+      },
       async complete(input: unknown) {
         completed = true
         completedInput = input
@@ -202,6 +229,7 @@ function createDeps(options: {
     current: () => current,
     completed: () => completed,
     completedWith: () => completedInput as Record<string, unknown> | null,
+    scheduledRetry: () => scheduledRetryInput as Record<string, unknown> | null,
   }
 }
 
@@ -213,6 +241,7 @@ describe('National Life interactive connection attempt runtime', () => {
 
     expect(test.calls).toEqual([
       'attempt:claim:OPENING_PORTAL',
+      'attempt:assign-shard',
       'steel:create-interactive',
       'page:goto-login',
       'runtime:encrypt',
@@ -271,8 +300,48 @@ describe('National Life interactive connection attempt runtime', () => {
       state: 'AWAITING_MFA',
       safeErrorCode: null,
     })
-    expect(test.calls).toContain('attempt:release-lease')
+    expect(test.calls).toContain('attempt:schedule-retry')
+    expect(test.calls).not.toContain('attempt:release-lease')
     expect(test.calls).not.toContain('steel:close')
+  })
+
+  it('persists exponential backoff and transport timing without changing interactive state', async () => {
+    const test = createDeps({
+      attempt: buildAttempt('AWAITING_LOGIN', { reconnectAttemptCount: 2 }),
+      reconnectError: Object.assign(new Error('temporary Steel reconnect failure'), {
+        code: 'STEEL_RECONNECT_FAILED',
+      }),
+    })
+
+    await runNationalLifeConnectionAttempt('attempt-1', test.deps)
+
+    expect(test.scheduledRetry()).toMatchObject({
+      attemptId: 'attempt-1',
+      state: 'AWAITING_LOGIN',
+      reconnectAttemptCount: 3,
+      nextPollAt: new Date('2026-07-28T12:00:04.000Z'),
+      lastTransportFailureAt: now,
+    })
+    expect(test.current()).toMatchObject({ state: 'AWAITING_LOGIN' })
+  })
+
+  it('fails after the reconnect retry budget is exhausted', async () => {
+    const test = createDeps({
+      attempt: buildAttempt('AWAITING_MFA', { reconnectAttemptCount: 5 }),
+      reconnectError: Object.assign(new Error('temporary Steel reconnect failure'), {
+        code: 'STEEL_RECONNECT_FAILED',
+      }),
+    })
+    expect(test.current().reconnectAttemptCount).toBe(5)
+
+    const result = await runNationalLifeConnectionAttempt('attempt-1', test.deps)
+
+    expect(result).toEqual({ kind: 'TERMINAL', state: 'FAILED' })
+    expect(test.current()).toMatchObject({
+      state: 'FAILED',
+      safeErrorCode: 'STEEL_RECONNECT_FAILED',
+    })
+    expect(test.calls).not.toContain('attempt:schedule-retry')
   })
 
   it('keeps MFA open when the page sits on an unrecognised origin', async () => {
@@ -308,7 +377,7 @@ describe('National Life interactive connection attempt runtime', () => {
     expect(result).toEqual({ kind: 'INTERACTIVE', state: 'AWAITING_MFA' })
     expect(test.current()).toMatchObject({ state: 'AWAITING_MFA' })
     expect(test.calls).not.toContain('steel:close')
-    expect(test.calls).toContain('attempt:release-lease')
+    expect(test.calls).toContain('attempt:schedule-retry')
   })
 
   it('keeps MFA open when the local disconnect fails after a transition', async () => {
@@ -386,7 +455,7 @@ describe('National Life interactive connection attempt runtime', () => {
       currentOrigin: null,
     })
     expect(test.calls).not.toContain('steel:close')
-    expect(test.calls).toContain('attempt:release-lease')
+    expect(test.calls).toContain('attempt:schedule-retry')
   })
 
   it('never commits a connected summary when context encryption fails', async () => {

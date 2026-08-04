@@ -1,0 +1,99 @@
+:root {
+  color: #17211b;
+  background: #f6f8f5;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  width: 320px;
+  min-height: 280px;
+  margin: 0;
+}
+
+main {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 12px;
+  padding: 22px;
+}
+
+.brand {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 12px;
+  color: #fff;
+  background: #235c42;
+  font-weight: 750;
+}
+
+.eyebrow {
+  margin: 1px 0 2px;
+  color: #637068;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.status,
+.actions,
+.privacy {
+  grid-column: 1 / -1;
+}
+
+.status {
+  min-height: 42px;
+  margin: 10px 0 0;
+  padding: 12px;
+  border: 1px solid #d9dfda;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.actions {
+  display: grid;
+  gap: 8px;
+}
+
+button {
+  min-height: 42px;
+  border: 1px solid #235c42;
+  border-radius: 9px;
+  color: #fff;
+  background: #235c42;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+button.secondary {
+  color: #235c42;
+  background: transparent;
+}
+
+button:focus-visible {
+  outline: 3px solid #89b9a0;
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: .6;
+}
+
+.privacy {
+  margin: 0;
+  color: #637068;
+  font-size: 11px;
+  line-height: 1.45;
+}

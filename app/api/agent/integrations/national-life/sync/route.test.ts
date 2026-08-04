@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentAgent: vi.fn(),
   getNationalLifeEnv: vi.fn(),
   isConfigured: vi.fn(),
+  localConfig: vi.fn(),
   getStatus: vi.fn(),
 }))
 
@@ -15,12 +16,17 @@ vi.mock('@/lib/national-life/env', () => ({
 vi.mock('@/lib/national-life/sync-run-service', () => ({
   getNationalLifeSyncStatus: mocks.getStatus,
 }))
+vi.mock('@/lib/national-life/local-connector/config', () => ({
+  getNationalLifeLocalConnectorConfig: mocks.localConfig,
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE: 'LOCAL_CONNECTOR',
+}))
 
 import { GET } from './route'
 
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.isConfigured.mockReturnValue(true)
+  mocks.localConfig.mockReturnValue({ enabled: false })
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1' })
   mocks.getNationalLifeEnv.mockReturnValue({ sessionScopeId: 'scope-1' })
 })
@@ -59,6 +65,22 @@ describe('National Life sync status route', () => {
     expect(mocks.getCurrentAgent).not.toHaveBeenCalled()
     expect(mocks.getStatus).not.toHaveBeenCalled()
     await expect(response.json()).resolves.toEqual({ run: null })
+  })
+
+  it('prefers the local run and does not read remote env when enabled', async () => {
+    mocks.localConfig.mockReturnValue({
+      enabled: true,
+      extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+      storeUrl: 'https://chromewebstore.google.com/detail/keepr/abcdefghijklmnopabcdefghijklmnop',
+      baseUrl: 'https://app.keepr.one',
+    })
+    mocks.getStatus.mockResolvedValue({ runId: 'local-run', safeErrorCode: null })
+
+    const response = await GET()
+
+    expect(mocks.getStatus).toHaveBeenCalledWith('agent-1', 'LOCAL_CONNECTOR')
+    expect(mocks.getNationalLifeEnv).not.toHaveBeenCalled()
+    await expect(response.json()).resolves.toEqual({ run: { runId: 'local-run' } })
   })
 
   it('fails closed when status lookup fails', async () => {

@@ -1,0 +1,4 @@
+.output/
+.wxt/
+.keys/
+node_modules/

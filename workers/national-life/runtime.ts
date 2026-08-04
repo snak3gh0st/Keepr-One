@@ -18,7 +18,7 @@ import {
   upsertForesightDocument,
   upsertForesightServiceSnapshot,
 } from '../../lib/national-life/foresight-snapshot-service'
-import type { NationalLifeEnv } from '../../lib/national-life/env'
+import type { NationalLifeEnv, NationalLifeRuntimeEnv } from '../../lib/national-life/env'
 import {
   createBrowserJobService,
   releaseJobsBlockedOnCarrierLogin,
@@ -36,7 +36,9 @@ import { writeConnectionTrace } from './connection-trace'
 import {
   runNationalLifeConnectionAttempt,
   type CompleteAttemptInput,
+  type AssignBrowserShardInput,
   type RunConnectionAttemptDeps,
+  type ScheduleInteractiveRetryInput,
   type SetAttemptRuntimeInput,
   type StoredConnectionAttempt,
   type TransitionAttemptInput,
@@ -69,6 +71,26 @@ const CLAIMABLE_ATTEMPT_STATES = [
 
 export function getClaimableConnectionAttemptStates() {
   return [...CLAIMABLE_ATTEMPT_STATES]
+}
+
+export function getClaimableConnectionAttemptWhere(
+  now: Date,
+  workerId?: string,
+): Prisma.NationalLifeConnectionAttemptWhereInput {
+  const leaseConditions: Prisma.NationalLifeConnectionAttemptWhereInput[] = [
+    { leaseOwner: null },
+    { leaseExpiresAt: { lte: now } },
+  ]
+  if (workerId) {
+    leaseConditions.push({ leaseOwner: workerId })
+  }
+  return {
+    state: { in: getClaimableConnectionAttemptStates() },
+    AND: [
+      { OR: [{ nextPollAt: { lte: now } }, { nextPollAt: null }] },
+      { OR: leaseConditions },
+    ],
+  }
 }
 
 type RuntimeSignalSource = Pick<EventEmitter, 'once' | 'off'>
@@ -206,6 +228,11 @@ const attemptSelect = {
   runtimeAuthTag: true,
   currentOrigin: true,
   safeErrorCode: true,
+  nextPollAt: true,
+  reconnectAttemptCount: true,
+  browserProvider: true,
+  browserShardId: true,
+  lastTransportFailureAt: true,
   expiresAt: true,
 } satisfies Prisma.NationalLifeConnectionAttemptSelect
 
@@ -276,7 +303,7 @@ function normalizedJob(
   }
 }
 
-function createAttemptStore(
+export function createNationalLifeAttemptStore(
   env: NationalLifeEnv,
 ): RunConnectionAttemptDeps['store'] {
   return {
@@ -289,12 +316,7 @@ function createAttemptStore(
             deploymentScope: env.sessionScopeId,
             provider: NATIONAL_LIFE_PROVIDER,
             purpose: ATTEMPT_PURPOSE,
-            state: { in: getClaimableConnectionAttemptStates() },
-            OR: [
-              { leaseOwner: null },
-              { leaseExpiresAt: { lte: now } },
-              { leaseOwner: workerId },
-            ],
+            ...getClaimableConnectionAttemptWhere(now, workerId),
           },
           data: { leaseOwner: workerId, leaseExpiresAt },
         })
@@ -335,6 +357,51 @@ function createAttemptStore(
       })
       if (updated.count !== 1) {
         throw new Error('National Life attempt runtime write was rejected')
+      }
+    },
+
+    async scheduleInteractiveRetry(input: ScheduleInteractiveRetryInput) {
+      const updated = await prisma.nationalLifeConnectionAttempt.updateMany({
+        where: {
+          id: input.attemptId,
+          deploymentScope: input.deploymentScope,
+          provider: input.provider,
+          purpose: input.purpose,
+          state: input.state,
+          leaseOwner: input.workerId,
+        },
+        data: {
+          reconnectAttemptCount: input.reconnectAttemptCount,
+          nextPollAt: input.nextPollAt,
+          lastTransportFailureAt: input.lastTransportFailureAt,
+          ...(input.currentOrigin !== undefined ? { currentOrigin: input.currentOrigin } : {}),
+          safeErrorCode: input.safeErrorCode ?? null,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+        },
+      })
+      if (updated.count !== 1) {
+        throw new Error('National Life interactive retry schedule was rejected')
+      }
+    },
+
+    async assignBrowserShard(input: AssignBrowserShardInput) {
+      const updated = await prisma.nationalLifeConnectionAttempt.updateMany({
+        where: {
+          id: input.attemptId,
+          deploymentScope: input.deploymentScope,
+          provider: input.provider,
+          purpose: input.purpose,
+          state: input.state,
+          leaseOwner: input.workerId,
+        },
+        data: {
+          browserProvider: input.browserProvider,
+          browserShardId: input.browserShardId,
+        },
+      })
+      if (updated.count !== 1) {
+        throw new Error('National Life browser shard assignment was rejected')
       }
     },
 
@@ -455,8 +522,8 @@ function createAttemptStore(
   }
 }
 
-function createAttemptRunner(env: NationalLifeEnv) {
-  const store = createAttemptStore(env)
+function createAttemptRunner(env: NationalLifeRuntimeEnv) {
+  const store = createNationalLifeAttemptStore(env)
   const deps: RunConnectionAttemptDeps = {
     env,
     workerId: env.runtimeWorkerId,
@@ -915,7 +982,7 @@ function closeServer(server: Server) {
 }
 
 export function createNationalLifeRuntimeDeps(
-  env: NationalLifeEnv,
+  env: NationalLifeRuntimeEnv,
 ): RuntimeDeps {
   const jobService = createBrowserJobService()
   return {
@@ -928,11 +995,7 @@ export function createNationalLifeRuntimeDeps(
           deploymentScope: env.sessionScopeId,
           provider: NATIONAL_LIFE_PROVIDER,
           purpose: ATTEMPT_PURPOSE,
-          state: { in: getClaimableConnectionAttemptStates() },
-          OR: [
-            { leaseOwner: null },
-            { leaseExpiresAt: { lte: new Date() } },
-          ],
+          ...getClaimableConnectionAttemptWhere(new Date()),
         },
         select: { id: true },
         orderBy: [{ expiresAt: 'asc' }, { createdAt: 'asc' }],

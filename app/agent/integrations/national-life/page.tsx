@@ -3,6 +3,10 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentSessionSummary } from '@/lib/national-life/interactive-connection-service'
 import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
+import {
+  getNationalLifeLocalConnectorConfig,
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+} from '@/lib/national-life/local-connector/config'
 import { foresightRunStore } from '@/lib/national-life/foresight-run-service'
 import { prisma } from '@/lib/prisma'
 import { ContextPanel } from '@/components/ContextPanel'
@@ -10,6 +14,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { Shell } from '@/components/Shell'
 import { EmptyState } from '@/components/Table'
 import { NationalLifeConnectionCard } from './NationalLifeConnectionCard'
+import { NationalLifeLocalConnectorCard } from './NationalLifeLocalConnectorCard'
 import { NationalLifeSyncProgress } from './NationalLifeSyncProgress'
 import { NationalLifeForesightProgress } from './NationalLifeForesightProgress'
 
@@ -17,18 +22,24 @@ export const dynamic = 'force-dynamic'
 
 export default async function NationalLifeConnectionPage() {
   const agent = await getCurrentAgent()
-  const configured = isNationalLifeConfigured()
+  const localConfig = getNationalLifeLocalConnectorConfig()
+  const remoteConfigured = isNationalLifeConfigured()
+  const remoteEnv = remoteConfigured ? getNationalLifeEnv() : null
+  const localSyncStatus = localConfig.enabled
+    ? await getNationalLifeSyncStatus(agent.id, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE)
+    : null
+  const selectedSyncStatus =
+    localSyncStatus ??
+    (remoteEnv ? await getNationalLifeSyncStatus(agent.id, remoteEnv.sessionScopeId) : null)
   const [user, summary, syncStatus, foresightStatus] = await Promise.all([
     prisma.user.findUnique({
       where: { id: agent.userId },
       select: { name: true, role: true },
     }),
-    configured ? getAgentSessionSummary(agent.id) : Promise.resolve(null),
-    configured
-      ? getNationalLifeSyncStatus(agent.id, getNationalLifeEnv().sessionScopeId)
-      : Promise.resolve(null),
-    configured
-      ? foresightRunStore.getStatus(agent.id, getNationalLifeEnv().sessionScopeId)
+    remoteConfigured ? getAgentSessionSummary(agent.id) : Promise.resolve(null),
+    Promise.resolve(selectedSyncStatus),
+    remoteEnv
+      ? foresightRunStore.getStatus(agent.id, remoteEnv.sessionScopeId)
       : Promise.resolve(null),
   ])
 
@@ -40,7 +51,7 @@ export default async function NationalLifeConnectionPage() {
       <PageHeader
         title="Conexão National Life"
         eyebrow="Integrações"
-        description="Entre diretamente no portal oficial da National Life. O Keepr One guarda somente a sessão autenticada e nunca armazena sua senha."
+        description="Conecte com segurança ao portal oficial da National Life e sincronize seus dados."
       >
         <Link
           href={backHref}
@@ -50,23 +61,45 @@ export default async function NationalLifeConnectionPage() {
         </Link>
       </PageHeader>
 
-      {configured ? (
+      {localConfig.enabled || remoteConfigured ? (
         <>
           <NationalLifeSyncProgress initialStatus={syncStatus} />
-          <NationalLifeForesightProgress initialStatus={foresightStatus} />
+          {remoteConfigured && <NationalLifeForesightProgress initialStatus={foresightStatus} />}
           <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="max-w-5xl">
-            <NationalLifeConnectionCard summary={summary} />
+          <div className="max-w-5xl space-y-8">
+            {localConfig.enabled && (
+              <NationalLifeLocalConnectorCard
+                extensionId={localConfig.extensionId}
+                storeUrl={localConfig.storeUrl}
+                baseUrl={localConfig.baseUrl}
+                remoteAvailable={remoteConfigured}
+              />
+            )}
+            {remoteConfigured && (
+              <div id="national-life-remote" className="scroll-mt-6">
+                {localConfig.enabled && (
+                  <div className="mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">
+                      Alternativa automática
+                    </p>
+                    <p className="mt-1 text-sm text-ink-muted">
+                      Use a conexão remota se preferir não instalar o KeeproneConnect neste computador.
+                    </p>
+                  </div>
+                )}
+                <NationalLifeConnectionCard summary={summary} />
+              </div>
+            )}
           </div>
 
           <ContextPanel eyebrow="Guardrails" title="Acesso autorizado e seguro">
             <p>
-              Você entra na página real da National Life / Auth0. O Keepr One preserva somente o contexto autenticado da sessão.
+              Você entra na página real da National Life / Auth0. Sua senha permanece sempre no portal oficial.
             </p>
             <div className="mt-5 border-t border-white/10 pt-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Sessão isolada</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Acesso controlado</p>
               <p className="mt-2 text-sm text-paper/70">
-                A janela segura não possui barra de endereço, downloads ou acesso à área de transferência.
+                A sincronização acessa somente as páginas necessárias da National Life.
               </p>
             </div>
             <div className="mt-5 border-t border-white/10 pt-4">
