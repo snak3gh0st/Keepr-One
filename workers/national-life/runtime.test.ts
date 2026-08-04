@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  getClaimableConnectionAttemptWhere,
   getClaimableConnectionAttemptStates,
   runNationalLifeRuntime,
   type RuntimeDeps,
@@ -83,6 +84,17 @@ describe('dedicated National Life runtime loops', () => {
     ])
     expect(getClaimableConnectionAttemptStates()).not.toEqual(
       expect.arrayContaining(['FAILED', 'CANCELLED', 'EXPIRED']),
+    )
+  })
+
+  it('claims only attempts whose durable poll is due', () => {
+    const now = new Date('2026-08-04T12:00:00.000Z')
+    expect(getClaimableConnectionAttemptWhere(now)).toEqual(
+      expect.objectContaining({
+        AND: expect.arrayContaining([
+          { OR: [{ nextPollAt: { lte: now } }, { nextPollAt: null }] },
+        ]),
+      }),
     )
   })
 

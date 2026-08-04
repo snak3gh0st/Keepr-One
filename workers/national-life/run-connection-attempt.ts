@@ -24,7 +24,37 @@ export type StoredConnectionAttempt = {
   runtimeAuthTag: string | null
   currentOrigin: string | null
   safeErrorCode: string | null
+  nextPollAt: Date | null
+  reconnectAttemptCount: number
+  browserProvider: string | null
+  browserShardId: string | null
+  lastTransportFailureAt: Date | null
   expiresAt: Date
+}
+
+export type ScheduleInteractiveRetryInput = {
+  attemptId: string
+  deploymentScope: string
+  provider: string
+  purpose: string
+  state: 'AWAITING_LOGIN' | 'AWAITING_MFA'
+  workerId: string
+  reconnectAttemptCount: number
+  nextPollAt: Date
+  lastTransportFailureAt: Date
+  currentOrigin?: string
+  safeErrorCode?: string
+}
+
+export type AssignBrowserShardInput = {
+  attemptId: string
+  deploymentScope: string
+  provider: string
+  purpose: string
+  state: 'OPENING_PORTAL' | 'AWAITING_LOGIN' | 'AWAITING_MFA'
+  workerId: string
+  browserProvider: string
+  browserShardId: string
 }
 
 export type SetAttemptRuntimeInput = {
@@ -82,6 +112,8 @@ export type RunConnectionAttemptDeps = {
     setRuntime(input: SetAttemptRuntimeInput): Promise<void>
     transition(input: TransitionAttemptInput): Promise<void>
     complete(input: CompleteAttemptInput): Promise<void>
+    scheduleInteractiveRetry(input: ScheduleInteractiveRetryInput): Promise<void>
+    assignBrowserShard(input: AssignBrowserShardInput): Promise<void>
     releaseLease(attemptId: string): Promise<void>
   }
   createInteractiveSession(): Promise<InteractiveBrowserSession>
@@ -178,6 +210,7 @@ function resolveCrypto(deps: RunConnectionAttemptDeps): ConnectionAttemptCrypto 
 const NAVIGATION_ORIGIN_BLOCKED_CODE = 'NAVIGATION_ORIGIN_BLOCKED'
 const STEEL_RECONNECT_FAILED_CODE = 'STEEL_RECONNECT_FAILED'
 const MFA_SESSION_EXPIRED_CODE = 'MFA_SESSION_EXPIRED'
+const MAX_INTERACTIVE_RECONNECT_ATTEMPTS = 5
 
 function errorCode(error: unknown): string | undefined {
   if (
@@ -290,6 +323,16 @@ async function openPortal(
 ): Promise<RunConnectionAttemptResult> {
   let session: InteractiveBrowserSession | undefined
   try {
+    await deps.store.assignBrowserShard({
+      attemptId: attempt.id,
+      deploymentScope: deps.env.sessionScopeId,
+      provider: 'NATIONAL_LIFE',
+      purpose: 'INTERACTIVE_CONNECTION_ATTEMPT',
+      state: attempt.state,
+      workerId: deps.workerId,
+      browserProvider: deps.env.browserProvider,
+      browserShardId: deps.env.browserShardId,
+    })
     session = await deps.createInteractiveSession()
     deps.trace?.({
       step: 'session-created',
@@ -444,8 +487,15 @@ async function monitorPortal(
       // The carrier browser is still live and a human may be mid-MFA on it.
       // Drop only the local CDP client and let the next poll try again.
       await safeDisconnect(session)
-      await recordInteractiveObservation(attempt, interactiveState, deps, error)
-      return { kind: 'INTERACTIVE', state: interactiveState }
+      const retryScheduled = await recordInteractiveObservation(
+        attempt,
+        interactiveState,
+        deps,
+        error,
+      )
+      return retryScheduled
+        ? { kind: 'INTERACTIVE', state: interactiveState }
+        : { kind: 'TERMINAL', state: 'FAILED' }
     }
 
     await safeClose(session)
@@ -490,25 +540,39 @@ async function recordInteractiveObservation(
   error: unknown,
 ) {
   const blockedOrigin = blockedOriginFrom(error)
-
-  if (blockedOrigin && blockedOrigin !== attempt.currentOrigin) {
-    try {
-      await deps.store.transition({
-        attemptId: attempt.id,
-        workerId: deps.workerId,
-        from: interactiveState,
-        to: interactiveState,
-        currentOrigin: blockedOrigin,
-        safeErrorCode: safeErrorCode(error),
-        now: deps.now(),
-      })
-      return
-    } catch {
-      // Fall through: releasing the lease matters more than the diagnostic.
-    }
+  const now = deps.now()
+  const retryCount = attempt.reconnectAttemptCount + 1
+  if (retryCount > MAX_INTERACTIVE_RECONNECT_ATTEMPTS) {
+    await deps.store.transition({
+      attemptId: attempt.id,
+      workerId: deps.workerId,
+      from: interactiveState,
+      to: 'FAILED',
+      currentOrigin: blockedOrigin ?? undefined,
+      safeErrorCode: STEEL_RECONNECT_FAILED_CODE,
+      now,
+    })
+    return false
   }
 
-  await deps.store.releaseLease(attempt.id)
+  const delay = Math.min(
+    deps.env.interactiveReconnectBaseDelayMs * 2 ** retryCount,
+    deps.env.interactiveReconnectMaxDelayMs,
+  )
+  await deps.store.scheduleInteractiveRetry({
+    attemptId: attempt.id,
+    deploymentScope: deps.env.sessionScopeId,
+    provider: 'NATIONAL_LIFE',
+    purpose: 'INTERACTIVE_CONNECTION_ATTEMPT',
+    state: interactiveState,
+    workerId: deps.workerId,
+    reconnectAttemptCount: retryCount,
+    nextPollAt: new Date(now.getTime() + delay),
+    lastTransportFailureAt: now,
+    currentOrigin: blockedOrigin,
+    safeErrorCode: blockedOrigin ? safeErrorCode(error) : undefined,
+  })
+  return true
 }
 
 async function cleanupAttemptRecord(
