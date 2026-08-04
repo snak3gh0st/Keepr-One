@@ -40,6 +40,7 @@ type ConnectorState =
   | 'error'
 
 function chromeRuntime(): ChromeRuntime | null {
+  if (typeof window === 'undefined') return null
   const candidate = (window as typeof window & { chrome?: { runtime?: ChromeRuntime } }).chrome
     ?.runtime
   return candidate && typeof candidate.sendMessage === 'function' ? candidate : null
@@ -89,6 +90,7 @@ function openStore(storeUrl: string) {
 }
 
 function browserSupportsConnector(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
   const userAgent = navigator.userAgent
   return /(?:Chrome|Chromium|Edg)\//.test(userAgent) || chromeRuntime() !== null
 }
@@ -123,9 +125,13 @@ export function NationalLifeLocalConnectorCard({
   const installedFlowStarted = useRef(false)
   const watchAbort = useRef(0)
   const [state, setState] = useState<ConnectorState>('idle')
+  const [compatible, setCompatible] = useState(false)
   const [pairedDeviceId, setPairedDeviceId] = useState<string | null>(null)
   const busy = !['idle', 'success', 'error', 'login-required'].includes(state)
-  const compatible = browserSupportsConnector()
+
+  useEffect(() => {
+    setCompatible(browserSupportsConnector())
+  }, [])
 
   async function watchSyncProgress(): Promise<void> {
     const token = ++watchAbort.current
