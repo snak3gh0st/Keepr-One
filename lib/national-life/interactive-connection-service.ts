@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import type { EncryptedBrowserSecret } from './browser-context-crypto'
 import type { NationalLifeConnectionAttemptState } from './connection-attempt-state'
 import { releaseJobsBlockedOnCarrierLogin } from './job-service'
+import { startForesightInventory } from './foresight-run-service'
 import { startNationalLifeSync } from './sync-run-service'
 import {
   NATIONAL_LIFE_CONNECTION_ATTEMPT_TTL_MS,
@@ -264,9 +265,12 @@ function normalizeSession(
   }
 }
 
-const prismaRepository: InteractiveConnectionRepository = {
+export function createInteractiveConnectionRepository(
+  client: typeof prisma,
+): InteractiveConnectionRepository {
+  return {
   async findActiveAttempt(agentId, provider, deploymentScope, purpose) {
-    const attempt = await prisma.nationalLifeConnectionAttempt.findUnique({
+    const attempt = await client.nationalLifeConnectionAttempt.findUnique({
       where: {
         agentId_deploymentScope_provider_purpose: {
           agentId,
@@ -282,7 +286,7 @@ const prismaRepository: InteractiveConnectionRepository = {
 
   async createAttemptWithAudit(input) {
     try {
-      return await prisma.$transaction(async (transaction) => {
+      return await client.$transaction(async (transaction) => {
         const recentStarts = await transaction.auditLog.count({
           where: {
             userId: input.userId,
@@ -359,7 +363,7 @@ const prismaRepository: InteractiveConnectionRepository = {
   },
 
   async findOwnedAttempt(agentId, provider, attemptId, deploymentScope, purpose) {
-    const attempt = await prisma.nationalLifeConnectionAttempt.findFirst({
+    const attempt = await client.nationalLifeConnectionAttempt.findFirst({
       where: { id: attemptId, agentId, provider, deploymentScope, purpose },
       select: attemptSelect,
     })
@@ -367,7 +371,7 @@ const prismaRepository: InteractiveConnectionRepository = {
   },
 
   async storeViewerNonce(input) {
-    const result = await prisma.nationalLifeConnectionAttempt.updateMany({
+    const result = await client.nationalLifeConnectionAttempt.updateMany({
       where: {
         id: input.attemptId,
         agentId: input.agentId,
@@ -383,7 +387,7 @@ const prismaRepository: InteractiveConnectionRepository = {
   },
 
   async consumeViewerNonce(input) {
-    const result = await prisma.nationalLifeConnectionAttempt.updateMany({
+    const result = await client.nationalLifeConnectionAttempt.updateMany({
       where: {
         id: input.attemptId,
         agentId: input.agentId,
@@ -400,7 +404,7 @@ const prismaRepository: InteractiveConnectionRepository = {
   },
 
   async cancelOwnedAttempt(input) {
-    return prisma.$transaction(async (transaction) => {
+    return client.$transaction(async (transaction) => {
       const result = await transaction.nationalLifeConnectionAttempt.updateMany({
         where: {
           id: input.attemptId,
@@ -438,7 +442,7 @@ const prismaRepository: InteractiveConnectionRepository = {
   },
 
   async completeOwnedAttempt(input) {
-    return prisma.$transaction(async (transaction) => {
+    return client.$transaction(async (transaction) => {
       const attempt = await transaction.nationalLifeConnectionAttempt.findFirst({
         where: {
           id: input.attemptId,
@@ -504,6 +508,11 @@ const prismaRepository: InteractiveConnectionRepository = {
         deploymentScope: input.deploymentScope,
         now: input.now,
       })
+      await startForesightInventory(transaction, {
+        agentId: input.agentId,
+        deploymentScope: input.deploymentScope,
+        now: input.now,
+      })
       const deleted = await transaction.nationalLifeConnectionAttempt.deleteMany({
         where: {
           id: input.attemptId,
@@ -521,7 +530,7 @@ const prismaRepository: InteractiveConnectionRepository = {
   },
 
   async invalidateOwnedSession(input) {
-    const result = await prisma.agentIntegrationSession.updateMany({
+    const result = await client.agentIntegrationSession.updateMany({
       where: {
         agentId: input.agentId,
         deploymentScope: input.deploymentScope,
@@ -541,7 +550,7 @@ const prismaRepository: InteractiveConnectionRepository = {
   },
 
   async disconnectOwnedAgent(input) {
-    return prisma.$transaction(async (transaction) => {
+    return client.$transaction(async (transaction) => {
       const cancelled = await transaction.nationalLifeConnectionAttempt.updateMany({
         where: {
           agentId: input.agentId,
@@ -588,7 +597,7 @@ const prismaRepository: InteractiveConnectionRepository = {
   },
 
   async findOwnedSession(agentId, provider, deploymentScope, purpose) {
-    const session = await prisma.agentIntegrationSession.findUnique({
+    const session = await client.agentIntegrationSession.findUnique({
       where: {
         agentId_deploymentScope_provider_purpose: {
           agentId,
@@ -603,14 +612,17 @@ const prismaRepository: InteractiveConnectionRepository = {
   },
 
   async listSessionHealth(provider, deploymentScope, purpose) {
-    const sessions = await prisma.agentIntegrationSession.findMany({
+    const sessions = await client.agentIntegrationSession.findMany({
       where: { provider, deploymentScope, purpose },
       select: sessionSelect,
       orderBy: { lastConnectedAt: 'desc' },
     })
     return sessions.map(normalizeSession)
   },
+  }
 }
+
+const prismaRepository = createInteractiveConnectionRepository(prisma)
 
 function resolveRepository(deps?: InteractiveConnectionServiceDeps) {
   return deps?.repository ?? prismaRepository

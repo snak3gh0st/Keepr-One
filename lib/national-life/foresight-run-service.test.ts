@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { createForesightRunStore } from './foresight-run-service'
+import {
+  createForesightRunStore,
+  startForesightInventory,
+} from './foresight-run-service'
 
 const now = new Date('2026-08-03T17:00:00.000Z')
 
@@ -46,6 +49,46 @@ function createRepository() {
 }
 
 describe('Foresight read run store', () => {
+  it('starts one scoped inventory job and reuses only that active inventory', async () => {
+    const repository = createRepository()
+
+    await expect(startForesightInventory(repository as never, {
+      agentId: 'agent-1',
+      deploymentScope: 'scope-1',
+      now,
+    })).resolves.toEqual({ runId: 'run-1', duplicate: false })
+
+    repository.active = { id: 'run-1', jobs: [{ id: 'job-1' }] }
+
+    await expect(startForesightInventory(repository as never, {
+      agentId: 'agent-1',
+      deploymentScope: 'scope-1',
+      now,
+    })).resolves.toEqual({ runId: 'run-1', duplicate: true })
+
+    expect(repository.jobs).toEqual([
+      expect.objectContaining({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        operation: 'SYNC_FORESIGHT_READ',
+        input: { foresightRunId: 'run-1', mode: 'INVENTORY' },
+      }),
+    ])
+    expect(repository.findFirstCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          where: expect.objectContaining({
+            agentId: 'agent-1',
+            deploymentScope: 'scope-1',
+            provider: 'NATIONAL_LIFE',
+            mode: 'INVENTORY',
+            targetCaseId: null,
+          }),
+        }),
+      ]),
+    )
+  })
+
   it('returns the active inventory run and job as a duplicate', async () => {
     const repository = createRepository()
     repository.active = { id: 'run-existing', jobs: [{ id: 'job-existing' }] }

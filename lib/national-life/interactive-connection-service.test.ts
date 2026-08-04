@@ -4,6 +4,7 @@ import type { EncryptedBrowserSecret } from './browser-context-crypto'
 import {
   cancelConnectionAttempt,
   completeConnectionAttempt,
+  createInteractiveConnectionRepository,
   consumeViewerNonce,
   disconnectAgentSession,
   getAgentSessionSummary,
@@ -215,6 +216,120 @@ function deps(repository: InteractiveConnectionRepository) {
   }
 }
 
+type CompletionState = {
+  attemptExists: boolean
+  sessions: Array<Record<string, unknown>>
+  syncRuns: Array<Record<string, unknown>>
+  foresightRuns: Array<Record<string, unknown>>
+  jobs: Array<Record<string, unknown>>
+}
+
+function createCompletionTransaction(state: CompletionState, failForesightJob = false) {
+  return {
+    nationalLifeConnectionAttempt: {
+      findFirst: async () => (state.attemptExists ? { id: 'attempt-1' } : null),
+      deleteMany: async () => {
+        if (!state.attemptExists) return { count: 0 }
+        state.attemptExists = false
+        return { count: 1 }
+      },
+    },
+    agentIntegrationSession: {
+      upsert: async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
+        const existing = state.sessions.find((session) =>
+          session.agentId === create.agentId &&
+          session.deploymentScope === create.deploymentScope &&
+          session.provider === create.provider,
+        )
+        if (existing) Object.assign(existing, update)
+        else state.sessions.push({ id: 'session-1', ...create })
+      },
+    },
+    nationalLifeSyncRun: {
+      findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+        state.syncRuns.find((run) =>
+          run.agentId === where.agentId &&
+          run.deploymentScope === where.deploymentScope &&
+          run.provider === where.provider &&
+          ['QUEUED', 'RUNNING', 'PAUSED'].includes(String(run.state)),
+        ) ?? null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const run = { id: `sync-run-${state.syncRuns.length + 1}`, state: 'QUEUED', ...data }
+        state.syncRuns.push(run)
+        return { id: run.id }
+      },
+    },
+    nationalLifeForesightReadRun: {
+      findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+        const run = state.foresightRuns.find((candidate) =>
+          candidate.agentId === where.agentId &&
+          candidate.deploymentScope === where.deploymentScope &&
+          candidate.provider === where.provider &&
+          candidate.mode === where.mode &&
+          candidate.targetCaseId === where.targetCaseId &&
+          ['QUEUED', 'RUNNING', 'PAUSED'].includes(String(candidate.state)),
+        )
+        return run
+          ? { id: run.id, jobs: state.jobs.filter((job) => job.foresightRunId === run.id).slice(0, 1) }
+          : null
+      },
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const run = { id: `foresight-run-${state.foresightRuns.length + 1}`, state: 'QUEUED', ...data }
+        state.foresightRuns.push(run)
+        return { id: run.id }
+      },
+    },
+    browserAutomationJob: {
+      updateMany: async () => ({ count: 0 }),
+      createMany: async ({ data }: { data: Array<Record<string, unknown>> }) => {
+        state.jobs.push(...data.map((job, index) => ({ id: `grid-job-${state.jobs.length + index + 1}`, ...job })))
+      },
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        if (failForesightJob) throw new Error('Foresight inventory creation failed')
+        const job = { id: `foresight-job-${state.jobs.length + 1}`, ...data }
+        state.jobs.push(job)
+        return { id: job.id }
+      },
+    },
+  }
+}
+
+async function completeInMemoryTransaction(
+  state: CompletionState,
+  options?: { failForesightJob?: boolean },
+) {
+  const repository = createInteractiveConnectionRepository({
+    $transaction: async (callback: (transaction: unknown) => Promise<boolean>) => {
+      const pending = structuredClone(state)
+      const completed = await callback(
+        createCompletionTransaction(pending, options?.failForesightJob),
+      )
+      Object.assign(state, pending)
+      return completed
+    },
+  } as never)
+  return completeConnectionAttempt(
+    {
+      agentId: 'agent-1',
+      attemptId: 'attempt-1',
+      encryptedContext: encrypted,
+      carrierExpiresAt: null,
+    },
+    {
+      repository,
+      now: () => now,
+      config: {
+        interactiveLoginEnabled: true,
+        interactiveLoginAgentIds: new Set<string>(),
+        interactiveLoginAllAgents: true,
+        viewerPublicOrigin: 'https://viewer.keepr.one',
+        viewerSigningKey: Buffer.alloc(32, 9),
+        deploymentScope: 'scope-1',
+      },
+    },
+  )
+}
+
 describe('National Life owned interactive connection service', () => {
   it('creates only one active attempt for the exact agent/provider', async () => {
     const memory = createMemoryRepository()
@@ -367,6 +482,63 @@ describe('National Life owned interactive connection service', () => {
     expect(memory.calls).toEqual(['session:commit', 'attempt:delete'])
     expect(memory.sessions.get('agent-1:NATIONAL_LIFE')?.ciphertext).toBe(encrypted.ciphertext)
     expect(memory.attempts).toHaveLength(0)
+  })
+
+  it('creates the nine-grid sync and one scoped Foresight inventory atomically after login', async () => {
+    const state: CompletionState = {
+      attemptExists: true,
+      sessions: [],
+      syncRuns: [],
+      foresightRuns: [],
+      jobs: [],
+    }
+
+    await expect(completeInMemoryTransaction(state)).resolves.toBeUndefined()
+
+    expect(state.syncRuns).toHaveLength(1)
+    expect(state.jobs.filter((job) => job.operation === 'SYNC_NATIONAL_LIFE_GRID')).toHaveLength(9)
+    expect(state.foresightRuns).toEqual([
+      expect.objectContaining({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        provider: 'NATIONAL_LIFE',
+        mode: 'INVENTORY',
+      }),
+    ])
+    expect(state.jobs.filter((job) => job.operation === 'SYNC_FORESIGHT_READ')).toEqual([
+      expect.objectContaining({
+        agentId: 'agent-1',
+        deploymentScope: 'scope-1',
+        provider: 'NATIONAL_LIFE',
+        input: { foresightRunId: 'foresight-run-1', mode: 'INVENTORY' },
+      }),
+    ])
+
+    state.attemptExists = true
+    await expect(completeInMemoryTransaction(state)).resolves.toBeUndefined()
+    expect(state.jobs.filter((job) => job.operation === 'SYNC_FORESIGHT_READ')).toHaveLength(1)
+    expect(state.jobs.filter((job) => job.operation === 'SYNC_NATIONAL_LIFE_GRID')).toHaveLength(9)
+  })
+
+  it('rolls back the connection when scoped Foresight inventory creation fails', async () => {
+    const state: CompletionState = {
+      attemptExists: true,
+      sessions: [],
+      syncRuns: [],
+      foresightRuns: [],
+      jobs: [],
+    }
+
+    await expect(completeInMemoryTransaction(state, { failForesightJob: true }))
+      .rejects.toThrow('Foresight inventory creation failed')
+
+    expect(state).toEqual({
+      attemptExists: true,
+      sessions: [],
+      syncRuns: [],
+      foresightRuns: [],
+      jobs: [],
+    })
   })
 
   it('disconnects only the owning agent session and cancels that agent attempt', async () => {

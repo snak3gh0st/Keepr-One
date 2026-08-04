@@ -141,6 +141,17 @@ export async function startForesightReadRun(
   return { runId: run.id, jobId: job.id, duplicate: false }
 }
 
+export async function startForesightInventory(
+  tx: Prisma.TransactionClient,
+  input: { agentId: string; deploymentScope: string; now: Date },
+): Promise<{ runId: string; duplicate: boolean }> {
+  const started = await startForesightReadRun(tx, {
+    ...input,
+    mode: 'INVENTORY',
+  })
+  return { runId: started.runId, duplicate: started.duplicate }
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
 }
