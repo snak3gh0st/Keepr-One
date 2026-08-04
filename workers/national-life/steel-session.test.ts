@@ -183,7 +183,11 @@ function createFakeSessionDeps(options?: {
   }
 }
 
-async function invokeRouteHandler(handler: RouteHandler, requestUrl: string) {
+async function invokeRouteHandler(
+  handler: RouteHandler,
+  requestUrl: string,
+  options?: { continueError?: Error },
+) {
   const events = { aborted: [] as string[], continued: 0 }
 
   const route: FakeRoute = {
@@ -192,6 +196,7 @@ async function invokeRouteHandler(handler: RouteHandler, requestUrl: string) {
     },
     continue: async () => {
       events.continued += 1
+      if (options?.continueError) throw options.continueError
     },
   }
 
@@ -366,6 +371,20 @@ describe('National Life Steel session boundary', () => {
     await expect(
       invokeRouteHandler(handler, 'https://agent.nationallife.example.evil.test/cases'),
     ).resolves.toEqual({ aborted: ['blockedbyclient'], continued: 0 })
+
+    await session.close()
+  })
+
+  it('does not let a closed target escape from the navigation guard callback', async () => {
+    const fake = createFakeSessionDeps()
+    const session = await createSteelBrowserSession(buildEnv(), fake.deps)
+    const [handler] = fake.routeHandlers
+
+    await expect(
+      invokeRouteHandler(handler, 'https://agent.nationallife.example/login', {
+        continueError: new Error('Target page, context or browser has been closed'),
+      }),
+    ).resolves.toEqual({ aborted: [], continued: 1 })
 
     await session.close()
   })

@@ -260,16 +260,22 @@ async function getOrCreatePage(context: ManagedContext): Promise<ManagedPage> {
 
 async function installNavigationGuard(context: ManagedContext, allowedOrigins: readonly string[]) {
   await context.route(DEFAULT_ROUTE_PATTERN, async (route: ManagedRoute, request: ManagedRequest) => {
-    if (request.isNavigationRequest() && request.resourceType() === 'document') {
-      try {
-        assertAllowedNavigation(request.url(), allowedOrigins)
-      } catch {
-        await route.abort('blockedbyclient')
-        return
+    try {
+      if (request.isNavigationRequest() && request.resourceType() === 'document') {
+        try {
+          assertAllowedNavigation(request.url(), allowedOrigins)
+        } catch {
+          await route.abort('blockedbyclient')
+          return
+        }
       }
-    }
 
-    await route.continue()
+      await route.continue()
+    } catch {
+      // Steel can close a target while a navigation callback is in flight.
+      // Do not let that transport rejection crash the worker process; the
+      // owning page operation will report the session failure to its caller.
+    }
   })
 }
 
