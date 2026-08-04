@@ -64,6 +64,7 @@ export async function startNationalLifeSync(
       agentId: input.agentId,
       deploymentScope: input.deploymentScope,
       provider: NATIONAL_LIFE_PROVIDER,
+      executionSource: 'REMOTE',
       state: { in: [...ACTIVE_RUN_STATES] },
     },
     orderBy: { createdAt: 'desc' },
@@ -78,6 +79,7 @@ export async function startNationalLifeSync(
       agentId: input.agentId,
       deploymentScope: input.deploymentScope,
       provider: NATIONAL_LIFE_PROVIDER,
+      executionSource: 'REMOTE',
       totalStages: NATIONAL_LIFE_SYNC_STAGES.length,
       createdAt: input.now,
       updatedAt: input.now,
@@ -115,6 +117,7 @@ export async function reconcileNationalLifeSync(
       agentId: input.agentId,
       deploymentScope: input.deploymentScope,
       provider: NATIONAL_LIFE_PROVIDER,
+      executionSource: 'REMOTE',
     },
     select: {
       startedAt: true,
@@ -138,6 +141,7 @@ export async function reconcileNationalLifeSync(
       agentId: input.agentId,
       deploymentScope: input.deploymentScope,
       provider: NATIONAL_LIFE_PROVIDER,
+      executionSource: 'REMOTE',
     },
     data: {
       state,
@@ -166,6 +170,11 @@ export async function getNationalLifeSyncStatus(
     select: {
       id: true,
       state: true,
+      executionSource: true,
+      completedStages: true,
+      totalStages: true,
+      failedStages: true,
+      currentGridKey: true,
       safeErrorCode: true,
       completedAt: true,
       jobs: {
@@ -176,6 +185,24 @@ export async function getNationalLifeSyncStatus(
   })
   if (!run) {
     return null
+  }
+
+  if (run.executionSource === 'LOCAL') {
+    const completed = run.completedStages
+    const total = run.totalStages
+    return {
+      runId: run.id,
+      state: run.state as NationalLifeSyncRunState,
+      completed,
+      total,
+      percent: total === 0 ? 0 : Math.round((completed / total) * 100),
+      failed: run.failedStages,
+      currentGridKey: run.currentGridKey,
+      currentGridLabel: nationalLifeSyncGridLabel(run.currentGridKey),
+      safeErrorCode: run.safeErrorCode,
+      shouldPoll: run.state === 'QUEUED' || run.state === 'RUNNING' || run.state === 'PAUSED',
+      completedAt: run.completedAt,
+    }
   }
 
   const progress = syncProgressFromJobs(run.jobs)

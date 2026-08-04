@@ -1,6 +1,11 @@
 import Link from 'next/link'
 import { getCurrentAgent } from '@/lib/agent-context'
+import { chooseMostRecentNationalLifeScope } from '@/lib/national-life/data-source'
 import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
+import {
+  getNationalLifeLocalConnectorConfig,
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+} from '@/lib/national-life/local-connector/config'
 import { prisma } from '@/lib/prisma'
 import { ContextPanel } from '@/components/ContextPanel'
 import { ErrorBanner } from '@/components/ErrorBanner'
@@ -73,8 +78,10 @@ function toCommissionRow(row: {
 export default async function NationalLifeDataPage() {
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
+  const localEnabled = getNationalLifeLocalConnectorConfig().enabled
+  const remoteConfigured = isNationalLifeConfigured()
 
-  if (!isNationalLifeConfigured()) {
+  if (!localEnabled && !remoteConfigured) {
     return (
       <Shell role="AGENT" userName={user?.name ?? ''}>
         <PageHeader
@@ -87,7 +94,11 @@ export default async function NationalLifeDataPage() {
     )
   }
 
-  const deploymentScope = getNationalLifeEnv().sessionScopeId
+  const remoteScope = remoteConfigured ? getNationalLifeEnv().sessionScopeId : null
+  const allowedScopes = [
+    ...(localEnabled ? [LOCAL_CONNECTOR_DEPLOYMENT_SCOPE] : []),
+    ...(remoteScope ? [remoteScope] : []),
+  ]
 
   let cases: CaseRow[] = []
   let inforce: InforceRow[] = []
@@ -98,7 +109,35 @@ export default async function NationalLifeDataPage() {
   let foresightRun: Awaited<ReturnType<typeof foresightRunStore.getStatus>> = null
 
   try {
-    const [caseRows, inforceRows, reportRows, session, foresightRows, currentForesightRun] = await Promise.all([
+    const [latestCase, latestInforce] = await Promise.all([
+      prisma.nationalLifeCaseSnapshot.findFirst({
+        where: { agentId: agent.id, deploymentScope: { in: allowedScopes } },
+        select: { deploymentScope: true, fetchedAt: true },
+        orderBy: { fetchedAt: 'desc' },
+      }),
+      prisma.nationalLifeInforcePolicy.findFirst({
+        where: { agentId: agent.id, deploymentScope: { in: allowedScopes } },
+        select: { deploymentScope: true, fetchedAt: true },
+        orderBy: { fetchedAt: 'desc' },
+      }),
+    ])
+    const deploymentScope = chooseMostRecentNationalLifeScope(allowedScopes, [
+      latestCase && { deploymentScope: latestCase.deploymentScope, observedAt: latestCase.fetchedAt },
+      latestInforce && {
+        deploymentScope: latestInforce.deploymentScope,
+        observedAt: latestInforce.fetchedAt,
+      },
+    ])
+
+    const [
+      caseRows,
+      inforceRows,
+      reportRows,
+      session,
+      localRun,
+      foresightRows,
+      currentForesightRun,
+    ] = await Promise.all([
       prisma.nationalLifeCaseSnapshot.findMany({
         where: { agentId: agent.id, deploymentScope },
         select: caseSelect,
@@ -109,42 +148,62 @@ export default async function NationalLifeDataPage() {
         select: inforceSelect,
         orderBy: [{ policyStatus: 'asc' }, { policyNumber: 'asc' }],
       }),
-      prisma.nationalLifeReportRow.findMany({
-        where: { agentId: agent.id, deploymentScope },
-        select: reportSelect,
-        orderBy: [{ gridKey: 'asc' }, { primaryDate: 'desc' }],
-      }),
-      prisma.agentIntegrationSession.findFirst({
-        where: {
-          agentId: agent.id,
-          deploymentScope,
-          provider: 'NATIONAL_LIFE',
-          purpose: 'CARRIER_SESSION',
-        },
-        select: { lastConnectedAt: true, lastUsedAt: true },
-      }),
-      prisma.nationalLifeForesightCaseSnapshot.findMany({
-        where: { agentId: agent.id, deploymentScope, provider: 'NATIONAL_LIFE' },
-        select: {
-          id: true,
-          displayName: true,
-          caseKind: true,
-          product: true,
-          status: true,
-          state: true,
-          observedAt: true,
-          _count: { select: { services: true } },
-        },
-        orderBy: [{ observedAt: 'desc' }, { displayName: 'asc' }],
-      }),
-      foresightRunStore.getStatus(agent.id, deploymentScope),
+      remoteScope
+        ? prisma.nationalLifeReportRow.findMany({
+            where: { agentId: agent.id, deploymentScope: remoteScope },
+            select: reportSelect,
+            orderBy: [{ gridKey: 'asc' }, { primaryDate: 'desc' }],
+          })
+        : Promise.resolve([]),
+      remoteScope && deploymentScope === remoteScope
+        ? prisma.agentIntegrationSession.findFirst({
+            where: {
+              agentId: agent.id,
+              deploymentScope: remoteScope,
+              provider: 'NATIONAL_LIFE',
+              purpose: 'CARRIER_SESSION',
+            },
+            select: { lastConnectedAt: true, lastUsedAt: true },
+          })
+        : Promise.resolve(null),
+      deploymentScope === LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
+        ? prisma.nationalLifeSyncRun.findFirst({
+            where: {
+              agentId: agent.id,
+              deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+              executionSource: 'LOCAL',
+              provider: 'NATIONAL_LIFE',
+            },
+            select: { completedAt: true, updatedAt: true },
+            orderBy: { createdAt: 'desc' },
+          })
+        : Promise.resolve(null),
+      remoteScope
+        ? prisma.nationalLifeForesightCaseSnapshot.findMany({
+            where: { agentId: agent.id, deploymentScope: remoteScope, provider: 'NATIONAL_LIFE' },
+            select: {
+              id: true,
+              displayName: true,
+              caseKind: true,
+              product: true,
+              status: true,
+              state: true,
+              observedAt: true,
+              _count: { select: { services: true } },
+            },
+            orderBy: [{ observedAt: 'desc' }, { displayName: 'asc' }],
+          })
+        : Promise.resolve([]),
+      remoteScope ? foresightRunStore.getStatus(agent.id, remoteScope) : Promise.resolve(null),
     ])
 
     cases = caseRows
     inforce = inforceRows
     commissions = reportRows.map(toCommissionRow)
-    // lastUsedAt advances on every sync; lastConnectedAt only on a fresh login.
-    lastSyncedAt = session?.lastUsedAt ?? session?.lastConnectedAt ?? null
+    lastSyncedAt =
+      deploymentScope === LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
+        ? localRun?.completedAt ?? localRun?.updatedAt ?? null
+        : session?.lastUsedAt ?? session?.lastConnectedAt ?? null
     foresightCases = foresightRows.map(({ _count, ...row }) => ({ ...row, serviceCount: _count.services }))
     foresightRun = currentForesightRun
   } catch (error) {

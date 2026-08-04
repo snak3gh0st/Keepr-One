@@ -212,6 +212,8 @@ model Agent {
   illustrations          Illustration[]
   nationalLifeInforcePolicies NationalLifeInforcePolicy[]
   nationalLifeReportRows NationalLifeReportRow[]
+  nationalLifeConnectorPairings NationalLifeConnectorPairing[]
+  nationalLifeConnectorDevices NationalLifeConnectorDevice[]
 
   @@index([parentAgentId])
 }
@@ -693,8 +695,11 @@ model NationalLifeSyncRun {
   id              String                   @id @default(cuid())
   agentId         String
   agent           Agent                    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  connectorDeviceId String?
+  connectorDevice NationalLifeConnectorDevice? @relation(fields: [connectorDeviceId], references: [id], onDelete: SetNull)
   deploymentScope String                   @default("SINGLE_DEPLOYMENT")
   provider        String                   @default("NATIONAL_LIFE")
+  executionSource String                   @default("REMOTE")
   state           NationalLifeSyncRunState @default(QUEUED)
   totalStages     Int
   completedStages Int                      @default(0)
@@ -706,8 +711,75 @@ model NationalLifeSyncRun {
   createdAt       DateTime                 @default(now())
   updatedAt       DateTime                 @updatedAt
   jobs            BrowserAutomationJob[]
+  stageReceipts   NationalLifeConnectorStageReceipt[]
 
   @@index([agentId, deploymentScope, state, createdAt])
+  @@index([connectorDeviceId, createdAt])
+}
+
+model NationalLifeConnectorPairing {
+  id         String    @id @default(cuid())
+  codeHash   String    @unique
+  agentId    String
+  agent      Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([agentId, expiresAt])
+}
+
+model NationalLifeConnectorDevice {
+  id                    String    @id @default(cuid())
+  agentId               String
+  agent                 Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  label                 String
+  publicKeyJwk          Json
+  publicKeyThumbprint   String    @unique
+  status                String    @default("ACTIVE")
+  lastSeenAt            DateTime?
+  revokedAt             DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  replays               NationalLifeConnectorReplay[]
+  stageReceipts         NationalLifeConnectorStageReceipt[]
+  syncRuns              NationalLifeSyncRun[]
+
+  @@index([agentId, status])
+}
+
+model NationalLifeConnectorReplay {
+  id        String   @id @default(cuid())
+  deviceId  String
+  device    NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  jti       String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([deviceId, jti])
+  @@index([expiresAt])
+}
+
+model NationalLifeConnectorStageReceipt {
+  id             String   @id @default(cuid())
+  deviceId       String
+  device         NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  runId          String
+  run            NationalLifeSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  gridKey        String
+  sequence       Int
+  truncated      Boolean  @default(true)
+  contentHash    String
+  recordCount    Int
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([deviceId, runId, gridKey, sequence])
+  @@index([runId, gridKey])
+  @@index([runId, truncated])
 }
 
 model Illustration {

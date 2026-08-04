@@ -1,0 +1,105 @@
+import { requireAllowedBaseUrl } from './constants'
+import { readPrivateKey } from './key-store'
+
+const encoder = new TextEncoder()
+
+export function canonicalMessage(input: {
+  method: string
+  pathname: string
+  jti: string
+  timestamp: string
+  bodyHash: string
+}): string {
+  return [
+    input.method.toUpperCase(),
+    input.pathname,
+    input.jti,
+    input.timestamp,
+    input.bodyHash,
+  ].join('\n')
+}
+
+function hex(bytes: ArrayBuffer): string {
+  return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+export function base64Url(bytes: ArrayBuffer): string {
+  let binary = ''
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+export async function sha256(value: string): Promise<string> {
+  return hex(await crypto.subtle.digest('SHA-256', encoder.encode(value)))
+}
+
+export async function signCanonicalMessage(key: CryptoKey, message: string): Promise<string> {
+  const signature = await crypto.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    key,
+    encoder.encode(message),
+  )
+  return base64Url(signature)
+}
+
+export class SignedRequestError extends Error {
+  constructor(
+    readonly code: 'DEVICE_KEY_UNAVAILABLE' | 'DEVICE_REQUEST_REJECTED' | 'DEVICE_REQUEST_FAILED' | 'IDEMPOTENCY_CONFLICT' | 'PATH_NOT_ALLOWED',
+  ) {
+    super(code)
+  }
+}
+
+export async function signedJsonRequest<T>(input: {
+  baseUrl: string
+  deviceId: string
+  method: 'POST' | 'PUT'
+  pathname: string
+  body: unknown
+  idempotencyKey?: string
+}): Promise<T> {
+  const baseUrl = requireAllowedBaseUrl(input.baseUrl)
+  if (!input.pathname.startsWith('/api/agent/integrations/national-life/local-connector/')) {
+    throw new SignedRequestError('PATH_NOT_ALLOWED')
+  }
+  const key = await readPrivateKey()
+  if (!key) throw new SignedRequestError('DEVICE_KEY_UNAVAILABLE')
+  const body = JSON.stringify(input.body)
+  const bodyHash = await sha256(body)
+  const timestamp = new Date().toISOString()
+  const jti = crypto.randomUUID()
+  const canonical = canonicalMessage({
+    method: input.method,
+    pathname: input.pathname,
+    jti,
+    timestamp,
+    bodyHash,
+  })
+  const signature = await signCanonicalMessage(key, canonical)
+  const headers = new Headers({
+    'content-type': 'application/json',
+    'x-fyntra-device-id': input.deviceId,
+    'x-fyntra-jti': jti,
+    'x-fyntra-timestamp': timestamp,
+    'x-fyntra-body-sha256': bodyHash,
+    'x-fyntra-signature': signature,
+  })
+  if (input.idempotencyKey) headers.set('x-idempotency-key', input.idempotencyKey)
+
+  const response = await fetch(`${baseUrl}${input.pathname}`, {
+    method: input.method,
+    headers,
+    body,
+    credentials: 'omit',
+    cache: 'no-store',
+    redirect: 'error',
+  })
+  if (response.status === 409) throw new SignedRequestError('IDEMPOTENCY_CONFLICT')
+  if (!response.ok) {
+    throw new SignedRequestError(
+      response.status === 401 ? 'DEVICE_REQUEST_REJECTED' : 'DEVICE_REQUEST_FAILED',
+    )
+  }
+  if (response.status === 204) return undefined as T
+  return (await response.json()) as T
+}
