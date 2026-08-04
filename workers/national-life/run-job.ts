@@ -18,7 +18,7 @@ import type {
   RapidSolveQuoteJobInput,
 } from '../../lib/national-life/job-service'
 import type { ForesightRunStore } from '../../lib/national-life/foresight-run-service'
-import { isPdfPayload } from '../../lib/national-life/foresight-report'
+import { buildForesightDocumentFilename, isPdfPayload } from '../../lib/national-life/foresight-report'
 import type {
   ForesightCaseListing,
   ForesightServiceObservation,
@@ -140,6 +140,7 @@ export type ForesightRunWorkerStore = ForesightRunStore & {
     caseSnapshotId: string
     reportKey: string
     caseName: string
+    filename?: string
     bytes: Buffer
     mimeType: string
     fetchedAt: Date
@@ -803,6 +804,7 @@ export async function runNationalLifeJob(
             caseSnapshotId: foresightPdfSnapshot.id,
             reportKey: 'foresight-report',
             caseName: rendered.caseName,
+            filename: buildForesightDocumentFilename(rendered.caseName, deps.now()),
             bytes: rendered.bytes,
             mimeType: rendered.mimeType,
             fetchedAt: deps.now(),

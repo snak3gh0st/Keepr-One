@@ -592,6 +592,7 @@ function createForesightRunWorkerStore(env: NationalLifeEnv) {
       caseSnapshotId: string
       reportKey: string
       caseName: string
+      filename?: string
       bytes: Buffer
       mimeType: string
       fetchedAt: Date
@@ -605,7 +606,7 @@ function createForesightRunWorkerStore(env: NationalLifeEnv) {
         reportKey: input.reportKey,
         // The key already scopes the document to its stored case. Avoid
         // deriving a filename from an untrusted carrier label.
-        filename: 'foresight-report.pdf',
+        filename: input.filename ?? 'foresight-report.pdf',
         mimeType: input.mimeType,
         byteSize: input.bytes.byteLength,
         contentHash: createHash('sha256').update(input.bytes).digest('hex'),
