@@ -16,7 +16,8 @@ ALTER TYPE "BrowserJobOperation" ADD VALUE 'SYNC_FORESIGHT_READ';
 ALTER TYPE "BrowserJobOperation" ADD VALUE 'GENERATE_FORESIGHT_PDF';
 
 -- AlterTable
-ALTER TABLE "BrowserAutomationJob" ADD COLUMN     "foresightRunId" TEXT;
+ALTER TABLE "BrowserAutomationJob" ADD COLUMN     "foresightRunId" TEXT,
+ADD COLUMN     "deploymentScope" TEXT;
 
 -- CreateTable
 CREATE TABLE "NationalLifeForesightReadRun" (
@@ -104,6 +105,13 @@ CREATE TABLE "NationalLifeForesightDocument" (
 
 -- CreateIndex
 CREATE INDEX "NationalLifeForesightReadRun_agentId_deploymentScope_state__idx" ON "NationalLifeForesightReadRun"("agentId", "deploymentScope", "state", "createdAt");
+
+-- One active read per ownership/mode/target key. `targetCaseId` is nullable,
+-- so COALESCE gives inventory runs a stable comparable key.
+CREATE UNIQUE INDEX "NationalLifeForesightReadRun_active_ownership_mode_target_key" ON "NationalLifeForesightReadRun"("agentId", "deploymentScope", "provider", "mode", COALESCE("targetCaseId", '')) WHERE "state" IN ('QUEUED', 'RUNNING', 'PAUSED');
+
+-- CreateIndex
+CREATE INDEX "BrowserAutomationJob_agentId_deploymentScope_provider_idx" ON "BrowserAutomationJob"("agentId", "deploymentScope", "provider");
 
 -- CreateIndex
 CREATE INDEX "NationalLifeForesightCaseSnapshot_agentId_deploymentScope_o_idx" ON "NationalLifeForesightCaseSnapshot"("agentId", "deploymentScope", "observedAt");

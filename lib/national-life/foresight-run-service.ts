@@ -1,6 +1,6 @@
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { FORESIGHT_SSO_EXPIRED, NATIONAL_LIFE_PROVIDER } from './constants'
+import { isNationalLifeLoginRequiredCode, NATIONAL_LIFE_PROVIDER } from './constants'
 
 const ACTIVE_STATES = ['QUEUED', 'RUNNING', 'PAUSED'] as const
 const TERMINAL_STATES = new Set(['COMPLETED', 'PARTIAL', 'FAILED'])
@@ -50,6 +50,13 @@ type ForesightRepository = Pick<
   'nationalLifeForesightReadRun' | 'browserAutomationJob'
 >
 
+type ForesightRunStoreRepository = ForesightRepository & {
+  $transaction?: <T>(
+    operation: (transaction: ForesightRepository) => Promise<T>,
+    options?: { isolationLevel?: Prisma.TransactionIsolationLevel },
+  ) => Promise<T>
+}
+
 function percent(run: Pick<ForesightReadStatus, 'totalCases' | 'inventoriedCases' | 'totalServices' | 'completedServices'>): number {
   const total = run.totalCases + run.totalServices
   return total === 0 ? 0 : Math.round(((run.inventoriedCases + run.completedServices) / total) * 100)
@@ -64,56 +71,95 @@ function statusFromRun(run: Omit<ForesightReadStatus, 'percent' | 'shouldPoll'>)
 }
 
 function stateFromJob(job: { state: string; safeErrorCode: string | null }): ForesightReadStatus['state'] {
-  if (job.state === 'ACTION_REQUIRED' || job.safeErrorCode === FORESIGHT_SSO_EXPIRED) return 'PAUSED'
+  if (
+    isNationalLifeLoginRequiredCode(job.safeErrorCode) ||
+    job.state === 'ACTION_REQUIRED' ||
+    job.state === 'WAITING_FOR_MFA' ||
+    job.state === 'CREDENTIALS_EXPIRED'
+  ) return 'PAUSED'
   if (job.state === 'RUNNING') return 'RUNNING'
   if (job.state === 'QUEUED') return 'QUEUED'
   if (job.state === 'SUCCEEDED') return 'COMPLETED'
   return job.state === 'FAILED' || job.state === 'CANCELLED' ? 'FAILED' : 'QUEUED'
 }
 
-export function createForesightRunStore(repository: ForesightRepository): ForesightRunStore {
+async function findActiveForesightRun(
+  repository: ForesightRepository,
+  input: Parameters<ForesightRunStore['start']>[0],
+) {
+  return repository.nationalLifeForesightReadRun.findFirst({
+    where: {
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      provider: NATIONAL_LIFE_PROVIDER,
+      mode: input.mode,
+      targetCaseId: input.targetCaseId ?? null,
+      state: { in: [...ACTIVE_STATES] },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, jobs: { select: { id: true }, take: 1 } },
+  })
+}
+
+export async function startForesightReadRun(
+  repository: ForesightRepository,
+  input: Parameters<ForesightRunStore['start']>[0],
+): Promise<{ runId: string; jobId: string; duplicate: boolean }> {
+  const active = await findActiveForesightRun(repository, input)
+  if (active?.jobs[0]) return { runId: active.id, jobId: active.jobs[0].id, duplicate: true }
+
+  const run = await repository.nationalLifeForesightReadRun.create({
+    data: {
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      provider: NATIONAL_LIFE_PROVIDER,
+      mode: input.mode,
+      targetCaseId: input.targetCaseId ?? null,
+      createdAt: input.now,
+      updatedAt: input.now,
+    },
+    select: { id: true },
+  })
+  const job = await repository.browserAutomationJob.create({
+    data: {
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      provider: NATIONAL_LIFE_PROVIDER,
+      operation: 'SYNC_FORESIGHT_READ',
+      foresightRunId: run.id,
+      state: 'QUEUED',
+      idempotencyKey: `national-life:foresight:${input.agentId}:${input.deploymentScope}:${input.mode}:${input.targetCaseId ?? 'all'}`,
+      input: {
+        foresightRunId: run.id,
+        mode: input.mode,
+        targetCaseId: input.targetCaseId ?? null,
+        deploymentScope: input.deploymentScope,
+      },
+      availableAt: input.now,
+    },
+    select: { id: true },
+  })
+  return { runId: run.id, jobId: job.id, duplicate: false }
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+}
+
+export function createForesightRunStore(repository: ForesightRunStoreRepository): ForesightRunStore {
   return {
     async start(input) {
-      const active = await repository.nationalLifeForesightReadRun.findFirst({
-        where: {
-          agentId: input.agentId,
-          deploymentScope: input.deploymentScope,
-          provider: NATIONAL_LIFE_PROVIDER,
-          state: { in: [...ACTIVE_STATES] },
-        },
-        orderBy: { createdAt: 'desc' },
-        select: { id: true, jobs: { select: { id: true }, take: 1 } },
-      })
-      if (active?.jobs[0]) {
+      const create = (transaction: ForesightRepository) => startForesightReadRun(transaction, input)
+      try {
+        return repository.$transaction
+          ? await repository.$transaction(create, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+          : await create(repository)
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error
+        const active = await findActiveForesightRun(repository, input)
+        if (!active?.jobs[0]) throw error
         return { runId: active.id, jobId: active.jobs[0].id, duplicate: true }
       }
-
-      const run = await repository.nationalLifeForesightReadRun.create({
-        data: {
-          agentId: input.agentId,
-          deploymentScope: input.deploymentScope,
-          provider: NATIONAL_LIFE_PROVIDER,
-          mode: input.mode,
-          targetCaseId: input.targetCaseId,
-          createdAt: input.now,
-          updatedAt: input.now,
-        },
-        select: { id: true },
-      })
-      const job = await repository.browserAutomationJob.create({
-        data: {
-          agentId: input.agentId,
-          provider: NATIONAL_LIFE_PROVIDER,
-          operation: 'SYNC_FORESIGHT_READ',
-          foresightRunId: run.id,
-          state: 'QUEUED',
-          idempotencyKey: `national-life:foresight:${input.agentId}:${input.deploymentScope}:${input.mode}:${input.targetCaseId ?? 'all'}`,
-          input: { foresightRunId: run.id, mode: input.mode, ...(input.targetCaseId ? { targetCaseId: input.targetCaseId } : {}) },
-          availableAt: input.now,
-        },
-        select: { id: true },
-      })
-      return { runId: run.id, jobId: job.id, duplicate: false }
     },
 
     async updateProgress(input) {
@@ -136,10 +182,13 @@ export function createForesightRunStore(repository: ForesightRepository): Foresi
           deploymentScope: input.deploymentScope,
           provider: NATIONAL_LIFE_PROVIDER,
         },
-        select: { completedAt: true, jobs: { select: { state: true, safeErrorCode: true, finishedAt: true } } },
+        select: {
+          completedAt: true,
+          jobs: { select: { state: true, safeErrorCode: true, finishedAt: true, deploymentScope: true } },
+        },
       })
       const job = run?.jobs[0]
-      if (!run || !job) return
+      if (!run || !job || job.deploymentScope !== input.deploymentScope) return
       const state = stateFromJob(job)
       await repository.nationalLifeForesightReadRun.updateMany({
         where: {

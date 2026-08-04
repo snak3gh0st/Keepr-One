@@ -645,6 +645,7 @@ model BrowserAutomationJob {
   id                     String              @id @default(cuid())
   agentId                String
   agent                  Agent               @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope        String?
   caseId                 String?
   insuranceCase          InsuranceCase?      @relation(fields: [caseId], references: [id], onDelete: Cascade)
   provider               String
@@ -677,6 +678,7 @@ model BrowserAutomationJob {
 
   @@index([state, availableAt])
   @@index([agentId, createdAt])
+  @@index([agentId, deploymentScope, provider])
   @@index([caseId, createdAt])
   @@index([syncRunId, syncStageIndex, state])
 }

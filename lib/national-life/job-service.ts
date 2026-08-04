@@ -86,12 +86,20 @@ export type NationalLifeGridJobInput = {
   gridKey: import('./portal-grid-client').NationalLifeGridKey
 }
 
+export type ForesightReadJobInput = {
+  foresightRunId: string
+  mode: 'INVENTORY' | 'DETAIL'
+  targetCaseId: string | null
+  deploymentScope: string
+}
+
 export type BrowserJobInput =
   | ConnectionTestJobInput
   | CaseReadSyncJobInput
   | RapidSolveQuoteJobInput
   | IllustrationPdfJobInput
   | NationalLifeGridJobInput
+  | ForesightReadJobInput
 
 /// Three outcomes the screen has to tell apart, and it must not collapse them.
 /// ANSWERED means the carrier replied — including a reply that refuses to
@@ -105,6 +113,7 @@ export type RapidSolveQuoteStatus =
 export type BrowserJobRecord = {
   id: string
   agentId: string
+  deploymentScope?: string | null
   caseId: string | null
   provider: string
   operation: BrowserJobOperation
@@ -136,6 +145,7 @@ export type ClaimedBrowserJob = BrowserJobRecord
 
 export type CreateBrowserJobInput = {
   agentId: string
+  deploymentScope?: string | null
   caseId?: string | null
   operation: BrowserJobOperation
   idempotencyKey: string
@@ -429,6 +439,7 @@ const prismaBrowserJobRepository: BrowserJobRepository = {
     const job = await prisma.browserAutomationJob.create({
       data: {
         agentId: input.agentId,
+        deploymentScope: input.deploymentScope ?? null,
         caseId: input.caseId ?? null,
         provider: NATIONAL_LIFE_PROVIDER,
         operation: input.operation,
