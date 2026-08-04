@@ -7,7 +7,7 @@ import {
   type EncryptedBrowserSecret,
 } from '../../lib/national-life/browser-context-crypto'
 import type { NationalLifeConnectionAttemptState } from '../../lib/national-life/connection-attempt-state'
-import type { NationalLifeEnv } from '../../lib/national-life/env'
+import type { NationalLifeRuntimeEnv } from '../../lib/national-life/env'
 import type { NationalLifeAdapter } from './adapter'
 import { traceReason, type ConnectionTrace } from './connection-trace'
 import type { BrowserSession, InteractiveBrowserSession } from './types'
@@ -74,7 +74,7 @@ type ConnectionAttemptCrypto = {
 }
 
 export type RunConnectionAttemptDeps = {
-  env: NationalLifeEnv
+  env: NationalLifeRuntimeEnv
   workerId: string
   now: () => Date
   store: {

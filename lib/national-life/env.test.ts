@@ -52,6 +52,22 @@ async function parse(
       process.env[name] = value
     }
   }
+  const { getNationalLifeRuntimeEnv } = await import('./env')
+  return getNationalLifeRuntimeEnv()
+}
+
+async function parseWeb(
+  overrides: Record<string, string | undefined> = {},
+) {
+  vi.resetModules()
+  Object.assign(process.env, REQUIRED_ENV)
+  for (const [name, value] of Object.entries(overrides)) {
+    if (value === undefined) {
+      delete process.env[name]
+    } else {
+      process.env[name] = value
+    }
+  }
   const { getNationalLifeEnv } = await import('./env')
   return getNationalLifeEnv()
 }
@@ -141,6 +157,22 @@ describe('National Life secure runtime environment', () => {
     const { isNationalLifeConfigured } = await import('./env')
 
     expect(isNationalLifeConfigured()).toBe(false)
+  })
+
+  it('keeps shared web configuration available without runtime capacities', async () => {
+    const env = await parseWeb({
+      NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS: undefined,
+      NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD: undefined,
+    })
+
+    expect(env.sessionScopeId).toBe('production-us-east-1')
+    expect(env).not.toHaveProperty('maxInteractiveSessions')
+  })
+
+  it('fails closed for the runtime getter when a capacity is absent', async () => {
+    await expect(
+      parse({ NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS: undefined }),
+    ).rejects.toThrow(/MAX_INTERACTIVE_SESSIONS/)
   })
 
   it('uses the authenticated app origin when the viewer allowlist is absent', async () => {

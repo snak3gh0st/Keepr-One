@@ -18,7 +18,7 @@ import {
   upsertForesightDocument,
   upsertForesightServiceSnapshot,
 } from '../../lib/national-life/foresight-snapshot-service'
-import type { NationalLifeEnv } from '../../lib/national-life/env'
+import type { NationalLifeEnv, NationalLifeRuntimeEnv } from '../../lib/national-life/env'
 import {
   createBrowserJobService,
   releaseJobsBlockedOnCarrierLogin,
@@ -455,7 +455,7 @@ function createAttemptStore(
   }
 }
 
-function createAttemptRunner(env: NationalLifeEnv) {
+function createAttemptRunner(env: NationalLifeRuntimeEnv) {
   const store = createAttemptStore(env)
   const deps: RunConnectionAttemptDeps = {
     env,
@@ -915,7 +915,7 @@ function closeServer(server: Server) {
 }
 
 export function createNationalLifeRuntimeDeps(
-  env: NationalLifeEnv,
+  env: NationalLifeRuntimeEnv,
 ): RuntimeDeps {
   const jobService = createBrowserJobService()
   return {

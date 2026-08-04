@@ -1,4 +1,4 @@
-import { getNationalLifeEnv } from '../lib/national-life/env'
+import { getNationalLifeRuntimeEnv } from '../lib/national-life/env'
 import { prisma } from '../lib/prisma'
 import {
   createNationalLifeRuntimeDeps,
@@ -6,7 +6,7 @@ import {
 } from '../workers/national-life/runtime'
 
 async function main() {
-  const env = getNationalLifeEnv()
+  const env = getNationalLifeRuntimeEnv()
   await runNationalLifeRuntime(createNationalLifeRuntimeDeps(env))
 }
 

@@ -52,27 +52,16 @@ export type NationalLifeEnv = {
   interactiveLoginAgentIds: ReadonlySet<string>
   interactiveLoginAllAgents: boolean
   keepAliveSsoJump: boolean
-  /** Optional only for legacy test doubles; the parser return type is complete. */
-  browserProvider?: 'steel' | 'browserless'
-  browserShardId?: string
-  maxInteractiveSessions?: number
-  maxSessionsPerShard?: number
-  interactiveReconnectBaseDelayMs?: number
-  interactiveReconnectMaxDelayMs?: number
 }
 
-export type ConfiguredNationalLifeEnv = NationalLifeEnv &
-  Required<
-    Pick<
-      NationalLifeEnv,
-      | 'browserProvider'
-      | 'browserShardId'
-      | 'maxInteractiveSessions'
-      | 'maxSessionsPerShard'
-      | 'interactiveReconnectBaseDelayMs'
-      | 'interactiveReconnectMaxDelayMs'
-    >
-  >
+export type NationalLifeRuntimeEnv = NationalLifeEnv & {
+  browserProvider: 'steel' | 'browserless'
+  browserShardId: string
+  maxInteractiveSessions: number
+  maxSessionsPerShard: number
+  interactiveReconnectBaseDelayMs: number
+  interactiveReconnectMaxDelayMs: number
+}
 
 const rawNationalLifeEnvSchema = z.object({
   STEEL_BASE_URL: z.string().trim().min(1),
@@ -92,6 +81,10 @@ const rawNationalLifeEnvSchema = z.object({
   NATIONAL_LIFE_INTERACTIVE_LOGIN_AGENT_IDS: z.string(),
   NATIONAL_LIFE_INTERACTIVE_LOGIN_ALL_AGENTS: z.string().trim().min(1).default('false'),
   NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP: z.string().trim().min(1).default('false'),
+  BETTER_AUTH_URL: z.string().trim().min(1),
+})
+
+const runtimeNationalLifeEnvSchema = z.object({
   NATIONAL_LIFE_BROWSER_PROVIDER: z
     .enum(['steel', 'browserless'])
     .default(NATIONAL_LIFE_DEFAULT_BROWSER_PROVIDER),
@@ -113,7 +106,6 @@ const rawNationalLifeEnvSchema = z.object({
     .trim()
     .min(1)
     .default(String(NATIONAL_LIFE_DEFAULT_RECONNECT_MAX_DELAY_MS)),
-  BETTER_AUTH_URL: z.string().trim().min(1),
 })
 
 function decodeBase64Key(name: string, base64Key: string) {
@@ -294,9 +286,9 @@ export function assertDistinctNationalLifeRuntimeWorkerIds(
   }
 }
 
-let cachedEnv: ConfiguredNationalLifeEnv | undefined
+let cachedEnv: NationalLifeEnv | undefined
 
-export function getNationalLifeEnv(): ConfiguredNationalLifeEnv {
+export function getNationalLifeEnv(): NationalLifeEnv {
   if (cachedEnv) {
     return cachedEnv
   }
@@ -405,33 +397,6 @@ export function getNationalLifeEnv(): ConfiguredNationalLifeEnv {
     )
   }
 
-  const maxInteractiveSessions = parsePositiveInteger(
-    'NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS',
-    parsed.NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS,
-  )
-  const maxSessionsPerShard = parsePositiveInteger(
-    'NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD',
-    parsed.NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD,
-  )
-  if (maxInteractiveSessions < maxSessionsPerShard) {
-    throw new Error(
-      'NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS must be at least NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD',
-    )
-  }
-  const interactiveReconnectBaseDelayMs = parsePositiveInteger(
-    'NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS',
-    parsed.NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS,
-  )
-  const interactiveReconnectMaxDelayMs = parsePositiveInteger(
-    'NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS',
-    parsed.NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS,
-  )
-  if (interactiveReconnectBaseDelayMs > interactiveReconnectMaxDelayMs) {
-    throw new Error(
-      'NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS must be at least the base delay',
-    )
-  }
-
   cachedEnv = {
     steelBaseUrl: steelBaseUrl.toString().replace(/\/$/, ''),
     steelApiKey: parsed.STEEL_API_KEY,
@@ -461,6 +426,50 @@ export function getNationalLifeEnv(): ConfiguredNationalLifeEnv {
     interactiveLoginAgentIds,
     interactiveLoginAllAgents,
     keepAliveSsoJump,
+  }
+  return cachedEnv
+}
+
+function parseRuntimeConfig(rawEnv: RawNationalLifeEnv) {
+  const parsed = runtimeNationalLifeEnvSchema.parse({
+    NATIONAL_LIFE_BROWSER_PROVIDER: rawEnv.NATIONAL_LIFE_BROWSER_PROVIDER,
+    NATIONAL_LIFE_BROWSER_SHARD_ID: rawEnv.NATIONAL_LIFE_BROWSER_SHARD_ID,
+    NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS:
+      rawEnv.NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS,
+    NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD:
+      rawEnv.NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD,
+    NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS:
+      rawEnv.NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS,
+    NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS:
+      rawEnv.NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS,
+  })
+  const maxInteractiveSessions = parsePositiveInteger(
+    'NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS',
+    parsed.NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS,
+  )
+  const maxSessionsPerShard = parsePositiveInteger(
+    'NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD',
+    parsed.NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD,
+  )
+  if (maxInteractiveSessions < maxSessionsPerShard) {
+    throw new Error(
+      'NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS must be at least NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD',
+    )
+  }
+  const interactiveReconnectBaseDelayMs = parsePositiveInteger(
+    'NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS',
+    parsed.NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS,
+  )
+  const interactiveReconnectMaxDelayMs = parsePositiveInteger(
+    'NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS',
+    parsed.NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS,
+  )
+  if (interactiveReconnectBaseDelayMs > interactiveReconnectMaxDelayMs) {
+    throw new Error(
+      'NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS must be at least the base delay',
+    )
+  }
+  return {
     browserProvider: parsed.NATIONAL_LIFE_BROWSER_PROVIDER,
     browserShardId: parsed.NATIONAL_LIFE_BROWSER_SHARD_ID,
     maxInteractiveSessions,
@@ -468,7 +477,22 @@ export function getNationalLifeEnv(): ConfiguredNationalLifeEnv {
     interactiveReconnectBaseDelayMs,
     interactiveReconnectMaxDelayMs,
   }
-  return cachedEnv
+}
+
+export function getNationalLifeRuntimeEnv(): NationalLifeRuntimeEnv {
+  const rawEnv: RawNationalLifeEnv = {
+    NATIONAL_LIFE_BROWSER_PROVIDER: process.env.NATIONAL_LIFE_BROWSER_PROVIDER,
+    NATIONAL_LIFE_BROWSER_SHARD_ID: process.env.NATIONAL_LIFE_BROWSER_SHARD_ID,
+    NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS:
+      process.env.NATIONAL_LIFE_MAX_INTERACTIVE_SESSIONS,
+    NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD:
+      process.env.NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD,
+    NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS:
+      process.env.NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS,
+    NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS:
+      process.env.NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS,
+  }
+  return { ...getNationalLifeEnv(), ...parseRuntimeConfig(rawEnv) }
 }
 
 export function isNationalLifeConfigured(): boolean {

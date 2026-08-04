@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { EncryptedBrowserSecret, AttemptRuntime } from '../../lib/national-life/browser-context-crypto'
-import type { NationalLifeEnv } from '../../lib/national-life/env'
+import type { NationalLifeRuntimeEnv } from '../../lib/national-life/env'
 import type { NationalLifeAuthenticationState } from './adapter'
 import type { BrowserSession, InteractiveBrowserSession } from './types'
 import {
@@ -24,7 +24,7 @@ const runtime: AttemptRuntime = {
   expiresAt: '2026-07-28T12:10:00.000Z',
 }
 
-function buildEnv(): NationalLifeEnv {
+function buildEnv(): NationalLifeRuntimeEnv {
   return {
     steelBaseUrl: 'https://steel.example',
     steelApiKey: 'steel-key',
@@ -43,6 +43,12 @@ function buildEnv(): NationalLifeEnv {
     interactiveLoginAllAgents: false,
     keepAliveSsoJump: false,
     viewerAppOrigins: ['https://app.keepr.one'],
+    browserProvider: 'steel',
+    browserShardId: 'national-life-shard-1',
+    maxInteractiveSessions: 10,
+    maxSessionsPerShard: 2,
+    interactiveReconnectBaseDelayMs: 1000,
+    interactiveReconnectMaxDelayMs: 30000,
   }
 }
 
