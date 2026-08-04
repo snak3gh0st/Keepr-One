@@ -66,6 +66,9 @@ CREATE TABLE "NationalLifeForesightCaseSnapshot" (
 CREATE TABLE "NationalLifeForesightServiceSnapshot" (
     "id" TEXT NOT NULL,
     "caseSnapshotId" TEXT NOT NULL,
+    "agentId" TEXT NOT NULL,
+    "deploymentScope" TEXT NOT NULL,
+    "provider" TEXT NOT NULL DEFAULT 'NATIONAL_LIFE',
     "serviceName" TEXT NOT NULL,
     "payloadShape" JSONB NOT NULL,
     "payload" JSONB NOT NULL,
@@ -81,6 +84,9 @@ CREATE TABLE "NationalLifeForesightServiceSnapshot" (
 CREATE TABLE "NationalLifeForesightDocument" (
     "id" TEXT NOT NULL,
     "caseSnapshotId" TEXT NOT NULL,
+    "agentId" TEXT NOT NULL,
+    "deploymentScope" TEXT NOT NULL,
+    "provider" TEXT NOT NULL DEFAULT 'NATIONAL_LIFE',
     "reportKey" TEXT NOT NULL,
     "filename" TEXT NOT NULL,
     "mimeType" TEXT NOT NULL,
@@ -106,13 +112,22 @@ CREATE INDEX "NationalLifeForesightCaseSnapshot_agentId_deploymentScope_o_idx" O
 CREATE UNIQUE INDEX "NationalLifeForesightCaseSnapshot_agentId_deploymentScope_p_key" ON "NationalLifeForesightCaseSnapshot"("agentId", "deploymentScope", "provider", "externalKey");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "NationalLifeForesightCaseSnapshot_id_agentId_deploymentScop_key" ON "NationalLifeForesightCaseSnapshot"("id", "agentId", "deploymentScope", "provider");
+
+-- CreateIndex
 CREATE INDEX "NationalLifeForesightServiceSnapshot_caseSnapshotId_observe_idx" ON "NationalLifeForesightServiceSnapshot"("caseSnapshotId", "observedAt");
+
+-- CreateIndex
+CREATE INDEX "NationalLifeForesightServiceSnapshot_agentId_deploymentScop_idx" ON "NationalLifeForesightServiceSnapshot"("agentId", "deploymentScope", "provider", "observedAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "NationalLifeForesightServiceSnapshot_caseSnapshotId_service_key" ON "NationalLifeForesightServiceSnapshot"("caseSnapshotId", "serviceName");
 
 -- CreateIndex
 CREATE INDEX "NationalLifeForesightDocument_caseSnapshotId_createdAt_idx" ON "NationalLifeForesightDocument"("caseSnapshotId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "NationalLifeForesightDocument_agentId_deploymentScope_provi_idx" ON "NationalLifeForesightDocument"("agentId", "deploymentScope", "provider", "createdAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "NationalLifeForesightDocument_caseSnapshotId_reportKey_key" ON "NationalLifeForesightDocument"("caseSnapshotId", "reportKey");
@@ -124,10 +139,16 @@ ALTER TABLE "NationalLifeForesightReadRun" ADD CONSTRAINT "NationalLifeForesight
 ALTER TABLE "NationalLifeForesightCaseSnapshot" ADD CONSTRAINT "NationalLifeForesightCaseSnapshot_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "NationalLifeForesightServiceSnapshot" ADD CONSTRAINT "NationalLifeForesightServiceSnapshot_caseSnapshotId_fkey" FOREIGN KEY ("caseSnapshotId") REFERENCES "NationalLifeForesightCaseSnapshot"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "NationalLifeForesightServiceSnapshot" ADD CONSTRAINT "NationalLifeForesightServiceSnapshot_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "NationalLifeForesightDocument" ADD CONSTRAINT "NationalLifeForesightDocument_caseSnapshotId_fkey" FOREIGN KEY ("caseSnapshotId") REFERENCES "NationalLifeForesightCaseSnapshot"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "NationalLifeForesightServiceSnapshot" ADD CONSTRAINT "NationalLifeForesightServiceSnapshot_caseSnapshotId_agentI_fkey" FOREIGN KEY ("caseSnapshotId", "agentId", "deploymentScope", "provider") REFERENCES "NationalLifeForesightCaseSnapshot"("id", "agentId", "deploymentScope", "provider") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "NationalLifeForesightDocument" ADD CONSTRAINT "NationalLifeForesightDocument_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "NationalLifeForesightDocument" ADD CONSTRAINT "NationalLifeForesightDocument_caseSnapshotId_agentId_deplo_fkey" FOREIGN KEY ("caseSnapshotId", "agentId", "deploymentScope", "provider") REFERENCES "NationalLifeForesightCaseSnapshot"("id", "agentId", "deploymentScope", "provider") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "BrowserAutomationJob" ADD CONSTRAINT "BrowserAutomationJob_foresightRunId_fkey" FOREIGN KEY ("foresightRunId") REFERENCES "NationalLifeForesightReadRun"("id") ON DELETE CASCADE ON UPDATE CASCADE;

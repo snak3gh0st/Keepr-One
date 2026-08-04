@@ -207,6 +207,8 @@ model Agent {
   nationalLifeCaseSnapshots NationalLifeCaseSnapshot[]
   nationalLifeForesightReadRuns NationalLifeForesightReadRun[]
   nationalLifeForesightCaseSnapshots NationalLifeForesightCaseSnapshot[]
+  nationalLifeForesightServiceSnapshots NationalLifeForesightServiceSnapshot[]
+  nationalLifeForesightDocuments NationalLifeForesightDocument[]
   illustrations          Illustration[]
   nationalLifeInforcePolicies NationalLifeInforcePolicy[]
   nationalLifeReportRows NationalLifeReportRow[]
@@ -375,13 +377,18 @@ model NationalLifeForesightCaseSnapshot {
   documents       NationalLifeForesightDocument[]
 
   @@unique([agentId, deploymentScope, provider, externalKey])
+  @@unique([id, agentId, deploymentScope, provider])
   @@index([agentId, deploymentScope, observedAt])
 }
 
 model NationalLifeForesightServiceSnapshot {
   id              String   @id @default(cuid())
   caseSnapshotId  String
-  caseSnapshot    NationalLifeForesightCaseSnapshot @relation(fields: [caseSnapshotId], references: [id], onDelete: Cascade)
+  agentId         String
+  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope String
+  provider        String   @default("NATIONAL_LIFE")
+  caseSnapshot    NationalLifeForesightCaseSnapshot @relation(fields: [caseSnapshotId, agentId, deploymentScope, provider], references: [id, agentId, deploymentScope, provider], onDelete: Cascade)
   serviceName     String
   payloadShape    Json
   payload         Json
@@ -392,12 +399,17 @@ model NationalLifeForesightServiceSnapshot {
 
   @@unique([caseSnapshotId, serviceName])
   @@index([caseSnapshotId, observedAt])
+  @@index([agentId, deploymentScope, provider, observedAt])
 }
 
 model NationalLifeForesightDocument {
   id              String   @id @default(cuid())
   caseSnapshotId  String
-  caseSnapshot    NationalLifeForesightCaseSnapshot @relation(fields: [caseSnapshotId], references: [id], onDelete: Cascade)
+  agentId         String
+  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope String
+  provider        String   @default("NATIONAL_LIFE")
+  caseSnapshot    NationalLifeForesightCaseSnapshot @relation(fields: [caseSnapshotId, agentId, deploymentScope, provider], references: [id, agentId, deploymentScope, provider], onDelete: Cascade)
   reportKey       String
   filename        String
   mimeType        String
@@ -412,6 +424,7 @@ model NationalLifeForesightDocument {
 
   @@unique([caseSnapshotId, reportKey])
   @@index([caseSnapshotId, createdAt])
+  @@index([agentId, deploymentScope, provider, createdAt])
 }
 
 model Client {
