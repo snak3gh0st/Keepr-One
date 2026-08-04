@@ -133,6 +133,8 @@ enum BrowserJobOperation {
   GET_RAPID_SOLVE_QUOTE
   GENERATE_ILLUSTRATION_PDF
   SYNC_NATIONAL_LIFE_GRID
+  SYNC_FORESIGHT_READ
+  GENERATE_FORESIGHT_PDF
 }
 
 enum NationalLifeSyncRunState {
@@ -142,6 +144,20 @@ enum NationalLifeSyncRunState {
   COMPLETED
   PARTIAL
   FAILED
+}
+
+enum NationalLifeForesightReadRunState {
+  QUEUED
+  RUNNING
+  PAUSED
+  PARTIAL
+  COMPLETED
+  FAILED
+}
+
+enum NationalLifeForesightReadMode {
+  INVENTORY
+  DETAIL
 }
 
 model User {
@@ -189,6 +205,8 @@ model Agent {
   browserJobs            BrowserAutomationJob[]
   nationalLifeSyncRuns   NationalLifeSyncRun[]
   nationalLifeCaseSnapshots NationalLifeCaseSnapshot[]
+  nationalLifeForesightReadRuns NationalLifeForesightReadRun[]
+  nationalLifeForesightCaseSnapshots NationalLifeForesightCaseSnapshot[]
   illustrations          Illustration[]
   nationalLifeInforcePolicies NationalLifeInforcePolicy[]
   nationalLifeReportRows NationalLifeReportRow[]
@@ -310,6 +328,90 @@ model NationalLifeReportRow {
   @@unique([agentId, deploymentScope, gridKey, rowKey])
   @@index([agentId, gridKey])
   @@index([fetchedAt])
+}
+
+model NationalLifeForesightReadRun {
+  id                String                               @id @default(cuid())
+  agentId           String
+  agent             Agent                                @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope   String                               @default("SINGLE_DEPLOYMENT")
+  provider          String                               @default("NATIONAL_LIFE")
+  mode              NationalLifeForesightReadMode
+  state             NationalLifeForesightReadRunState    @default(QUEUED)
+  targetCaseId      String?
+  totalCases        Int                                  @default(0)
+  inventoriedCases  Int                                  @default(0)
+  totalServices     Int                                  @default(0)
+  completedServices Int                                  @default(0)
+  currentCaseName   String?
+  currentService    String?
+  safeErrorCode     String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime                             @default(now())
+  updatedAt         DateTime                             @updatedAt
+  jobs              BrowserAutomationJob[]
+
+  @@index([agentId, deploymentScope, state, createdAt])
+}
+
+model NationalLifeForesightCaseSnapshot {
+  id              String   @id @default(cuid())
+  agentId         String
+  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope String
+  provider        String   @default("NATIONAL_LIFE")
+  externalKey     String
+  displayName     String
+  caseKind        String?
+  product         String?
+  status          String?
+  state           String?
+  observedAt      DateTime
+  raw             Json
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  services        NationalLifeForesightServiceSnapshot[]
+  documents       NationalLifeForesightDocument[]
+
+  @@unique([agentId, deploymentScope, provider, externalKey])
+  @@index([agentId, deploymentScope, observedAt])
+}
+
+model NationalLifeForesightServiceSnapshot {
+  id              String   @id @default(cuid())
+  caseSnapshotId  String
+  caseSnapshot    NationalLifeForesightCaseSnapshot @relation(fields: [caseSnapshotId], references: [id], onDelete: Cascade)
+  serviceName     String
+  payloadShape    Json
+  payload         Json
+  validationState String
+  observedAt      DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([caseSnapshotId, serviceName])
+  @@index([caseSnapshotId, observedAt])
+}
+
+model NationalLifeForesightDocument {
+  id              String   @id @default(cuid())
+  caseSnapshotId  String
+  caseSnapshot    NationalLifeForesightCaseSnapshot @relation(fields: [caseSnapshotId], references: [id], onDelete: Cascade)
+  reportKey       String
+  filename        String
+  mimeType        String
+  byteSize        Int
+  contentHash     String
+  bytes           Bytes
+  renderState     String
+  safeErrorCode   String?
+  fetchedAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([caseSnapshotId, reportKey])
+  @@index([caseSnapshotId, createdAt])
 }
 
 model Client {
@@ -536,6 +638,8 @@ model BrowserAutomationJob {
   operation              BrowserJobOperation
   syncRunId              String?
   syncRun                NationalLifeSyncRun? @relation(fields: [syncRunId], references: [id], onDelete: Cascade)
+  foresightRunId         String?
+  foresightRun           NationalLifeForesightReadRun? @relation(fields: [foresightRunId], references: [id], onDelete: Cascade)
   syncStageIndex         Int?
   syncGridKey            String?
   state                  BrowserJobState     @default(QUEUED)
