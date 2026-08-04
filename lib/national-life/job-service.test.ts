@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { extname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { describe, expect, it } from 'vitest'
 import { assertBrowserJobTransition, type BrowserJobState } from './job-state'
 import {
@@ -855,6 +855,64 @@ describe('Foresight jobs', () => {
     return { repository, service, starts, snapshotLookups }
   }
 
+  function createConcurrentUniquePdfRepository() {
+    const repository = createInMemoryRepository()
+    let activeLookupCalls = 0
+    let releaseActiveLookups!: () => void
+    const bothActiveLookupsReached = new Promise<void>((resolve) => {
+      releaseActiveLookups = resolve
+    })
+    let existingLookupCalls = 0
+    let releaseExistingLookups!: () => void
+    const bothExistingLookupsReached = new Promise<void>((resolve) => {
+      releaseExistingLookups = resolve
+    })
+    const findMostRecent = repository.findMostRecentByRetryKeyFamily.bind(repository)
+    repository.findMostRecentByRetryKeyFamily = async (baseKey, states) => {
+      if (states?.length) {
+        activeLookupCalls += 1
+        if (activeLookupCalls === 2) releaseActiveLookups()
+        if (activeLookupCalls <= 2) {
+          await bothActiveLookupsReached
+          return null
+        }
+      } else {
+        existingLookupCalls += 1
+        if (existingLookupCalls === 2) releaseExistingLookups()
+        if (existingLookupCalls <= 2) {
+          await bothExistingLookupsReached
+          return null
+        }
+      }
+      return findMostRecent(baseKey, states)
+    }
+    let createCalls = 0
+    const createdIdempotencyKeys = new Set<string>()
+    let releaseCreates!: () => void
+    const bothCreatesReached = new Promise<void>((resolve) => {
+      releaseCreates = resolve
+    })
+    const create = repository.create.bind(repository)
+
+    repository.create = async (input) => {
+      createCalls += 1
+      if (createCalls === 2) releaseCreates()
+      await bothCreatesReached
+
+      if (createdIdempotencyKeys.has(input.idempotencyKey)) {
+        throw new Prisma.PrismaClientKnownRequestError('duplicate idempotency key', {
+          code: 'P2002',
+          clientVersion: 'test',
+        })
+      }
+
+      createdIdempotencyKeys.add(input.idempotencyKey)
+      return create(input)
+    }
+
+    return repository
+  }
+
   it.each([
     [{ agentId: 'https://carrier.example/agent', deploymentScope: 'scope-1', mode: 'INVENTORY' }],
     [{ agentId: 'agent-1', deploymentScope: 'https://carrier.example/scope', mode: 'INVENTORY' }],
@@ -1021,6 +1079,36 @@ describe('Foresight jobs', () => {
         idempotencyKey: 'national-life:foresight-pdf:agent-1:scope-1:snapshot-1',
       }),
     ])
+  })
+
+  it('returns the active PDF when concurrent creation collides on the unique key', async () => {
+    const repository = createConcurrentUniquePdfRepository()
+    const service = createBrowserJobService({
+      repository,
+      now: () => now,
+      async findForesightCaseSnapshot(input) {
+        return input.caseSnapshotId === ownedSnapshot.id &&
+          input.agentId === ownedSnapshot.agentId &&
+          input.deploymentScope === ownedSnapshot.deploymentScope
+          ? ownedSnapshot
+          : null
+      },
+    })
+    const input = {
+      agentId: 'agent-1',
+      deploymentScope: 'scope-1',
+      caseSnapshotId: 'snapshot-1',
+      caseKey: ownedSnapshot.externalKey,
+    }
+
+    await expect(Promise.all([
+      service.enqueueForesightPdf(input),
+      service.enqueueForesightPdf(input),
+    ])).resolves.toEqual([
+      { jobId: 'job-1', duplicate: false },
+      { jobId: 'job-1', duplicate: true },
+    ])
+    await expect(repository.snapshot()).resolves.toHaveLength(1)
   })
 
   it('rejects a cross-agent PDF snapshot and a non-exact case key', async () => {

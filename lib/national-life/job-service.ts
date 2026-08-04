@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { BrowserAutomationJob, BrowserJobOperation, Prisma } from '@prisma/client'
+import { Prisma, type BrowserAutomationJob, type BrowserJobOperation } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import {
   NATIONAL_LIFE_LOGIN_REQUIRED_CODES,
@@ -353,6 +353,10 @@ function coerceExactForesightCaseKey(caseKey: string): string {
     throw new Error('caseKey must match the owned Foresight case exactly')
   }
   return caseKey
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
 }
 
 async function resolveForesightRunStore(
@@ -857,15 +861,25 @@ export function createBrowserJobService(deps?: BrowserJobServiceDeps) {
       }
 
       const existing = await repository.findMostRecentByRetryKeyFamily(baseKey)
-      const created = await repository.create({
-        agentId,
-        deploymentScope,
-        operation: 'GENERATE_FORESIGHT_PDF',
-        idempotencyKey: existing ? buildCaseSyncRetryKey(baseKey) : baseKey,
-        input: { caseSnapshotId, caseKey },
-        availableAt: now,
-      })
-      return { jobId: created.id, duplicate: false }
+      try {
+        const created = await repository.create({
+          agentId,
+          deploymentScope,
+          operation: 'GENERATE_FORESIGHT_PDF',
+          idempotencyKey: existing ? buildCaseSyncRetryKey(baseKey) : baseKey,
+          input: { caseSnapshotId, caseKey },
+          availableAt: now,
+        })
+        return { jobId: created.id, duplicate: false }
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error
+
+        const activeAfterRace = await repository.findMostRecentByRetryKeyFamily(baseKey, [
+          ...ACTIVE_JOB_STATES,
+        ])
+        if (!activeAfterRace) throw error
+        return { jobId: activeAfterRace.id, duplicate: true }
+      }
     },
 
     /// Where each pending or failed render stands, keyed by illustration.

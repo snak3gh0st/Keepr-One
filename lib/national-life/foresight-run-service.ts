@@ -132,8 +132,7 @@ export async function startForesightReadRun(
       input: {
         foresightRunId: run.id,
         mode: input.mode,
-        targetCaseId: input.targetCaseId ?? null,
-        deploymentScope: input.deploymentScope,
+        ...(input.targetCaseId ? { targetCaseId: input.targetCaseId } : {}),
       },
       availableAt: input.now,
     },

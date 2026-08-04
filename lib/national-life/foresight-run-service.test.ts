@@ -78,13 +78,34 @@ describe('Foresight read run store', () => {
       foresightRunId: 'run-1',
       deploymentScope: 'scope-1',
       input: {
-        foresightRunId: 'run-1', mode: 'DETAIL', targetCaseId: 'case-1', deploymentScope: 'scope-1',
+        foresightRunId: 'run-1', mode: 'DETAIL', targetCaseId: 'case-1',
       },
       idempotencyKey: 'national-life:foresight:agent-1:scope-1:DETAIL:case-1',
     })
     expect(repository.findFirstCalls[0]).toMatchObject({
       where: expect.objectContaining({ agentId: 'agent-1', deploymentScope: 'scope-1' }),
     })
+  })
+
+  it('omits absent inventory target and deployment scope from the job JSON input', async () => {
+    const repository = createRepository()
+
+    await createForesightRunStore(repository as never).start({
+      agentId: 'agent-1',
+      deploymentScope: 'scope-1',
+      mode: 'INVENTORY',
+      now,
+    })
+
+    expect(repository.jobs[0]).toMatchObject({
+      deploymentScope: 'scope-1',
+      input: {
+        foresightRunId: 'run-1',
+        mode: 'INVENTORY',
+      },
+    })
+    expect(repository.jobs[0].input).not.toHaveProperty('targetCaseId')
+    expect(repository.jobs[0].input).not.toHaveProperty('deploymentScope')
   })
 
   it('creates the run and job in one transaction when concurrent starts race', async () => {
