@@ -29,4 +29,12 @@ describe('National Life Steel runtime compose', () => {
       'NATIONAL_LIFE_PORTAL_ORIGINS: https://www.nationallife.com,https://nlg-prod.auth0.com,https://nlg-prod.us.auth0.com,https://mfa.nationallife.com,https://federate.ipipeline.com',
     )
   })
+
+  it('documents the observed National Life MFA and Auth0 origins in the env example', () => {
+    const envExample = readFileSync('.env.example', 'utf8')
+
+    expect(envExample).toContain(
+      'NATIONAL_LIFE_PORTAL_ORIGINS="https://www.nationallife.com,https://nlg-prod.auth0.com,https://nlg-prod.us.auth0.com,https://mfa.nationallife.com"',
+    )
+  })
 })
