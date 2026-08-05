@@ -185,8 +185,9 @@ existe e reporta formatos sem chamar `IllustrateCase`.
 - Operação em `WAITING_FOR_CONFIRMATION` sobrevive a mais de 30 minutos sem virar
   timeout.
 - Revogar o device interrompe operações em curso daquele device.
-- Nenhuma capability desta versão submete aplicação nem altera dado do carrier além
-  da seleção de caso no Foresight.
+- Nenhuma capability desta versão submete aplicação nem altera dado comercial no
+  carrier. Os únicos efeitos permitidos são os inerentes à leitura do Foresight:
+  seleção de caso na sessão e geração do relatório que o próprio agente pediu.
 
 ## Fora de escopo
 
