@@ -962,7 +962,7 @@ Em `background.ts`:
 4. `finishGrid` avança para o próximo índice do plano; conclui quando o índice passa do fim.
 5. `uploadChunk` envia `schemaVersion: 2` e as linhas **cruas**, sem passar por normalizador.
 
-Em `nlg-main.content.ts`: remover a chamada a `normalizeRows` e emitir as linhas como vieram de `parsePortalPage`. Manter a deduplicação por página **removida** — dedupe agora é do servidor, pela chave de upsert. Manter os limites de tamanho na validação de chunk.
+Em `nlg-main.content.ts`: remover a chamada a `normalizeRows` e emitir as linhas como vieram de `parsePortalPage`. **Remover também a deduplicação por número de apólice** — tanto a de dentro de `normalizeRows` quanto o `Set` `seen` que atravessa páginas — porque ela dependia de conhecer o campo-chave de cada grade, que é exatamente o conhecimento que sai da extensão nesta task. A deduplicação passa a ser do servidor, pela chave de upsert. Manter os limites de tamanho na validação de chunk.
 
 Deletar `normalizers.ts` e `normalizers.test.ts`. Remover `GRID_PATHS`, `GRID_KEYS` e `GridKey` de `constants.ts`.
 
