@@ -83,7 +83,9 @@ export function NationalLifeSyncProgress({
   const message = friendlyState(status)
   const terminal = status.state === 'COMPLETED'
   const lastSynced = formatMoment(status.completedAt)
-  const outcome = outcomeLine(status)
+  // Só depois do fim. No meio do run, "nada novo desta vez" ou "120 gravados"
+  // seriam a mesma mentira do "concluído" eterno, apontada para o outro lado.
+  const outcome = terminal ? outcomeLine(status) : null
 
   return (
     <section

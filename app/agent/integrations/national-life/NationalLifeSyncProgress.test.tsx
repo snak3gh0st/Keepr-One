@@ -146,4 +146,22 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.getByText('100% done')).toBeTruthy()
   })
+
+  it('claims nothing about records while the run is still going', () => {
+    render(
+      <NationalLifeSyncProgress
+        initialStatus={status({
+          state: 'RUNNING',
+          shouldPoll: true,
+          currentGridLabel: null,
+          receivedRecords: 0,
+          writtenRecords: 0,
+        })}
+      />,
+    )
+
+    expect(screen.queryByText(/nothing new to send/)).toBeNull()
+    expect(screen.queryByText(/could be saved/)).toBeNull()
+    expect(screen.getByText('0% done')).toBeTruthy()
+  })
 })

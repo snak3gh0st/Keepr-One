@@ -320,6 +320,12 @@ export function NationalLifeLocalConnectorCard({
       promptInstall()
       return
     }
+    // "Check again" tem de checar. Reenviar START faria a extensão renavegar a
+    // aba e interromper justamente o sync que acabamos de dizer que segue vivo.
+    if (state === 'slow') {
+      void watchSyncProgress()
+      return
+    }
     beginAttempt('checking')
     try {
       const result = await sendConnectorMessage(extensionId, {
