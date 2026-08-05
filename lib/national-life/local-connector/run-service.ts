@@ -13,6 +13,12 @@ import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 
 export { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 
+/// Every query that reads or mutates a run filters on `agentId` *and*
+/// `deploymentScope`. The scope is a constant today, so an agent cannot in fact
+/// hold runs under two scopes — but the tenancy predicate is what makes that a
+/// property of the query rather than of the current configuration, and queries
+/// that disagree on it are how the gap becomes reachable later.
+
 export const LOCAL_CONNECTOR_RUN_TTL_MS = 30 * 60_000
 /// The grids a run reads when the caller does not name any. The capability
 /// catalogue can plan any grid raw-ingest routes, but widening the default would
@@ -66,6 +72,7 @@ async function failStaleLocalRuns(
   await db.nationalLifeSyncRun.updateMany({
     where: {
       agentId: input.agentId,
+      deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
       connectorDeviceId: input.deviceId,
       executionSource: 'LOCAL',
       provider: NATIONAL_LIFE_PROVIDER,
@@ -100,6 +107,7 @@ export async function startLocalConnectorRun(
   const active = await db.nationalLifeSyncRun.findFirst({
     where: {
       agentId: input.agentId,
+      deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
       connectorDeviceId: input.deviceId,
       executionSource: 'LOCAL',
       provider: NATIONAL_LIFE_PROVIDER,
@@ -161,6 +169,7 @@ export async function failLocalConnectorRun(
     where: {
       id: input.runId,
       agentId: input.agentId,
+      deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
       connectorDeviceId: input.deviceId,
       executionSource: 'LOCAL',
       provider: NATIONAL_LIFE_PROVIDER,
@@ -371,6 +380,7 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
         where: {
           id: input.envelope.runId,
           agentId: input.agentId,
+          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
           connectorDeviceId: input.deviceId,
           executionSource: 'LOCAL',
           provider: NATIONAL_LIFE_PROVIDER,

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
   failLocalConnectorRun,
   ingestLocalConnectorStage,
   startLocalConnectorRun,
@@ -732,6 +733,75 @@ describe('local connector runs', () => {
     await expect(
       ingestLocalConnectorStage(db, { ...input, contentHash: 'b'.repeat(64) }),
     ).rejects.toThrow('IDEMPOTENCY_CONFLICT')
+  })
+
+  it('puts a run from another deployment scope out of reach of every run query', async () => {
+    // The stub db ignores `where`, so the only honest check is the predicate the
+    // service hands Prisma: a run under another scope is excluded because the query
+    // says so. All four run queries are asserted together — three siblings agreeing
+    // and one not is exactly how this class of gap reappears.
+    const scope = { deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE }
+
+    const staleUpdateMany = vi.fn().mockResolvedValue({ count: 0 })
+    const activeFindFirst = vi.fn().mockResolvedValue(null)
+    const startDb = {
+      nationalLifeSyncRun: {
+        create: vi.fn().mockResolvedValue({ id: 'run-1' }),
+        updateMany: staleUpdateMany,
+        findFirst: activeFindFirst,
+      },
+    } as never
+    await startLocalConnectorRun(startDb, { agentId: 'agent-1', deviceId: 'device-1', now })
+    // 1. failStaleLocalRuns
+    expect(staleUpdateMany.mock.calls[0][0].where).toMatchObject(scope)
+    // 2. active-run lookup
+    expect(activeFindFirst.mock.calls[0][0].where).toMatchObject(scope)
+
+    // 3. failLocalConnectorRun
+    const failUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
+    await failLocalConnectorRun({ nationalLifeSyncRun: { updateMany: failUpdateMany } } as never, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      runId: 'run-1',
+      safeErrorCode: 'BRIDGE_UNAVAILABLE',
+      now,
+    })
+    expect(failUpdateMany.mock.calls[0][0].where).toMatchObject(scope)
+
+    // 4. ingest lookup
+    const ingestFindFirst = vi.fn().mockResolvedValue(null)
+    const tx = {
+      nationalLifeSyncRun: { findFirst: ingestFindFirst, update: vi.fn() },
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn(), create: vi.fn(), findMany: vi.fn() },
+      nationalLifeCaseSnapshot: { upsert: vi.fn() },
+      nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: vi.fn() },
+    }
+    const ingestDb = {
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+    } as never
+    await expect(
+      ingestLocalConnectorStage(ingestDb, {
+        agentId: 'agent-1',
+        deviceId: 'device-1',
+        gridKey: 'NEW_BUSINESS',
+        idempotencyKey: 'nlc:run-other-scope:NEW_BUSINESS:0',
+        contentHash: 'a'.repeat(64),
+        now,
+        envelope: {
+          schemaVersion: 2,
+          runId: 'run-other-scope',
+          gridKey: 'NEW_BUSINESS',
+          sequence: 0,
+          observedAt: now.toISOString(),
+          recordsTotal: 0,
+          truncated: false,
+          records: [],
+        },
+      }),
+    ).rejects.toThrow('RUN_NOT_FOUND')
+    expect(ingestFindFirst.mock.calls[0][0].where).toMatchObject(scope)
   })
 
   it('fails an active local run with a safe error code', async () => {
