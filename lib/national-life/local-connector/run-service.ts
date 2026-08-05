@@ -15,9 +15,9 @@ export { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 
 export const LOCAL_CONNECTOR_RUN_TTL_MS = 30 * 60_000
 /// The grids a run reads when the caller does not name any. The capability
-/// catalogue can plan all twenty, but widening the default would change what an
-/// unattended device does at the same moment the protocol changed shape, so the
-/// extra grids are opt-in per run.
+/// catalogue can plan any grid raw-ingest routes, but widening the default would
+/// change what an unattended device does at the same moment the protocol changed
+/// shape, so the extra grids are opt-in per run.
 export const LOCAL_CONNECTOR_DEFAULT_GRID_KEYS = [
   'NEW_BUSINESS',
   'INFORCE_CLIENTS',

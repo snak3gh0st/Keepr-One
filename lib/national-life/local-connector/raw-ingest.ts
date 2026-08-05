@@ -18,6 +18,20 @@ const REPORT_ROW_GRIDS = new Set<NationalLifeGridKey>([
   'PIP_PENDING',
 ])
 
+/// The grids `planRawIngest` can actually land somewhere, derived from the three
+/// routing sets above rather than written out a fourth time — a key can only appear
+/// here by being routed. Exported so planning can refuse an unroutable grid before a
+/// run exists, instead of letting the first stage discover it on a device mid-run.
+export const LOCAL_CONNECTOR_ROUTED_GRIDS: ReadonlySet<NationalLifeGridKey> = new Set([
+  ...CASE_SNAPSHOT_GRIDS,
+  ...INFORCE_GRIDS,
+  ...REPORT_ROW_GRIDS,
+])
+
+export function isRoutedGrid(gridKey: NationalLifeGridKey): boolean {
+  return LOCAL_CONNECTOR_ROUTED_GRIDS.has(gridKey)
+}
+
 export class LocalConnectorRawIngestError extends Error {
   constructor(readonly code: 'GRID_NOT_ROUTED', readonly gridKey: NationalLifeGridKey) {
     super(`No ingest route for grid ${gridKey}`)

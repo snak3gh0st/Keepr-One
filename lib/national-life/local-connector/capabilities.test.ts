@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '@/lib/national-life/portal-grid-client'
-import { isSafeNavigatePath, planReadGridStages } from './capabilities'
+import {
+  LocalConnectorPlanError,
+  isSafeNavigatePath,
+  planReadGridStages,
+} from './capabilities'
+import { LOCAL_CONNECTOR_ROUTED_GRIDS, planRawIngest } from './raw-ingest'
+import { LOCAL_CONNECTOR_DEFAULT_GRID_KEYS } from './run-service'
 
 describe('isSafeNavigatePath', () => {
   it('accepts a portal agent path', () => {
@@ -43,11 +49,49 @@ describe('planReadGridStages', () => {
     ])
   })
 
-  it('produces a plan every grid key can reach', () => {
-    const keys = Object.keys(NATIONAL_LIFE_GRIDS) as NationalLifeGridKey[]
+  it('produces a plan every routed grid key can reach', () => {
+    const keys = [...LOCAL_CONNECTOR_ROUTED_GRIDS]
     const plan = planReadGridStages(keys)
     expect(plan).toHaveLength(keys.length)
     expect(plan.every((stage) => isSafeNavigatePath(stage.params.navigatePath))).toBe(true)
+  })
+
+  it('plans the default pair', () => {
+    expect(planReadGridStages(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS).map((s) => s.params.gridKey)).toEqual([
+      'NEW_BUSINESS',
+      'INFORCE_CLIENTS',
+    ])
+  })
+
+  it('refuses a catalogue grid that has no ingest destination', () => {
+    // The whole point of planning: a grid the server cannot land anywhere must fail
+    // before a run row exists, not on the device once the run is RUNNING.
+    expect(() => planReadGridStages(['COMMISSIONS_OVERVIEW'])).toThrow(
+      /No ingest destination for grid COMMISSIONS_OVERVIEW/,
+    )
+    try {
+      planReadGridStages(['COMMISSIONS_OVERVIEW'])
+    } catch (error) {
+      expect(error).toBeInstanceOf(LocalConnectorPlanError)
+      expect((error as LocalConnectorPlanError).code).toBe('GRID_NOT_ROUTED')
+    }
+  })
+
+  it('pins the routed set to what planRawIngest actually does, in both directions', () => {
+    // Bidirectional: a key can neither be exported without being routed, nor routed
+    // without being exported. One direction alone lets the two drift.
+    for (const gridKey of Object.keys(NATIONAL_LIFE_GRIDS) as NationalLifeGridKey[]) {
+      const routes = () => {
+        planRawIngest(gridKey, [])
+      }
+      if (LOCAL_CONNECTOR_ROUTED_GRIDS.has(gridKey)) {
+        expect(routes).not.toThrow()
+        expect(() => planReadGridStages([gridKey])).not.toThrow()
+      } else {
+        expect(routes).toThrow(/No ingest route for grid/)
+        expect(() => planReadGridStages([gridKey])).toThrow(LocalConnectorPlanError)
+      }
+    }
   })
 
   it('collapses a repeated grid key into a single stage', () => {
@@ -69,6 +113,9 @@ describe('planReadGridStages', () => {
     vi.doMock('@/lib/national-life/portal-grid-client', () => ({
       NATIONAL_LIFE_GRIDS: { A_GRID: '/agent/shared', B_GRID: '/agent/shared' },
     }))
+    // The invented keys are by definition unroutable; stubbing the routing check
+    // keeps this test on the path-collision behaviour it exists to pin.
+    vi.doMock('./raw-ingest', () => ({ isRoutedGrid: () => true }))
     try {
       const { planReadGridStages: planWithCollidingCatalogue } = await import('./capabilities')
       expect(() =>
@@ -79,6 +126,7 @@ describe('planReadGridStages', () => {
       ).toThrow(/Duplicate navigate path/)
     } finally {
       vi.doUnmock('@/lib/national-life/portal-grid-client')
+      vi.doUnmock('./raw-ingest')
       vi.resetModules()
     }
   })

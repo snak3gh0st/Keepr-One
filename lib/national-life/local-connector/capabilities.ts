@@ -3,8 +3,21 @@ import {
   NATIONAL_LIFE_GRIDS,
   type NationalLifeGridKey,
 } from '@/lib/national-life/portal-grid-client'
+import { isRoutedGrid } from './raw-ingest'
 
 export type LocalConnectorCapabilityName = 'READ_GRID'
+
+/// Distinguishable from the device's own mistakes on purpose: every case this
+/// carries is a server-side misconfiguration, so the run route must answer 500
+/// rather than blame the caller's request.
+export class LocalConnectorPlanError extends Error {
+  constructor(
+    readonly code: 'GRID_NOT_ROUTED',
+    readonly gridKey: NationalLifeGridKey,
+  ) {
+    super(`No ingest destination for grid ${gridKey}`)
+  }
+}
 
 export type ReadGridParams = {
   gridKey: NationalLifeGridKey
@@ -46,6 +59,12 @@ export function isSafeNavigatePath(path: string): boolean {
 /// Deduping the keys handles the reachable case; the path check is the backstop for a
 /// catalogue edit that points two distinct keys at one page. Both fail here, while
 /// planning, rather than on a device mid-run.
+///
+/// The same principle covers routing. A grid the catalogue knows but `planRawIngest`
+/// cannot land anywhere would produce a run whose first stage throws inside the ingest
+/// transaction — a server misconfiguration reported to the device as a malformed
+/// request, leaving a RUNNING run to die at the TTL. The routed set comes from
+/// raw-ingest so the two cannot drift.
 export function planReadGridStages(
   gridKeys: readonly NationalLifeGridKey[],
 ): LocalConnectorStagePlan[] {
@@ -65,6 +84,9 @@ export function planReadGridStages(
     const owner = seenPaths.get(navigatePath)
     if (owner) {
       throw new Error(`Duplicate navigate path for grids ${owner} and ${gridKey}`)
+    }
+    if (!isRoutedGrid(gridKey)) {
+      throw new LocalConnectorPlanError('GRID_NOT_ROUTED', gridKey)
     }
     seenPaths.set(navigatePath, gridKey)
     return { capability: 'READ_GRID', params: { gridKey, navigatePath } }
