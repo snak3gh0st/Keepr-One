@@ -31,7 +31,9 @@ export type LocalConnectorStagePlan = {
 
 /// The extension refuses anything outside the agent tree. Every portal grid hits the
 /// same endpoint — only the page you open first differs — so one capability covers
-/// them all, and adding a grid is a deploy rather than a Chrome Web Store review.
+/// them all, and adding a grid is a deploy rather than a Chrome Web Store review —
+/// a deploy that must give the grid an ingest route as well as a catalogue entry,
+/// since planning refuses a grid raw-ingest cannot land anywhere (see below).
 ///
 /// The whitelist regex is the load-bearing check: only `[A-Za-z0-9/_-]` survives,
 /// so no character a URL parser could special-case (`:`, `@`, `\`, `%`, whitespace,
