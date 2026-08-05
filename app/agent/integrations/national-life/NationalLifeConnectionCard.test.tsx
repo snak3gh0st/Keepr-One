@@ -61,12 +61,12 @@ describe('NationalLifeConnectionCard', () => {
   it('offers connection without collecting or claiming to save National Life credentials', async () => {
     render(<NationalLifeConnectionCard summary={null} />)
 
-    expect(screen.getByRole('button', { name: 'Conectar National Life' })).toBeInTheDocument()
-    expect(screen.getByText('O Keepr One não armazena sua senha')).toBeInTheDocument()
-    expect(screen.queryByLabelText(/usuário|senha/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/salvar conexão/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Connect National Life' })).toBeInTheDocument()
+    expect(screen.getByText('Keepr One never stores your password')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/username|password/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/save connection/i)).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
     expect(await screen.findByRole('dialog', { name: 'Entrar na National Life' })).toBeInTheDocument()
   })
 
@@ -85,10 +85,10 @@ describe('NationalLifeConnectionCard', () => {
       />,
     )
 
-    expect(screen.getByText('Conectada')).toBeInTheDocument()
-    expect(screen.getByText('Última conexão')).toBeInTheDocument()
-    expect(screen.getByText('Última verificação')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Desconectar' })).toBeInTheDocument()
+    expect(screen.getByText('Connected')).toBeInTheDocument()
+    expect(screen.getByText('Last connected')).toBeInTheDocument()
+    expect(screen.getByText('Last checked')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument()
   })
 
   it('never offers a session deadline, because the value behind it is a bot cookie', () => {
@@ -106,10 +106,10 @@ describe('NationalLifeConnectionCard', () => {
       />,
     )
 
-    expect(screen.queryByText('Validade da sessão')).not.toBeInTheDocument()
+    expect(screen.queryByText('Session expires')).not.toBeInTheDocument()
     // Nothing crossed the SSO jump yet, which is not the same as knowing it is
     // unreachable — the card must not claim either way.
-    expect(screen.getByText('Não verificada')).toBeInTheDocument()
+    expect(screen.getByText('Not checked yet')).toBeInTheDocument()
   })
 
   it('says the illustration is out of reach when the last jump hit the login wall', () => {
@@ -127,8 +127,8 @@ describe('NationalLifeConnectionCard', () => {
       />,
     )
 
-    expect(screen.getByText('Ilustração (Foresight)')).toBeInTheDocument()
-    expect(screen.getByText('Requer novo login')).toBeInTheDocument()
+    expect(screen.getByText('Illustrations (Foresight)')).toBeInTheDocument()
+    expect(screen.getByText('Sign in again')).toBeInTheDocument()
   })
 
   it('closes after authentication, refreshes the summary, and announces success', async () => {
@@ -146,11 +146,11 @@ describe('NationalLifeConnectionCard', () => {
     )
 
     render(<NationalLifeConnectionCard summary={null} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-      expect(screen.getByRole('status')).toHaveTextContent('National Life conectada')
+      expect(screen.getByRole('status')).toHaveTextContent('National Life connected')
     })
     expect(mocks.refresh).toHaveBeenCalledOnce()
   })

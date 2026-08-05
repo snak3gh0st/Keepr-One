@@ -41,7 +41,7 @@ describe('National Life interactive connection actions', () => {
     mocks.getCurrentAgent.mockRejectedValue(new Error('Forbidden'))
     await expect(startNationalLifeConnection()).resolves.toEqual({
       ok: false,
-      message: 'Não foi possível iniciar a conexão National Life agora.',
+      message: 'We could not start your National Life connection right now. Please try again.',
     })
     expect(mocks.start).not.toHaveBeenCalled()
   })
@@ -69,7 +69,7 @@ describe('National Life interactive connection actions', () => {
     mocks.bootstrap.mockRejectedValue(new Error('not found'))
     await expect(createNationalLifeViewerBootstrap('attempt-other')).resolves.toEqual({
       ok: false,
-      message: 'A sessão segura não está mais disponível. Inicie uma nova conexão.',
+      message: 'This secure session is no longer available. Start a new connection.',
     })
     expect(mocks.bootstrap).toHaveBeenCalledWith({
       agentId: 'agent-1',

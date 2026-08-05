@@ -241,7 +241,7 @@ describe('NationalLifeBrowserModal', () => {
 
     await waitFor(() =>
       expect(onClosed).toHaveBeenCalledWith(
-        'A sessão segura expirou. Conecte novamente para continuar.',
+        'Your secure session timed out. Connect again to continue.',
       ),
     )
   })
