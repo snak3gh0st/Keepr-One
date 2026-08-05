@@ -17,7 +17,7 @@ export default async function NewIllustrationPage() {
       <PageHeader
         title="Nova ilustração"
         eyebrow="Carteira"
-        description="Cote o IUL direto na National Life, com os números da própria seguradora."
+        description="Cote FlexLife direto na National Life, com os números da própria seguradora."
       >
         <Link
           href="/agent/illustrations"
@@ -47,8 +47,8 @@ export default async function NewIllustrationPage() {
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Cobertura</p>
             <p className="mt-2 text-sm text-ink-muted">
-              O Rapid Solve cota um único produto, de IUL. Term não é cotado por este portal, e
-              Nova York não está entre os estados de emissão.
+              Esta cotação é FlexLife. Term não entra neste fluxo, e Nova York não está entre
+              os estados de emissão.
             </p>
           </div>
           <div className="mt-5 border-t border-white/10 pt-4">

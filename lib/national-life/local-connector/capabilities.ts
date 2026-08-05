@@ -7,6 +7,19 @@ import { isRoutedGrid } from './raw-ingest'
 
 export type LocalConnectorCapabilityName = 'READ_GRID'
 
+/// Named for planning and UI copy only. The extension's IMPLEMENTED_CAPABILITIES
+/// must stay the closed set of what the device can actually run — do not add these
+/// there until each capability ships with a parser and executor.
+export const PLANNED_LOCAL_CONNECTOR_CAPABILITIES = [
+  'FORESIGHT_INVENTORY',
+  'FORESIGHT_CASE_DETAIL',
+  'FORESIGHT_REPORT',
+  'FLEXLIFE_QUOTE',
+] as const
+
+export type PlannedLocalConnectorCapability =
+  (typeof PLANNED_LOCAL_CONNECTOR_CAPABILITIES)[number]
+
 /// Distinguishable from the device's own mistakes on purpose: every case this
 /// carries is a server-side misconfiguration, so the run route must answer 500
 /// rather than blame the caller's request.

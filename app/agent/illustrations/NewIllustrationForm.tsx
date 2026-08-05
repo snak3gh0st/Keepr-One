@@ -69,14 +69,14 @@ export function NewIllustrationForm() {
   return (
     <div className="module-main-surface">
       <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
-        National Life • Rapid Solve
+        National Life • FlexLife
       </p>
       <h2 className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">
-        Cotação de IUL
+        Cotação FlexLife
       </h2>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">
-        Os valores vêm da própria seguradora. O Rapid Solve cota apenas o produto de IUL —
-        Term não é cotado por este portal.
+        Os valores vêm da própria seguradora. Esta cotação é do produto FlexLife —
+        Term não entra neste fluxo.
       </p>
 
       <form action={handleSubmit} className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -216,8 +216,8 @@ export function NewIllustrationForm() {
         <div className="mt-4 space-y-2">
           <div className="rounded-2xl border border-border-steel bg-panel/55 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-ink">Cotação da National Life</p>
-              <p className="text-xs text-ink-muted">Produto de IUL • prêmio mensal</p>
+              <p className="text-sm font-semibold text-ink">Cotação FlexLife</p>
+              <p className="text-xs text-ink-muted">National Life • prêmio mensal</p>
             </div>
 
             {/* The carrier's own condition, which an agent has to accept on its

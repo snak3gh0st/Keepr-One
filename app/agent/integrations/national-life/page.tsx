@@ -71,6 +71,7 @@ export default async function NationalLifeConnectionPage() {
               <NationalLifeLocalConnectorCard
                 extensionId={localConfig.extensionId}
                 storeUrl={localConfig.storeUrl}
+                installMode={localConfig.installMode}
                 baseUrl={localConfig.baseUrl}
                 remoteAvailable={remoteConfigured}
               />

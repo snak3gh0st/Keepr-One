@@ -17,7 +17,22 @@ describe('local connector config', () => {
     expect(getNationalLifeLocalConnectorConfig()).toEqual({ enabled: false })
   })
 
-  it('returns the minimum public config when enabled', () => {
+  it('enables pilot mode with extension ID only (no Store URL)', () => {
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_ENABLED', 'true')
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_ID', extensionId)
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL', '')
+    vi.stubEnv('BETTER_AUTH_URL', 'https://app.keeprone.com')
+
+    expect(getNationalLifeLocalConnectorConfig()).toEqual({
+      enabled: true,
+      extensionId,
+      installMode: 'pilot',
+      storeUrl: null,
+      baseUrl: 'https://app.keeprone.com',
+    })
+  })
+
+  it('returns store mode when an official listing URL is configured', () => {
     vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_ENABLED', 'true')
     vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_ID', extensionId)
     vi.stubEnv(
@@ -29,20 +44,30 @@ describe('local connector config', () => {
     expect(getNationalLifeLocalConnectorConfig()).toEqual({
       enabled: true,
       extensionId,
+      installMode: 'store',
       storeUrl: `https://chromewebstore.google.com/detail/keeproneconnect/${extensionId}`,
       baseUrl: 'https://app.keeprone.com',
     })
   })
 
-  it('never enables without a valid extension ID or matching official listing', () => {
+  it('never enables without a valid extension ID', () => {
     vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_ENABLED', 'true')
     vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_ID', '')
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL', '')
+    vi.stubEnv('BETTER_AUTH_URL', 'https://app.keeprone.com')
+
+    expect(() => getNationalLifeLocalConnectorConfig()).toThrow(/extension ID/)
+  })
+
+  it('rejects a Store URL that is not the official listing for the extension', () => {
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_ENABLED', 'true')
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_ID', extensionId)
     vi.stubEnv(
       'NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL',
       'https://example.com/detail/connector',
     )
     vi.stubEnv('BETTER_AUTH_URL', 'https://app.keeprone.com')
 
-    expect(() => getNationalLifeLocalConnectorConfig()).toThrow(/extension ID/)
+    expect(() => getNationalLifeLocalConnectorConfig()).toThrow(/Chrome Web Store URL/)
   })
 })

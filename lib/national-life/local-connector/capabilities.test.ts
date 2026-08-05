@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '@/lib/national-life/portal-grid-client'
 import {
   LocalConnectorPlanError,
+  PLANNED_LOCAL_CONNECTOR_CAPABILITIES,
   isSafeNavigatePath,
   planReadGridStages,
 } from './capabilities'
@@ -146,5 +147,16 @@ describe('planReadGridStages', () => {
     expect(() =>
       planReadGridStages(['toString' as NationalLifeGridKey]),
     ).toThrow(/Unknown grid key/)
+  })
+})
+
+describe('PLANNED_LOCAL_CONNECTOR_CAPABILITIES', () => {
+  it('names FlexLife/Foresight capabilities without treating them as implemented', () => {
+    expect(PLANNED_LOCAL_CONNECTOR_CAPABILITIES).toEqual([
+      'FORESIGHT_INVENTORY',
+      'FORESIGHT_CASE_DETAIL',
+      'FORESIGHT_REPORT',
+      'FLEXLIFE_QUOTE',
+    ])
   })
 })

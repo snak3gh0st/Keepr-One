@@ -5,6 +5,7 @@
 /// have nothing to show for a request already made against the carrier.
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { NATIONAL_LIFE_PROVIDER } from './constants'
+import { flexLifeProductLabel } from './flex-life'
 import type { RapidSolveQuote } from './rapid-solve'
 
 export type SaveRapidSolveIllustrationInput = {
@@ -53,7 +54,7 @@ export async function saveRapidSolveIllustration(
       kind: 'PRELIMINARY',
       provider: NATIONAL_LIFE_PROVIDER,
       externalId: input.jobId,
-      productName: input.productCode,
+      productName: flexLifeProductLabel(input.productCode),
       faceAmount: input.quote.faceAmount,
       // The carrier quotes monthly, which is what `PremiumMode` asks for.
       premium: input.quote.monthlyPremium,
@@ -67,6 +68,7 @@ export async function saveRapidSolveIllustration(
       } as Prisma.InputJsonValue,
     },
     update: {
+      productName: flexLifeProductLabel(input.productCode),
       faceAmount: input.quote.faceAmount,
       premium: input.quote.monthlyPremium,
       rawPayload: {
