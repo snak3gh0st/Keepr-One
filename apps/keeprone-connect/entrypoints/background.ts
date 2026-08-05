@@ -1,4 +1,5 @@
 import { parseStagePlan } from '../lib/capabilities'
+import { CONNECTOR_SCHEMA_VERSION } from '../lib/contract'
 import {
   NLG_ORIGIN,
   allowedKeeprOrigins,
@@ -308,7 +309,7 @@ async function uploadChunk(message: Extract<BridgeMessage, { type: 'GRID_CHUNK' 
       body: {
         // Raw carrier rows, exactly as the portal returned them. Field names and
         // meanings are the server's business now.
-        schemaVersion: 2,
+        schemaVersion: CONNECTOR_SCHEMA_VERSION,
         runId: state.runId,
         gridKey: message.gridKey,
         sequence: message.sequence,
