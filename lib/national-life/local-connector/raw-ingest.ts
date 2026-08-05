@@ -18,7 +18,7 @@ const REPORT_ROW_GRIDS = new Set<NationalLifeGridKey>([
   'PIP_PENDING',
 ])
 
-export class RawIngestRouteError extends Error {
+export class LocalConnectorRawIngestError extends Error {
   constructor(readonly code: 'GRID_NOT_ROUTED', readonly gridKey: NationalLifeGridKey) {
     super(`No ingest route for grid ${gridKey}`)
   }
@@ -45,5 +45,5 @@ export function planRawIngest(
   if (REPORT_ROW_GRIDS.has(gridKey)) {
     return { target: 'REPORT_ROW', gridKey, rows: toReportRows(gridKey, rows) }
   }
-  throw new RawIngestRouteError('GRID_NOT_ROUTED', gridKey)
+  throw new LocalConnectorRawIngestError('GRID_NOT_ROUTED', gridKey)
 }

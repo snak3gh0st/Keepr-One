@@ -20,8 +20,23 @@ describe('local connector runs', () => {
       startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now }),
     ).resolves.toEqual({
       runId: 'run-1',
-      schemaVersion: 1,
-      stages: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+      schemaVersion: 2,
+      stages: [
+        {
+          capability: 'READ_GRID',
+          params: {
+            gridKey: 'NEW_BUSINESS',
+            navigatePath: '/agent/book-of-business/new-business/all-new-business-cases',
+          },
+        },
+        {
+          capability: 'READ_GRID',
+          params: {
+            gridKey: 'INFORCE_CLIENTS',
+            navigatePath: '/agent/book-of-business/inforce-book/all-clients',
+          },
+        },
+      ],
       duplicate: false,
     })
     expect(create.mock.calls[0][0].data).toEqual(
@@ -37,6 +52,180 @@ describe('local connector runs', () => {
     await expect(
       startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now }),
     ).resolves.toMatchObject({ runId: 'run-1', duplicate: true })
+  })
+
+  it('accepts a grid beyond the original two', async () => {
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn().mockResolvedValue({ id: 'run-2' }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+    } as never
+
+    const run = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: ['PAID_COMMISSIONS'] },
+    )
+
+    expect(run.stages).toHaveLength(1)
+    expect(run.stages[0].params.gridKey).toBe('PAID_COMMISSIONS')
+    expect(run.stages[0].params.navigatePath).toBe(
+      '/agent/compensation/commissions/paid-commissions',
+    )
+  })
+
+  it('persists the untouched carrier row', async () => {
+    const caseUpsert = vi.fn().mockResolvedValue({})
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'run_1', totalStages: 2 }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      nationalLifeConnectorStageReceipt: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 'receipt-3',
+          runId: 'run_1',
+          gridKey: 'NEW_BUSINESS',
+          sequence: 0,
+          contentHash: 'd'.repeat(64),
+          recordCount: 1,
+          createdAt: now,
+        }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      nationalLifeCaseSnapshot: { upsert: caseUpsert },
+      nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: vi.fn() },
+    }
+    const db = {
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+    } as never
+
+    await ingestLocalConnectorStage(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      gridKey: 'NEW_BUSINESS',
+      idempotencyKey: 'nlc:run_1:NEW_BUSINESS:0',
+      contentHash: 'd'.repeat(64),
+      now,
+      envelope: {
+        schemaVersion: 2,
+        runId: 'run_1',
+        gridKey: 'NEW_BUSINESS',
+        sequence: 0,
+        observedAt: '2026-08-04T00:00:00.000Z',
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ PolicyNo: 'X1', InsuredName: 'Maria Silva', UnknownColumn: 'keep me' }],
+      },
+    })
+
+    const stored = caseUpsert.mock.calls[0][0]
+    expect(stored.create.policyNo).toBe('X1')
+    expect(stored.create.insuredName).toBe('Maria Silva')
+    expect(stored.create.raw).toMatchObject({ UnknownColumn: 'keep me' })
+    expect(stored.update.raw).toMatchObject({ UnknownColumn: 'keep me' })
+  })
+
+  it('routes a report grid to report rows with the untouched row', async () => {
+    const reportUpsert = vi.fn().mockResolvedValue({})
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'run_1', totalStages: 1 }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      nationalLifeConnectorStageReceipt: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 'receipt-4',
+          runId: 'run_1',
+          gridKey: 'PAID_COMMISSIONS',
+          sequence: 0,
+          contentHash: 'e'.repeat(64),
+          recordCount: 1,
+          createdAt: now,
+        }),
+        findMany: vi.fn().mockResolvedValue([{ gridKey: 'PAID_COMMISSIONS' }]),
+      },
+      nationalLifeCaseSnapshot: { upsert: vi.fn() },
+      nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: reportUpsert },
+    }
+    const db = {
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+    } as never
+
+    await ingestLocalConnectorStage(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      gridKey: 'PAID_COMMISSIONS',
+      idempotencyKey: 'nlc:run_1:PAID_COMMISSIONS:0',
+      contentHash: 'e'.repeat(64),
+      now,
+      envelope: {
+        schemaVersion: 2,
+        runId: 'run_1',
+        gridKey: 'PAID_COMMISSIONS',
+        sequence: 0,
+        observedAt: '2026-08-04T00:00:00.000Z',
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ GlobalId: 'G1', PayDate: '2026-07-01', NLDCommEarningAmt: '123.45' }],
+      },
+    })
+
+    const written = reportUpsert.mock.calls[0][0]
+    expect(written.where.agentId_deploymentScope_gridKey_rowKey.gridKey).toBe('PAID_COMMISSIONS')
+    expect(written.create.rowKey).toBe('G1|2026-07-01')
+    expect(written.create.raw).toMatchObject({ GlobalId: 'G1' })
+  })
+
+  it('rejects a grid that has no ingest destination', async () => {
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'run_1', totalStages: 1 }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      nationalLifeConnectorStageReceipt: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      nationalLifeCaseSnapshot: { upsert: vi.fn() },
+      nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: vi.fn() },
+    }
+    const db = {
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+    } as never
+
+    await expect(
+      ingestLocalConnectorStage(db, {
+        agentId: 'agent-1',
+        deviceId: 'device-1',
+        gridKey: 'COMMISSIONS_OVERVIEW',
+        idempotencyKey: 'nlc:run_1:COMMISSIONS_OVERVIEW:0',
+        contentHash: 'f'.repeat(64),
+        now,
+        envelope: {
+          schemaVersion: 2,
+          runId: 'run_1',
+          gridKey: 'COMMISSIONS_OVERVIEW',
+          sequence: 0,
+          observedAt: '2026-08-04T00:00:00.000Z',
+          recordsTotal: 0,
+          truncated: false,
+          records: [],
+        },
+      }),
+    ).rejects.toThrow('No ingest route for grid COMMISSIONS_OVERVIEW')
+    expect(tx.nationalLifeConnectorStageReceipt.create).not.toHaveBeenCalled()
   })
 
   it('does not complete a run until every grid has a non-truncated receipt', async () => {
@@ -57,7 +246,7 @@ describe('local connector runs', () => {
     }
     const tx = {
       nationalLifeSyncRun: {
-        findFirst: vi.fn().mockResolvedValue({ id: 'run-1' }),
+        findFirst: vi.fn().mockResolvedValue({ id: 'run-1', totalStages: 2 }),
         update: runUpdate,
       },
       nationalLifeConnectorStageReceipt: {
@@ -67,6 +256,7 @@ describe('local connector runs', () => {
       },
       nationalLifeCaseSnapshot: { upsert: caseUpsert },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -81,19 +271,22 @@ describe('local connector runs', () => {
       contentHash: 'a'.repeat(64),
       now,
       envelope: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         runId: 'run-1',
         gridKey: 'NEW_BUSINESS',
         sequence: 0,
         observedAt: now.toISOString(),
         recordsTotal: 2,
         truncated: true,
-        records: [{ policyNo: 'NL-123', insuredName: 'Ada Lovelace' }],
+        records: [{ PolicyNo: 'NL-123', InsuredName: 'Ada Lovelace' }],
       },
     })
 
     expect(result.duplicate).toBe(false)
-    expect(caseUpsert.mock.calls[0][0].create.raw).toEqual({})
+    expect(caseUpsert.mock.calls[0][0].create.raw).toEqual({
+      PolicyNo: 'NL-123',
+      InsuredName: 'Ada Lovelace',
+    })
     expect(runUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -123,7 +316,7 @@ describe('local connector runs', () => {
     }
     const tx = {
       nationalLifeSyncRun: {
-        findFirst: vi.fn().mockResolvedValue({ id: 'run-1' }),
+        findFirst: vi.fn().mockResolvedValue({ id: 'run-1', totalStages: 2 }),
         update: runUpdate,
       },
       nationalLifeConnectorStageReceipt: {
@@ -136,6 +329,7 @@ describe('local connector runs', () => {
       },
       nationalLifeCaseSnapshot: { upsert: vi.fn() },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -150,7 +344,7 @@ describe('local connector runs', () => {
       contentHash: 'c'.repeat(64),
       now,
       envelope: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         runId: 'run-1',
         gridKey: 'INFORCE_CLIENTS',
         sequence: 0,
@@ -199,14 +393,14 @@ describe('local connector runs', () => {
       contentHash: 'a'.repeat(64),
       now,
       envelope: {
-        schemaVersion: 1 as const,
+        schemaVersion: 2 as const,
         runId: 'run-1',
         gridKey: 'NEW_BUSINESS' as const,
         sequence: 0,
         observedAt: now.toISOString(),
         recordsTotal: 1,
         truncated: false,
-        records: [{ policyNo: 'NL-123' }],
+        records: [{ PolicyNo: 'NL-123' }],
       },
     }
 

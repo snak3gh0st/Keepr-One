@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { planRawIngest, RawIngestRouteError } from './raw-ingest'
+import { planRawIngest, LocalConnectorRawIngestError } from './raw-ingest'
 
 describe('planRawIngest', () => {
   it('routes new business rows to case snapshots and keeps the raw row', () => {
@@ -23,13 +23,13 @@ describe('planRawIngest', () => {
   })
 
   it('rejects a grid key it does not route with a distinguishable error', () => {
-    expect(() => planRawIngest('NOT_A_GRID' as never, [])).toThrow(RawIngestRouteError)
+    expect(() => planRawIngest('NOT_A_GRID' as never, [])).toThrow(LocalConnectorRawIngestError)
     try {
       planRawIngest('NOT_A_GRID' as never, [])
       throw new Error('expected planRawIngest to throw')
     } catch (error) {
-      expect(error).toBeInstanceOf(RawIngestRouteError)
-      expect((error as RawIngestRouteError).code).toBe('GRID_NOT_ROUTED')
+      expect(error).toBeInstanceOf(LocalConnectorRawIngestError)
+      expect((error as LocalConnectorRawIngestError).code).toBe('GRID_NOT_ROUTED')
     }
   })
 })

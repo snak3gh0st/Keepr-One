@@ -4,10 +4,13 @@ import {
   localConnectorUnavailableResponse,
 } from '@/lib/national-life/local-connector/config'
 import {
-  LOCAL_CONNECTOR_GRID_KEYS,
   LOCAL_CONNECTOR_MAX_BODY_BYTES,
-  localConnectorStageEnvelopeSchema,
+  localConnectorRawStageEnvelopeSchema,
 } from '@/lib/national-life/local-connector/contracts'
+import {
+  NATIONAL_LIFE_GRIDS,
+  type NationalLifeGridKey,
+} from '@/lib/national-life/portal-grid-client'
 import {
   LocalConnectorSignatureError,
   sha256Hex,
@@ -27,7 +30,12 @@ const NO_STORE = { 'Cache-Control': 'no-store' }
 const idempotencyKeySchema = z.string().min(16).max(160).regex(/^[A-Za-z0-9._:-]+$/)
 const routeParamsSchema = z.strictObject({
   runId: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
-  gridKey: z.enum(LOCAL_CONNECTOR_GRID_KEYS),
+  // The URL segment is validated against the server's own grid catalogue, and
+  // the envelope's gridKey is cross-checked against it below, so neither the
+  // path nor the body is authoritative on its own.
+  gridKey: z.enum(
+    Object.keys(NATIONAL_LIFE_GRIDS) as [NationalLifeGridKey, ...NationalLifeGridKey[]],
+  ),
 })
 
 export async function PUT(
@@ -45,7 +53,7 @@ export async function PUT(
       body,
     })
     const params = routeParamsSchema.parse(await context.params)
-    const envelope = localConnectorStageEnvelopeSchema.parse(parseJsonBody(body))
+    const envelope = localConnectorRawStageEnvelopeSchema.parse(parseJsonBody(body))
     if (envelope.runId !== params.runId || envelope.gridKey !== params.gridKey) {
       return Response.json({ error: 'INVALID_ENVELOPE' }, { status: 400, headers: NO_STORE })
     }

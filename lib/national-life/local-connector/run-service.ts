@@ -2,22 +2,26 @@ import 'server-only'
 
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { NATIONAL_LIFE_PROVIDER } from '../constants'
+import type { NationalLifeGridKey } from '../portal-grid-client'
+import { planReadGridStages, type LocalConnectorStagePlan } from './capabilities'
 import {
-  LOCAL_CONNECTOR_GRID_KEYS,
-  type InforceClientRecord,
-  type LocalConnectorStageEnvelope,
-  type NewBusinessRecord,
+  LOCAL_CONNECTOR_SCHEMA_VERSION,
+  type LocalConnectorRawStageEnvelope,
 } from './contracts'
+import { planRawIngest } from './raw-ingest'
 import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 
 export { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 
 export const LOCAL_CONNECTOR_RUN_TTL_MS = 30 * 60_000
-// This run-start response still advertises the legacy typed-envelope protocol
-// version: LOCAL_CONNECTOR_SCHEMA_VERSION in contracts.ts moved to 2 for the new
-// raw-record envelope, but the stage route these runs feed still parses the v1
-// typed schemas. Task 7 retires this alongside the typed schemas it describes.
-const RUN_PROTOCOL_SCHEMA_VERSION = 1 as const
+/// The grids a run reads when the caller does not name any. The capability
+/// catalogue can plan all twenty, but widening the default would change what an
+/// unattended device does at the same moment the protocol changed shape, so the
+/// extra grids are opt-in per run.
+export const LOCAL_CONNECTOR_DEFAULT_GRID_KEYS = [
+  'NEW_BUSINESS',
+  'INFORCE_CLIENTS',
+] as const satisfies readonly NationalLifeGridKey[]
 const UPSERT_CHUNK_SIZE = 100
 
 type LocalConnectorDb = Pick<
@@ -26,6 +30,7 @@ type LocalConnectorDb = Pick<
   | 'nationalLifeConnectorStageReceipt'
   | 'nationalLifeCaseSnapshot'
   | 'nationalLifeInforcePolicy'
+  | 'nationalLifeReportRow'
   | '$transaction'
 >
 
@@ -61,8 +66,17 @@ async function failStaleLocalRuns(
 export async function startLocalConnectorRun(
   db: LocalConnectorDb,
   input: { agentId: string; deviceId: string; now?: Date },
-) {
+  options?: { gridKeys?: readonly NationalLifeGridKey[] },
+): Promise<{
+  runId: string
+  schemaVersion: typeof LOCAL_CONNECTOR_SCHEMA_VERSION
+  stages: LocalConnectorStagePlan[]
+  duplicate: boolean
+}> {
   const now = input.now ?? new Date()
+  // Planned before any write: an unknown grid key must fail the request rather
+  // than leave a RUNNING run behind that no device can ever finish.
+  const stages = planReadGridStages(options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS)
   await failStaleLocalRuns(db, { agentId: input.agentId, deviceId: input.deviceId, now })
 
   const active = await db.nationalLifeSyncRun.findFirst({
@@ -79,8 +93,8 @@ export async function startLocalConnectorRun(
   if (active) {
     return {
       runId: active.id,
-      schemaVersion: RUN_PROTOCOL_SCHEMA_VERSION,
-      stages: [...LOCAL_CONNECTOR_GRID_KEYS],
+      schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
+      stages,
       duplicate: true as const,
     }
   }
@@ -93,8 +107,8 @@ export async function startLocalConnectorRun(
       provider: NATIONAL_LIFE_PROVIDER,
       executionSource: 'LOCAL',
       state: 'RUNNING',
-      totalStages: LOCAL_CONNECTOR_GRID_KEYS.length,
-      currentGridKey: LOCAL_CONNECTOR_GRID_KEYS[0],
+      totalStages: stages.length,
+      currentGridKey: stages[0]?.params.gridKey ?? null,
       startedAt: now,
       createdAt: now,
       updatedAt: now,
@@ -104,8 +118,8 @@ export async function startLocalConnectorRun(
 
   return {
     runId: run.id,
-    schemaVersion: RUN_PROTOCOL_SCHEMA_VERSION,
-    stages: [...LOCAL_CONNECTOR_GRID_KEYS],
+    schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
+    stages,
     duplicate: false as const,
   }
 }
@@ -144,72 +158,19 @@ export async function failLocalConnectorRun(
 type IngestInput = {
   agentId: string
   deviceId: string
-  gridKey: (typeof LOCAL_CONNECTOR_GRID_KEYS)[number]
+  gridKey: NationalLifeGridKey
   idempotencyKey: string
   contentHash: string
-  envelope: LocalConnectorStageEnvelope
+  envelope: LocalConnectorRawStageEnvelope
   now?: Date
 }
 
-function nullable(value: string | null | undefined): string | null {
-  return value ?? null
-}
-
-function newBusinessData(record: NewBusinessRecord, observedAt: Date) {
-  return {
-    insuredName: nullable(record.insuredName),
-    ownerName: nullable(record.ownerName),
-    product: nullable(record.product),
-    carrierStatus: nullable(record.carrierStatus),
-    deliveryStatus: nullable(record.deliveryStatus),
-    actionRequired: nullable(record.actionRequired),
-    requirements: nullable(record.requirements),
-    submitDate: nullable(record.submitDate),
-    sentDate: nullable(record.sentDate),
-    modalPremium: nullable(record.modalPremium),
-    anticipatedAnnualPremium: nullable(record.anticipatedAnnualPremium),
-    submitMethod: nullable(record.submitMethod),
-    caseManager: nullable(record.caseManager),
-    agency: nullable(record.agency),
-    writingAgentName: nullable(record.writingAgentName),
-    writingAgentNumber: nullable(record.writingAgentNumber),
-    companyCode: nullable(record.companyCode),
-    raw: {} as Prisma.InputJsonValue,
-    fetchedAt: observedAt,
-  }
-}
-
-function inforceData(record: InforceClientRecord, observedAt: Date) {
-  return {
-    nbPolicyNumber: nullable(record.nbPolicyNumber),
-    policyStatus: nullable(record.policyStatus),
-    policyIssueDate: nullable(record.policyIssueDate),
-    lastStatusChangeDate: nullable(record.lastStatusChangeDate),
-    productClass: nullable(record.productClass),
-    productName: nullable(record.productName),
-    productCode: nullable(record.productCode),
-    companyCode: nullable(record.companyCode),
-    systemCode: nullable(record.systemCode),
-    planCode: nullable(record.planCode),
-    agentNumber: nullable(record.agentNumber),
-    agentName: nullable(record.agentName),
-    servicingAgentName: nullable(record.servicingAgentName),
-    servicingAgencyName: nullable(record.servicingAgencyName),
-    insuredClientName: nullable(record.insuredClientName),
-    insuredDob: nullable(record.insuredDob),
-    insuredEmail: nullable(record.insuredEmail),
-    insuredPhoneNumber: nullable(record.insuredPhoneNumber),
-    ownerClientName: nullable(record.ownerClientName),
-    ownerDob: nullable(record.ownerDob),
-    ownerEmail: nullable(record.ownerEmail),
-    ownerPhoneNumber: nullable(record.ownerPhoneNumber),
-    accumulatedCashValue: nullable(record.accumulatedCashValue),
-    anticipatedAnnualPremium: nullable(record.anticipatedAnnualPremium),
-    termConversionDate: nullable(record.termConversionDate),
-    levelPeriodEndDate: nullable(record.levelPeriodEndDate),
-    employerName: nullable(record.employerName),
-    raw: {} as Prisma.InputJsonValue,
-    fetchedAt: observedAt,
+/// The mappers are pure and the writes stay here: persistCaseSnapshots and its
+/// siblings bind the module-level Prisma client, so they cannot enlist in the
+/// stage-ingest transaction that also writes the receipt and the run row.
+async function inChunks<T>(items: T[], write: (chunk: T[]) => Promise<unknown>) {
+  for (let offset = 0; offset < items.length; offset += UPSERT_CHUNK_SIZE) {
+    await write(items.slice(offset, offset + UPSERT_CHUNK_SIZE))
   }
 }
 
@@ -218,60 +179,103 @@ async function persistRecords(
   input: IngestInput,
   observedAt: Date,
 ) {
-  if (input.envelope.gridKey === 'NEW_BUSINESS') {
-    for (let offset = 0; offset < input.envelope.records.length; offset += UPSERT_CHUNK_SIZE) {
-      const chunk = input.envelope.records.slice(offset, offset + UPSERT_CHUNK_SIZE)
-      await Promise.all(
-        chunk.map((record) => {
-          const data = newBusinessData(record, observedAt)
+  const plan = planRawIngest(input.gridKey, input.envelope.records)
+
+  if (plan.target === 'CASE_SNAPSHOT') {
+    await inChunks(plan.snapshots, (chunk) =>
+      Promise.all(
+        chunk.map(({ policyNo, raw, ...rest }) => {
+          const data = {
+            ...rest,
+            raw: raw as Prisma.InputJsonValue,
+            fetchedAt: observedAt,
+          }
           return tx.nationalLifeCaseSnapshot.upsert({
             where: {
               agentId_deploymentScope_gridKey_policyNo: {
                 agentId: input.agentId,
                 deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
                 gridKey: input.gridKey,
-                policyNo: record.policyNo,
+                policyNo,
               },
             },
             create: {
               agentId: input.agentId,
               deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
               gridKey: input.gridKey,
-              policyNo: record.policyNo,
+              policyNo,
               ...data,
             },
             update: data,
           })
         }),
-      )
-    }
+      ),
+    )
     return
   }
 
-  for (let offset = 0; offset < input.envelope.records.length; offset += UPSERT_CHUNK_SIZE) {
-    const chunk = input.envelope.records.slice(offset, offset + UPSERT_CHUNK_SIZE)
-    await Promise.all(
-      chunk.map((record) => {
-        const data = inforceData(record, observedAt)
-        return tx.nationalLifeInforcePolicy.upsert({
-          where: {
-            agentId_deploymentScope_policyNumber: {
+  if (plan.target === 'INFORCE_POLICY') {
+    await inChunks(plan.snapshots, (chunk) =>
+      Promise.all(
+        chunk.map(({ policyNumber, raw, ...rest }) => {
+          const data = {
+            ...rest,
+            raw: raw as Prisma.InputJsonValue,
+            fetchedAt: observedAt,
+          }
+          return tx.nationalLifeInforcePolicy.upsert({
+            where: {
+              agentId_deploymentScope_policyNumber: {
+                agentId: input.agentId,
+                deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+                policyNumber,
+              },
+            },
+            create: {
               agentId: input.agentId,
               deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-              policyNumber: record.policyNumber,
+              policyNumber,
+              ...data,
+            },
+            update: data,
+          })
+        }),
+      ),
+    )
+    return
+  }
+
+  await inChunks(plan.rows, (chunk) =>
+    Promise.all(
+      chunk.map((row) => {
+        const data = {
+          primaryDate: row.primaryDate,
+          label: row.label,
+          amounts: row.amounts as Prisma.InputJsonValue,
+          raw: row.raw as Prisma.InputJsonValue,
+          fetchedAt: observedAt,
+        }
+        return tx.nationalLifeReportRow.upsert({
+          where: {
+            agentId_deploymentScope_gridKey_rowKey: {
+              agentId: input.agentId,
+              deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+              gridKey: input.gridKey,
+              rowKey: row.rowKey,
             },
           },
           create: {
             agentId: input.agentId,
             deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-            policyNumber: record.policyNumber,
+            gridKey: input.gridKey,
+            rowKey: row.rowKey,
             ...data,
           },
           update: data,
         })
       }),
-    )
-  }
+    ),
+  )
 }
 
 function publicReceipt(receipt: {
@@ -343,7 +347,7 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
           provider: NATIONAL_LIFE_PROVIDER,
           state: { in: ['RUNNING', 'COMPLETED'] },
         },
-        select: { id: true },
+        select: { id: true, totalStages: true },
       })
       if (!run || input.envelope.gridKey !== input.gridKey) {
         throw new LocalConnectorRunError('RUN_NOT_FOUND')
@@ -379,13 +383,11 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
         select: { gridKey: true },
       })
       const completedStages = finalizedGrids.length
-      const completed = LOCAL_CONNECTOR_GRID_KEYS.every((gridKey) =>
-        finalizedGrids.some((row) => row.gridKey === gridKey),
-      )
-      const currentGridKey =
-        LOCAL_CONNECTOR_GRID_KEYS.find(
-          (gridKey) => !finalizedGrids.some((row) => row.gridKey === gridKey),
-        ) ?? null
+      // The run row no longer knows which grids were planned — a run can now carry
+      // any subset of the catalogue — so completeness is counted against the
+      // totalStages written at start instead of a fixed grid list.
+      const completed = completedStages >= run.totalStages
+      const currentGridKey = completed ? null : input.gridKey
       await tx.nationalLifeSyncRun.update({
         where: { id: run.id },
         data: {
