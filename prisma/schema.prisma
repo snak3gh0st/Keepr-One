@@ -582,9 +582,11 @@ model AgentIntegrationSession {
   lastConnectedAt    DateTime
   lastUsedAt         DateTime?
   // The illustration path (Foresight) sits behind the carrier's Auth0 tenant,
-  // whose session dies while the portal session lives. Each keep-alive tick
-  // that crosses the SSO jump records what it found, so the agent learns the
-  // PDF is out of reach before clicking towards it. Last tick only — nothing
+  // whose session dies while the portal session lives. Written by the outcome of
+  // the two jobs that actually cross the SSO jump (SYNC_FORESIGHT_READ and
+  // GENERATE_FORESIGHT_PDF), not by the keep-alive tick — which is off in
+  // production, and is why this field used to go stale. The agent learns the PDF
+  // is out of reach before clicking towards it. Last crossing only — nothing
   // here predicts the next one.
   illustrationSsoReachable  Boolean?
   illustrationSsoCheckedAt  DateTime?
@@ -705,6 +707,12 @@ model NationalLifeSyncRun {
   completedStages Int                      @default(0)
   failedStages    Int                      @default(0)
   currentGridKey  String?
+  /// As grades que este run planejou ler. Vazio significa "o par padrão legado"
+  /// (NEW_BUSINESS, INFORCE_CLIENTS): runs criados antes desta coluna só podiam
+  /// ter planejado essas duas, então nenhum backfill é necessário. É a autoridade
+  /// do servidor sobre quais estágios pertencem a este run — sem ela o dispositivo
+  /// decidiria o que conta como completo.
+  plannedGridKeys String[]                 @default([])
   safeErrorCode   String?
   startedAt       DateTime?
   completedAt     DateTime?
@@ -772,7 +780,14 @@ model NationalLifeConnectorStageReceipt {
   sequence       Int
   truncated      Boolean  @default(true)
   contentHash    String
+  /// Linhas recebidas na página. Não entra no hash de conteúdo — este é o sha256
+  /// do corpo cru. O que fixa seu significado é ser campo público do recibo e,
+  /// junto de `writtenCount`, tornar visível "recebi 200, escrevi 0".
   recordCount    Int
+  /// Linhas efetivamente escritas depois da normalização. Nulo em recibos
+  /// anteriores a esta coluna. Distingue "recebi 200, escrevi 0" — uma página que
+  /// o mapeador descartou inteira — de uma página vazia de verdade.
+  writtenCount   Int?
   idempotencyKey String   @unique
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

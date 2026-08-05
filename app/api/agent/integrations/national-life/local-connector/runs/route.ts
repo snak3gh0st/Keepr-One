@@ -2,8 +2,14 @@ import {
   isNationalLifeLocalConnectorEnabled,
   localConnectorUnavailableResponse,
 } from '@/lib/national-life/local-connector/config'
-import { verifyLocalConnectorDeviceRequest } from '@/lib/national-life/local-connector/device-signature'
-import { readLimitedBody } from '@/lib/national-life/local-connector/request'
+import {
+  LocalConnectorSignatureError,
+  verifyLocalConnectorDeviceRequest,
+} from '@/lib/national-life/local-connector/device-signature'
+import {
+  LocalConnectorRequestError,
+  readLimitedBody,
+} from '@/lib/national-life/local-connector/request'
 import { startLocalConnectorRun } from '@/lib/national-life/local-connector/run-service'
 import { prisma } from '@/lib/prisma'
 
@@ -23,7 +29,16 @@ export async function POST(request: Request) {
     })
     const run = await startLocalConnectorRun(prisma, device)
     return Response.json(run, { status: 201, headers: NO_STORE })
-  } catch {
-    return Response.json({ error: 'DEVICE_REQUEST_REJECTED' }, { status: 401, headers: NO_STORE })
+  } catch (error) {
+    if (error instanceof LocalConnectorSignatureError) {
+      return Response.json(
+        { error: 'DEVICE_REQUEST_REJECTED' },
+        { status: 401, headers: NO_STORE },
+      )
+    }
+    if (error instanceof LocalConnectorRequestError) {
+      return Response.json({ error: 'INVALID_REQUEST' }, { status: 400, headers: NO_STORE })
+    }
+    return Response.json({ error: 'RUN_START_FAILED' }, { status: 500, headers: NO_STORE })
   }
 }

@@ -36,6 +36,7 @@ import {
   type GridSyncResult,
 } from '../../lib/national-life/sync-grid'
 import { redactDiagnostic } from '../../lib/national-life/redaction'
+import { recordForesightReachability } from '../../lib/national-life/interactive-connection-service'
 import type {
   BrowserSession,
   NationalLifeCaseObservation,
@@ -361,6 +362,18 @@ function getErrorSafeDetail(error: unknown): unknown {
   return undefined
 }
 
+/// The adapter reports "I could not find the element" as PORTAL_LAYOUT_CHANGED and
+/// records the underlying reason in safeDetail.safeCode. A dead Foresight session is
+/// one of those reasons, and it needs a login, not a human reading a diff.
+function getErrorSafeCode(error: unknown): string | undefined {
+  const detail = getErrorSafeDetail(error)
+  if (detail && typeof detail === 'object' && 'safeCode' in detail) {
+    const safeCode = (detail as { safeCode?: unknown }).safeCode
+    if (typeof safeCode === 'string') return safeCode
+  }
+  return undefined
+}
+
 function getSessionCryptoConfig(env: NationalLifeEnv) {
   return {
     scopeId: env.sessionScopeId,
@@ -497,12 +510,36 @@ export function describeUnexpectedFailure(error: unknown): unknown {
   return redactDiagnostic({ message: withoutUrls(String(error)) })
 }
 
+/// Telemetry must never fail a job that already produced its answer, which is why
+/// this swallows — same rule as the session-context persistence below.
+///
+/// `illustrationSsoReachable` used to be written only by the keep-alive's SSO
+/// jump, which is off in production, so the field went stale. Deriving it from
+/// the two operations that actually cross the Foresight SSO boundary keeps it
+/// honest without needing the keep-alive at all.
+async function noteForesightReachability(
+  job: Pick<BrowserJobRecord, 'agentId' | 'operation'>,
+  deploymentScope: string,
+  reachable: boolean,
+): Promise<void> {
+  if (job.operation !== 'SYNC_FORESIGHT_READ' && job.operation !== 'GENERATE_FORESIGHT_PDF') return
+  try {
+    await recordForesightReachability({
+      agentId: job.agentId,
+      deploymentScope,
+      reachable,
+    })
+  } catch {
+    // ignored on purpose
+  }
+}
+
 async function handleFailure(
   job: BrowserJobRecord,
   error: unknown,
   deps: Pick<
     NationalLifeRunJobDeps,
-    'jobStore' | 'sessionStore' | 'now'
+    'jobStore' | 'sessionStore' | 'now' | 'env'
   >,
 ): Promise<void> {
   const code = getErrorCode(error)
@@ -516,7 +553,8 @@ async function handleFailure(
   // waits for one instead of being thrown away. The worker only claims QUEUED,
   // so nothing here keeps knocking on the carrier while it waits — which
   // matters, because crossing the identity provider is what burns the session.
-  if (code === FORESIGHT_SSO_EXPIRED) {
+  if (code === FORESIGHT_SSO_EXPIRED || getErrorSafeCode(error) === FORESIGHT_SSO_EXPIRED) {
+    await noteForesightReachability(job, deps.env.sessionScopeId, false)
     await deps.jobStore.transitionJob({
       jobId: job.id,
       from: 'RUNNING',
@@ -819,6 +857,7 @@ export async function runNationalLifeJob(
               bytes: rendered.bytes.byteLength,
             },
           })
+          await noteForesightReachability(job, deps.env.sessionScopeId, true)
         } else if (caseInput) {
           const observation = await adapter.readCase(caseInput.lookup)
           const syncResult = await deps.applyCaseObservation({
@@ -879,6 +918,7 @@ export async function runNationalLifeJob(
               to: 'SUCCEEDED',
               result: { inventoriedCases: result.cases.length },
             })
+            await noteForesightReachability(job, deps.env.sessionScopeId, true)
           } else {
             const snapshot = foresightDetailSnapshot
             if (!snapshot) {
@@ -935,6 +975,7 @@ export async function runNationalLifeJob(
               to: 'SUCCEEDED',
               result: { caseSnapshotId: snapshot.id, servicesRead: result.services.length },
             })
+            await noteForesightReachability(job, deps.env.sessionScopeId, true)
           }
         }
 

@@ -1,6 +1,5 @@
 import { NLG_ORIGIN } from '../lib/constants'
 import { parseBeginGridMessage } from '../lib/messages'
-import { normalizeRows } from '../lib/normalizers'
 import { buildPageBody, nextPageStart, PAGE_SIZE, parsePortalPage } from '../lib/paging'
 
 const DATATABLE_PATH = '/agent/Datatable/GetJsonResult'
@@ -122,7 +121,6 @@ export default defineContentScript({
         let draw = 1
         let sequence = 0
         let sentAny = false
-        const seen = new Set<string>()
 
         while (true) {
           const body = buildPageBody(requestTemplate.body, start, PAGE_SIZE, draw)
@@ -135,13 +133,18 @@ export default defineContentScript({
           })
           if (!response.ok) throw new Error('PORTAL_REQUEST_FAILED')
           const page = parsePortalPage(await response.json())
-          const records = normalizeRows(message.gridKey, page.rows).filter((record) => {
-            const key = 'policyNo' in record ? record.policyNo : record.policyNumber
-            if (seen.has(key)) return false
-            seen.add(key)
-            return true
-          })
-          if (records.length > 0) {
+          // Rows go up exactly as the carrier returned them. The only thing dropped
+          // is a row that is not a plain object, which is a shape the envelope cannot
+          // carry — not a judgment about its contents. There is no per-policy
+          // deduplication here any more: it required knowing each grid's key field,
+          // and the server dedupes by its own upsert key.
+          const records = page.rows.filter(
+            (row): row is Record<string, unknown> =>
+              typeof row === 'object' && row !== null && !Array.isArray(row),
+          )
+          // A carrier that ignores `length` can hand back more rows than a page, so
+          // slice to the cap the envelope accepts rather than losing the whole chunk.
+          for (let offset = 0; offset < records.length; offset += PAGE_SIZE) {
             post({
               type: 'GRID_CHUNK',
               gridKey: message.gridKey,
@@ -150,7 +153,7 @@ export default defineContentScript({
               sequence,
               recordsTotal: page.recordsTotal,
               truncated: page.truncated,
-              records,
+              records: records.slice(offset, offset + PAGE_SIZE),
             })
             sequence += 1
             sentAny = true

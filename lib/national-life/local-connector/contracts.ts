@@ -1,18 +1,20 @@
 import { z } from 'zod'
+import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '../portal-grid-client'
 
-export const LOCAL_CONNECTOR_SCHEMA_VERSION = 1 as const
+export const LOCAL_CONNECTOR_SCHEMA_VERSION = 2 as const
 export const LOCAL_CONNECTOR_MAX_BODY_BYTES = 2 * 1024 * 1024
-export const LOCAL_CONNECTOR_MAX_RECORDS = 1_000
-export const LOCAL_CONNECTOR_GRID_KEYS = ['NEW_BUSINESS', 'INFORCE_CLIENTS'] as const
+/// Raw carrier rows are fatter than normalized ones. 200 rows against the 2 MiB body
+/// cap leaves headroom for the widest grid; the extension pages to match.
+export const LOCAL_CONNECTOR_MAX_RECORDS = 200
+/// Must match MAX_PORTAL_RECORDS in the extension's `lib/paging.ts`, which clamps
+/// `recordsTotal` to that ceiling before it ever reaches here. A lower cap on this
+/// side does not protect anything — it makes the very envelope the extension emits
+/// when a grid overflows (`recordsTotal` at the ceiling, `truncated: true`) fail with
+/// a 400, so a grid above the cap fails the run instead of ingesting what it got and
+/// leaving the run open. The truncated path only works if both ceilings agree.
+export const LOCAL_CONNECTOR_MAX_RECORDS_TOTAL = 200_000
 
 const identifier = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/)
-const normalizedText = z
-  .string()
-  .trim()
-  .max(512)
-  .refine((value) => !/[<>]/.test(value) && !value.includes('\u0000'), 'Markup is not allowed')
-const nullableText = normalizedText.nullable().optional()
-const nullableEmail = z.string().trim().email().max(320).nullable().optional()
 
 export const publicP256JwkSchema = z
   .strictObject({
@@ -27,93 +29,44 @@ export const publicP256JwkSchema = z
   })
   .refine((jwk) => jwk.ext !== false, 'Public key must be extractable')
 
-export const newBusinessRecordSchema = z.strictObject({
-  policyNo: normalizedText.min(1).max(128),
-  insuredName: nullableText,
-  ownerName: nullableText,
-  product: nullableText,
-  carrierStatus: nullableText,
-  deliveryStatus: nullableText,
-  actionRequired: nullableText,
-  requirements: nullableText,
-  submitDate: nullableText,
-  sentDate: nullableText,
-  modalPremium: nullableText,
-  anticipatedAnnualPremium: nullableText,
-  submitMethod: nullableText,
-  caseManager: nullableText,
-  agency: nullableText,
-  writingAgentName: nullableText,
-  writingAgentNumber: nullableText,
-  companyCode: nullableText,
-})
+export const LOCAL_CONNECTOR_MAX_ROW_BYTES = 16 * 1024
 
-export const inforceClientRecordSchema = z.strictObject({
-  policyNumber: normalizedText.min(1).max(128),
-  nbPolicyNumber: nullableText,
-  policyStatus: nullableText,
-  policyIssueDate: nullableText,
-  lastStatusChangeDate: nullableText,
-  productClass: nullableText,
-  productName: nullableText,
-  productCode: nullableText,
-  companyCode: nullableText,
-  systemCode: nullableText,
-  planCode: nullableText,
-  agentNumber: nullableText,
-  agentName: nullableText,
-  servicingAgentName: nullableText,
-  servicingAgencyName: nullableText,
-  insuredClientName: nullableText,
-  insuredDob: nullableText,
-  insuredEmail: nullableEmail,
-  insuredPhoneNumber: nullableText,
-  ownerClientName: nullableText,
-  ownerDob: nullableText,
-  ownerEmail: nullableEmail,
-  ownerPhoneNumber: nullableText,
-  accumulatedCashValue: nullableText,
-  anticipatedAnnualPremium: nullableText,
-  termConversionDate: nullableText,
-  levelPeriodEndDate: nullableText,
-  employerName: nullableText,
-})
+/// Shape is intentionally unconstrained: readLimitedBody already caps the whole
+/// body at LOCAL_CONNECTOR_MAX_BODY_BYTES before this ever parses, and the request
+/// is signed by a paired device, so a depth bound bought little security. What it
+/// did cost was availability — one unexpectedly-deep row failed the whole 200-row
+/// envelope, and a retry hit the same wall deterministically. Bound by serialized
+/// size per row instead, which is the actual resource being protected.
+export const rawGridRowSchema: z.ZodType<Record<string, unknown>> = z
+  .record(z.string().max(128), z.unknown())
+  .superRefine((row, ctx) => {
+    if (JSON.stringify(row).length > LOCAL_CONNECTOR_MAX_ROW_BYTES) {
+      ctx.addIssue({ code: 'custom', message: 'row exceeds the per-row size cap' })
+    }
+  })
 
-const envelopeBase = {
-  schemaVersion: z.literal(LOCAL_CONNECTOR_SCHEMA_VERSION),
-  runId: identifier,
-  sequence: z.number().int().min(0).max(10_000),
-  observedAt: z.string().datetime({ offset: true }),
-  recordsTotal: z.number().int().min(0).max(100_000),
-  truncated: z.boolean(),
-}
+export const localConnectorRawStageEnvelopeSchema = z
+  .strictObject({
+    schemaVersion: z.literal(LOCAL_CONNECTOR_SCHEMA_VERSION),
+    runId: identifier,
+    // The client's gridKey is never treated as authoritative on its own: it is
+    // validated here against the server's own grid allowlist, and the route
+    // additionally cross-checks it against the URL segment before ingest.
+    gridKey: z.enum(
+      Object.keys(NATIONAL_LIFE_GRIDS) as [NationalLifeGridKey, ...NationalLifeGridKey[]],
+    ),
+    sequence: z.number().int().min(0).max(10_000),
+    observedAt: z.string().datetime({ offset: true }),
+    recordsTotal: z.number().int().min(0).max(LOCAL_CONNECTOR_MAX_RECORDS_TOTAL),
+    truncated: z.boolean(),
+    records: z.array(rawGridRowSchema).max(LOCAL_CONNECTOR_MAX_RECORDS),
+  })
+  .superRefine((envelope, ctx) => {
+    if (envelope.recordsTotal < envelope.records.length) {
+      ctx.addIssue({ code: 'custom', message: 'recordsTotal is below the page it carries' })
+    }
+  })
 
-export const newBusinessEnvelopeSchema = z.strictObject({
-  ...envelopeBase,
-  gridKey: z.literal('NEW_BUSINESS'),
-  records: z.array(newBusinessRecordSchema).max(LOCAL_CONNECTOR_MAX_RECORDS),
-}).superRefine((envelope, context) => {
-  if (envelope.recordsTotal < envelope.records.length) {
-    context.addIssue({ code: 'custom', message: 'recordsTotal is smaller than records' })
-  }
-})
-
-export const inforceClientsEnvelopeSchema = z.strictObject({
-  ...envelopeBase,
-  gridKey: z.literal('INFORCE_CLIENTS'),
-  records: z.array(inforceClientRecordSchema).max(LOCAL_CONNECTOR_MAX_RECORDS),
-}).superRefine((envelope, context) => {
-  if (envelope.recordsTotal < envelope.records.length) {
-    context.addIssue({ code: 'custom', message: 'recordsTotal is smaller than records' })
-  }
-})
-
-export const localConnectorStageEnvelopeSchema = z.discriminatedUnion('gridKey', [
-  newBusinessEnvelopeSchema,
-  inforceClientsEnvelopeSchema,
-])
+export type LocalConnectorRawStageEnvelope = z.infer<typeof localConnectorRawStageEnvelopeSchema>
 
 export type PublicP256Jwk = z.infer<typeof publicP256JwkSchema>
-export type NewBusinessRecord = z.infer<typeof newBusinessRecordSchema>
-export type InforceClientRecord = z.infer<typeof inforceClientRecordSchema>
-export type LocalConnectorStageEnvelope = z.infer<typeof localConnectorStageEnvelopeSchema>

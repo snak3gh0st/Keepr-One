@@ -1,6 +1,5 @@
+import { parseStagePlan } from '../lib/capabilities'
 import {
-  GRID_KEYS,
-  GRID_PATHS,
   NLG_ORIGIN,
   allowedKeeprOrigins,
   isAuthPath,
@@ -14,7 +13,13 @@ import {
   type BridgeMessage,
 } from '../lib/messages'
 import { SignedRequestError, signedJsonRequest } from '../lib/signed-client'
-import { readDeviceState, readSyncState, writeDeviceState, writeSyncState } from '../lib/state'
+import {
+  currentStage,
+  readDeviceState,
+  readSyncState,
+  writeDeviceState,
+  writeSyncState,
+} from '../lib/state'
 
 type ActiveNavigation = BeginGridMessage & { tabId: number }
 
@@ -138,15 +143,14 @@ async function createRun() {
     pathname: '/api/agent/integrations/national-life/local-connector/runs',
     body: {},
   })
-  const stages = response.stages
-  if (
-    typeof response.runId !== 'string' ||
-    !Array.isArray(stages) ||
-    !GRID_KEYS.every((grid) => stages.includes(grid))
-  ) {
+  if (typeof response.runId !== 'string' || response.runId.length === 0) {
     throw new Error('INVALID_RUN_RESPONSE')
   }
-  await writeSyncState({ runId: response.runId, nextGrid: 'NEW_BUSINESS', status: 'NAVIGATING' })
+  // The server decides which stages this run has and in what order; the extension
+  // only checks that every one of them names a capability it implements and a path
+  // inside the agent tree. Adding a grid is a server deploy, not a release here.
+  const plan = parseStagePlan(response.stages)
+  await writeSyncState({ runId: response.runId, plan, stageIndex: 0, status: 'NAVIGATING' })
 }
 
 async function findNationalLifeTab(): Promise<chrome.tabs.Tab | undefined> {
@@ -156,8 +160,9 @@ async function findNationalLifeTab(): Promise<chrome.tabs.Tab | undefined> {
 
 async function navigatePendingGrid() {
   const state = await readSyncState()
-  if (!state.runId || !state.nextGrid) return
-  const target = `${NLG_ORIGIN}${GRID_PATHS[state.nextGrid]}`
+  const stage = currentStage(state)
+  if (!state.runId || !stage) return
+  const target = `${NLG_ORIGIN}${stage.params.navigatePath}`
   const existing = await findNationalLifeTab()
   await writeSyncState({ ...state, status: 'NAVIGATING', errorCode: undefined })
   if (existing?.id !== undefined) {
@@ -173,7 +178,7 @@ async function startNewSync() {
       const current = await readSyncState()
       if (
         current.runId &&
-        current.nextGrid &&
+        currentStage(current) &&
         ['NAVIGATING', 'EXTRACTING', 'UPLOADING', 'AUTH_REQUIRED', 'STARTING'].includes(
           current.status,
         )
@@ -197,7 +202,7 @@ async function startNewSync() {
   })
 }
 
-async function beginExtraction(tabId: number, gridKey: (typeof GRID_KEYS)[number]) {
+async function beginExtraction(tabId: number, gridKey: string) {
   if (activeNavigations.get(tabId)?.gridKey === gridKey) return
   const message: BeginGridMessage = {
     type: 'BEGIN_GRID',
@@ -230,15 +235,15 @@ async function handleTabReady(tabId: number, urlValue?: string) {
   }
   if (url.origin !== NLG_ORIGIN) return
   const state = await readSyncState()
-  if (!state.runId || !state.nextGrid || state.status === 'COMPLETED' || state.status === 'ERROR') {
+  const stage = currentStage(state)
+  if (!state.runId || !stage || state.status === 'COMPLETED' || state.status === 'ERROR') {
     return
   }
   if (isAuthPath(url.pathname)) {
     await writeSyncState({ ...state, status: 'AUTH_REQUIRED' })
     return
   }
-  const expectedPath = GRID_PATHS[state.nextGrid]
-  if (url.pathname !== expectedPath) {
+  if (url.pathname !== stage.params.navigatePath) {
     // Do not force-navigate away from MFA/interstitial pages. Only resume
     // extraction when the expected grid is already open.
     if (state.status !== 'AUTH_REQUIRED') {
@@ -246,7 +251,7 @@ async function handleTabReady(tabId: number, urlValue?: string) {
     }
     return
   }
-  await beginExtraction(tabId, state.nextGrid)
+  await beginExtraction(tabId, stage.params.gridKey)
 }
 
 async function uploadChunk(message: Extract<BridgeMessage, { type: 'GRID_CHUNK' }>) {
@@ -258,21 +263,26 @@ async function uploadChunk(message: Extract<BridgeMessage, { type: 'GRID_CHUNK' 
     !device.baseUrl ||
     !state.runId ||
     state.runId.length > 128 ||
-    state.nextGrid !== message.gridKey
+    currentStage(state)?.params.gridKey !== message.gridKey
   ) {
     throw new Error('SYNC_STATE_INVALID')
   }
   await writeSyncState({ ...state, status: 'UPLOADING', errorCode: undefined })
-  const pathname = `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}/stages/${message.gridKey}`
+  const pathname = `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}/stages/${encodeURIComponent(message.gridKey)}`
   try {
     await signedJsonRequest({
       baseUrl: device.baseUrl,
       deviceId: device.deviceId,
       method: 'PUT',
       pathname,
-      idempotencyKey: `nlc:${state.runId}:${message.gridKey}:${message.sequence}`,
+      // The stage index is in the key because the plan is server-supplied now: two
+      // stages naming the same grid would otherwise share an idempotency key and
+      // silently collide. Retries of the same chunk still reuse the same key.
+      idempotencyKey: `nlc:${state.runId}:${state.stageIndex ?? 0}:${message.gridKey}:${message.sequence}`,
       body: {
-        schemaVersion: 1,
+        // Raw carrier rows, exactly as the portal returned them. Field names and
+        // meanings are the server's business now.
+        schemaVersion: 2,
         runId: state.runId,
         gridKey: message.gridKey,
         sequence: message.sequence,
@@ -290,16 +300,29 @@ async function uploadChunk(message: Extract<BridgeMessage, { type: 'GRID_CHUNK' 
   }
 }
 
-async function finishGrid(tabId: number, gridKey: (typeof GRID_KEYS)[number]) {
+async function finishGrid(tabId: number, gridKey: string) {
   const state = await readSyncState()
-  if (!state.runId || state.nextGrid !== gridKey) throw new Error('SYNC_STATE_INVALID')
-  activeNavigations.delete(tabId)
-  if (gridKey === 'NEW_BUSINESS') {
-    await writeSyncState({ runId: state.runId, nextGrid: 'INFORCE_CLIENTS', status: 'NAVIGATING' })
-    await chrome.tabs.update(tabId, { url: `${NLG_ORIGIN}${GRID_PATHS.INFORCE_CLIENTS}` })
-  } else {
-    await writeSyncState({ runId: state.runId, status: 'COMPLETED' })
+  const stage = currentStage(state)
+  if (!state.runId || !state.plan || stage?.params.gridKey !== gridKey) {
+    throw new Error('SYNC_STATE_INVALID')
   }
+  activeNavigations.delete(tabId)
+  // currentStage already proved the stored plan parses; re-derive it so navigation
+  // reads the validated array rather than the raw storage value.
+  const plan = parseStagePlan(state.plan)
+  const nextIndex = (state.stageIndex ?? 0) + 1
+  const next = plan[nextIndex]
+  if (!next) {
+    await writeSyncState({ runId: state.runId, status: 'COMPLETED' })
+    return
+  }
+  await writeSyncState({
+    runId: state.runId,
+    plan,
+    stageIndex: nextIndex,
+    status: 'NAVIGATING',
+  })
+  await chrome.tabs.update(tabId, { url: `${NLG_ORIGIN}${next.params.navigatePath}` })
 }
 
 async function processBridgeMessage(tabId: number, message: BridgeMessage) {
@@ -343,7 +366,7 @@ function enqueueBridgeMessage(tabId: number, message: BridgeMessage) {
 
 async function retryPendingSync() {
   const state = await readSyncState()
-  if (state.runId && state.nextGrid && state.status !== 'COMPLETED' && state.status !== 'ERROR') {
+  if (state.runId && currentStage(state) && state.status !== 'COMPLETED' && state.status !== 'ERROR') {
     await navigatePendingGrid()
     return { ok: true as const }
   }
@@ -352,7 +375,7 @@ async function retryPendingSync() {
 
 async function resumePending() {
   const state = await readSyncState()
-  if (!state.runId || !state.nextGrid || state.status === 'COMPLETED' || state.status === 'ERROR') {
+  if (!state.runId || !currentStage(state) || state.status === 'COMPLETED' || state.status === 'ERROR') {
     return
   }
   const tab = await findNationalLifeTab()
@@ -435,7 +458,7 @@ export default defineBackground(() => {
     if (type === 'OPEN_NLG' && Object.keys(value).length === 1) {
       void (async () => {
         const state = await readSyncState()
-        if (state.runId && state.nextGrid && state.status !== 'COMPLETED') {
+        if (state.runId && currentStage(state) && state.status !== 'COMPLETED') {
           await navigatePendingGrid()
         } else {
           const tab = await findNationalLifeTab()

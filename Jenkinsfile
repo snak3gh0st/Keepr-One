@@ -30,6 +30,14 @@ pipeline {
       }
     }
 
+    // The root tsconfig excludes apps/keeprone-connect, so `next build` never sees
+    // the extension. Without this stage the connector's types are checked nowhere.
+    stage('Connector typecheck') {
+      steps {
+        sh 'corepack pnpm run connector:typecheck'
+      }
+    }
+
     stage('Tests') {
       steps {
         sh 'corepack pnpm run test'
