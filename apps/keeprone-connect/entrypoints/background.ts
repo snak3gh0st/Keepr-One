@@ -12,6 +12,7 @@ import {
   type BeginGridMessage,
   type BridgeMessage,
 } from '../lib/messages'
+import { revokesDevice } from '../lib/failure'
 import { SignedRequestError, signedJsonRequest } from '../lib/signed-client'
 import {
   currentStage,
@@ -130,6 +131,26 @@ async function reportRunFailure(code: string) {
   }
 }
 
+/// Esquece o pareamento sem tocar no estado do sync. `unpairConnector` zera o
+/// sync para IDLE — correto quando o agente desconecta de propósito, errado aqui:
+/// o motivo da falha precisa sobreviver para a página poder explicá-lo.
+async function forgetRevokedDevice() {
+  const device = await readDeviceState()
+  await clearDeviceKeys()
+  await writeDeviceState({ baseUrl: device.baseUrl, status: 'UNPAIRED' })
+  activeNavigations.clear()
+  tabQueues.clear()
+}
+
+/// Único caminho de falha do sync. Grava o motivo, tenta avisar o servidor
+/// enquanto o dispositivo ainda vale, e só então derruba um pareamento morto —
+/// é o que troca "tentar de novo para sempre" por "reconectar".
+async function failSync(code: string) {
+  await writeSyncState({ ...(await readSyncState()), status: 'ERROR', errorCode: code })
+  await reportRunFailure(code)
+  if (revokesDevice(code)) await forgetRevokedDevice()
+}
+
 async function createRun() {
   const device = await readDeviceState()
   if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
@@ -195,8 +216,13 @@ async function startNewSync() {
       return { ok: true as const, status: 'NAVIGATING' as const }
     } catch (error) {
       const code = error instanceof Error ? error.message : 'SYNC_START_FAILED'
-      await writeSyncState({ status: 'ERROR', errorCode: code })
-      await reportRunFailure(code)
+      // Não pareado não é falha do sync: é o estado inicial de quem ainda não
+      // conectou. Gravá-lo como ERROR faria a página abrir acusando um problema.
+      if (code === 'CONNECTOR_NOT_PAIRED') {
+        await writeSyncState({ status: 'IDLE' })
+        return { ok: false as const, error: code }
+      }
+      await failSync(code)
       return { ok: false as const, error: code }
     }
   })
@@ -216,12 +242,7 @@ async function beginExtraction(tabId: number, gridKey: string) {
     await chrome.tabs.sendMessage(tabId, message)
   } catch {
     activeNavigations.delete(tabId)
-    await writeSyncState({
-      ...(await readSyncState()),
-      status: 'ERROR',
-      errorCode: 'BRIDGE_UNAVAILABLE',
-    })
-    await reportRunFailure('BRIDGE_UNAVAILABLE')
+    await failSync('BRIDGE_UNAVAILABLE')
   }
 }
 
@@ -298,6 +319,10 @@ async function uploadChunk(message: Extract<BridgeMessage, { type: 'GRID_CHUNK' 
     }
     throw error
   }
+  // Prova de vida do run. É o único sinal que se move quando uma única grade
+  // grande passa minutos subindo lote a lote.
+  const after = await readSyncState()
+  await writeSyncState({ ...after, uploads: (after.uploads ?? 0) + 1 })
 }
 
 async function finishGrid(tabId: number, gridKey: string) {
@@ -313,7 +338,12 @@ async function finishGrid(tabId: number, gridKey: string) {
   const nextIndex = (state.stageIndex ?? 0) + 1
   const next = plan[nextIndex]
   if (!next) {
-    await writeSyncState({ runId: state.runId, status: 'COMPLETED' })
+    await writeSyncState({
+      runId: state.runId,
+      status: 'COMPLETED',
+      uploads: state.uploads,
+      completedAt: new Date().toISOString(),
+    })
     return
   }
   await writeSyncState({
@@ -321,6 +351,7 @@ async function finishGrid(tabId: number, gridKey: string) {
     plan,
     stageIndex: nextIndex,
     status: 'NAVIGATING',
+    uploads: state.uploads,
   })
   await chrome.tabs.update(tabId, { url: `${NLG_ORIGIN}${next.params.navigatePath}` })
 }
@@ -340,18 +371,11 @@ async function processBridgeMessage(tabId: number, message: BridgeMessage) {
     else if (message.type === 'GRID_DONE') await finishGrid(tabId, message.gridKey)
     else {
       activeNavigations.delete(tabId)
-      await writeSyncState({ ...(await readSyncState()), status: 'ERROR', errorCode: message.code })
-      await reportRunFailure(message.code)
+      await failSync(message.code)
     }
   } catch (error) {
     activeNavigations.delete(tabId)
-    const code = error instanceof Error ? error.message : 'UPLOAD_FAILED'
-    await writeSyncState({
-      ...(await readSyncState()),
-      status: 'ERROR',
-      errorCode: code,
-    })
-    await reportRunFailure(code)
+    await failSync(error instanceof Error ? error.message : 'UPLOAD_FAILED')
   }
 }
 

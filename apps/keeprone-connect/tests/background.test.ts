@@ -155,7 +155,110 @@ describe('background plan executor', () => {
     )
     await flush()
 
-    expect(readSync()).toEqual({ runId: 'run-1', status: 'COMPLETED' })
+    // A data de conclusão é o que impede a página de dizer "concluído" para
+    // sempre: sem ela, um COMPLETED grudento não tem como ser datado.
+    expect(readSync()).toMatchObject({ runId: 'run-1', status: 'COMPLETED' })
+    expect(typeof readSync().completedAt).toBe('string')
+    expect(readSync().plan).toBeUndefined()
+  })
+
+  it('drops the pairing when the server rejects this device, and keeps the reason', async () => {
+    // 401 quer dizer credencial morta: repetir a mesma requisição assinada não
+    // pode dar certo. Sem soltar o pareamento, "tentar novamente" é um laço.
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    const { SignedRequestError } = await import('../lib/signed-client')
+    vi.mocked(signedJsonRequest).mockRejectedValue(
+      new (SignedRequestError as unknown as new (code: string) => Error)(
+        'DEVICE_REQUEST_REJECTED',
+      ),
+    )
+    await bootBackground()
+    const begin = beginGridMessage()
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 0,
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ a: 'b' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+      vi.fn(),
+    )
+    await flush()
+
+    expect(storage.device).toMatchObject({ status: 'UNPAIRED' })
+    expect(storage.device).not.toHaveProperty('deviceId')
+    expect(readSync()).toMatchObject({
+      status: 'ERROR',
+      errorCode: 'DEVICE_REQUEST_REJECTED',
+    })
+  })
+
+  it('keeps the pairing for a failure a retry can still fix', async () => {
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    const { SignedRequestError } = await import('../lib/signed-client')
+    vi.mocked(signedJsonRequest).mockRejectedValue(
+      new (SignedRequestError as unknown as new (code: string) => Error)('DEVICE_REQUEST_FAILED'),
+    )
+    await bootBackground()
+    const begin = beginGridMessage()
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 0,
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ a: 'b' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+      vi.fn(),
+    )
+    await flush()
+
+    expect(storage.device).toMatchObject({ status: 'READY', deviceId: 'device-1' })
+    expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'DEVICE_REQUEST_FAILED' })
+  })
+
+  it('counts uploaded batches so a long single stage still proves it is alive', async () => {
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    vi.mocked(signedJsonRequest).mockResolvedValue(undefined as never)
+    await bootBackground()
+    const begin = beginGridMessage()
+
+    for (const sequence of [0, 1]) {
+      emit(
+        'runtime.onMessage',
+        {
+          type: 'GRID_CHUNK',
+          gridKey: 'NEW_BUSINESS',
+          token: begin.token,
+          correlationId: begin.correlationId,
+          sequence,
+          recordsTotal: 2,
+          truncated: sequence === 0,
+          records: [{ a: 'b' }],
+        },
+        { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+        vi.fn(),
+      )
+      await flush()
+    }
+
+    expect(readSync()).toMatchObject({ status: 'UPLOADING', stageIndex: 0, uploads: 2 })
   })
 
   it('resumes mid-plan after the service worker is evicted', async () => {
