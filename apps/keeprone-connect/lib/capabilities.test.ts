@@ -127,6 +127,27 @@ describe('parseStagePlan', () => {
     ).toThrow('INVALID_RUN_RESPONSE')
   })
 
+  it('refuses a gridKey outside the label charset', () => {
+    for (const gridKey of ['new-business', 'NEW BUSINESS', 'NEW.BUSINESS', 'NEW/BUSINESS', '']) {
+      expect(() =>
+        parseStagePlan([
+          { capability: 'READ_GRID', params: { gridKey, navigatePath: '/agent/x' } },
+        ]),
+      ).toThrow('INVALID_RUN_RESPONSE')
+    }
+  })
+
+  it('refuses a navigatePath beyond the length cap', () => {
+    expect(() =>
+      parseStagePlan([
+        {
+          capability: 'READ_GRID',
+          params: { gridKey: 'X', navigatePath: `/agent/${'x'.repeat(512)}` },
+        },
+      ]),
+    ).toThrow('UNSAFE_NAVIGATE_PATH')
+  })
+
   it('refuses a non-object entry', () => {
     expect(() => parseStagePlan(['READ_GRID'])).toThrow('INVALID_RUN_RESPONSE')
   })

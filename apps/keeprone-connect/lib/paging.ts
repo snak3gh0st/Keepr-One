@@ -1,5 +1,11 @@
-export const MAX_PORTAL_RECORDS = 100_000
-export const PAGE_SIZE = 500
+/// The ceiling exists to bound memory and request count, not to describe any real
+/// grid: at 200_000 rows no carrier grid we have ever seen reaches it. When it does
+/// fire, `truncated` stays true and the server deliberately leaves the run open —
+/// incomplete data must not finalize a stage.
+export const MAX_PORTAL_RECORDS = 200_000
+/// Raw carrier rows are fatter than the normalized ones we used to send, so a page
+/// carries fewer of them. Mirrors LOCAL_CONNECTOR_MAX_RECORDS on the server.
+export const PAGE_SIZE = 200
 
 type JsonMap = Record<string, unknown>
 

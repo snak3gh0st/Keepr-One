@@ -1,4 +1,4 @@
-import type { GridKey } from './constants'
+import { parseStagePlan, type StagePlan } from './capabilities'
 
 export type ConnectorStatus = 'UNPAIRED' | 'PAIRING' | 'READY' | 'ERROR'
 export type SyncStatus =
@@ -19,9 +19,28 @@ export type DeviceState = {
 
 export type SyncState = {
   runId?: string
-  nextGrid?: GridKey
+  /// The plan the server handed us for this run, plus where in it we are. The
+  /// extension no longer knows which grids exist, so "what comes next" is data,
+  /// not code. A stored state written by an older version has no plan; every
+  /// caller treats that as "no run in progress" and starts a fresh one, which the
+  /// server answers with `duplicate: true` and the plan already persisted on the
+  /// open run.
+  plan?: StagePlan[]
+  stageIndex?: number
   status: SyncStatus
   errorCode?: string
+}
+
+/// The plan round-trips through chrome.storage.local, which survives extension
+/// updates. Re-validating on read means a stale or half-written shape degrades into
+/// "no plan" instead of steering navigation with something we never checked.
+export function currentStage(state: SyncState): StagePlan | undefined {
+  if (!state.plan || typeof state.stageIndex !== 'number') return undefined
+  try {
+    return parseStagePlan(state.plan)[state.stageIndex]
+  } catch {
+    return undefined
+  }
 }
 
 const DEVICE_KEY = 'device'

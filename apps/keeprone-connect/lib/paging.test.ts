@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPageBody, MAX_PORTAL_RECORDS, nextPageStart, parsePortalPage } from './paging'
+import { buildPageBody, MAX_PORTAL_RECORDS, nextPageStart, PAGE_SIZE, parsePortalPage } from './paging'
 
 describe('portal paging helpers', () => {
   it('updates a form-encoded DataTables model while preserving its identity', () => {
@@ -11,10 +11,24 @@ describe('portal paging helpers', () => {
     expect(result.get('DatatableId')).toBe('AllClients')
     expect(JSON.parse(result.get('objJsonModel')!)).toEqual({
       start: 500,
-      length: 500,
+      length: 200,
       draw: 9,
       search: { value: '' },
     })
+  })
+
+  it('pages at the raw-row size cap', () => {
+    expect(PAGE_SIZE).toBe(200)
+  })
+
+  it('marks only the page that is actually short as truncated', () => {
+    const page = parsePortalPage({ data: [{ PolicyNo: 'X1' }], recordsTotal: 500 })
+    expect(page.truncated).toBe(false)
+  })
+
+  it('marks truncated when the carrier total exceeds what we will fetch', () => {
+    const page = parsePortalPage({ data: [{ PolicyNo: 'X1' }], recordsTotal: 200_001 })
+    expect(page.truncated).toBe(true)
   })
 
   it('updates JSON templates with stringified nested models', () => {
@@ -24,11 +38,11 @@ describe('portal paging helpers', () => {
     )
     const parsed = JSON.parse(body)
     expect(parsed.DatatableId).toBe('Cases')
-    expect(JSON.parse(parsed.objJsonModel)).toMatchObject({ start: 1_000, length: 500 })
+    expect(JSON.parse(parsed.objJsonModel)).toMatchObject({ start: 1_000, length: 200 })
   })
 
   it('caps totals and stops on empty or final pages', () => {
-    expect(parsePortalPage({ aaData: [{}], iTotalRecords: '100001' })).toEqual({
+    expect(parsePortalPage({ aaData: [{}], iTotalRecords: '200001' })).toEqual({
       rows: [{}],
       recordsTotal: MAX_PORTAL_RECORDS,
       truncated: true,

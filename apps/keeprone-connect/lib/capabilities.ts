@@ -1,12 +1,17 @@
+import { isGridKeyLabel } from './constants'
 import { hasExactKeys } from './messages'
 
+export type Capability = 'READ_GRID'
+
 export type StagePlan = {
-  capability: 'READ_GRID'
+  capability: Capability
   params: { gridKey: string; navigatePath: string }
 }
 
-const IMPLEMENTED = new Set(['READ_GRID'])
+const IMPLEMENTED_CAPABILITIES = ['READ_GRID'] as const
 const MAX_STAGES = 32
+const MAX_NAVIGATE_PATH = 256
+
 
 /// The server picks which capability runs and with what parameters, but the catalogue
 /// lives here. A compromised backend can reorder our own operations; it cannot invent
@@ -28,6 +33,7 @@ const MAX_STAGES = 32
 /// kept anyway so the traversal intent stays legible at the call site.
 function isSafeNavigatePath(path: string): boolean {
   if (typeof path !== 'string') return false
+  if (path.length > MAX_NAVIGATE_PATH) return false
   if (!path.startsWith('/agent/')) return false
   if (path.startsWith('//')) return false
   if (path.includes('..')) return false
@@ -44,19 +50,24 @@ export function parseStagePlan(value: unknown): StagePlan[] {
       throw new Error('INVALID_RUN_RESPONSE')
     }
     const { capability, params } = entry as { capability: unknown; params: unknown }
-    if (typeof capability !== 'string' || !IMPLEMENTED.has(capability)) {
+    if (
+      typeof capability !== 'string' ||
+      !(IMPLEMENTED_CAPABILITIES as readonly string[]).includes(capability)
+    ) {
       throw new Error('UNKNOWN_CAPABILITY')
     }
     if (!params || typeof params !== 'object' || !hasExactKeys(params, ['gridKey', 'navigatePath'])) {
       throw new Error('INVALID_RUN_RESPONSE')
     }
     const { gridKey, navigatePath } = params as { gridKey: unknown; navigatePath: unknown }
-    if (typeof gridKey !== 'string' || gridKey.length === 0 || gridKey.length > 64) {
+    if (!isGridKeyLabel(gridKey)) {
       throw new Error('INVALID_RUN_RESPONSE')
     }
     if (typeof navigatePath !== 'string' || !isSafeNavigatePath(navigatePath)) {
       throw new Error('UNSAFE_NAVIGATE_PATH')
     }
-    return { capability: 'READ_GRID', params: { gridKey, navigatePath } }
+    // Echo the capability that was validated rather than a literal, so a second
+    // entry in IMPLEMENTED_CAPABILITIES cannot silently collapse into READ_GRID.
+    return { capability: capability as Capability, params: { gridKey, navigatePath } }
   })
 }

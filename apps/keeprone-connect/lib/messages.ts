@@ -1,7 +1,16 @@
-import { GRID_KEYS, type GridKey } from './constants'
-import { isNormalizedRecord, type NormalizedRecord } from './normalizers'
+import { isGridKeyLabel } from './constants'
+import { MAX_PORTAL_RECORDS, PAGE_SIZE } from './paging'
 
 type JsonObject = Record<string, unknown>
+
+export type RawGridRow = Record<string, unknown>
+
+/// Mirrors LOCAL_CONNECTOR_MAX_ROW_BYTES and the record-key bound in the server's
+/// `contracts.ts`. Deliberately a near-duplicate rather than a shared import: this is
+/// a process boundary, and the page world is hostile enough that the background
+/// deserves its own opinion about what it will forward.
+const MAX_RAW_ROW_BYTES = 16 * 1024
+const MAX_ROW_KEY_LENGTH = 128
 
 export type PairConnectorMessage = {
   type: 'PAIR_CONNECTOR'
@@ -30,32 +39,32 @@ export type ExternalMessage =
 
 export type BeginGridMessage = {
   type: 'BEGIN_GRID'
-  gridKey: GridKey
+  gridKey: string
   token: string
   correlationId: string
 }
 
 export type GridChunkMessage = {
   type: 'GRID_CHUNK'
-  gridKey: GridKey
+  gridKey: string
   token: string
   correlationId: string
   sequence: number
   recordsTotal: number
   truncated: boolean
-  records: NormalizedRecord[]
+  records: RawGridRow[]
 }
 
 export type GridDoneMessage = {
   type: 'GRID_DONE'
-  gridKey: GridKey
+  gridKey: string
   token: string
   correlationId: string
 }
 
 export type GridErrorMessage = {
   type: 'GRID_ERROR'
-  gridKey: GridKey
+  gridKey: string
   token: string
   correlationId: string
   code: 'TEMPLATE_UNAVAILABLE' | 'PORTAL_REQUEST_FAILED' | 'INVALID_PORTAL_RESPONSE'
@@ -77,8 +86,17 @@ function isShortString(value: unknown, max: number, min = 1): value is string {
   return typeof value === 'string' && value.length >= min && value.length <= max
 }
 
-function isGridKey(value: unknown): value is GridKey {
-  return typeof value === 'string' && GRID_KEYS.includes(value as GridKey)
+/// Raw carrier rows are forwarded uninterpreted: the server owns every field name and
+/// every meaning. The background only bounds what it will relay — a plain object whose
+/// keys are short and whose serialized size fits the server's per-row cap.
+function isRawGridRow(value: unknown): value is RawGridRow {
+  if (!isObject(value)) return false
+  if (Object.keys(value).some((key) => key.length > MAX_ROW_KEY_LENGTH)) return false
+  try {
+    return JSON.stringify(value).length <= MAX_RAW_ROW_BYTES
+  } catch {
+    return false
+  }
 }
 
 export function parseExternalMessage(value: unknown): ExternalMessage | null {
@@ -109,7 +127,7 @@ export function parseBeginGridMessage(value: unknown): BeginGridMessage | null {
     !isObject(value) ||
     !hasExactKeys(value, ['type', 'gridKey', 'token', 'correlationId']) ||
     value.type !== 'BEGIN_GRID' ||
-    !isGridKey(value.gridKey) ||
+    !isGridKeyLabel(value.gridKey) ||
     !isShortString(value.token, 128, 32) ||
     !isShortString(value.correlationId, 128, 16)
   ) {
@@ -119,7 +137,7 @@ export function parseBeginGridMessage(value: unknown): BeginGridMessage | null {
 }
 
 export function parseBridgeMessage(value: unknown): BridgeMessage | null {
-  if (!isObject(value) || !isGridKey(value.gridKey) || !isShortString(value.token, 128, 32)) {
+  if (!isObject(value) || !isGridKeyLabel(value.gridKey) || !isShortString(value.token, 128, 32)) {
     return null
   }
   if (!isShortString(value.correlationId, 128, 16) || typeof value.type !== 'string') return null
@@ -154,11 +172,11 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
     (value.sequence as number) > 10_000 ||
     !Number.isInteger(value.recordsTotal) ||
     (value.recordsTotal as number) < 0 ||
-    (value.recordsTotal as number) > 100_000 ||
+    (value.recordsTotal as number) > MAX_PORTAL_RECORDS ||
     typeof value.truncated !== 'boolean' ||
     !Array.isArray(value.records) ||
-    value.records.length > 1_000 ||
-    !value.records.every((record) => isNormalizedRecord(value.gridKey as GridKey, record))
+    value.records.length > PAGE_SIZE ||
+    !value.records.every(isRawGridRow)
   ) {
     return null
   }

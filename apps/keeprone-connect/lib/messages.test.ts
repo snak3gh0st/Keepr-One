@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { parseBridgeMessage, parseExternalMessage } from './messages'
-import { normalizeNewBusiness } from './normalizers'
 
 describe('message validation', () => {
   it('accepts exact external messages and rejects extra properties', () => {
@@ -23,21 +22,48 @@ describe('message validation', () => {
     })
   })
 
-  it('requires exact, normalized chunk records', () => {
-    const record = normalizeNewBusiness({ PolicyNo: 'P-1' })
-    const chunk = {
-      type: 'GRID_CHUNK',
-      gridKey: 'NEW_BUSINESS',
-      token: 'a'.repeat(64),
-      correlationId: '12345678-1234-4123-8123-123456789012',
-      sequence: 0,
-      recordsTotal: 1,
-      truncated: false,
-      records: [record],
-    }
+  const rawChunk = {
+    type: 'GRID_CHUNK',
+    gridKey: 'NEW_BUSINESS',
+    token: 'a'.repeat(64),
+    correlationId: '12345678-1234-4123-8123-123456789012',
+    sequence: 0,
+    recordsTotal: 1,
+    truncated: false,
+    records: [{ PolicyNo: 'P-1', InsuredName: '<b>Ana</b>', Nested: { a: [1, 2] } }],
+  }
+
+  it('accepts raw carrier rows without normalizing them', () => {
+    expect(parseBridgeMessage(rawChunk)).toEqual(rawChunk)
+  })
+
+  it('accepts a grid key it has never seen before', () => {
+    const chunk = { ...rawChunk, gridKey: 'PAID_COMMISSIONS' }
     expect(parseBridgeMessage(chunk)).toEqual(chunk)
-    expect(parseBridgeMessage({ ...chunk, records: [{ ...record, raw: { PolicyNo: 'P-1' } }] })).toBeNull()
-    expect(parseBridgeMessage({ ...chunk, records: [{ ...record, insuredName: '<b>Ana</b>' }] })).toBeNull()
+  })
+
+  it('rejects a grid key outside the label charset', () => {
+    expect(parseBridgeMessage({ ...rawChunk, gridKey: 'new-business' })).toBeNull()
+    expect(parseBridgeMessage({ ...rawChunk, gridKey: 'X'.repeat(65) })).toBeNull()
+    expect(parseBridgeMessage({ ...rawChunk, gridKey: '' })).toBeNull()
+  })
+
+  it('rejects rows that are not plain objects', () => {
+    expect(parseBridgeMessage({ ...rawChunk, records: [['P-1']] })).toBeNull()
+    expect(parseBridgeMessage({ ...rawChunk, records: ['P-1'] })).toBeNull()
+    expect(parseBridgeMessage({ ...rawChunk, records: [null] })).toBeNull()
+  })
+
+  it('keeps the size limits on raw chunks', () => {
+    const fatRow = { Blob: 'x'.repeat(17 * 1024) }
+    expect(parseBridgeMessage({ ...rawChunk, records: [fatRow] })).toBeNull()
+    const longKey = { ['k'.repeat(129)]: 'x' }
+    expect(parseBridgeMessage({ ...rawChunk, records: [longKey] })).toBeNull()
+    const tooMany = Array.from({ length: 201 }, () => ({ PolicyNo: 'P' }))
+    expect(
+      parseBridgeMessage({ ...rawChunk, records: tooMany, recordsTotal: 201 }),
+    ).toBeNull()
+    expect(parseBridgeMessage({ ...rawChunk, recordsTotal: 200_001 })).toBeNull()
   })
 
   it('rejects oversized and unknown bridge messages', () => {
