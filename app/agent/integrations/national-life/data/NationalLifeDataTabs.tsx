@@ -152,30 +152,30 @@ export function NationalLifeDataTabs({
   return (
     <div>
       <div className="flex flex-wrap gap-2">
-        <TabButton active={tab === "cases"} count={filtered.cases.length} label="Casos" onClick={() => switchTab("cases")} />
+        <TabButton active={tab === "cases"} count={filtered.cases.length} label="Cases" onClick={() => switchTab("cases")} />
         <TabButton
           active={tab === "inforce"}
           count={filtered.inforce.length}
-          label="Apólices em vigor"
+          label="In-force policies"
           onClick={() => switchTab("inforce")}
         />
         <TabButton
           active={tab === "commissions"}
           count={filtered.commissions.length}
-          label="Comissões"
+          label="Commissions"
           onClick={() => switchTab("commissions")}
         />
       </div>
 
       <label className="mt-4 block">
-        <span className="sr-only">Buscar</span>
+        <span className="sr-only">Search</span>
         <input
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
             setPage(1);
           }}
-          placeholder="Buscar por apólice, segurado, produto ou status"
+          placeholder="Search by policy, insured, product, or status"
           className="w-full border border-white/12 bg-transparent px-3 py-2.5 text-sm text-paper placeholder:text-paper/35 focus:border-white/30 focus:outline-none"
         />
       </label>
@@ -184,8 +184,8 @@ export function NationalLifeDataTabs({
         <div className="mt-5">
           <EmptyState>
             {query.trim()
-              ? "Nenhum registro corresponde à busca."
-              : "Nada sincronizado ainda para esta aba."}
+              ? "No records match your search. Try a different policy number or name."
+              : "Nothing has synced into this tab yet."}
           </EmptyState>
         </div>
       ) : (
@@ -201,10 +201,10 @@ export function NationalLifeDataTabs({
                   {row.carrierStatus ?? "—"}
                 </p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-4">
-                  <Meta label="Produto" value={row.product} />
-                  <Meta label="Submetido" value={row.submitDate} />
-                  <Meta label="Prêmio anual" value={row.anticipatedAnnualPremium} />
-                  <Meta label="Pendências" value={row.requirements} />
+                  <Meta label="Product" value={row.product} />
+                  <Meta label="Submitted" value={row.submitDate} />
+                  <Meta label="Annual premium" value={row.anticipatedAnnualPremium} />
+                  <Meta label="Requirements" value={row.requirements} />
                 </div>
               </EntityCard>
             ))}
@@ -220,10 +220,10 @@ export function NationalLifeDataTabs({
                   {row.policyStatus ?? "—"}
                 </p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-4">
-                  <Meta label="Produto" value={row.productName} />
-                  <Meta label="Titular" value={row.ownerClientName} />
-                  <Meta label="Emissão" value={row.policyIssueDate} />
-                  <Meta label="Agência" value={row.servicingAgencyName} />
+                  <Meta label="Product" value={row.productName} />
+                  <Meta label="Owner" value={row.ownerClientName} />
+                  <Meta label="Issue date" value={row.policyIssueDate} />
+                  <Meta label="Agency" value={row.servicingAgencyName} />
                 </div>
               </EntityCard>
             ))}

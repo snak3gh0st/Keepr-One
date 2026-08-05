@@ -36,23 +36,23 @@ export function NationalLifeForesightProgress({
   const paused = status.state === 'PAUSED'
   const terminal = !status.shouldPoll
   const progress = status.totalServices > 0
-    ? `lendo ${status.completedServices} de ${status.totalServices} serviços`
-    : `lendo ${status.inventoriedCases} de ${status.totalCases} casos`
+    ? `reading ${status.completedServices} of ${status.totalServices} services`
+    : `reading ${status.inventoriedCases} of ${status.totalCases} cases`
 
   return (
-    <section aria-label="Progresso Foresight" className="mb-6 rounded-2xl border border-border-steel bg-paper p-5 shadow-[var(--shadow-card)] sm:p-6">
+    <section aria-label="Foresight progress" className="mb-6 rounded-2xl border border-border-steel bg-paper p-5 shadow-[var(--shadow-card)] sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Foresight</p>
           <h2 className="mt-1 text-lg font-semibold text-ink">
-            {paused ? 'Precisa de você' : terminal ? 'Leitura concluída' : 'Lendo dados da seguradora'}
+            {paused ? 'Needs your attention' : terminal ? 'Finished reading' : 'Reading your carrier data'}
           </h2>
         </div>
         <span className="font-mono text-sm font-semibold text-teal">{status.percent}%</span>
       </div>
-      <progress aria-label="Progresso da leitura Foresight" className="mt-5 h-2 w-full accent-teal" max={100} value={status.percent} />
+      <progress aria-label="Foresight reading progress" className="mt-5 h-2 w-full accent-teal" max={100} value={status.percent} />
       <p className="mt-3 text-sm text-ink-muted">
-        {paused ? 'Reconecte a National Life para continuar. Nenhuma alteração foi feita no carrier.' : `Foresight: ${progress}`}
+        {paused ? 'Reconnect to National Life to keep going. Nothing was changed at the carrier.' : `Foresight: ${progress}`}
       </p>
     </section>
   )
