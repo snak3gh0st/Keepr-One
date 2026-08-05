@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Corrigir três defeitos que impedem diagnóstico, e transformar a extensão KeeproneConnect de sincronizador de duas grades em executor de capabilities, com as 21 grades alcançáveis sem release na Chrome Web Store.
+**Goal:** Corrigir três defeitos que impedem diagnóstico, e transformar a extensão KeeproneConnect de sincronizador de duas grades em executor de capabilities, com as 20 grades alcançáveis sem release na Chrome Web Store.
 
 **Architecture:** A extensão carrega um catálogo fechado de capabilities e valida nome e parâmetros antes de executar. O servidor escolhe a capability e os parâmetros, recebe a resposta **crua** do carrier, e normaliza com os mapeadores puros que já existem (`toCaseSnapshots`, `toInforcePolicySnapshots`, `toReportRows`). A extensão deixa de normalizar.
 
@@ -21,7 +21,7 @@
 
 ## Escopo
 
-Este plano cobre **Fase 0** (três correções) e **Fase 1** (contrato de capability + `READ_GRID` para as 21 grades).
+Este plano cobre **Fase 0** (três correções) e **Fase 1** (contrato de capability + `READ_GRID` para as 20 grades).
 
 **Fase 2 (Foresight na extensão) recebe plano próprio.** Ela depende do contrato entregue aqui e o seu escopo ainda é definido por dois experimentos não executados (`Rapid Solve cria o caso?` e `GetQuickCalcData devolve valores?`). Planejá-la agora produziria tarefas cujo escopo muda depois.
 
@@ -344,7 +344,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-# FASE 1 — Capabilities e as 21 grades
+# FASE 1 — Capabilities e as 20 grades
 
 ### Task 4: Catálogo de capabilities do servidor
 
@@ -429,7 +429,7 @@ export type LocalConnectorStagePlan = {
   params: ReadGridParams
 }
 
-/// The extension refuses anything outside the agent tree. All 21 grids hit the same
+/// The extension refuses anything outside the agent tree. All 20 grids hit the same
 /// endpoint — only the page you open first differs — so one capability covers them
 /// all, and adding a grid is a deploy rather than a Chrome Web Store review.
 export function isSafeNavigatePath(path: string): boolean {

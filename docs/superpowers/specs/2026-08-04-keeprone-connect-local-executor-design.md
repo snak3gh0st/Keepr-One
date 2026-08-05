@@ -78,7 +78,7 @@ desconhecido e parâmetro fora do domínio declarado.
 | `FORESIGHT_CASE_DETAIL` | `caseKey` | Seleciona o caso e chama os serviços ASMX da allowlist | seleção de caso na sessão |
 | `FORESIGHT_REPORT` | `caseKey` | Seleciona o caso, dispara o trio de render e busca o PDF | gera relatório |
 
-**`READ_GRID` cobre as 21 grades com uma única capability**, porque todas batem no
+**`READ_GRID` cobre as 20 grades com uma única capability**, porque todas batem no
 mesmo endpoint — o que varia é só qual página abrir antes para capturar o template.
 Adicionar grade é mudança de servidor, não release na Chrome Web Store.
 
@@ -118,7 +118,7 @@ arbitrários do backend.
 
 Uma distinção que precisa ficar explícita: **JSON cru do endpoint do próprio portal
 não é "HTML bruto"**. Devolver o payload do `GetJsonResult` sem normalizar é
-necessário — é o que permite ao servidor tratar as 21 grades e reprocessar quando um
+necessário — é o que permite ao servidor tratar as 20 grades e reprocessar quando um
 normalizador estiver errado. Capturar e transmitir HTML de página continua proibido,
 com uma exceção estreita e nomeada: o trecho de âncoras do inventário do Foresight,
 que não tem serviço equivalente.
@@ -166,7 +166,7 @@ existe e reporta formatos sem chamar `IllustrateCase`.
 ## Fases
 
 0. Experimentos acima + as três correções
-1. Contrato `ConnectorCapability` e `READ_GRID` — 21 grades
+1. Contrato `ConnectorCapability` e `READ_GRID` — 20 grades
 2. Foresight na extensão: inventário, detalhe, PDF
 3. Action Center no Keepr One com a máquina de estados
 4. Superfície de dados: renderizar os payloads de serviço já persistidos e ligar o
