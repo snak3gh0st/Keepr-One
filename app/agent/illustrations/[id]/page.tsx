@@ -8,6 +8,7 @@ import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
 import { carrierLabel } from '@/lib/national-life/rapid-solve-labels'
 import { QUOTE_DISCLAIMER } from '@/lib/national-life/quote-disclaimer'
 import { formatCarrierInstant } from '@/lib/national-life/carrier-instant'
+import { flexLifeProductLabel } from '@/lib/national-life/flex-life'
 import type { LapseYear } from '@/lib/national-life/rapid-solve'
 import { IllustrationPdfButton } from '../IllustrationPdfButton'
 import { Shell } from '@/components/Shell'
@@ -129,12 +130,14 @@ export default async function QuoteSummaryPage({ params }: { params: Promise<{ i
               value={facts.allocation !== null ? `${facts.allocation}%` : null}
             />
             <Fact label="Premium mode" value={facts.premiumMode} />
-            {/* The carrier stores a code here, not a name. Showing the code is
-                the honest thing; inventing a product name is not. */}
+            {/* FlexLife is the product this quote surface sells. The carrier may
+                still store a numeric code in the payload; the label maps the
+                known FlexLife code and leaves any other code untouched. */}
             <Fact
-              label="Product code"
-              value={facts.productCode ?? illustration.productName}
+              label="Produto"
+              value={flexLifeProductLabel(facts.productCode ?? illustration.productName)}
             />
+            <Fact label="Product code" value={facts.productCode} />
           </dl>
         </section>
 
@@ -168,7 +171,7 @@ export default async function QuoteSummaryPage({ params }: { params: Promise<{ i
             lib/national-life/quote-disclaimer.ts, so the two screens cannot
             drift apart. */}
         <p>
-          Números fornecidos por National Life (Rapid Solve) em{' '}
+          Números fornecidos por National Life (FlexLife) em{' '}
           {formatCarrierInstant(illustration.createdAt)}.{' '}
           {QUOTE_DISCLAIMER} O documento oficial é a ilustração em PDF da seguradora.
         </p>

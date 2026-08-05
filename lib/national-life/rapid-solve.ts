@@ -137,9 +137,10 @@ export type RapidSolveRequest = {
 // Named here so that if a quote ever comes back for the wrong product, the
 // reason is visible instead of buried in a literal.
 //
-// The product code stays the default rather than the only value: it is what the
-// carrier's Rapid Solve screen sends, so it is the only code known to work, but
-// it has not been confirmed which product it is nor whether Term is reachable.
+// Product `956` is the FlexLife quote the agency sells through this surface.
+// The agent-facing name is FlexLife (`lib/national-life/flex-life.ts`); this
+// code is only what the Rapid Solve transport posts until Foresight quoting
+// replaces it. Whether Term is reachable through any other code remains open.
 export const RAPID_SOLVE_PRODUCT_CODE = '956'
 export const RAPID_SOLVE_PREMIUM_MODE = 'Monthly'
 

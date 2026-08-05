@@ -38,6 +38,7 @@ describe('saveRapidSolveIllustration', () => {
           clientId: null,
           kind: 'PRELIMINARY',
           externalId: 'job-1',
+          productName: 'FlexLife',
           faceAmount: 250_000,
           premium: 312.4,
           insuredName: 'Ana Souza',

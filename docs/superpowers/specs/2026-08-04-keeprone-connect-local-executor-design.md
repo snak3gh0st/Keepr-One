@@ -14,6 +14,11 @@ operações autorizadas no navegador do próprio agente, com a sessão dele.
 Esta versão cobre **leitura**. Escrita na conta do agente (e-App, submissão de
 aplicação) fica explicitamente fora e depende de decisão humana separada.
 
+A **cotação** que o agente vende é **FlexLife** (não "Rapid Solve"). O desenho
+desse caminho — incluindo `FLEXLIFE_QUOTE` e alternativas à extensão — está em
+`docs/superpowers/specs/2026-08-05-flexlife-quote-foresight-design.md`. Piloto
+sem Store: `docs/operations/keeprone-connect-pilot-without-store.md`.
+
 ## Decisão
 
 Manter a extensão Chrome e mudar o seu posicionamento e a sua camada.
