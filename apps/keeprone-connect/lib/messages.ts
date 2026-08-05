@@ -67,7 +67,7 @@ function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function hasExactKeys(value: JsonObject, keys: readonly string[]): boolean {
+export function hasExactKeys(value: JsonObject, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort()
   const expected = [...keys].sort()
   return actual.length === expected.length && actual.every((key, index) => key === expected[index])
