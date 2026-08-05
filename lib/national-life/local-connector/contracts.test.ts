@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  LEGACY_MAX_RECORDS,
   LOCAL_CONNECTOR_MAX_RECORDS,
+  LOCAL_CONNECTOR_MAX_ROW_BYTES,
   inforceClientsEnvelopeSchema,
   localConnectorRawStageEnvelopeSchema,
   newBusinessEnvelopeSchema,
@@ -52,11 +54,24 @@ describe('local connector contracts', () => {
       inforceClientsEnvelopeSchema.parse({
         ...baseEnvelope,
         gridKey: 'INFORCE_CLIENTS',
-        records: Array.from({ length: LOCAL_CONNECTOR_MAX_RECORDS + 1 }, (_, index) => ({
+        records: Array.from({ length: LEGACY_MAX_RECORDS + 1 }, (_, index) => ({
           policyNumber: `NL-${index}`,
         })),
       }),
     ).toThrow()
+  })
+
+  it('still accepts more than the raw envelope page cap (legacy extension compatibility)', () => {
+    const recordCount = LOCAL_CONNECTOR_MAX_RECORDS + 1
+    const result = inforceClientsEnvelopeSchema.parse({
+      ...baseEnvelope,
+      recordsTotal: recordCount,
+      gridKey: 'INFORCE_CLIENTS',
+      records: Array.from({ length: recordCount }, (_, index) => ({
+        policyNumber: `NL-${index}`,
+      })),
+    })
+    expect(result.records).toHaveLength(recordCount)
   })
 })
 
@@ -73,6 +88,16 @@ describe('local connector raw stage envelope', () => {
       records: [{ PolicyNo: 'X1', SomeColumnWeDoNotKnowAbout: 42, Nested: { a: 1 } }],
     })
     expect(envelope.records[0].SomeColumnWeDoNotKnowAbout).toBe(42)
+    expect(envelope.records[0].Nested).toEqual({ a: 1 })
+  })
+
+  it('accepts exactly the page cap of records', () => {
+    const records = Array.from({ length: 200 }, (_, i) => ({ PolicyNo: `X${i}` }))
+    const envelope = localConnectorRawStageEnvelopeSchema.parse({
+      schemaVersion: 2, runId: 'run_1', gridKey: 'NEW_BUSINESS', sequence: 0,
+      observedAt: '2026-08-04T00:00:00.000Z', recordsTotal: 200, truncated: false, records,
+    })
+    expect(envelope.records).toHaveLength(200)
   })
 
   it('rejects more records than the page cap', () => {
@@ -81,6 +106,25 @@ describe('local connector raw stage envelope', () => {
       localConnectorRawStageEnvelopeSchema.parse({
         schemaVersion: 2, runId: 'run_1', gridKey: 'NEW_BUSINESS', sequence: 0,
         observedAt: '2026-08-04T00:00:00.000Z', recordsTotal: 201, truncated: false, records,
+      }),
+    ).toThrow()
+  })
+
+  it('accepts a deeply-nested row now that shape is unconstrained', () => {
+    const envelope = localConnectorRawStageEnvelopeSchema.parse({
+      schemaVersion: 2, runId: 'run_1', gridKey: 'NEW_BUSINESS', sequence: 0,
+      observedAt: '2026-08-04T00:00:00.000Z', recordsTotal: 1, truncated: false,
+      records: [{ PolicyNo: 'X1', Deep: { a: { b: { c: [1, 2, { d: 'e' }] } } } }],
+    })
+    expect(envelope.records[0].Deep).toEqual({ a: { b: { c: [1, 2, { d: 'e' }] } } })
+  })
+
+  it('rejects a row exceeding the per-row size cap', () => {
+    expect(() =>
+      localConnectorRawStageEnvelopeSchema.parse({
+        schemaVersion: 2, runId: 'run_1', gridKey: 'NEW_BUSINESS', sequence: 0,
+        observedAt: '2026-08-04T00:00:00.000Z', recordsTotal: 1, truncated: false,
+        records: [{ PolicyNo: 'X1', Big: 'x'.repeat(LOCAL_CONNECTOR_MAX_ROW_BYTES) }],
       }),
     ).toThrow()
   })

@@ -11,6 +11,12 @@ export const LOCAL_CONNECTOR_GRID_KEYS = ['NEW_BUSINESS', 'INFORCE_CLIENTS'] as 
 /// sends. Do not couple this to LOCAL_CONNECTOR_SCHEMA_VERSION: Task 7 deletes this
 /// constant together with the typed schemas once the raw path is proven.
 const LEGACY_ENVELOPE_SCHEMA_VERSION = 1 as const
+/// The typed envelope's own record cap. The live stage route still parses these
+/// schemas against an already-installed extension that pages at 500 rows, so this
+/// must not follow LOCAL_CONNECTOR_MAX_RECORDS down to 200 or every page from a
+/// deployed device 400s until Task 9 lowers the extension's page size. Task 7
+/// deletes this constant together with the typed schemas.
+export const LEGACY_MAX_RECORDS = 1_000
 
 const identifier = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/)
 const normalizedText = z
@@ -98,7 +104,7 @@ const envelopeBase = {
 export const newBusinessEnvelopeSchema = z.strictObject({
   ...envelopeBase,
   gridKey: z.literal('NEW_BUSINESS'),
-  records: z.array(newBusinessRecordSchema).max(LOCAL_CONNECTOR_MAX_RECORDS),
+  records: z.array(newBusinessRecordSchema).max(LEGACY_MAX_RECORDS),
 }).superRefine((envelope, context) => {
   if (envelope.recordsTotal < envelope.records.length) {
     context.addIssue({ code: 'custom', message: 'recordsTotal is smaller than records' })
@@ -108,7 +114,7 @@ export const newBusinessEnvelopeSchema = z.strictObject({
 export const inforceClientsEnvelopeSchema = z.strictObject({
   ...envelopeBase,
   gridKey: z.literal('INFORCE_CLIENTS'),
-  records: z.array(inforceClientRecordSchema).max(LOCAL_CONNECTOR_MAX_RECORDS),
+  records: z.array(inforceClientRecordSchema).max(LEGACY_MAX_RECORDS),
 }).superRefine((envelope, context) => {
   if (envelope.recordsTotal < envelope.records.length) {
     context.addIssue({ code: 'custom', message: 'recordsTotal is smaller than records' })
@@ -120,14 +126,21 @@ export const localConnectorStageEnvelopeSchema = z.discriminatedUnion('gridKey',
   inforceClientsEnvelopeSchema,
 ])
 
-const rawScalar = z.union([z.string().max(4_096), z.number(), z.boolean(), z.null()])
+export const LOCAL_CONNECTOR_MAX_ROW_BYTES = 16 * 1024
 
-/// One level of nesting is enough for every carrier grid observed, and bounding depth
-/// keeps a hostile payload from costing us parse time.
-export const rawGridRowSchema: z.ZodType<Record<string, unknown>> = z.record(
-  z.string().max(128),
-  z.union([rawScalar, z.array(rawScalar).max(64), z.record(z.string().max(128), rawScalar)]),
-)
+/// Shape is intentionally unconstrained: readLimitedBody already caps the whole
+/// body at LOCAL_CONNECTOR_MAX_BODY_BYTES before this ever parses, and the request
+/// is signed by a paired device, so a depth bound bought little security. What it
+/// did cost was availability — one unexpectedly-deep row failed the whole 200-row
+/// envelope, and a retry hit the same wall deterministically. Bound by serialized
+/// size per row instead, which is the actual resource being protected.
+export const rawGridRowSchema: z.ZodType<Record<string, unknown>> = z
+  .record(z.string().max(128), z.unknown())
+  .superRefine((row, ctx) => {
+    if (JSON.stringify(row).length > LOCAL_CONNECTOR_MAX_ROW_BYTES) {
+      ctx.addIssue({ code: 'custom', message: 'row exceeds the per-row size cap' })
+    }
+  })
 
 export const localConnectorRawStageEnvelopeSchema = z
   .strictObject({
