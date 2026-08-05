@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -362,13 +362,18 @@ describe('NationalLifeLocalConnectorCard', () => {
     // que um run que termine com o agente longe ainda seja visto.
     vi.useFakeTimers()
     let polls = 0
+    let completed = false
     installChromeMock((message, callback) => {
       if (message.type === 'GET_CONNECTOR_STATUS') {
         polls += 1
         callback({
           ok: true,
           device: { status: 'READY', deviceId: 'device-1' },
-          sync: { status: 'UPLOADING', stageIndex: 0, uploads: 1 },
+          sync: {
+            status: completed ? 'COMPLETED' : 'UPLOADING',
+            stageIndex: 0,
+            uploads: 1,
+          },
         })
         return
       }
@@ -385,7 +390,9 @@ describe('NationalLifeLocalConnectorCard', () => {
     )
     await vi.advanceTimersByTimeAsync(0)
     screen.getByRole('button', { name: 'Connect National Life' }).click()
-    await vi.advanceTimersByTimeAsync(60_000)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(90_000)
+    })
 
     expect(screen.getByRole('status')).toHaveTextContent('Still syncing')
     expect(screen.getByRole('status')).not.toHaveTextContent('stopped')
@@ -395,8 +402,12 @@ describe('NationalLifeLocalConnectorCard', () => {
     // agente longe da tela ainda precisa ser visto. (A virada para sucesso em si
     // já é coberta pelo teste de conclusão.)
     const before = polls
-    await vi.advanceTimersByTimeAsync(20_000)
+    completed = true
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
     expect(polls).toBeGreaterThan(before)
+    expect(screen.getByRole('status')).toHaveTextContent('up to date')
     vi.useRealTimers()
   })
 
@@ -444,5 +455,40 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(screen.getAllByRole('button')[0]).toBeEnabled()
     expect(screen.getByRole('status')).not.toHaveTextContent('Syncing your National Life data')
     vi.useRealTimers()
+  })
+
+  it('does not tell a computer that never connected that it was disconnected', async () => {
+    // O pareamento é que falhou. "Reconnect" repetiria o mesmo passo com o mesmo
+    // texto e o mesmo botao — o laco de novo, uma classe adiante.
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({ ok: true, device: { status: 'ERROR' }, sync: { status: 'IDLE' } })
+        return
+      }
+      if (message.type === 'PAIR_CONNECTOR') {
+        callback({ ok: false, error: 'PAIRING_REJECTED' })
+        return
+      }
+      callback({ ok: false, error: 'CONNECTOR_NOT_PAIRED' })
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ code: 'pairing-code-123456' }) })),
+    )
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
+
+    const status = await screen.findByRole('status')
+    await waitFor(() => expect(status).toHaveTextContent('could not finish connecting'))
+    expect(status).not.toHaveTextContent('no longer connected')
+    expect(screen.getByRole('button', { name: 'Start over' })).toBeEnabled()
   })
 })

@@ -10,7 +10,13 @@
 /// o texto é escrito duas vezes de propósito; o que precisa coincidir são as
 /// classes de falha.
 
-export type ConnectorFailureAction = 'reconnect' | 'update' | 'retry' | 'disconnect' | 'support'
+export type ConnectorFailureAction =
+  | 'reconnect'
+  | 'pairing'
+  | 'update'
+  | 'retry'
+  | 'disconnect'
+  | 'support'
 
 export type ConnectorFailure = {
   message: string
@@ -23,11 +29,13 @@ export type ConnectorFailure = {
 /// `apps/keeprone-connect/lib/failure.ts`. Comentário recíproco não garante
 /// nada: quem garante é `connector-failure-parity.test.ts`, que importa os dois
 /// módulos e compara os conjuntos.
-export const RECONNECT_CODES: readonly string[] = [
-  'DEVICE_REVOKED',
-  'DEVICE_KEY_UNAVAILABLE',
-  'PAIRING_REJECTED',
-]
+export const RECONNECT_CODES: readonly string[] = ['DEVICE_REVOKED', 'DEVICE_KEY_UNAVAILABLE']
+
+/// A tentativa de conectar é que falhou — este computador nunca chegou a estar
+/// conectado. Dizer "você foi desconectado" seria falso, e oferecer "reconectar"
+/// mandaria o agente repetir exatamente o passo que acabou de falhar, com o
+/// mesmo texto e o mesmo botão: o laço de novo, uma classe adiante.
+export const PAIRING_CODES: readonly string[] = ['PAIRING_REJECTED', 'PAIRING_FAILED']
 
 export const OUTDATED_CODES: readonly string[] = [
   'UNKNOWN_CAPABILITY',
@@ -60,6 +68,14 @@ export function connectorFailure(code: string | null | undefined): ConnectorFail
       actionLabel: 'Reconnect this computer',
       message:
         'This computer is no longer connected to your Keepr One account. Reconnect it to sync again — you will sign in to National Life as usual.',
+    }
+  }
+  if (typeof code === 'string' && PAIRING_CODES.includes(code)) {
+    return {
+      action: 'pairing',
+      actionLabel: 'Start over',
+      message:
+        'We could not finish connecting this computer. Starting over gets you a fresh connection — if it fails again, contact Keepr One support.',
     }
   }
   if (code === DISCONNECT_FAILED) {

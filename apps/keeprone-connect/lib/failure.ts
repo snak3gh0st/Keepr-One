@@ -9,7 +9,7 @@
 /// diferentes (popup de uma linha vs. cartão com botão), por isso o texto é
 /// escrito duas vezes de propósito; as classes de falha é que são as mesmas.
 
-export type ConnectorFailureAction = 'reconnect' | 'retry' | 'update' | 'support'
+export type ConnectorFailureAction = 'reconnect' | 'pairing' | 'retry' | 'update' | 'support'
 
 export type ConnectorFailure = {
   message: string
@@ -27,8 +27,10 @@ export const RECONNECT_CODES: readonly string[] = [
   // Sem chave privada local não há como assinar nada, nunca. Reconectar é a
   // única saída — mas não há chave para apagar.
   'DEVICE_KEY_UNAVAILABLE',
-  'PAIRING_REJECTED',
 ]
+
+/// A conexão nunca chegou a existir; não há o que "re"conectar.
+export const PAIRING_CODES: readonly string[] = ['PAIRING_REJECTED', 'PAIRING_FAILED']
 
 /// Subconjunto de RECONNECT_CODES que autoriza destruir o material local.
 const REVOKING_CODES: readonly string[] = [DEVICE_REVOKED]
@@ -60,6 +62,13 @@ export function connectorFailure(code: string | undefined | null): ConnectorFail
       action: 'reconnect',
       message:
         'This computer is no longer linked to your Keepr One account. Reconnect it from the National Life page in Keepr One.',
+    }
+  }
+  if (typeof code === 'string' && PAIRING_CODES.includes(code)) {
+    return {
+      action: 'pairing',
+      message:
+        'Connecting this computer did not finish. Start over from the National Life page in Keepr One.',
     }
   }
   if (typeof code === 'string' && OUTDATED_CODES.includes(code)) {

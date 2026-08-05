@@ -11,6 +11,7 @@ import * as web from './connector-failure'
 describe('classificação de falha do conector', () => {
   const sets = [
     ['reconnect', web.RECONNECT_CODES, extension.RECONNECT_CODES],
+    ['pairing', web.PAIRING_CODES, extension.PAIRING_CODES],
     ['update', web.OUTDATED_CODES, extension.OUTDATED_CODES],
     ['portal', web.PORTAL_CODES, extension.PORTAL_CODES],
   ] as const
@@ -22,8 +23,21 @@ describe('classificação de falha do conector', () => {
   }
 
   it('não classifica o mesmo código em duas classes', () => {
-    const all = [...web.RECONNECT_CODES, ...web.OUTDATED_CODES, ...web.PORTAL_CODES]
+    const all = [
+      ...web.RECONNECT_CODES,
+      ...web.PAIRING_CODES,
+      ...web.OUTDATED_CODES,
+      ...web.PORTAL_CODES,
+    ]
     expect(new Set(all).size).toBe(all.length)
+  })
+
+  it('não promete reconexão a um computador que nunca conectou', () => {
+    // "Reconnect" repetiria o passo que acabou de falhar, com o mesmo texto e o
+    // mesmo botão. É a forma exata do laço, uma classe adiante.
+    expect(web.connectorFailure('PAIRING_REJECTED').action).toBe('pairing')
+    expect(web.connectorFailure('PAIRING_REJECTED').message).not.toMatch(/no longer connected/i)
+    expect(web.RECONNECT_CODES).not.toContain('PAIRING_REJECTED')
   })
 
   it('só a revogação explícita destrói o material local', () => {
@@ -35,7 +49,12 @@ describe('classificação de falha do conector', () => {
   })
 
   it('concorda em qual ação cada código pede', () => {
-    for (const code of [...web.RECONNECT_CODES, ...web.OUTDATED_CODES, ...web.PORTAL_CODES]) {
+    for (const code of [
+      ...web.RECONNECT_CODES,
+      ...web.PAIRING_CODES,
+      ...web.OUTDATED_CODES,
+      ...web.PORTAL_CODES,
+    ]) {
       expect(web.connectorFailure(code).action).toBe(extension.connectorFailure(code).action)
     }
   })

@@ -125,8 +125,10 @@ const pilotStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
 /// relógio zera a cada progresso, então uma grade grande subindo lote a lote
 /// nunca chega aqui — e mesmo chegando, o que se diz é "ainda rodando", não
 /// "falhou": o watchdog não tem como saber que falhou. Passado o limite, a
-/// consulta fica mais espaçada, mas não para.
-const STALL_LIMIT = 35
+/// consulta fica um pouco mais espaçada, mas não para — `uploads` só anda quando
+/// um lote *termina* de subir, então um único PUT lento já parece parado, e a
+/// margem aqui é o que evita chamar de demorado um sync saudável.
+const STALL_LIMIT = 45
 
 /// O que prova que o run andou desde a última consulta. `uploads` é o único
 /// campo que se move dentro de uma única grade grande.
@@ -188,7 +190,7 @@ export function NationalLifeLocalConnectorCard({
     let idle = 0
     for (;;) {
       if (token !== watchAbort.current) return
-      await sleep(signature === '' ? 750 : idle >= STALL_LIMIT ? 5_000 : 1_000)
+      await sleep(signature === '' ? 750 : idle >= STALL_LIMIT ? 2_000 : 1_000)
       if (token !== watchAbort.current) return
       const status = await sendConnectorMessage(extensionId, { type: 'GET_CONNECTOR_STATUS' })
       const syncStatus = status.sync?.status
@@ -322,6 +324,17 @@ export function NationalLifeLocalConnectorCard({
     // do que o agente pediu.
     if (failure?.action === 'disconnect') {
       await handleDisconnect()
+      return
+    }
+    // "Start over" tem de recomeçar: um código de pareamento novo, emitido
+    // agora. Passar pelo START reaproveitaria o caminho que acabou de falhar.
+    if (failure?.action === 'pairing') {
+      beginAttempt('connecting')
+      try {
+        await createPairingAndStart()
+      } catch (error) {
+        fail(error instanceof Error ? error.message : null)
+      }
       return
     }
     // "Check again" tem de checar. Reenviar START faria a extensão renavegar a
