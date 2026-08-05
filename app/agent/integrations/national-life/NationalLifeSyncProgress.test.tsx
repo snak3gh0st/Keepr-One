@@ -22,10 +22,12 @@ function status(overrides: Partial<NationalLifeSyncStatus> = {}): NationalLifeSy
     percent: 0,
     failed: 0,
     currentGridKey: 'NEW_BUSINESS',
-    currentGridLabel: 'novos negócios',
+    currentGridLabel: 'new business',
     safeErrorCode: null,
     shouldPoll: true,
     completedAt: null,
+    receivedRecords: null,
+    writtenRecords: null,
     ...overrides,
   }
 }

@@ -5,6 +5,7 @@ import {
   nationalLifeSyncGridLabel,
   reconcileNationalLifeSync,
   startNationalLifeSync,
+  summarizeStageReceipts,
 } from './sync-run-service'
 
 const now = new Date('2026-08-03T17:00:00.000Z')
@@ -103,7 +104,7 @@ describe('startNationalLifeSync', () => {
       failedStages: 1,
       currentGridKey: null,
     })
-    expect(nationalLifeSyncGridLabel('INFORCE_CLIENTS')).toBe('apólices em vigor')
+    expect(nationalLifeSyncGridLabel('INFORCE_CLIENTS')).toBe('in-force policies')
   })
 
   it('is wired into both login completion transactions', () => {
@@ -118,5 +119,63 @@ describe('startNationalLifeSync', () => {
 
     expect(runtime).toContain('startNationalLifeSync(transaction')
     expect(interactive).toContain('startNationalLifeSync(transaction')
+  })
+})
+
+describe('summarizeStageReceipts', () => {
+  it('reports nothing when there is no receipt to read', () => {
+    // Um run REMOTE não gera recibo. Dizer "0 gravadas" ali acusaria de vazio um
+    // sync que funcionou.
+    expect(summarizeStageReceipts([])).toEqual({
+      receivedRecords: null,
+      writtenRecords: null,
+    })
+  })
+
+  it('exposes received-but-not-written instead of hiding it behind a success', () => {
+    expect(
+      summarizeStageReceipts([
+        { recordCount: 200, writtenCount: 0 },
+        { recordCount: 0, writtenCount: 0 },
+      ]),
+    ).toEqual({ receivedRecords: 200, writtenRecords: 0 })
+  })
+
+  it('adds up what was received and what survived normalization', () => {
+    expect(
+      summarizeStageReceipts([
+        { recordCount: 120, writtenCount: 118 },
+        { recordCount: 80, writtenCount: 80 },
+      ]),
+    ).toEqual({ receivedRecords: 200, writtenRecords: 198 })
+  })
+
+  it('keeps written unknown when every receipt predates the column', () => {
+    expect(
+      summarizeStageReceipts([
+        { recordCount: 10, writtenCount: null },
+        { recordCount: 5, writtenCount: null },
+      ]),
+    ).toEqual({ receivedRecords: 15, writtenRecords: null })
+  })
+})
+
+describe('grid labels', () => {
+  it('reads in English, because the agents are American', () => {
+    for (const gridKey of [
+      'NEW_BUSINESS',
+      'RECENTLY_CLOSED',
+      'INFORCE_CLIENTS',
+      'PAID_COMMISSIONS',
+      'PROJECTED_COMMISSIONS',
+      'CLIENT_INTELLIGENCE',
+      'CORRESPONDENCE',
+      'COMMISSIONS_PAYMENT_PORTAL',
+      'PIP_PENDING',
+    ]) {
+      const label = nationalLifeSyncGridLabel(gridKey)
+      expect(label).toBeTruthy()
+      expect(label).not.toMatch(/[áàâãéêíóôõúç]/i)
+    }
   })
 })

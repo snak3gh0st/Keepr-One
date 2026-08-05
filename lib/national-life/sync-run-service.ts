@@ -37,22 +37,54 @@ export type NationalLifeSyncStatus = {
   safeErrorCode: string | null
   shouldPoll: boolean
   completedAt: Date | null
+  /// Linhas que o dispositivo entregou e linhas que sobreviveram à normalização.
+  /// Nulo quando não há recibo nenhum para consultar — um run REMOTE não gera
+  /// recibos, e dizer "0 gravadas" ali seria acusar de vazio um sync que deu
+  /// certo. Com número, o par expõe o caso que motivou a coluna: recebi 200,
+  /// escrevi 0.
+  receivedRecords: number | null
+  writtenRecords: number | null
 }
 
+/// Rótulos em inglês: quem lê é um agente americano.
 const GRID_LABELS: Record<string, string> = {
-  NEW_BUSINESS: 'novos negócios',
-  RECENTLY_CLOSED: 'casos encerrados recentemente',
-  INFORCE_CLIENTS: 'apólices em vigor',
-  PAID_COMMISSIONS: 'comissões pagas',
-  PROJECTED_COMMISSIONS: 'comissões projetadas',
-  CLIENT_INTELLIGENCE: 'inteligência de clientes',
-  CORRESPONDENCE: 'correspondências',
-  COMMISSIONS_PAYMENT_PORTAL: 'pagamentos de comissão',
-  PIP_PENDING: 'pendências de aumento',
+  NEW_BUSINESS: 'new business',
+  RECENTLY_CLOSED: 'recently closed cases',
+  INFORCE_CLIENTS: 'in-force policies',
+  PAID_COMMISSIONS: 'paid commissions',
+  PROJECTED_COMMISSIONS: 'projected commissions',
+  CLIENT_INTELLIGENCE: 'client intelligence',
+  CORRESPONDENCE: 'correspondence',
+  COMMISSIONS_PAYMENT_PORTAL: 'commission payments',
+  PIP_PENDING: 'pending increases',
 }
 
 export function nationalLifeSyncGridLabel(gridKey: string | null): string | null {
   return gridKey ? GRID_LABELS[gridKey] ?? null : null
+}
+
+export type StageReceiptTotals = {
+  receivedRecords: number | null
+  writtenRecords: number | null
+}
+
+/// `writtenCount` é opcional no schema: recibos anteriores à coluna são nulos.
+/// Somá-los como zero transformaria "não sei" em "não escrevi nada", que é a
+/// mentira oposta à que a coluna existe para evitar.
+export function summarizeStageReceipts(
+  receipts: ReadonlyArray<{ recordCount: number; writtenCount: number | null }>,
+): StageReceiptTotals {
+  if (receipts.length === 0) {
+    return { receivedRecords: null, writtenRecords: null }
+  }
+  const known = receipts.filter((receipt) => typeof receipt.writtenCount === 'number')
+  return {
+    receivedRecords: receipts.reduce((total, receipt) => total + receipt.recordCount, 0),
+    writtenRecords:
+      known.length === 0
+        ? null
+        : known.reduce((total, receipt) => total + (receipt.writtenCount ?? 0), 0),
+  }
 }
 
 export async function startNationalLifeSync(
@@ -181,11 +213,14 @@ export async function getNationalLifeSyncStatus(
         select: { state: true, syncStageIndex: true, syncGridKey: true },
         orderBy: { syncStageIndex: 'asc' },
       },
+      stageReceipts: { select: { recordCount: true, writtenCount: true } },
     },
   })
   if (!run) {
     return null
   }
+
+  const totals = summarizeStageReceipts(run.stageReceipts)
 
   if (run.executionSource === 'LOCAL') {
     const completed = run.completedStages
@@ -202,6 +237,7 @@ export async function getNationalLifeSyncStatus(
       safeErrorCode: run.safeErrorCode,
       shouldPoll: run.state === 'QUEUED' || run.state === 'RUNNING' || run.state === 'PAUSED',
       completedAt: run.completedAt,
+      ...totals,
     }
   }
 
@@ -215,6 +251,7 @@ export async function getNationalLifeSyncStatus(
     safeErrorCode: run.safeErrorCode,
     shouldPoll: state === 'QUEUED' || state === 'RUNNING' || state === 'PAUSED',
     completedAt: run.completedAt,
+    ...totals,
   }
 }
 
