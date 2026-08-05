@@ -71,6 +71,7 @@ describe('National Life sync status route', () => {
     mocks.localConfig.mockReturnValue({
       enabled: true,
       extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+      installMode: 'store',
       storeUrl: 'https://chromewebstore.google.com/detail/keepr/abcdefghijklmnopabcdefghijklmnop',
       baseUrl: 'https://app.keepr.one',
     })

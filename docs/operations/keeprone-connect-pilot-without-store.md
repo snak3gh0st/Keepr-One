@@ -28,13 +28,16 @@ Keepr falar com ela via `chrome.runtime.sendMessage`.
    NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_ID=<id estável do manifesto>
    ```
 
+   **Não** defina `NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL` no piloto. Sem a
+   URL, o Keepr entra em `installMode: pilot` e o card instrui unpacked em vez
+   de abrir a Store.
+
    O `key` em `apps/keeprone-connect/.keys/manifest-key.txt` fixa o ID entre
    reloads. Sem ele, cada unpack gera ID novo e o card para de achar a extensão.
 
-4. URL da Store: o config atual exige um host `chromewebstore.google.com`.
-   Use a URL do **item em rascunho** no Developer Dashboard (já tem o ID),
-   mesmo não publicado. O botão “instalar” do card pode abrir essa página;
-   no piloto, instrua o agente a usar unpacked se a página ainda não instalar.
+4. Quando a Store publicar: configure
+   `NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL` com a listing oficial que contém o
+   mesmo extension ID. O card passa a `installMode: store` (botão abre a Store).
 
 5. Smoke: siga `docs/operations/keeprone-connect-smoke-test.md` e valide o banco
    (`plannedGridKeys`, `writtenCount`, `raw`).

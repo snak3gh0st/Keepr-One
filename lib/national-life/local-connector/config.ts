@@ -5,12 +5,16 @@ const CHROME_WEB_STORE_HOST = 'chromewebstore.google.com'
 
 export const LOCAL_CONNECTOR_DEPLOYMENT_SCOPE = 'LOCAL_CONNECTOR'
 
+export type LocalConnectorInstallMode = 'pilot' | 'store'
+
 export type PublicLocalConnectorConfig =
   | { enabled: false }
   | {
       enabled: true
       extensionId: string
-      storeUrl: string
+      installMode: LocalConnectorInstallMode
+      /** Official Chrome Web Store listing; null in pilot (unpacked) mode. */
+      storeUrl: string | null
       baseUrl: string
     }
 
@@ -83,11 +87,26 @@ export function getNationalLifeLocalConnectorConfig(): PublicLocalConnectorConfi
   }
 
   const extensionId = parseExtensionId(process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_ID)
+  const rawStoreUrl = process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL?.trim()
+  const baseUrl = parseAppOrigin(process.env.BETTER_AUTH_URL)
+
+  // Empty / unset Store URL = pilot (unpacked extension). Store listing is Phase 6.
+  if (!rawStoreUrl) {
+    return {
+      enabled: true,
+      extensionId,
+      installMode: 'pilot',
+      storeUrl: null,
+      baseUrl,
+    }
+  }
+
   return {
     enabled: true,
     extensionId,
-    storeUrl: parseStoreUrl(process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL, extensionId),
-    baseUrl: parseAppOrigin(process.env.BETTER_AUTH_URL),
+    installMode: 'store',
+    storeUrl: parseStoreUrl(rawStoreUrl, extensionId),
+    baseUrl,
   }
 }
 

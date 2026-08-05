@@ -99,7 +99,7 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
-const stateCopy: Record<ConnectorState, string> = {
+const storeStateCopy: Record<ConnectorState, string> = {
   idle: 'Pronto para conectar',
   checking: 'Verificando acesso neste navegador…',
   installing: 'Abrindo a instalação segura…',
@@ -110,14 +110,22 @@ const stateCopy: Record<ConnectorState, string> = {
   error: 'Não foi possível conectar agora. Tente novamente.',
 }
 
+const pilotStateCopy: Record<ConnectorState, string> = {
+  ...storeStateCopy,
+  installing:
+    'Carregue a extensão unpacked em chrome://extensions (modo do desenvolvedor) e clique de novo.',
+}
+
 export function NationalLifeLocalConnectorCard({
   extensionId,
-  storeUrl,
+  storeUrl = null,
+  installMode = 'store',
   baseUrl,
   remoteAvailable = false,
 }: {
   extensionId: string
-  storeUrl: string
+  storeUrl?: string | null
+  installMode?: 'pilot' | 'store'
   baseUrl: string
   remoteAvailable?: boolean
 }) {
@@ -127,7 +135,14 @@ export function NationalLifeLocalConnectorCard({
   const [state, setState] = useState<ConnectorState>('idle')
   const [compatible, setCompatible] = useState(false)
   const [pairedDeviceId, setPairedDeviceId] = useState<string | null>(null)
-  const busy = !['idle', 'success', 'error', 'login-required'].includes(state)
+  const recoverable =
+    state === 'idle' ||
+    state === 'success' ||
+    state === 'error' ||
+    state === 'login-required' ||
+    (installMode === 'pilot' && state === 'installing')
+  const busy = !recoverable
+  const stateCopy = installMode === 'pilot' ? pilotStateCopy : storeStateCopy
 
   useEffect(() => {
     setCompatible(browserSupportsConnector())
@@ -239,10 +254,16 @@ export function NationalLifeLocalConnectorCard({
       .catch(() => {})
   }, [compatible, extensionId])
 
+  function promptInstall() {
+    setState('installing')
+    if (installMode === 'store' && storeUrl) {
+      openStore(storeUrl)
+    }
+  }
+
   async function handlePrimaryAction() {
     if (!compatible) {
-      setState('installing')
-      openStore(storeUrl)
+      promptInstall()
       return
     }
     setState('checking')
@@ -261,8 +282,7 @@ export function NationalLifeLocalConnectorCard({
       }
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('CONNECTOR_')) {
-        setState('installing')
-        openStore(storeUrl)
+        promptInstall()
         return
       }
       setState('error')
@@ -320,17 +340,22 @@ export function NationalLifeLocalConnectorCard({
           </div>
           <p className="mt-5 text-sm leading-6 text-ink-muted">
             Via KeeproneConnect: você entra no portal oficial; a senha não passa pelo Keepr.
+            {installMode === 'pilot'
+              ? ' Neste piloto, carregue a extensão unpacked com o ID configurado no ambiente.'
+              : null}
           </p>
         </div>
         <span className="inline-flex w-fit rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal-deep">
-          1 clique
+          {installMode === 'pilot' ? 'Piloto' : '1 clique'}
         </span>
       </div>
 
       <div className="flex flex-col gap-3 bg-panel/55 p-5 sm:flex-row sm:items-center sm:p-6">
         <Button type="button" variant="primary" disabled={busy} onClick={handlePrimaryAction}>
           {state === 'installing'
-            ? 'Abrindo instalação…'
+            ? installMode === 'pilot'
+              ? 'Já instalei — conectar'
+              : 'Abrindo instalação…'
             : state === 'error'
               ? 'Tentar novamente'
               : state === 'login-required'

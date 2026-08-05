@@ -51,12 +51,37 @@ describe('NationalLifeLocalConnectorCard', () => {
     const clicked = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
 
     render(
-      <NationalLifeLocalConnectorCard extensionId={extensionId} storeUrl={storeUrl} baseUrl={baseUrl} />,
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
     )
     await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
 
     expect(clicked).toHaveBeenCalledOnce()
     expect(screen.getByRole('status')).toHaveTextContent('Abrindo a instalação segura')
+  })
+
+  it('guides unpacked install in pilot mode without opening a store URL', async () => {
+    installChromeMock((_message, callback) => callback())
+    const clicked = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={null}
+        installMode="pilot"
+        baseUrl={baseUrl}
+      />,
+    )
+    expect(screen.getByText('Piloto')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
+
+    expect(clicked).not.toHaveBeenCalled()
+    expect(screen.getByRole('status')).toHaveTextContent('chrome://extensions')
+    expect(screen.getByRole('button', { name: 'Já instalei — conectar' })).toBeEnabled()
   })
 
   it('auto-pairs after installation without exposing the pairing code', async () => {
@@ -79,7 +104,12 @@ describe('NationalLifeLocalConnectorCard', () => {
     })
 
     render(
-      <NationalLifeLocalConnectorCard extensionId={extensionId} storeUrl={storeUrl} baseUrl={baseUrl} />,
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
     )
 
     await waitFor(() =>
@@ -106,7 +136,12 @@ describe('NationalLifeLocalConnectorCard', () => {
     })
 
     render(
-      <NationalLifeLocalConnectorCard extensionId={extensionId} storeUrl={storeUrl} baseUrl={baseUrl} />,
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
     )
     await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
 
@@ -134,7 +169,12 @@ describe('NationalLifeLocalConnectorCard', () => {
     })
 
     render(
-      <NationalLifeLocalConnectorCard extensionId={extensionId} storeUrl={storeUrl} baseUrl={baseUrl} />,
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
     )
     await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
 
@@ -155,7 +195,12 @@ describe('NationalLifeLocalConnectorCard', () => {
     })
 
     render(
-      <NationalLifeLocalConnectorCard extensionId={extensionId} storeUrl={storeUrl} baseUrl={baseUrl} />,
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
     )
     await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
 

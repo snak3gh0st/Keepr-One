@@ -15,7 +15,8 @@ describe('NationalLifeLocalConnectorCard SSR', () => {
       renderToString(
         <NationalLifeLocalConnectorCard
           extensionId="abcdefghijklmnopabcdefghijklmnop"
-          storeUrl="https://chromewebstore.google.com/detail/keeproneconnect/abcdefghijklmnopabcdefghijklmnop"
+          storeUrl={null}
+          installMode="pilot"
           baseUrl="https://app.keeprone.com"
         />,
       ),
