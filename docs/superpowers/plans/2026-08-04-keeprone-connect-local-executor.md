@@ -200,11 +200,18 @@ E trocar o `catch`:
         { status: 401, headers: NO_STORE },
       )
     }
+    if (error instanceof LocalConnectorRequestError) {
+      return Response.json({ error: 'INVALID_REQUEST' }, { status: 400, headers: NO_STORE })
+    }
     return Response.json({ error: 'RUN_START_FAILED' }, { status: 500, headers: NO_STORE })
   }
 ```
 
-`RUN_START_FAILED` é opaco de propósito: diferencia a *classe* do erro sem vazar detalhe interno.
+Três classes, três códigos: assinatura rejeitada é 401, corpo malformado ou grande
+demais é falha do cliente e é 400, e o resto é falha nossa e é 500. `LocalConnectorRequestError`
+vem de `lib/national-life/local-connector/request.ts` e é o que `readLimitedBody` lança
+como `BODY_TOO_LARGE`. `RUN_START_FAILED` é opaco de propósito: diferencia a *classe*
+do erro sem vazar detalhe interno.
 
 - [ ] **Step 4: Rodar os testes**
 
