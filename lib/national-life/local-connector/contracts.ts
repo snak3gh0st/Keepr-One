@@ -1,9 +1,16 @@
 import { z } from 'zod'
+import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '../portal-grid-client'
 
-export const LOCAL_CONNECTOR_SCHEMA_VERSION = 1 as const
+export const LOCAL_CONNECTOR_SCHEMA_VERSION = 2 as const
 export const LOCAL_CONNECTOR_MAX_BODY_BYTES = 2 * 1024 * 1024
-export const LOCAL_CONNECTOR_MAX_RECORDS = 1_000
+/// Raw carrier rows are fatter than normalized ones. 200 rows against the 2 MiB body
+/// cap leaves headroom for the widest grid; the extension pages to match.
+export const LOCAL_CONNECTOR_MAX_RECORDS = 200
 export const LOCAL_CONNECTOR_GRID_KEYS = ['NEW_BUSINESS', 'INFORCE_CLIENTS'] as const
+/// The typed envelope below is pinned to the version the shipped extension still
+/// sends. Do not couple this to LOCAL_CONNECTOR_SCHEMA_VERSION: Task 7 deletes this
+/// constant together with the typed schemas once the raw path is proven.
+const LEGACY_ENVELOPE_SCHEMA_VERSION = 1 as const
 
 const identifier = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/)
 const normalizedText = z
@@ -80,7 +87,7 @@ export const inforceClientRecordSchema = z.strictObject({
 })
 
 const envelopeBase = {
-  schemaVersion: z.literal(LOCAL_CONNECTOR_SCHEMA_VERSION),
+  schemaVersion: z.literal(LEGACY_ENVELOPE_SCHEMA_VERSION),
   runId: identifier,
   sequence: z.number().int().min(0).max(10_000),
   observedAt: z.string().datetime({ offset: true }),
@@ -112,6 +119,39 @@ export const localConnectorStageEnvelopeSchema = z.discriminatedUnion('gridKey',
   newBusinessEnvelopeSchema,
   inforceClientsEnvelopeSchema,
 ])
+
+const rawScalar = z.union([z.string().max(4_096), z.number(), z.boolean(), z.null()])
+
+/// One level of nesting is enough for every carrier grid observed, and bounding depth
+/// keeps a hostile payload from costing us parse time.
+export const rawGridRowSchema: z.ZodType<Record<string, unknown>> = z.record(
+  z.string().max(128),
+  z.union([rawScalar, z.array(rawScalar).max(64), z.record(z.string().max(128), rawScalar)]),
+)
+
+export const localConnectorRawStageEnvelopeSchema = z
+  .strictObject({
+    schemaVersion: z.literal(LOCAL_CONNECTOR_SCHEMA_VERSION),
+    runId: identifier,
+    // The client's gridKey is never treated as authoritative on its own: it is
+    // validated here against the server's own grid allowlist, and the route
+    // additionally cross-checks it against the URL segment before ingest.
+    gridKey: z.enum(
+      Object.keys(NATIONAL_LIFE_GRIDS) as [NationalLifeGridKey, ...NationalLifeGridKey[]],
+    ),
+    sequence: z.number().int().min(0).max(10_000),
+    observedAt: z.string().datetime({ offset: true }),
+    recordsTotal: z.number().int().min(0).max(100_000),
+    truncated: z.boolean(),
+    records: z.array(rawGridRowSchema).max(LOCAL_CONNECTOR_MAX_RECORDS),
+  })
+  .superRefine((envelope, ctx) => {
+    if (envelope.recordsTotal < envelope.records.length) {
+      ctx.addIssue({ code: 'custom', message: 'recordsTotal is below the page it carries' })
+    }
+  })
+
+export type LocalConnectorRawStageEnvelope = z.infer<typeof localConnectorRawStageEnvelopeSchema>
 
 export type PublicP256Jwk = z.infer<typeof publicP256JwkSchema>
 export type NewBusinessRecord = z.infer<typeof newBusinessRecordSchema>

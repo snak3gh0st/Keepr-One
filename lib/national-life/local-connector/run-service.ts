@@ -4,7 +4,6 @@ import type { Prisma, PrismaClient } from '@prisma/client'
 import { NATIONAL_LIFE_PROVIDER } from '../constants'
 import {
   LOCAL_CONNECTOR_GRID_KEYS,
-  LOCAL_CONNECTOR_SCHEMA_VERSION,
   type InforceClientRecord,
   type LocalConnectorStageEnvelope,
   type NewBusinessRecord,
@@ -14,6 +13,11 @@ import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 export { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 
 export const LOCAL_CONNECTOR_RUN_TTL_MS = 30 * 60_000
+// This run-start response still advertises the legacy typed-envelope protocol
+// version: LOCAL_CONNECTOR_SCHEMA_VERSION in contracts.ts moved to 2 for the new
+// raw-record envelope, but the stage route these runs feed still parses the v1
+// typed schemas. Task 7 retires this alongside the typed schemas it describes.
+const RUN_PROTOCOL_SCHEMA_VERSION = 1 as const
 const UPSERT_CHUNK_SIZE = 100
 
 type LocalConnectorDb = Pick<
@@ -75,7 +79,7 @@ export async function startLocalConnectorRun(
   if (active) {
     return {
       runId: active.id,
-      schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
+      schemaVersion: RUN_PROTOCOL_SCHEMA_VERSION,
       stages: [...LOCAL_CONNECTOR_GRID_KEYS],
       duplicate: true as const,
     }
@@ -100,7 +104,7 @@ export async function startLocalConnectorRun(
 
   return {
     runId: run.id,
-    schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
+    schemaVersion: RUN_PROTOCOL_SCHEMA_VERSION,
     stages: [...LOCAL_CONNECTOR_GRID_KEYS],
     duplicate: false as const,
   }
