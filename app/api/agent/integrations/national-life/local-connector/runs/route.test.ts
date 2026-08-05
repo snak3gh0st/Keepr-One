@@ -73,6 +73,23 @@ describe('local connector runs route', () => {
     expect(await response.json()).toEqual({ error: 'RUN_START_FAILED' })
   })
 
+  it('returns 400 for an oversized body without touching the signature check', async () => {
+    const response = await POST(
+      new Request(
+        'https://app.keepr.one/api/agent/integrations/national-life/local-connector/runs',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'content-length': '999999' },
+          body: '{}',
+        },
+      ),
+    )
+    expect(response.status).toBe(400)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(await response.json()).toEqual({ error: 'INVALID_REQUEST' })
+    expect(mockVerify).not.toHaveBeenCalled()
+  })
+
   it('starts a run when the signature and start succeed', async () => {
     mockVerify.mockResolvedValueOnce({ deviceId: 'dev_1', agentId: 'agent_1' })
     mockStartRun.mockResolvedValueOnce({
