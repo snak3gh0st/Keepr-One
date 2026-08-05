@@ -888,6 +888,54 @@ describe('National Life restored-context job orchestration', () => {
     expect(test.reconciledRuns).toEqual([])
   })
 
+  it('parks a Foresight job for login when the expiry is wrapped as a layout change', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'SYNC_FORESIGHT_READ',
+        caseId: null,
+        input: { foresightRunId: 'foresight-run-1', mode: 'INVENTORY' },
+      }),
+      readForesight: async () => {
+        throw Object.assign(new Error('National Life portal layout changed'), {
+          code: 'PORTAL_LAYOUT_CHANGED',
+          safeDetail: {
+            safeCode: 'FORESIGHT_SSO_EXPIRED',
+            portalUrl: 'https://www.nationallife.com/NWI',
+          },
+        })
+      },
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'ACTION_REQUIRED',
+      safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
+    })
+  })
+
+  it('still routes a genuine layout change to manual review', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'SYNC_FORESIGHT_READ',
+        caseId: null,
+        input: { foresightRunId: 'foresight-run-1', mode: 'INVENTORY' },
+      }),
+      readForesight: async () => {
+        throw Object.assign(new Error('National Life portal layout changed'), {
+          code: 'PORTAL_LAYOUT_CHANGED',
+          safeDetail: { safeCode: 'SELECTOR_NOT_FOUND' },
+        })
+      },
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.store.transitions.at(-1)).toMatchObject({
+      to: 'MANUAL_REVIEW',
+    })
+  })
+
   it('disconnects, without closing or releasing, a live session reattached for a Foresight read', async () => {
     const test = createDeps({
       job: buildJob({

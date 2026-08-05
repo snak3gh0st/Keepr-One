@@ -361,6 +361,18 @@ function getErrorSafeDetail(error: unknown): unknown {
   return undefined
 }
 
+/// The adapter reports "I could not find the element" as PORTAL_LAYOUT_CHANGED and
+/// records the underlying reason in safeDetail.safeCode. A dead Foresight session is
+/// one of those reasons, and it needs a login, not a human reading a diff.
+function getErrorSafeCode(error: unknown): string | undefined {
+  const detail = getErrorSafeDetail(error)
+  if (detail && typeof detail === 'object' && 'safeCode' in detail) {
+    const safeCode = (detail as { safeCode?: unknown }).safeCode
+    if (typeof safeCode === 'string') return safeCode
+  }
+  return undefined
+}
+
 function getSessionCryptoConfig(env: NationalLifeEnv) {
   return {
     scopeId: env.sessionScopeId,
@@ -516,7 +528,7 @@ async function handleFailure(
   // waits for one instead of being thrown away. The worker only claims QUEUED,
   // so nothing here keeps knocking on the carrier while it waits — which
   // matters, because crossing the identity provider is what burns the session.
-  if (code === FORESIGHT_SSO_EXPIRED) {
+  if (code === FORESIGHT_SSO_EXPIRED || getErrorSafeCode(error) === FORESIGHT_SSO_EXPIRED) {
     await deps.jobStore.transitionJob({
       jobId: job.id,
       from: 'RUNNING',
