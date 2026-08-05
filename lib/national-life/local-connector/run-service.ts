@@ -419,8 +419,10 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
           sequence: input.envelope.sequence,
           truncated: input.envelope.truncated,
           contentHash: input.contentHash,
-          // Rows received, not rows written: this is public on the receipt and
-          // feeds the content hash, so its meaning must not drift.
+          // Rows received, not rows written. The content hash is taken over the
+          // raw body and owes nothing to this number; what fixes its meaning is
+          // that it is a public receipt field, and that paired with writtenCount
+          // it makes "received 200, wrote 0" visible instead of clean.
           recordCount: input.envelope.records.length,
           writtenCount,
           idempotencyKey: input.idempotencyKey,
