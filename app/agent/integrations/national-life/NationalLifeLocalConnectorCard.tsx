@@ -183,6 +183,17 @@ export function NationalLifeLocalConnectorCard({
     setCompatible(browserSupportsConnector())
   }, [])
 
+  /// O laço de acompanhamento não termina sozinho: passado o limite ele só fica
+  /// mais lento. Sem invalidar o token na desmontagem, sair da página por
+  /// navegação de cliente deixaria uma consulta a cada 2s para sempre, chamando
+  /// setState e router.refresh de um componente já morto — e cada remontagem
+  /// cria um ref novo, então ir e voltar acumularia laços independentes.
+  useEffect(() => {
+    return () => {
+      watchAbort.current += 1
+    }
+  }, [])
+
   async function watchSyncProgress(): Promise<void> {
     const token = ++watchAbort.current
     beginAttempt('syncing')

@@ -491,4 +491,48 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(status).not.toHaveTextContent('no longer connected')
     expect(screen.getByRole('button', { name: 'Start over' })).toBeEnabled()
   })
+
+  it('stops watching when the agent navigates away from the page', async () => {
+    // O laco nao termina sozinho: passado o limite ele so fica mais lento. Sem
+    // invalidar o token na desmontagem, sair da pagina deixaria uma consulta a
+    // cada 2s para sempre, chamando setState num componente ja morto.
+    vi.useFakeTimers()
+    let polls = 0
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        polls += 1
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: { status: 'UPLOADING', stageIndex: 0, uploads: 1 },
+        })
+        return
+      }
+      callback({ ok: true })
+    })
+
+    const view = render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    screen.getByRole('button', { name: 'Connect National Life' }).click()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(polls).toBeGreaterThan(1)
+
+    view.unmount()
+    const afterUnmount = polls
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000)
+    })
+
+    expect(polls).toBe(afterUnmount)
+    vi.useRealTimers()
+  })
 })

@@ -24,9 +24,9 @@ describe('carrierSyncState', () => {
 
 describe('carrierSyncLabel', () => {
   it('uses the three agreed sentences', () => {
-    expect(carrierSyncLabel({ kind: 'IN_SYNC' })).toBe('Em dia')
-    expect(carrierSyncLabel({ kind: 'WORKING', count: 2 })).toBe('2 a caminho')
-    expect(carrierSyncLabel({ kind: 'NEEDS_YOU', count: 3 })).toBe('Precisa de você')
+    expect(carrierSyncLabel({ kind: 'IN_SYNC' })).toBe('Up to date')
+    expect(carrierSyncLabel({ kind: 'WORKING', count: 2 })).toBe('2 on the way')
+    expect(carrierSyncLabel({ kind: 'NEEDS_YOU', count: 3 })).toBe('Needs you')
   })
 
   // The count is in the working label and deliberately not in the blocked one:

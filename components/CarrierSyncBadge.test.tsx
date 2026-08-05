@@ -50,14 +50,14 @@ describe('CarrierSyncBadge', () => {
   it('is quiet when the account is up to date', async () => {
     answerWith({ kind: 'IN_SYNC' })
     render(<CarrierSyncBadge />)
-    expect(await screen.findByText('Em dia')).toBeTruthy()
+    expect(await screen.findByText('Up to date')).toBeTruthy()
     expect(screen.queryByRole('button')).toBeNull()
   })
 
   it('counts what is on its way, without offering an action', async () => {
     answerWith({ kind: 'WORKING', count: 2 })
     render(<CarrierSyncBadge />)
-    expect(await screen.findByText('2 a caminho')).toBeTruthy()
+    expect(await screen.findByText('2 on the way')).toBeTruthy()
     expect(screen.queryByRole('button')).toBeNull()
   })
 
@@ -65,7 +65,7 @@ describe('CarrierSyncBadge', () => {
   it('offers the action only when something waits on the agent', async () => {
     answerWith({ kind: 'NEEDS_YOU', count: 1 })
     render(<CarrierSyncBadge />)
-    expect(await screen.findByRole('button', { name: 'Precisa de você' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Needs you' })).toBeTruthy()
   })
 
   // A badge that cannot read its state renders nothing rather than guessing.
@@ -99,7 +99,7 @@ describe('CarrierSyncBadge', () => {
   it('refetches when the route changes, not on a timer', async () => {
     const first = answerWith({ kind: 'NEEDS_YOU', count: 1 })
     const { rerender } = render(<CarrierSyncBadge />)
-    expect(await screen.findByRole('button', { name: 'Precisa de você' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Needs you' })).toBeTruthy()
     expect(first.fetchMock).toHaveBeenCalledTimes(1)
 
     // Sitting still on the same route must not fire a second request.
@@ -111,7 +111,7 @@ describe('CarrierSyncBadge', () => {
     mocks.pathname = '/agent/integrations/national-life'
     rerender(<CarrierSyncBadge />)
 
-    expect(await screen.findByText('Em dia')).toBeTruthy()
+    expect(await screen.findByText('Up to date')).toBeTruthy()
     expect(second.fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -140,7 +140,7 @@ describe('CarrierSyncBadge', () => {
 
     // The newer route's request answers first.
     resolvers[1]({ state: { kind: 'IN_SYNC' } })
-    expect(await screen.findByText('Em dia')).toBeTruthy()
+    expect(await screen.findByText('Up to date')).toBeTruthy()
 
     // The stale request for the route the agent already left answers late.
     // Wrapped in `act` and awaited so a `setState` from the dangling `.then`
@@ -154,7 +154,7 @@ describe('CarrierSyncBadge', () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByText('Em dia')).toBeTruthy()
+    expect(screen.getByText('Up to date')).toBeTruthy()
     expect(screen.queryByRole('button')).toBeNull()
   })
 })

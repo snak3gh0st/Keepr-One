@@ -16,5 +16,5 @@
 /// sent from shifting under a non-UTC server clock. The two fields need
 /// different treatment because they are not the same kind of value.
 export function formatCarrierInstant(value: Date): string {
-  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' }).format(value)
+  return new Intl.DateTimeFormat('en-US', { dateStyle: 'short' }).format(value)
 }

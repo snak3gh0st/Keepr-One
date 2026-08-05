@@ -116,7 +116,7 @@ describe('Shell achievement band', () => {
     expect(band).toHaveAttribute('data-achievement-tone', 'blue')
     expect(screen.getByText('Agency Vice President')).toBeInTheDocument()
     expect(screen.getAllByText('Apólices')).not.toHaveLength(0)
-    expect(await screen.findByText('Em dia')).toBeInTheDocument()
+    expect(await screen.findByText('Up to date')).toBeInTheDocument()
   })
 
   it('keeps pre-jacket ranks in the neutral shell', async () => {
@@ -138,7 +138,7 @@ describe('Shell achievement band', () => {
     expect(container.querySelector('[data-achievement-tone]')).toBeNull()
     expect(screen.queryByText('Regional Leader')).not.toBeInTheDocument()
     expect(screen.getAllByText('Hoje')).not.toHaveLength(0)
-    expect(await screen.findByText('Em dia')).toBeInTheDocument()
+    expect(await screen.findByText('Up to date')).toBeInTheDocument()
   })
 
   it('persists a local preview achievement after the Journey shell unmounts', async () => {
@@ -196,7 +196,7 @@ describe('Shell achievement band', () => {
 
     expect(screen.queryByLabelText('Conquista atual: Blue Jacket')).toBeNull()
     expect(screen.getByText('Painel administrativo')).toBeInTheDocument()
-    expect(screen.queryByText('Em dia')).toBeNull()
+    expect(screen.queryByText('Up to date')).toBeNull()
     expect(fetch).not.toHaveBeenCalled()
   })
 })
