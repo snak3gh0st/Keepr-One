@@ -44,10 +44,25 @@ export async function signCanonicalMessage(key: CryptoKey, message: string): Pro
 
 export class SignedRequestError extends Error {
   constructor(
-    readonly code: 'DEVICE_KEY_UNAVAILABLE' | 'DEVICE_REQUEST_REJECTED' | 'DEVICE_REQUEST_FAILED' | 'IDEMPOTENCY_CONFLICT' | 'PATH_NOT_ALLOWED',
+    readonly code: 'DEVICE_KEY_UNAVAILABLE' | 'DEVICE_REVOKED' | 'DEVICE_REQUEST_REJECTED' | 'DEVICE_REQUEST_FAILED' | 'IDEMPOTENCY_CONFLICT' | 'PATH_NOT_ALLOWED',
   ) {
     super(code)
   }
+}
+
+/// Um 401 sozinho não prova nada sobre o pareamento: o servidor devolve o mesmo
+/// status para relógio fora da janela da assinatura e para soluço de banco no
+/// registro de replay. Só a afirmação explícita de que o dispositivo não existe
+/// mais autoriza o chamador a apagar a chave privada — sem isso, um desvio de
+/// horário, que persiste depois de reparear, viraria um laço.
+export function classifyFailedResponse(
+  status: number,
+  headers: Pick<Headers, 'get'>,
+): 'DEVICE_REVOKED' | 'DEVICE_REQUEST_REJECTED' | 'DEVICE_REQUEST_FAILED' {
+  if (status !== 401) return 'DEVICE_REQUEST_FAILED'
+  return headers.get('x-fyntra-device-error') === 'DEVICE_REVOKED'
+    ? 'DEVICE_REVOKED'
+    : 'DEVICE_REQUEST_REJECTED'
 }
 
 export async function signedJsonRequest<T>(input: {
@@ -96,9 +111,7 @@ export async function signedJsonRequest<T>(input: {
   })
   if (response.status === 409) throw new SignedRequestError('IDEMPOTENCY_CONFLICT')
   if (!response.ok) {
-    throw new SignedRequestError(
-      response.status === 401 ? 'DEVICE_REQUEST_REJECTED' : 'DEVICE_REQUEST_FAILED',
-    )
+    throw new SignedRequestError(classifyFailedResponse(response.status, response.headers))
   }
   if (response.status === 204) return undefined as T
   return (await response.json()) as T

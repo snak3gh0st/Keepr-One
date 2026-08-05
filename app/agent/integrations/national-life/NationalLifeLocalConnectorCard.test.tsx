@@ -216,7 +216,7 @@ describe('NationalLifeLocalConnectorCard', () => {
         callback({
           ok: true,
           device: { status: 'UNPAIRED' },
-          sync: { status: 'ERROR', errorCode: 'DEVICE_REQUEST_REJECTED' },
+          sync: { status: 'ERROR', errorCode: 'DEVICE_REVOKED' },
         })
         return
       }
@@ -312,8 +312,12 @@ describe('NationalLifeLocalConnectorCard', () => {
       />,
     )
 
-    await screen.findByRole('status')
-    await waitFor(() => expect(document.body.textContent).not.toContain('SOME_INTERNAL_CODE'))
+    // A asserção negativa sozinha passa num DOM vazio. Primeiro provamos que a
+    // mensagem de falha realmente apareceu; só então "o código não aparece" diz
+    // alguma coisa.
+    const status = await screen.findByRole('status')
+    await waitFor(() => expect(status).toHaveTextContent('Your sync stopped'))
+    expect(document.body.textContent).not.toContain('SOME_INTERNAL_CODE')
   })
 
   it('keeps saying it is working while a single large stage uploads batch after batch', async () => {
@@ -349,6 +353,96 @@ describe('NationalLifeLocalConnectorCard', () => {
     await vi.advanceTimersByTimeAsync(400_000)
 
     expect(screen.getByRole('status')).toHaveTextContent('Syncing your National Life data')
+    vi.useRealTimers()
+  })
+
+  it('softens the wording when nothing moves, and never claims a failure', async () => {
+    // O sync fica parado de verdade. O watchdog não tem como saber se quebrou,
+    // então ele não afirma que quebrou — e continua olhando, mais devagar, para
+    // que um run que termine com o agente longe ainda seja visto.
+    vi.useFakeTimers()
+    let polls = 0
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        polls += 1
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: { status: 'UPLOADING', stageIndex: 0, uploads: 1 },
+        })
+        return
+      }
+      callback({ ok: true })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    screen.getByRole('button', { name: 'Connect National Life' }).click()
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(screen.getByRole('status')).toHaveTextContent('Still syncing')
+    expect(screen.getByRole('status')).not.toHaveTextContent('stopped')
+
+    // Continua consultando: o run que termina depois ainda vira sucesso.
+    // Continua consultando em vez de sair do laço: um run que termina com o
+    // agente longe da tela ainda precisa ser visto. (A virada para sucesso em si
+    // já é coberta pelo teste de conclusão.)
+    const before = polls
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(polls).toBeGreaterThan(before)
+    vi.useRealTimers()
+  })
+
+  it('does not freeze the card when the recheck itself fails', async () => {
+    // 'syncing' nao e um estado recuperavel: uma rejeicao nao tratada no
+    // recheck desabilitaria o botao principal e esconderia o de desconectar,
+    // deixando o agente sem saida nenhuma.
+    vi.useFakeTimers()
+    let broken = false
+    installChromeMock((message, callback) => {
+      if (broken) {
+        callback()
+        return
+      }
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: { status: 'UPLOADING', stageIndex: 0, uploads: 1 },
+        })
+        return
+      }
+      callback({ ok: true })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    screen.getByRole('button', { name: 'Connect National Life' }).click()
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    const recheck = screen.getByRole('button', { name: 'Check again' })
+    expect(recheck).toBeEnabled()
+    broken = true
+    recheck.click()
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    // Sobrou saida: o botao principal continua clicavel.
+    expect(screen.getAllByRole('button')[0]).toBeEnabled()
+    expect(screen.getByRole('status')).not.toHaveTextContent('Syncing your National Life data')
     vi.useRealTimers()
   })
 })

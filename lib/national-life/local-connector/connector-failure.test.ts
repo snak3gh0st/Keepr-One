@@ -5,7 +5,9 @@ import {
 } from './connector-failure'
 
 const EVERY_CODE = [
+  'DEVICE_REVOKED',
   'DEVICE_REQUEST_REJECTED',
+  'DISCONNECT_FAILED',
   'DEVICE_KEY_UNAVAILABLE',
   'PAIRING_REJECTED',
   'UNKNOWN_CAPABILITY',
@@ -46,12 +48,25 @@ describe('connectorFailure', () => {
   })
 
   it('sends a revoked device to reconnect rather than to a retry that cannot work', () => {
-    const failure = connectorFailure('DEVICE_REQUEST_REJECTED')
+    const failure = connectorFailure('DEVICE_REVOKED')
     expect(failure.action).toBe('reconnect')
     expect(failure.actionLabel).toMatch(/reconnect/i)
-    expect(connectorFailureRequiresReconnect('DEVICE_REQUEST_REJECTED')).toBe(true)
+    expect(connectorFailureRequiresReconnect('DEVICE_REVOKED')).toBe(true)
     expect(connectorFailureRequiresReconnect('PORTAL_REQUEST_FAILED')).toBe(false)
     expect(connectorFailureRequiresReconnect(null)).toBe(false)
+  })
+
+  it('does not call a plain rejected request a revoked device', () => {
+    // 401 cobre relógio fora da janela e soluço de banco. Tratar isso como
+    // pareamento morto manda o agente reconectar para cair no mesmo 401.
+    expect(connectorFailureRequiresReconnect('DEVICE_REQUEST_REJECTED')).toBe(false)
+  })
+
+  it('gives a failed disconnect its own way out, not a button that syncs', () => {
+    const failure = connectorFailure('DISCONNECT_FAILED')
+    expect(failure.action).toBe('disconnect')
+    expect(failure.actionLabel).toMatch(/disconnect/i)
+    expect(failure.message).not.toMatch(/sync stopped/i)
   })
 
   it('tells an out-of-date extension to update, and says so plainly', () => {
@@ -70,7 +85,7 @@ describe('connectorFailure', () => {
     expect(connectorFailure('WHATEVER_COMES_NEXT').action).toBe('support')
     const distinct = new Set(
       [
-        'DEVICE_REQUEST_REJECTED',
+        'DEVICE_REVOKED',
         'UNKNOWN_CAPABILITY',
         'PORTAL_REQUEST_FAILED',
         'WHATEVER_COMES_NEXT',

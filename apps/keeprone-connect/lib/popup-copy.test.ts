@@ -27,7 +27,7 @@ describe('popupStatusText', () => {
   it('explains a revoked device instead of asking for a plain reconnect', () => {
     const text = popupStatusText(unpaired, {
       status: 'ERROR',
-      errorCode: 'DEVICE_REQUEST_REJECTED',
+      errorCode: 'DEVICE_REVOKED',
     })
     expect(text).toMatch(/no longer linked/i)
   })
@@ -52,7 +52,7 @@ describe('popupCanRetry', () => {
   })
 
   it('hides the retry when retrying cannot possibly work', () => {
-    expect(popupCanRetry(unpaired, { status: 'ERROR', errorCode: 'DEVICE_REQUEST_REJECTED' })).toBe(
+    expect(popupCanRetry(unpaired, { status: 'ERROR', errorCode: 'DEVICE_REVOKED' })).toBe(
       false,
     )
     expect(popupCanRetry(ready, { status: 'ERROR', errorCode: 'UNKNOWN_CAPABILITY' })).toBe(false)

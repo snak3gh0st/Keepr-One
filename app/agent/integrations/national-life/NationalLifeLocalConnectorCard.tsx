@@ -5,8 +5,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/Button'
 import {
+  DISCONNECT_FAILED,
   connectorFailure,
-  connectorFailureRequiresReconnect,
 } from '@/lib/national-life/local-connector/connector-failure'
 
 type ConnectorResponse = {
@@ -121,11 +121,12 @@ const pilotStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
     'Load the unpacked extension at chrome://extensions (developer mode), then click again.',
 }
 
-/// Quantas rodadas sem qualquer sinal de vida antes de parar de acompanhar. O
+/// Quantas rodadas sem qualquer sinal de vida antes de suavizar a frase. O
 /// relógio zera a cada progresso, então uma grade grande subindo lote a lote
 /// nunca chega aqui — e mesmo chegando, o que se diz é "ainda rodando", não
-/// "falhou": o watchdog não tem como saber que falhou.
-const STALL_LIMIT = 180
+/// "falhou": o watchdog não tem como saber que falhou. Passado o limite, a
+/// consulta fica mais espaçada, mas não para.
+const STALL_LIMIT = 35
 
 /// O que prova que o run andou desde a última consulta. `uploads` é o único
 /// campo que se move dentro de uma única grade grande.
@@ -187,7 +188,7 @@ export function NationalLifeLocalConnectorCard({
     let idle = 0
     for (;;) {
       if (token !== watchAbort.current) return
-      await sleep(idle === 0 && signature === '' ? 750 : 1_000)
+      await sleep(signature === '' ? 750 : idle >= STALL_LIMIT ? 5_000 : 1_000)
       if (token !== watchAbort.current) return
       const status = await sendConnectorMessage(extensionId, { type: 'GET_CONNECTOR_STATUS' })
       const syncStatus = status.sync?.status
@@ -214,13 +215,10 @@ export function NationalLifeLocalConnectorCard({
         continue
       }
       idle += 1
-      // Parar de acompanhar não é o mesmo que ter falhado: o run segue no
-      // navegador. Inventar um erro aqui era acusar de quebrado um sync grande
-      // que só estava demorando.
-      if (idle >= STALL_LIMIT) {
-        setState('slow')
-        return
-      }
+      // Suavizar a frase, nunca inventar uma falha — e continuar olhando. Sair
+      // do laço deixaria um run que termina enquanto o agente está longe preso
+      // em "sincronizando" para sempre.
+      if (idle >= STALL_LIMIT) setState('slow')
     }
   }
 
@@ -320,10 +318,23 @@ export function NationalLifeLocalConnectorCard({
       promptInstall()
       return
     }
+    // O botão promete desconectar; disparar um sync aqui seria fazer o oposto
+    // do que o agente pediu.
+    if (failure?.action === 'disconnect') {
+      await handleDisconnect()
+      return
+    }
     // "Check again" tem de checar. Reenviar START faria a extensão renavegar a
     // aba e interromper justamente o sync que acabamos de dizer que segue vivo.
+    // O try é obrigatório: watchSyncProgress deixa o cartão em 'syncing', que
+    // não é recuperável, então uma rejeição não tratada aqui congelaria os dois
+    // botões e não sobraria saída nenhuma.
     if (state === 'slow') {
-      void watchSyncProgress()
+      try {
+        await watchSyncProgress()
+      } catch (error) {
+        fail(error instanceof Error ? error.message : null)
+      }
       return
     }
     beginAttempt('checking')
@@ -372,7 +383,7 @@ export function NationalLifeLocalConnectorCard({
       setState('idle')
       router.refresh()
     } catch {
-      fail('DISCONNECT_FAILED')
+      fail(DISCONNECT_FAILED)
     }
   }
 

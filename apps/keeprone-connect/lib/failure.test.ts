@@ -2,13 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { DEVICE_REVOKED, connectorFailure, revokesDevice } from './failure'
 
 describe('revokesDevice', () => {
-  it('treats a rejected signed request as a dead pairing', () => {
-    expect(revokesDevice('DEVICE_REQUEST_REJECTED')).toBe(true)
-    expect(revokesDevice('DEVICE_KEY_UNAVAILABLE')).toBe(true)
+  it('only destroys the local key on an explicit revocation', () => {
     expect(revokesDevice(DEVICE_REVOKED)).toBe(true)
   })
 
-  it('leaves a pairing alone for failures the device can retry', () => {
+  it('leaves the key alone for a 401 that is not a revocation', () => {
+    // O mesmo 401 cobre relógio fora da janela da assinatura, que persiste
+    // depois de reparear: apagar a chave aqui é recriar o laço infinito.
+    expect(revokesDevice('DEVICE_REQUEST_REJECTED')).toBe(false)
+    expect(revokesDevice('DEVICE_KEY_UNAVAILABLE')).toBe(false)
     expect(revokesDevice('DEVICE_REQUEST_FAILED')).toBe(false)
     expect(revokesDevice('BRIDGE_UNAVAILABLE')).toBe(false)
     expect(revokesDevice('PORTAL_REQUEST_FAILED')).toBe(false)
@@ -18,7 +20,7 @@ describe('revokesDevice', () => {
 
 describe('connectorFailure', () => {
   it('tells a revoked device to reconnect', () => {
-    const failure = connectorFailure('DEVICE_REQUEST_REJECTED')
+    const failure = connectorFailure('DEVICE_REVOKED')
     expect(failure.action).toBe('reconnect')
     expect(failure.message).toMatch(/reconnect/i)
   })
@@ -47,6 +49,7 @@ describe('connectorFailure', () => {
 
   it('never leaks the internal code into the message', () => {
     const codes = [
+      'DEVICE_REVOKED',
       'DEVICE_REQUEST_REJECTED',
       'UNKNOWN_CAPABILITY',
       'PORTAL_REQUEST_FAILED',

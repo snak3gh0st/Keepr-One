@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { base64Url, canonicalMessage, sha256, signCanonicalMessage } from './signed-client'
+import {
+  base64Url,
+  canonicalMessage,
+  classifyFailedResponse,
+  sha256,
+  signCanonicalMessage,
+} from './signed-client'
 
 function fromBase64Url(value: string): ArrayBuffer {
   const base64 = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=')
@@ -40,5 +46,28 @@ describe('signed device requests', () => {
         new TextEncoder().encode(message),
       ),
     ).resolves.toBe(true)
+  })
+})
+
+describe('classifyFailedResponse', () => {
+  it('calls it a revocation only when the server says so explicitly', () => {
+    expect(
+      classifyFailedResponse(401, new Headers({ 'x-fyntra-device-error': 'DEVICE_REVOKED' })),
+    ).toBe('DEVICE_REVOKED')
+  })
+
+  it('does not invent a revocation from a bare 401', () => {
+    // Pode ser só relógio adiantado. Chamar isso de revogação faz o chamador
+    // apagar a chave de um dispositivo saudável — e o desvio sobrevive ao
+    // repareamento, então o laço volta.
+    expect(classifyFailedResponse(401, new Headers())).toBe('DEVICE_REQUEST_REJECTED')
+    expect(
+      classifyFailedResponse(401, new Headers({ 'x-fyntra-device-error': 'INVALID_DEVICE_SIGNATURE' })),
+    ).toBe('DEVICE_REQUEST_REJECTED')
+  })
+
+  it('leaves every other status as a plain failure', () => {
+    expect(classifyFailedResponse(500, new Headers())).toBe('DEVICE_REQUEST_FAILED')
+    expect(classifyFailedResponse(403, new Headers())).toBe('DEVICE_REQUEST_FAILED')
   })
 })

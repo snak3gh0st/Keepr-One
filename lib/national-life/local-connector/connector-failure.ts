@@ -10,7 +10,7 @@
 /// o texto é escrito duas vezes de propósito; o que precisa coincidir são as
 /// classes de falha.
 
-export type ConnectorFailureAction = 'reconnect' | 'update' | 'retry' | 'support'
+export type ConnectorFailureAction = 'reconnect' | 'update' | 'retry' | 'disconnect' | 'support'
 
 export type ConnectorFailure = {
   message: string
@@ -19,21 +19,24 @@ export type ConnectorFailure = {
   action: ConnectorFailureAction
 }
 
-const REVOKING_CODES: readonly string[] = [
+/// Estes três conjuntos têm de ser idênticos aos de
+/// `apps/keeprone-connect/lib/failure.ts`. Comentário recíproco não garante
+/// nada: quem garante é `connector-failure-parity.test.ts`, que importa os dois
+/// módulos e compara os conjuntos.
+export const RECONNECT_CODES: readonly string[] = [
   'DEVICE_REVOKED',
-  'DEVICE_REQUEST_REJECTED',
   'DEVICE_KEY_UNAVAILABLE',
   'PAIRING_REJECTED',
 ]
 
-const OUTDATED_CODES: readonly string[] = [
+export const OUTDATED_CODES: readonly string[] = [
   'UNKNOWN_CAPABILITY',
   'UNSAFE_NAVIGATE_PATH',
   'INVALID_RUN_RESPONSE',
   'PATH_NOT_ALLOWED',
 ]
 
-const PORTAL_CODES: readonly string[] = [
+export const PORTAL_CODES: readonly string[] = [
   'PORTAL_REQUEST_FAILED',
   'TEMPLATE_UNAVAILABLE',
   'INVALID_PORTAL_RESPONSE',
@@ -42,8 +45,13 @@ const PORTAL_CODES: readonly string[] = [
 ]
 
 export function connectorFailureRequiresReconnect(code: string | null | undefined): boolean {
-  return typeof code === 'string' && REVOKING_CODES.includes(code)
+  return typeof code === 'string' && RECONNECT_CODES.includes(code)
 }
+
+/// Desconectar não é sincronizar. Sem classe própria, a falha caía no texto
+/// genérico de sync e o botão passava a oferecer "Try again", que dispararia um
+/// sync — o oposto do que o agente tinha pedido.
+export const DISCONNECT_FAILED = 'DISCONNECT_FAILED'
 
 export function connectorFailure(code: string | null | undefined): ConnectorFailure {
   if (connectorFailureRequiresReconnect(code)) {
@@ -52,6 +60,14 @@ export function connectorFailure(code: string | null | undefined): ConnectorFail
       actionLabel: 'Reconnect this computer',
       message:
         'This computer is no longer connected to your Keepr One account. Reconnect it to sync again — you will sign in to National Life as usual.',
+    }
+  }
+  if (code === DISCONNECT_FAILED) {
+    return {
+      action: 'disconnect',
+      actionLabel: 'Try disconnecting again',
+      message:
+        'We could not disconnect this computer just now. Nothing changed — try again, and your data stays exactly as it is.',
     }
   }
   if (typeof code === 'string' && OUTDATED_CODES.includes(code)) {

@@ -142,9 +142,14 @@ async function forgetRevokedDevice() {
   tabQueues.clear()
 }
 
-/// Único caminho de falha do sync. Grava o motivo, tenta avisar o servidor
-/// enquanto o dispositivo ainda vale, e só então derruba um pareamento morto —
-/// é o que troca "tentar de novo para sempre" por "reconectar".
+/// Único caminho de falha do sync. Grava o motivo, tenta avisar o servidor e só
+/// então derruba um pareamento que o servidor declarou morto — é o que troca
+/// "tentar de novo para sempre" por "reconectar".
+///
+/// Na revogação, o aviso ao servidor é uma requisição assinada pela mesma chave
+/// que acabou de ser recusada: ele não chega, e não há como fazer chegar daqui.
+/// Quem encerra o run naquele caso é o próprio servidor, em
+/// `revokeLocalConnectorDevice`, que já derruba os runs abertos do dispositivo.
 async function failSync(code: string) {
   await writeSyncState({ ...(await readSyncState()), status: 'ERROR', errorCode: code })
   await reportRunFailure(code)

@@ -62,6 +62,18 @@ describe('local connector runs route', () => {
     expect(response.status).toBe(401)
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(await response.json()).toEqual({ error: 'DEVICE_REQUEST_REJECTED' })
+    // Sem o cabeçalho: um 401 comum não autoriza o dispositivo a se apagar. Ele
+    // cobre relógio fora da janela da assinatura, que persiste depois de
+    // reparear — apagar a chave por causa dele é um laço infinito.
+    expect(response.headers.get('x-fyntra-device-error')).toBe('INVALID_DEVICE_SIGNATURE')
+  })
+
+  it('states revocation explicitly so the device may forget its key', async () => {
+    mockVerify.mockRejectedValueOnce(new LocalConnectorSignatureError('DEVICE_REVOKED'))
+    const response = await POST(signedRequest())
+
+    expect(response.status).toBe(401)
+    expect(response.headers.get('x-fyntra-device-error')).toBe('DEVICE_REVOKED')
   })
 
   it('does not report a server failure as a rejected device', async () => {

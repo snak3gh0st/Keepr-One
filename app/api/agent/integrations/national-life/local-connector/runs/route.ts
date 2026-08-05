@@ -31,9 +31,13 @@ export async function POST(request: Request) {
     return Response.json(run, { status: 201, headers: NO_STORE })
   } catch (error) {
     if (error instanceof LocalConnectorSignatureError) {
+      // O cabeçalho é o que deixa o dispositivo distinguir "não te conheço mais"
+      // de "esta requisição não passou". Só o primeiro autoriza apagar a chave.
       return Response.json(
+        // O corpo mantém o código público estável; quem carrega a distinção é o
+        // cabeçalho, para não mudar o contrato já consumido.
         { error: 'DEVICE_REQUEST_REJECTED' },
-        { status: 401, headers: NO_STORE },
+        { status: 401, headers: { ...NO_STORE, 'x-fyntra-device-error': error.code } },
       )
     }
     if (error instanceof LocalConnectorRequestError) {

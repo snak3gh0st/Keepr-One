@@ -9,27 +9,32 @@
 /// diferentes (popup de uma linha vs. cartão com botão), por isso o texto é
 /// escrito duas vezes de propósito; as classes de falha é que são as mesmas.
 
-export type ConnectorFailureAction = 'reconnect' | 'signin' | 'retry' | 'update' | 'support'
+export type ConnectorFailureAction = 'reconnect' | 'retry' | 'update' | 'support'
 
 export type ConnectorFailure = {
   message: string
   action: ConnectorFailureAction
 }
 
-/// Marca local de "o servidor não reconhece mais este dispositivo". Só existe
-/// para que o motivo sobreviva à limpeza do pareamento.
+/// Afirmação explícita do servidor: esta identidade não existe mais. É a única
+/// coisa que autoriza apagar a chave privada. Um 401 genérico não serve — ele
+/// cobre relógio fora da janela, que persiste depois de reparear e transformaria
+/// a limpeza num laço.
 export const DEVICE_REVOKED = 'DEVICE_REVOKED'
 
-/// Credenciais mortas. Repetir a mesma requisição assinada não pode dar certo,
-/// então o pareamento local tem de sair do caminho e dar lugar a reconectar.
-const REVOKING_CODES: readonly string[] = [
+export const RECONNECT_CODES: readonly string[] = [
   DEVICE_REVOKED,
-  'DEVICE_REQUEST_REJECTED',
+  // Sem chave privada local não há como assinar nada, nunca. Reconectar é a
+  // única saída — mas não há chave para apagar.
   'DEVICE_KEY_UNAVAILABLE',
+  'PAIRING_REJECTED',
 ]
 
+/// Subconjunto de RECONNECT_CODES que autoriza destruir o material local.
+const REVOKING_CODES: readonly string[] = [DEVICE_REVOKED]
+
 /// O servidor mandou um plano que esta versão da extensão não sabe executar.
-const OUTDATED_CODES: readonly string[] = [
+export const OUTDATED_CODES: readonly string[] = [
   'UNKNOWN_CAPABILITY',
   'UNSAFE_NAVIGATE_PATH',
   'INVALID_RUN_RESPONSE',
@@ -37,7 +42,7 @@ const OUTDATED_CODES: readonly string[] = [
 ]
 
 /// O portal (ou a ponte com ele) não respondeu como esperado. Costuma passar.
-const PORTAL_CODES: readonly string[] = [
+export const PORTAL_CODES: readonly string[] = [
   'PORTAL_REQUEST_FAILED',
   'TEMPLATE_UNAVAILABLE',
   'INVALID_PORTAL_RESPONSE',
@@ -50,7 +55,7 @@ export function revokesDevice(code: string | undefined | null): boolean {
 }
 
 export function connectorFailure(code: string | undefined | null): ConnectorFailure {
-  if (revokesDevice(code)) {
+  if (typeof code === 'string' && RECONNECT_CODES.includes(code)) {
     return {
       action: 'reconnect',
       message:
