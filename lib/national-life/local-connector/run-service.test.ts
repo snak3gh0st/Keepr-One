@@ -543,6 +543,80 @@ describe('local connector runs', () => {
     )
   })
 
+  it('leaves a single-grid run open when its only receipt is truncated', async () => {
+    // Incomplete data must not finalize a stage. The extension sets truncated when the
+    // carrier total passes its fetch ceiling and still uploads what it read; the run
+    // stays RUNNING so the missing rows are not mistaken for a finished grid. This path
+    // was unreachable while the server's recordsTotal cap sat below the extension's
+    // ceiling — the envelope 400'd before a truncated receipt could ever be written.
+    const runUpdate = vi.fn().mockResolvedValue({})
+    const receiptFindMany = vi.fn().mockResolvedValue([])
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'run-1', plannedGridKeys: ['NEW_BUSINESS'] }),
+        update: runUpdate,
+      },
+      nationalLifeConnectorStageReceipt: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 'receipt-truncated',
+          deviceId: 'device-1',
+          runId: 'run-1',
+          gridKey: 'NEW_BUSINESS',
+          sequence: 0,
+          truncated: true,
+          contentHash: 'd'.repeat(64),
+          recordCount: 1,
+          idempotencyKey: 'idem-truncated-001',
+          createdAt: now,
+          updatedAt: now,
+        }),
+        findMany: receiptFindMany,
+      },
+      nationalLifeCaseSnapshot: { upsert: vi.fn().mockResolvedValue({}) },
+      nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: vi.fn() },
+    }
+    const db = {
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+    } as never
+
+    await ingestLocalConnectorStage(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      gridKey: 'NEW_BUSINESS',
+      idempotencyKey: 'idem-truncated-001',
+      contentHash: 'd'.repeat(64),
+      now,
+      envelope: {
+        schemaVersion: 2,
+        runId: 'run-1',
+        gridKey: 'NEW_BUSINESS',
+        sequence: 0,
+        observedAt: now.toISOString(),
+        recordsTotal: 200_000,
+        truncated: true,
+        records: [{ PolicyNo: 'NL-999' }],
+      },
+    })
+
+    // Only non-truncated receipts count towards finalizing a grid.
+    expect(receiptFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { runId: 'run-1', truncated: false } }),
+    )
+    expect(runUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          state: 'RUNNING',
+          completedStages: 0,
+          currentGridKey: 'NEW_BUSINESS',
+          completedAt: null,
+        }),
+      }),
+    )
+  })
+
   it('completes only after final receipts for both grids', async () => {
     const runUpdate = vi.fn().mockResolvedValue({})
     const receipt = {

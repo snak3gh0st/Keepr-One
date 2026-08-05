@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   LOCAL_CONNECTOR_MAX_ROW_BYTES,
+  LOCAL_CONNECTOR_MAX_RECORDS_TOTAL,
   localConnectorRawStageEnvelopeSchema,
 } from './contracts'
 
@@ -63,6 +64,34 @@ describe('local connector raw stage envelope', () => {
       localConnectorRawStageEnvelopeSchema.parse({
         schemaVersion: 2, runId: 'run_1', gridKey: 'NOT_A_GRID', sequence: 0,
         observedAt: '2026-08-04T00:00:00.000Z', recordsTotal: 0, truncated: false, records: [],
+      }),
+    ).toThrow()
+  })
+
+  it('accepts the truncated envelope the extension emits at its fetch ceiling', () => {
+    // The extension clamps recordsTotal to MAX_PORTAL_RECORDS and sets truncated when
+    // the carrier total passes it. If this cap were lower, that envelope would 400 and
+    // an oversized grid would fail the run instead of leaving it open.
+    expect(LOCAL_CONNECTOR_MAX_RECORDS_TOTAL).toBe(200_000)
+    const envelope = localConnectorRawStageEnvelopeSchema.parse({
+      schemaVersion: 2, runId: 'run_1', gridKey: 'NEW_BUSINESS', sequence: 0,
+      observedAt: '2026-08-04T00:00:00.000Z',
+      recordsTotal: LOCAL_CONNECTOR_MAX_RECORDS_TOTAL,
+      truncated: true,
+      records: [{ PolicyNo: 'X1' }],
+    })
+    expect(envelope.truncated).toBe(true)
+    expect(envelope.recordsTotal).toBe(200_000)
+  })
+
+  it('rejects recordsTotal above the shared ceiling', () => {
+    expect(() =>
+      localConnectorRawStageEnvelopeSchema.parse({
+        schemaVersion: 2, runId: 'run_1', gridKey: 'NEW_BUSINESS', sequence: 0,
+        observedAt: '2026-08-04T00:00:00.000Z',
+        recordsTotal: LOCAL_CONNECTOR_MAX_RECORDS_TOTAL + 1,
+        truncated: true,
+        records: [{ PolicyNo: 'X1' }],
       }),
     ).toThrow()
   })

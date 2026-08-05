@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '@/lib/national-life/portal-grid-client'
 import { isSafeNavigatePath, planReadGridStages } from './capabilities'
 
@@ -48,6 +48,44 @@ describe('planReadGridStages', () => {
     const plan = planReadGridStages(keys)
     expect(plan).toHaveLength(keys.length)
     expect(plan.every((stage) => isSafeNavigatePath(stage.params.navigatePath))).toBe(true)
+  })
+
+  it('collapses a repeated grid key into a single stage', () => {
+    // A repeated key would give two stages the same receipt coordinates
+    // (runId, gridKey, sequence), so the second stage's chunks collide with the first's.
+    const plan = planReadGridStages(['NEW_BUSINESS', 'INFORCE_CLIENTS', 'NEW_BUSINESS'])
+    expect(plan.map((stage) => stage.params.gridKey)).toEqual([
+      'NEW_BUSINESS',
+      'INFORCE_CLIENTS',
+    ])
+  })
+
+  it('refuses a plan in which two grids share a navigate path', async () => {
+    // Unreachable through today's catalogue (every path is distinct), so the check is
+    // exercised against a catalogue that points two keys at one page. The device
+    // advances stages by navigating, so an unchanged path means no new document and the
+    // previous grid's rows would be uploaded under the new grid's key.
+    vi.resetModules()
+    vi.doMock('@/lib/national-life/portal-grid-client', () => ({
+      NATIONAL_LIFE_GRIDS: { A_GRID: '/agent/shared', B_GRID: '/agent/shared' },
+    }))
+    try {
+      const { planReadGridStages: planWithCollidingCatalogue } = await import('./capabilities')
+      expect(() =>
+        planWithCollidingCatalogue([
+          'A_GRID' as NationalLifeGridKey,
+          'B_GRID' as NationalLifeGridKey,
+        ]),
+      ).toThrow(/Duplicate navigate path/)
+    } finally {
+      vi.doUnmock('@/lib/national-life/portal-grid-client')
+      vi.resetModules()
+    }
+  })
+
+  it('keeps every catalogue path distinct', () => {
+    const paths = Object.values(NATIONAL_LIFE_GRIDS)
+    expect(new Set(paths).size).toBe(paths.length)
   })
 
   it('rejects a grid key that is not an own property of the catalogue', () => {

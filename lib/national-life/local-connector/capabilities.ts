@@ -33,10 +33,24 @@ export function isSafeNavigatePath(path: string): boolean {
   return /^[A-Za-z0-9/_-]+$/.test(path)
 }
 
+/// Two stages must never share a `navigatePath`, and the plan must not repeat a grid.
+///
+/// A repeated grid key would give two stages the same stage-receipt coordinates
+/// (`runId`, `gridKey`, `sequence`), so the second stage's chunks collide with the
+/// first's. And two stages on the same path are worse: the device advances stages with
+/// a tab navigation, so an unchanged path means no new document, and the extension's
+/// MAIN-world script keeps the DataTable template it captured for the previous stage —
+/// it would page the previous grid and upload those rows under the new grid's key.
+/// Silent mislabeling, not an error.
+///
+/// Deduping the keys handles the reachable case; the path check is the backstop for a
+/// catalogue edit that points two distinct keys at one page. Both fail here, while
+/// planning, rather than on a device mid-run.
 export function planReadGridStages(
   gridKeys: readonly NationalLifeGridKey[],
 ): LocalConnectorStagePlan[] {
-  return gridKeys.map((gridKey) => {
+  const seenPaths = new Map<string, NationalLifeGridKey>()
+  return [...new Set(gridKeys)].map((gridKey) => {
     // Types are gone at runtime: a key that isn't an own property of the catalogue
     // (an unknown grid, or an inherited/prototype name like `toString`) must fail
     // loudly here rather than resolve to `undefined` or a function and blow up
@@ -48,6 +62,11 @@ export function planReadGridStages(
     if (!isSafeNavigatePath(navigatePath)) {
       throw new Error(`Unsafe navigate path for grid ${gridKey}`)
     }
+    const owner = seenPaths.get(navigatePath)
+    if (owner) {
+      throw new Error(`Duplicate navigate path for grids ${owner} and ${gridKey}`)
+    }
+    seenPaths.set(navigatePath, gridKey)
     return { capability: 'READ_GRID', params: { gridKey, navigatePath } }
   })
 }

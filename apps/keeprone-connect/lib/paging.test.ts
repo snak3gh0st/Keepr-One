@@ -17,13 +17,25 @@ describe('portal paging helpers', () => {
     })
   })
 
-  it('pages at the raw-row size cap', () => {
-    expect(PAGE_SIZE).toBe(200)
+  it('never asks the carrier for more rows than one envelope may carry', () => {
+    // 200 is the server's per-envelope record cap (LOCAL_CONNECTOR_MAX_RECORDS). A page
+    // request above it would produce chunks the ingest endpoint rejects.
+    const template = new URLSearchParams({
+      objJsonModel: JSON.stringify({ start: 0, length: 25 }),
+    })
+    for (const requested of [PAGE_SIZE, 500, 10_000]) {
+      const body = new URLSearchParams(buildPageBody(template.toString(), 0, requested))
+      expect(JSON.parse(body.get('objJsonModel')!).length).toBeLessThanOrEqual(200)
+    }
+    const byDefault = new URLSearchParams(buildPageBody(template.toString(), 0))
+    expect(JSON.parse(byDefault.get('objJsonModel')!).length).toBe(200)
   })
 
-  it('marks only the page that is actually short as truncated', () => {
-    const page = parsePortalPage({ data: [{ PolicyNo: 'X1' }], recordsTotal: 500 })
-    expect(page.truncated).toBe(false)
+  it('does not truncate a grid that only the old ceiling would have clamped', () => {
+    // Above the previous 100_000 ceiling and below the current one: the whole total is
+    // reported and nothing is marked incomplete, so the server can finalize the stage.
+    const page = parsePortalPage({ data: [{ PolicyNo: 'X1' }], recordsTotal: 150_000 })
+    expect(page).toEqual({ rows: [{ PolicyNo: 'X1' }], recordsTotal: 150_000, truncated: false })
   })
 
   it('marks truncated when the carrier total exceeds what we will fetch', () => {

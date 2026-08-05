@@ -6,6 +6,13 @@ export const LOCAL_CONNECTOR_MAX_BODY_BYTES = 2 * 1024 * 1024
 /// Raw carrier rows are fatter than normalized ones. 200 rows against the 2 MiB body
 /// cap leaves headroom for the widest grid; the extension pages to match.
 export const LOCAL_CONNECTOR_MAX_RECORDS = 200
+/// Must match MAX_PORTAL_RECORDS in the extension's `lib/paging.ts`, which clamps
+/// `recordsTotal` to that ceiling before it ever reaches here. A lower cap on this
+/// side does not protect anything — it makes the very envelope the extension emits
+/// when a grid overflows (`recordsTotal` at the ceiling, `truncated: true`) fail with
+/// a 400, so a grid above the cap fails the run instead of ingesting what it got and
+/// leaving the run open. The truncated path only works if both ceilings agree.
+export const LOCAL_CONNECTOR_MAX_RECORDS_TOTAL = 200_000
 
 const identifier = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/)
 
@@ -50,7 +57,7 @@ export const localConnectorRawStageEnvelopeSchema = z
     ),
     sequence: z.number().int().min(0).max(10_000),
     observedAt: z.string().datetime({ offset: true }),
-    recordsTotal: z.number().int().min(0).max(100_000),
+    recordsTotal: z.number().int().min(0).max(LOCAL_CONNECTOR_MAX_RECORDS_TOTAL),
     truncated: z.boolean(),
     records: z.array(rawGridRowSchema).max(LOCAL_CONNECTOR_MAX_RECORDS),
   })
