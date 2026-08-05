@@ -3,7 +3,7 @@ import { parseStagePlan } from './capabilities'
 
 describe('parseStagePlan', () => {
   it('accepts a READ_GRID stage from the server', () => {
-    const plan = parseStagePlan([
+    const [stage] = parseStagePlan([
       {
         capability: 'READ_GRID',
         params: {
@@ -12,8 +12,8 @@ describe('parseStagePlan', () => {
         },
       },
     ])
-    expect(plan[0].params.gridKey).toBe('PAID_COMMISSIONS')
-    expect(plan[0].params.navigatePath).toBe(
+    expect(stage?.params.gridKey).toBe('PAID_COMMISSIONS')
+    expect(stage?.params.navigatePath).toBe(
       '/agent/compensation/commissions/paid-commissions',
     )
   })

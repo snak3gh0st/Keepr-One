@@ -76,7 +76,11 @@ function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-export function hasExactKeys(value: JsonObject, keys: readonly string[]): boolean {
+/// Takes `object`, not `JsonObject`: callers reach this after narrowing an
+/// `unknown` with `typeof value === 'object'`, which yields `object` and carries no
+/// index signature. The check only enumerates own keys, so the wider type costs
+/// nothing and spares every call site a cast that would erase the narrowing.
+export function hasExactKeys(value: object, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort()
   const expected = [...keys].sort()
   return actual.length === expected.length && actual.every((key, index) => key === expected[index])
