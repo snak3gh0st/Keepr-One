@@ -11,7 +11,10 @@ describe('local connector runs', () => {
   it('creates a local run without browser jobs and reuses an active run', async () => {
     const create = vi.fn().mockResolvedValue({ id: 'run-1' })
     const updateMany = vi.fn().mockResolvedValue({ count: 0 })
-    const findFirst = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'run-1' })
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'run-1', plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'] })
     const db = {
       nationalLifeSyncRun: { create, updateMany, findFirst },
     } as never
@@ -80,7 +83,10 @@ describe('local connector runs', () => {
     const caseUpsert = vi.fn().mockResolvedValue({})
     const tx = {
       nationalLifeSyncRun: {
-        findFirst: vi.fn().mockResolvedValue({ id: 'run_1', totalStages: 2 }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run_1',
+          plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        }),
         update: vi.fn().mockResolvedValue({}),
       },
       nationalLifeConnectorStageReceipt: {
@@ -135,7 +141,7 @@ describe('local connector runs', () => {
     const reportUpsert = vi.fn().mockResolvedValue({})
     const tx = {
       nationalLifeSyncRun: {
-        findFirst: vi.fn().mockResolvedValue({ id: 'run_1', totalStages: 1 }),
+        findFirst: vi.fn().mockResolvedValue({ id: 'run_1', plannedGridKeys: ['PAID_COMMISSIONS'] }),
         update: vi.fn().mockResolvedValue({}),
       },
       nationalLifeConnectorStageReceipt: {
@@ -188,7 +194,9 @@ describe('local connector runs', () => {
   it('rejects a grid that has no ingest destination', async () => {
     const tx = {
       nationalLifeSyncRun: {
-        findFirst: vi.fn().mockResolvedValue({ id: 'run_1', totalStages: 1 }),
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ id: 'run_1', plannedGridKeys: ['COMMISSIONS_OVERVIEW'] }),
         update: vi.fn().mockResolvedValue({}),
       },
       nationalLifeConnectorStageReceipt: {
@@ -228,6 +236,239 @@ describe('local connector runs', () => {
     expect(tx.nationalLifeConnectorStageReceipt.create).not.toHaveBeenCalled()
   })
 
+  it('rejects a stage for a grid the run never planned and does not complete it', async () => {
+    const runUpdate = vi.fn().mockResolvedValue({})
+    const caseUpsert = vi.fn().mockResolvedValue({})
+    const reportUpsert = vi.fn().mockResolvedValue({})
+    const tx = {
+      nationalLifeSyncRun: {
+        // A default run: it planned exactly NEW_BUSINESS and INFORCE_CLIENTS.
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run_1',
+          plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        }),
+        update: runUpdate,
+      },
+      nationalLifeConnectorStageReceipt: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      nationalLifeCaseSnapshot: { upsert: caseUpsert },
+      nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: reportUpsert },
+    }
+    const db = {
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+    } as never
+
+    // The device asks the URL and the envelope to agree on a grid of its own
+    // choosing. They agree — and it is still refused.
+    await expect(
+      ingestLocalConnectorStage(db, {
+        agentId: 'agent-1',
+        deviceId: 'device-1',
+        gridKey: 'PAID_COMMISSIONS',
+        idempotencyKey: 'nlc:run_1:PAID_COMMISSIONS:0',
+        contentHash: 'a'.repeat(64),
+        now,
+        envelope: {
+          schemaVersion: 2,
+          runId: 'run_1',
+          gridKey: 'PAID_COMMISSIONS',
+          sequence: 0,
+          observedAt: '2026-08-04T00:00:00.000Z',
+          recordsTotal: 1,
+          truncated: false,
+          records: [{ GlobalId: 'G1', PayDate: '2026-07-01' }],
+        },
+      }),
+    ).rejects.toThrow('GRID_NOT_PLANNED')
+
+    expect(reportUpsert).not.toHaveBeenCalled()
+    expect(tx.nationalLifeConnectorStageReceipt.create).not.toHaveBeenCalled()
+    expect(runUpdate).not.toHaveBeenCalled()
+  })
+
+  it('does not let unplanned grids close a run by count alone', async () => {
+    const runUpdate = vi.fn().mockResolvedValue({})
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run_1',
+          plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        }),
+        update: runUpdate,
+      },
+      nationalLifeConnectorStageReceipt: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 'receipt-5',
+          runId: 'run_1',
+          gridKey: 'NEW_BUSINESS',
+          sequence: 0,
+          contentHash: 'b'.repeat(64),
+          recordCount: 1,
+          writtenCount: 1,
+          createdAt: now,
+        }),
+        // Two finalized grids on the run — but only one of them was planned.
+        // A count-based check would read 2 >= 2 and close the run.
+        findMany: vi.fn().mockResolvedValue([
+          { gridKey: 'NEW_BUSINESS' },
+          { gridKey: 'PAID_COMMISSIONS' },
+        ]),
+      },
+      nationalLifeCaseSnapshot: { upsert: vi.fn().mockResolvedValue({}) },
+      nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: vi.fn() },
+    }
+    const db = {
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+    } as never
+
+    await ingestLocalConnectorStage(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      gridKey: 'NEW_BUSINESS',
+      idempotencyKey: 'nlc:run_1:NEW_BUSINESS:0',
+      contentHash: 'b'.repeat(64),
+      now,
+      envelope: {
+        schemaVersion: 2,
+        runId: 'run_1',
+        gridKey: 'NEW_BUSINESS',
+        sequence: 0,
+        observedAt: '2026-08-04T00:00:00.000Z',
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ PolicyNo: 'X1' }],
+      },
+    })
+
+    expect(runUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          state: 'RUNNING',
+          completedStages: 1,
+          completedAt: null,
+        }),
+      }),
+    )
+  })
+
+  it('reuses the existing run plan instead of the requested grids', async () => {
+    const create = vi.fn()
+    const db = {
+      nationalLifeSyncRun: {
+        create,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run-1',
+          plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        }),
+      },
+    } as never
+
+    const run = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: ['PAID_COMMISSIONS'] },
+    )
+
+    expect(run.duplicate).toBe(true)
+    expect(run.stages.map((stage) => stage.params.gridKey)).toEqual([
+      'NEW_BUSINESS',
+      'INFORCE_CLIENTS',
+    ])
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('treats a run with no persisted plan as the legacy default pair', async () => {
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst: vi.fn().mockResolvedValue({ id: 'run-legacy', plannedGridKeys: [] }),
+      },
+    } as never
+
+    const run = await startLocalConnectorRun(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      now,
+    })
+
+    expect(run.stages.map((stage) => stage.params.gridKey)).toEqual([
+      'NEW_BUSINESS',
+      'INFORCE_CLIENTS',
+    ])
+  })
+
+  it('records zero rows written when every row fails normalization', async () => {
+    const caseUpsert = vi.fn()
+    const receiptCreate = vi.fn().mockResolvedValue({
+      id: 'receipt-6',
+      runId: 'run_1',
+      gridKey: 'NEW_BUSINESS',
+      sequence: 0,
+      contentHash: 'c'.repeat(64),
+      recordCount: 2,
+      writtenCount: 0,
+      createdAt: now,
+    })
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run_1',
+          plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      nationalLifeConnectorStageReceipt: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: receiptCreate,
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      nationalLifeCaseSnapshot: { upsert: caseUpsert },
+      nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: vi.fn() },
+    }
+    const db = {
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+    } as never
+
+    // A selector drift on the extension: the rows arrive, but none carries the
+    // PolicyNo the mapper keys on, so every one is dropped.
+    const result = await ingestLocalConnectorStage(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      gridKey: 'NEW_BUSINESS',
+      idempotencyKey: 'nlc:run_1:NEW_BUSINESS:0',
+      contentHash: 'c'.repeat(64),
+      now,
+      envelope: {
+        schemaVersion: 2,
+        runId: 'run_1',
+        gridKey: 'NEW_BUSINESS',
+        sequence: 0,
+        observedAt: '2026-08-04T00:00:00.000Z',
+        recordsTotal: 2,
+        truncated: false,
+        records: [{ WrongColumn: 'a' }, { WrongColumn: 'b' }],
+      },
+    })
+
+    expect(caseUpsert).not.toHaveBeenCalled()
+    // Received two, wrote none — the receipt says so instead of looking clean.
+    expect(receiptCreate.mock.calls[0][0].data.recordCount).toBe(2)
+    expect(receiptCreate.mock.calls[0][0].data.writtenCount).toBe(0)
+    expect(result.receipt.writtenCount).toBe(0)
+  })
+
   it('does not complete a run until every grid has a non-truncated receipt', async () => {
     const caseUpsert = vi.fn().mockResolvedValue({})
     const runUpdate = vi.fn().mockResolvedValue({})
@@ -246,7 +487,10 @@ describe('local connector runs', () => {
     }
     const tx = {
       nationalLifeSyncRun: {
-        findFirst: vi.fn().mockResolvedValue({ id: 'run-1', totalStages: 2 }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run-1',
+          plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        }),
         update: runUpdate,
       },
       nationalLifeConnectorStageReceipt: {
@@ -316,7 +560,10 @@ describe('local connector runs', () => {
     }
     const tx = {
       nationalLifeSyncRun: {
-        findFirst: vi.fn().mockResolvedValue({ id: 'run-1', totalStages: 2 }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run-1',
+          plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        }),
         update: runUpdate,
       },
       nationalLifeConnectorStageReceipt: {

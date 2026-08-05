@@ -76,6 +76,9 @@ export async function PUT(
       )
     }
     if (error instanceof LocalConnectorRunError) {
+      // GRID_NOT_PLANNED joins RUN_NOT_FOUND on 404: the device addressed a stage
+      // that does not exist on this run. 403 would imply the device lacks rights
+      // to a real resource, and 409 is reserved for the idempotency clash.
       const status = error.code === 'IDEMPOTENCY_CONFLICT' ? 409 : 404
       return Response.json({ error: error.code }, { status, headers: NO_STORE })
     }

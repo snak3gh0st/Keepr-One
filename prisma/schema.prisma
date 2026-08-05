@@ -705,6 +705,12 @@ model NationalLifeSyncRun {
   completedStages Int                      @default(0)
   failedStages    Int                      @default(0)
   currentGridKey  String?
+  /// As grades que este run planejou ler. Vazio significa "o par padrão legado"
+  /// (NEW_BUSINESS, INFORCE_CLIENTS): runs criados antes desta coluna só podiam
+  /// ter planejado essas duas, então nenhum backfill é necessário. É a autoridade
+  /// do servidor sobre quais estágios pertencem a este run — sem ela o dispositivo
+  /// decidiria o que conta como completo.
+  plannedGridKeys String[]                 @default([])
   safeErrorCode   String?
   startedAt       DateTime?
   completedAt     DateTime?
@@ -772,7 +778,12 @@ model NationalLifeConnectorStageReceipt {
   sequence       Int
   truncated      Boolean  @default(true)
   contentHash    String
+  /// Linhas recebidas na página. Público no recibo e parte do hash de conteúdo.
   recordCount    Int
+  /// Linhas efetivamente escritas depois da normalização. Nulo em recibos
+  /// anteriores a esta coluna. Distingue "recebi 200, escrevi 0" — uma página que
+  /// o mapeador descartou inteira — de uma página vazia de verdade.
+  writtenCount   Int?
   idempotencyKey String   @unique
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

@@ -35,9 +35,27 @@ type LocalConnectorDb = Pick<
 >
 
 export class LocalConnectorRunError extends Error {
-  constructor(readonly code: 'RUN_NOT_FOUND' | 'IDEMPOTENCY_CONFLICT' | 'RUN_NOT_ACTIVE') {
+  constructor(
+    readonly code:
+      | 'RUN_NOT_FOUND'
+      | 'IDEMPOTENCY_CONFLICT'
+      | 'RUN_NOT_ACTIVE'
+      | 'GRID_NOT_PLANNED',
+  ) {
     super(code)
   }
+}
+
+/// The server's own answer to "which grids does this run cover".
+///
+/// An empty column means the run predates it, and such a run could only have
+/// planned the legacy default pair — so no backfill is needed. Everything that
+/// decides what a run covers reads this and nothing the device sent: the grid
+/// key in the URL and the one in the envelope both come from the device, so
+/// cross-checking them against each other proves nothing about authority.
+function plannedGridKeys(run: { plannedGridKeys: string[] }): readonly NationalLifeGridKey[] {
+  if (run.plannedGridKeys.length === 0) return LOCAL_CONNECTOR_DEFAULT_GRID_KEYS
+  return run.plannedGridKeys as NationalLifeGridKey[]
 }
 
 async function failStaleLocalRuns(
@@ -88,13 +106,16 @@ export async function startLocalConnectorRun(
       state: 'RUNNING',
     },
     orderBy: { createdAt: 'desc' },
-    select: { id: true },
+    select: { id: true, plannedGridKeys: true },
   })
   if (active) {
+    // The plan comes from the run that already exists, not from what this call
+    // asked for: returning the requested grids would hand the device a plan whose
+    // stages the run can never account for, and it would never complete.
     return {
       runId: active.id,
       schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
-      stages,
+      stages: planReadGridStages(plannedGridKeys(active)),
       duplicate: true as const,
     }
   }
@@ -108,6 +129,7 @@ export async function startLocalConnectorRun(
       executionSource: 'LOCAL',
       state: 'RUNNING',
       totalStages: stages.length,
+      plannedGridKeys: stages.map((stage) => stage.params.gridKey),
       currentGridKey: stages[0]?.params.gridKey ?? null,
       startedAt: now,
       createdAt: now,
@@ -174,11 +196,15 @@ async function inChunks<T>(items: T[], write: (chunk: T[]) => Promise<unknown>) 
   }
 }
 
+/// Returns rows actually written. It can be below `envelope.records.length`: the
+/// mappers drop rows with no natural key and dedupe on it, so a whole page can
+/// normalize to nothing. The receipt records both numbers so a run that ingested
+/// zero rows is visible instead of looking like a clean empty grid.
 async function persistRecords(
   tx: Prisma.TransactionClient,
   input: IngestInput,
   observedAt: Date,
-) {
+): Promise<number> {
   const plan = planRawIngest(input.gridKey, input.envelope.records)
 
   if (plan.target === 'CASE_SNAPSHOT') {
@@ -211,7 +237,7 @@ async function persistRecords(
         }),
       ),
     )
-    return
+    return plan.snapshots.length
   }
 
   if (plan.target === 'INFORCE_POLICY') {
@@ -242,7 +268,7 @@ async function persistRecords(
         }),
       ),
     )
-    return
+    return plan.snapshots.length
   }
 
   await inChunks(plan.rows, (chunk) =>
@@ -276,6 +302,7 @@ async function persistRecords(
       }),
     ),
   )
+  return plan.rows.length
 }
 
 function publicReceipt(receipt: {
@@ -285,6 +312,7 @@ function publicReceipt(receipt: {
   sequence: number
   contentHash: string
   recordCount: number
+  writtenCount: number | null
   createdAt: Date
 }) {
   return {
@@ -294,6 +322,7 @@ function publicReceipt(receipt: {
     sequence: receipt.sequence,
     contentHash: receipt.contentHash,
     recordCount: receipt.recordCount,
+    writtenCount: receipt.writtenCount,
     createdAt: receipt.createdAt.toISOString(),
   }
 }
@@ -347,10 +376,20 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
           provider: NATIONAL_LIFE_PROVIDER,
           state: { in: ['RUNNING', 'COMPLETED'] },
         },
-        select: { id: true, totalStages: true },
+        select: { id: true, plannedGridKeys: true },
       })
       if (!run || input.envelope.gridKey !== input.gridKey) {
         throw new LocalConnectorRunError('RUN_NOT_FOUND')
+      }
+
+      // Server authority over gridKey. The URL segment and the envelope both come
+      // from the device, so agreeing with each other proves nothing; only the list
+      // the server persisted when it planned the run does. Without this a device
+      // could satisfy a two-grid run with two grids it invented, and the run would
+      // report COMPLETED having ingested nothing that was asked for.
+      const planned = plannedGridKeys(run)
+      if (!planned.includes(input.gridKey)) {
+        throw new LocalConnectorRunError('GRID_NOT_PLANNED')
       }
 
       const sequenceCollision = await receiptForSequence(tx, input)
@@ -361,7 +400,7 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
         throw new LocalConnectorRunError('IDEMPOTENCY_CONFLICT')
       }
 
-      await persistRecords(tx, input, observedAt)
+      const writtenCount = await persistRecords(tx, input, observedAt)
       const created = await tx.nationalLifeConnectorStageReceipt.create({
         data: {
           deviceId: input.deviceId,
@@ -370,7 +409,10 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
           sequence: input.envelope.sequence,
           truncated: input.envelope.truncated,
           contentHash: input.contentHash,
+          // Rows received, not rows written: this is public on the receipt and
+          // feeds the content hash, so its meaning must not drift.
           recordCount: input.envelope.records.length,
+          writtenCount,
           idempotencyKey: input.idempotencyKey,
           createdAt: now,
           updatedAt: now,
@@ -382,11 +424,13 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
         distinct: ['gridKey'],
         select: { gridKey: true },
       })
-      const completedStages = finalizedGrids.length
-      // The run row no longer knows which grids were planned — a run can now carry
-      // any subset of the catalogue — so completeness is counted against the
-      // totalStages written at start instead of a fixed grid list.
-      const completed = completedStages >= run.totalStages
+      // Identity, not arithmetic: every *planned* grid must have a non-truncated
+      // receipt. A count would let any N finalized grids close an N-stage run.
+      const finalizedPlanned = planned.filter((gridKey) =>
+        finalizedGrids.some((row) => row.gridKey === gridKey),
+      )
+      const completedStages = finalizedPlanned.length
+      const completed = finalizedPlanned.length === planned.length
       const currentGridKey = completed ? null : input.gridKey
       await tx.nationalLifeSyncRun.update({
         where: { id: run.id },
