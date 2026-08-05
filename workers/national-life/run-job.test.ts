@@ -1,7 +1,19 @@
 import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import type { SessionContext } from 'steel-sdk/resources/sessions/sessions'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+/// `noteForesightReachability` calls `recordForesightReachability` without
+/// deps, which resolves to the real prisma-backed repository — same pattern
+/// runtime.test.ts uses to intercept a module-level singleton.
+const prismaMock = vi.hoisted(() => ({
+  agentIntegrationSession: {
+    updateMany: vi.fn(async () => ({ count: 1 })),
+  },
+}))
+
+vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
+
 import { encryptBrowserContext } from '../../lib/national-life/browser-context-crypto'
 import type { NationalLifeEnv } from '../../lib/national-life/env'
 import type { BrowserJobRecord } from '../../lib/national-life/job-service'
@@ -480,6 +492,10 @@ function createDeps(options: {
 }
 
 describe('National Life restored-context job orchestration', () => {
+  beforeEach(() => {
+    prismaMock.agentIntegrationSession.updateMany.mockClear()
+  })
+
   it('restores an authenticated session before reading and applying carrier data', async () => {
     const test = createDeps({})
 
@@ -675,6 +691,38 @@ describe('National Life restored-context job orchestration', () => {
     expect(test.store.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
   })
 
+  it('records Foresight as reachable when a Foresight inventory job completes', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'SYNC_FORESIGHT_READ',
+        caseId: null,
+        input: { foresightRunId: 'foresight-run-1', mode: 'INVENTORY' },
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(prismaMock.agentIntegrationSession.updateMany).toHaveBeenCalledWith({
+      where: { agentId: 'agent-1', deploymentScope: 'scope-1', provider: 'NATIONAL_LIFE', purpose: 'CARRIER_SESSION' },
+      data: { illustrationSsoReachable: true, illustrationSsoCheckedAt: expect.any(Date) },
+    })
+  })
+
+  it('keeps a Foresight job SUCCEEDED even when the reachability telemetry write fails', async () => {
+    prismaMock.agentIntegrationSession.updateMany.mockRejectedValueOnce(new Error('db unavailable'))
+    const test = createDeps({
+      job: buildJob({
+        operation: 'SYNC_FORESIGHT_READ',
+        caseId: null,
+        input: { foresightRunId: 'foresight-run-1', mode: 'INVENTORY' },
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.store.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
+  })
+
   it('persists one Foresight detail service at a time with progress for the exact owned case', async () => {
     const test = createDeps({
       job: buildJob({
@@ -807,6 +855,42 @@ describe('National Life restored-context job orchestration', () => {
     })
   })
 
+  it('records Foresight as reachable when a Foresight PDF job completes', async () => {
+    const test = createDeps({
+      job: buildJob({
+        operation: 'GENERATE_FORESIGHT_PDF',
+        caseId: null,
+        input: { caseSnapshotId: 'snapshot-1', caseKey: 'exact-foresight-case-key' },
+      }),
+      foresightCase: {
+        id: 'snapshot-1',
+        externalKey: 'exact-foresight-case-key',
+        displayName: 'Exact Foresight case',
+      },
+      renderForesightReport: () => ({
+        caseName: 'exact-foresight-case-key',
+        bytes: Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(1_025)]),
+        mimeType: 'application/pdf',
+      }),
+    })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(prismaMock.agentIntegrationSession.updateMany).toHaveBeenCalledWith({
+      where: { agentId: 'agent-1', deploymentScope: 'scope-1', provider: 'NATIONAL_LIFE', purpose: 'CARRIER_SESSION' },
+      data: { illustrationSsoReachable: true, illustrationSsoCheckedAt: expect.any(Date) },
+    })
+  })
+
+  it('does not record Foresight reachability for non-Foresight operations', async () => {
+    const test = createDeps({ job: buildQuoteJob() })
+
+    await runNationalLifeJob('job-1', test.deps)
+
+    expect(test.store.transitions.at(-1)).toMatchObject({ to: 'SUCCEEDED' })
+    expect(prismaMock.agentIntegrationSession.updateMany).not.toHaveBeenCalled()
+  })
+
   it('fails a non-PDF Foresight report without persisting a document', async () => {
     const test = createDeps({
       job: buildJob({
@@ -886,6 +970,10 @@ describe('National Life restored-context job orchestration', () => {
     })
     expect(test.reconciledForesightRuns).toEqual(['foresight-run-1'])
     expect(test.reconciledRuns).toEqual([])
+    expect(prismaMock.agentIntegrationSession.updateMany).toHaveBeenCalledWith({
+      where: { agentId: 'agent-1', deploymentScope: 'scope-1', provider: 'NATIONAL_LIFE', purpose: 'CARRIER_SESSION' },
+      data: { illustrationSsoReachable: false, illustrationSsoCheckedAt: expect.any(Date) },
+    })
   })
 
   it('parks a Foresight job for login when the expiry is wrapped as a layout change', async () => {
@@ -912,6 +1000,10 @@ describe('National Life restored-context job orchestration', () => {
       to: 'ACTION_REQUIRED',
       safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
     })
+    expect(prismaMock.agentIntegrationSession.updateMany).toHaveBeenCalledWith({
+      where: { agentId: 'agent-1', deploymentScope: 'scope-1', provider: 'NATIONAL_LIFE', purpose: 'CARRIER_SESSION' },
+      data: { illustrationSsoReachable: false, illustrationSsoCheckedAt: expect.any(Date) },
+    })
   })
 
   it('still routes a genuine layout change to manual review', async () => {
@@ -934,6 +1026,7 @@ describe('National Life restored-context job orchestration', () => {
     expect(test.store.transitions.at(-1)).toMatchObject({
       to: 'MANUAL_REVIEW',
     })
+    expect(prismaMock.agentIntegrationSession.updateMany).not.toHaveBeenCalled()
   })
 
   it('disconnects, without closing or releasing, a live session reattached for a Foresight read', async () => {

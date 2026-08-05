@@ -11,6 +11,7 @@ import {
   getOwnedAttemptStatus,
   issueViewerBootstrap,
   listAgentSessionHealthForAdmin,
+  recordForesightReachability,
   startConnectionAttempt,
   type InteractiveConnectionRepository,
   type StoredConnectionAttempt,
@@ -196,6 +197,14 @@ function createMemoryRepository() {
     },
     async listSessionHealth(provider) {
       return [...sessions.values()].filter((session) => session.provider === provider)
+    },
+    async recordForesightReachability(input) {
+      const session = sessions.get(sessionKey(input.agentId))
+      if (!session) return
+      Object.assign(session, {
+        illustrationSsoReachable: input.reachable,
+        illustrationSsoCheckedAt: input.now,
+      })
     },
   }
 
@@ -593,6 +602,48 @@ describe('National Life owned interactive connection service', () => {
       illustrationSsoCheckedAt: null,
     })
     expect(JSON.stringify(summary)).not.toMatch(/cipher|runtime|nonce|debug|steel/i)
+  })
+
+  it('marks Foresight unreachable when a job reports an expired session', async () => {
+    const memory = createMemoryRepository()
+    const started = await startConnectionAttempt(
+      { agentId: 'agent-1', userId: 'user-1' },
+      deps(memory.repository),
+    )
+    if (started.kind !== 'STARTED') throw new Error('expected started attempt')
+    await completeConnectionAttempt(
+      { agentId: 'agent-1', attemptId: started.attempt.id, encryptedContext: encrypted, carrierExpiresAt: null },
+      deps(memory.repository),
+    )
+
+    await recordForesightReachability(
+      { agentId: 'agent-1', deploymentScope: 'SINGLE_DEPLOYMENT', reachable: false },
+      deps(memory.repository),
+    )
+
+    const summary = await getAgentSessionSummary('agent-1', deps(memory.repository))
+    expect(summary?.illustrationSsoReachable).toBe(false)
+  })
+
+  it('marks Foresight reachable when a job completes', async () => {
+    const memory = createMemoryRepository()
+    const started = await startConnectionAttempt(
+      { agentId: 'agent-1', userId: 'user-1' },
+      deps(memory.repository),
+    )
+    if (started.kind !== 'STARTED') throw new Error('expected started attempt')
+    await completeConnectionAttempt(
+      { agentId: 'agent-1', attemptId: started.attempt.id, encryptedContext: encrypted, carrierExpiresAt: null },
+      deps(memory.repository),
+    )
+
+    await recordForesightReachability(
+      { agentId: 'agent-1', deploymentScope: 'SINGLE_DEPLOYMENT', reachable: true },
+      deps(memory.repository),
+    )
+
+    const summary = await getAgentSessionSummary('agent-1', deps(memory.repository))
+    expect(summary?.illustrationSsoReachable).toBe(true)
   })
 
   it('returns admin health rows without ciphertext or viewer access', async () => {

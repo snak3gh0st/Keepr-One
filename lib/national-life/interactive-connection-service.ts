@@ -194,6 +194,12 @@ export type InteractiveConnectionRepository = {
     deploymentScope: string,
     purpose: string,
   ): Promise<StoredIntegrationSession[]>
+  recordForesightReachability(input: {
+    agentId: string
+    deploymentScope: string
+    reachable: boolean
+    now: Date
+  }): Promise<void>
 }
 
 export type InteractiveConnectionConfig = {
@@ -619,6 +625,25 @@ export function createInteractiveConnectionRepository(
     })
     return sessions.map(normalizeSession)
   },
+
+  async recordForesightReachability(input) {
+    // Same three-plus-one key every other query in this file uses
+    // (agentId_deploymentScope_provider_purpose). Dropping `purpose` would let
+    // this stamp a row that isn't the carrier session — e.g. the
+    // AUTHENTICATED_BROWSER_CONTEXT row for the same agent/scope/provider.
+    await client.agentIntegrationSession.updateMany({
+      where: {
+        agentId: input.agentId,
+        deploymentScope: input.deploymentScope,
+        provider: NATIONAL_LIFE_PROVIDER,
+        purpose: SESSION_PURPOSE,
+      },
+      data: {
+        illustrationSsoReachable: input.reachable,
+        illustrationSsoCheckedAt: input.now,
+      },
+    })
+  },
   }
 }
 
@@ -945,4 +970,18 @@ export async function listAgentSessionHealthForAdmin(
     illustrationSsoReachable: session.illustrationSsoReachable,
     illustrationSsoCheckedAt: session.illustrationSsoCheckedAt,
   }))
+}
+
+/// Derived from job outcomes, not from the keep-alive. The keep-alive SSO jump is
+/// off — it was itself burning the Auth0 session — so a field only it wrote showed
+/// a stale `true` while jobs failed with FORESIGHT_SSO_EXPIRED.
+export async function recordForesightReachability(
+  input: { agentId: string; deploymentScope: string; reachable: boolean },
+  deps?: InteractiveConnectionServiceDeps,
+): Promise<void> {
+  const repository = resolveRepository(deps)
+  await repository.recordForesightReachability({
+    ...input,
+    now: resolveNow(deps),
+  })
 }
