@@ -45,7 +45,11 @@ function createMemoryRepository() {
   let nextId = 1
 
   const attemptKey = (agentId: string) => `${agentId}:NATIONAL_LIFE`
-  const sessionKey = (agentId: string) => `${agentId}:NATIONAL_LIFE`
+  // Mirrors the real compound unique key (agentId_deploymentScope_provider_purpose):
+  // without deploymentScope in the key, a service-layer bug that drops or
+  // mixes up deploymentScope would go undetected by this fake.
+  const sessionKey = (agentId: string, deploymentScope: string) =>
+    `${agentId}:NATIONAL_LIFE:${deploymentScope}`
 
   const repository: InteractiveConnectionRepository = {
     async findActiveAttempt(agentId, provider) {
@@ -149,7 +153,7 @@ function createMemoryRepository() {
         return false
       }
       calls.push('session:commit')
-      sessions.set(sessionKey(input.agentId), {
+      sessions.set(sessionKey(input.agentId, input.deploymentScope), {
         id: 'session-1',
         agentId: input.agentId,
         agentName: 'Agent One',
@@ -172,7 +176,7 @@ function createMemoryRepository() {
       return true
     },
     async invalidateOwnedSession(input) {
-      const session = sessions.get(sessionKey(input.agentId))
+      const session = sessions.get(sessionKey(input.agentId, input.deploymentScope))
       if (!session) return false
       Object.assign(session, {
         status: 'SESSION_EXPIRED',
@@ -189,17 +193,17 @@ function createMemoryRepository() {
       if (attempt) {
         attempt.state = 'CANCELLED'
       }
-      sessions.delete(sessionKey(input.agentId))
+      sessions.delete(sessionKey(input.agentId, input.deploymentScope))
       return { attemptCancelled: Boolean(attempt), sessionDeleted: true }
     },
-    async findOwnedSession(agentId, provider) {
-      return sessions.get(`${agentId}:${provider}`) ?? null
+    async findOwnedSession(agentId, provider, deploymentScope) {
+      return sessions.get(sessionKey(agentId, deploymentScope)) ?? null
     },
     async listSessionHealth(provider) {
       return [...sessions.values()].filter((session) => session.provider === provider)
     },
     async recordForesightReachability(input) {
-      const session = sessions.get(sessionKey(input.agentId))
+      const session = sessions.get(sessionKey(input.agentId, input.deploymentScope))
       if (!session) return
       Object.assign(session, {
         illustrationSsoReachable: input.reachable,
@@ -211,7 +215,7 @@ function createMemoryRepository() {
   return { repository, attempts, sessions, auditEvents, calls }
 }
 
-function deps(repository: InteractiveConnectionRepository) {
+function deps(repository: InteractiveConnectionRepository, deploymentScope?: string) {
   return {
     repository,
     now: () => now,
@@ -221,6 +225,7 @@ function deps(repository: InteractiveConnectionRepository) {
       interactiveLoginAllAgents: true,
       viewerPublicOrigin: 'https://viewer.keepr.one',
       viewerSigningKey: Buffer.alloc(32, 9),
+      ...(deploymentScope !== undefined ? { deploymentScope } : {}),
     },
   }
 }
@@ -489,7 +494,7 @@ describe('National Life owned interactive connection service', () => {
     )
 
     expect(memory.calls).toEqual(['session:commit', 'attempt:delete'])
-    expect(memory.sessions.get('agent-1:NATIONAL_LIFE')?.ciphertext).toBe(encrypted.ciphertext)
+    expect(memory.sessions.get('agent-1:NATIONAL_LIFE:SINGLE_DEPLOYMENT')?.ciphertext).toBe(encrypted.ciphertext)
     expect(memory.attempts).toHaveLength(0)
   })
 
@@ -573,8 +578,8 @@ describe('National Life owned interactive connection service', () => {
       deps(memory.repository),
     )
 
-    expect(memory.sessions.has('agent-1:NATIONAL_LIFE')).toBe(false)
-    expect(memory.sessions.has('agent-2:NATIONAL_LIFE')).toBe(true)
+    expect(memory.sessions.has('agent-1:NATIONAL_LIFE:SINGLE_DEPLOYMENT')).toBe(false)
+    expect(memory.sessions.has('agent-2:NATIONAL_LIFE:SINGLE_DEPLOYMENT')).toBe(true)
     expect(memory.attempts.get('agent-1:NATIONAL_LIFE')?.state).toBe('CANCELLED')
     expect(memory.attempts.get('agent-2:NATIONAL_LIFE')?.state).toBe('OPENING_PORTAL')
   })
@@ -644,6 +649,40 @@ describe('National Life owned interactive connection service', () => {
 
     const summary = await getAgentSessionSummary('agent-1', deps(memory.repository))
     expect(summary?.illustrationSsoReachable).toBe(true)
+  })
+
+  it('only marks the session for the matching deploymentScope, leaving a sibling scope untouched', async () => {
+    const memory = createMemoryRepository()
+
+    const startedA = await startConnectionAttempt(
+      { agentId: 'agent-1', userId: 'user-1' },
+      deps(memory.repository, 'scope-a'),
+    )
+    if (startedA.kind !== 'STARTED') throw new Error('expected started attempt')
+    await completeConnectionAttempt(
+      { agentId: 'agent-1', attemptId: startedA.attempt.id, encryptedContext: encrypted, carrierExpiresAt: null },
+      deps(memory.repository, 'scope-a'),
+    )
+
+    const startedB = await startConnectionAttempt(
+      { agentId: 'agent-1', userId: 'user-1' },
+      deps(memory.repository, 'scope-b'),
+    )
+    if (startedB.kind !== 'STARTED') throw new Error('expected started attempt')
+    await completeConnectionAttempt(
+      { agentId: 'agent-1', attemptId: startedB.attempt.id, encryptedContext: encrypted, carrierExpiresAt: null },
+      deps(memory.repository, 'scope-b'),
+    )
+
+    await recordForesightReachability(
+      { agentId: 'agent-1', deploymentScope: 'scope-a', reachable: false },
+      deps(memory.repository, 'scope-a'),
+    )
+
+    const summaryA = await getAgentSessionSummary('agent-1', deps(memory.repository, 'scope-a'))
+    const summaryB = await getAgentSessionSummary('agent-1', deps(memory.repository, 'scope-b'))
+    expect(summaryA?.illustrationSsoReachable).toBe(false)
+    expect(summaryB?.illustrationSsoReachable).toBe(null)
   })
 
   it('returns admin health rows without ciphertext or viewer access', async () => {
