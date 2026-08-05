@@ -58,10 +58,10 @@ describe('NationalLifeLocalConnectorCard', () => {
         baseUrl={baseUrl}
       />,
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
 
     expect(clicked).toHaveBeenCalledOnce()
-    expect(screen.getByRole('status')).toHaveTextContent('Abrindo a instalação segura')
+    expect(screen.getByRole('status')).toHaveTextContent('Opening the secure install page')
   })
 
   it('guides unpacked install in pilot mode without opening a store URL', async () => {
@@ -76,12 +76,12 @@ describe('NationalLifeLocalConnectorCard', () => {
         baseUrl={baseUrl}
       />,
     )
-    expect(screen.getByText('Piloto')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
+    expect(screen.getByText('Pilot')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
 
     expect(clicked).not.toHaveBeenCalled()
     expect(screen.getByRole('status')).toHaveTextContent('chrome://extensions')
-    expect(screen.getByRole('button', { name: 'Já instalei — conectar' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: "I've installed it — connect" })).toBeEnabled()
   })
 
   it('auto-pairs after installation without exposing the pairing code', async () => {
@@ -143,11 +143,11 @@ describe('NationalLifeLocalConnectorCard', () => {
         baseUrl={baseUrl}
       />,
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
 
     expect(fetch).not.toHaveBeenCalled()
     await waitFor(
-      () => expect(screen.getByRole('status')).toHaveTextContent('concluída'),
+      () => expect(screen.getByRole('status')).toHaveTextContent('up to date'),
       { timeout: 3_000 },
     )
     expect(mocks.refresh).toHaveBeenCalled()
@@ -176,13 +176,13 @@ describe('NationalLifeLocalConnectorCard', () => {
         baseUrl={baseUrl}
       />,
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
 
     await waitFor(
-      () => expect(screen.getByRole('status')).toHaveTextContent('portal oficial'),
+      () => expect(screen.getByRole('status')).toHaveTextContent('Sign in to the National Life portal'),
       { timeout: 3_000 },
     )
-    expect(screen.getByRole('button', { name: 'Continuar' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled()
   })
 
   it('shows a recoverable friendly error', async () => {
@@ -202,9 +202,153 @@ describe('NationalLifeLocalConnectorCard', () => {
         baseUrl={baseUrl}
       />,
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Conectar National Life' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Tente novamente')
-    expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeEnabled()
+    expect(await screen.findByRole('status')).toHaveTextContent('try again')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+  })
+
+  it('keeps a failure visible after the agent reloads the page', async () => {
+    // O motivo fica gravado na extensão. Antes, o F5 devolvia o cartão ao
+    // repouso: o agente recarregava e o problema simplesmente sumia da tela.
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'UNPAIRED' },
+          sync: { status: 'ERROR', errorCode: 'DEVICE_REQUEST_REJECTED' },
+        })
+        return
+      }
+      callback({ ok: false, error: 'CONNECTOR_NOT_PAIRED' })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    expect(await screen.findByRole('status')).toHaveTextContent('no longer connected')
+    expect(screen.getByRole('button', { name: 'Reconnect this computer' })).toBeEnabled()
+  })
+
+  it('tells an out-of-date extension to update instead of to retry', async () => {
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: { status: 'ERROR', errorCode: 'UNKNOWN_CAPABILITY' },
+        })
+        return
+      }
+      callback({ ok: false, error: 'UNKNOWN_CAPABILITY' })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    const status = await screen.findByRole('status')
+    await waitFor(() => expect(status).toHaveTextContent('Update the extension'))
+    expect(screen.getByRole('link', { name: /update it/i })).toHaveAttribute('href', storeUrl)
+  })
+
+  it('distinguishes a portal hiccup from a device that has to be reconnected', async () => {
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: { status: 'ERROR', errorCode: 'PORTAL_REQUEST_FAILED' },
+        })
+        return
+      }
+      callback({ ok: false, error: 'PORTAL_REQUEST_FAILED' })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    const status = await screen.findByRole('status')
+    await waitFor(() => expect(status).toHaveTextContent('National Life did not respond'))
+    expect(status).not.toHaveTextContent('no longer connected')
+  })
+
+  it('never prints an internal code on screen', async () => {
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: { status: 'ERROR', errorCode: 'SOME_INTERNAL_CODE' },
+        })
+        return
+      }
+      callback({ ok: false, error: 'SOME_INTERNAL_CODE' })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    await screen.findByRole('status')
+    await waitFor(() => expect(document.body.textContent).not.toContain('SOME_INTERNAL_CODE'))
+  })
+
+  it('keeps saying it is working while a single large stage uploads batch after batch', async () => {
+    // Um upload longo deixa status e stageIndex parados. Antes, ~180 rodadas
+    // depois o cartão declarava falha num sync que estava indo bem.
+    vi.useFakeTimers()
+    let uploads = 0
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        uploads += 1
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: { status: 'UPLOADING', stageIndex: 0, uploads },
+        })
+        return
+      }
+      callback({ ok: true })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    screen.getByRole('button', { name: 'Connect National Life' }).click()
+
+    // Muito além do antigo limite fixo de 180 leituras.
+    await vi.advanceTimersByTimeAsync(400_000)
+
+    expect(screen.getByRole('status')).toHaveTextContent('Syncing your National Life data')
+    vi.useRealTimers()
   })
 })

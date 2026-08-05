@@ -67,7 +67,7 @@ describe('NationalLifeConnectionCard', () => {
     expect(screen.queryByText(/save connection/i)).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
-    expect(await screen.findByRole('dialog', { name: 'Entrar na National Life' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: 'Sign in to National Life' })).toBeInTheDocument()
   })
 
   it('shows the reusable session summary and disconnect action', () => {

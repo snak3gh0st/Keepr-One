@@ -183,11 +183,10 @@ export function useNationalLifeConnectionAttempt(
         }
         stopped = true
         setViewerUrl(null)
-        setError(
-          pollError instanceof Error && pollError.message !== 'STATUS_UNAVAILABLE'
-            ? pollError.message
-            : 'Your secure session was interrupted. Connect again to continue.',
-        )
+        // Um `Failed to fetch` ou um erro de parse chegava inteiro à tela. O
+        // texto cru de uma exceção nunca é uma instrução para o agente.
+        void pollError
+        setError('Your secure session was interrupted. Connect again to continue.')
         keepaliveCancel()
       }
     }
