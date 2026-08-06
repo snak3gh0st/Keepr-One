@@ -92,6 +92,18 @@ por cascade junto com o agente) e recibos de run não-terminal — um run abando
 em `RUNNING` guarda seus recibos para sempre. Cresce devagar; se virar problema, o
 conserto é expirar o run, não afrouxar o recibo.
 
+**Duas das três seleções não são cobertas por índice.** `Replay.expiresAt` tem o
+seu. A de recibos filtra por `run: { state, updatedAt }` e `NationalLifeSyncRun`
+não tem índice `(state, updatedAt)`; a de pairings filtra `expiresAt`/`consumedAt`
+sozinhos, enquanto o único índice começa por `agentId`. Nos volumes de hoje é
+irrelevante — as duas tabelas são pequenas perto da de replay. Fica registrado
+para não virar surpresa a 100 agentes.
+
+**Um erro de digitação na variável de intervalo não derruba o boot.** A validação
+lança, e `instrumentation.ts` captura: uma tarefa de fundo pode não rodar, mas não
+pode impedir o app de servir — o healthcheck do Dockerfile transformaria isso em
+deploy falho.
+
 #### Pendência: o PDF no Postgres
 
 Continua como `Bytes` em `NationalLifeForesightDocument`. Não foi movido nesta
