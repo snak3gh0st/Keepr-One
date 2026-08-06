@@ -9,7 +9,13 @@
 /// diferentes (popup de uma linha vs. cartão com botão), por isso o texto é
 /// escrito duas vezes de propósito; as classes de falha é que são as mesmas.
 
-export type ConnectorFailureAction = 'reconnect' | 'pairing' | 'retry' | 'update' | 'support'
+export type ConnectorFailureAction =
+  | 'reconnect'
+  | 'pairing'
+  | 'retry'
+  | 'update'
+  | 'paused'
+  | 'support'
 
 export type ConnectorFailure = {
   message: string
@@ -41,7 +47,14 @@ export const OUTDATED_CODES: readonly string[] = [
   'UNSAFE_NAVIGATE_PATH',
   'INVALID_RUN_RESPONSE',
   'PATH_NOT_ALLOWED',
+  // 426 do servidor: esta versão está abaixo do piso. É a única classe em que
+  // "atualize" não é um palpite — foi o servidor que disse.
+  'CLIENT_TOO_OLD',
 ]
+
+/// O servidor desligou o conector de propósito. Não é falha do agente nem do
+/// portal, e não é coisa que atualizar resolva — a saída é esperar.
+export const PAUSED_CODES: readonly string[] = ['CONNECTOR_PAUSED']
 
 /// O portal (ou a ponte com ele) não respondeu como esperado. Costuma passar.
 export const PORTAL_CODES: readonly string[] = [
@@ -76,6 +89,13 @@ export function connectorFailure(code: string | undefined | null): ConnectorFail
       action: 'update',
       message:
         'This browser extension is out of date. Update KeeproneConnect in your browser, then start the sync again.',
+    }
+  }
+  if (typeof code === 'string' && PAUSED_CODES.includes(code)) {
+    return {
+      action: 'paused',
+      message:
+        'Syncing is paused by Keepr One right now. Nothing is wrong with this computer — we will turn it back on.',
     }
   }
   if (typeof code === 'string' && PORTAL_CODES.includes(code)) {

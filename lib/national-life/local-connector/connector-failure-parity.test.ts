@@ -13,6 +13,7 @@ describe('classificação de falha do conector', () => {
     ['reconnect', web.RECONNECT_CODES, extension.RECONNECT_CODES],
     ['pairing', web.PAIRING_CODES, extension.PAIRING_CODES],
     ['update', web.OUTDATED_CODES, extension.OUTDATED_CODES],
+    ['paused', web.PAUSED_CODES, extension.PAUSED_CODES],
     ['portal', web.PORTAL_CODES, extension.PORTAL_CODES],
   ] as const
 
@@ -27,6 +28,7 @@ describe('classificação de falha do conector', () => {
       ...web.RECONNECT_CODES,
       ...web.PAIRING_CODES,
       ...web.OUTDATED_CODES,
+      ...web.PAUSED_CODES,
       ...web.PORTAL_CODES,
     ]
     expect(new Set(all).size).toBe(all.length)
@@ -38,6 +40,17 @@ describe('classificação de falha do conector', () => {
     expect(web.connectorFailure('PAIRING_REJECTED').action).toBe('pairing')
     expect(web.connectorFailure('PAIRING_REJECTED').message).not.toMatch(/no longer connected/i)
     expect(web.RECONNECT_CODES).not.toContain('PAIRING_REJECTED')
+  })
+
+  it('não manda tentar de novo o que tentar de novo não resolve', () => {
+    // As duas classes que o servidor afirma. Cair em "retry" seria um laço: um
+    // cliente abaixo do piso recebe 426 em toda tentativa, e um conector pausado
+    // recebe 503 em toda tentativa.
+    expect(web.connectorFailure('CLIENT_TOO_OLD').action).toBe('update')
+    expect(web.connectorFailure('CONNECTOR_PAUSED').action).toBe('paused')
+    expect(extension.connectorFailure('CLIENT_TOO_OLD').action).toBe('update')
+    expect(extension.connectorFailure('CONNECTOR_PAUSED').action).toBe('paused')
+    expect(web.connectorFailure('CONNECTOR_PAUSED').actionLabel).not.toMatch(/try again/i)
   })
 
   it('só a revogação explícita destrói o material local', () => {
@@ -53,6 +66,7 @@ describe('classificação de falha do conector', () => {
       ...web.RECONNECT_CODES,
       ...web.PAIRING_CODES,
       ...web.OUTDATED_CODES,
+      ...web.PAUSED_CODES,
       ...web.PORTAL_CODES,
     ]) {
       expect(web.connectorFailure(code).action).toBe(extension.connectorFailure(code).action)

@@ -1,4 +1,5 @@
 import { requireAllowedBaseUrl } from './constants'
+import { CONNECTOR_VERSION_HEADER, readExtensionVersion } from './contract'
 import { readPrivateKey } from './key-store'
 
 const encoder = new TextEncoder()
@@ -44,7 +45,7 @@ export async function signCanonicalMessage(key: CryptoKey, message: string): Pro
 
 export class SignedRequestError extends Error {
   constructor(
-    readonly code: 'DEVICE_KEY_UNAVAILABLE' | 'DEVICE_REVOKED' | 'DEVICE_REQUEST_REJECTED' | 'DEVICE_REQUEST_FAILED' | 'IDEMPOTENCY_CONFLICT' | 'PATH_NOT_ALLOWED',
+    readonly code: 'DEVICE_KEY_UNAVAILABLE' | 'DEVICE_REVOKED' | 'DEVICE_REQUEST_REJECTED' | 'DEVICE_REQUEST_FAILED' | 'IDEMPOTENCY_CONFLICT' | 'PATH_NOT_ALLOWED' | 'CLIENT_TOO_OLD' | 'CONNECTOR_PAUSED',
   ) {
     super(code)
   }
@@ -58,7 +59,20 @@ export class SignedRequestError extends Error {
 export function classifyFailedResponse(
   status: number,
   headers: Pick<Headers, 'get'>,
-): 'DEVICE_REVOKED' | 'DEVICE_REQUEST_REJECTED' | 'DEVICE_REQUEST_FAILED' {
+):
+  | 'DEVICE_REVOKED'
+  | 'DEVICE_REQUEST_REJECTED'
+  | 'DEVICE_REQUEST_FAILED'
+  | 'CLIENT_TOO_OLD'
+  | 'CONNECTOR_PAUSED' {
+  // 426 e 503-pausado precisam de código próprio ou caem em DEVICE_REQUEST_FAILED,
+  // que está na classe "portal" e diz ao agente "espere um minuto e tente de novo".
+  // Para versão velha isso é falso e vira laço: tentar de novo nunca resolve, só
+  // atualizar resolve. Para pausa, "um minuto" é uma promessa que ninguém fez.
+  if (status === 426) return 'CLIENT_TOO_OLD'
+  if (status === 503 && headers.get('x-fyntra-connector-state') === 'PAUSED') {
+    return 'CONNECTOR_PAUSED'
+  }
   if (status !== 401) return 'DEVICE_REQUEST_FAILED'
   return headers.get('x-fyntra-device-error') === 'DEVICE_REVOKED'
     ? 'DEVICE_REVOKED'
@@ -100,6 +114,10 @@ export async function signedJsonRequest<T>(input: {
     'x-fyntra-signature': signature,
   })
   if (input.idempotencyKey) headers.set('x-idempotency-key', input.idempotencyKey)
+  // Auto-declarada e fora da mensagem canônica de propósito: assiná-la sugeriria
+  // que ela é confiável, e ela não é — o servidor trata como sinal, não prova.
+  const extensionVersion = readExtensionVersion()
+  if (extensionVersion) headers.set(CONNECTOR_VERSION_HEADER, extensionVersion)
 
   const response = await fetch(`${baseUrl}${input.pathname}`, {
     method: input.method,

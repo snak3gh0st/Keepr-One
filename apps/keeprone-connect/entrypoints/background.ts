@@ -1,5 +1,9 @@
 import { parseStagePlan } from '../lib/capabilities'
-import { CONNECTOR_SCHEMA_VERSION } from '../lib/contract'
+import {
+  CONNECTOR_SCHEMA_VERSION,
+  CONNECTOR_VERSION_HEADER,
+  readExtensionVersion,
+} from '../lib/contract'
 import {
   NLG_ORIGIN,
   allowedKeeprOrigins,
@@ -13,7 +17,18 @@ import {
   type BeginGridMessage,
   type BridgeMessage,
 } from '../lib/messages'
-import { revokesDevice } from '../lib/failure'
+import { OUTDATED_CODES, revokesDevice } from '../lib/failure'
+import {
+  PERMISSIVE_REMOTE_CONFIG,
+  ensureFreshRemoteConfig,
+  readCachedRemoteConfig,
+} from '../lib/remote-config'
+import {
+  UPDATE_NUDGE_KEY,
+  isBusySyncStatus,
+  nudgeExtensionUpdate,
+  type UpdateNudgeRecord,
+} from '../lib/update-nudge'
 import { SignedRequestError, signedJsonRequest } from '../lib/signed-client'
 import {
   currentStage,
@@ -28,6 +43,11 @@ type ActiveNavigation = BeginGridMessage & { tabId: number }
 const activeNavigations = new Map<number, ActiveNavigation>()
 const tabQueues = new Map<number, Promise<void>>()
 let syncStartLock: Promise<unknown> | null = null
+
+function versionedHeaders(base: Record<string, string>): Record<string, string> {
+  const version = readExtensionVersion()
+  return version ? { ...base, [CONNECTOR_VERSION_HEADER]: version } : base
+}
 
 function randomToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32))
@@ -70,7 +90,10 @@ async function pairConnector(
       `${baseUrl}/api/agent/integrations/national-life/local-connector/pairings/exchange`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        // O pareamento é a única requisição que não passa por `signedJsonRequest`
+        // (ainda não há chave para assinar). Carimbar a versão aqui também é o que
+        // faz "toda requisição carrega a versão" ser verdade e não quase-verdade.
+        headers: versionedHeaders({ 'content-type': 'application/json' }),
         body: JSON.stringify({
           code: message.code,
           label: message.label,
@@ -151,16 +174,63 @@ async function forgetRevokedDevice() {
 /// que acabou de ser recusada: ele não chega, e não há como fazer chegar daqui.
 /// Quem encerra o run naquele caso é o próprio servidor, em
 /// `revokeLocalConnectorDevice`, que já derruba os runs abertos do dispositivo.
+/// O auto-conserto, e a única coisa no arquivo que pode desabilitar a extensão se
+/// for feita errado. Toda a trava mora em `nudgeExtensionUpdate`; aqui só ficam as
+/// dependências, e duas delas são o ponto:
+///
+/// - `isBusy` olha o estado **persistido** além dos mapas em memória. Num worker
+///   recém-iniciado `activeNavigations` e `tabQueues` estão vazios embora um run
+///   esteja genuinamente no meio segundo o storage — confiar só neles chamaria
+///   "ponto seguro" exatamente o momento mais perigoso.
+/// - `writeRecord` grava no `chrome.storage.local`, que sobrevive ao worker. Um
+///   global de módulo morreria junto com o reload que ele deveria estar contando.
+async function nudgeUpdateIfSafe(): Promise<void> {
+  await nudgeExtensionUpdate({
+    now: () => Date.now(),
+    version: () => readExtensionVersion(),
+    readRecord: async () => {
+      const result = await chrome.storage.local.get(UPDATE_NUDGE_KEY)
+      return result[UPDATE_NUDGE_KEY] as UpdateNudgeRecord | undefined
+    },
+    writeRecord: async (record) => {
+      await chrome.storage.local.set({ [UPDATE_NUDGE_KEY]: record })
+    },
+    requestUpdateCheck: async () => {
+      await chrome.runtime.requestUpdateCheck()
+    },
+    reload: () => chrome.runtime.reload(),
+    isBusy: async () => {
+      if (activeNavigations.size > 0 || tabQueues.size > 0 || syncStartLock !== null) return true
+      const state = await readSyncState()
+      return isBusySyncStatus(state.status)
+    },
+  })
+}
+
 async function failSync(code: string) {
   await writeSyncState({ ...(await readSyncState()), status: 'ERROR', errorCode: code })
   await reportRunFailure(code)
   if (revokesDevice(code)) await forgetRevokedDevice()
+  // O servidor afirmou que esta versão não serve mais. É o único gatilho: um
+  // empurrão a cada falha genérica gastaria as tentativas contra problemas que
+  // atualizar não resolve. `failSync` já gravou o ERROR, e o estado de sync
+  // acabou de sair dos estados ocupados — por isso o empurrão vem depois.
+  if (OUTDATED_CODES.includes(code)) await nudgeUpdateIfSafe()
 }
 
 async function createRun() {
   const device = await readDeviceState()
   if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
     throw new Error('CONNECTOR_NOT_PAIRED')
+  }
+  // Lê o **cache**, não a rede. Bloquear o começo do sync numa requisição extra
+  // trocaria uma alavanca de emergência por latência em todo sync e por mais um
+  // ponto de falha no caminho que mais importa. Quem recusa de verdade é o
+  // endpoint de run, na mesma viagem que já íamos fazer; isto aqui só evita abrir
+  // um run condenado quando já sabemos, e dá ao agente a frase certa.
+  const remote = (await readCachedRemoteConfig()) ?? PERMISSIVE_REMOTE_CONFIG
+  if (!remote.syncEnabled || remote.disabledCapabilities.includes('READ_GRID')) {
+    throw new Error('CONNECTOR_PAUSED')
   }
   await writeSyncState({ status: 'STARTING' })
   const response = await signedJsonRequest<{ runId?: unknown; stages?: unknown }>({
@@ -514,4 +584,17 @@ export default defineBackground(() => {
   })
 
   void resumePending()
+  // Uma batida a cada subida do service worker. É a janela mais barata que existe
+  // para uma flag chegar sem nenhuma ação do agente, e o worker sobe com muita
+  // frequência justamente porque este conector acorda o tempo todo.
+  //
+  // Fora do caminho de ação de propósito: ninguém espera por ela, e o resultado
+  // só é lido no próximo sync. Se falhar, o cache anterior continua valendo e o
+  // endpoint segue sendo a autoridade — falhar aqui não pode parar nada.
+  void (async () => {
+    const device = await readDeviceState()
+    if (device.status === 'READY' && device.baseUrl) {
+      await ensureFreshRemoteConfig(device.baseUrl)
+    }
+  })()
 })

@@ -10,7 +10,7 @@ import {
   LocalConnectorRequestError,
   readLimitedBody,
 } from '@/lib/national-life/local-connector/request'
-import { refuseLocalConnectorRequest } from '@/lib/national-life/local-connector/remote-config'
+import { refuseLocalConnectorCapability } from '@/lib/national-life/local-connector/remote-config'
 import { startLocalConnectorRun } from '@/lib/national-life/local-connector/run-service'
 import { prisma } from '@/lib/prisma'
 
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   // que o cliente diz ter é auto-declarada, então o piso não é uma sugestão que
   // ele possa ignorar — é aqui que ele é aplicado. Um run é o começo de tudo;
   // barrar aqui evita abrir um run que o cliente não conseguiria terminar.
-  const refusal = refuseLocalConnectorRequest(request.headers)
+  const refusal = refuseLocalConnectorCapability('READ_GRID', request.headers)
   if (refusal) return refusal
 
   try {

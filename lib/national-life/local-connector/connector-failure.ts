@@ -15,6 +15,7 @@ export type ConnectorFailureAction =
   | 'pairing'
   | 'update'
   | 'retry'
+  | 'paused'
   | 'disconnect'
   | 'support'
 
@@ -42,7 +43,15 @@ export const OUTDATED_CODES: readonly string[] = [
   'UNSAFE_NAVIGATE_PATH',
   'INVALID_RUN_RESPONSE',
   'PATH_NOT_ALLOWED',
+  // 426 Upgrade Required. O servidor afirmou o piso; não é dedução nossa.
+  'CLIENT_TOO_OLD',
 ]
+
+/// O conector foi desligado pelo servidor — a alavanca de emergência que não
+/// depende de release nenhum. Precisa de classe própria: cair no texto genérico
+/// ofereceria "Try again", que dispara um sync que o servidor vai recusar de
+/// novo, e o agente ficaria batendo numa porta que sabemos estar fechada.
+export const PAUSED_CODES: readonly string[] = ['CONNECTOR_PAUSED']
 
 export const PORTAL_CODES: readonly string[] = [
   'PORTAL_REQUEST_FAILED',
@@ -92,6 +101,16 @@ export function connectorFailure(code: string | null | undefined): ConnectorFail
       actionLabel: "I've updated it — try again",
       message:
         'Keepr One is newer than the KeeproneConnect extension on this computer. Update the extension in your browser, then try again.',
+    }
+  }
+  if (typeof code === 'string' && PAUSED_CODES.includes(code)) {
+    return {
+      action: 'paused',
+      // Não é "tente de novo": tentar de novo bate na mesma recusa. O rótulo diz
+      // a única coisa que muda a situação, que é o tempo.
+      actionLabel: 'Check again',
+      message:
+        'Syncing with National Life is paused by Keepr One right now. Nothing is wrong with this computer and nothing was lost — check back shortly.',
     }
   }
   if (typeof code === 'string' && PORTAL_CODES.includes(code)) {

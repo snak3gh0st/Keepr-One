@@ -20,7 +20,7 @@ import {
   parseJsonBody,
   readLimitedBody,
 } from '@/lib/national-life/local-connector/request'
-import { refuseLocalConnectorRequest } from '@/lib/national-life/local-connector/remote-config'
+import { refuseLocalConnectorCapability } from '@/lib/national-life/local-connector/remote-config'
 import {
   ingestLocalConnectorStage,
   LocalConnectorRunError,
@@ -47,7 +47,7 @@ export async function PUT(
   // É aqui que a flag ganha a latência que a Store não dá. Uma grade grande sobe
   // lote a lote, um PUT por lote: uma pausa ligada no meio do run derruba o run no
   // lote seguinte — minutos —, sem depender de a extensão ter consultado nada.
-  const refusal = refuseLocalConnectorRequest(request.headers)
+  const refusal = refuseLocalConnectorCapability('READ_GRID', request.headers)
   if (refusal) return refusal
 
   try {

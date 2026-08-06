@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   LOCAL_CONNECTOR_STATE_HEADER,
@@ -131,5 +133,29 @@ describe('heartbeat', () => {
     expect(getLocalConnectorRemoteConfig().heartbeatSeconds).toBe(3600)
     process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_HEARTBEAT_SECONDS = 'nunca'
     expect(getLocalConnectorRemoteConfig().heartbeatSeconds).toBe(300)
+  })
+})
+
+describe('quem fica de fora da recusa', () => {
+  const read = (relative: string) =>
+    readFileSync(
+      resolve(__dirname, '../../../app/api/agent/integrations/national-life/local-connector', relative),
+      'utf8',
+    )
+
+  it('as rotas de trabalho recusam', () => {
+    expect(read('runs/route.ts')).toContain('refuseLocalConnectorCapability')
+    expect(read('runs/[runId]/stages/[gridKey]/route.ts')).toContain(
+      'refuseLocalConnectorCapability',
+    )
+  })
+
+  it('encerrar um run aberto e revogar um dispositivo nunca são recusados', () => {
+    // Um cliente abaixo do piso ainda precisa conseguir fechar o run dele. Recusar
+    // aqui trocaria uma falha rápida por um run RUNNING pendurado até o TTL — e a
+    // pausa faria o mesmo com a frota inteira de uma vez. Revogação, idem: desligar
+    // o conector não pode impedir um agente de desconectar um computador.
+    expect(read('runs/[runId]/fail/route.ts')).not.toContain('refuseLocalConnector')
+    expect(read('devices/[deviceId]/revoke/route.ts')).not.toContain('refuseLocalConnector')
   })
 })
