@@ -42,7 +42,13 @@ const tabs = {
   query: vi.fn(async () => [] as unknown[]),
   update: vi.fn(async () => undefined),
   create: vi.fn(async () => undefined),
-  sendMessage: vi.fn(async () => undefined),
+  // Tipado com os dois argumentos reais para que um teste possa afirmar sobre a
+  // mensagem enviada, e não só sobre ter havido envio.
+  sendMessage: vi.fn(async (tabId: number, message: unknown) => {
+    void tabId
+    void message
+    return undefined
+  }),
   onUpdated: register('tabs.onUpdated'),
   onRemoved: register('tabs.onRemoved'),
 }
@@ -188,6 +194,84 @@ describe('empurrão de atualização no caminho real', () => {
     expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'CLIENT_TOO_OLD' })
     expect(chromeStub.runtime.reload).toHaveBeenCalledTimes(1)
     expect(storage.updateNudge).toMatchObject({ version: '0.1.0', reloadCount: 1 })
+  })
+
+  it('manda o extrator parar quando o servidor recusa o lote por pausa', async () => {
+    // Recusar o upload já impedia o dado de entrar. O que não parava era a
+    // extração: o laço na página fala com o portal, não com o Keepr One, e
+    // seguia paginando a National Life até o estágio acabar sozinho.
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    const begin = beginGridMessage()
+    vi.mocked(signedJsonRequest).mockRejectedValue(new Error('CONNECTOR_PAUSED'))
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 0,
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ a: 'b' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+      vi.fn(),
+    )
+    await flush()
+
+    expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'CONNECTOR_PAUSED' })
+    // A ordem tem de falar da extração que está rodando: com token de outra, a
+    // página a ignoraria e continuaria dirigindo o portal.
+    expect(tabs.sendMessage).toHaveBeenLastCalledWith(7, {
+      type: 'ABORT_GRID',
+      gridKey: 'NEW_BUSINESS',
+      token: begin.token,
+      correlationId: begin.correlationId,
+    })
+  })
+
+  it('manda parar antes de recarregar a extensão no 426', async () => {
+    // Ordem, não coincidência: `failSync` num CLIENT_TOO_OLD pode chamar
+    // `chrome.runtime.reload()`, que mata este worker. Uma ordem de parar
+    // emitida depois disso nunca sairia, e o portal seguiria sendo dirigido
+    // exatamente no caso em que a extensão inteira está sendo trocada.
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    const begin = beginGridMessage()
+
+    const order: string[] = []
+    tabs.sendMessage.mockImplementation(async (_tabId: number, message: unknown) => {
+      order.push((message as { type: string }).type)
+      return undefined
+    })
+    chromeStub.runtime.reload.mockImplementation(() => {
+      order.push('reload')
+    })
+    vi.mocked(signedJsonRequest).mockRejectedValue(new Error('CLIENT_TOO_OLD'))
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 0,
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ a: 'b' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+      vi.fn(),
+    )
+    await flush()
+
+    expect(order).toEqual(['ABORT_GRID', 'reload'])
   })
 
   it('não empurra numa falha que atualizar não resolve', async () => {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { parseBridgeMessage, parseExternalMessage } from './messages'
+import {
+  parseAbortGridMessage,
+  parseBeginGridMessage,
+  parseBridgeMessage,
+  parseExternalMessage,
+} from './messages'
 
 describe('message validation', () => {
   it('accepts exact external messages and rejects extra properties', () => {
@@ -76,5 +81,40 @@ describe('message validation', () => {
       }),
     ).toBeNull()
     expect(parseBridgeMessage({ type: 'OTHER' })).toBeNull()
+  })
+})
+
+describe('grid control messages', () => {
+  const base = {
+    gridKey: 'NEW_BUSINESS',
+    token: 't'.repeat(32),
+    correlationId: 'c'.repeat(16),
+  }
+
+  it('accepts a well-formed order to begin and to abort', () => {
+    expect(parseBeginGridMessage({ type: 'BEGIN_GRID', ...base })).toEqual({
+      type: 'BEGIN_GRID',
+      ...base,
+    })
+    expect(parseAbortGridMessage({ type: 'ABORT_GRID', ...base })).toEqual({
+      type: 'ABORT_GRID',
+      ...base,
+    })
+  })
+
+  it('never confuses one order for the other', () => {
+    // O extrator arma a bandeira de parada com o que este parser aceitar. Se ele
+    // aceitasse um BEGIN_GRID, mandar começar viraria mandar parar.
+    expect(parseAbortGridMessage({ type: 'BEGIN_GRID', ...base })).toBeNull()
+    expect(parseBeginGridMessage({ type: 'ABORT_GRID', ...base })).toBeNull()
+  })
+
+  it('rejects an abort order that cannot identify an extraction', () => {
+    expect(parseAbortGridMessage({ type: 'ABORT_GRID', ...base, extra: 1 })).toBeNull()
+    expect(parseAbortGridMessage({ type: 'ABORT_GRID', ...base, token: 'short' })).toBeNull()
+    expect(parseAbortGridMessage({ type: 'ABORT_GRID', ...base, correlationId: 'tiny' })).toBeNull()
+    expect(parseAbortGridMessage({ type: 'ABORT_GRID', ...base, gridKey: 'new business' })).toBeNull()
+    expect(parseAbortGridMessage({ type: 'ABORT_GRID' })).toBeNull()
+    expect(parseAbortGridMessage(null)).toBeNull()
   })
 })

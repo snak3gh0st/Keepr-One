@@ -14,6 +14,7 @@ import { clearDeviceKeys, getOrCreateDeviceKey } from '../lib/key-store'
 import {
   parseBridgeMessage,
   parseExternalMessage,
+  type AbortGridMessage,
   type BeginGridMessage,
   type BridgeMessage,
 } from '../lib/messages'
@@ -456,6 +457,32 @@ async function finishGrid(tabId: number, gridKey: string) {
   await chrome.tabs.update(tabId, { url: `${NLG_ORIGIN}${next.params.navigatePath}` })
 }
 
+/// Manda o extrator parar onde está.
+///
+/// É o que faltava para a pausa do servidor alcançar um run em voo. Recusar o
+/// upload já impedia o dado de entrar, mas não impedia a extração de continuar:
+/// o laço na página fala com o portal, não com o Keepr One, e seguia paginando a
+/// National Life até o estágio acabar sozinho. Para uma emergência nossa isso era
+/// tolerável; para a seguradora pedindo que a automação pare, não é.
+///
+/// Silenciosa de propósito quando não há extração ativa ou quando a aba sumiu:
+/// as duas coisas são a mesma parada, por outro caminho.
+async function abortExtraction(tabId: number) {
+  const active = activeNavigations.get(tabId)
+  if (!active) return
+  const message: AbortGridMessage = {
+    type: 'ABORT_GRID',
+    gridKey: active.gridKey,
+    token: active.token,
+    correlationId: active.correlationId,
+  }
+  try {
+    await chrome.tabs.sendMessage(tabId, message)
+  } catch {
+    // Aba fechada, ponte ausente: não há o que parar.
+  }
+}
+
 async function processBridgeMessage(tabId: number, message: BridgeMessage) {
   const active = activeNavigations.get(tabId)
   if (
@@ -474,6 +501,11 @@ async function processBridgeMessage(tabId: number, message: BridgeMessage) {
       await failSync(message.code, tabId)
     }
   } catch (error) {
+    // A ordem de parar vem antes de tudo: antes do `delete`, que apaga o token
+    // de que ela precisa, e antes de `failSync`, que num CLIENT_TOO_OLD pode
+    // chamar `chrome.runtime.reload()` e matar este worker no meio. Um GRID_ERROR
+    // não passa por aqui — ali o extrator já parou sozinho.
+    await abortExtraction(tabId)
     activeNavigations.delete(tabId)
     await failSync(error instanceof Error ? error.message : 'UPLOAD_FAILED', tabId)
   }

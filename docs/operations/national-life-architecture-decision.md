@@ -219,6 +219,38 @@ Não existe solução pronta para isso — a busca por repos de version gating
 encontrou arquivos de configuração de 65 bytes. São ~150 linhas nossas, custo
 zero, sem dependência nova.
 
+#### A pausa alcança o run em voo
+
+Havia um buraco aqui, e era o pior deles. Pausar no servidor recusava o upload
+seguinte — o dado parava de entrar — mas não alcançava a extração já rodando: o
+laço de paginação vive na página, fala com o portal e não com o Keepr One, e
+seguia puxando página atrás de página da National Life até o estágio acabar
+sozinho. Para uma emergência nossa (dado corrompido) isso bastava. Para a
+seguradora pedindo que a automação pare, não bastava — e essa era a classe de
+risco viva deste projeto.
+
+Fechado: a primeira recusa de upload dispara `ABORT_GRID` do background para a
+ponte e da ponte para o extrator, que confere a ordem **antes de cada ida ao
+portal** e outra vez quando a página volta. Numa grade de 100.000 linhas isso é a
+diferença entre parar na página 1 e parar na 500.
+
+Três detalhes que o desenho carrega de propósito:
+
+- **A ordem sai antes de tudo.** Antes de esquecer a navegação ativa, que guarda o
+  token de que ela precisa, e antes de `failSync` — que num `CLIENT_TOO_OLD` pode
+  chamar `chrome.runtime.reload()` e matar o worker no meio. Uma ordem emitida
+  depois disso nunca sairia, justamente quando a extensão está sendo trocada.
+- **A ordem é ligada a um token.** Uma ordem que não prove falar da extração que
+  está rodando é ignorada; senão pararia a errada, ou armaria a bandeira para a
+  próxima.
+- **O extrator sai calado.** Sem `GRID_DONE`, sem `GRID_ERROR`: o background já
+  gravou o motivo verdadeiro, e um erro tardio o trocaria por "resposta inválida"
+  na tela do agente.
+
+O que continua fora de alcance: uma pausa que chegue durante um estágio sem
+nenhum upload em curso só é notada no upload seguinte. Como um lote sobe a cada
+200 linhas, a janela é de uma página.
+
 ### Distribuição não tem alternativa
 
 - CRX auto-hospedado: morto no Windows (Chrome 33) e macOS (Chrome 44).

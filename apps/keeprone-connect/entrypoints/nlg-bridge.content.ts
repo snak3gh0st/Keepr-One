@@ -1,4 +1,9 @@
-import { parseBeginGridMessage, parseBridgeMessage, type BeginGridMessage } from '../lib/messages'
+import {
+  parseAbortGridMessage,
+  parseBeginGridMessage,
+  parseBridgeMessage,
+  type BeginGridMessage,
+} from '../lib/messages'
 
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
 
@@ -9,10 +14,28 @@ export default defineContentScript({
     let active: BeginGridMessage | null = null
 
     chrome.runtime.onMessage.addListener((value) => {
-      const message = parseBeginGridMessage(value)
-      if (!message) return
-      active = message
-      window.postMessage({ channel: CHANNEL, payload: message }, location.origin)
+      const begin = parseBeginGridMessage(value)
+      if (begin) {
+        active = begin
+        window.postMessage({ channel: CHANNEL, payload: begin }, location.origin)
+        return
+      }
+
+      // A ordem de parar atravessa para a página pelo mesmo canal, e só se falar
+      // da extração que esta ponte está acompanhando: uma ordem com token de
+      // outra extração pararia a errada.
+      const abort = parseAbortGridMessage(value)
+      if (
+        !abort ||
+        !active ||
+        abort.token !== active.token ||
+        abort.correlationId !== active.correlationId ||
+        abort.gridKey !== active.gridKey
+      ) {
+        return
+      }
+      window.postMessage({ channel: CHANNEL, payload: abort }, location.origin)
+      active = null
     })
 
     window.addEventListener('message', (event) => {

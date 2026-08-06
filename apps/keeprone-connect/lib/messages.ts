@@ -44,6 +44,21 @@ export type BeginGridMessage = {
   correlationId: string
 }
 
+/// Ordem de parar onde está, mandada pelo background ao extrator.
+///
+/// O laço de paginação da página não tem como saber que o servidor recusou o
+/// último lote: ele fala com o portal, não com o Keepr One. Sem esta mensagem o
+/// `while (true)` segue puxando página atrás de página da National Life mesmo
+/// depois do run ter morrido — o servidor para de receber, e o portal continua
+/// sendo dirigido. Carrega os mesmos três campos de `BEGIN_GRID` porque tem de
+/// provar que fala da extração que está rodando, e não de uma anterior.
+export type AbortGridMessage = {
+  type: 'ABORT_GRID'
+  gridKey: string
+  token: string
+  correlationId: string
+}
+
 export type GridChunkMessage = {
   type: 'GRID_CHUNK'
   gridKey: string
@@ -126,18 +141,29 @@ export function parseExternalMessage(value: unknown): ExternalMessage | null {
   return { type: value.type, code: value.code.trim(), label: value.label.trim(), baseUrl: value.baseUrl }
 }
 
-export function parseBeginGridMessage(value: unknown): BeginGridMessage | null {
+/// `BEGIN_GRID` e `ABORT_GRID` têm exatamente a mesma forma e a mesma exigência:
+/// identificar uma extração. Um parser só, com o tipo esperado como parâmetro,
+/// para que afrouxar a validação de um nunca afrouxe a do outro por descuido.
+function parseGridControlMessage<T extends string>(value: unknown, type: T) {
   if (
     !isObject(value) ||
     !hasExactKeys(value, ['type', 'gridKey', 'token', 'correlationId']) ||
-    value.type !== 'BEGIN_GRID' ||
+    value.type !== type ||
     !isGridKeyLabel(value.gridKey) ||
     !isShortString(value.token, 128, 32) ||
     !isShortString(value.correlationId, 128, 16)
   ) {
     return null
   }
-  return value as BeginGridMessage
+  return value
+}
+
+export function parseBeginGridMessage(value: unknown): BeginGridMessage | null {
+  return parseGridControlMessage(value, 'BEGIN_GRID') as BeginGridMessage | null
+}
+
+export function parseAbortGridMessage(value: unknown): AbortGridMessage | null {
+  return parseGridControlMessage(value, 'ABORT_GRID') as AbortGridMessage | null
 }
 
 export function parseBridgeMessage(value: unknown): BridgeMessage | null {
