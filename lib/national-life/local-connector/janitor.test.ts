@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import {
   LOCAL_CONNECTOR_PAIRING_RETENTION_MS,
@@ -99,6 +100,37 @@ describe('local connector janitor predicates', () => {
     expect(states).not.toContain('RUNNING')
     expect(states).not.toContain('QUEUED')
     expect(states).not.toContain('PAUSED')
+  })
+})
+
+describe('local connector janitor indexes', () => {
+  const schema = readFileSync('prisma/schema.prisma', 'utf8')
+
+  function indexesOf(model: string): string[] {
+    const body = schema.split(`model ${model} {`)[1]?.split('\n}')[0] ?? ''
+    return [...body.matchAll(/@@index\(\[([^\]]+)\]\)/g)].map((match) =>
+      match[1].replace(/\s/g, ''),
+    )
+  }
+
+  it('backs the stage receipt sweep with an index on the run columns it filters', () => {
+    // O predicado é `run: { state, updatedAt }`. Os índices que já existiam
+    // começam por `agentId`, e esta varredura não filtra agente nenhum — varre a
+    // tabela inteira. Mudar o predicado sem mudar o índice devolve a varredura ao
+    // sequential scan, e nada além deste teste avisaria.
+    expect(indexesOf('NationalLifeSyncRun')).toContain('state,updatedAt')
+  })
+
+  it('backs the pairing sweep with one index per branch of its OR', () => {
+    // Um composto `(expiresAt, consumedAt)` serviria só ao primeiro ramo. Dois de
+    // uma coluna deixam o Postgres resolver o OR com BitmapOr.
+    const indexes = indexesOf('NationalLifeConnectorPairing')
+    expect(indexes).toContain('expiresAt')
+    expect(indexes).toContain('consumedAt')
+  })
+
+  it('leaves the replay sweep on the index it already had', () => {
+    expect(indexesOf('NationalLifeConnectorReplay')).toContain('expiresAt')
   })
 })
 

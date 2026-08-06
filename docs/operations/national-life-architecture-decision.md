@@ -92,12 +92,17 @@ por cascade junto com o agente) e recibos de run não-terminal — um run abando
 em `RUNNING` guarda seus recibos para sempre. Cresce devagar; se virar problema, o
 conserto é expirar o run, não afrouxar o recibo.
 
-**Duas das três seleções não são cobertas por índice.** `Replay.expiresAt` tem o
-seu. A de recibos filtra por `run: { state, updatedAt }` e `NationalLifeSyncRun`
-não tem índice `(state, updatedAt)`; a de pairings filtra `expiresAt`/`consumedAt`
-sozinhos, enquanto o único índice começa por `agentId`. Nos volumes de hoje é
-irrelevante — as duas tabelas são pequenas perto da de replay. Fica registrado
-para não virar surpresa a 100 agentes.
+**As três seleções são cobertas por índice.** `Replay.expiresAt` já tinha o seu;
+as outras duas ganharam os seus em
+`20260806010000_index_connector_janitor_sweeps`. O ponto que fazia falta: os
+índices que já existiam nessas tabelas começam por `agentId`, e nenhuma das duas
+varreduras filtra por agente — elas varrem a tabela inteira, então aquele prefixo
+não servia. Em Pairing são **dois índices de uma coluna**, não um composto: o
+predicado é um `OR`, que o Postgres resolve com BitmapOr dos dois; um composto
+`(expiresAt, consumedAt)` só serviria ao primeiro ramo.
+
+Os testes amarram predicado e índice: mudar um sem o outro devolve a varredura ao
+sequential scan, e nada além deles avisaria.
 
 **Um erro de digitação na variável de intervalo não derruba o boot.** A validação
 lança, e `instrumentation.ts` captura: uma tarefa de fundo pode não rodar, mas não
@@ -161,8 +166,8 @@ cheio não é prova, e a linha do banco é a única outra cópia.
 
 **Isto muda o lugar do crescimento, não o bounda.** Continua sem varredor para
 arquivos de documento; a diferença é que agora cresce em disco barato e não no
-banco que serve a aplicação. Fica anotado junto das duas seleções de varredura
-sem índice: são as três dívidas conhecidas desta área.
+banco que serve a aplicação. É a dívida conhecida que resta nesta área — as
+seleções de varredura já ganharam seus índices.
 
 ---
 
