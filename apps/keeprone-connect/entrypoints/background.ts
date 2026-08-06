@@ -200,7 +200,17 @@ async function nudgeUpdateIfSafe(): Promise<void> {
     },
     reload: () => chrome.runtime.reload(),
     isBusy: async () => {
-      if (activeNavigations.size > 0 || tabQueues.size > 0 || syncStartLock !== null) return true
+      // `syncStartLock` fica **de fora**, e essa omissão é deliberada. O gatilho
+      // que mais importa — o 426 — chega por `startNewSync`, que roda dentro de
+      // `withSyncLock`: no instante em que `failSync` decide empurrar, o lock é a
+      // promessa da própria operação que está falhando. Consultá-lo devolveria
+      // BUSY sempre, e o empurrão nunca aconteceria justamente no caso para o
+      // qual ele foi construído.
+      //
+      // O que sobra cobre o caso real de trabalho concorrente: um `startNewSync`
+      // de verdade em voo deixa o estado persistido em STARTING/NAVIGATING, e uma
+      // falha vinda da ponte só existe quando `activeNavigations` está povoado.
+      if (activeNavigations.size > 0 || tabQueues.size > 0) return true
       const state = await readSyncState()
       return isBusySyncStatus(state.status)
     },

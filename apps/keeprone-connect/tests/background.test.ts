@@ -60,6 +60,9 @@ const chromeStub = {
     },
   },
   runtime: {
+    getManifest: () => ({ version: '0.1.0' }),
+    requestUpdateCheck: vi.fn(async () => ({ status: 'no_update' })),
+    reload: vi.fn(),
     onInstalled: register('runtime.onInstalled'),
     onMessage: register('runtime.onMessage'),
     onMessageExternal: register('runtime.onMessageExternal'),
@@ -91,6 +94,11 @@ function readSync() {
   return storage.sync as Record<string, unknown>
 }
 
+const EXTERNAL_SENDER = {
+  origin: 'http://localhost:3000',
+  url: 'http://localhost:3000/agent/integrations/national-life',
+}
+
 function beginGridMessage() {
   const call = tabs.sendMessage.mock.calls.at(-1) as unknown as [number, Record<string, unknown>]
   return call?.[1]
@@ -106,6 +114,36 @@ beforeEach(() => {
   // The extension's own vitest config substitutes this at build time; the repo-root
   // config does not, and without it every allowed-origin check fails.
   vi.stubGlobal('__KEEPR_ORIGIN__', 'http://localhost:3000')
+})
+
+describe('empurrão de atualização no caminho real', () => {
+  it('empurra quando o servidor diz que esta versão está abaixo do piso', async () => {
+    // O caso que quase escapou: `failSync` roda **dentro** de `withSyncLock`, então
+    // um `isBusy` que consultasse o lock devolveria BUSY sempre e o empurrão nunca
+    // aconteceria — exatamente no gatilho para o qual ele foi construído.
+    vi.mocked(signedJsonRequest).mockRejectedValue(
+      Object.assign(new Error('CLIENT_TOO_OLD'), { code: 'CLIENT_TOO_OLD' }),
+    )
+    await bootBackground()
+
+    emit('runtime.onMessageExternal', { type: 'START_NATIONAL_LIFE_SYNC' }, EXTERNAL_SENDER, vi.fn())
+    await flush()
+
+    expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'CLIENT_TOO_OLD' })
+    expect(chromeStub.runtime.reload).toHaveBeenCalledTimes(1)
+    // E a trava ficou gravada antes do reload, não depois.
+    expect(storage.updateNudge).toMatchObject({ version: '0.1.0', reloadCount: 1 })
+  })
+
+  it('não empurra numa falha que atualizar não resolve', async () => {
+    vi.mocked(signedJsonRequest).mockRejectedValue(new Error('PORTAL_REQUEST_FAILED'))
+    await bootBackground()
+
+    emit('runtime.onMessageExternal', { type: 'START_NATIONAL_LIFE_SYNC' }, EXTERNAL_SENDER, vi.fn())
+    await flush()
+
+    expect(chromeStub.runtime.reload).not.toHaveBeenCalled()
+  })
 })
 
 describe('background plan executor', () => {
