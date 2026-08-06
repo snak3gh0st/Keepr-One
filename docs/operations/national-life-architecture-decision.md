@@ -51,10 +51,13 @@ suspeita de filtro de data e sonda **escrita e nunca rodada**
 - `Policy` tem 2.168 linhas de seed sintético (`NLG-0001`).
 - `ExternalReference` existe para isso e está vazia.
 
-### 4. Crescimento sem varredor — descoberto nesta rodada
+### 4. Crescimento sem varredor — resolvido para as três tabelas do conector
 
-**Nenhum varredor existe.** `NationalLifeConnectorReplay` ganha uma linha por
-requisição assinada; `expiresAt` é escrito e indexado e nada o lê.
+> **Estado:** varredores entregues (`lib/national-life/local-connector/janitor.ts`).
+> O PDF no Postgres continua pendente — ver "Pendência: o PDF no Postgres" abaixo.
+
+**Nenhum varredor existia.** `NationalLifeConnectorReplay` ganha uma linha por
+requisição assinada; `expiresAt` era escrito e indexado e nada o lia.
 
 Um sync completo do livro são ~53 requisições assinadas por agente. A 100 agentes
 por dia: ~5.300 linhas/dia, **~1,9 M/ano**, para sempre. Idem recibos de estágio e
@@ -62,6 +65,49 @@ pairings consumidos.
 
 **E o PDF do Foresight é gravado como `Bytes` dentro do Postgres**
 (`schema.prisma:420`). Dezenas de GB/ano num banco que também serve a aplicação.
+
+#### O que foi entregue
+
+Uma varredura em lotes sobre as três tabelas, com o disparo junto — não há cron
+neste projeto, e varredura sem disparo é como `expiresAt` chegou até aqui:
+
+| Tabela | Corte | Por quê esse corte |
+| --- | --- | --- |
+| `NationalLifeConnectorReplay` | `expiresAt` + uma janela de assinatura (5 min) | A verificação de timestamp já rejeita sozinha qualquer assinatura vencida; a linha vira lastro no mesmo instante. A margem extra é folga se aquela checagem mudar. |
+| `NationalLifeConnectorPairing` | vencido **ou** consumido há mais de 24h | O resgate exige `consumedAt: null` e `expiresAt` no futuro. As 24h são só para o suporte olhar um pareamento do mesmo dia. |
+| `NationalLifeConnectorStageReceipt` | run em estado terminal e parado há mais de 30 dias | O recibo é a chave de idempotência do upload. O corte é a idade do **run**, não a do recibo: apagar recibo de run que ainda aceita upload transforma reenvio em escrita dupla. |
+
+Disparo: intervalo dentro do próprio processo, ligado em `instrumentation.ts`
+(padrão 900s, `NATIONAL_LIFE_JANITOR_INTERVAL_SECONDS`, desligável por
+`NATIONAL_LIFE_JANITOR_DISABLED`). Mais `POST
+/api/internal/national-life/connector-janitor` com `NATIONAL_LIFE_JANITOR_SECRET`,
+que chama exatamente a mesma passada — se a rota funciona, o automático também.
+
+Lotes de 1.000 com teto de 50 por passada: um `deleteMany` único sobre uma tabela
+dimensionada para 1,9 M linhas/ano trava e incha. Atingido o teto, a passada
+reporta `truncated: true` e a seguinte continua.
+
+**O que a varredura não apaga:** `NationalLifeSyncRun` (é o que a tela lê, e some
+por cascade junto com o agente) e recibos de run não-terminal — um run abandonado
+em `RUNNING` guarda seus recibos para sempre. Cresce devagar; se virar problema, o
+conserto é expirar o run, não afrouxar o recibo.
+
+#### Pendência: o PDF no Postgres
+
+Continua como `Bytes` em `NationalLifeForesightDocument`. Não foi movido nesta
+rodada porque é troca de backend de storage mais migração de dado já gravado, e o
+repositório não tem cliente de object storage. As duas saídas:
+
+- **Disco com volume** — reusa o padrão que já existe em
+  `app/api/documents/[id]/route.ts` (`UPLOADS_DIR`). Barato, mas o disco do
+  container Coolify é efêmero: sem volume persistente montado, o PDF some no
+  próximo deploy. O passo manual é a montagem do volume.
+- **S3/R2** — não some em deploy nenhum, e é o caminho certo se o app um dia
+  rodar em mais de um container. Custa `@aws-sdk/client-s3`, credenciais, bucket
+  e região.
+
+Recomendação: S3/R2, porque o motivo de tirar o PDF do banco é justamente durar, e
+volume em host único troca um ponto único de falha por outro.
 
 ---
 
@@ -196,15 +242,20 @@ a aplicação de um terceiro. Cai no producer agreement, ainda pendente.
    contrato de API.
 3. **UX de falha, em inglês** — erros distintos e acionáveis; os três becos
    (device revogado em loop, erro que some no reload, Store 404).
-4. **Varredores** — replay, recibos, pairings. E tirar o PDF do Postgres.
+4. ~~**Varredores** — replay, recibos, pairings.~~ Feito. Falta tirar o PDF do
+   Postgres — decisão de storage descrita acima.
 5. **Chrome DevTools MCP** na máquina de dev — lê o painel de rede, que é onde a
    quebra mora. Manutenção, nunca runtime.
 6. **Store, em paralelo, com data de decisão.**
 
 ## Duas correções baratas de alto retorno
 
-- **Rapid Solve** — o `HTTP 500` tinha causa achada: falta o header
-  `__requestverificationtoken`. O grid client já lê esse token.
+- ~~**Rapid Solve**~~ — **feito** em `fb4e446`. O `HTTP 500` era a falta do header
+  `__requestverificationtoken`. `requestRapidSolveQuote` agora carrega a própria
+  página do Rapid Solve, lê `input[name="__RequestVerificationToken"]` e manda o
+  header no POST — pelo contexto do browser da sessão, que é o que garante o
+  cookie de antiforgery casando com o token. **Nunca exercitado contra o portal
+  real**: só contra fixture. É item de smoke test.
 - **Sonda de correspondência** — escrita, nunca rodada. Se o filtro de data for a
   causa dos 64 documentos, destrava o caminho do PDF, único caminho para capital
   segurado.
