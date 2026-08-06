@@ -19,6 +19,11 @@ function harness(overrides: Partial<UpdateNudgeDeps> = {}) {
     version: () => '0.1.0',
     readRecord: async () => stored,
     writeRecord: async (record) => {
+      // A suspensão é o teste. Sem ela, uma implementação que chamasse
+      // `deps.writeRecord(...)` **sem await** produziria a mesma ordem
+      // ['write','reload'] e a asserção não provaria nada — que é exatamente a
+      // coisa que o módulo chama de "a trava".
+      await Promise.resolve()
       order.push('write')
       stored = record
     },
@@ -48,7 +53,9 @@ describe('empurrão de atualização', () => {
     const h = harness()
     expect(await nudgeExtensionUpdate(h.deps)).toBe('RELOADED')
     // A ordem é o contrato inteiro: reload() mata o worker, então um write não
-    // aguardado se perderia e a próxima inicialização leria a trava vazia.
+    // aguardado se perderia e a próxima inicialização leria a trava vazia. O
+    // `writeRecord` do harness suspende antes de registrar, então esta asserção
+    // só passa se a implementação de fato aguardou.
     expect(h.order).toEqual(['write', 'reload'])
     expect(h.stored).toMatchObject({ version: '0.1.0', reloadCount: 1 })
   })

@@ -42,6 +42,10 @@ type ActiveNavigation = BeginGridMessage & { tabId: number }
 
 const activeNavigations = new Map<number, ActiveNavigation>()
 const tabQueues = new Map<number, Promise<void>>()
+/// Quantas mensagens da ponte estão pendentes por aba, incluindo a que está sendo
+/// processada agora. `tabQueues` sozinho não distingue "uma mensagem, que sou eu"
+/// de "uma mensagem minha e outras esperando".
+const pendingBridgeMessages = new Map<number, number>()
 let syncStartLock: Promise<unknown> | null = null
 
 function versionedHeaders(base: Record<string, string>): Record<string, string> {
@@ -179,12 +183,12 @@ async function forgetRevokedDevice() {
 /// dependências, e duas delas são o ponto:
 ///
 /// - `isBusy` olha o estado **persistido** além dos mapas em memória. Num worker
-///   recém-iniciado `activeNavigations` e `tabQueues` estão vazios embora um run
-///   esteja genuinamente no meio segundo o storage — confiar só neles chamaria
-///   "ponto seguro" exatamente o momento mais perigoso.
+///   recém-iniciado os mapas estão vazios embora um run esteja genuinamente no
+///   meio segundo o storage — confiar só neles chamaria "ponto seguro" exatamente
+///   o momento mais perigoso.
 /// - `writeRecord` grava no `chrome.storage.local`, que sobrevive ao worker. Um
 ///   global de módulo morreria junto com o reload que ele deveria estar contando.
-async function nudgeUpdateIfSafe(): Promise<void> {
+async function nudgeUpdateIfSafe(selfTabId?: number): Promise<void> {
   await nudgeExtensionUpdate({
     now: () => Date.now(),
     version: () => readExtensionVersion(),
@@ -199,25 +203,35 @@ async function nudgeUpdateIfSafe(): Promise<void> {
       await chrome.runtime.requestUpdateCheck()
     },
     reload: () => chrome.runtime.reload(),
+    /// A regra, e ela tem exatamente uma forma: **nada que conte a própria
+    /// operação que está falhando**. Esse erro já foi cometido duas vezes aqui, em
+    /// dois braços diferentes, e as duas vezes o efeito foi o mesmo — o empurrão
+    /// devolvia BUSY para sempre e o recurso morria no gatilho mais importante.
+    ///
+    /// - `syncStartLock` fica de fora: um 426 vindo de `startNewSync` roda dentro
+    ///   de `withSyncLock`, então o lock é a promessa da própria operação falhando.
+    /// - a fila da aba é **descontada de uma unidade** quando a falha vem da ponte:
+    ///   `processBridgeMessage` chama `failSync` com a sua própria entrada ainda
+    ///   pendente em `tabQueues`. Esse é o caminho dominante de um 426, porque um
+    ///   piso subido contra runs em voo é exatamente o que "subir o piso"
+    ///   significa: a recusa chega no PUT de um lote, não no início do run.
+    ///
+    /// O que sobra é trabalho de verdade: outras abas, outras mensagens na mesma
+    /// aba, e o estado persistido — que `failSync` acabou de mover para ERROR, de
+    /// modo que só um sync *concorrente* o deixa ocupado.
     isBusy: async () => {
-      // `syncStartLock` fica **de fora**, e essa omissão é deliberada. O gatilho
-      // que mais importa — o 426 — chega por `startNewSync`, que roda dentro de
-      // `withSyncLock`: no instante em que `failSync` decide empurrar, o lock é a
-      // promessa da própria operação que está falhando. Consultá-lo devolveria
-      // BUSY sempre, e o empurrão nunca aconteceria justamente no caso para o
-      // qual ele foi construído.
-      //
-      // O que sobra cobre o caso real de trabalho concorrente: um `startNewSync`
-      // de verdade em voo deixa o estado persistido em STARTING/NAVIGATING, e uma
-      // falha vinda da ponte só existe quando `activeNavigations` está povoado.
-      if (activeNavigations.size > 0 || tabQueues.size > 0) return true
+      if (activeNavigations.size > 0) return true
+      let pending = 0
+      for (const count of pendingBridgeMessages.values()) pending += count
+      if (selfTabId !== undefined) pending -= 1
+      if (pending > 0) return true
       const state = await readSyncState()
       return isBusySyncStatus(state.status)
     },
   })
 }
 
-async function failSync(code: string) {
+async function failSync(code: string, selfTabId?: number) {
   await writeSyncState({ ...(await readSyncState()), status: 'ERROR', errorCode: code })
   await reportRunFailure(code)
   if (revokesDevice(code)) await forgetRevokedDevice()
@@ -225,7 +239,7 @@ async function failSync(code: string) {
   // empurrão a cada falha genérica gastaria as tentativas contra problemas que
   // atualizar não resolve. `failSync` já gravou o ERROR, e o estado de sync
   // acabou de sair dos estados ocupados — por isso o empurrão vem depois.
-  if (OUTDATED_CODES.includes(code)) await nudgeUpdateIfSafe()
+  if (OUTDATED_CODES.includes(code)) await nudgeUpdateIfSafe(selfTabId)
 }
 
 async function createRun() {
@@ -457,18 +471,27 @@ async function processBridgeMessage(tabId: number, message: BridgeMessage) {
     else if (message.type === 'GRID_DONE') await finishGrid(tabId, message.gridKey)
     else {
       activeNavigations.delete(tabId)
-      await failSync(message.code)
+      await failSync(message.code, tabId)
     }
   } catch (error) {
     activeNavigations.delete(tabId)
-    await failSync(error instanceof Error ? error.message : 'UPLOAD_FAILED')
+    await failSync(error instanceof Error ? error.message : 'UPLOAD_FAILED', tabId)
   }
 }
 
 function enqueueBridgeMessage(tabId: number, message: BridgeMessage) {
   const previous = tabQueues.get(tabId) ?? Promise.resolve()
+  // Profundidade por aba, não só "existe fila". `tabQueues` guarda a promessa da
+  // cadeia inteira, então enquanto `processBridgeMessage` roda a entrada dele
+  // ainda está lá — perguntar "há fila?" de dentro dele responde sempre "sim".
+  // Contando mensagens dá para descontar a que está falhando e ainda enxergar as
+  // outras. Ver `nudgeUpdateIfSafe`.
+  pendingBridgeMessages.set(tabId, (pendingBridgeMessages.get(tabId) ?? 0) + 1)
   const next = previous.then(() => processBridgeMessage(tabId, message))
   const queued = next.finally(() => {
+    const remaining = (pendingBridgeMessages.get(tabId) ?? 1) - 1
+    if (remaining > 0) pendingBridgeMessages.set(tabId, remaining)
+    else pendingBridgeMessages.delete(tabId)
     if (tabQueues.get(tabId) === queued) tabQueues.delete(tabId)
   })
   tabQueues.set(tabId, queued)

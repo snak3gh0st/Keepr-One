@@ -130,8 +130,63 @@ describe('empurrão de atualização no caminho real', () => {
     await flush()
 
     expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'CLIENT_TOO_OLD' })
+    expect(chromeStub.runtime.requestUpdateCheck).toHaveBeenCalled()
     expect(chromeStub.runtime.reload).toHaveBeenCalledTimes(1)
     // E a trava ficou gravada antes do reload, não depois.
+    expect(storage.updateNudge).toMatchObject({ version: '0.1.0', reloadCount: 1 })
+  })
+
+  it('a trava persistida sobrevive à morte do worker e barra o segundo reload', async () => {
+    // Esta é a asserção que um `chrome.runtime.reload()` solto no lugar do
+    // empurrão **não** satisfaz: ele recarregaria de novo. Reiniciar o worker é o
+    // caso real — reload() mata o worker, então a segunda decisão sempre acontece
+    // num módulo recém-carregado, com os globais zerados.
+    vi.mocked(signedJsonRequest).mockRejectedValue(new Error('CLIENT_TOO_OLD'))
+    await bootBackground()
+    emit('runtime.onMessageExternal', { type: 'START_NATIONAL_LIFE_SYNC' }, EXTERNAL_SENDER, vi.fn())
+    await flush()
+    expect(chromeStub.runtime.reload).toHaveBeenCalledTimes(1)
+
+    // Worker morre e volta. Só o chrome.storage.local sobrevive.
+    await bootBackground()
+    emit('runtime.onMessageExternal', { type: 'START_NATIONAL_LIFE_SYNC' }, EXTERNAL_SENDER, vi.fn())
+    await flush()
+
+    expect(chromeStub.runtime.reload).toHaveBeenCalledTimes(1)
+    expect(storage.updateNudge).toMatchObject({ reloadCount: 1 })
+  })
+
+  it('empurra quando o 426 chega no PUT de um lote, não no início do run', async () => {
+    // O caminho dominante de verdade: subir o piso contra runs já em voo é o que
+    // "subir o piso" significa operacionalmente, e aí a recusa chega no upload de
+    // um lote. `processBridgeMessage` chama `failSync` com a própria entrada dele
+    // ainda pendente na fila da aba — contar essa entrada devolvia BUSY sempre,
+    // que é o mesmo erro do `syncStartLock`, um braço adiante.
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    const begin = beginGridMessage()
+    vi.mocked(signedJsonRequest).mockRejectedValue(new Error('CLIENT_TOO_OLD'))
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 0,
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ a: 'b' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+      vi.fn(),
+    )
+    await flush()
+
+    expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'CLIENT_TOO_OLD' })
+    expect(chromeStub.runtime.reload).toHaveBeenCalledTimes(1)
     expect(storage.updateNudge).toMatchObject({ version: '0.1.0', reloadCount: 1 })
   })
 
