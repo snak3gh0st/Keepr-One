@@ -17,7 +17,12 @@ export const CONNECTOR_VERSION_HEADER = 'x-fyntra-connector-version'
 /// caminho de assinatura: sem versão, o cabeçalho simplesmente não vai.
 export function readExtensionVersion(): string | undefined {
   try {
-    const version = globalThis.chrome?.runtime?.getManifest?.().version
+    // Structural, not `typeof chrome`: this module is also type-checked from the
+    // root project, which does not load the extension's browser type definitions.
+    const runtime = (
+      globalThis as { chrome?: { runtime?: { getManifest?: () => { version?: unknown } } } }
+    ).chrome?.runtime
+    const version = runtime?.getManifest?.().version
     return typeof version === 'string' && /^[0-9]+(\.[0-9]+){0,3}$/.test(version)
       ? version
       : undefined
