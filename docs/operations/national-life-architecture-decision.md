@@ -336,20 +336,55 @@ a aplicação de um terceiro. Cai no producer agreement, ainda pendente.
 
 ## O que fazer, em ordem
 
-1. **Tolerância de versão** — header `X-Ext-Version`, servidor aceita N versões,
-   `426` abaixo do piso, flag de kill no mesmo envelope. Com o guard de reload.
-   Serve para extensão e para desktop.
-2. **Canário de schema** — `ajv` validando toda resposta contra o schema da última
-   versão boa. Zero LLM, zero dado saindo da máquina. É o único que ataca drift de
-   contrato de API.
-3. **UX de falha, em inglês** — erros distintos e acionáveis; os três becos
-   (device revogado em loop, erro que some no reload, Store 404).
+1. ~~**Tolerância de versão** — header, servidor aceita N versões, `426` abaixo do
+   piso, flag de kill no mesmo envelope, com o guard de reload.~~ Feito. O header
+   ficou `x-fyntra-connector-version`, não `X-Ext-Version`. E a pausa agora
+   alcança o run em voo — ver "A pausa alcança o run em voo" acima.
+2. **Canário de schema** — validação de toda resposta contra o contrato de campos
+   da última versão boa. Zero LLM, zero dado saindo da máquina. É o único que
+   ataca drift de contrato de API. **Aberto** — ver a nota de desenho abaixo.
+3. ~~**UX de falha, em inglês** — erros distintos e acionáveis.~~ Feito
+   (`connector-failure.ts`: `RECONNECT_CODES`, `OUTDATED_CODES`, `PAUSED_CODES`,
+   com paridade testada entre extensão e servidor).
 4. ~~**Varredores** — replay, recibos, pairings. E tirar o PDF do Postgres.~~
    Feito. Falta rodar o backfill em produção e, depois dele, derrubar a coluna
    `bytes` numa migração separada.
 5. **Chrome DevTools MCP** na máquina de dev — lê o painel de rede, que é onde a
    quebra mora. Manutenção, nunca runtime.
 6. **Store, em paralelo, com data de decisão.**
+
+### Nota de desenho: o canário de schema
+
+Levantado e **não construído**, porque o jeito rápido é pior que não fazer.
+
+O que o canário precisa saber é *quais campos cada grade deveria trazer*. Essa
+informação já existe, mas dentro dos mapeadores, como argumentos de chamada:
+`text(row, 'DerivedStatusDescription', 'PolicyStatus', 'Status')` — 17 grupos em
+`case-snapshot-service.ts`, ~25 em `inforce-policy-service.ts`, mais os de
+`report-row-service.ts`. Os fallbacks importam: "`InsuredName` sumiu" não é drift
+se `InsuredOrAnnuitantName` chegou. A unidade de observação é o **grupo**, não a
+chave.
+
+Copiar essas listas para um arquivo de contrato cria uma segunda fonte de verdade
+que vai divergir dos mapeadores — exatamente o defeito que o canário existe para
+detectar, instalado no próprio canário. O caminho certo é extrair os grupos dos
+mapeadores para dados (`const CASE_SNAPSHOT_FIELDS = { insuredName: [...] }`),
+fazer o mapeador ler desses dados, e o canário ler os mesmos. Uma fonte só.
+
+Isso é refatoração dos três mapeadores — código que hoje funciona, numa branch de
+20 commits esperando re-review. É a decisão que falta, não o código.
+
+Duas coisas já estão determinadas quando ele for feito:
+
+- **Nunca recusar.** O agente é não-técnico; sync que morre porque a seguradora
+  renomeou uma coluna é o defeito, não a proteção. O canário observa e alerta.
+- **Grupo, não chave**, e drift é grupo com cobertura zero numa página que tem
+  linhas — não campo nulo em linha isolada.
+
+O sinal grosso disso já existe e está na tela: `writtenCount` contra
+`recordCount` mostra "recebi 200, escrevi 0". O que ele não pega é drift em campo
+não-chave — `insuredName` vira nulo para todo mundo e ninguém percebe. É esse
+buraco que o canário fecha.
 
 ## Duas correções baratas de alto retorno
 
