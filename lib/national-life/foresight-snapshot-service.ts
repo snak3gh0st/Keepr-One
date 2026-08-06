@@ -1,5 +1,10 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import {
+  foresightDocumentKey,
+  foresightDocumentsDir,
+  writeForesightDocument,
+} from './foresight-document-storage'
 import { redactForesightPayload } from './foresight-sync'
 
 export type ForesightCaseSnapshotInput = {
@@ -96,6 +101,17 @@ export async function upsertForesightServiceSnapshot(
 }
 
 export async function upsertForesightDocument(input: ForesightDocumentInput): Promise<void> {
+  const storageKey = foresightDocumentKey(input.caseSnapshotId, input.reportKey)
+
+  // Arquivo antes da linha, e não o contrário. Um arquivo sem linha é invisível
+  // — ninguém o procura. Uma linha sem arquivo é um download que dá 404 para o
+  // agente, com o banco afirmando que o documento existe.
+  await writeForesightDocument(
+    foresightDocumentsDir(),
+    storageKey,
+    new Uint8Array(input.bytes),
+  )
+
   const data = {
     agentId: input.agentId,
     deploymentScope: input.deploymentScope,
@@ -104,7 +120,11 @@ export async function upsertForesightDocument(input: ForesightDocumentInput): Pr
     mimeType: input.mimeType,
     byteSize: input.byteSize,
     contentHash: input.contentHash,
-    bytes: new Uint8Array(input.bytes),
+    storageKey,
+    // Escritas novas não deixam bytes no banco. O `null` explícito importa no
+    // caminho de update: sem ele, uma linha antiga rerrenderizada ficaria com o
+    // PDF velho no banco *e* o novo em disco, e a leitura serviria o velho.
+    bytes: null,
     renderState: input.renderState,
     safeErrorCode: input.safeErrorCode,
     fetchedAt: input.fetchedAt,

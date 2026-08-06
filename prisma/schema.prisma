@@ -417,7 +417,16 @@ model NationalLifeForesightDocument {
   mimeType        String
   byteSize        Int
   contentHash     String
-  bytes           Bytes
+  /// Caminho do PDF dentro de `UPLOADS_DIR`. Nulo em linhas escritas antes desta
+  /// coluna — o backfill (`scripts/national-life-backfill-foresight-documents.ts`)
+  /// é quem as move.
+  storageKey      String?
+  /// O PDF em si, quando ainda está no banco. Escritas novas nascem com `bytes`
+  /// nulo e `storageKey` preenchido; a coluna sobrevive para não perder o que já
+  /// foi gravado. Derrubá-la é uma migração separada, depois do backfill
+  /// verificado em produção — dropar dado e mudar caminho de escrita no mesmo
+  /// deploy não deixa para onde voltar.
+  bytes           Bytes?
   renderState     String
   safeErrorCode   String?
   fetchedAt       DateTime?

@@ -104,22 +104,43 @@ lança, e `instrumentation.ts` captura: uma tarefa de fundo pode não rodar, mas
 pode impedir o app de servir — o healthcheck do Dockerfile transformaria isso em
 deploy falho.
 
-#### Pendência: o PDF no Postgres
+#### O PDF saiu do Postgres
 
-Continua como `Bytes` em `NationalLifeForesightDocument`. Não foi movido nesta
-rodada porque é troca de backend de storage mais migração de dado já gravado, e o
-repositório não tem cliente de object storage. As duas saídas:
+A decisão dependia de um fato que ninguém tinha checado: o disco do container é
+efêmero ou não? Foi verificado no host, não suposto. O container da app tem um
+**volume nomeado** (`sbdvgmwn1l8r3te8kef2z88k-fyntra_uploads`) montado em
+`/data/uploads`, com `UPLOADS_DIR=/data/uploads`. Sobrevive a deploy, estava
+vazio, e o disco tem 78 GB livres. Ou seja: o caminho que os documentos de
+apólice já usam é persistente, e a alternativa cara (S3/R2, com dependência,
+bucket e credencial) não comprava nada que o pilotos precise hoje.
 
-- **Disco com volume** — reusa o padrão que já existe em
-  `app/api/documents/[id]/route.ts` (`UPLOADS_DIR`). Barato, mas o disco do
-  container Coolify é efêmero: sem volume persistente montado, o PDF some no
-  próximo deploy. O passo manual é a montagem do volume.
-- **S3/R2** — não some em deploy nenhum, e é o caminho certo se o app um dia
-  rodar em mais de um container. Custa `@aws-sdk/client-s3`, credenciais, bucket
-  e região.
+Escritas novas gravam o PDF em disco e nascem com `bytes` nulo. As três decisões
+que sustentam isso:
 
-Recomendação: S3/R2, porque o motivo de tirar o PDF do banco é justamente durar, e
-volume em host único troca um ponto único de falha por outro.
+- **Arquivo antes da linha.** Arquivo sem linha é invisível — ninguém o procura.
+  Linha sem arquivo é um download que dá 404 com o banco jurando que o documento
+  existe.
+- **Chave derivada, nunca sorteada.** `upsertForesightDocument` é um upsert:
+  rerrenderizar o mesmo relatório é o caso normal. Uma chave com UUID — como a de
+  documentos de apólice — deixaria um órfão por rerrenderização, e não há
+  varredor para arquivos de documento.
+- **A leitura entende os dois estados.** `storageKey` presente → disco; senão,
+  `bytes`. É esse ramo que serve as linhas que o backfill ainda não moveu.
+
+Migração aditiva: `storageKey` entra nula, `bytes` passa a aceitar nulo, nada é
+apagado. Derrubar a coluna `bytes` é uma migração **separada**, depois do backfill
+verificado em produção — dropar dado e mudar caminho de escrita no mesmo deploy
+não deixa para onde voltar.
+
+Backfill: `scripts/national-life-backfill-foresight-documents.ts`. Ensaio por
+padrão; com `--commit`, cada linha escreve o arquivo, **relê e compara byte a
+byte**, e só então limpa a coluna — um `writeFile` que retorna sem erro num disco
+cheio não é prova, e a linha do banco é a única outra cópia.
+
+**Isto muda o lugar do crescimento, não o bounda.** Continua sem varredor para
+arquivos de documento; a diferença é que agora cresce em disco barato e não no
+banco que serve a aplicação. Fica anotado junto das duas seleções de varredura
+sem índice: são as três dívidas conhecidas desta área.
 
 ---
 
@@ -296,8 +317,9 @@ a aplicação de um terceiro. Cai no producer agreement, ainda pendente.
    contrato de API.
 3. **UX de falha, em inglês** — erros distintos e acionáveis; os três becos
    (device revogado em loop, erro que some no reload, Store 404).
-4. ~~**Varredores** — replay, recibos, pairings.~~ Feito. Falta tirar o PDF do
-   Postgres — decisão de storage descrita acima.
+4. ~~**Varredores** — replay, recibos, pairings. E tirar o PDF do Postgres.~~
+   Feito. Falta rodar o backfill em produção e, depois dele, derrubar a coluna
+   `bytes` numa migração separada.
 5. **Chrome DevTools MCP** na máquina de dev — lê o painel de rede, que é onde a
    quebra mora. Manutenção, nunca runtime.
 6. **Store, em paralelo, com data de decisão.**
