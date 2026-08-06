@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { runGridExtraction, type RequestTemplate } from './grid-extraction'
+import {
+  createGridExtractionRunner,
+  runGridExtraction,
+  type RequestTemplate,
+} from './grid-extraction'
 import type { BeginGridMessage } from './messages'
 
 const MESSAGE: BeginGridMessage = {
@@ -155,5 +159,117 @@ describe('grid extraction abort', () => {
     // "conector pausado" por "resposta inválida" na tela do agente.
     expect(h.posts.some((post) => post.type === 'GRID_ERROR')).toBe(false)
     expect(h.posts.some((post) => post.type === 'GRID_DONE')).toBe(false)
+  })
+})
+
+describe('grid extraction runner', () => {
+  const SECOND: BeginGridMessage = {
+    type: 'BEGIN_GRID',
+    gridKey: 'INFORCE_CLIENTS',
+    token: 's'.repeat(32),
+    correlationId: 'd'.repeat(16),
+  }
+
+  function abortFor(message: BeginGridMessage) {
+    return {
+      type: 'ABORT_GRID' as const,
+      gridKey: message.gridKey,
+      token: message.token,
+      correlationId: message.correlationId,
+    }
+  }
+
+  function runnerHarness(pages: { data: unknown[]; recordsTotal: number }[]) {
+    const posts: Record<string, unknown>[] = []
+    const fetchPage = vi.fn(async () => {
+      const page = pages.shift()
+      if (!page) throw new Error('PORTAL_REQUEST_FAILED')
+      return pageResponse(page)
+    })
+    const runner = createGridExtractionRunner({
+      waitForTemplate: async () => TEMPLATE,
+      fetchPage: fetchPage as never,
+      post: (payload: Record<string, unknown>) => posts.push(payload),
+    })
+    return { runner, posts, fetchPage }
+  }
+
+  it('volta a extrair no estágio seguinte a um que foi parado', async () => {
+    // A pergunta que nada respondia antes: depois de uma pausa, o conector
+    // volta a funcionar, ou fica morto até a aba recarregar? Uma bandeira de
+    // parada que sobrevivesse ao estágio pararia o sync inteiro em silêncio, e
+    // nenhum teste do laço em si a pegaria.
+    const h = runnerHarness([{ data: rows(50), recordsTotal: 50 }])
+
+    const first = h.runner.begin(MESSAGE)
+    h.runner.abort(abortFor(MESSAGE))
+    await first
+    expect(h.posts).toEqual([])
+
+    await h.runner.begin(SECOND)
+
+    expect(h.fetchPage).toHaveBeenCalledTimes(1)
+    expect(h.posts.at(-1)).toMatchObject({ type: 'GRID_DONE', gridKey: 'INFORCE_CLIENTS' })
+  })
+
+  it('ignora uma ordem de parar que fala de outra extração', async () => {
+    const h = runnerHarness([{ data: rows(50), recordsTotal: 50 }])
+
+    const running = h.runner.begin(MESSAGE)
+    h.runner.abort(abortFor(SECOND))
+    await running
+
+    // Parar a errada é tão ruim quanto não parar: o agente veria o sync morrer
+    // sem que ninguém tivesse pedido.
+    expect(h.posts.at(-1)).toMatchObject({ type: 'GRID_DONE', gridKey: 'NEW_BUSINESS' })
+  })
+
+  it('recusa um BEGIN reemitido com um token que já foi parado', async () => {
+    // O mundo MAIN é compartilhado com a página da National Life: um script dela
+    // vê o BEGIN_GRID passar e pode reemiti-lo. Um token parado tem de continuar
+    // parado, senão o replay volta a dirigir o portal depois da pausa.
+    const h = runnerHarness([{ data: rows(50), recordsTotal: 50 }])
+
+    const first = h.runner.begin(MESSAGE)
+    h.runner.abort(abortFor(MESSAGE))
+    await first
+
+    await h.runner.begin(MESSAGE)
+
+    expect(h.fetchPage).not.toHaveBeenCalled()
+    expect(h.posts).toEqual([])
+  })
+
+  it('ignora um eco da mesma ordem de começar', async () => {
+    const h = runnerHarness([{ data: rows(10), recordsTotal: 10 }])
+
+    await Promise.all([h.runner.begin(MESSAGE), h.runner.begin(MESSAGE)])
+
+    expect(h.fetchPage).toHaveBeenCalledTimes(1)
+  })
+
+  it('reporta um template que nunca apareceu', async () => {
+    const posts: Record<string, unknown>[] = []
+    const runner = createGridExtractionRunner({
+      waitForTemplate: async () => {
+        throw new Error('TEMPLATE_UNAVAILABLE')
+      },
+      fetchPage: (async () => pageResponse({ data: [], recordsTotal: 0 })) as never,
+      post: (payload: Record<string, unknown>) => posts.push(payload),
+    })
+
+    await runner.begin(MESSAGE)
+
+    // O `waitForTemplate` passou a ser injetado, então quem o captura mudou de
+    // `try`. O código continua sendo o do portal, e não "resposta inválida".
+    expect(posts).toEqual([
+      {
+        type: 'GRID_ERROR',
+        gridKey: MESSAGE.gridKey,
+        token: MESSAGE.token,
+        correlationId: MESSAGE.correlationId,
+        code: 'TEMPLATE_UNAVAILABLE',
+      },
+    ])
   })
 })

@@ -1,5 +1,5 @@
 import { NLG_ORIGIN } from '../lib/constants'
-import { runGridExtraction, type RequestTemplate } from '../lib/grid-extraction'
+import { createGridExtractionRunner, type RequestTemplate } from '../lib/grid-extraction'
 import { parseAbortGridMessage, parseBeginGridMessage } from '../lib/messages'
 
 const DATATABLE_PATH = '/agent/Datatable/GetJsonResult'
@@ -39,10 +39,6 @@ export default defineContentScript({
   main() {
     let template: RequestTemplate | null = null
     let resolveTemplate: ((value: RequestTemplate) => void) | null = null
-    let runningToken: string | null = null
-    /// Token da extração que recebeu ordem de parar. É token, e não booleano,
-    /// para que uma ordem atrasada não mate a extração seguinte.
-    let abortedToken: string | null = null
     const originalFetch = window.fetch.bind(window)
 
     function capture(candidate: RequestTemplate) {
@@ -110,42 +106,29 @@ export default defineContentScript({
       })
     }
 
-    async function extract(message: NonNullable<ReturnType<typeof parseBeginGridMessage>>) {
-      if (runningToken === message.token) return
-      runningToken = message.token
-      if (abortedToken !== message.token) abortedToken = null
-      try {
-        await runGridExtraction(message, {
-          waitForTemplate,
-          fetchPage: (requestTemplate, body) =>
-            originalFetch(`${NLG_ORIGIN}${DATATABLE_PATH}`, {
-              method: 'POST',
-              headers: requestTemplate.headers,
-              body,
-              credentials: 'include',
-              cache: 'no-store',
-            }),
-          post,
-          aborted: () => abortedToken === message.token,
-        })
-      } finally {
-        runningToken = null
-      }
-    }
-
+    const runner = createGridExtractionRunner({
+      waitForTemplate,
+      fetchPage: (requestTemplate, body) =>
+        originalFetch(`${NLG_ORIGIN}${DATATABLE_PATH}`, {
+          method: 'POST',
+          headers: requestTemplate.headers,
+          body,
+          credentials: 'include',
+          cache: 'no-store',
+        }),
+      post,
+    })
 
     window.addEventListener('message', (event) => {
       if (event.source !== window || event.origin !== location.origin) return
       if (typeof event.data !== 'object' || event.data === null || event.data.channel !== CHANNEL) return
       const begin = parseBeginGridMessage(event.data.payload)
       if (begin) {
-        void extract(begin)
+        void runner.begin(begin)
         return
       }
       const abort = parseAbortGridMessage(event.data.payload)
-      // Só a extração que está rodando pode ser parada: uma ordem com token de
-      // outra armaria a bandeira para a próxima extração que reusasse o token.
-      if (abort && abort.token === runningToken) abortedToken = abort.token
+      if (abort) runner.abort(abort)
     })
   },
 })

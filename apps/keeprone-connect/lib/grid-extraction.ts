@@ -1,5 +1,5 @@
 import { buildPageBody, nextPageStart, PAGE_SIZE, parsePortalPage } from './paging'
-import type { BeginGridMessage } from './messages'
+import type { AbortGridMessage, BeginGridMessage } from './messages'
 
 /// O laço que pagina uma grade do portal.
 ///
@@ -115,5 +115,53 @@ export async function runGridExtraction(
       correlationId: message.correlationId,
       code,
     })
+  }
+}
+
+export type GridExtractionRunner = {
+  begin: (message: BeginGridMessage) => Promise<void>
+  abort: (message: AbortGridMessage) => void
+}
+
+/// O ciclo de vida em volta do laço: qual extração está rodando e qual recebeu
+/// ordem de parar.
+///
+/// Mora aqui pelo mesmo motivo que o laço. Enquanto era um par de variáveis
+/// soltas dentro do `defineContentScript`, nada respondia à única pergunta que
+/// importa depois de uma pausa: o estágio *seguinte* volta a extrair? Uma
+/// bandeira de parada que sobrevivesse ao estágio mataria o sync em silêncio, e
+/// nenhum teste do laço em si pegaria isso.
+export function createGridExtractionRunner(
+  deps: Omit<GridExtractionDeps, 'aborted'>,
+): GridExtractionRunner {
+  let runningToken: string | null = null
+  /// Token da extração que recebeu ordem de parar, e não um booleano.
+  ///
+  /// É o que torna a bandeira segura sem nenhuma guarda em volta: quem consulta
+  /// compara com o próprio token, então uma ordem atrasada não alcança a
+  /// extração seguinte — o background sorteia um token novo por estágio. E um
+  /// token que foi parado permanece parado, o que é a resposta certa para o
+  /// único jeito de ele voltar: o mundo MAIN é compartilhado com a página da
+  /// seguradora, e um script dela pode reemitir um `BEGIN_GRID` que viu passar.
+  /// Zerar a bandeira faria esse replay dirigir o portal.
+  let abortedToken: string | null = null
+
+  return {
+    async begin(message) {
+      // Uma segunda BEGIN com o mesmo token é eco, não trabalho novo.
+      if (runningToken === message.token) return
+      runningToken = message.token
+      try {
+        await runGridExtraction(message, {
+          ...deps,
+          aborted: () => abortedToken === message.token,
+        })
+      } finally {
+        runningToken = null
+      }
+    },
+    abort(message) {
+      abortedToken = message.token
+    },
   }
 }

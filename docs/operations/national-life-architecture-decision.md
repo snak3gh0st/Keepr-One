@@ -231,8 +231,9 @@ risco viva deste projeto.
 
 Fechado: a primeira recusa de upload dispara `ABORT_GRID` do background para a
 ponte e da ponte para o extrator, que confere a ordem **antes de cada ida ao
-portal** e outra vez quando a página volta. Numa grade de 100.000 linhas isso é a
-diferença entre parar na página 1 e parar na 500.
+portal** e outra vez quando a página volta. A recusa chega depois que a página 1
+subiu, então a primeira ida que *não acontece* é a da página 2. Numa grade de
+100.000 linhas, é a diferença entre parar na página 2 e parar na 500.
 
 Três detalhes que o desenho carrega de propósito:
 
@@ -247,9 +248,14 @@ Três detalhes que o desenho carrega de propósito:
   gravou o motivo verdadeiro, e um erro tardio o trocaria por "resposta inválida"
   na tela do agente.
 
+- **Um token parado continua parado.** O mundo MAIN é compartilhado com a página
+  da seguradora: um script dela vê o `BEGIN_GRID` passar e pode reemiti-lo.
+  Zerar a bandeira faria esse replay voltar a dirigir o portal.
+
 O que continua fora de alcance: uma pausa que chegue durante um estágio sem
 nenhum upload em curso só é notada no upload seguinte. Como um lote sobe a cada
-200 linhas, a janela é de uma página.
+página do portal (200 linhas), a janela é de uma página — não de uma linha, e
+não do estágio inteiro.
 
 ### Distribuição não tem alternativa
 
