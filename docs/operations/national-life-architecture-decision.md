@@ -248,9 +248,13 @@ Três detalhes que o desenho carrega de propósito:
   gravou o motivo verdadeiro, e um erro tardio o trocaria por "resposta inválida"
   na tela do agente.
 
-- **Um token parado continua parado.** O mundo MAIN é compartilhado com a página
-  da seguradora: um script dela vê o `BEGIN_GRID` passar e pode reemiti-lo.
-  Zerar a bandeira faria esse replay voltar a dirigir o portal.
+- **Um token parado continua parado, e uma ordem alheia não muda nada.** O mundo
+  MAIN é compartilhado com a página da seguradora, que vê o `BEGIN_GRID` passar.
+  As duas metades da invariante são necessárias e por motivos diferentes: zerar
+  a bandeira ao começar deixaria um replay daquele `BEGIN` voltar a dirigir o
+  portal; aceitar ordem de parar com token qualquer deixaria a página
+  *desparar* uma parada de verdade, porque a bandeira é um slot só — um
+  `setInterval` postando `ABORT_GRID` a cada milissegundo bastaria.
 
 O que continua fora de alcance: uma pausa que chegue durante um estágio sem
 nenhum upload em curso só é notada no upload seguinte. Como um lote sobe a cada

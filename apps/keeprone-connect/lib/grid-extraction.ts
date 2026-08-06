@@ -161,7 +161,13 @@ export function createGridExtractionRunner(
       }
     },
     abort(message) {
-      abortedToken = message.token
+      // A guarda não é sobre parar a extração errada — a consulta escopada por
+      // token já cuida disso. É sobre não *desparar* a certa: a bandeira é um
+      // slot só, e uma ordem alheia gravando nele apaga a parada de verdade.
+      // A página da seguradora divide este mundo com a gente e vê o token
+      // passar; sem a guarda, um `setInterval` postando ABORT_GRID com token
+      // qualquer devolve o portal a ser paginado.
+      if (message.token === runningToken) abortedToken = message.token
     },
   }
 }

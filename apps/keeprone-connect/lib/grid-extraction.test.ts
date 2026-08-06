@@ -224,6 +224,23 @@ describe('grid extraction runner', () => {
     expect(h.posts.at(-1)).toMatchObject({ type: 'GRID_DONE', gridKey: 'NEW_BUSINESS' })
   })
 
+  it('uma ordem de parar com outro token não apaga uma parada real', async () => {
+    // A propriedade que importa não é "uma ordem alheia não para a certa" — é
+    // "uma ordem alheia não *despara* a certa". O mundo MAIN é compartilhado
+    // com a página da seguradora: sem a guarda, um `setInterval` postando
+    // ABORT_GRID com token qualquer sobrescreve a parada de verdade a cada
+    // milissegundo, e o portal continua sendo paginado.
+    const h = runnerHarness([{ data: rows(200), recordsTotal: 100_000 }])
+
+    const first = h.runner.begin(MESSAGE)
+    h.runner.abort(abortFor(MESSAGE))
+    h.runner.abort(abortFor(SECOND))
+    await first
+
+    expect(h.fetchPage).not.toHaveBeenCalled()
+    expect(h.posts).toEqual([])
+  })
+
   it('recusa um BEGIN reemitido com um token que já foi parado', async () => {
     // O mundo MAIN é compartilhado com a página da National Life: um script dela
     // vê o BEGIN_GRID passar e pode reemiti-lo. Um token parado tem de continuar
