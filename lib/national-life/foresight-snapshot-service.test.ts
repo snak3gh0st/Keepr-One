@@ -213,6 +213,23 @@ describe('Foresight snapshot persistence', () => {
     expect(fileExistedAtUpsert).toBe(true)
   })
 
+  it('guarda os bytes no banco quando não há diretório configurado', async () => {
+    // É o estado do runtime da National Life hoje: nenhum volume montado. Sem
+    // esta válvula ele gravaria o PDF num disco efêmero dele mesmo, poria
+    // `storageKey` no banco compartilhado, e a app — que lê do volume dela —
+    // daria 404 em todo download sem nenhum sinal.
+    delete process.env.UPLOADS_DIR
+    repository.nationalLifeForesightDocument.upsert.mockResolvedValue({ id: 'document-1' })
+
+    await upsertForesightDocument({ ...documentInput, bytes: Buffer.from('pdf') })
+
+    const call = repository.nationalLifeForesightDocument.upsert.mock.calls[0]?.[0]
+    expect(call.create.storageKey).toBeNull()
+    expect(Buffer.from(call.create.bytes).toString()).toBe('pdf')
+    expect(call.update.storageKey).toBeNull()
+    expect(existsSync(join(uploadsDir, foresightDocumentKey('case-1', 'illustration')))).toBe(false)
+  })
+
   it('não grava a linha quando o disco recusa o arquivo', async () => {
     repository.nationalLifeForesightDocument.upsert.mockResolvedValue({ id: 'document-1' })
     process.env.UPLOADS_DIR = join(uploadsDir, 'arquivo-no-lugar-de-pasta')

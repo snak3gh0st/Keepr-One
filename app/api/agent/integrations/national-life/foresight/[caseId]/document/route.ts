@@ -31,9 +31,11 @@ export async function GET(
     // linhas gravadas antes desta mudança só saem do banco quando o backfill as
     // move, e até lá são servidas daqui. Quando `bytes` for derrubado, este
     // ramo morre junto com a coluna.
-    const body = document.storageKey
-      ? await readForesightDocument(foresightDocumentsDir(), document.storageKey)
-      : document.bytes
+    const uploadsDir = foresightDocumentsDir()
+    const body =
+      document.storageKey && uploadsDir
+        ? await readForesightDocument(uploadsDir, document.storageKey)
+        : document.bytes
     if (!body) return new Response(null, { status: 404 })
 
     return new Response(new Uint8Array(body), {

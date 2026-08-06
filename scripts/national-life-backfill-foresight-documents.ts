@@ -1,10 +1,14 @@
-import { prisma } from '@/lib/prisma'
+// Caminhos relativos, e não o alias `@/`: este script roda por `tsx`, que não
+// lê os `paths` do tsconfig. Todo script daqui que é executado assim usa
+// relativo pelo mesmo motivo — o alias só falharia na hora de rodar contra
+// produção.
+import { prisma } from '../lib/prisma'
 import {
   foresightDocumentKey,
   foresightDocumentsDir,
   readForesightDocument,
   writeForesightDocument,
-} from '@/lib/national-life/foresight-document-storage'
+} from '../lib/national-life/foresight-document-storage'
 
 /// Move para disco os PDFs do Foresight que ficaram no Postgres.
 ///
@@ -40,6 +44,7 @@ async function moveOne(row: {
   if (!row.bytes) return 0
   const storageKey = foresightDocumentKey(row.caseSnapshotId, row.reportKey)
   const dir = foresightDocumentsDir()
+  if (!dir) throw new Error('UPLOADS_DIR não está configurado neste processo')
   const size = row.bytes.byteLength
 
   if (!commit) return size

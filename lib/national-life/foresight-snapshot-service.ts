@@ -101,16 +101,17 @@ export async function upsertForesightServiceSnapshot(
 }
 
 export async function upsertForesightDocument(input: ForesightDocumentInput): Promise<void> {
-  const storageKey = foresightDocumentKey(input.caseSnapshotId, input.reportKey)
+  const uploadsDir = foresightDocumentsDir()
+  const storageKey = uploadsDir
+    ? foresightDocumentKey(input.caseSnapshotId, input.reportKey)
+    : null
 
   // Arquivo antes da linha, e não o contrário. Um arquivo sem linha é invisível
   // — ninguém o procura. Uma linha sem arquivo é um download que dá 404 para o
   // agente, com o banco afirmando que o documento existe.
-  await writeForesightDocument(
-    foresightDocumentsDir(),
-    storageKey,
-    new Uint8Array(input.bytes),
-  )
+  if (uploadsDir && storageKey) {
+    await writeForesightDocument(uploadsDir, storageKey, new Uint8Array(input.bytes))
+  }
 
   const data = {
     agentId: input.agentId,
@@ -121,10 +122,11 @@ export async function upsertForesightDocument(input: ForesightDocumentInput): Pr
     byteSize: input.byteSize,
     contentHash: input.contentHash,
     storageKey,
-    // Escritas novas não deixam bytes no banco. O `null` explícito importa no
-    // caminho de update: sem ele, uma linha antiga rerrenderizada ficaria com o
-    // PDF velho no banco *e* o novo em disco, e a leitura serviria o velho.
-    bytes: null,
+    // Uma cópia, nunca duas. Com diretório configurado o PDF já está em disco e
+    // o `null` explícito importa no caminho de update: sem ele, uma linha antiga
+    // rerrenderizada ficaria com o PDF velho no banco *e* o novo em disco, e a
+    // leitura serviria o velho. Sem diretório, o banco volta a ser o lugar.
+    bytes: storageKey ? null : new Uint8Array(input.bytes),
     renderState: input.renderState,
     safeErrorCode: input.safeErrorCode,
     fetchedAt: input.fetchedAt,

@@ -114,6 +114,28 @@ vazio, e o disco tem 78 GB livres. Ou seja: o caminho que os documentos de
 apólice já usam é persistente, e a alternativa cara (S3/R2, com dependência,
 bucket e credencial) não comprava nada que o pilotos precise hoje.
 
+**Quem escreve não é quem lê, e isso é carga estrutural.** O PDF é obtido
+dirigindo o portal, então quem chama `upsertForesightDocument` é
+`workers/national-life/runtime.ts` — o container do runtime, que **não é
+deployado pelo Coolify** e, checado no host, não montava volume nenhum. Quem
+serve o download é o container da app. Sem tratar isso, o runtime gravaria o PDF
+num disco efêmero dentro dele, poria `storageKey` no banco compartilhado, e a app
+procuraria o arquivo no volume dela: 404 em todo download, em silêncio, e sem que
+nenhum teste unitário pudesse ver — eles exercitam um sistema de arquivos só.
+
+Duas medidas, uma de código e uma de deploy:
+
+- `foresightDocumentsDir()` **não tem default**. Sem `UPLOADS_DIR` explícito ele
+  devolve `null` e o escritor volta a guardar bytes no banco — gordo, mas
+  correto. Um `?? './uploads'` é justamente o que transforma essa falha em
+  silêncio.
+- O compose do runtime passou a montar o **mesmo volume externo**
+  (`sbdvgmwn1l8r3te8kef2z88k-fyntra_uploads`) em `/data/uploads` e a definir
+  `UPLOADS_DIR`. `external: true` importa: sem isso o Docker criaria um volume
+  novo com nome derivado do projeto e os dois containers escreveriam em discos
+  diferentes achando que compartilham um. **Exige redeploy manual do runtime** —
+  ele não sai no push para `main`.
+
 Escritas novas gravam o PDF em disco e nascem com `bytes` nulo. As três decisões
 que sustentam isso:
 

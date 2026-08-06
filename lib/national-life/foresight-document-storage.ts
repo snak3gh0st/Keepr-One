@@ -1,4 +1,7 @@
-import 'server-only'
+// Sem `server-only` de propósito, ao contrário dos módulos do conector local:
+// este é carregado pelo runtime da National Life e pelo script de backfill, os
+// dois rodando por `tsx`, onde `server-only` não resolve. É a mesma razão pela
+// qual nenhum outro módulo de `lib/national-life/` o declara.
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 
@@ -16,8 +19,24 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 
 const NATIONAL_LIFE_DOCUMENT_ROOT = 'national-life/foresight'
 
-export function foresightDocumentsDir(): string {
-  return process.env.UPLOADS_DIR ?? './uploads'
+/// Diretório dos PDFs, ou `null` quando ninguém configurou um.
+///
+/// **Sem default.** Este é o ponto onde um default silencioso é perigoso, e não
+/// conveniente: quem escreve o PDF é o runtime da National Life
+/// (`workers/national-life/runtime.ts`), um container separado que não é
+/// deployado pelo Coolify; quem serve o download é o container da app. Um
+/// `?? './uploads'` faria o runtime gravar num diretório efêmero dentro dele
+/// mesmo, gravar `storageKey` no banco compartilhado, e a app procurar aquele
+/// arquivo no volume dela — onde nada foi escrito. Todo download daria 404, em
+/// silêncio, e nenhum teste unitário veria: eles exercitam um sistema de
+/// arquivos só.
+///
+/// Com `null`, o escritor cai de volta em guardar bytes no banco. Isso é o
+/// comportamento antigo — gordo, mas correto — em vez de uma linha que aponta
+/// para um arquivo que ninguém alcança.
+export function foresightDocumentsDir(): string | null {
+  const configured = process.env.UPLOADS_DIR?.trim()
+  return configured ? configured : null
 }
 
 /// Chave derivada, nunca sorteada.

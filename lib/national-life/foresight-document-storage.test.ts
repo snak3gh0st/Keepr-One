@@ -85,13 +85,21 @@ describe('foresight document round trip', () => {
 })
 
 describe('foresight documents directory', () => {
-  it('follows UPLOADS_DIR, the same volume the policy documents already use', () => {
+  it('follows UPLOADS_DIR and refuses to invent a default', () => {
     const original = process.env.UPLOADS_DIR
     try {
       process.env.UPLOADS_DIR = '/data/uploads'
       expect(foresightDocumentsDir()).toBe('/data/uploads')
+
+      // Sem default de propósito. Quem escreve o PDF é o runtime da National
+      // Life, um container que hoje não monta volume nenhum; um `./uploads`
+      // implícito o faria gravar num disco efêmero dentro dele, escrever
+      // `storageKey` no banco compartilhado, e a app procurar o arquivo no
+      // volume dela — 404 em todo download, em silêncio.
       delete process.env.UPLOADS_DIR
-      expect(foresightDocumentsDir()).toBe('./uploads')
+      expect(foresightDocumentsDir()).toBeNull()
+      process.env.UPLOADS_DIR = '   '
+      expect(foresightDocumentsDir()).toBeNull()
     } finally {
       if (original === undefined) delete process.env.UPLOADS_DIR
       else process.env.UPLOADS_DIR = original

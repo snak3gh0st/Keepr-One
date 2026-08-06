@@ -115,6 +115,17 @@ services:
       NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD: "${NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD:?NATIONAL_LIFE_MAX_SESSIONS_PER_SHARD is required}"
       NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS: "${NATIONAL_LIFE_INTERACTIVE_RECONNECT_BASE_DELAY_MS:-1000}"
       NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS: "${NATIONAL_LIFE_INTERACTIVE_RECONNECT_MAX_DELAY_MS:-30000}"
+      # Onde o PDF do Foresight é gravado. Tem de ser o **mesmo volume** que o
+      # container da app monta: quem escreve o arquivo é este runtime, quem serve
+      # o download é a app. Um caminho diferente aqui grava o PDF num disco que a
+      # app não enxerga, e todo download dá 404 com o banco jurando que o
+      # documento existe. Se a variável não chegar, o código não grava
+      # `storageKey` e o PDF volta a ficar no Postgres — gordo, mas correto.
+      UPLOADS_DIR: /data/uploads
+    volumes:
+      # Volume nomeado criado pelo Coolify para a app "Fyntra"; declarado
+      # `external` abaixo porque quem o cria é o outro deploy, não este compose.
+      - fyntra_uploads:/data/uploads
     mem_limit: 768m
     # Counts threads, not processes. The worker alone sits at ~72 of them, and
     # each `docker exec ... tsx` adds roughly 25 more, so at 128 a second
@@ -141,6 +152,16 @@ services:
       - traefik.http.routers.keeprone-nlgviewer-https.tls=true
       - traefik.http.routers.keeprone-nlgviewer-https.tls.certresolver=letsencrypt
       - traefik.http.services.keeprone-nlgviewer.loadbalancer.server.port=3010
+
+volumes:
+  # O volume de uploads da app "Fyntra", criado pelo deploy do Coolify. Externo
+  # porque este compose o consome e não o cria: se este arquivo o criasse, o
+  # Docker faria um volume *novo* com nome derivado do projeto, o runtime
+  # gravaria nele, a app leria no dela, e nada apareceria — o modo de falha exato
+  # que esta montagem existe para evitar.
+  fyntra_uploads:
+    external: true
+    name: sbdvgmwn1l8r3te8kef2z88k-fyntra_uploads
 
 networks:
   coolify:
