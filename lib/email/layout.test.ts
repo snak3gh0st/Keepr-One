@@ -10,7 +10,8 @@ describe('renderEmailLayout', () => {
 
     expect(html).toContain('Título de teste')
     expect(html).toContain('<p>Corpo de teste</p>')
-    expect(html).toContain('KEEPR ONE')
+    expect(html).toContain('>keepr<')
+    expect(html).toContain('>one<')
   })
 
   it('renders a CTA button when label and url are provided', () => {
