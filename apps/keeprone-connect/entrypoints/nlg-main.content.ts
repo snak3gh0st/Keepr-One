@@ -1,15 +1,10 @@
 import { NLG_ORIGIN } from '../lib/constants'
-import { parseBeginGridMessage } from '../lib/messages'
-import { buildPageBody, nextPageStart, PAGE_SIZE, parsePortalPage } from '../lib/paging'
+import { createGridExtractionRunner, type RequestTemplate } from '../lib/grid-extraction'
+import { parseAbortGridMessage, parseBeginGridMessage } from '../lib/messages'
 
 const DATATABLE_PATH = '/agent/Datatable/GetJsonResult'
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
 const ALLOWED_HEADERS = new Set(['content-type', 'x-requested-with'])
-
-type RequestTemplate = {
-  body: string
-  headers: Record<string, string>
-}
 
 function allowedHeader(name: string): boolean {
   const lower = name.toLowerCase()
@@ -44,7 +39,6 @@ export default defineContentScript({
   main() {
     let template: RequestTemplate | null = null
     let resolveTemplate: ((value: RequestTemplate) => void) | null = null
-    let runningToken: string | null = null
     const originalFetch = window.fetch.bind(window)
 
     function capture(candidate: RequestTemplate) {
@@ -112,102 +106,29 @@ export default defineContentScript({
       })
     }
 
-    async function extract(message: NonNullable<ReturnType<typeof parseBeginGridMessage>>) {
-      if (runningToken === message.token) return
-      runningToken = message.token
-      try {
-        const requestTemplate = await waitForTemplate()
-        let start = 0
-        let draw = 1
-        let sequence = 0
-        let sentAny = false
-
-        while (true) {
-          const body = buildPageBody(requestTemplate.body, start, PAGE_SIZE, draw)
-          const response = await originalFetch(`${NLG_ORIGIN}${DATATABLE_PATH}`, {
-            method: 'POST',
-            headers: requestTemplate.headers,
-            body,
-            credentials: 'include',
-            cache: 'no-store',
-          })
-          if (!response.ok) throw new Error('PORTAL_REQUEST_FAILED')
-          const page = parsePortalPage(await response.json())
-          // Rows go up exactly as the carrier returned them. The only thing dropped
-          // is a row that is not a plain object, which is a shape the envelope cannot
-          // carry — not a judgment about its contents. There is no per-policy
-          // deduplication here any more: it required knowing each grid's key field,
-          // and the server dedupes by its own upsert key.
-          const records = page.rows.filter(
-            (row): row is Record<string, unknown> =>
-              typeof row === 'object' && row !== null && !Array.isArray(row),
-          )
-          // A carrier that ignores `length` can hand back more rows than a page, so
-          // slice to the cap the envelope accepts rather than losing the whole chunk.
-          for (let offset = 0; offset < records.length; offset += PAGE_SIZE) {
-            post({
-              type: 'GRID_CHUNK',
-              gridKey: message.gridKey,
-              token: message.token,
-              correlationId: message.correlationId,
-              sequence,
-              recordsTotal: page.recordsTotal,
-              truncated: page.truncated,
-              records: records.slice(offset, offset + PAGE_SIZE),
-            })
-            sequence += 1
-            sentAny = true
-          }
-          const next = nextPageStart(start, page.rows.length, page.recordsTotal)
-          if (next === null) {
-            if (!sentAny) {
-              post({
-                type: 'GRID_CHUNK',
-                gridKey: message.gridKey,
-                token: message.token,
-                correlationId: message.correlationId,
-                sequence: 0,
-                recordsTotal: page.recordsTotal,
-                truncated: page.truncated,
-                records: [],
-              })
-            }
-            break
-          }
-          start = next
-          draw += 1
-        }
-        post({
-          type: 'GRID_DONE',
-          gridKey: message.gridKey,
-          token: message.token,
-          correlationId: message.correlationId,
-        })
-      } catch (error) {
-        const code =
-          error instanceof Error &&
-          ['TEMPLATE_UNAVAILABLE', 'PORTAL_REQUEST_FAILED', 'INVALID_PORTAL_RESPONSE'].includes(
-            error.message,
-          )
-            ? error.message
-            : 'INVALID_PORTAL_RESPONSE'
-        post({
-          type: 'GRID_ERROR',
-          gridKey: message.gridKey,
-          token: message.token,
-          correlationId: message.correlationId,
-          code,
-        })
-      } finally {
-        runningToken = null
-      }
-    }
+    const runner = createGridExtractionRunner({
+      waitForTemplate,
+      fetchPage: (requestTemplate, body) =>
+        originalFetch(`${NLG_ORIGIN}${DATATABLE_PATH}`, {
+          method: 'POST',
+          headers: requestTemplate.headers,
+          body,
+          credentials: 'include',
+          cache: 'no-store',
+        }),
+      post,
+    })
 
     window.addEventListener('message', (event) => {
       if (event.source !== window || event.origin !== location.origin) return
       if (typeof event.data !== 'object' || event.data === null || event.data.channel !== CHANNEL) return
-      const message = parseBeginGridMessage(event.data.payload)
-      if (message) void extract(message)
+      const begin = parseBeginGridMessage(event.data.payload)
+      if (begin) {
+        void runner.begin(begin)
+        return
+      }
+      const abort = parseAbortGridMessage(event.data.payload)
+      if (abort) runner.abort(abort)
     })
   },
 })

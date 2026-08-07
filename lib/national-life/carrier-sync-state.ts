@@ -22,11 +22,11 @@ export function carrierSyncState(input: {
 export function carrierSyncLabel(state: CarrierSyncState): string {
   switch (state.kind) {
     case 'WORKING':
-      return `${state.count} a caminho`
+      return `${state.count} on the way`
     // No count: this is a call to act, and a number in it reads as progress.
     case 'NEEDS_YOU':
-      return 'Precisa de você'
+      return 'Needs you'
     default:
-      return 'Em dia'
+      return 'Up to date'
   }
 }

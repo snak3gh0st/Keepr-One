@@ -27,9 +27,20 @@ type SignatureDb = Pick<
   'nationalLifeConnectorDevice' | 'nationalLifeConnectorReplay' | '$transaction'
 >
 
+/// `DEVICE_REVOKED` é a única afirmação sobre o dispositivo em si: o servidor
+/// não conhece mais esta identidade. Todo o resto — relógio fora da janela,
+/// hash divergente, JWK ilegível, soluço de banco no replay — é
+/// `INVALID_DEVICE_SIGNATURE`, e pode dar certo na próxima tentativa.
+///
+/// A distinção é o que impede o cliente de destruir a chave privada de um
+/// dispositivo saudável só porque o relógio dele está adiantado: apagar a chave
+/// por causa de desvio de horário é um laço, porque o desvio persiste depois de
+/// reparear.
+export type LocalConnectorSignatureFailure = 'INVALID_DEVICE_SIGNATURE' | 'DEVICE_REVOKED'
+
 export class LocalConnectorSignatureError extends Error {
-  constructor() {
-    super('INVALID_DEVICE_SIGNATURE')
+  constructor(readonly code: LocalConnectorSignatureFailure = 'INVALID_DEVICE_SIGNATURE') {
+    super(code)
   }
 }
 
@@ -99,7 +110,7 @@ export async function verifyLocalConnectorDeviceRequest(
       where: { id: signed.deviceId, status: 'ACTIVE', revokedAt: null },
       select: { id: true, agentId: true, publicKeyJwk: true },
     })
-    if (!device) throw new LocalConnectorSignatureError()
+    if (!device) throw new LocalConnectorSignatureError('DEVICE_REVOKED')
 
     const publicKeyJwk = publicP256JwkSchema.parse(device.publicKeyJwk)
     const key = await webcrypto.subtle.importKey(
@@ -141,7 +152,13 @@ export async function verifyLocalConnectorDeviceRequest(
     })
 
     return { deviceId: device.id, agentId: device.agentId, jti: signed.jti }
-  } catch {
+  } catch (error) {
+    // O motivo só escapa deste catch quando é uma afirmação sobre o dispositivo.
+    // Qualquer outra exceção continua colapsando em "assinatura inválida", para
+    // não virar oráculo de qual etapa da verificação falhou.
+    if (error instanceof LocalConnectorSignatureError && error.code === 'DEVICE_REVOKED') {
+      throw error
+    }
     throw new LocalConnectorSignatureError()
   }
 }

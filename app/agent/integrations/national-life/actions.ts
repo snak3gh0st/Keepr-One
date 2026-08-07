@@ -44,7 +44,7 @@ export async function startNationalLifeConnection(): Promise<StartConnectionActi
       return {
         ok: false,
         message:
-          'Você atingiu o limite de conexões recentes. Aguarde alguns minutos e tente novamente.',
+          'You have started too many connections in a short time. Wait a few minutes and try again.',
       }
     }
     return {
@@ -56,7 +56,7 @@ export async function startNationalLifeConnection(): Promise<StartConnectionActi
   } catch {
     return {
       ok: false,
-      message: 'Não foi possível iniciar a conexão National Life agora.',
+      message: 'We could not start your National Life connection right now. Please try again.',
     }
   }
 }
@@ -77,7 +77,7 @@ export async function createNationalLifeViewerBootstrap(
     return {
       ok: false,
       message:
-        'A sessão segura não está mais disponível. Inicie uma nova conexão.',
+        'This secure session is no longer available. Start a new connection.',
     }
   }
 }
@@ -97,7 +97,7 @@ export async function cancelNationalLifeConnection(
   } catch {
     return {
       ok: false,
-      message: 'Não foi possível cancelar a conexão National Life agora.',
+      message: 'We could not cancel your National Life connection right now. Please try again.',
     }
   }
 }
@@ -114,7 +114,7 @@ export async function disconnectNationalLifeConnection(): Promise<ConnectionMuta
   } catch {
     return {
       ok: false,
-      message: 'Não foi possível desconectar a National Life agora.',
+      message: 'We could not disconnect National Life right now. Please try again.',
     }
   }
 }

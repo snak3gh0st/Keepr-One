@@ -63,7 +63,11 @@ export async function revokeLocalConnectorDevice(
         connectorDeviceId: input.deviceId,
         executionSource: 'LOCAL',
         provider: NATIONAL_LIFE_PROVIDER,
-        state: 'RUNNING',
+        // Um run pausado ou ainda na fila também morre com o dispositivo. Sem
+        // eles, o painel de progresso seguiria anunciando "atualizando seus
+        // dados" enquanto o cartão logo abaixo diz que o computador não está
+        // mais conectado — duas telas contando histórias diferentes.
+        state: { in: ['QUEUED', 'RUNNING', 'PAUSED'] },
       },
       data: {
         state: 'FAILED',

@@ -417,7 +417,16 @@ model NationalLifeForesightDocument {
   mimeType        String
   byteSize        Int
   contentHash     String
-  bytes           Bytes
+  /// Caminho do PDF dentro de `UPLOADS_DIR`. Nulo em linhas escritas antes desta
+  /// coluna — o backfill (`scripts/national-life-backfill-foresight-documents.ts`)
+  /// é quem as move.
+  storageKey      String?
+  /// O PDF em si, quando ainda está no banco. Escritas novas nascem com `bytes`
+  /// nulo e `storageKey` preenchido; a coluna sobrevive para não perder o que já
+  /// foi gravado. Derrubá-la é uma migração separada, depois do backfill
+  /// verificado em produção — dropar dado e mudar caminho de escrita no mesmo
+  /// deploy não deixa para onde voltar.
+  bytes           Bytes?
   renderState     String
   safeErrorCode   String?
   fetchedAt       DateTime?
@@ -723,6 +732,10 @@ model NationalLifeSyncRun {
 
   @@index([agentId, deploymentScope, state, createdAt])
   @@index([connectorDeviceId, createdAt])
+  /// Serve a varredura de recibos de estágio, que seleciona por run terminal
+  /// parado há mais de 30 dias. O índice de cima não serve: ele começa por
+  /// `agentId`, e a varredura não filtra por agente nenhum — é a tabela inteira.
+  @@index([state, updatedAt])
 }
 
 model NationalLifeConnectorPairing {
@@ -736,6 +749,13 @@ model NationalLifeConnectorPairing {
   updatedAt  DateTime  @updatedAt
 
   @@index([agentId, expiresAt])
+  /// Dois índices de uma coluna, e não um composto: a varredura procura
+  /// `expiresAt < corte` **ou** `consumedAt < corte`, e o Postgres resolve isso
+  /// com um BitmapOr dos dois. Um composto `(expiresAt, consumedAt)` só serviria
+  /// ao primeiro ramo. O `@@index([agentId, expiresAt])` acima não serve a
+  /// nenhum: começa por `agentId`, que a varredura não filtra.
+  @@index([expiresAt])
+  @@index([consumedAt])
 }
 
 model NationalLifeConnectorDevice {

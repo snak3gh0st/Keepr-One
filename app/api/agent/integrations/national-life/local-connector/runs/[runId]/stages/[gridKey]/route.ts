@@ -20,6 +20,7 @@ import {
   parseJsonBody,
   readLimitedBody,
 } from '@/lib/national-life/local-connector/request'
+import { refuseLocalConnectorCapability } from '@/lib/national-life/local-connector/remote-config'
 import {
   ingestLocalConnectorStage,
   LocalConnectorRunError,
@@ -43,6 +44,11 @@ export async function PUT(
   context: { params: Promise<{ runId: string; gridKey: string }> },
 ) {
   if (!isNationalLifeLocalConnectorEnabled()) return localConnectorUnavailableResponse()
+  // É aqui que a flag ganha a latência que a Store não dá. Uma grade grande sobe
+  // lote a lote, um PUT por lote: uma pausa ligada no meio do run derruba o run no
+  // lote seguinte — minutos —, sem depender de a extensão ter consultado nada.
+  const refusal = refuseLocalConnectorCapability('READ_GRID', request.headers)
+  if (refusal) return refusal
 
   try {
     const body = await readLimitedBody(request, LOCAL_CONNECTOR_MAX_BODY_BYTES)
@@ -70,9 +76,13 @@ export async function PUT(
     return Response.json(result, { status: result.duplicate ? 200 : 201, headers: NO_STORE })
   } catch (error) {
     if (error instanceof LocalConnectorSignatureError) {
+      // O cabeçalho é o que deixa o dispositivo distinguir "não te conheço mais"
+      // de "esta requisição não passou". Só o primeiro autoriza apagar a chave.
       return Response.json(
+        // O corpo mantém o código público estável; quem carrega a distinção é o
+        // cabeçalho, para não mudar o contrato já consumido.
         { error: 'DEVICE_REQUEST_REJECTED' },
-        { status: 401, headers: NO_STORE },
+        { status: 401, headers: { ...NO_STORE, 'x-fyntra-device-error': error.code } },
       )
     }
     if (error instanceof LocalConnectorRunError) {

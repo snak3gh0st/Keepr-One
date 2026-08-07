@@ -49,15 +49,15 @@ export default async function NationalLifeConnectionPage() {
   return (
     <Shell role={role} userName={user?.name ?? ''}>
       <PageHeader
-        title="Conexão National Life"
-        eyebrow="Integrações"
-        description="Conecte com segurança ao portal oficial da National Life e sincronize seus dados."
+        title="National Life connection"
+        eyebrow="Integrations"
+        description="Connect securely to the official National Life portal and sync your data."
       >
         <Link
           href={backHref}
           className="inline-flex min-h-10 items-center rounded-md border border-teal px-4 py-2.5 text-sm font-semibold text-teal transition-[background-color,border-color,color,transform] duration-150 hover:border-teal-deep hover:bg-teal-pale focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
         >
-          ← Voltar
+          ← Back
         </Link>
       </PageHeader>
 
@@ -81,10 +81,10 @@ export default async function NationalLifeConnectionPage() {
                 {localConfig.enabled && (
                   <div className="mb-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">
-                      Alternativa automática
+                      Automatic option
                     </p>
                     <p className="mt-1 text-sm text-ink-muted">
-                      Use a conexão remota se preferir não instalar o KeeproneConnect neste computador.
+                      Use the remote connection if you would rather not install KeeproneConnect on this computer.
                     </p>
                   </div>
                 )}
@@ -93,20 +93,20 @@ export default async function NationalLifeConnectionPage() {
             )}
           </div>
 
-          <ContextPanel eyebrow="Guardrails" title="Acesso autorizado e seguro">
+          <ContextPanel eyebrow="Guardrails" title="Authorized, secure access">
             <p>
-              Você entra na página real da National Life / Auth0. Sua senha permanece sempre no portal oficial.
+              You sign in on the real National Life / Auth0 page. Your password stays on the official portal at all times.
             </p>
             <div className="mt-5 border-t border-white/10 pt-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Acesso controlado</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Limited access</p>
               <p className="mt-2 text-sm text-paper/70">
-                A sincronização acessa somente as páginas necessárias da National Life.
+                The sync only opens the National Life pages it needs.
               </p>
             </div>
             <div className="mt-5 border-t border-white/10 pt-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Dados protegidos</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Protected data</p>
               <p className="mt-2 text-sm text-paper/70">
-                Sua senha é digitada somente no portal oficial e não é armazenada pelo Keepr One.
+                Your password is typed only on the official portal and is never stored by Keepr One.
               </p>
             </div>
           </ContextPanel>
@@ -115,7 +115,7 @@ export default async function NationalLifeConnectionPage() {
       ) : (
         <div className="mt-8 max-w-5xl">
           <EmptyState>
-            Esta integração ainda não foi habilitada neste ambiente. Fale com o time técnico antes de tentar conectar uma conta National Life.
+            This integration is not enabled yet. Contact Keepr One support before trying to connect a National Life account.
           </EmptyState>
         </div>
       )}

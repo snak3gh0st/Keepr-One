@@ -51,10 +51,13 @@ suspeita de filtro de data e sonda **escrita e nunca rodada**
 - `Policy` tem 2.168 linhas de seed sintético (`NLG-0001`).
 - `ExternalReference` existe para isso e está vazia.
 
-### 4. Crescimento sem varredor — descoberto nesta rodada
+### 4. Crescimento sem varredor — resolvido para as três tabelas do conector
 
-**Nenhum varredor existe.** `NationalLifeConnectorReplay` ganha uma linha por
-requisição assinada; `expiresAt` é escrito e indexado e nada o lê.
+> **Estado:** varredores entregues (`lib/national-life/local-connector/janitor.ts`).
+> O PDF no Postgres continua pendente — ver "Pendência: o PDF no Postgres" abaixo.
+
+**Nenhum varredor existia.** `NationalLifeConnectorReplay` ganha uma linha por
+requisição assinada; `expiresAt` era escrito e indexado e nada o lia.
 
 Um sync completo do livro são ~53 requisições assinadas por agente. A 100 agentes
 por dia: ~5.300 linhas/dia, **~1,9 M/ano**, para sempre. Idem recibos de estágio e
@@ -62,6 +65,109 @@ pairings consumidos.
 
 **E o PDF do Foresight é gravado como `Bytes` dentro do Postgres**
 (`schema.prisma:420`). Dezenas de GB/ano num banco que também serve a aplicação.
+
+#### O que foi entregue
+
+Uma varredura em lotes sobre as três tabelas, com o disparo junto — não há cron
+neste projeto, e varredura sem disparo é como `expiresAt` chegou até aqui:
+
+| Tabela | Corte | Por quê esse corte |
+| --- | --- | --- |
+| `NationalLifeConnectorReplay` | `expiresAt` + uma janela de assinatura (5 min) | A verificação de timestamp já rejeita sozinha qualquer assinatura vencida; a linha vira lastro no mesmo instante. A margem extra é folga se aquela checagem mudar. |
+| `NationalLifeConnectorPairing` | vencido **ou** consumido há mais de 24h | O resgate exige `consumedAt: null` e `expiresAt` no futuro. As 24h são só para o suporte olhar um pareamento do mesmo dia. |
+| `NationalLifeConnectorStageReceipt` | run em estado terminal e parado há mais de 30 dias | O recibo é a chave de idempotência do upload. O corte é a idade do **run**, não a do recibo: apagar recibo de run que ainda aceita upload transforma reenvio em escrita dupla. |
+
+Disparo: intervalo dentro do próprio processo, ligado em `instrumentation.ts`
+(padrão 900s, `NATIONAL_LIFE_JANITOR_INTERVAL_SECONDS`, desligável por
+`NATIONAL_LIFE_JANITOR_DISABLED`). Mais `POST
+/api/internal/national-life/connector-janitor` com `NATIONAL_LIFE_JANITOR_SECRET`,
+que chama exatamente a mesma passada — se a rota funciona, o automático também.
+
+Lotes de 1.000 com teto de 50 por passada: um `deleteMany` único sobre uma tabela
+dimensionada para 1,9 M linhas/ano trava e incha. Atingido o teto, a passada
+reporta `truncated: true` e a seguinte continua.
+
+**O que a varredura não apaga:** `NationalLifeSyncRun` (é o que a tela lê, e some
+por cascade junto com o agente) e recibos de run não-terminal — um run abandonado
+em `RUNNING` guarda seus recibos para sempre. Cresce devagar; se virar problema, o
+conserto é expirar o run, não afrouxar o recibo.
+
+**As três seleções são cobertas por índice.** `Replay.expiresAt` já tinha o seu;
+as outras duas ganharam os seus em
+`20260806010000_index_connector_janitor_sweeps`. O ponto que fazia falta: os
+índices que já existiam nessas tabelas começam por `agentId`, e nenhuma das duas
+varreduras filtra por agente — elas varrem a tabela inteira, então aquele prefixo
+não servia. Em Pairing são **dois índices de uma coluna**, não um composto: o
+predicado é um `OR`, que o Postgres resolve com BitmapOr dos dois; um composto
+`(expiresAt, consumedAt)` só serviria ao primeiro ramo.
+
+Os testes amarram predicado e índice: mudar um sem o outro devolve a varredura ao
+sequential scan, e nada além deles avisaria.
+
+**Um erro de digitação na variável de intervalo não derruba o boot.** A validação
+lança, e `instrumentation.ts` captura: uma tarefa de fundo pode não rodar, mas não
+pode impedir o app de servir — o healthcheck do Dockerfile transformaria isso em
+deploy falho.
+
+#### O PDF saiu do Postgres
+
+A decisão dependia de um fato que ninguém tinha checado: o disco do container é
+efêmero ou não? Foi verificado no host, não suposto. O container da app tem um
+**volume nomeado** (`sbdvgmwn1l8r3te8kef2z88k-fyntra_uploads`) montado em
+`/data/uploads`, com `UPLOADS_DIR=/data/uploads`. Sobrevive a deploy, estava
+vazio, e o disco tem 78 GB livres. Ou seja: o caminho que os documentos de
+apólice já usam é persistente, e a alternativa cara (S3/R2, com dependência,
+bucket e credencial) não comprava nada que o pilotos precise hoje.
+
+**Quem escreve não é quem lê, e isso é carga estrutural.** O PDF é obtido
+dirigindo o portal, então quem chama `upsertForesightDocument` é
+`workers/national-life/runtime.ts` — o container do runtime, que **não é
+deployado pelo Coolify** e, checado no host, não montava volume nenhum. Quem
+serve o download é o container da app. Sem tratar isso, o runtime gravaria o PDF
+num disco efêmero dentro dele, poria `storageKey` no banco compartilhado, e a app
+procuraria o arquivo no volume dela: 404 em todo download, em silêncio, e sem que
+nenhum teste unitário pudesse ver — eles exercitam um sistema de arquivos só.
+
+Duas medidas, uma de código e uma de deploy:
+
+- `foresightDocumentsDir()` **não tem default**. Sem `UPLOADS_DIR` explícito ele
+  devolve `null` e o escritor volta a guardar bytes no banco — gordo, mas
+  correto. Um `?? './uploads'` é justamente o que transforma essa falha em
+  silêncio.
+- O compose do runtime passou a montar o **mesmo volume externo**
+  (`sbdvgmwn1l8r3te8kef2z88k-fyntra_uploads`) em `/data/uploads` e a definir
+  `UPLOADS_DIR`. `external: true` importa: sem isso o Docker criaria um volume
+  novo com nome derivado do projeto e os dois containers escreveriam em discos
+  diferentes achando que compartilham um. **Exige redeploy manual do runtime** —
+  ele não sai no push para `main`.
+
+Escritas novas gravam o PDF em disco e nascem com `bytes` nulo. As três decisões
+que sustentam isso:
+
+- **Arquivo antes da linha.** Arquivo sem linha é invisível — ninguém o procura.
+  Linha sem arquivo é um download que dá 404 com o banco jurando que o documento
+  existe.
+- **Chave derivada, nunca sorteada.** `upsertForesightDocument` é um upsert:
+  rerrenderizar o mesmo relatório é o caso normal. Uma chave com UUID — como a de
+  documentos de apólice — deixaria um órfão por rerrenderização, e não há
+  varredor para arquivos de documento.
+- **A leitura entende os dois estados.** `storageKey` presente → disco; senão,
+  `bytes`. É esse ramo que serve as linhas que o backfill ainda não moveu.
+
+Migração aditiva: `storageKey` entra nula, `bytes` passa a aceitar nulo, nada é
+apagado. Derrubar a coluna `bytes` é uma migração **separada**, depois do backfill
+verificado em produção — dropar dado e mudar caminho de escrita no mesmo deploy
+não deixa para onde voltar.
+
+Backfill: `scripts/national-life-backfill-foresight-documents.ts`. Ensaio por
+padrão; com `--commit`, cada linha escreve o arquivo, **relê e compara byte a
+byte**, e só então limpa a coluna — um `writeFile` que retorna sem erro num disco
+cheio não é prova, e a linha do banco é a única outra cópia.
+
+**Isto muda o lugar do crescimento, não o bounda.** Continua sem varredor para
+arquivos de documento; a diferença é que agora cresce em disco barato e não no
+banco que serve a aplicação. É a dívida conhecida que resta nesta área — as
+seleções de varredura já ganharam seus índices.
 
 ---
 
@@ -161,6 +267,48 @@ Não existe solução pronta para isso — a busca por repos de version gating
 encontrou arquivos de configuração de 65 bytes. São ~150 linhas nossas, custo
 zero, sem dependência nova.
 
+#### A pausa alcança o run em voo
+
+Havia um buraco aqui, e era o pior deles. Pausar no servidor recusava o upload
+seguinte — o dado parava de entrar — mas não alcançava a extração já rodando: o
+laço de paginação vive na página, fala com o portal e não com o Keepr One, e
+seguia puxando página atrás de página da National Life até o estágio acabar
+sozinho. Para uma emergência nossa (dado corrompido) isso bastava. Para a
+seguradora pedindo que a automação pare, não bastava — e essa era a classe de
+risco viva deste projeto.
+
+Fechado: a primeira recusa de upload dispara `ABORT_GRID` do background para a
+ponte e da ponte para o extrator, que confere a ordem **antes de cada ida ao
+portal** e outra vez quando a página volta. A recusa chega depois que a página 1
+subiu, então a primeira ida que *não acontece* é a da página 2. Numa grade de
+100.000 linhas, é a diferença entre parar na página 2 e parar na 500.
+
+Três detalhes que o desenho carrega de propósito:
+
+- **A ordem sai antes de tudo.** Antes de esquecer a navegação ativa, que guarda o
+  token de que ela precisa, e antes de `failSync` — que num `CLIENT_TOO_OLD` pode
+  chamar `chrome.runtime.reload()` e matar o worker no meio. Uma ordem emitida
+  depois disso nunca sairia, justamente quando a extensão está sendo trocada.
+- **A ordem é ligada a um token.** Uma ordem que não prove falar da extração que
+  está rodando é ignorada; senão pararia a errada, ou armaria a bandeira para a
+  próxima.
+- **O extrator sai calado.** Sem `GRID_DONE`, sem `GRID_ERROR`: o background já
+  gravou o motivo verdadeiro, e um erro tardio o trocaria por "resposta inválida"
+  na tela do agente.
+
+- **Um token parado continua parado, e uma ordem alheia não muda nada.** O mundo
+  MAIN é compartilhado com a página da seguradora, que vê o `BEGIN_GRID` passar.
+  As duas metades da invariante são necessárias e por motivos diferentes: zerar
+  a bandeira ao começar deixaria um replay daquele `BEGIN` voltar a dirigir o
+  portal; aceitar ordem de parar com token qualquer deixaria a página
+  *desparar* uma parada de verdade, porque a bandeira é um slot só — um
+  `setInterval` postando `ABORT_GRID` a cada milissegundo bastaria.
+
+O que continua fora de alcance: uma pausa que chegue durante um estágio sem
+nenhum upload em curso só é notada no upload seguinte. Como um lote sobe a cada
+página do portal (200 linhas), a janela é de uma página — não de uma linha, e
+não do estágio inteiro.
+
 ### Distribuição não tem alternativa
 
 - CRX auto-hospedado: morto no Windows (Chrome 33) e macOS (Chrome 44).
@@ -188,23 +336,64 @@ a aplicação de um terceiro. Cai no producer agreement, ainda pendente.
 
 ## O que fazer, em ordem
 
-1. **Tolerância de versão** — header `X-Ext-Version`, servidor aceita N versões,
-   `426` abaixo do piso, flag de kill no mesmo envelope. Com o guard de reload.
-   Serve para extensão e para desktop.
-2. **Canário de schema** — `ajv` validando toda resposta contra o schema da última
-   versão boa. Zero LLM, zero dado saindo da máquina. É o único que ataca drift de
-   contrato de API.
-3. **UX de falha, em inglês** — erros distintos e acionáveis; os três becos
-   (device revogado em loop, erro que some no reload, Store 404).
-4. **Varredores** — replay, recibos, pairings. E tirar o PDF do Postgres.
+1. ~~**Tolerância de versão** — header, servidor aceita N versões, `426` abaixo do
+   piso, flag de kill no mesmo envelope, com o guard de reload.~~ Feito. O header
+   ficou `x-fyntra-connector-version`, não `X-Ext-Version`. E a pausa agora
+   alcança o run em voo — ver "A pausa alcança o run em voo" acima.
+2. **Canário de schema** — validação de toda resposta contra o contrato de campos
+   da última versão boa. Zero LLM, zero dado saindo da máquina. É o único que
+   ataca drift de contrato de API. **Aberto** — ver a nota de desenho abaixo.
+3. ~~**UX de falha, em inglês** — erros distintos e acionáveis.~~ Feito
+   (`connector-failure.ts`: `RECONNECT_CODES`, `OUTDATED_CODES`, `PAUSED_CODES`,
+   com paridade testada entre extensão e servidor).
+4. ~~**Varredores** — replay, recibos, pairings. E tirar o PDF do Postgres.~~
+   Feito. Falta rodar o backfill em produção e, depois dele, derrubar a coluna
+   `bytes` numa migração separada.
 5. **Chrome DevTools MCP** na máquina de dev — lê o painel de rede, que é onde a
    quebra mora. Manutenção, nunca runtime.
 6. **Store, em paralelo, com data de decisão.**
 
+### Nota de desenho: o canário de schema
+
+Levantado e **não construído**, porque o jeito rápido é pior que não fazer.
+
+O que o canário precisa saber é *quais campos cada grade deveria trazer*. Essa
+informação já existe, mas dentro dos mapeadores, como argumentos de chamada:
+`text(row, 'DerivedStatusDescription', 'PolicyStatus', 'Status')` — 17 grupos em
+`case-snapshot-service.ts`, ~25 em `inforce-policy-service.ts`, mais os de
+`report-row-service.ts`. Os fallbacks importam: "`InsuredName` sumiu" não é drift
+se `InsuredOrAnnuitantName` chegou. A unidade de observação é o **grupo**, não a
+chave.
+
+Copiar essas listas para um arquivo de contrato cria uma segunda fonte de verdade
+que vai divergir dos mapeadores — exatamente o defeito que o canário existe para
+detectar, instalado no próprio canário. O caminho certo é extrair os grupos dos
+mapeadores para dados (`const CASE_SNAPSHOT_FIELDS = { insuredName: [...] }`),
+fazer o mapeador ler desses dados, e o canário ler os mesmos. Uma fonte só.
+
+Isso é refatoração dos três mapeadores — código que hoje funciona, numa branch de
+20 commits esperando re-review. É a decisão que falta, não o código.
+
+Duas coisas já estão determinadas quando ele for feito:
+
+- **Nunca recusar.** O agente é não-técnico; sync que morre porque a seguradora
+  renomeou uma coluna é o defeito, não a proteção. O canário observa e alerta.
+- **Grupo, não chave**, e drift é grupo com cobertura zero numa página que tem
+  linhas — não campo nulo em linha isolada.
+
+O sinal grosso disso já existe e está na tela: `writtenCount` contra
+`recordCount` mostra "recebi 200, escrevi 0". O que ele não pega é drift em campo
+não-chave — `insuredName` vira nulo para todo mundo e ninguém percebe. É esse
+buraco que o canário fecha.
+
 ## Duas correções baratas de alto retorno
 
-- **Rapid Solve** — o `HTTP 500` tinha causa achada: falta o header
-  `__requestverificationtoken`. O grid client já lê esse token.
+- ~~**Rapid Solve**~~ — **feito** em `fb4e446`. O `HTTP 500` era a falta do header
+  `__requestverificationtoken`. `requestRapidSolveQuote` agora carrega a própria
+  página do Rapid Solve, lê `input[name="__RequestVerificationToken"]` e manda o
+  header no POST — pelo contexto do browser da sessão, que é o que garante o
+  cookie de antiforgery casando com o token. **Nunca exercitado contra o portal
+  real**: só contra fixture. É item de smoke test.
 - **Sonda de correspondência** — escrita, nunca rodada. Se o filtro de data for a
   causa dos 64 documentos, destrava o caminho do PDF, único caminho para capital
   segurado.

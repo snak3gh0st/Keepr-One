@@ -2,6 +2,36 @@ import { z } from 'zod'
 import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '../portal-grid-client'
 
 export const LOCAL_CONNECTOR_SCHEMA_VERSION = 2 as const
+
+/// O que o servidor *aceita*, que não é o mesmo que o que ele *emite*.
+///
+/// `LOCAL_CONNECTOR_SCHEMA_VERSION` é a versão que o plano de run carrega para
+/// fora — uma só, sempre a corrente. Este conjunto é a janela de tolerância na
+/// entrada: enquanto ele tiver mais de um membro, duas versões da extensão
+/// conseguem subir dados ao mesmo tempo.
+///
+/// É isso que transforma a próxima quebra de contrato numa depreciação em vez de
+/// um corte. A Chrome Web Store não dá alavanca para acelerar atualização —
+/// `requestUpdateCheck()` é limitado pelo mesmo backoff de 5h, e o Chrome só
+/// instala com o service worker ocioso, o que num conector que acorda o tempo
+/// todo significa dias, não horas. Rollout percentual exige >10.000 usuários
+/// semanais; temos ~100. Então a única forma de não derrubar todo mundo é o
+/// servidor aceitar N e N-1 durante a transição, e só depois estreitar o
+/// conjunto.
+///
+/// Ordem do corte: (1) adicionar a versão nova aqui, (2) publicar a extensão que
+/// a emite, (3) esperar a frota migrar — `x-fyntra-connector-version` diz quando —,
+/// (4) remover a antiga daqui. Nunca (4) antes de (3).
+export const LOCAL_CONNECTOR_ACCEPTED_SCHEMA_VERSIONS = [2] as const
+
+export type LocalConnectorSchemaVersion =
+  (typeof LOCAL_CONNECTOR_ACCEPTED_SCHEMA_VERSIONS)[number]
+
+export function isAcceptedLocalConnectorSchemaVersion(
+  value: unknown,
+): value is LocalConnectorSchemaVersion {
+  return (LOCAL_CONNECTOR_ACCEPTED_SCHEMA_VERSIONS as readonly unknown[]).includes(value)
+}
 export const LOCAL_CONNECTOR_MAX_BODY_BYTES = 2 * 1024 * 1024
 /// Raw carrier rows are fatter than normalized ones. 200 rows against the 2 MiB body
 /// cap leaves headroom for the widest grid; the extension pages to match.
@@ -47,7 +77,7 @@ export const rawGridRowSchema: z.ZodType<Record<string, unknown>> = z
 
 export const localConnectorRawStageEnvelopeSchema = z
   .strictObject({
-    schemaVersion: z.literal(LOCAL_CONNECTOR_SCHEMA_VERSION),
+    schemaVersion: z.literal(LOCAL_CONNECTOR_ACCEPTED_SCHEMA_VERSIONS),
     runId: identifier,
     // The client's gridKey is never treated as authoritative on its own: it is
     // validated here against the server's own grid allowlist, and the route

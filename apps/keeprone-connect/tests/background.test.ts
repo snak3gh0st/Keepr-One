@@ -42,7 +42,13 @@ const tabs = {
   query: vi.fn(async () => [] as unknown[]),
   update: vi.fn(async () => undefined),
   create: vi.fn(async () => undefined),
-  sendMessage: vi.fn(async () => undefined),
+  // Tipado com os dois argumentos reais para que um teste possa afirmar sobre a
+  // mensagem enviada, e não só sobre ter havido envio.
+  sendMessage: vi.fn(async (tabId: number, message: unknown) => {
+    void tabId
+    void message
+    return undefined
+  }),
   onUpdated: register('tabs.onUpdated'),
   onRemoved: register('tabs.onRemoved'),
 }
@@ -60,6 +66,9 @@ const chromeStub = {
     },
   },
   runtime: {
+    getManifest: () => ({ version: '0.1.0' }),
+    requestUpdateCheck: vi.fn(async () => ({ status: 'no_update' })),
+    reload: vi.fn(),
     onInstalled: register('runtime.onInstalled'),
     onMessage: register('runtime.onMessage'),
     onMessageExternal: register('runtime.onMessageExternal'),
@@ -91,6 +100,11 @@ function readSync() {
   return storage.sync as Record<string, unknown>
 }
 
+const EXTERNAL_SENDER = {
+  origin: 'http://localhost:3000',
+  url: 'http://localhost:3000/agent/integrations/national-life',
+}
+
 function beginGridMessage() {
   const call = tabs.sendMessage.mock.calls.at(-1) as unknown as [number, Record<string, unknown>]
   return call?.[1]
@@ -106,6 +120,169 @@ beforeEach(() => {
   // The extension's own vitest config substitutes this at build time; the repo-root
   // config does not, and without it every allowed-origin check fails.
   vi.stubGlobal('__KEEPR_ORIGIN__', 'http://localhost:3000')
+})
+
+describe('empurrão de atualização no caminho real', () => {
+  it('empurra quando o servidor diz que esta versão está abaixo do piso', async () => {
+    // O caso que quase escapou: `failSync` roda **dentro** de `withSyncLock`, então
+    // um `isBusy` que consultasse o lock devolveria BUSY sempre e o empurrão nunca
+    // aconteceria — exatamente no gatilho para o qual ele foi construído.
+    vi.mocked(signedJsonRequest).mockRejectedValue(
+      Object.assign(new Error('CLIENT_TOO_OLD'), { code: 'CLIENT_TOO_OLD' }),
+    )
+    await bootBackground()
+
+    emit('runtime.onMessageExternal', { type: 'START_NATIONAL_LIFE_SYNC' }, EXTERNAL_SENDER, vi.fn())
+    await flush()
+
+    expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'CLIENT_TOO_OLD' })
+    expect(chromeStub.runtime.requestUpdateCheck).toHaveBeenCalled()
+    expect(chromeStub.runtime.reload).toHaveBeenCalledTimes(1)
+    // E a trava ficou gravada antes do reload, não depois.
+    expect(storage.updateNudge).toMatchObject({ version: '0.1.0', reloadCount: 1 })
+  })
+
+  it('a trava persistida sobrevive à morte do worker e barra o segundo reload', async () => {
+    // Esta é a asserção que um `chrome.runtime.reload()` solto no lugar do
+    // empurrão **não** satisfaz: ele recarregaria de novo. Reiniciar o worker é o
+    // caso real — reload() mata o worker, então a segunda decisão sempre acontece
+    // num módulo recém-carregado, com os globais zerados.
+    vi.mocked(signedJsonRequest).mockRejectedValue(new Error('CLIENT_TOO_OLD'))
+    await bootBackground()
+    emit('runtime.onMessageExternal', { type: 'START_NATIONAL_LIFE_SYNC' }, EXTERNAL_SENDER, vi.fn())
+    await flush()
+    expect(chromeStub.runtime.reload).toHaveBeenCalledTimes(1)
+
+    // Worker morre e volta. Só o chrome.storage.local sobrevive.
+    await bootBackground()
+    emit('runtime.onMessageExternal', { type: 'START_NATIONAL_LIFE_SYNC' }, EXTERNAL_SENDER, vi.fn())
+    await flush()
+
+    expect(chromeStub.runtime.reload).toHaveBeenCalledTimes(1)
+    expect(storage.updateNudge).toMatchObject({ reloadCount: 1 })
+  })
+
+  it('empurra quando o 426 chega no PUT de um lote, não no início do run', async () => {
+    // O caminho dominante de verdade: subir o piso contra runs já em voo é o que
+    // "subir o piso" significa operacionalmente, e aí a recusa chega no upload de
+    // um lote. `processBridgeMessage` chama `failSync` com a própria entrada dele
+    // ainda pendente na fila da aba — contar essa entrada devolvia BUSY sempre,
+    // que é o mesmo erro do `syncStartLock`, um braço adiante.
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    const begin = beginGridMessage()
+    vi.mocked(signedJsonRequest).mockRejectedValue(new Error('CLIENT_TOO_OLD'))
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 0,
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ a: 'b' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+      vi.fn(),
+    )
+    await flush()
+
+    expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'CLIENT_TOO_OLD' })
+    expect(chromeStub.runtime.reload).toHaveBeenCalledTimes(1)
+    expect(storage.updateNudge).toMatchObject({ version: '0.1.0', reloadCount: 1 })
+  })
+
+  it('manda o extrator parar quando o servidor recusa o lote por pausa', async () => {
+    // Recusar o upload já impedia o dado de entrar. O que não parava era a
+    // extração: o laço na página fala com o portal, não com o Keepr One, e
+    // seguia paginando a National Life até o estágio acabar sozinho.
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    const begin = beginGridMessage()
+    vi.mocked(signedJsonRequest).mockRejectedValue(new Error('CONNECTOR_PAUSED'))
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 0,
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ a: 'b' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+      vi.fn(),
+    )
+    await flush()
+
+    expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'CONNECTOR_PAUSED' })
+    // A ordem tem de falar da extração que está rodando: com token de outra, a
+    // página a ignoraria e continuaria dirigindo o portal.
+    expect(tabs.sendMessage).toHaveBeenLastCalledWith(7, {
+      type: 'ABORT_GRID',
+      gridKey: 'NEW_BUSINESS',
+      token: begin.token,
+      correlationId: begin.correlationId,
+    })
+  })
+
+  it('manda parar antes de recarregar a extensão no 426', async () => {
+    // Ordem, não coincidência: `failSync` num CLIENT_TOO_OLD pode chamar
+    // `chrome.runtime.reload()`, que mata este worker. Uma ordem de parar
+    // emitida depois disso nunca sairia, e o portal seguiria sendo dirigido
+    // exatamente no caso em que a extensão inteira está sendo trocada.
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    const begin = beginGridMessage()
+
+    const order: string[] = []
+    tabs.sendMessage.mockImplementation(async (_tabId: number, message: unknown) => {
+      order.push((message as { type: string }).type)
+      return undefined
+    })
+    chromeStub.runtime.reload.mockImplementation(() => {
+      order.push('reload')
+    })
+    vi.mocked(signedJsonRequest).mockRejectedValue(new Error('CLIENT_TOO_OLD'))
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 0,
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ a: 'b' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+      vi.fn(),
+    )
+    await flush()
+
+    expect(order).toEqual(['ABORT_GRID', 'reload'])
+  })
+
+  it('não empurra numa falha que atualizar não resolve', async () => {
+    vi.mocked(signedJsonRequest).mockRejectedValue(new Error('PORTAL_REQUEST_FAILED'))
+    await bootBackground()
+
+    emit('runtime.onMessageExternal', { type: 'START_NATIONAL_LIFE_SYNC' }, EXTERNAL_SENDER, vi.fn())
+    await flush()
+
+    expect(chromeStub.runtime.reload).not.toHaveBeenCalled()
+  })
 })
 
 describe('background plan executor', () => {
@@ -155,7 +332,107 @@ describe('background plan executor', () => {
     )
     await flush()
 
-    expect(readSync()).toEqual({ runId: 'run-1', status: 'COMPLETED' })
+    // A data de conclusão é o que impede a página de dizer "concluído" para
+    // sempre: sem ela, um COMPLETED grudento não tem como ser datado.
+    expect(readSync()).toMatchObject({ runId: 'run-1', status: 'COMPLETED' })
+    expect(typeof readSync().completedAt).toBe('string')
+    expect(readSync().plan).toBeUndefined()
+  })
+
+  it('drops the pairing only when the server says the device is revoked', async () => {
+    // Um 401 genérico não basta: ele cobre relógio fora da janela, que persiste
+    // depois de reparear. Só a afirmação explícita solta o pareamento.
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    const { SignedRequestError } = await import('../lib/signed-client')
+    vi.mocked(signedJsonRequest).mockRejectedValue(
+      new (SignedRequestError as unknown as new (code: string) => Error)('DEVICE_REVOKED'),
+    )
+    await bootBackground()
+    const begin = beginGridMessage()
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 0,
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ a: 'b' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+      vi.fn(),
+    )
+    await flush()
+
+    expect(storage.device).toMatchObject({ status: 'UNPAIRED' })
+    expect(storage.device).not.toHaveProperty('deviceId')
+    expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'DEVICE_REVOKED' })
+  })
+
+  it('keeps the pairing on a bare rejection, which may be nothing but clock skew', async () => {
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    const { SignedRequestError } = await import('../lib/signed-client')
+    vi.mocked(signedJsonRequest).mockRejectedValue(
+      new (SignedRequestError as unknown as new (code: string) => Error)(
+        'DEVICE_REQUEST_REJECTED',
+      ),
+    )
+    await bootBackground()
+    const begin = beginGridMessage()
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 0,
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ a: 'b' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+      vi.fn(),
+    )
+    await flush()
+
+    expect(storage.device).toMatchObject({ status: 'READY', deviceId: 'device-1' })
+    expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'DEVICE_REQUEST_REJECTED' })
+  })
+
+  it('counts uploaded batches so a long single stage still proves it is alive', async () => {
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    vi.mocked(signedJsonRequest).mockResolvedValue(undefined as never)
+    await bootBackground()
+    const begin = beginGridMessage()
+
+    for (const sequence of [0, 1]) {
+      emit(
+        'runtime.onMessage',
+        {
+          type: 'GRID_CHUNK',
+          gridKey: 'NEW_BUSINESS',
+          token: begin.token,
+          correlationId: begin.correlationId,
+          sequence,
+          recordsTotal: 2,
+          truncated: sequence === 0,
+          records: [{ a: 'b' }],
+        },
+        { tab: { id: 7 }, url: `${NLG}/agent/anything` },
+        vi.fn(),
+      )
+      await flush()
+    }
+
+    expect(readSync()).toMatchObject({ status: 'UPLOADING', stageIndex: 0, uploads: 2 })
   })
 
   it('resumes mid-plan after the service worker is evicted', async () => {

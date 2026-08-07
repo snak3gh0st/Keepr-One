@@ -30,7 +30,7 @@ function formatDateTime(value: Date | string | null) {
   if (Number.isNaN(date.getTime())) {
     return '—'
   }
-  return new Intl.DateTimeFormat('pt-BR', {
+  return new Intl.DateTimeFormat('en-US', {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(date)
@@ -77,7 +77,7 @@ export function NationalLifeConnectionCard({
         setMessage({ kind: 'error', text: result.message })
         return
       }
-      setMessage({ kind: 'success', text: 'National Life desconectada.' })
+      setMessage({ kind: 'success', text: 'National Life disconnected.' })
       router.refresh()
     } finally {
       setBusy(null)
@@ -86,7 +86,7 @@ export function NationalLifeConnectionCard({
 
   function handleAuthenticated() {
     setAttempt(null)
-    setMessage({ kind: 'success', text: 'National Life conectada' })
+    setMessage({ kind: 'success', text: 'National Life connected' })
     router.refresh()
   }
 
@@ -110,15 +110,16 @@ export function NationalLifeConnectionCard({
                 <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
                   National Life
                 </h2>
-                <p className="text-sm text-ink-muted">Portal do agente</p>
+                <p className="text-sm text-ink-muted">Agent portal</p>
               </div>
             </div>
             <p className="mt-5 text-sm leading-6 text-ink-muted">
-              Entre diretamente no portal oficial da National Life. O Keepr One guarda somente a sessão autenticada e nunca armazena sua senha.
+              Sign in on the official National Life portal. Keepr One keeps only
+              the signed-in session, and never your password.
             </p>
             <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-ink">
               <span className="h-2 w-2 rounded-full bg-success" />
-              O Keepr One não armazena sua senha
+              Keepr One never stores your password
             </p>
           </div>
 
@@ -131,7 +132,7 @@ export function NationalLifeConnectionCard({
                   : 'bg-panel text-ink-muted'
             }`}
           >
-            {connected ? 'Conectada' : summary ? 'Reconexão necessária' : 'Não conectada'}
+            {connected ? 'Connected' : summary ? 'Reconnect needed' : 'Not connected'}
           </span>
         </div>
 
@@ -139,7 +140,7 @@ export function NationalLifeConnectionCard({
           <dl className="grid divide-y divide-border-steel border-b border-border-steel sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             <div className="px-5 py-4 sm:px-6">
               <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                Última conexão
+                Last connected
               </dt>
               <dd className="mt-2 font-mono text-sm text-ink">
                 {formatDateTime(summary.lastConnectedAt)}
@@ -147,7 +148,7 @@ export function NationalLifeConnectionCard({
             </div>
             <div className="px-5 py-4 sm:px-6">
               <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                Última verificação
+                Last checked
               </dt>
               {/* Written only after an authenticated page answered, so this is a
                   successful check and not merely the last attempt. It replaced a
@@ -160,7 +161,7 @@ export function NationalLifeConnectionCard({
             </div>
             <div className="px-5 py-4 sm:px-6">
               <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                Ilustração (Foresight)
+                Illustrations (Foresight)
               </dt>
               {/* The PDF path sits behind the carrier's Auth0 tenant, which dies
                   while the portal session lives. Knowing before clicking beats
@@ -172,14 +173,14 @@ export function NationalLifeConnectionCard({
                 }`}
               >
                 {summary.illustrationSsoReachable === null
-                  ? 'Não verificada'
+                  ? 'Not checked yet'
                   : summary.illustrationSsoReachable
-                    ? 'Disponível'
-                    : 'Requer novo login'}
+                    ? 'Available'
+                    : 'Sign in again'}
               </dd>
               {summary.illustrationSsoCheckedAt && (
                 <p className="mt-1 text-xs text-ink-muted">
-                  em {formatDateTime(summary.illustrationSsoCheckedAt)}
+                  on {formatDateTime(summary.illustrationSsoCheckedAt)}
                 </p>
               )}
             </div>
@@ -194,7 +195,7 @@ export function NationalLifeConnectionCard({
               disabled={busy !== null}
               onClick={handleConnect}
             >
-              {busy === 'connect' ? 'Abrindo sessão segura...' : 'Conectar National Life'}
+              {busy === 'connect' ? 'Opening secure session...' : 'Connect National Life'}
             </Button>
           )}
           {summary && (
@@ -204,7 +205,7 @@ export function NationalLifeConnectionCard({
               disabled={busy !== null}
               onClick={handleDisconnect}
             >
-              {busy === 'disconnect' ? 'Desconectando...' : 'Desconectar'}
+              {busy === 'disconnect' ? 'Disconnecting...' : 'Disconnect'}
             </Button>
           )}
           {connected && (
@@ -212,7 +213,7 @@ export function NationalLifeConnectionCard({
               href="/agent/integrations/national-life/data"
               className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
             >
-              Ver dados sincronizados
+              View synced data
             </Link>
           )}
           {message && (
@@ -224,7 +225,7 @@ export function NationalLifeConnectionCard({
             >
               {message.text}
               {message.kind === 'error' && !connected && (
-                <span className="ml-1">Conectar novamente continua disponível.</span>
+                <span className="ml-1">You can connect again at any time.</span>
               )}
             </p>
           )}

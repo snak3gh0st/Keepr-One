@@ -1,5 +1,10 @@
 import { parseStagePlan } from '../lib/capabilities'
 import {
+  CONNECTOR_SCHEMA_VERSION,
+  CONNECTOR_VERSION_HEADER,
+  readExtensionVersion,
+} from '../lib/contract'
+import {
   NLG_ORIGIN,
   allowedKeeprOrigins,
   isAuthPath,
@@ -9,9 +14,22 @@ import { clearDeviceKeys, getOrCreateDeviceKey } from '../lib/key-store'
 import {
   parseBridgeMessage,
   parseExternalMessage,
+  type AbortGridMessage,
   type BeginGridMessage,
   type BridgeMessage,
 } from '../lib/messages'
+import { OUTDATED_CODES, revokesDevice } from '../lib/failure'
+import {
+  PERMISSIVE_REMOTE_CONFIG,
+  ensureFreshRemoteConfig,
+  readCachedRemoteConfig,
+} from '../lib/remote-config'
+import {
+  UPDATE_NUDGE_KEY,
+  isBusySyncStatus,
+  nudgeExtensionUpdate,
+  type UpdateNudgeRecord,
+} from '../lib/update-nudge'
 import { SignedRequestError, signedJsonRequest } from '../lib/signed-client'
 import {
   currentStage,
@@ -25,7 +43,16 @@ type ActiveNavigation = BeginGridMessage & { tabId: number }
 
 const activeNavigations = new Map<number, ActiveNavigation>()
 const tabQueues = new Map<number, Promise<void>>()
+/// Quantas mensagens da ponte estão pendentes por aba, incluindo a que está sendo
+/// processada agora. `tabQueues` sozinho não distingue "uma mensagem, que sou eu"
+/// de "uma mensagem minha e outras esperando".
+const pendingBridgeMessages = new Map<number, number>()
 let syncStartLock: Promise<unknown> | null = null
+
+function versionedHeaders(base: Record<string, string>): Record<string, string> {
+  const version = readExtensionVersion()
+  return version ? { ...base, [CONNECTOR_VERSION_HEADER]: version } : base
+}
 
 function randomToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32))
@@ -68,7 +95,10 @@ async function pairConnector(
       `${baseUrl}/api/agent/integrations/national-life/local-connector/pairings/exchange`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        // O pareamento é a única requisição que não passa por `signedJsonRequest`
+        // (ainda não há chave para assinar). Carimbar a versão aqui também é o que
+        // faz "toda requisição carrega a versão" ser verdade e não quase-verdade.
+        headers: versionedHeaders({ 'content-type': 'application/json' }),
         body: JSON.stringify({
           code: message.code,
           label: message.label,
@@ -130,10 +160,102 @@ async function reportRunFailure(code: string) {
   }
 }
 
+/// Esquece o pareamento sem tocar no estado do sync. `unpairConnector` zera o
+/// sync para IDLE — correto quando o agente desconecta de propósito, errado aqui:
+/// o motivo da falha precisa sobreviver para a página poder explicá-lo.
+async function forgetRevokedDevice() {
+  const device = await readDeviceState()
+  await clearDeviceKeys()
+  await writeDeviceState({ baseUrl: device.baseUrl, status: 'UNPAIRED' })
+  activeNavigations.clear()
+  tabQueues.clear()
+}
+
+/// Único caminho de falha do sync. Grava o motivo, tenta avisar o servidor e só
+/// então derruba um pareamento que o servidor declarou morto — é o que troca
+/// "tentar de novo para sempre" por "reconectar".
+///
+/// Na revogação, o aviso ao servidor é uma requisição assinada pela mesma chave
+/// que acabou de ser recusada: ele não chega, e não há como fazer chegar daqui.
+/// Quem encerra o run naquele caso é o próprio servidor, em
+/// `revokeLocalConnectorDevice`, que já derruba os runs abertos do dispositivo.
+/// O auto-conserto, e a única coisa no arquivo que pode desabilitar a extensão se
+/// for feita errado. Toda a trava mora em `nudgeExtensionUpdate`; aqui só ficam as
+/// dependências, e duas delas são o ponto:
+///
+/// - `isBusy` olha o estado **persistido** além dos mapas em memória. Num worker
+///   recém-iniciado os mapas estão vazios embora um run esteja genuinamente no
+///   meio segundo o storage — confiar só neles chamaria "ponto seguro" exatamente
+///   o momento mais perigoso.
+/// - `writeRecord` grava no `chrome.storage.local`, que sobrevive ao worker. Um
+///   global de módulo morreria junto com o reload que ele deveria estar contando.
+async function nudgeUpdateIfSafe(selfTabId?: number): Promise<void> {
+  await nudgeExtensionUpdate({
+    now: () => Date.now(),
+    version: () => readExtensionVersion(),
+    readRecord: async () => {
+      const result = await chrome.storage.local.get(UPDATE_NUDGE_KEY)
+      return result[UPDATE_NUDGE_KEY] as UpdateNudgeRecord | undefined
+    },
+    writeRecord: async (record) => {
+      await chrome.storage.local.set({ [UPDATE_NUDGE_KEY]: record })
+    },
+    requestUpdateCheck: async () => {
+      await chrome.runtime.requestUpdateCheck()
+    },
+    reload: () => chrome.runtime.reload(),
+    /// A regra, e ela tem exatamente uma forma: **nada que conte a própria
+    /// operação que está falhando**. Esse erro já foi cometido duas vezes aqui, em
+    /// dois braços diferentes, e as duas vezes o efeito foi o mesmo — o empurrão
+    /// devolvia BUSY para sempre e o recurso morria no gatilho mais importante.
+    ///
+    /// - `syncStartLock` fica de fora: um 426 vindo de `startNewSync` roda dentro
+    ///   de `withSyncLock`, então o lock é a promessa da própria operação falhando.
+    /// - a fila da aba é **descontada de uma unidade** quando a falha vem da ponte:
+    ///   `processBridgeMessage` chama `failSync` com a sua própria entrada ainda
+    ///   pendente em `tabQueues`. Esse é o caminho dominante de um 426, porque um
+    ///   piso subido contra runs em voo é exatamente o que "subir o piso"
+    ///   significa: a recusa chega no PUT de um lote, não no início do run.
+    ///
+    /// O que sobra é trabalho de verdade: outras abas, outras mensagens na mesma
+    /// aba, e o estado persistido — que `failSync` acabou de mover para ERROR, de
+    /// modo que só um sync *concorrente* o deixa ocupado.
+    isBusy: async () => {
+      if (activeNavigations.size > 0) return true
+      let pending = 0
+      for (const count of pendingBridgeMessages.values()) pending += count
+      if (selfTabId !== undefined) pending -= 1
+      if (pending > 0) return true
+      const state = await readSyncState()
+      return isBusySyncStatus(state.status)
+    },
+  })
+}
+
+async function failSync(code: string, selfTabId?: number) {
+  await writeSyncState({ ...(await readSyncState()), status: 'ERROR', errorCode: code })
+  await reportRunFailure(code)
+  if (revokesDevice(code)) await forgetRevokedDevice()
+  // O servidor afirmou que esta versão não serve mais. É o único gatilho: um
+  // empurrão a cada falha genérica gastaria as tentativas contra problemas que
+  // atualizar não resolve. `failSync` já gravou o ERROR, e o estado de sync
+  // acabou de sair dos estados ocupados — por isso o empurrão vem depois.
+  if (OUTDATED_CODES.includes(code)) await nudgeUpdateIfSafe(selfTabId)
+}
+
 async function createRun() {
   const device = await readDeviceState()
   if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
     throw new Error('CONNECTOR_NOT_PAIRED')
+  }
+  // Lê o **cache**, não a rede. Bloquear o começo do sync numa requisição extra
+  // trocaria uma alavanca de emergência por latência em todo sync e por mais um
+  // ponto de falha no caminho que mais importa. Quem recusa de verdade é o
+  // endpoint de run, na mesma viagem que já íamos fazer; isto aqui só evita abrir
+  // um run condenado quando já sabemos, e dá ao agente a frase certa.
+  const remote = (await readCachedRemoteConfig()) ?? PERMISSIVE_REMOTE_CONFIG
+  if (!remote.syncEnabled || remote.disabledCapabilities.includes('READ_GRID')) {
+    throw new Error('CONNECTOR_PAUSED')
   }
   await writeSyncState({ status: 'STARTING' })
   const response = await signedJsonRequest<{ runId?: unknown; stages?: unknown }>({
@@ -195,8 +317,13 @@ async function startNewSync() {
       return { ok: true as const, status: 'NAVIGATING' as const }
     } catch (error) {
       const code = error instanceof Error ? error.message : 'SYNC_START_FAILED'
-      await writeSyncState({ status: 'ERROR', errorCode: code })
-      await reportRunFailure(code)
+      // Não pareado não é falha do sync: é o estado inicial de quem ainda não
+      // conectou. Gravá-lo como ERROR faria a página abrir acusando um problema.
+      if (code === 'CONNECTOR_NOT_PAIRED') {
+        await writeSyncState({ status: 'IDLE' })
+        return { ok: false as const, error: code }
+      }
+      await failSync(code)
       return { ok: false as const, error: code }
     }
   })
@@ -216,12 +343,7 @@ async function beginExtraction(tabId: number, gridKey: string) {
     await chrome.tabs.sendMessage(tabId, message)
   } catch {
     activeNavigations.delete(tabId)
-    await writeSyncState({
-      ...(await readSyncState()),
-      status: 'ERROR',
-      errorCode: 'BRIDGE_UNAVAILABLE',
-    })
-    await reportRunFailure('BRIDGE_UNAVAILABLE')
+    await failSync('BRIDGE_UNAVAILABLE')
   }
 }
 
@@ -282,7 +404,7 @@ async function uploadChunk(message: Extract<BridgeMessage, { type: 'GRID_CHUNK' 
       body: {
         // Raw carrier rows, exactly as the portal returned them. Field names and
         // meanings are the server's business now.
-        schemaVersion: 2,
+        schemaVersion: CONNECTOR_SCHEMA_VERSION,
         runId: state.runId,
         gridKey: message.gridKey,
         sequence: message.sequence,
@@ -298,6 +420,10 @@ async function uploadChunk(message: Extract<BridgeMessage, { type: 'GRID_CHUNK' 
     }
     throw error
   }
+  // Prova de vida do run. É o único sinal que se move quando uma única grade
+  // grande passa minutos subindo lote a lote.
+  const after = await readSyncState()
+  await writeSyncState({ ...after, uploads: (after.uploads ?? 0) + 1 })
 }
 
 async function finishGrid(tabId: number, gridKey: string) {
@@ -313,7 +439,12 @@ async function finishGrid(tabId: number, gridKey: string) {
   const nextIndex = (state.stageIndex ?? 0) + 1
   const next = plan[nextIndex]
   if (!next) {
-    await writeSyncState({ runId: state.runId, status: 'COMPLETED' })
+    await writeSyncState({
+      runId: state.runId,
+      status: 'COMPLETED',
+      uploads: state.uploads,
+      completedAt: new Date().toISOString(),
+    })
     return
   }
   await writeSyncState({
@@ -321,8 +452,35 @@ async function finishGrid(tabId: number, gridKey: string) {
     plan,
     stageIndex: nextIndex,
     status: 'NAVIGATING',
+    uploads: state.uploads,
   })
   await chrome.tabs.update(tabId, { url: `${NLG_ORIGIN}${next.params.navigatePath}` })
+}
+
+/// Manda o extrator parar onde está.
+///
+/// É o que faltava para a pausa do servidor alcançar um run em voo. Recusar o
+/// upload já impedia o dado de entrar, mas não impedia a extração de continuar:
+/// o laço na página fala com o portal, não com o Keepr One, e seguia paginando a
+/// National Life até o estágio acabar sozinho. Para uma emergência nossa isso era
+/// tolerável; para a seguradora pedindo que a automação pare, não é.
+///
+/// Silenciosa de propósito quando não há extração ativa ou quando a aba sumiu:
+/// as duas coisas são a mesma parada, por outro caminho.
+async function abortExtraction(tabId: number) {
+  const active = activeNavigations.get(tabId)
+  if (!active) return
+  const message: AbortGridMessage = {
+    type: 'ABORT_GRID',
+    gridKey: active.gridKey,
+    token: active.token,
+    correlationId: active.correlationId,
+  }
+  try {
+    await chrome.tabs.sendMessage(tabId, message)
+  } catch {
+    // Aba fechada, ponte ausente: não há o que parar.
+  }
 }
 
 async function processBridgeMessage(tabId: number, message: BridgeMessage) {
@@ -340,25 +498,32 @@ async function processBridgeMessage(tabId: number, message: BridgeMessage) {
     else if (message.type === 'GRID_DONE') await finishGrid(tabId, message.gridKey)
     else {
       activeNavigations.delete(tabId)
-      await writeSyncState({ ...(await readSyncState()), status: 'ERROR', errorCode: message.code })
-      await reportRunFailure(message.code)
+      await failSync(message.code, tabId)
     }
   } catch (error) {
+    // A ordem de parar vem antes de tudo: antes do `delete`, que apaga o token
+    // de que ela precisa, e antes de `failSync`, que num CLIENT_TOO_OLD pode
+    // chamar `chrome.runtime.reload()` e matar este worker no meio. Um GRID_ERROR
+    // não passa por aqui — ali o extrator já parou sozinho.
+    await abortExtraction(tabId)
     activeNavigations.delete(tabId)
-    const code = error instanceof Error ? error.message : 'UPLOAD_FAILED'
-    await writeSyncState({
-      ...(await readSyncState()),
-      status: 'ERROR',
-      errorCode: code,
-    })
-    await reportRunFailure(code)
+    await failSync(error instanceof Error ? error.message : 'UPLOAD_FAILED', tabId)
   }
 }
 
 function enqueueBridgeMessage(tabId: number, message: BridgeMessage) {
   const previous = tabQueues.get(tabId) ?? Promise.resolve()
+  // Profundidade por aba, não só "existe fila". `tabQueues` guarda a promessa da
+  // cadeia inteira, então enquanto `processBridgeMessage` roda a entrada dele
+  // ainda está lá — perguntar "há fila?" de dentro dele responde sempre "sim".
+  // Contando mensagens dá para descontar a que está falhando e ainda enxergar as
+  // outras. Ver `nudgeUpdateIfSafe`.
+  pendingBridgeMessages.set(tabId, (pendingBridgeMessages.get(tabId) ?? 0) + 1)
   const next = previous.then(() => processBridgeMessage(tabId, message))
   const queued = next.finally(() => {
+    const remaining = (pendingBridgeMessages.get(tabId) ?? 1) - 1
+    if (remaining > 0) pendingBridgeMessages.set(tabId, remaining)
+    else pendingBridgeMessages.delete(tabId)
     if (tabQueues.get(tabId) === queued) tabQueues.delete(tabId)
   })
   tabQueues.set(tabId, queued)
@@ -484,4 +649,17 @@ export default defineBackground(() => {
   })
 
   void resumePending()
+  // Uma batida a cada subida do service worker. É a janela mais barata que existe
+  // para uma flag chegar sem nenhuma ação do agente, e o worker sobe com muita
+  // frequência justamente porque este conector acorda o tempo todo.
+  //
+  // Fora do caminho de ação de propósito: ninguém espera por ela, e o resultado
+  // só é lido no próximo sync. Se falhar, o cache anterior continua valendo e o
+  // endpoint segue sendo a autoridade — falhar aqui não pode parar nada.
+  void (async () => {
+    const device = await readDeviceState()
+    if (device.status === 'READY' && device.baseUrl) {
+      await ensureFreshRemoteConfig(device.baseUrl)
+    }
+  })()
 })

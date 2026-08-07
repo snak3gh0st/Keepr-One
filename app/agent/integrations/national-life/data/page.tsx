@@ -85,11 +85,11 @@ export default async function NationalLifeDataPage() {
     return (
       <Shell role="AGENT" userName={user?.name ?? ''}>
         <PageHeader
-          title="Dados National Life"
-          eyebrow="Integração"
-          description="A integração não está configurada neste ambiente."
+          title="National Life data"
+          eyebrow="Integration"
+          description="This integration is not set up yet."
         />
-        <ErrorBanner>National Life não está configurada. Fale com o suporte.</ErrorBanner>
+        <ErrorBanner>National Life is not set up yet. Contact Keepr One support to turn it on.</ErrorBanner>
       </Shell>
     )
   }
@@ -222,45 +222,45 @@ export default async function NationalLifeDataPage() {
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <PageHeader
-        title="Dados National Life"
-        eyebrow="Integração"
-        description="Casos, apólices em vigor e comissões lidos direto do portal da National Life."
+        title="National Life data"
+        eyebrow="Integration"
+        description="Cases, in-force policies, and commissions read straight from the National Life portal."
       >
         <Link
           href="/agent/integrations/national-life"
           className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
         >
-          Gerenciar conexão
+          Manage connection
         </Link>
       </PageHeader>
 
       {loadError && (
         <ErrorBanner>
-          Não foi possível carregar os dados da National Life agora. Tente atualizar a página.
+          We could not load your National Life data right now. Refresh the page to try again.
         </ErrorBanner>
       )}
 
       {!loadError && (
         <ModuleSummary
-          label="Resumo do que veio do portal"
+          label="What came back from the portal"
           items={[
             {
-              label: 'Casos',
+              label: 'Cases',
               value: cases.length,
-              detail: 'Novos negócios e encerrados recentemente',
+              detail: 'New business and recently closed',
             },
             {
-              label: 'Em vigor',
+              label: 'In force',
               value: activeInforce,
-              detail: `${inforce.length} apólices lidas · ${attentionInforce} pedem atenção`,
+              detail: `${inforce.length} policies read · ${attentionInforce} need attention`,
               tone: attentionInforce > 0 ? 'gold' : 'green',
             },
             {
-              label: 'Linhas de comissão',
+              label: 'Commission lines',
               value: commissions.length,
               detail: lastSyncedAt
-                ? `Última sincronização em ${lastSyncedAt.toLocaleString('pt-BR')}`
-                : 'Ainda não sincronizado',
+                ? `Last synced ${lastSyncedAt.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`
+                : 'Not synced yet',
             },
           ]}
         />
@@ -272,16 +272,16 @@ export default async function NationalLifeDataPage() {
             <NationalLifeDataTabs cases={cases} inforce={inforce} commissions={commissions} />
           )}
         </section>
-        <ContextPanel eyebrow="Como ler" title="Direto do portal">
+        <ContextPanel eyebrow="How to read this" title="Straight from the portal">
           <p>
-            Estes registros são uma cópia do que o portal da National Life mostra, guardada no
-            momento da sincronização. Eles não substituem suas apólices no Keepr One.
+            These records are a copy of what the National Life portal showed at the time of the last
+            sync. They do not replace your policies in Keepr One.
           </p>
           <div className="mt-5 border-t border-white/10 pt-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Valores</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Amounts</p>
             <p className="mt-2">
-              Prêmios e comissões chegam como texto do carrier e são exibidos como recebidos, sem
-              recálculo.
+              Premiums and commissions arrive as text from the carrier and are shown exactly as
+              received, with no recalculation.
             </p>
           </div>
         </ContextPanel>
@@ -290,9 +290,9 @@ export default async function NationalLifeDataPage() {
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Foresight</p>
-            <h2 className="mt-1 text-xl font-semibold text-paper">Casos observados no portal</h2>
+            <h2 className="mt-1 text-xl font-semibold text-paper">Cases seen in the portal</h2>
           </div>
-          <p className="text-sm text-paper/55">Leitura somente leitura · {foresightCases.length} casos</p>
+          <p className="text-sm text-paper/55">View-only · {foresightCases.length} cases</p>
         </div>
         <ForesightCaseTabs cases={foresightCases} run={foresightRun} />
       </section>

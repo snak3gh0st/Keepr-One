@@ -29,6 +29,14 @@ export type SyncState = {
   stageIndex?: number
   status: SyncStatus
   errorCode?: string
+  /// Contador monotônico de lotes enviados neste run. Existe porque `status` e
+  /// `stageIndex` ficam parados durante o upload de uma grade grande: sem ele a
+  /// página não distingue "travou" de "ainda subindo", e um sync legítimo e
+  /// demorado vira falha inventada.
+  uploads?: number
+  /// Quando o último run terminou de verdade. Um `COMPLETED` sem data é grudento
+  /// e mente: a página passaria a vida dizendo "concluído".
+  completedAt?: string
 }
 
 /// The plan round-trips through chrome.storage.local, which survives extension

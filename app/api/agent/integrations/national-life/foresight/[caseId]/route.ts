@@ -10,7 +10,7 @@ export async function POST(
   context: { params: Promise<{ caseId: string }> },
 ) {
   if (!isNationalLifeConfigured()) {
-    return NextResponse.json({ ok: false, message: 'Integração indisponível.' }, { status: 503 })
+    return NextResponse.json({ ok: false, message: 'This feature is not available right now.' }, { status: 503 })
   }
 
   try {
@@ -19,7 +19,7 @@ export async function POST(
     const body = await request.json().catch(() => null) as { action?: unknown } | null
     const action = body?.action
     if ((action !== 'DETAIL' && action !== 'PDF') || !caseId || caseId.length > 128) {
-      return NextResponse.json({ ok: false, message: 'Ação inválida.' }, { status: 400 })
+      return NextResponse.json({ ok: false, message: 'That request could not be understood. Reload the page and try again.' }, { status: 400 })
     }
 
     const deploymentScope = getNationalLifeEnv().sessionScopeId
@@ -32,7 +32,7 @@ export async function POST(
       },
       select: { id: true, externalKey: true },
     })
-    if (!snapshot) return NextResponse.json({ ok: false, message: 'Caso não encontrado.' }, { status: 404 })
+    if (!snapshot) return NextResponse.json({ ok: false, message: 'We could not find that case. Reload the page and try again.' }, { status: 404 })
 
     const result = action === 'DETAIL'
       ? await enqueueForesightRead({
@@ -50,6 +50,6 @@ export async function POST(
 
     return NextResponse.json({ ok: true, ...result })
   } catch {
-    return NextResponse.json({ ok: false, message: 'Não foi possível agendar essa leitura.' }, { status: 404 })
+    return NextResponse.json({ ok: false, message: 'We could not start that report right now. Try again in a minute.' }, { status: 404 })
   }
 }

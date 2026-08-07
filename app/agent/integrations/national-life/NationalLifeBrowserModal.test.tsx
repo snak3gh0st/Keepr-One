@@ -90,11 +90,11 @@ describe('NationalLifeBrowserModal', () => {
       />,
     )
 
-    expect(screen.getByRole('dialog', { name: 'Entrar na National Life' })).toBeInTheDocument()
-    expect(screen.getByText('Sessão segura e isolada')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Sign in to National Life' })).toBeInTheDocument()
+    expect(screen.getByText('Secure, isolated session')).toBeInTheDocument()
     expect(screen.getByText('10:00')).toBeInTheDocument()
 
-    const frame = await screen.findByTitle('Portal oficial da National Life')
+    const frame = await screen.findByTitle('Official National Life portal')
     expect(frame).toHaveAttribute(
       'src',
       'https://viewer.keepr.one/bootstrap?ticket=opaque-ticket',
@@ -185,7 +185,7 @@ describe('NationalLifeBrowserModal', () => {
       />,
     )
 
-    expect(await screen.findByText('Confirme a verificação no portal')).toBeInTheDocument()
+    expect(await screen.findByText('Confirm the verification on the portal')).toBeInTheDocument()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
@@ -199,9 +199,9 @@ describe('NationalLifeBrowserModal', () => {
       />,
     )
 
-    await userEvent.click(screen.getByRole('button', { name: 'Cancelar conexão' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    await waitFor(() => expect(onClosed).toHaveBeenCalledWith('Conexão cancelada. Você pode tentar novamente.'))
+    await waitFor(() => expect(onClosed).toHaveBeenCalledWith('Connection canceled. You can try again whenever you like.'))
     expect(mocks.cancel).toHaveBeenCalledWith('attempt-1')
   })
 
@@ -241,7 +241,7 @@ describe('NationalLifeBrowserModal', () => {
 
     await waitFor(() =>
       expect(onClosed).toHaveBeenCalledWith(
-        'A sessão segura expirou. Conecte novamente para continuar.',
+        'Your secure session timed out. Connect again to continue.',
       ),
     )
   })

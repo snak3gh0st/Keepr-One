@@ -63,11 +63,11 @@ function toStatus(payload: AttemptStatusPayload): ConnectionAttemptStatus {
 function safeTerminalMessage(state: NationalLifeConnectionAttemptState) {
   switch (state) {
     case 'CANCELLED':
-      return 'Conexão cancelada. Você pode tentar novamente.'
+      return 'Connection canceled. You can try again whenever you are ready.'
     case 'EXPIRED':
-      return 'A sessão segura expirou. Conecte novamente para continuar.'
+      return 'Your secure session timed out. Connect again to continue.'
     default:
-      return 'Não foi possível concluir a conexão. Feche esta janela e tente novamente.'
+      return 'We could not finish connecting. Close this window and try again.'
   }
 }
 
@@ -183,11 +183,10 @@ export function useNationalLifeConnectionAttempt(
         }
         stopped = true
         setViewerUrl(null)
-        setError(
-          pollError instanceof Error && pollError.message !== 'STATUS_UNAVAILABLE'
-            ? pollError.message
-            : 'A sessão segura foi interrompida. Conecte novamente para continuar.',
-        )
+        // Um `Failed to fetch` ou um erro de parse chegava inteiro à tela. O
+        // texto cru de uma exceção nunca é uma instrução para o agente.
+        void pollError
+        setError('Your secure session was interrupted. Connect again to continue.')
         keepaliveCancel()
       }
     }

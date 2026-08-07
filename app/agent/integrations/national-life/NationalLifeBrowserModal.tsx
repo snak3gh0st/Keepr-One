@@ -20,12 +20,12 @@ function formatCountdown(milliseconds: number) {
 
 function stateLabel(state: string | undefined) {
   if (state === 'AWAITING_MFA') {
-    return 'Confirme a verificação no portal'
+    return 'Confirm the verification on the portal'
   }
   if (state === 'AWAITING_LOGIN') {
-    return 'Entre no portal oficial'
+    return 'Sign in on the official portal'
   }
-  return 'Preparando o portal oficial'
+  return 'Opening the official portal'
 }
 
 const VIEWER_ASPECT_RATIO = 16 / 10
@@ -87,7 +87,7 @@ export function NationalLifeBrowserModal({
       if (next === 0 && !completed.current) {
         completed.current = true
         void close().finally(() => {
-          onClosed('A sessão segura expirou. Conecte novamente para continuar.')
+          onClosed('Your secure session expired. Connect again to continue.')
         })
       }
     }, 1_000)
@@ -115,7 +115,7 @@ export function NationalLifeBrowserModal({
     }
     completed.current = true
     await close()
-    onClosed('Conexão cancelada. Você pode tentar novamente.')
+    onClosed('Connection canceled. You can try again whenever you like.')
   }
 
   return (
@@ -131,7 +131,7 @@ export function NationalLifeBrowserModal({
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-2 rounded-full bg-mint-pale px-3 py-1 text-xs font-semibold text-teal-deep">
                 <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                Sessão segura e isolada
+                Secure, isolated session
               </span>
               <span className="font-mono text-xs tabular-nums text-ink-muted">
                 {formatCountdown(remaining)}
@@ -141,26 +141,26 @@ export function NationalLifeBrowserModal({
               id="national-life-modal-title"
               className="mt-3 text-xl font-semibold tracking-[-0.025em] text-ink"
             >
-              Entrar na National Life
+              Sign in to National Life
             </h2>
             <p className="mt-1 text-sm text-ink-muted">
-              Esta é a página real da National Life / Auth0, aberta em uma sessão protegida pelo Keepr One.
+              This is the real National Life / Auth0 sign-in page, opened inside a session protected by Keepr One.
             </p>
           </div>
           <Button type="button" variant="secondary" onClick={handleCancel}>
-            Cancelar conexão
+            Cancel
           </Button>
         </header>
 
         <div className="flex items-center justify-between gap-4 border-b border-border-steel bg-panel px-5 py-3 text-xs lg:px-6">
           <div className="min-w-0">
             <p className="font-semibold text-ink">{stateLabel(status?.state)}</p>
-            <p className="mt-0.5 truncate font-mono text-ink-muted" aria-label="Origem verificada">
+            <p className="mt-0.5 truncate font-mono text-ink-muted" aria-label="Verified origin">
               {origin}
             </p>
           </div>
           <span className="hidden shrink-0 rounded-full border border-border-steel bg-paper px-3 py-1.5 font-semibold text-success sm:inline-flex">
-            Origem verificada pelo worker
+            Origin verified by Keepr One
           </span>
         </div>
 
@@ -176,7 +176,7 @@ export function NationalLifeBrowserModal({
                 style={stageSize ? stageSize : { visibility: 'hidden' }}
               >
                 <iframe
-                  title="Portal oficial da National Life"
+                  title="Official National Life portal"
                   src={viewerUrl}
                   className="h-full w-full border-0"
                   sandbox="allow-forms allow-scripts allow-same-origin"
