@@ -2,6 +2,7 @@ import { betterAuth } from 'better-auth'
 import { prismaAdapter } from 'better-auth/adapters/prisma'
 import { prisma } from '@/lib/prisma'
 import { sendResetPasswordEmail } from '@/lib/email/send'
+import { createRedisSecondaryStorage } from '@/lib/redis/secondary-storage'
 
 const configuredBaseURL = process.env.BETTER_AUTH_URL
 const localBaseURL = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : undefined
@@ -26,6 +27,20 @@ export const auth = betterAuth({
   baseURL,
   trustedOrigins,
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
+  // Sem REDIS_URL isso vira `undefined` e o better-auth cai de volta pro
+  // Postgres sozinho — sessão e rate limit continuam funcionando, só sem o
+  // offload.
+  secondaryStorage: createRedisSecondaryStorage(),
+  rateLimit: {
+    enabled: true,
+    storage: 'secondary-storage',
+    window: 60,
+    max: 20,
+    customRules: {
+      '/sign-in/email': { window: 60, max: 5 },
+      '/forget-password': { window: 300, max: 3 },
+    },
+  },
   emailAndPassword: {
     enabled: true,
     sendResetPassword: async ({ user, url }) => {

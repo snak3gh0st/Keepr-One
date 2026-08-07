@@ -13,9 +13,16 @@ import {
 import { refuseLocalConnectorCapability } from '@/lib/national-life/local-connector/remote-config'
 import { startLocalConnectorRun } from '@/lib/national-life/local-connector/run-service'
 import { prisma } from '@/lib/prisma'
+import { consumeRateLimit } from '@/lib/redis/rate-limit'
 
 const MAX_RUN_BODY_BYTES = 1_024
 const NO_STORE = { 'Cache-Control': 'no-store' }
+/// Teto de disparos de run por agente, não por IP: o dono da fadiga de sessão
+/// é o portal da carrier, e é o agente quem repete o clique num bug de UI ou
+/// num loop de retry. 10 em 10 minutos cobre um uso ativo normal com folga e
+/// ainda para um loop antes de ele custar uma sessão inteira do carrier.
+const RUN_START_MAX = 10
+const RUN_START_WINDOW_SECONDS = 600
 
 export async function POST(request: Request) {
   if (!isNationalLifeLocalConnectorEnabled()) return localConnectorUnavailableResponse()
@@ -34,6 +41,18 @@ export async function POST(request: Request) {
       headers: request.headers,
       body,
     })
+    const rateLimit = await consumeRateLimit({
+      key: `national-life-run-start:${device.agentId}`,
+      max: RUN_START_MAX,
+      windowSeconds: RUN_START_WINDOW_SECONDS,
+    })
+    if (!rateLimit.allowed) {
+      return Response.json(
+        { error: 'RUN_START_RATE_LIMITED' },
+        { status: 429, headers: { ...NO_STORE, 'Retry-After': String(rateLimit.retryAfterSeconds) } },
+      )
+    }
+
     const run = await startLocalConnectorRun(prisma, device)
     return Response.json(run, { status: 201, headers: NO_STORE })
   } catch (error) {
