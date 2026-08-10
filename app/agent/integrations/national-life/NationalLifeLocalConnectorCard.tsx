@@ -296,6 +296,10 @@ export function NationalLifeLocalConnectorCard({
     await watchSyncProgress()
   }
 
+  function notifySyncStarted() {
+    window.dispatchEvent(new Event(NATIONAL_LIFE_SYNC_STARTED_EVENT))
+  }
+
   async function runInstalledFlow() {
     try {
       await createPairingAndStart()
@@ -383,6 +387,7 @@ export function NationalLifeLocalConnectorCard({
         type: 'START_NATIONAL_LIFE_SYNC',
       })
       if (result.ok) {
+        notifySyncStarted()
         await watchSyncProgress()
       } else if (result.error === 'CONNECTOR_NOT_PAIRED') {
         await createPairingAndStart()
@@ -430,82 +435,105 @@ export function NationalLifeLocalConnectorCard({
   return (
     <section
       aria-labelledby="local-connector-title"
-      className="overflow-hidden rounded-2xl border border-teal/35 bg-paper shadow-[var(--shadow-card)]"
+      className="overflow-hidden rounded-[24px] border border-teal/35 bg-paper shadow-[var(--shadow-card)]"
     >
-      <div className="flex flex-col gap-5 border-b border-border-steel p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6">
-        <div className="max-w-2xl">
+      <div className="relative border-b border-border-steel bg-[radial-gradient(circle_at_100%_0%,rgba(39,171,143,0.13),transparent_38%)] p-5 sm:p-7">
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-3">
             <span
               aria-hidden="true"
-              className="grid h-11 w-11 place-items-center rounded-xl bg-teal-pale text-lg font-semibold text-teal-deep"
+              className="grid h-12 w-12 place-items-center rounded-2xl bg-rail-strong text-sm font-bold tracking-[0.12em] text-paper shadow-[0_8px_20px_rgba(21,45,43,0.14)]"
             >
               NL
             </span>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-teal-deep">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-teal-deep">
                 KeeproneConnect · on this computer
               </p>
-              <h2 id="local-connector-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
-                Connect and sync
+              <h2 id="local-connector-title" className="mt-1 text-2xl font-semibold tracking-[-0.04em] text-ink">
+                Connect this computer
               </h2>
             </div>
           </div>
-          <p className="mt-5 text-sm leading-6 text-ink-muted">
-            You sign in on the official National Life portal. Your password never passes through
-            Keepr One.
-            {installMode === 'pilot'
-              ? ' In this pilot, load the unpacked extension using the ID configured for this environment.'
-              : null}
-          </p>
+          <span className="inline-flex w-fit items-center gap-2 rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal-deep">
+            <span className="h-1.5 w-1.5 rounded-full bg-teal" aria-hidden="true" />
+            {installMode === 'pilot' ? 'Pilot' : 'One click'}
+          </span>
         </div>
-        <span className="inline-flex w-fit rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal-deep">
-          {installMode === 'pilot' ? 'Pilot' : 'One click'}
-        </span>
+        <p className="mt-6 max-w-2xl text-sm leading-6 text-ink-muted">
+          Sign in on the official National Life portal. Your password never passes through Keepr One.
+          {installMode === 'pilot'
+            ? ' In this pilot, load the unpacked extension using the ID configured for this environment.'
+            : null}
+        </p>
+        {pairedDeviceId && state === 'idle' && (
+          <div className="mt-5 inline-flex items-center gap-2 rounded-xl border border-teal/25 bg-paper/80 px-3 py-2 text-sm font-semibold text-teal-deep">
+            <span className="grid h-5 w-5 place-items-center rounded-full bg-teal text-[11px] text-paper" aria-hidden="true">
+              ✓
+            </span>
+            This computer is ready
+          </div>
+        )}
       </div>
 
-      <div className="flex flex-col gap-3 bg-panel/55 p-5 sm:flex-row sm:items-center sm:p-6">
-        <Button type="button" variant="primary" disabled={busy} onClick={handlePrimaryAction}>
-          {state === 'installing'
-            ? installMode === 'pilot'
-              ? "I've installed it — connect"
-              : 'Opening the install page…'
-            : failure
-              ? failure.actionLabel
-              : state === 'login-required'
-                ? 'Continue'
-                : state === 'slow'
-                  ? 'Check again'
+      <div className="grid gap-5 bg-panel/45 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div className="min-w-0">
+          <div className="flex items-start gap-3">
+            <span
+              aria-hidden="true"
+              className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
+                state === 'error' ? 'bg-danger' : state === 'success' ? 'bg-success' : busy ? 'animate-pulse bg-teal' : 'bg-ink-muted/45'
+              }`}
+            />
+            <p
+              role="status"
+              aria-live="polite"
+              className={`text-sm leading-6 ${state === 'error' ? 'text-danger' : state === 'success' ? 'text-success' : 'text-ink-muted'}`}
+            >
+              {!browserIsCompatible
+                ? 'Connecting on this computer needs Google Chrome or Microsoft Edge.'
+                : state === 'error'
+                  ? connectorFailure(errorCode).message
+                  : state === 'idle' && pairedDeviceId
+                    ? 'This computer is connected and ready to sync your National Life data.'
+                    : stateCopy[state]}
+            </p>
+          </div>
+          {remoteAvailable && !browserIsCompatible && (
+            <Link href="#national-life-remote" className="mt-3 ml-5 inline-flex text-sm font-semibold text-teal underline-offset-4 hover:underline">
+              Use the automatic option instead
+            </Link>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2 lg:justify-end">
+          <Button type="button" variant="primary" disabled={busy} onClick={handlePrimaryAction}>
+            {state === 'installing'
+              ? installMode === 'pilot'
+                ? "I've installed it — connect"
+                : 'Opening the install page…'
+              : failure
+                ? failure.actionLabel
+                : state === 'login-required'
+                  ? 'Continue'
+                  : state === 'slow'
+                    ? 'Check again'
                     : busy
-                      ? 'Connecting…'
+                      ? state === 'syncing'
+                        ? 'Syncing…'
+                        : 'Connecting…'
                       : state === 'success'
                         ? 'Sync again'
                         : pairedDeviceId
                           ? 'Sync National Life'
                           : 'Connect National Life'}
-        </Button>
-        {pairedDeviceId && !busy && (
-          <Button type="button" variant="secondary" onClick={handleDisconnect}>
-            Disconnect this computer
           </Button>
-        )}
-        <p
-          role="status"
-          aria-live="polite"
-          className={`text-sm ${state === 'error' ? 'text-danger' : state === 'success' ? 'text-success' : 'text-ink-muted'}`}
-        >
-          {!browserIsCompatible
-            ? 'Connecting on this computer needs Google Chrome or Microsoft Edge.'
-            : state === 'error'
-              ? connectorFailure(errorCode).message
-              : state === 'idle' && pairedDeviceId
-                ? 'This computer is connected and ready to sync your National Life data.'
-                : stateCopy[state]}
-        </p>
-        {remoteAvailable && !compatible && (
-          <Link href="#national-life-remote" className="text-sm font-semibold text-teal underline-offset-4 hover:underline">
-            Use the automatic option instead
-          </Link>
-        )}
+          {pairedDeviceId && !busy && (
+            <Button type="button" variant="secondary" onClick={handleDisconnect}>
+              Disconnect
+            </Button>
+          )}
+        </div>
       </div>
       {failure?.action === 'update' && storeUrl && (
         <div className="border-t border-border-steel px-5 py-4 sm:px-6">

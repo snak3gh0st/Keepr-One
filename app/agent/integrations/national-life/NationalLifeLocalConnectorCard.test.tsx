@@ -10,6 +10,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh }),
 }))
 
+import { NATIONAL_LIFE_SYNC_STARTED_EVENT } from './NationalLifeSyncProgress'
 import { NationalLifeLocalConnectorCard } from './NationalLifeLocalConnectorCard'
 
 const extensionId = 'abcdefghijklmnopabcdefghijklmnop'
@@ -156,6 +157,8 @@ describe('NationalLifeLocalConnectorCard', () => {
   it('shows a sync action when an existing paired computer is detected', async () => {
     let started = false
     const messages: string[] = []
+    const syncStarted = vi.fn()
+    window.addEventListener(NATIONAL_LIFE_SYNC_STARTED_EVENT, syncStarted)
     installChromeMock((message, callback) => {
       messages.push(message.type)
       if (message.type === 'GET_CONNECTOR_STATUS') {
@@ -191,6 +194,7 @@ describe('NationalLifeLocalConnectorCard', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sync National Life' }))
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('up to date'))
     expect(messages).toContain('START_NATIONAL_LIFE_SYNC')
+    expect(syncStarted).toHaveBeenCalledOnce()
   })
 
   it('surfaces AUTH_REQUIRED while the agent logs into National Life', async () => {
