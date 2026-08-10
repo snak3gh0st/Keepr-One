@@ -1,4 +1,5 @@
 export const NLG_ORIGIN = 'https://www.nationallife.com'
+export const NLG_AUTH0_ORIGIN = 'https://nlg-prod.auth0.com'
 export const LOGIN_PATH = '/agent/auth/login'
 
 /// `gridKey` is an opaque label. Which grids exist is the server's knowledge now, so

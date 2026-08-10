@@ -16,6 +16,7 @@ vi.mock('../lib/key-store', () => ({
 import { signedJsonRequest } from '../lib/signed-client'
 
 const NLG = 'https://www.nationallife.com'
+const NLG_AUTH0 = 'https://nlg-prod.auth0.com'
 const NEW_BUSINESS_PATH = '/agent/book-of-business/new-business/all-new-business-cases'
 const INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients'
 const COMMISSIONS_PATH = '/agent/compensation/commissions/paid-commissions'
@@ -486,6 +487,16 @@ describe('background plan executor', () => {
       url: `${NLG}${NEW_BUSINESS_PATH}`,
     })
     expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
+  })
+
+  it('keeps the Auth0 login tab instead of opening another login', async () => {
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'AUTH_REQUIRED' }
+    tabs.query.mockResolvedValue([{ id: 12, active: true, url: `${NLG_AUTH0}/login?state=pending` }])
+    await bootBackground()
+
+    expect(tabs.update).toHaveBeenCalledWith(12, { active: true })
+    expect(tabs.create).not.toHaveBeenCalled()
+    expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED', stageIndex: 0 })
   })
 
   it('starts a fresh run when the stored state predates the plan shape', async () => {

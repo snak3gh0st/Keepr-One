@@ -5,6 +5,7 @@ import {
   readExtensionVersion,
 } from '../lib/contract'
 import {
+  NLG_AUTH0_ORIGIN,
   NLG_ORIGIN,
   allowedKeeprOrigins,
   isAuthPath,
@@ -276,8 +277,33 @@ async function createRun() {
 }
 
 async function findNationalLifeTab(): Promise<chrome.tabs.Tab | undefined> {
-  const tabs = await chrome.tabs.query({ url: `${NLG_ORIGIN}/*` })
-  return tabs.find((tab) => typeof tab.id === 'number' && tab.active) ?? tabs.find((tab) => typeof tab.id === 'number')
+  const tabs = await chrome.tabs.query({
+    url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
+  })
+  const carrierTabs = tabs.filter((tab) => {
+    if (typeof tab.url !== 'string') return false
+    try {
+      return new URL(tab.url).origin === NLG_ORIGIN
+    } catch {
+      return false
+    }
+  })
+  return carrierTabs.find((tab) => typeof tab.id === 'number' && tab.active) ?? carrierTabs.find((tab) => typeof tab.id === 'number')
+}
+
+async function findNationalLifeAuthTab(): Promise<chrome.tabs.Tab | undefined> {
+  const tabs = await chrome.tabs.query({
+    url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
+  })
+  const authTabs = tabs.filter((tab) => {
+    if (typeof tab.url !== 'string') return false
+    try {
+      return new URL(tab.url).origin === NLG_AUTH0_ORIGIN
+    } catch {
+      return false
+    }
+  })
+  return authTabs.find((tab) => typeof tab.id === 'number' && tab.active) ?? authTabs.find((tab) => typeof tab.id === 'number')
 }
 
 async function navigatePendingGrid() {
@@ -286,6 +312,25 @@ async function navigatePendingGrid() {
   if (!state.runId || !stage) return
   const target = `${NLG_ORIGIN}${stage.params.navigatePath}`
   const existing = await findNationalLifeTab()
+  if (existing?.id !== undefined && existing.url) {
+    try {
+      if (isAuthPath(new URL(existing.url).pathname)) {
+        await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
+        await chrome.tabs.update(existing.id, { active: true })
+        return
+      }
+    } catch {
+      // Fall through to the normal target navigation for an unparseable tab URL.
+    }
+  }
+  if (existing?.id === undefined) {
+    const authTab = await findNationalLifeAuthTab()
+    if (authTab?.id !== undefined) {
+      await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
+      await chrome.tabs.update(authTab.id, { active: true })
+      return
+    }
+  }
   await writeSyncState({ ...state, status: 'NAVIGATING', errorCode: undefined })
   if (existing?.id !== undefined) {
     await chrome.tabs.update(existing.id, { active: true, url: target })
