@@ -148,13 +148,11 @@ export default async function NationalLifeDataPage() {
         select: inforceSelect,
         orderBy: [{ policyStatus: 'asc' }, { policyNumber: 'asc' }],
       }),
-      remoteScope
-        ? prisma.nationalLifeReportRow.findMany({
-            where: { agentId: agent.id, deploymentScope: remoteScope },
-            select: reportSelect,
-            orderBy: [{ gridKey: 'asc' }, { primaryDate: 'desc' }],
-          })
-        : Promise.resolve([]),
+      prisma.nationalLifeReportRow.findMany({
+        where: { agentId: agent.id, deploymentScope },
+        select: reportSelect,
+        orderBy: [{ gridKey: 'asc' }, { primaryDate: 'desc' }],
+      }),
       remoteScope && deploymentScope === remoteScope
         ? prisma.agentIntegrationSession.findFirst({
             where: {
@@ -242,7 +240,7 @@ export default async function NationalLifeDataPage() {
 
       {!loadError && (
         <ModuleSummary
-          label="What came back from the portal"
+          label="Saved in Keepr One"
           items={[
             {
               label: 'Cases',

@@ -8,6 +8,7 @@ import {
   DISCONNECT_FAILED,
   connectorFailure,
 } from '@/lib/national-life/local-connector/connector-failure'
+import { NATIONAL_LIFE_SYNC_STARTED_EVENT } from './NationalLifeSyncProgress'
 
 type ConnectorResponse = {
   ok: boolean
@@ -156,6 +157,10 @@ export function NationalLifeLocalConnectorCard({
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [compatible, setCompatible] = useState(false)
   const [pairedDeviceId, setPairedDeviceId] = useState<string | null>(null)
+  // The capability probe is asynchronous after hydration, but a user can click
+  // before that microtask settles. Read the browser surface as a fallback so the
+  // first click is not mistaken for an unsupported browser.
+  const browserIsCompatible = compatible || browserSupportsConnector()
   const recoverable =
     state === 'idle' ||
     state === 'success' ||
@@ -180,7 +185,17 @@ export function NationalLifeLocalConnectorCard({
   }
 
   useEffect(() => {
-    setCompatible(browserSupportsConnector())
+    // Browser capability is only known after hydration. Defer the state write to
+    // a microtask so the server-rendered card and the first client render stay
+    // identical, while the lint rule does not mistake this external probe for a
+    // synchronous render loop.
+    let alive = true
+    void Promise.resolve().then(() => {
+      if (alive) setCompatible(browserSupportsConnector())
+    })
+    return () => {
+      alive = false
+    }
   }, [])
 
   /// O laço de acompanhamento não termina sozinho: passado o limite ele só fica
@@ -277,6 +292,7 @@ export function NationalLifeLocalConnectorCard({
       }
       throw new Error(result.error ?? 'SYNC_FAILED')
     }
+    window.dispatchEvent(new Event(NATIONAL_LIFE_SYNC_STARTED_EVENT))
     await watchSyncProgress()
   }
 
@@ -304,7 +320,7 @@ export function NationalLifeLocalConnectorCard({
   }, [])
 
   useEffect(() => {
-    if (!compatible || !extensionId) return
+    if (!browserIsCompatible || !extensionId) return
     void sendConnectorMessage(extensionId, { type: 'GET_CONNECTOR_STATUS' })
       .then((status) => {
         if (status.device?.deviceId) setPairedDeviceId(status.device.deviceId)
@@ -317,7 +333,7 @@ export function NationalLifeLocalConnectorCard({
         // sincronização, datada, é o painel de progresso.
       })
       .catch(() => {})
-  }, [compatible, extensionId])
+  }, [browserIsCompatible, extensionId])
 
   function promptInstall() {
     beginAttempt('installing')
@@ -327,7 +343,7 @@ export function NationalLifeLocalConnectorCard({
   }
 
   async function handlePrimaryAction() {
-    if (!compatible) {
+    if (!browserIsCompatible) {
       promptInstall()
       return
     }
@@ -459,11 +475,13 @@ export function NationalLifeLocalConnectorCard({
                 ? 'Continue'
                 : state === 'slow'
                   ? 'Check again'
-                  : busy
-                    ? 'Connecting…'
-                    : state === 'success'
-                      ? 'Sync again'
-                      : 'Connect National Life'}
+                    : busy
+                      ? 'Connecting…'
+                      : state === 'success'
+                        ? 'Sync again'
+                        : pairedDeviceId
+                          ? 'Sync National Life'
+                          : 'Connect National Life'}
         </Button>
         {pairedDeviceId && !busy && (
           <Button type="button" variant="secondary" onClick={handleDisconnect}>
@@ -475,11 +493,13 @@ export function NationalLifeLocalConnectorCard({
           aria-live="polite"
           className={`text-sm ${state === 'error' ? 'text-danger' : state === 'success' ? 'text-success' : 'text-ink-muted'}`}
         >
-          {!compatible
+          {!browserIsCompatible
             ? 'Connecting on this computer needs Google Chrome or Microsoft Edge.'
             : state === 'error'
               ? connectorFailure(errorCode).message
-              : stateCopy[state]}
+              : state === 'idle' && pairedDeviceId
+                ? 'This computer is connected and ready to sync your National Life data.'
+                : stateCopy[state]}
         </p>
         {remoteAvailable && !compatible && (
           <Link href="#national-life-remote" className="text-sm font-semibold text-teal underline-offset-4 hover:underline">

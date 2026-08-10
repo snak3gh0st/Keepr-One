@@ -153,6 +153,46 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(mocks.refresh).toHaveBeenCalled()
   })
 
+  it('shows a sync action when an existing paired computer is detected', async () => {
+    let started = false
+    const messages: string[] = []
+    installChromeMock((message, callback) => {
+      messages.push(message.type)
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: { status: started ? 'COMPLETED' : 'IDLE' },
+        })
+        return
+      }
+      if (message.type === 'START_NATIONAL_LIFE_SYNC') {
+        started = true
+        callback({ ok: true })
+        return
+      }
+      callback({ ok: true })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Sync National Life' })).toBeEnabled(),
+    )
+    expect(screen.getByRole('status')).toHaveTextContent('connected and ready to sync')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync National Life' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('up to date'))
+    expect(messages).toContain('START_NATIONAL_LIFE_SYNC')
+  })
+
   it('surfaces AUTH_REQUIRED while the agent logs into National Life', async () => {
     let syncStatus = 'NAVIGATING'
     installChromeMock((message, callback) => {

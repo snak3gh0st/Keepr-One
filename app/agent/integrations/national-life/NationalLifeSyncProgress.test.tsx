@@ -5,7 +5,10 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
-import { NationalLifeSyncProgress } from './NationalLifeSyncProgress'
+import {
+  NATIONAL_LIFE_SYNC_STARTED_EVENT,
+  NationalLifeSyncProgress,
+} from './NationalLifeSyncProgress'
 
 afterEach(() => {
   cleanup()
@@ -57,7 +60,7 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.getByText('Updating your National Life data')).toBeTruthy()
     expect(screen.getByText('3 of 9 areas updated')).toBeTruthy()
-    expect(screen.getByText('Now: correspondence')).toBeTruthy()
+    expect(screen.getByText('Now reading and saving: correspondence')).toBeTruthy()
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '3')
     expect(screen.getByRole('progressbar')).toHaveAttribute('max', '9')
   })
@@ -105,7 +108,7 @@ describe('NationalLifeSyncProgress', () => {
     )
 
     expect(screen.getByText(/Last synced/)).toBeTruthy()
-    expect(screen.getByText('238 records saved.')).toBeTruthy()
+    expect(screen.getByText('238 records saved to Keepr One.')).toBeTruthy()
   })
 
   it('refuses to call an empty write a success', () => {
@@ -163,5 +166,18 @@ describe('NationalLifeSyncProgress', () => {
     expect(screen.queryByText(/nothing new to send/)).toBeNull()
     expect(screen.queryByText(/could be saved/)).toBeNull()
     expect(screen.getByText('0% done')).toBeTruthy()
+  })
+
+  it('shows a ready state and starts polling when the card starts a new sync', async () => {
+    const fetchMock = answerWith(status({ completed: 1, percent: 11, currentGridLabel: 'new business' }))
+    render(<NationalLifeSyncProgress initialStatus={null} />)
+
+    expect(screen.getByText('Ready to bring National Life into Keepr One')).toBeTruthy()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    window.dispatchEvent(new Event(NATIONAL_LIFE_SYNC_STARTED_EVENT))
+
+    await waitFor(() => expect(screen.getByText('1 of 9 areas updated')).toBeTruthy())
+    expect(screen.getByText('Now reading and saving: new business')).toBeTruthy()
   })
 })

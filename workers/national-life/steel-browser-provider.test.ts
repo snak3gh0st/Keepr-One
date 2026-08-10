@@ -26,6 +26,16 @@ function buildEnv(): NationalLifeEnv {
 }
 
 function createFakeDeps() {
+  type FakeRoute = {
+    abort(reason?: string): Promise<void>
+    continue(): Promise<void>
+  }
+  type FakeRequest = {
+    isNavigationRequest(): boolean
+    resourceType(): string
+    url(): string
+  }
+
   const calls = {
     createInputs: [] as unknown[],
     retrieveIds: [] as string[],
@@ -35,11 +45,11 @@ function createFakeDeps() {
     routePatterns: [] as string[],
   }
   const page = { url: () => 'about:blank' }
-  const routeHandlers: Array<(route: any, request: any) => Promise<void>> = []
+  const routeHandlers: Array<(route: FakeRoute, request: FakeRequest) => Promise<void>> = []
   const context = {
     pages: () => [page],
     newPage: async () => page,
-    route: async (pattern: string, handler: (route: any, request: any) => Promise<void>) => {
+    route: async (pattern: string, handler: (route: FakeRoute, request: FakeRequest) => Promise<void>) => {
       calls.routePatterns.push(pattern)
       routeHandlers.push(handler)
     },
@@ -125,7 +135,12 @@ describe('Steel browser provider', () => {
     const events = { aborted: [] as string[], continued: 0 }
 
     await handler(
-      { abort: async (reason?: string) => events.aborted.push(reason ?? ''), continue: async () => undefined },
+      {
+        abort: async (reason?: string) => {
+          events.aborted.push(reason ?? '')
+        },
+        continue: async () => undefined,
+      },
       { isNavigationRequest: () => true, resourceType: () => 'document', url: () => 'https://agent.nationallife.example.evil.test' },
     )
     expect(events.aborted).toEqual(['blockedbyclient'])
