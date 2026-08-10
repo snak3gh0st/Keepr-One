@@ -365,6 +365,15 @@ async function handleTabReady(tabId: number, urlValue?: string) {
     await writeSyncState({ ...state, status: 'AUTH_REQUIRED' })
     return
   }
+  // The carrier may finish Auth0/MFA by redirecting to the authenticated agent
+  // shell instead of returning directly to the grid we were waiting for. That
+  // shell is proof that the login completed; resume the pending stage here so the
+  // user does not have to click Sync again (and accidentally start another login
+  // navigation).
+  if (state.status === 'AUTH_REQUIRED' && url.pathname.startsWith('/agent/')) {
+    await navigatePendingGrid()
+    return
+  }
   if (url.pathname !== stage.params.navigatePath) {
     // Do not force-navigate away from MFA/interstitial pages. Only resume
     // extraction when the expected grid is already open.

@@ -476,6 +476,18 @@ describe('background plan executor', () => {
     expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED' })
   })
 
+  it('resumes the pending grid when login returns to the authenticated agent shell', async () => {
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'AUTH_REQUIRED' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}/agent/` }])
+    await bootBackground()
+
+    expect(tabs.update).toHaveBeenCalledWith(7, {
+      active: true,
+      url: `${NLG}${NEW_BUSINESS_PATH}`,
+    })
+    expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
+  })
+
   it('starts a fresh run when the stored state predates the plan shape', async () => {
     // This is the whole storage migration: an installed extension holds `nextGrid`, not
     // a plan. Every guard reads currentStage(), so the old shape is simply "no run in
