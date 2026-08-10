@@ -306,7 +306,7 @@ async function createRun() {
   await writeSyncState({ runId: response.runId, plan, stageIndex: 0, status: 'NAVIGATING' })
 }
 
-async function findNationalLifeTab(): Promise<chrome.tabs.Tab | undefined> {
+async function findNationalLifeTab(expectedPath?: string): Promise<chrome.tabs.Tab | undefined> {
   const tabs = await chrome.tabs.query({
     url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
   })
@@ -318,7 +318,18 @@ async function findNationalLifeTab(): Promise<chrome.tabs.Tab | undefined> {
       return false
     }
   })
-  return carrierTabs.find((tab) => typeof tab.id === 'number' && tab.active) ?? carrierTabs.find((tab) => typeof tab.id === 'number')
+  const usableTabs = carrierTabs.filter((tab) => typeof tab.id === 'number')
+  if (expectedPath) {
+    const expected = usableTabs.find((tab) => {
+      try {
+        return new URL(tab.url ?? '').pathname === expectedPath
+      } catch {
+        return false
+      }
+    })
+    if (expected) return expected
+  }
+  return usableTabs.find((tab) => !tab.active) ?? usableTabs.find((tab) => tab.active) ?? usableTabs[0]
 }
 
 async function findNationalLifeAuthTab(): Promise<chrome.tabs.Tab | undefined> {
@@ -341,11 +352,12 @@ async function navigatePendingGrid() {
   const stage = currentStage(state)
   if (!state.runId || !stage) return
   const target = `${NLG_ORIGIN}${stage.params.navigatePath}`
-  const requiresUserAuth = state.status === 'AUTH_REQUIRED'
-  const existing = await findNationalLifeTab()
+  const existing = await findNationalLifeTab(stage.params.navigatePath)
+  let existingIsAuth = false
   if (existing?.id !== undefined && existing.url) {
     try {
       if (isAuthPath(new URL(existing.url).pathname)) {
+        existingIsAuth = true
         await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
         await chrome.tabs.update(existing.id, { active: true })
         return
@@ -368,9 +380,17 @@ async function navigatePendingGrid() {
     // not steal focus from Keepr One or from the agent's other work. The only
     // time we intentionally activate a tab is when the agent must complete
     // National Life login/MFA above.
-    await chrome.tabs.update(existing.id, { url: target })
+    const existingPath = existing.url ? new URL(existing.url).pathname : undefined
+    if (existingPath === stage.params.navigatePath) return
+    if (existing.active) {
+      // The agent may be using the visible carrier tab. Keep it untouched and
+      // create a dedicated background tab for the connector instead.
+      await chrome.tabs.create({ active: false, url: target })
+    } else {
+      await chrome.tabs.update(existing.id, { url: target })
+    }
   } else {
-    await chrome.tabs.create({ active: requiresUserAuth, url: target })
+    await chrome.tabs.create({ active: existingIsAuth || state.status === 'AUTH_REQUIRED', url: target })
   }
 }
 
@@ -458,10 +478,12 @@ async function handleTabReady(tabId: number, urlValue?: string) {
     return
   }
   if (url.pathname !== stage.params.navigatePath) {
-    // Do not force-navigate away from MFA/interstitial pages. Only resume
-    // extraction when the expected grid is already open.
+    // Auth interstitials are handled above. For any other carrier page, resume
+    // the stage in a background tab; otherwise a stale tab (for example
+    // All Clients left open after the previous stage) strands the run in
+    // NAVIGATING forever.
     if (state.status !== 'AUTH_REQUIRED') {
-      await writeSyncState({ ...state, status: 'NAVIGATING' })
+      await navigatePendingGrid()
     }
     return
   }

@@ -450,8 +450,9 @@ describe('background plan executor', () => {
     expect(readSync()).toMatchObject({ stageIndex: 1, status: 'EXTRACTING' })
   })
 
-  it('does not extract when the landed path is not the current stage', async () => {
+  it('returns to the current stage when a stale carrier page is open', async () => {
     storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${INFORCE_PATH}` }])
     await bootBackground()
 
     emit(
@@ -463,7 +464,20 @@ describe('background plan executor', () => {
     await flush()
 
     expect(tabs.sendMessage).not.toHaveBeenCalled()
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
     expect(readSync()).toMatchObject({ stageIndex: 0, status: 'NAVIGATING' })
+  })
+
+  it('opens a background carrier tab when the visible carrier tab is on another page', async () => {
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${INFORCE_PATH}` }])
+    await bootBackground()
+
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
+      url: `${NLG}${NEW_BUSINESS_PATH}`,
+    })
+    expect(tabs.update).not.toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
   })
 
   it('goes to AUTH_REQUIRED instead of extracting on an auth interstitial', async () => {
@@ -482,7 +496,10 @@ describe('background plan executor', () => {
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}/agent/` }])
     await bootBackground()
 
-    expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
+      url: `${NLG}${NEW_BUSINESS_PATH}`,
+    })
     expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
   })
 
