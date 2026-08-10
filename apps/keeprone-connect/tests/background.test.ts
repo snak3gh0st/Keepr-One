@@ -480,6 +480,23 @@ describe('background plan executor', () => {
     expect(tabs.update).not.toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
   })
 
+  it('starts extraction when Check again finds the current grid already open', async () => {
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    tabs.sendMessage.mockClear()
+    storage.sync = { ...readSync(), status: 'NAVIGATING' }
+
+    emit('runtime.onMessage', { type: 'RETRY_SYNC' }, {}, vi.fn())
+    await flush()
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ type: 'BEGIN_GRID', gridKey: 'NEW_BUSINESS' }),
+    )
+    expect(readSync()).toMatchObject({ status: 'EXTRACTING', stageIndex: 0 })
+  })
+
   it('goes to AUTH_REQUIRED instead of extracting on an auth interstitial', async () => {
     storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     await bootBackground()

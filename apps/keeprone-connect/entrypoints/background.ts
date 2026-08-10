@@ -381,7 +381,13 @@ async function navigatePendingGrid() {
     // time we intentionally activate a tab is when the agent must complete
     // National Life login/MFA above.
     const existingPath = existing.url ? new URL(existing.url).pathname : undefined
-    if (existingPath === stage.params.navigatePath) return
+    if (existingPath === stage.params.navigatePath) {
+      // `Check again` can be pressed while the expected grid is already open.
+      // There is no tabs.onUpdated event in that case, so explicitly resume the
+      // bridge or the run would remain in NAVIGATING forever.
+      await handleTabReady(existing.id, existing.url)
+      return
+    }
     if (existing.active) {
       // The agent may be using the visible carrier tab. Keep it untouched and
       // create a dedicated background tab for the connector instead.
@@ -430,7 +436,15 @@ async function startNewSync() {
 }
 
 async function beginExtraction(tabId: number, gridKey: string) {
-  if (activeNavigations.get(tabId)?.gridKey === gridKey) return
+  const active = activeNavigations.get(tabId)
+  if (active?.gridKey === gridKey) {
+    const state = await readSyncState()
+    if (state.status === 'EXTRACTING' || state.status === 'UPLOADING') return
+    // A retry deliberately moved the persisted state back to NAVIGATING. The
+    // old in-memory token belongs to the failed attempt and must not prevent a
+    // fresh BEGIN_GRID from reaching the bridge.
+    activeNavigations.delete(tabId)
+  }
   const message: BeginGridMessage = {
     type: 'BEGIN_GRID',
     gridKey,
