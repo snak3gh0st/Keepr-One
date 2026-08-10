@@ -396,7 +396,7 @@ describe('NationalLifeLocalConnectorCard', () => {
     // Muito além do antigo limite fixo de 180 leituras.
     await vi.advanceTimersByTimeAsync(400_000)
 
-    expect(screen.getByRole('status')).toHaveTextContent('Syncing your National Life data')
+    expect(screen.getByRole('status')).toHaveTextContent('Syncing in the background')
     vi.useRealTimers()
   })
 

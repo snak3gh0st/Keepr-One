@@ -63,15 +63,15 @@ function formatAmount(value: string | undefined) {
 }
 
 function statusTone(status: string | null) {
-  if (!status) return "text-paper/50";
+  if (!status) return "text-ink-muted";
   const normalized = status.toLowerCase();
   if (normalized.startsWith("active") || normalized.startsWith("issued")) {
-    return "text-emerald-300";
+    return "text-success";
   }
   if (normalized.includes("lapse") || normalized.includes("closed") || normalized.includes("not active")) {
-    return "text-amber-300";
+    return "text-gold-ink";
   }
-  return "text-paper/70";
+  return "text-ink-muted";
 }
 
 function TabButton({
@@ -92,12 +92,12 @@ function TabButton({
       aria-pressed={active}
       className={`inline-flex items-center gap-2 border px-4 py-2 text-sm font-semibold transition-colors ${
         active
-          ? "border-white/30 bg-white/[0.08] text-paper"
-          : "border-white/10 text-paper/60 hover:bg-white/[0.04]"
+          ? "border-teal bg-teal-pale text-teal-deep"
+          : "border-border-steel text-ink-muted hover:bg-panel hover:text-ink"
       }`}
     >
       {label}
-      <span className="text-xs text-paper/45">{count}</span>
+      <span className="text-xs text-ink-muted">{count}</span>
     </button>
   );
 }
@@ -105,8 +105,8 @@ function TabButton({
 function Meta({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
-      <p className="text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-paper/40">{label}</p>
-      <p className="mt-0.5 text-sm text-paper/80">{value?.trim() ? value : "—"}</p>
+      <p className="text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-ink-muted">{label}</p>
+      <p className="mt-0.5 text-sm text-ink">{value?.trim() ? value : "—"}</p>
     </div>
   );
 }
@@ -176,7 +176,7 @@ export function NationalLifeDataTabs({
             setPage(1);
           }}
           placeholder="Search by policy, insured, product, or status"
-          className="w-full border border-white/12 bg-transparent px-3 py-2.5 text-sm text-paper placeholder:text-paper/35 focus:border-white/30 focus:outline-none"
+          className="w-full rounded-xl border border-border-steel bg-paper px-3 py-3 text-sm text-ink placeholder:text-ink-muted focus:border-teal focus:outline-none focus:ring-4 focus:ring-teal-pale"
         />
       </label>
 
@@ -194,8 +194,8 @@ export function NationalLifeDataTabs({
             (visible as CaseRow[]).map((row, index) => (
               <EntityCard key={row.id} index={index}>
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="font-semibold text-paper">{row.insuredName ?? "—"}</p>
-                  <p className="font-mono text-xs text-paper/50">{row.policyNo}</p>
+                  <p className="font-semibold text-ink">{row.insuredName ?? "—"}</p>
+                  <p className="font-mono text-xs text-ink-muted">{row.policyNo}</p>
                 </div>
                 <p className={`mt-1 text-sm font-medium ${statusTone(row.carrierStatus)}`}>
                   {row.carrierStatus ?? "—"}
@@ -213,8 +213,8 @@ export function NationalLifeDataTabs({
             (visible as InforceRow[]).map((row, index) => (
               <EntityCard key={row.id} index={index}>
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="font-semibold text-paper">{row.insuredClientName ?? "—"}</p>
-                  <p className="font-mono text-xs text-paper/50">{row.policyNumber}</p>
+                  <p className="font-semibold text-ink">{row.insuredClientName ?? "—"}</p>
+                  <p className="font-mono text-xs text-ink-muted">{row.policyNumber}</p>
                 </div>
                 <p className={`mt-1 text-sm font-medium ${statusTone(row.policyStatus)}`}>
                   {row.policyStatus ?? "—"}
@@ -234,10 +234,10 @@ export function NationalLifeDataTabs({
               return (
                 <EntityCard key={row.id} index={index}>
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="font-semibold text-paper">{row.label ?? "—"}</p>
-                    <p className="text-xs text-paper/50">{row.primaryDate ?? "—"}</p>
+                    <p className="font-semibold text-ink">{row.label ?? "—"}</p>
+                    <p className="text-xs text-ink-muted">{row.primaryDate ?? "—"}</p>
                   </div>
-                  <p className="mt-1 text-xs uppercase tracking-[0.08em] text-paper/40">
+                  <p className="mt-1 text-xs uppercase tracking-[0.08em] text-ink-muted">
                     {row.gridKey.replace(/_/g, " ").toLowerCase()}
                   </p>
                   {entries.length > 0 && (

@@ -226,7 +226,7 @@ export default async function NationalLifeDataPage() {
       >
         <Link
           href="/agent/integrations/national-life"
-          className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
+          className="inline-flex items-center rounded-full border border-border-steel bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-colors hover:border-teal hover:bg-panel"
         >
           Manage connection
         </Link>
@@ -287,10 +287,10 @@ export default async function NationalLifeDataPage() {
       <section className="mt-8 module-main-surface">
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Foresight</p>
-            <h2 className="mt-1 text-xl font-semibold text-paper">Cases seen in the portal</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Foresight</p>
+            <h2 className="mt-1 text-xl font-semibold text-ink">Cases seen in the portal</h2>
           </div>
-          <p className="text-sm text-paper/55">View-only · {foresightCases.length} cases</p>
+          <p className="text-sm text-ink-muted">View-only · {foresightCases.length} cases</p>
         </div>
         <ForesightCaseTabs cases={foresightCases} run={foresightRun} />
       </section>

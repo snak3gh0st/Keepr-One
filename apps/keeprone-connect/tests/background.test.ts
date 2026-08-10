@@ -482,11 +482,23 @@ describe('background plan executor', () => {
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}/agent/` }])
     await bootBackground()
 
-    expect(tabs.update).toHaveBeenCalledWith(7, {
-      active: true,
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
+    expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
+  })
+
+  it('recreates a closed carrier tab without stealing focus', async () => {
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'EXTRACTING' }
+    tabs.query.mockResolvedValueOnce([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+
+    emit('tabs.onRemoved', 7)
+    await flush()
+
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
       url: `${NLG}${NEW_BUSINESS_PATH}`,
     })
-    expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
+    expect(readSync()).toMatchObject({ runId: 'run-1', stageIndex: 0, status: 'NAVIGATING' })
   })
 
   it('keeps the Auth0 login tab instead of opening another login', async () => {
@@ -616,7 +628,7 @@ describe('background plan executor', () => {
     )
     await flush()
 
-    expect(tabs.create).toHaveBeenCalledWith({ active: true, url: `${NLG}${COMMISSIONS_PATH}` })
+    expect(tabs.create).toHaveBeenCalledWith({ active: false, url: `${NLG}${COMMISSIONS_PATH}` })
 
     emit('tabs.onUpdated', 4, { status: 'complete' }, { url: `${NLG}${COMMISSIONS_PATH}` })
     await flush()

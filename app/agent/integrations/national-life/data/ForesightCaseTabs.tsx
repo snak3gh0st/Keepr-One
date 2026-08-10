@@ -49,27 +49,27 @@ export function ForesightCaseTabs({
   }
 
   if (cases.length === 0) {
-    return <p className="border border-white/10 px-4 py-6 text-sm text-paper/60">No Foresight cases yet. Reading is view-only and never changes anything at the carrier.</p>
+    return <p className="border border-border-steel px-4 py-6 text-sm text-ink-muted">No Foresight cases yet. Reading is view-only and never changes anything at the carrier.</p>
   }
 
   return (
     <div>
-      {run?.shouldPoll && <p className="mb-4 text-sm text-paper/60">Foresight is updating your cases.</p>}
+      {run?.shouldPoll && <p className="mb-4 text-sm text-ink-muted">Foresight is updating your cases.</p>}
       {message && <p role="status" className="mb-4 text-sm font-semibold text-teal">{message}</p>}
       <div className="space-y-3">
         {cases.map((item) => (
-          <article key={item.id} className="border border-white/10 bg-white/[0.02] p-4">
+          <article key={item.id} className="rounded-xl border border-border-steel bg-panel/55 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="font-semibold text-paper">{item.displayName}</h3>
-                <p className="mt-1 text-sm text-paper/60">{item.product ?? item.caseKind ?? 'Product not listed'}</p>
+                <h3 className="font-semibold text-ink">{item.displayName}</h3>
+                <p className="mt-1 text-sm text-ink-muted">{item.product ?? item.caseKind ?? 'Product not listed'}</p>
               </div>
-              <span className="text-xs uppercase tracking-[0.08em] text-paper/45">{item.status ?? item.state ?? 'Seen'}</span>
+              <span className="text-xs uppercase tracking-[0.08em] text-ink-muted">{item.status ?? item.state ?? 'Seen'}</span>
             </div>
-            <p className="mt-3 text-xs text-paper/50">{item.serviceCount} service records · {new Date(item.observedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+            <p className="mt-3 text-xs text-ink-muted">{item.serviceCount} service records · {new Date(item.observedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               <button type="button" disabled={busy !== null} onClick={() => void action(item.id, 'DETAIL')} className="border border-teal px-3 py-2 text-sm font-semibold text-teal hover:bg-teal/10 disabled:opacity-50">{busy === `${item.id}:DETAIL` ? 'Starting…' : 'Read data'}</button>
-              <button type="button" disabled={busy !== null} onClick={() => void action(item.id, 'PDF')} className="border border-white/15 px-3 py-2 text-sm font-semibold text-paper hover:bg-white/[0.06] disabled:opacity-50">{busy === `${item.id}:PDF` ? 'Starting…' : 'Create PDF'}</button>
+              <button type="button" disabled={busy !== null} onClick={() => void action(item.id, 'PDF')} className="rounded-lg border border-border-steel px-3 py-2 text-sm font-semibold text-ink hover:bg-paper disabled:opacity-50">{busy === `${item.id}:PDF` ? 'Starting…' : 'Create PDF'}</button>
             </div>
           </article>
         ))}

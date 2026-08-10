@@ -50,6 +50,36 @@ const tabQueues = new Map<number, Promise<void>>()
 const pendingBridgeMessages = new Map<number, number>()
 let syncStartLock: Promise<unknown> | null = null
 
+const BRIDGE_RETRY_DELAYS_MS = [150, 300, 600, 1_000, 1_500]
+
+function errorCode(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+async function sendBeginGridWithRetry(tabId: number, message: BeginGridMessage): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      await chrome.tabs.sendMessage(tabId, message)
+      return
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      const active = activeNavigations.get(tabId)
+      if (!active || active.token !== message.token) return
+    }
+  }
+  throw lastError ?? new Error('BRIDGE_UNAVAILABLE')
+}
+
+function respond<T>(sendResponse: (response?: T) => void, promise: Promise<T>): void {
+  void promise.then(sendResponse, (error) => {
+    sendResponse({ ok: false, error: errorCode(error, 'CONNECTOR_UNAVAILABLE') } as T)
+  })
+}
+
 function versionedHeaders(base: Record<string, string>): Record<string, string> {
   const version = readExtensionVersion()
   return version ? { ...base, [CONNECTOR_VERSION_HEADER]: version } : base
@@ -311,6 +341,7 @@ async function navigatePendingGrid() {
   const stage = currentStage(state)
   if (!state.runId || !stage) return
   const target = `${NLG_ORIGIN}${stage.params.navigatePath}`
+  const requiresUserAuth = state.status === 'AUTH_REQUIRED'
   const existing = await findNationalLifeTab()
   if (existing?.id !== undefined && existing.url) {
     try {
@@ -333,9 +364,13 @@ async function navigatePendingGrid() {
   }
   await writeSyncState({ ...state, status: 'NAVIGATING', errorCode: undefined })
   if (existing?.id !== undefined) {
-    await chrome.tabs.update(existing.id, { active: true, url: target })
+    // A logged-in portal tab is an implementation detail of the connector. Do
+    // not steal focus from Keepr One or from the agent's other work. The only
+    // time we intentionally activate a tab is when the agent must complete
+    // National Life login/MFA above.
+    await chrome.tabs.update(existing.id, { url: target })
   } else {
-    await chrome.tabs.create({ active: true, url: target })
+    await chrome.tabs.create({ active: requiresUserAuth, url: target })
   }
 }
 
@@ -385,7 +420,10 @@ async function beginExtraction(tabId: number, gridKey: string) {
   activeNavigations.set(tabId, { ...message, tabId })
   await writeSyncState({ ...(await readSyncState()), status: 'EXTRACTING', errorCode: undefined })
   try {
-    await chrome.tabs.sendMessage(tabId, message)
+    // `tabs.onUpdated(..., complete)` can arrive a few hundred milliseconds
+    // before the document_start bridge has registered its listener. Treat that
+    // race as a page-readiness delay, not as a failed sync.
+    await sendBeginGridWithRetry(tabId, message)
   } catch {
     activeNavigations.delete(tabId)
     await failSync('BRIDGE_UNAVAILABLE')
@@ -641,18 +679,18 @@ export default defineBackground(() => {
         sendResponse({ ok: false, error: 'BASE_URL_MISMATCH' })
         return
       }
-      void pairConnector(message).then(sendResponse)
+      respond(sendResponse, pairConnector(message))
       return true
     }
     if (message.type === 'GET_CONNECTOR_STATUS') {
-      void getConnectorStatus().then(sendResponse)
+      respond(sendResponse, getConnectorStatus())
       return true
     }
     if (message.type === 'UNPAIR_CONNECTOR') {
-      void unpairConnector().then(sendResponse)
+      respond(sendResponse, unpairConnector())
       return true
     }
-    void startNewSync().then(sendResponse)
+    respond(sendResponse, startNewSync())
     return true
   })
 
@@ -671,25 +709,28 @@ export default defineBackground(() => {
     }
     const type = (value as { type: string }).type
     if (type === 'GET_STATUS' && Object.keys(value).length === 1) {
-      void getConnectorStatus().then(sendResponse)
+      respond(sendResponse, getConnectorStatus())
       return true
     }
     if (type === 'OPEN_NLG' && Object.keys(value).length === 1) {
-      void (async () => {
-        const state = await readSyncState()
-        if (state.runId && currentStage(state) && state.status !== 'COMPLETED') {
-          await navigatePendingGrid()
-        } else {
-          const tab = await findNationalLifeTab()
-          if (tab?.id !== undefined) await chrome.tabs.update(tab.id, { active: true })
-          else await chrome.tabs.create({ url: `${NLG_ORIGIN}/agent/`, active: true })
-        }
-        sendResponse({ ok: true })
-      })()
+      respond(
+        sendResponse,
+        (async () => {
+          const state = await readSyncState()
+          if (state.runId && currentStage(state) && state.status !== 'COMPLETED') {
+            await navigatePendingGrid()
+          } else {
+            const tab = await findNationalLifeTab()
+            if (tab?.id !== undefined) await chrome.tabs.update(tab.id, { active: true })
+            else await chrome.tabs.create({ url: `${NLG_ORIGIN}/agent/`, active: true })
+          }
+          return { ok: true as const }
+        })(),
+      )
       return true
     }
     if (type === 'RETRY_SYNC' && Object.keys(value).length === 1) {
-      void retryPendingSync().then(sendResponse)
+      respond(sendResponse, retryPendingSync())
       return true
     }
   })
@@ -700,6 +741,12 @@ export default defineBackground(() => {
   chrome.tabs.onRemoved.addListener((tabId) => {
     activeNavigations.delete(tabId)
     tabQueues.delete(tabId)
+    // Closing the carrier tab must not strand a server run in RUNNING forever.
+    // The portal page is only the execution surface; the persisted run remains
+    // authoritative. Recreate an inactive tab and let handleTabReady resume the
+    // current stage. If the run is waiting for MFA, navigatePendingGrid brings
+    // the login tab forward so the user can finish authentication.
+    void resumePending().catch(() => {})
   })
 
   void resumePending()
