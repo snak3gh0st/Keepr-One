@@ -161,6 +161,10 @@ export function NationalLifeLocalConnectorCard({
   // before that microtask settles. Read the browser surface as a fallback so the
   // first click is not mistaken for an unsupported browser.
   const browserIsCompatible = compatible || browserSupportsConnector()
+  // Keep the first client render identical to the server render. The synchronous
+  // browser fallback above is for actions/effects only; using it in visible copy
+  // would make Chrome render a different text node during hydration.
+  const browserCapabilityResolved = compatible
   const recoverable =
     state === 'idle' ||
     state === 'success' ||
@@ -490,7 +494,7 @@ export function NationalLifeLocalConnectorCard({
               aria-live="polite"
               className={`text-sm leading-6 ${state === 'error' ? 'text-danger' : state === 'success' ? 'text-success' : 'text-ink-muted'}`}
             >
-              {!browserIsCompatible
+              {!browserCapabilityResolved
                 ? 'Connecting on this computer needs Google Chrome or Microsoft Edge.'
                 : state === 'error'
                   ? connectorFailure(errorCode).message
@@ -499,7 +503,7 @@ export function NationalLifeLocalConnectorCard({
                     : stateCopy[state]}
             </p>
           </div>
-          {remoteAvailable && !browserIsCompatible && (
+          {remoteAvailable && !browserCapabilityResolved && (
             <Link href="#national-life-remote" className="mt-3 ml-5 inline-flex text-sm font-semibold text-teal underline-offset-4 hover:underline">
               Use the automatic option instead
             </Link>
