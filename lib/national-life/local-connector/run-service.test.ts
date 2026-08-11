@@ -99,6 +99,7 @@ describe('local connector runs', () => {
 
   it('persists the untouched carrier row', async () => {
     const caseUpsert = vi.fn().mockResolvedValue({})
+    const rawPageUpsert = vi.fn().mockResolvedValue({})
     const tx = {
       nationalLifeSyncRun: {
         findFirst: vi.fn().mockResolvedValue({
@@ -123,6 +124,7 @@ describe('local connector runs', () => {
       nationalLifeCaseSnapshot: { upsert: caseUpsert },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
       nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeRawGridPage: { upsert: rawPageUpsert, deleteMany: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -153,6 +155,15 @@ describe('local connector runs', () => {
     expect(stored.create.insuredName).toBe('Maria Silva')
     expect(stored.create.raw).toMatchObject({ UnknownColumn: 'keep me' })
     expect(stored.update.raw).toMatchObject({ UnknownColumn: 'keep me' })
+    expect(rawPageUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        runId: 'run_1',
+        gridKey: 'NEW_BUSINESS',
+        sequence: 0,
+        recordCount: 1,
+        records: [{ PolicyNo: 'X1', InsuredName: 'Maria Silva', UnknownColumn: 'keep me' }],
+      }),
+    }))
   })
 
   it('routes a report grid to report rows with the untouched row', async () => {
@@ -178,6 +189,7 @@ describe('local connector runs', () => {
       nationalLifeCaseSnapshot: { upsert: vi.fn() },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
       nationalLifeReportRow: { upsert: reportUpsert },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -225,6 +237,7 @@ describe('local connector runs', () => {
       nationalLifeCaseSnapshot: { upsert: vi.fn() },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
       nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -275,6 +288,7 @@ describe('local connector runs', () => {
       nationalLifeCaseSnapshot: { upsert: caseUpsert },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
       nationalLifeReportRow: { upsert: reportUpsert },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -341,6 +355,7 @@ describe('local connector runs', () => {
       nationalLifeCaseSnapshot: { upsert: vi.fn().mockResolvedValue({}) },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
       nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -447,6 +462,7 @@ describe('local connector runs', () => {
       nationalLifeCaseSnapshot: { upsert: caseUpsert },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
       nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -513,6 +529,7 @@ describe('local connector runs', () => {
       nationalLifeCaseSnapshot: { upsert: caseUpsert },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
       nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -586,6 +603,7 @@ describe('local connector runs', () => {
       nationalLifeCaseSnapshot: { upsert: vi.fn().mockResolvedValue({}) },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
       nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -657,6 +675,7 @@ describe('local connector runs', () => {
       nationalLifeCaseSnapshot: { upsert: vi.fn() },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
       nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -715,6 +734,7 @@ describe('local connector runs', () => {
       nationalLifeCaseSnapshot: { upsert: vi.fn().mockResolvedValue({}) },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
       nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const db = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -835,6 +855,7 @@ describe('local connector runs', () => {
       nationalLifeCaseSnapshot: { upsert: vi.fn() },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
       nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const ingestDb = {
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -902,6 +923,7 @@ describe('local connector runs', () => {
         upsert: vi.fn().mockResolvedValue({}),
         findMany: vi.fn().mockResolvedValue([{ gridKey: 'NEW_BUSINESS' }]),
       },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
 
