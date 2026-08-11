@@ -918,7 +918,14 @@ export default defineBackground(() => {
     void resumePending({ reconcileWithServer: true }).catch((error) => failSync(errorCode(error, 'SYNC_RESUME_FAILED')))
   })
 
-  void resumePending()
+  void (async () => {
+    const state = await readSyncState()
+    // If Chrome evicted us after the server accepted GRID_DONE, storage still
+    // says UPLOADING even though the server has already advanced the durable
+    // cursor. Reconcile immediately on this recovery path; waiting for a user
+    // click or the next alarm would turn a recoverable hand-off into a stall.
+    await resumePending({ reconcileWithServer: state.status === 'UPLOADING' })
+  })().catch((error) => failSync(errorCode(error, 'SYNC_RESUME_FAILED')))
   // Uma batida a cada subida do service worker. É a janela mais barata que existe
   // para uma flag chegar sem nenhuma ação do agente, e o worker sobe com muita
   // frequência justamente porque este conector acorda o tempo todo.
