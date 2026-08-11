@@ -34,12 +34,12 @@ describe('parseStagePlan', () => {
 
   it('accepts multiple stages up to the cap', () => {
     const plan = parseStagePlan(
-      Array.from({ length: 32 }, (_, i) => ({
+      Array.from({ length: 64 }, (_, i) => ({
         capability: 'READ_GRID',
         params: { gridKey: `GRID_${i}`, navigatePath: '/agent/x' },
       })),
     )
-    expect(plan).toHaveLength(32)
+    expect(plan).toHaveLength(64)
   })
 
   it('refuses a capability it does not implement', () => {
@@ -115,7 +115,7 @@ describe('parseStagePlan', () => {
   })
 
   it('refuses a plan beyond the stage cap', () => {
-    const stages = Array.from({ length: 33 }, () => ({
+    const stages = Array.from({ length: 65 }, () => ({
       capability: 'READ_GRID',
       params: { gridKey: 'X', navigatePath: '/agent/x' },
     }))

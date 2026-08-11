@@ -22,7 +22,7 @@ import {
   type BridgeMessage,
   type CapturePageMessage,
 } from '../lib/messages'
-import { PAGE_SIZE } from '../lib/paging'
+import { chunkRecordsForUpload } from '../lib/record-chunks'
 import { OUTDATED_CODES, revokesDevice } from '../lib/failure'
 import {
   PERMISSIVE_REMOTE_CONFIG,
@@ -588,11 +588,7 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
       token,
       correlationId,
     })
-    const chunks = records.length === 0
-      ? [[]]
-      : Array.from({ length: Math.ceil(records.length / PAGE_SIZE) }, (_, index) =>
-          records.slice(index * PAGE_SIZE, (index + 1) * PAGE_SIZE),
-        )
+    const chunks = chunkRecordsForUpload(records)
     for (const [sequence, chunk] of chunks.entries()) {
       await uploadChunk(tabId, {
         type: 'GRID_CHUNK',
