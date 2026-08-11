@@ -441,8 +441,17 @@ async function navigatePendingGrid() {
     }
     if (existing.active) {
       // The agent may be using the visible carrier tab. Keep it untouched and
-      // create a dedicated background tab for the connector instead.
-      await chrome.tabs.create({ active: false, url: target })
+      // bind the one quiet connector tab we create; without retaining this id,
+      // every later resume mistakes it for missing and opens another tab.
+      const created = await chrome.tabs.create({ active: false, url: target })
+      if (created?.id !== undefined) {
+        await writeSyncState({
+          ...(await readSyncState()),
+          carrierTabId: created.id,
+          status: 'NAVIGATING',
+          errorCode: undefined,
+        })
+      }
     } else {
       await updateTab(existing.id, { url: target })
     }
