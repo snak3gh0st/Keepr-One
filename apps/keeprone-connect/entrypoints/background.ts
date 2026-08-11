@@ -894,23 +894,19 @@ export default defineBackground(() => {
   chrome.tabs.onRemoved.addListener((tabId) => {
     activeNavigations.delete(tabId)
     tabQueues.delete(tabId)
-    // Closing the carrier tab must not strand a server run in RUNNING forever.
-    // The portal page is only the execution surface; the persisted run remains
-    // authoritative. Recreate an inactive tab and let handleTabReady resume the
-    // current stage. If the run is waiting for MFA, navigatePendingGrid brings
-    // the login tab forward so the user can finish authentication.
+    // A visible Chrome tab is not a disposable implementation detail. The agent
+    // closing it is an explicit stop signal, not permission to keep reopening
+    // National Life behind their back. End this run cleanly; a later Sync starts
+    // a new, inactive carrier tab only when the agent asks for it.
     void (async () => {
       const state = await readSyncState()
-      // Fechar uma aba sem relação com o conector não pode disparar uma nova
-      // navegação do portal. Se a aba que fechou era a portadora da sessão e há
-      // um run vivo, recriamos uma aba em background e continuamos sozinhos.
       if (state.carrierTabId !== tabId) return
       if (state.status === 'COMPLETED' || state.status === 'ERROR' || !state.runId || !currentStage(state)) {
         return
       }
-      await writeSyncState({ ...state, carrierTabId: undefined, status: 'NAVIGATING' })
-      await resumePending()
-    })().catch(() => {})
+      await writeSyncState({ ...state, carrierTabId: undefined })
+      await failSync('CONNECTOR_TAB_CLOSED')
+    })().catch(() => failSync('CONNECTOR_TAB_CLOSED'))
   })
 
   chrome.alarms.onAlarm.addListener((alarm) => {

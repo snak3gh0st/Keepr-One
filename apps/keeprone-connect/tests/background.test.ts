@@ -582,7 +582,7 @@ describe('background plan executor', () => {
     expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
   })
 
-  it('recreates a closed carrier tab without stealing focus', async () => {
+  it('stops cleanly when the carrier tab is closed instead of reopening it', async () => {
     storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'EXTRACTING' }
     tabs.query.mockResolvedValueOnce([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
     await bootBackground()
@@ -590,11 +590,9 @@ describe('background plan executor', () => {
     emit('tabs.onRemoved', 7)
     await flush()
 
-    expect(tabs.create).toHaveBeenCalledWith({
-      active: false,
-      url: `${NLG}${NEW_BUSINESS_PATH}`,
-    })
-    expect(readSync()).toMatchObject({ runId: 'run-1', stageIndex: 0, status: 'NAVIGATING' })
+    expect(tabs.create).not.toHaveBeenCalled()
+    expect(tabs.update).not.toHaveBeenCalled()
+    expect(readSync()).toMatchObject({ runId: 'run-1', stageIndex: 0, status: 'ERROR', errorCode: 'CONNECTOR_TAB_CLOSED' })
   })
 
   it('does not re-navigate the connector when an unrelated tab closes', async () => {
