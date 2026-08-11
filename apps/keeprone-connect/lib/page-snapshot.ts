@@ -12,8 +12,12 @@ export type PageSnapshotRecord = Record<string, unknown>
 /// `MAX_TEXT_CHUNKS` sobe junto para preservar o mesmo total de 240.000
 /// caracteres de texto por página: o teto existe para limitar a página, não para
 /// perder texto quando o bloco encolhe.
-const TEXT_CHUNK_SIZE = 7_500
-const MAX_TEXT_CHUNKS = 32
+///
+/// Exportados porque quem prova que eles cabem é o teste de paridade do
+/// servidor, do outro lado da fronteira. Copiar os números lá desligaria o teste
+/// do coletor em silêncio na primeira vez que alguém mexesse aqui.
+export const TEXT_CHUNK_SIZE = 7_500
+export const MAX_TEXT_CHUNKS = 32
 const MAX_TABLE_ROWS = 2_000
 const MAX_LINKS = 500
 const MAX_FIELDS = 500

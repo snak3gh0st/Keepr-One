@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { chunkRecordsForUpload } from '../../../apps/keeprone-connect/lib/record-chunks'
 import { CONNECTOR_SCHEMA_VERSION } from '../../../apps/keeprone-connect/lib/contract'
 import {
+  MAX_TEXT_CHUNKS,
+  TEXT_CHUNK_SIZE,
+} from '../../../apps/keeprone-connect/lib/page-snapshot'
+import {
   LOCAL_CONNECTOR_MAX_BODY_BYTES,
   LOCAL_CONNECTOR_MAX_RECORDS,
   LOCAL_CONNECTOR_MAX_ROW_BYTES,
@@ -16,8 +20,6 @@ import {
 /// Estes números são os do coletor de verdade (`lib/page-snapshot.ts`), não
 /// números escolhidos para o teste passar. Se o coletor mudar, este arquivo é o
 /// que deve falhar primeiro.
-const TEXT_CHUNK_SIZE = 7_500
-const MAX_TEXT_CHUNKS = 32
 const MAX_TABLE_ROWS = 2_000
 const CELL_LIMIT = 400
 const CELLS_PER_ROW = 12
