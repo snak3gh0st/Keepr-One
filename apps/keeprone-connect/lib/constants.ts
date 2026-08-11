@@ -44,3 +44,12 @@ export function isAuthPath(pathname: string): boolean {
     pathname.includes('/challenge')
   )
 }
+
+/// Content scripts are declared for the whole `/agent/*` tree because Chrome
+/// match patterns cannot express exclusions. Authentication callbacks live in
+/// that same tree, though, and must remain untouched: replacing fetch/XHR while
+/// Auth0 or MFA is completing adds risk exactly where the connector should be a
+/// passive observer.
+export function shouldInstrumentNationalLifePath(pathname: string): boolean {
+  return pathname.startsWith('/agent/') && !isAuthPath(pathname)
+}

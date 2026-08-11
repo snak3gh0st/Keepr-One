@@ -41,6 +41,13 @@ describe('connectorFailure', () => {
     }
   })
 
+  it('explains a run-start rate limit without blaming National Life', () => {
+    const failure = connectorFailure('RUN_START_RATE_LIMITED')
+    expect(failure.action).toBe('retry')
+    expect(failure.message).toMatch(/wait a few minutes/i)
+    expect(failure.message).toMatch(/connection is still intact/i)
+  })
+
   it('falls back to a generic message only for codes it does not know', () => {
     const failure = connectorFailure('SOMETHING_NOBODY_MAPPED')
     expect(failure.action).toBe('support')

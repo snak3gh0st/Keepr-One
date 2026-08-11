@@ -78,4 +78,8 @@ describe('classificação das recusas novas', () => {
     expect(classifyFailedResponse(401, headers())).toBe('DEVICE_REQUEST_REJECTED')
     expect(classifyFailedResponse(500, headers())).toBe('DEVICE_REQUEST_FAILED')
   })
+
+  it('429 pede espera em vez de fingir falha do portal', () => {
+    expect(classifyFailedResponse(429, headers())).toBe('RUN_START_RATE_LIMITED')
+  })
 })

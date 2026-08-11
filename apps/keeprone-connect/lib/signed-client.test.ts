@@ -70,4 +70,9 @@ describe('classifyFailedResponse', () => {
     expect(classifyFailedResponse(500, new Headers())).toBe('DEVICE_REQUEST_FAILED')
     expect(classifyFailedResponse(403, new Headers())).toBe('DEVICE_REQUEST_FAILED')
   })
+
+  it('keeps a run-start rate limit distinct from a portal failure', () => {
+    expect(classifyFailedResponse(429, new Headers({ 'retry-after': '120' })))
+      .toBe('RUN_START_RATE_LIMITED')
+  })
 })
