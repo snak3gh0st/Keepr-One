@@ -63,6 +63,11 @@ export function capturePageSnapshot(document: Document, pageUrl: URL): PageSnaps
     const headers = [...table.querySelectorAll('thead th')]
       .map((cell) => clean(cell.textContent, 400))
       .slice(0, 12)
+    records.push({
+      RecordType: 'TABLE_META',
+      TableIndex: tableIndex,
+      Headers: headers,
+    })
     for (const [rowIndex, row] of [...table.querySelectorAll('tbody tr')].entries()) {
       if (tableRows >= MAX_TABLE_ROWS) break
       const cells = [...row.querySelectorAll('th, td')]
@@ -72,7 +77,6 @@ export function capturePageSnapshot(document: Document, pageUrl: URL): PageSnaps
         RecordType: 'TABLE_ROW',
         TableIndex: tableIndex,
         RowIndex: rowIndex,
-        Headers: headers,
         Cells: cells,
       })
       tableRows += 1

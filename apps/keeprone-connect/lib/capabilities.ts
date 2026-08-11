@@ -9,7 +9,10 @@ export type StagePlan =
   | { capability: 'READ_PAGE'; params: { sourceKey: string; navigatePath: string } }
 
 const IMPLEMENTED_CAPABILITIES = ['READ_GRID', 'READ_PAGE'] as const
-const MAX_STAGES = 32
+// A plan is server-authorized and each stage is independently bounded. Leave
+// room for the source inventory to grow without making the 33rd source a hard
+// client-side rollout failure.
+const MAX_STAGES = 64
 const MAX_NAVIGATE_PATH = 256
 
 
