@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   nationalLifeSyncGridLabel,
+  localStageCoverage,
   reconcileNationalLifeSync,
   startNationalLifeSync,
   summarizeStageReceipts,
@@ -181,5 +182,20 @@ describe('grid labels', () => {
       expect(label).toBeTruthy()
       expect(label).not.toMatch(/[áàâãéêíóôõúç]/i)
     }
+  })
+})
+
+describe('local stage coverage', () => {
+  it('only marks a portal area verified after its completion record exists', () => {
+    expect(localStageCoverage({
+      plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+      totalStages: 2,
+      currentGridKey: 'INFORCE_CLIENTS',
+      failedStages: 0,
+      completions: [{ gridKey: 'NEW_BUSINESS', expectedRecordCount: 715 }],
+    })).toEqual([
+      expect.objectContaining({ gridKey: 'NEW_BUSINESS', state: 'VERIFIED', verifiedRecords: 715 }),
+      expect.objectContaining({ gridKey: 'INFORCE_CLIENTS', state: 'READING', verifiedRecords: null }),
+    ])
   })
 })

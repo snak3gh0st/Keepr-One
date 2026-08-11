@@ -45,6 +45,16 @@ export type NationalLifeSyncStatus = {
   /// escrevi 0.
   receivedRecords: number | null
   writtenRecords: number | null
+  /// The per-area truth behind the headline counter. A local run only becomes
+  /// VERIFIED after the connector reconciles all its pages with recordsTotal.
+  stageCoverage?: NationalLifeStageCoverage[]
+}
+
+export type NationalLifeStageCoverage = {
+  gridKey: string
+  label: string | null
+  state: 'PENDING' | 'READING' | 'VERIFIED' | 'FAILED'
+  verifiedRecords: number | null
 }
 
 /// Rótulos em inglês: quem lê é um agente americano.
@@ -66,6 +76,31 @@ const GRID_LABELS: Record<string, string> = {
 
 export function nationalLifeSyncGridLabel(gridKey: string | null): string | null {
   return gridKey ? GRID_LABELS[gridKey] ?? null : null
+}
+
+export function localStageCoverage(input: {
+  plannedGridKeys: readonly string[]
+  totalStages: number
+  currentGridKey: string | null
+  failedStages: number
+  completions: ReadonlyArray<{ gridKey: string; expectedRecordCount: number }>
+}): NationalLifeStageCoverage[] {
+  const planned = input.plannedGridKeys.length > 0
+    ? input.plannedGridKeys
+    : NATIONAL_LIFE_SYNC_STAGES.slice(0, input.totalStages)
+  const completed = new Map(input.completions.map((row) => [row.gridKey, row.expectedRecordCount]))
+  return planned.map((gridKey) => ({
+    gridKey,
+    label: nationalLifeSyncGridLabel(gridKey),
+    state: completed.has(gridKey)
+      ? 'VERIFIED'
+      : gridKey === input.currentGridKey
+        ? 'READING'
+        : input.failedStages > 0 && !input.currentGridKey
+          ? 'FAILED'
+          : 'PENDING',
+    verifiedRecords: completed.get(gridKey) ?? null,
+  }))
 }
 
 export type StageReceiptTotals = {
@@ -159,6 +194,7 @@ export async function reconcileNationalLifeSync(
     select: {
       startedAt: true,
       completedAt: true,
+      plannedGridKeys: true,
       jobs: {
         select: { state: true, syncStageIndex: true, syncGridKey: true },
         orderBy: { syncStageIndex: 'asc' },
@@ -213,6 +249,7 @@ export async function getNationalLifeSyncStatus(
       totalStages: true,
       failedStages: true,
       currentGridKey: true,
+      plannedGridKeys: true,
       safeErrorCode: true,
       completedAt: true,
       jobs: {
@@ -220,6 +257,7 @@ export async function getNationalLifeSyncStatus(
         orderBy: { syncStageIndex: 'asc' },
       },
       stageReceipts: { select: { recordCount: true, writtenCount: true } },
+      stageCompletions: { select: { gridKey: true, expectedRecordCount: true } },
     },
   })
   if (!run) {
@@ -244,6 +282,13 @@ export async function getNationalLifeSyncStatus(
       shouldPoll: run.state === 'QUEUED' || run.state === 'RUNNING' || run.state === 'PAUSED',
       completedAt: run.completedAt,
       ...totals,
+      stageCoverage: localStageCoverage({
+        plannedGridKeys: run.plannedGridKeys,
+        totalStages: total,
+        currentGridKey: run.currentGridKey,
+        failedStages: run.failedStages,
+        completions: run.stageCompletions,
+      }),
     }
   }
 
@@ -258,5 +303,11 @@ export async function getNationalLifeSyncStatus(
     shouldPoll: state === 'QUEUED' || state === 'RUNNING' || state === 'PAUSED',
     completedAt: run.completedAt,
     ...totals,
+    stageCoverage: run.jobs.map((job) => ({
+      gridKey: job.syncGridKey ?? 'UNKNOWN',
+      label: nationalLifeSyncGridLabel(job.syncGridKey ?? null),
+      state: job.state === 'SUCCEEDED' ? 'VERIFIED' : job.state === 'FAILED' ? 'FAILED' : job.syncGridKey === progress.currentGridKey ? 'READING' : 'PENDING',
+      verifiedRecords: null,
+    })),
   }
 }

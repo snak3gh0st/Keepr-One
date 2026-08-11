@@ -50,6 +50,13 @@ function formatCount(value: number | null): string {
   return value === null ? '—' : value.toLocaleString('en-US')
 }
 
+function coverageTone(state: NonNullable<NationalLifeSyncStatus['stageCoverage']>[number]['state']) {
+  if (state === 'VERIFIED') return 'border-teal/30 bg-teal-pale/45 text-teal-deep'
+  if (state === 'READING') return 'border-gold/40 bg-gold-pale text-gold-ink'
+  if (state === 'FAILED') return 'border-red-300 bg-red-50 text-red-700'
+  return 'border-border-steel bg-panel/55 text-ink-muted'
+}
+
 export function NationalLifeSyncProgress({
   initialStatus,
 }: {
@@ -190,6 +197,28 @@ export function NationalLifeSyncProgress({
           <p className="mt-1 text-xs text-ink-muted">Rows written to your National Life data</p>
         </div>
       </div>
+
+      {status.stageCoverage && status.stageCoverage.length > 0 && (
+        <div className="mt-5 border-t border-border-steel pt-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">Verified portal areas</p>
+            <p className="text-xs text-ink-muted">A check means every page was reconciled.</p>
+          </div>
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {status.stageCoverage.map((stage) => (
+              <li key={stage.gridKey} className={`rounded-lg border px-3 py-2 text-xs ${coverageTone(stage.state)}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold capitalize">{stage.label ?? stage.gridKey.replace(/_/g, ' ').toLowerCase()}</span>
+                  <span className="font-mono text-[10px] uppercase">{stage.state}</span>
+                </div>
+                {stage.verifiedRecords !== null && (
+                  <p className="mt-1 font-mono tabular-nums">{stage.verifiedRecords.toLocaleString('en-US')} rows verified</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {active && (
         <p className="mt-4 text-xs leading-5 text-ink-muted">
