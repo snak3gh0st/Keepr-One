@@ -218,6 +218,7 @@ type IngestInput = {
   idempotencyKey: string
   contentHash: string
   envelope: LocalConnectorRawStageEnvelope
+  legacyStageCompletion?: boolean
   now?: Date
 }
 
@@ -456,13 +457,39 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
         },
       })
 
-      // A page receipt is deliberately not a stage completion. The extension
-      // must upload every sequence and then call completeLocalConnectorStage,
-      // which reconciles this durable receipt set with the carrier total.
-      await tx.nationalLifeSyncRun.update({
-        where: { id: run.id },
-        data: { state: 'RUNNING', currentGridKey: input.gridKey, updatedAt: now },
-      })
+      if (input.legacyStageCompletion) {
+        // The retired protocol only sends chunks. Preserve its existing behaviour
+        // during Store rollout so an installed 0.1.0/0.1.1 does not hang; it is
+        // intentionally isolated from the 0.1.2+ path below, which never counts
+        // a page as a completed grid.
+        const finalizedGrids = await tx.nationalLifeConnectorStageReceipt.findMany({
+          where: { runId: run.id, truncated: false },
+          distinct: ['gridKey'],
+          select: { gridKey: true },
+        })
+        const completedStages = planned.filter((gridKey) =>
+          finalizedGrids.some((row) => row.gridKey === gridKey),
+        ).length
+        const completed = completedStages === planned.length
+        await tx.nationalLifeSyncRun.update({
+          where: { id: run.id },
+          data: {
+            state: completed ? 'COMPLETED' : 'RUNNING',
+            completedStages,
+            currentGridKey: completed ? null : input.gridKey,
+            completedAt: completed ? now : null,
+            updatedAt: now,
+          },
+        })
+      } else {
+        // A page receipt is deliberately not a stage completion. The extension
+        // must upload every sequence and then call completeLocalConnectorStage,
+        // which reconciles this durable receipt set with the carrier total.
+        await tx.nationalLifeSyncRun.update({
+          where: { id: run.id },
+          data: { state: 'RUNNING', currentGridKey: input.gridKey, updatedAt: now },
+        })
+      }
       return { receipt: created, duplicate: false as const }
     })
     return { receipt: publicReceipt(result.receipt), duplicate: result.duplicate }

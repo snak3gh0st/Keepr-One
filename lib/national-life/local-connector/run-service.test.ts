@@ -691,6 +691,62 @@ describe('local connector runs', () => {
     )
   })
 
+  it('keeps an installed pre-0.1.2 connector moving during the Store rollout', async () => {
+    const runUpdate = vi.fn().mockResolvedValue({})
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'run-legacy', plannedGridKeys: ['NEW_BUSINESS'] }),
+        update: runUpdate,
+      },
+      nationalLifeConnectorStageReceipt: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 'receipt-legacy',
+          runId: 'run-legacy',
+          gridKey: 'NEW_BUSINESS',
+          sequence: 0,
+          contentHash: 'e'.repeat(64),
+          recordCount: 1,
+          createdAt: now,
+        }),
+        findMany: vi.fn().mockResolvedValue([{ gridKey: 'NEW_BUSINESS' }]),
+      },
+      nationalLifeCaseSnapshot: { upsert: vi.fn().mockResolvedValue({}) },
+      nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: vi.fn() },
+    }
+    const db = {
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+    } as never
+
+    await ingestLocalConnectorStage(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      gridKey: 'NEW_BUSINESS',
+      idempotencyKey: 'legacy-stage-0001',
+      contentHash: 'e'.repeat(64),
+      now,
+      legacyStageCompletion: true,
+      envelope: {
+        schemaVersion: 2,
+        runId: 'run-legacy',
+        gridKey: 'NEW_BUSINESS',
+        sequence: 0,
+        observedAt: now.toISOString(),
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ PolicyNo: 'NL-LEGACY' }],
+      },
+    })
+
+    expect(runUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ state: 'COMPLETED', completedStages: 1 }),
+      }),
+    )
+  })
+
   it('returns the original receipt only when an idempotency key has the same hash', async () => {
     const stored = {
       id: 'receipt-1',
