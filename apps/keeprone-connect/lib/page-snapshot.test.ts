@@ -22,10 +22,14 @@ describe('page snapshot', () => {
     )
 
     expect(records).toContainEqual(expect.objectContaining({
-      RecordType: 'TABLE_ROW',
+      RecordType: 'TABLE_META',
       Headers: ['Period', 'Total'],
+    }))
+    expect(records).toContainEqual(expect.objectContaining({
+      RecordType: 'TABLE_ROW',
       Cells: ['YTD', '$41,666.95'],
     }))
+    expect(records.find((record) => record.RecordType === 'TABLE_ROW')).not.toHaveProperty('Headers')
     expect(records).toContainEqual(expect.objectContaining({
       RecordType: 'FORM_FIELD',
       Name: 'agentNumber',
