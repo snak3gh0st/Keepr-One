@@ -122,6 +122,7 @@ export async function startLocalConnectorRun(
   schemaVersion: typeof LOCAL_CONNECTOR_SCHEMA_VERSION
   stages: LocalConnectorStagePlan[]
   duplicate: boolean
+  completedStages: number
 }> {
   const now = input.now ?? new Date()
   // Planned before any write: an unknown grid key must fail the request rather
@@ -139,7 +140,7 @@ export async function startLocalConnectorRun(
       state: 'RUNNING',
     },
     orderBy: { createdAt: 'desc' },
-    select: { id: true, plannedGridKeys: true },
+    select: { id: true, plannedGridKeys: true, completedStages: true },
   })
   if (active) {
     // The plan comes from the run that already exists, not from what this call
@@ -150,6 +151,7 @@ export async function startLocalConnectorRun(
       schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
       stages: planReadGridStages(plannedGridKeys(active)),
       duplicate: true as const,
+      completedStages: active.completedStages,
     }
   }
 
@@ -176,6 +178,7 @@ export async function startLocalConnectorRun(
     schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
     stages,
     duplicate: false as const,
+    completedStages: 0,
   }
 }
 
