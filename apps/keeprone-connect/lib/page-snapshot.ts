@@ -1,7 +1,19 @@
 export type PageSnapshotRecord = Record<string, unknown>
 
-const TEXT_CHUNK_SIZE = 12_000
-const MAX_TEXT_CHUNKS = 20
+/// Dimensionado contra o **pior caso do escape do JSON**, não contra o tamanho
+/// do texto. O teto por linha das duas pontas (16 KiB) é medido sobre o texto já
+/// serializado, e cada aspa ou barra invertida vira dois caracteres ali. Um bloco
+/// de 12.000 caracteres cabia enquanto o texto fosse comum e estourava a partir
+/// de ~36% de aspas — e um registro acima do teto não é recusado sozinho: ele faz
+/// `parsePageCaptureAck` rejeitar o retrato inteiro, o que derruba o estágio com
+/// `BRIDGE_UNAVAILABLE` e volta a derrubar em cada tentativa, porque a página
+/// recapturada é a mesma. A 7.500, mesmo um bloco 100% de aspas cabe.
+///
+/// `MAX_TEXT_CHUNKS` sobe junto para preservar o mesmo total de 240.000
+/// caracteres de texto por página: o teto existe para limitar a página, não para
+/// perder texto quando o bloco encolhe.
+const TEXT_CHUNK_SIZE = 7_500
+const MAX_TEXT_CHUNKS = 32
 const MAX_TABLE_ROWS = 2_000
 const MAX_LINKS = 500
 const MAX_FIELDS = 500
