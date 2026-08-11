@@ -482,6 +482,21 @@ describe('background plan executor', () => {
     expect(readSync()).toMatchObject({ stageIndex: 0, status: 'NAVIGATING' })
   })
 
+  it('retries a temporarily locked Chrome tab instead of abandoning the sync', async () => {
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${INFORCE_PATH}` }])
+    tabs.update
+      .mockRejectedValueOnce(new Error('Tabs cannot be edited right now (user may be dragging a tab).'))
+      .mockResolvedValue(undefined)
+
+    await bootBackground()
+    await new Promise((resolve) => setTimeout(resolve, 75))
+
+    expect(tabs.update).toHaveBeenCalledTimes(2)
+    expect(tabs.update).toHaveBeenLastCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
+    expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
+  })
+
   it('opens a background carrier tab when the visible carrier tab is on another page', async () => {
     storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${INFORCE_PATH}` }])
@@ -554,6 +569,21 @@ describe('background plan executor', () => {
       url: `${NLG}${NEW_BUSINESS_PATH}`,
     })
     expect(readSync()).toMatchObject({ runId: 'run-1', stageIndex: 0, status: 'NAVIGATING' })
+  })
+
+  it('does not re-navigate the connector when an unrelated tab closes', async () => {
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'EXTRACTING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    tabs.create.mockClear()
+    tabs.update.mockClear()
+
+    emit('tabs.onRemoved', 99)
+    await flush()
+
+    expect(tabs.create).not.toHaveBeenCalled()
+    expect(tabs.update).not.toHaveBeenCalled()
+    expect(readSync()).toMatchObject({ carrierTabId: 7, status: 'EXTRACTING' })
   })
 
   it('keeps the Auth0 login tab instead of opening another login', async () => {

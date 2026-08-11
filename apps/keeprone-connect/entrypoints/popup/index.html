@@ -7,18 +7,27 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <main>
-      <div class="brand" aria-hidden="true">K</div>
-      <div>
-        <p class="eyebrow">Keepr One</p>
-        <h1>KeeproneConnect</h1>
-      </div>
-      <p id="status" class="status" role="status" aria-live="polite">Checking status…</p>
+    <main id="popup">
+      <header class="header">
+        <div class="brand" aria-hidden="true">K</div>
+        <div class="brand-copy">
+          <p class="eyebrow">Keepr One</p>
+          <h1>KeeproneConnect</h1>
+        </div>
+        <span id="connection" class="connection">Checking</span>
+      </header>
+      <section class="status-card" aria-labelledby="status-heading">
+        <div class="status-topline">
+          <span class="status-dot" aria-hidden="true"></span>
+          <p id="status-heading">National Life connection</p>
+        </div>
+        <p id="status" class="status" role="status" aria-live="polite">Checking status…</p>
+      </section>
       <div class="actions">
         <button id="open" type="button">Open National Life</button>
         <button id="retry" class="secondary" type="button">Try again</button>
       </div>
-      <p class="privacy">Your data is processed in this browser and is never stored in the extension.</p>
+      <p class="privacy"><span aria-hidden="true">↗</span> Data stays in this browser. Your National Life password is never stored by Keepr One.</p>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

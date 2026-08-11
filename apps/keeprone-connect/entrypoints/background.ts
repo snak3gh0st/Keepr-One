@@ -52,9 +52,37 @@ const pendingBridgeMessages = new Map<number, number>()
 let syncStartLock: Promise<unknown> | null = null
 
 const BRIDGE_RETRY_DELAYS_MS = [150, 300, 600, 1_000, 1_500]
+// O Chrome recusa qualquer alteração de aba durante um arrasto do usuário. É
+// uma condição temporária do navegador, não uma falha da National Life nem do
+// sync; a própria documentação do Chrome recomenda repetir a operação depois
+// de uma espera curta.
+const TAB_EDIT_RETRY_DELAYS_MS = [50, 100, 200, 400, 800]
 
 function errorCode(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
+}
+
+function isTabEditInProgress(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('Tabs cannot be edited right now')
+}
+
+async function retryTabEdit<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= TAB_EDIT_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      const delay = TAB_EDIT_RETRY_DELAYS_MS[attempt]
+      if (!isTabEditInProgress(error) || delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError ?? new Error('TAB_EDIT_FAILED')
+}
+
+async function updateTab(tabId: number, updateProperties: chrome.tabs.UpdateProperties) {
+  return retryTabEdit(() => chrome.tabs.update(tabId, updateProperties))
 }
 
 async function sendBeginGridWithRetry(tabId: number, message: BeginGridMessage): Promise<void> {
@@ -374,7 +402,7 @@ async function navigatePendingGrid() {
     try {
       if (isAuthPath(new URL(existing.url).pathname)) {
         await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
-        await chrome.tabs.update(existing.id, { active: true })
+        await updateTab(existing.id, { active: true })
         return
       }
     } catch {
@@ -400,7 +428,7 @@ async function navigatePendingGrid() {
       // create a dedicated background tab for the connector instead.
       await chrome.tabs.create({ active: false, url: target })
     } else {
-      await chrome.tabs.update(existing.id, { url: target })
+      await updateTab(existing.id, { url: target })
     }
   } else {
     const created = await chrome.tabs.create({
@@ -502,7 +530,7 @@ async function handleTabReady(tabId: number, urlValue?: string) {
   }
   if (url.origin === NLG_AUTH0_ORIGIN) {
     await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
-    await chrome.tabs.update(tabId, { active: true })
+    await updateTab(tabId, { active: true })
     return
   }
   if (url.origin !== NLG_ORIGIN) return
@@ -610,7 +638,7 @@ async function finishGrid(tabId: number, gridKey: string) {
     status: 'NAVIGATING',
     uploads: state.uploads,
   })
-  await chrome.tabs.update(tabId, { url: `${NLG_ORIGIN}${next.params.navigatePath}` })
+  await updateTab(tabId, { url: `${NLG_ORIGIN}${next.params.navigatePath}` })
 }
 
 /// Manda o extrator parar onde está.
@@ -781,7 +809,7 @@ export default defineBackground(() => {
             await navigatePendingGrid()
           } else {
             const tab = await findNationalLifeTab()
-            if (tab?.id !== undefined) await chrome.tabs.update(tab.id, { active: true })
+            if (tab?.id !== undefined) await updateTab(tab.id, { active: true })
             else await chrome.tabs.create({ url: `${NLG_ORIGIN}/agent/`, active: true })
           }
           return { ok: true as const }
@@ -796,7 +824,11 @@ export default defineBackground(() => {
   })
 
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.status === 'complete') void handleTabReady(tabId, tab.url)
+    if (changeInfo.status === 'complete') {
+      void handleTabReady(tabId, tab.url).catch((error) =>
+        failSync(errorCode(error, 'TAB_EDIT_FAILED')),
+      )
+    }
   })
   chrome.tabs.onRemoved.addListener((tabId) => {
     activeNavigations.delete(tabId)
@@ -808,9 +840,14 @@ export default defineBackground(() => {
     // the login tab forward so the user can finish authentication.
     void (async () => {
       const state = await readSyncState()
-      if (state.carrierTabId === tabId) {
-        await writeSyncState({ ...state, carrierTabId: undefined, status: 'NAVIGATING' })
+      // Fechar uma aba sem relação com o conector não pode disparar uma nova
+      // navegação do portal. Se a aba que fechou era a portadora da sessão e há
+      // um run vivo, recriamos uma aba em background e continuamos sozinhos.
+      if (state.carrierTabId !== tabId) return
+      if (state.status === 'COMPLETED' || state.status === 'ERROR' || !state.runId || !currentStage(state)) {
+        return
       }
+      await writeSyncState({ ...state, carrierTabId: undefined, status: 'NAVIGATING' })
       await resumePending()
     })().catch(() => {})
   })
