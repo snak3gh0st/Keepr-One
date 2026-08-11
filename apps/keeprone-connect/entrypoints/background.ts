@@ -62,6 +62,7 @@ const BRIDGE_RETRY_DELAYS_MS = [150, 300, 600, 1_000, 1_500]
 // sync; a própria documentação do Chrome recomenda repetir a operação depois
 // de uma espera curta.
 const TAB_EDIT_RETRY_DELAYS_MS = [50, 100, 200, 400, 800]
+const SYNC_WATCHDOG_ALARM = 'keeprone-national-life-sync-watchdog'
 
 function errorCode(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
@@ -206,6 +207,7 @@ async function unpairConnector() {
   await writeSyncState({ status: 'IDLE' })
   activeNavigations.clear()
   tabQueues.clear()
+  await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
   return { ok: true as const, deviceId: device.deviceId }
 }
 
@@ -309,6 +311,7 @@ async function nudgeUpdateIfSafe(selfTabId?: number): Promise<void> {
 async function failSync(code: string, selfTabId?: number) {
   await writeSyncState({ ...(await readSyncState()), status: 'ERROR', errorCode: code })
   await reportRunFailure(code)
+  await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
   if (revokesDevice(code)) await forgetRevokedDevice()
   // O servidor afirmou que esta versão não serve mais. É o único gatilho: um
   // empurrão a cada falha genérica gastaria as tentativas contra problemas que
@@ -337,7 +340,7 @@ async function createRun() {
     throw new Error('CONNECTOR_PAUSED')
   }
   await writeSyncState({ ...previous, status: 'STARTING', errorCode: undefined })
-  const response = await signedJsonRequest<{ runId?: unknown; stages?: unknown }>({
+  const response = await signedJsonRequest<{ runId?: unknown; stages?: unknown; completedStages?: unknown }>({
     baseUrl: device.baseUrl,
     deviceId: device.deviceId,
     method: 'POST',
@@ -351,14 +354,21 @@ async function createRun() {
   // only checks that every one of them names a capability it implements and a path
   // inside the agent tree. Adding a grid is a server deploy, not a release here.
   const plan = parseStagePlan(response.stages)
+  const completedStages = typeof response.completedStages === 'number' &&
+    Number.isInteger(response.completedStages) &&
+    response.completedStages >= 0 &&
+    response.completedStages < plan.length
+    ? response.completedStages
+    : 0
   if (previous.runId === response.runId && currentStage(previous)) {
-    // A retry of a still-live run must not rewind the stage. The server returns
-    // duplicate=true for that case; preserving the local cursor lets the retry
-    // reclaim only genuinely stale runs while leaving active work untouched.
+    // A retry of a still-live run must resume from the server-confirmed cursor.
+    // Local storage can be stale when Chrome evicts the worker between a grid
+    // acknowledgement and the following navigation.
     await writeSyncState({
       ...previous,
       runId: response.runId,
       plan,
+      stageIndex: completedStages,
       status: 'NAVIGATING',
       errorCode: undefined,
     })
@@ -371,6 +381,7 @@ async function createRun() {
       carrierTabId: previous.carrierTabId,
     })
   }
+  chrome.alarms.create(SYNC_WATCHDOG_ALARM, { periodInMinutes: 1 })
 }
 
 async function findNationalLifeTab(): Promise<chrome.tabs.Tab | undefined> {
@@ -671,6 +682,7 @@ async function finishGrid(tabId: number, gridKey: string) {
       uploads: state.uploads,
       completedAt: new Date().toISOString(),
     })
+    await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
     return
   }
   await writeSyncState({
@@ -760,12 +772,19 @@ async function retryPendingSync() {
   return startNewSync()
 }
 
-async function resumePending() {
+async function resumePending(options?: { reconcileWithServer?: boolean }) {
   const state = await readSyncState()
   if (!state.runId || !currentStage(state) || state.status === 'COMPLETED' || state.status === 'ERROR') {
     return
   }
-  const tab = await findConnectorTab(state)
+  // The server is the durable cursor. A service worker may be evicted after it
+  // confirms a grid and before it moves the tab to the next one.
+  if (options?.reconcileWithServer && activeNavigations.size === 0) await createRun()
+  const resumed = await readSyncState()
+  if (!resumed.runId || !currentStage(resumed) || resumed.status === 'COMPLETED' || resumed.status === 'ERROR') {
+    return
+  }
+  const tab = await findConnectorTab(resumed)
   if (tab?.id !== undefined && tab.url) {
     await handleTabReady(tab.id, tab.url)
   } else {
@@ -892,6 +911,11 @@ export default defineBackground(() => {
       await writeSyncState({ ...state, carrierTabId: undefined, status: 'NAVIGATING' })
       await resumePending()
     })().catch(() => {})
+  })
+
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== SYNC_WATCHDOG_ALARM) return
+    void resumePending({ reconcileWithServer: true }).catch((error) => failSync(errorCode(error, 'SYNC_RESUME_FAILED')))
   })
 
   void resumePending()

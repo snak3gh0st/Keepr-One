@@ -124,7 +124,7 @@ describe('local connector runs route', () => {
   it('lets a client at or above the floor through', async () => {
     process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_MIN_VERSION = '0.2.0'
     mockVerify.mockResolvedValueOnce({ deviceId: 'dev_1', agentId: 'agent_1' })
-    mockStartRun.mockResolvedValueOnce({ runId: 'run_1', schemaVersion: 2, stages: [], duplicate: false })
+    mockStartRun.mockResolvedValueOnce({ runId: 'run_1', schemaVersion: 2, stages: [], duplicate: false, completedStages: 0 })
     const request = new Request(
       'https://app.keepr.one/api/agent/integrations/national-life/local-connector/runs',
       {
@@ -160,6 +160,7 @@ describe('local connector runs route', () => {
       schemaVersion: 1,
       stages: [],
       duplicate: false,
+      completedStages: 0,
     })
     const response = await POST(signedRequest())
     expect(response.status).toBe(201)

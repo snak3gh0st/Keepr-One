@@ -88,6 +88,11 @@ const chromeStub = {
     onMessage: register('runtime.onMessage'),
     onMessageExternal: register('runtime.onMessageExternal'),
   },
+  alarms: {
+    create: vi.fn(),
+    clear: vi.fn(async () => true),
+    onAlarm: register('alarms.onAlarm'),
+  },
   tabs,
 }
 

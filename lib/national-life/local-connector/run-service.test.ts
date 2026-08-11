@@ -46,7 +46,7 @@ describe('local connector runs', () => {
     const findFirst = vi
       .fn()
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: 'run-1', plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'] })
+      .mockResolvedValueOnce({ id: 'run-1', plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'], completedStages: 1 })
     const db = {
       nationalLifeSyncRun: { create, updateMany, findFirst },
     } as never
@@ -58,6 +58,7 @@ describe('local connector runs', () => {
       schemaVersion: 2,
       stages: planReadGridStages(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS),
       duplicate: false,
+      completedStages: 0,
     })
     expect(create.mock.calls[0][0].data).toEqual(
       expect.objectContaining({
@@ -71,7 +72,7 @@ describe('local connector runs', () => {
 
     await expect(
       startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now }),
-    ).resolves.toMatchObject({ runId: 'run-1', duplicate: true })
+    ).resolves.toMatchObject({ runId: 'run-1', duplicate: true, completedStages: 1 })
   })
 
   it('accepts a grid beyond the original two', async () => {
