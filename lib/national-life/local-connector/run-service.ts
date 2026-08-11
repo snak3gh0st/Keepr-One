@@ -3,7 +3,11 @@ import 'server-only'
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { NATIONAL_LIFE_PROVIDER } from '../constants'
 import type { NationalLifeGridKey } from '../portal-grid-client'
-import { planReadGridStages, type LocalConnectorStagePlan } from './capabilities'
+import {
+  planReadGridStages,
+  planReadPageStages,
+  type LocalConnectorStagePlan,
+} from './capabilities'
 import {
   LOCAL_CONNECTOR_SCHEMA_VERSION,
   type LocalConnectorRawStageEnvelope,
@@ -11,6 +15,7 @@ import {
 import { planRawIngest } from './raw-ingest'
 import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 import { NATIONAL_LIFE_SYNC_STAGES } from '../sync-progress'
+import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from '../read-coverage'
 
 export { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 
@@ -27,7 +32,14 @@ export const LOCAL_CONNECTOR_LEGACY_GRID_KEYS = [
   'NEW_BUSINESS',
   'INFORCE_CLIENTS',
 ] as const satisfies readonly NationalLifeGridKey[]
-export const LOCAL_CONNECTOR_DEFAULT_GRID_KEYS = NATIONAL_LIFE_SYNC_STAGES
+export const LOCAL_CONNECTOR_DEFAULT_GRID_KEYS = [
+  ...NATIONAL_LIFE_SYNC_STAGES,
+] as const
+export const LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS = [
+  ...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
+  ...NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
+] as const
+const DISCOVERY_PAGE_KEYS = new Set<NationalLifeGridKey>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
 const UPSERT_CHUNK_SIZE = 100
 
 type LocalConnectorDb = Pick<
@@ -74,6 +86,15 @@ export class LocalConnectorStageCompletionError extends Error {
 function plannedGridKeys(run: { plannedGridKeys: string[] }): readonly NationalLifeGridKey[] {
   if (run.plannedGridKeys.length === 0) return LOCAL_CONNECTOR_LEGACY_GRID_KEYS
   return run.plannedGridKeys as NationalLifeGridKey[]
+}
+
+function planLocalConnectorStages(keys: readonly NationalLifeGridKey[]): LocalConnectorStagePlan[] {
+  const unique = [...new Set(keys)]
+  return unique.map((key) =>
+    DISCOVERY_PAGE_KEYS.has(key)
+      ? planReadPageStages([key])[0]!
+      : planReadGridStages([key])[0]!,
+  )
 }
 
 async function failStaleLocalRuns(
@@ -128,7 +149,7 @@ export async function startLocalConnectorRun(
   const now = input.now ?? new Date()
   // Planned before any write: an unknown grid key must fail the request rather
   // than leave a RUNNING run behind that no device can ever finish.
-  const stages = planReadGridStages(options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS)
+  const stages = planLocalConnectorStages(options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS)
   await failStaleLocalRuns(db, { agentId: input.agentId, deviceId: input.deviceId, now })
 
   const active = await db.nationalLifeSyncRun.findFirst({
@@ -150,7 +171,7 @@ export async function startLocalConnectorRun(
     return {
       runId: active.id,
       schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
-      stages: planReadGridStages(plannedGridKeys(active)),
+      stages: planLocalConnectorStages(plannedGridKeys(active)),
       duplicate: true as const,
       completedStages: active.completedStages,
     }
@@ -165,8 +186,14 @@ export async function startLocalConnectorRun(
       executionSource: 'LOCAL',
       state: 'RUNNING',
       totalStages: stages.length,
-      plannedGridKeys: stages.map((stage) => stage.params.gridKey),
-      currentGridKey: stages[0]?.params.gridKey ?? null,
+      plannedGridKeys: stages.map((stage) =>
+        stage.capability === 'READ_GRID' ? stage.params.gridKey : stage.params.sourceKey,
+      ),
+      currentGridKey: stages[0]
+        ? stages[0].capability === 'READ_GRID'
+          ? stages[0].params.gridKey
+          : stages[0].params.sourceKey
+        : null,
       startedAt: now,
       createdAt: now,
       updatedAt: now,

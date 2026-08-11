@@ -8,6 +8,7 @@ export const CONNECTOR_COMMAND_PROTOCOL_VERSION = 1 as const
 
 export const CONNECTOR_CAPABILITIES = [
   'READ_GRID',
+  'READ_PAGE',
   'FORESIGHT_INVENTORY',
   'FORESIGHT_CASE_DETAIL',
   'FORESIGHT_REPORT',
@@ -56,6 +57,7 @@ export type ConnectorCommandTarget =
 
 export type ConnectorCommandParams =
   | { gridKey: string; navigatePath: string }
+  | { sourceKey: string; navigatePath: string }
   | Record<string, never>
   | { caseKey: string }
   | { externalApplicationId: string }
@@ -104,6 +106,7 @@ export function requiresExplicitConfirmation(capability: ConnectorCapability): b
 export function isReadOnlyCapability(capability: ConnectorCapability): boolean {
   return [
     'READ_GRID',
+    'READ_PAGE',
     'FORESIGHT_INVENTORY',
     'FORESIGHT_CASE_DETAIL',
     'FORESIGHT_REPORT',
@@ -173,6 +176,11 @@ function parseParams(
       return has(['gridKey', 'navigatePath']) && isIdentifier(value.gridKey) &&
         typeof value.navigatePath === 'string' && value.navigatePath.length <= 256
         ? { gridKey: value.gridKey, navigatePath: value.navigatePath }
+        : undefined
+    case 'READ_PAGE':
+      return has(['sourceKey', 'navigatePath']) && isIdentifier(value.sourceKey) &&
+        typeof value.navigatePath === 'string' && value.navigatePath.length <= 256
+        ? { sourceKey: value.sourceKey, navigatePath: value.navigatePath }
         : undefined
     case 'FORESIGHT_INVENTORY':
       return has([]) ? {} : undefined

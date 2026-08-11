@@ -8,14 +8,28 @@
 export const NATIONAL_LIFE_GRID_ENDPOINT_PATH = '/agent/Datatable/GetJsonResult'
 
 export const NATIONAL_LIFE_GRIDS = {
+  // Server-rendered portal surfaces. They use the same source-key catalogue so
+  // local connector envelopes remain server-authorized, but are captured with
+  // READ_PAGE rather than replaying the DataTables endpoint.
+  AGENT_DASHBOARD: '/agent/',
   // New business pipeline.
   NEW_BUSINESS: '/agent/book-of-business/new-business/all-new-business-cases',
   RECENTLY_CLOSED: '/agent/book-of-business/new-business/recently-closed-cases',
   PLACEMENT_REPORT: '/agent/book-of-business/new-business/placement-report',
+  INFORMAL_REQUESTS: '/agent/book-of-business/new-business/informal-request',
+  TRANSFER_COMPANY_INFORMATION:
+    '/agent/book-of-business/new-business/Transfer-Company-Information',
   TRANSFERS_EXCHANGES: '/agent/book-of-business/new-business/transfers-exchanges',
   // Inforce book — the basis for payment and commission reconciliation.
   INFORCE_CLIENTS: '/agent/book-of-business/inforce-book/all-clients',
   POLICY_PAYMENT_HISTORY: '/agent/book-of-business/inforce-book/policy-payment-history',
+  DAILY_UNIT_VALUES: '/agent/book-of-business/inforce-book/daily-unit-values',
+  PIP_CONTRIBUTION_INCREASE:
+    '/agent/book-of-business/inforce-book/pip-contribution-increase',
+  ANNUITY_PAST_DUE_CONTRIBUTIONS:
+    '/agent/book-of-business/inforce-book/annuity-flow-report/past-due-contribution',
+  ANNUITY_PAYROLL_FLOW_CHANGES:
+    '/agent/book-of-business/inforce-book/annuity-flow-report/payroll-flow-changes',
   PREMIUM_REPORT_AGENCY: '/agent/book-of-business/inforce-book/premium-report-agency',
   LIFE_PENDING_LAPSE: '/agent/book-of-business/inforce-book/life-pending-lapse-report',
   LIFE_PERSISTENCY: '/agent/book-of-business/inforce-book/life-persistency-report',

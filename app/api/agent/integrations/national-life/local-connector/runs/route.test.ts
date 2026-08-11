@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   enabled: vi.fn(),
+  pageDiscoveryEnabled: vi.fn(),
   mockVerify: vi.fn(),
   mockStartRun: vi.fn(),
 }))
 
 vi.mock('@/lib/national-life/local-connector/config', () => ({
   isNationalLifeLocalConnectorEnabled: mocks.enabled,
+  isNationalLifePageDiscoveryEnabled: mocks.pageDiscoveryEnabled,
   localConnectorUnavailableResponse: () =>
     Response.json(
       { error: 'NOT_AVAILABLE' },
@@ -24,6 +26,7 @@ vi.mock('@/lib/national-life/local-connector/device-signature', async () => {
   }
 })
 vi.mock('@/lib/national-life/local-connector/run-service', () => ({
+  LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS: ['NEW_BUSINESS', 'AGENT_DASHBOARD'],
   startLocalConnectorRun: mocks.mockStartRun,
 }))
 vi.mock('@/lib/prisma', () => ({ prisma: {} }))
@@ -51,6 +54,7 @@ const REMOTE_ENV = [
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.enabled.mockReturnValue(true)
+  mocks.pageDiscoveryEnabled.mockReturnValue(false)
   for (const key of REMOTE_ENV) delete process.env[key]
 })
 
@@ -151,6 +155,38 @@ describe('local connector runs route', () => {
   it('disabling READ_GRID stops runs without pausing the whole connector', async () => {
     process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_DISABLED_CAPABILITIES = 'READ_GRID'
     expect((await POST(signedRequest())).status).toBe(503)
+  })
+
+  it('requires READ_PAGE and sends the expanded plan only when discovery is enabled', async () => {
+    mocks.pageDiscoveryEnabled.mockReturnValue(true)
+    mockVerify.mockResolvedValueOnce({ deviceId: 'dev_1', agentId: 'agent_1' })
+    mockStartRun.mockResolvedValueOnce({
+      runId: 'run_1', schemaVersion: 2, stages: [], duplicate: false, completedStages: 0,
+    })
+
+    const response = await POST(signedRequest())
+
+    expect(response.status).toBe(201)
+    expect(mockStartRun).toHaveBeenCalledWith(
+      {},
+      { deviceId: 'dev_1', agentId: 'agent_1' },
+      { gridKeys: ['NEW_BUSINESS', 'AGENT_DASHBOARD'] },
+    )
+  })
+
+  it('does not require READ_PAGE while discovery is disabled', async () => {
+    process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_DISABLED_CAPABILITIES = 'READ_PAGE'
+    mockVerify.mockResolvedValueOnce({ deviceId: 'dev_1', agentId: 'agent_1' })
+    mockStartRun.mockResolvedValueOnce({
+      runId: 'run_1', schemaVersion: 2, stages: [], duplicate: false, completedStages: 0,
+    })
+
+    expect((await POST(signedRequest())).status).toBe(201)
+    expect(mockStartRun).toHaveBeenCalledWith(
+      {},
+      { deviceId: 'dev_1', agentId: 'agent_1' },
+      undefined,
+    )
   })
 
   it('starts a run when the signature and start succeed', async () => {

@@ -44,6 +44,27 @@ export const NATIONAL_LIFE_AUTOMATIC_GRID_KEYS = [
   'PAYABLE_GROSS_COMMISSIONS',
 ] as const satisfies readonly NationalLifeGridKey[]
 
+/// Sources that require a server-rendered page/form snapshot before their
+/// business-specific collectors can be finalized. They are deliberately not
+/// counted as automatic coverage merely because the extension can observe the
+/// page: a probe is evidence, not completion.
+export const NATIONAL_LIFE_DISCOVERY_PAGE_KEYS = [
+  'AGENT_DASHBOARD',
+  'PREMIUM_REPORT_AGENCY',
+  'POLICY_PAYMENT_HISTORY',
+  'LIFE_PERSISTENCY',
+  'PENDING_GROSS_COMMISSIONS',
+  'COMMISSIONS_OVERVIEW',
+  'COMMISSIONS_POLICY_HISTORY',
+  'PLACEMENT_REPORT',
+  'DAILY_UNIT_VALUES',
+  'PIP_CONTRIBUTION_INCREASE',
+  'ANNUITY_PAST_DUE_CONTRIBUTIONS',
+  'ANNUITY_PAYROLL_FLOW_CHANGES',
+  'INFORMAL_REQUESTS',
+  'TRANSFER_COMPANY_INFORMATION',
+] as const satisfies readonly NationalLifeGridKey[]
+
 const automaticLabels: Record<(typeof NATIONAL_LIFE_AUTOMATIC_GRID_KEYS)[number], string> = {
   NEW_BUSINESS: 'New business cases',
   RECENTLY_CLOSED: 'Recently closed cases',
@@ -79,7 +100,7 @@ export const NATIONAL_LIFE_READ_COVERAGE: readonly NationalLifeReadSource[] = [
   {
     key: 'AGENT_DASHBOARD',
     label: 'Agent dashboard totals and action-required items',
-    route: '/agent/',
+    route: NATIONAL_LIFE_GRIDS.AGENT_DASHBOARD,
     collector: 'DASHBOARD',
     implementation: 'NEEDS_COLLECTOR',
     requiredForFullSync: true,
@@ -143,7 +164,7 @@ export const NATIONAL_LIFE_READ_COVERAGE: readonly NationalLifeReadSource[] = [
   {
     key: 'DAILY_UNIT_VALUES',
     label: 'Daily unit values',
-    route: '/agent/book-of-business/inforce-book/daily-unit-values',
+    route: NATIONAL_LIFE_GRIDS.DAILY_UNIT_VALUES,
     collector: 'FILTERED_REPORT',
     implementation: 'NEEDS_PROBE',
     requiredForFullSync: true,
@@ -151,7 +172,7 @@ export const NATIONAL_LIFE_READ_COVERAGE: readonly NationalLifeReadSource[] = [
   {
     key: 'PIP_CONTRIBUTION_INCREASE',
     label: 'PIP contribution increases',
-    route: '/agent/book-of-business/inforce-book/pip-contribution-increase',
+    route: NATIONAL_LIFE_GRIDS.PIP_CONTRIBUTION_INCREASE,
     collector: 'FILTERED_REPORT',
     implementation: 'NEEDS_PROBE',
     requiredForFullSync: true,
@@ -159,7 +180,7 @@ export const NATIONAL_LIFE_READ_COVERAGE: readonly NationalLifeReadSource[] = [
   {
     key: 'ANNUITY_PAST_DUE_CONTRIBUTIONS',
     label: 'Annuity past-due contributions',
-    route: '/agent/book-of-business/inforce-book/annuity-flow-report/past-due-contribution',
+    route: NATIONAL_LIFE_GRIDS.ANNUITY_PAST_DUE_CONTRIBUTIONS,
     collector: 'FILTERED_REPORT',
     implementation: 'NEEDS_PROBE',
     requiredForFullSync: true,
@@ -167,7 +188,7 @@ export const NATIONAL_LIFE_READ_COVERAGE: readonly NationalLifeReadSource[] = [
   {
     key: 'ANNUITY_PAYROLL_FLOW_CHANGES',
     label: 'Annuity payroll flow changes',
-    route: '/agent/book-of-business/inforce-book/annuity-flow-report/payroll-flow-changes',
+    route: NATIONAL_LIFE_GRIDS.ANNUITY_PAYROLL_FLOW_CHANGES,
     collector: 'FILTERED_REPORT',
     implementation: 'NEEDS_PROBE',
     requiredForFullSync: true,
@@ -175,7 +196,15 @@ export const NATIONAL_LIFE_READ_COVERAGE: readonly NationalLifeReadSource[] = [
   {
     key: 'INFORMAL_REQUESTS',
     label: 'Informal requests',
-    route: '/agent/book-of-business/new-business/informal-request',
+    route: NATIONAL_LIFE_GRIDS.INFORMAL_REQUESTS,
+    collector: 'FILTERED_REPORT',
+    implementation: 'NEEDS_PROBE',
+    requiredForFullSync: true,
+  },
+  {
+    key: 'TRANSFER_COMPANY_INFORMATION',
+    label: 'Transfer company information',
+    route: NATIONAL_LIFE_GRIDS.TRANSFER_COMPANY_INFORMATION,
     collector: 'FILTERED_REPORT',
     implementation: 'NEEDS_PROBE',
     requiredForFullSync: true,
