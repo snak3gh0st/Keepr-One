@@ -2,9 +2,11 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import { nationalLifeReadCoverageSummary } from '@/lib/national-life/read-coverage'
 import type { NationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
 
 const POLL_INTERVAL_MS = 1_500
+const PORTAL_COVERAGE = nationalLifeReadCoverageSummary()
 export const NATIONAL_LIFE_SYNC_STARTED_EVENT = 'national-life-sync-started'
 
 function safeStatus(value: unknown): NationalLifeSyncStatus | null {
@@ -52,6 +54,7 @@ function formatCount(value: number | null): string {
 
 function coverageTone(state: NonNullable<NationalLifeSyncStatus['stageCoverage']>[number]['state']) {
   if (state === 'VERIFIED') return 'border-teal/30 bg-teal-pale/45 text-teal-deep'
+  if (state === 'CAPTURED') return 'border-blue-200 bg-blue-50 text-blue-800'
   if (state === 'READING') return 'border-gold/40 bg-gold-pale text-gold-ink'
   if (state === 'FAILED') return 'border-red-300 bg-red-50 text-red-700'
   return 'border-border-steel bg-panel/55 text-ink-muted'
@@ -156,7 +159,7 @@ export function NationalLifeSyncProgress({
           )}
         </div>
         <span className="font-mono text-sm font-semibold tabular-nums text-teal">
-          {status.completed} of {status.total} areas updated
+          {status.completed} of {status.total} portal sources captured
         </span>
       </div>
 
@@ -201,8 +204,8 @@ export function NationalLifeSyncProgress({
       {status.stageCoverage && status.stageCoverage.length > 0 && (
         <div className="mt-5 border-t border-border-steel pt-4">
           <div className="flex items-baseline justify-between gap-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">Verified portal areas</p>
-            <p className="text-xs text-ink-muted">A check means every page was reconciled.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">Portal source coverage</p>
+            <p className="text-xs text-ink-muted">Verified means every paginated row was reconciled.</p>
           </div>
           <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {status.stageCoverage.map((stage) => (
@@ -212,11 +215,20 @@ export function NationalLifeSyncProgress({
                   <span className="font-mono text-[10px] uppercase">{stage.state}</span>
                 </div>
                 {stage.verifiedRecords !== null && (
-                  <p className="mt-1 font-mono tabular-nums">{stage.verifiedRecords.toLocaleString('en-US')} rows verified</p>
+                  <p className="mt-1 font-mono tabular-nums">
+                    {stage.verifiedRecords.toLocaleString('en-US')}{' '}
+                    {stage.state === 'CAPTURED' ? 'snapshot records captured' : 'rows verified'}
+                  </p>
                 )}
               </li>
             ))}
           </ul>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-steel bg-panel/45 px-3 py-2 text-xs text-ink-muted">
+            <span>V1 portal coverage</span>
+            <span className="font-mono font-semibold tabular-nums text-ink">
+              {PORTAL_COVERAGE.automatic} of {PORTAL_COVERAGE.required} known sources automated
+            </span>
+          </div>
         </div>
       )}
 

@@ -8,6 +8,7 @@ import {
   type NationalLifeSyncRunState,
 } from './sync-progress'
 import { expireStaleLocalConnectorRuns } from './local-connector/run-service'
+import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from './read-coverage'
 
 const ACTIVE_RUN_STATES: readonly NationalLifeSyncRunState[] = [
   'QUEUED',
@@ -53,7 +54,7 @@ export type NationalLifeSyncStatus = {
 export type NationalLifeStageCoverage = {
   gridKey: string
   label: string | null
-  state: 'PENDING' | 'READING' | 'VERIFIED' | 'FAILED'
+  state: 'PENDING' | 'READING' | 'CAPTURED' | 'VERIFIED' | 'FAILED'
   verifiedRecords: number | null
 }
 
@@ -72,7 +73,23 @@ const GRID_LABELS: Record<string, string> = {
   LIFE_PENDING_LAPSE: 'pending lapse policies',
   COMMISSIONS_EARNING_REPORT: 'commission earning detail',
   PAYABLE_GROSS_COMMISSIONS: 'payable gross commissions',
+  AGENT_DASHBOARD: 'agent dashboard',
+  PREMIUM_REPORT_AGENCY: 'premium report',
+  POLICY_PAYMENT_HISTORY: 'policy payment history',
+  LIFE_PERSISTENCY: 'life persistency',
+  PENDING_GROSS_COMMISSIONS: 'pending gross commissions',
+  COMMISSIONS_OVERVIEW: 'commission overview',
+  COMMISSIONS_POLICY_HISTORY: 'policy commission history',
+  PLACEMENT_REPORT: 'placement report',
+  DAILY_UNIT_VALUES: 'daily unit values',
+  PIP_CONTRIBUTION_INCREASE: 'PIP contribution increases',
+  ANNUITY_PAST_DUE_CONTRIBUTIONS: 'past-due annuity contributions',
+  ANNUITY_PAYROLL_FLOW_CHANGES: 'annuity payroll flow changes',
+  INFORMAL_REQUESTS: 'informal requests',
+  TRANSFER_COMPANY_INFORMATION: 'transfer company information',
 }
+
+const DISCOVERY_PAGE_KEYS = new Set<string>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
 
 export function nationalLifeSyncGridLabel(gridKey: string | null): string | null {
   return gridKey ? GRID_LABELS[gridKey] ?? null : null
@@ -93,7 +110,7 @@ export function localStageCoverage(input: {
     gridKey,
     label: nationalLifeSyncGridLabel(gridKey),
     state: completed.has(gridKey)
-      ? 'VERIFIED'
+      ? DISCOVERY_PAGE_KEYS.has(gridKey) ? 'CAPTURED' : 'VERIFIED'
       : gridKey === input.currentGridKey
         ? 'READING'
         : input.failedStages > 0 && !input.currentGridKey

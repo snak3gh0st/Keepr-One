@@ -12,10 +12,24 @@ describe('parseStagePlan', () => {
         },
       },
     ])
-    expect(stage?.params.gridKey).toBe('PAID_COMMISSIONS')
+    expect(stage?.capability).toBe('READ_GRID')
+    expect(stage?.capability === 'READ_GRID' ? stage.params.gridKey : null).toBe('PAID_COMMISSIONS')
     expect(stage?.params.navigatePath).toBe(
       '/agent/compensation/commissions/paid-commissions',
     )
+  })
+
+  it('accepts a READ_PAGE source from the server', () => {
+    const [stage] = parseStagePlan([
+      {
+        capability: 'READ_PAGE',
+        params: { sourceKey: 'AGENT_DASHBOARD', navigatePath: '/agent/' },
+      },
+    ])
+    expect(stage).toEqual({
+      capability: 'READ_PAGE',
+      params: { sourceKey: 'AGENT_DASHBOARD', navigatePath: '/agent/' },
+    })
   })
 
   it('accepts multiple stages up to the cap', () => {

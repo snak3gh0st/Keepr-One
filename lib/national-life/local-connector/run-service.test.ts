@@ -221,7 +221,8 @@ describe('local connector runs', () => {
     expect(written.create.raw).toMatchObject({ GlobalId: 'G1' })
   })
 
-  it('rejects a grid that has no ingest destination', async () => {
+  it('routes a captured server-rendered page to raw report rows', async () => {
+    const reportUpsert = vi.fn().mockResolvedValue({})
     const tx = {
       nationalLifeSyncRun: {
         findFirst: vi
@@ -231,12 +232,21 @@ describe('local connector runs', () => {
       },
       nationalLifeConnectorStageReceipt: {
         findUnique: vi.fn().mockResolvedValue(null),
-        create: vi.fn(),
+        create: vi.fn().mockResolvedValue({
+          id: 'receipt-page',
+          runId: 'run_1',
+          gridKey: 'COMMISSIONS_OVERVIEW',
+          sequence: 0,
+          contentHash: 'f'.repeat(64),
+          recordCount: 1,
+          writtenCount: 1,
+          createdAt: now,
+        }),
         findMany: vi.fn().mockResolvedValue([]),
       },
       nationalLifeCaseSnapshot: { upsert: vi.fn() },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
-      nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: reportUpsert },
       nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }
     const db = {
@@ -258,13 +268,18 @@ describe('local connector runs', () => {
           gridKey: 'COMMISSIONS_OVERVIEW',
           sequence: 0,
           observedAt: '2026-08-04T00:00:00.000Z',
-          recordsTotal: 0,
+          recordsTotal: 1,
           truncated: false,
-          records: [],
+          records: [{ RecordType: 'PAGE_META', Title: 'Commission Overview' }],
         },
       }),
-    ).rejects.toThrow('No ingest route for grid COMMISSIONS_OVERVIEW')
-    expect(tx.nationalLifeConnectorStageReceipt.create).not.toHaveBeenCalled()
+    ).resolves.toMatchObject({ duplicate: false })
+    expect(reportUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        gridKey: 'COMMISSIONS_OVERVIEW',
+        raw: { RecordType: 'PAGE_META', Title: 'Commission Overview' },
+      }),
+    }))
   })
 
   it('rejects a stage for a grid the run never planned and does not complete it', async () => {

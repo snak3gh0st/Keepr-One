@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
 import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '@/lib/national-life/portal-grid-client'
 import {
-  LocalConnectorPlanError,
   PLANNED_LOCAL_CONNECTOR_CAPABILITIES,
   isSafeNavigatePath,
   planReadGridStages,
+  planReadPageStages,
 } from './capabilities'
 import { LOCAL_CONNECTOR_ROUTED_GRIDS, planRawIngest } from './raw-ingest'
-import { LOCAL_CONNECTOR_DEFAULT_GRID_KEYS } from './run-service'
+import {
+  LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
+  LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS,
+} from './run-service'
 
 describe('isSafeNavigatePath', () => {
   it('accepts a portal agent path', () => {
@@ -51,14 +54,14 @@ describe('planReadGridStages', () => {
   })
 
   it('produces a plan every routed grid key can reach', () => {
-    const keys = [...LOCAL_CONNECTOR_ROUTED_GRIDS]
+    const keys = [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS]
     const plan = planReadGridStages(keys)
     expect(plan).toHaveLength(keys.length)
     expect(plan.every((stage) => isSafeNavigatePath(stage.params.navigatePath))).toBe(true)
   })
 
   it('plans the default operational sync set', () => {
-    expect(planReadGridStages(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS).map((s) => s.params.gridKey)).toEqual([
+    expect(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS).toEqual([
       'NEW_BUSINESS',
       'RECENTLY_CLOSED',
       'INFORCE_CLIENTS',
@@ -73,20 +76,38 @@ describe('planReadGridStages', () => {
       'COMMISSIONS_EARNING_REPORT',
       'PAYABLE_GROSS_COMMISSIONS',
     ])
+    expect(LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS).toEqual([
+      ...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
+      'AGENT_DASHBOARD',
+      'PREMIUM_REPORT_AGENCY',
+      'POLICY_PAYMENT_HISTORY',
+      'LIFE_PERSISTENCY',
+      'PENDING_GROSS_COMMISSIONS',
+      'COMMISSIONS_OVERVIEW',
+      'COMMISSIONS_POLICY_HISTORY',
+      'PLACEMENT_REPORT',
+      'DAILY_UNIT_VALUES',
+      'PIP_CONTRIBUTION_INCREASE',
+      'ANNUITY_PAST_DUE_CONTRIBUTIONS',
+      'ANNUITY_PAYROLL_FLOW_CHANGES',
+      'INFORMAL_REQUESTS',
+      'TRANSFER_COMPANY_INFORMATION',
+    ])
   })
 
-  it('refuses a catalogue grid that has no ingest destination', () => {
-    // The whole point of planning: a grid the server cannot land anywhere must fail
-    // before a run row exists, not on the device once the run is RUNNING.
-    expect(() => planReadGridStages(['COMMISSIONS_OVERVIEW'])).toThrow(
-      /No ingest destination for grid COMMISSIONS_OVERVIEW/,
-    )
-    try {
-      planReadGridStages(['COMMISSIONS_OVERVIEW'])
-    } catch (error) {
-      expect(error).toBeInstanceOf(LocalConnectorPlanError)
-      expect((error as LocalConnectorPlanError).code).toBe('GRID_NOT_ROUTED')
-    }
+  it('plans server-rendered sources with READ_PAGE', () => {
+    expect(planReadPageStages(['COMMISSIONS_OVERVIEW'])).toEqual([{
+      capability: 'READ_PAGE',
+      params: {
+        sourceKey: 'COMMISSIONS_OVERVIEW',
+        navigatePath: '/agent/compensation/commissions/overview',
+      },
+    }])
+  })
+
+  it('never lets a source run with the wrong collector', () => {
+    expect(() => planReadGridStages(['COMMISSIONS_OVERVIEW'])).toThrow(/requires READ_PAGE/)
+    expect(() => planReadPageStages(['NEW_BUSINESS'])).toThrow(/requires READ_GRID/)
   })
 
   it('pins the routed set to what planRawIngest actually does, in both directions', () => {
@@ -98,10 +119,8 @@ describe('planReadGridStages', () => {
       }
       if (LOCAL_CONNECTOR_ROUTED_GRIDS.has(gridKey)) {
         expect(routes).not.toThrow()
-        expect(() => planReadGridStages([gridKey])).not.toThrow()
       } else {
         expect(routes).toThrow(/No ingest route for grid/)
-        expect(() => planReadGridStages([gridKey])).toThrow(LocalConnectorPlanError)
       }
     }
   })
@@ -125,6 +144,10 @@ describe('planReadGridStages', () => {
     vi.doMock('@/lib/national-life/portal-grid-client', () => ({
       NATIONAL_LIFE_GRIDS: { A_GRID: '/agent/shared', B_GRID: '/agent/shared' },
     }))
+    vi.doMock('../read-coverage', () => ({
+      NATIONAL_LIFE_AUTOMATIC_GRID_KEYS: ['A_GRID', 'B_GRID'],
+      NATIONAL_LIFE_DISCOVERY_PAGE_KEYS: [],
+    }))
     // The invented keys are by definition unroutable; stubbing the routing check
     // keeps this test on the path-collision behaviour it exists to pin.
     vi.doMock('./raw-ingest', () => ({ isRoutedGrid: () => true }))
@@ -138,6 +161,7 @@ describe('planReadGridStages', () => {
       ).toThrow(/Duplicate navigate path/)
     } finally {
       vi.doUnmock('@/lib/national-life/portal-grid-client')
+      vi.doUnmock('../read-coverage')
       vi.doUnmock('./raw-ingest')
       vi.resetModules()
     }
@@ -165,6 +189,7 @@ describe('PLANNED_LOCAL_CONNECTOR_CAPABILITIES', () => {
   it('declares every protocol capability while the extension executes only its closed subset', () => {
     expect(PLANNED_LOCAL_CONNECTOR_CAPABILITIES).toEqual([
       'READ_GRID',
+      'READ_PAGE',
       'FORESIGHT_INVENTORY',
       'FORESIGHT_CASE_DETAIL',
       'FORESIGHT_REPORT',

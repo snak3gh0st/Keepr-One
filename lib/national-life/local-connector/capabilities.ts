@@ -8,12 +8,19 @@ import {
   type ConnectorCapability,
 } from '@/lib/national-life/connector-command-contract'
 import { isRoutedGrid } from './raw-ingest'
+import {
+  NATIONAL_LIFE_AUTOMATIC_GRID_KEYS,
+  NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
+} from '../read-coverage'
+
+const READ_GRID_KEYS = new Set<NationalLifeGridKey>(NATIONAL_LIFE_AUTOMATIC_GRID_KEYS)
+const READ_PAGE_KEYS = new Set<NationalLifeGridKey>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
 
 export type LocalConnectorCapabilityName = ConnectorCapability
 
 /// The Chrome extension ships this closed subset. The larger protocol catalogue
 /// is deliberately not executable until a released browser executor validates it.
-export const EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES = ['READ_GRID'] as const satisfies readonly LocalConnectorCapabilityName[]
+export const EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES = ['READ_GRID', 'READ_PAGE'] as const satisfies readonly LocalConnectorCapabilityName[]
 
 /// Named for planning and UI copy only. The extension's IMPLEMENTED_CAPABILITIES
 /// must stay the closed set of what the device can actually run — do not add these
@@ -43,6 +50,9 @@ export type ReadGridParams = {
 export type LocalConnectorStagePlan = {
   capability: 'READ_GRID'
   params: ReadGridParams
+} | {
+  capability: 'READ_PAGE'
+  params: { sourceKey: NationalLifeGridKey; navigatePath: string }
 }
 
 /// The extension refuses anything outside the agent tree. Every portal grid hits the
@@ -95,6 +105,9 @@ export function planReadGridStages(
     if (!Object.hasOwn(NATIONAL_LIFE_GRIDS, gridKey)) {
       throw new Error(`Unknown grid key ${String(gridKey)}`)
     }
+    if (!READ_GRID_KEYS.has(gridKey)) {
+      throw new Error(`Source ${gridKey} requires READ_PAGE`)
+    }
     const navigatePath = NATIONAL_LIFE_GRIDS[gridKey]
     if (!isSafeNavigatePath(navigatePath)) {
       throw new Error(`Unsafe navigate path for grid ${gridKey}`)
@@ -108,5 +121,26 @@ export function planReadGridStages(
     }
     seenPaths.set(navigatePath, gridKey)
     return { capability: 'READ_GRID', params: { gridKey, navigatePath } }
+  })
+}
+
+export function planReadPageStages(
+  sourceKeys: readonly NationalLifeGridKey[],
+): LocalConnectorStagePlan[] {
+  return [...new Set(sourceKeys)].map((sourceKey) => {
+    if (!Object.hasOwn(NATIONAL_LIFE_GRIDS, sourceKey)) {
+      throw new Error(`Unknown source key ${String(sourceKey)}`)
+    }
+    if (!READ_PAGE_KEYS.has(sourceKey)) {
+      throw new Error(`Source ${sourceKey} requires READ_GRID`)
+    }
+    const navigatePath = NATIONAL_LIFE_GRIDS[sourceKey]
+    if (!isSafeNavigatePath(navigatePath)) {
+      throw new Error(`Unsafe navigate path for source ${sourceKey}`)
+    }
+    if (!isRoutedGrid(sourceKey)) {
+      throw new LocalConnectorPlanError('GRID_NOT_ROUTED', sourceKey)
+    }
+    return { capability: 'READ_PAGE', params: { sourceKey, navigatePath } }
   })
 }

@@ -2,14 +2,13 @@ import { isGridKeyLabel } from './constants'
 import { hasExactKeys } from './messages'
 import { parseConnectorCommand, type ConnectorCommand } from './command-contract'
 
-export type Capability = 'READ_GRID'
+export type Capability = 'READ_GRID' | 'READ_PAGE'
 
-export type StagePlan = {
-  capability: Capability
-  params: { gridKey: string; navigatePath: string }
-}
+export type StagePlan =
+  | { capability: 'READ_GRID'; params: { gridKey: string; navigatePath: string } }
+  | { capability: 'READ_PAGE'; params: { sourceKey: string; navigatePath: string } }
 
-const IMPLEMENTED_CAPABILITIES = ['READ_GRID'] as const
+const IMPLEMENTED_CAPABILITIES = ['READ_GRID', 'READ_PAGE'] as const
 const MAX_STAGES = 32
 const MAX_NAVIGATE_PATH = 256
 
@@ -46,7 +45,7 @@ export function parseStagePlan(value: unknown): StagePlan[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_STAGES) {
     throw new Error('INVALID_RUN_RESPONSE')
   }
-  return value.map((entry) => {
+  return value.map((entry): StagePlan => {
     if (!entry || typeof entry !== 'object' || !hasExactKeys(entry, ['capability', 'params'])) {
       throw new Error('INVALID_RUN_RESPONSE')
     }
@@ -57,19 +56,21 @@ export function parseStagePlan(value: unknown): StagePlan[] {
     ) {
       throw new Error('UNKNOWN_CAPABILITY')
     }
-    if (!params || typeof params !== 'object' || !hasExactKeys(params, ['gridKey', 'navigatePath'])) {
-      throw new Error('INVALID_RUN_RESPONSE')
-    }
-    const { gridKey, navigatePath } = params as { gridKey: unknown; navigatePath: unknown }
-    if (!isGridKeyLabel(gridKey)) {
-      throw new Error('INVALID_RUN_RESPONSE')
-    }
+    if (!params || typeof params !== 'object') throw new Error('INVALID_RUN_RESPONSE')
+    const navigatePath = 'navigatePath' in params ? params.navigatePath : undefined
     if (typeof navigatePath !== 'string' || !isSafeNavigatePath(navigatePath)) {
       throw new Error('UNSAFE_NAVIGATE_PATH')
     }
-    // Echo the capability that was validated rather than a literal, so a second
-    // entry in IMPLEMENTED_CAPABILITIES cannot silently collapse into READ_GRID.
-    return { capability: capability as Capability, params: { gridKey, navigatePath } }
+    if (capability === 'READ_GRID') {
+      if (!hasExactKeys(params, ['gridKey', 'navigatePath'])) throw new Error('INVALID_RUN_RESPONSE')
+      const gridKey = 'gridKey' in params ? params.gridKey : undefined
+      if (!isGridKeyLabel(gridKey)) throw new Error('INVALID_RUN_RESPONSE')
+      return { capability, params: { gridKey, navigatePath } }
+    }
+    if (!hasExactKeys(params, ['sourceKey', 'navigatePath'])) throw new Error('INVALID_RUN_RESPONSE')
+    const sourceKey = 'sourceKey' in params ? params.sourceKey : undefined
+    if (!isGridKeyLabel(sourceKey)) throw new Error('INVALID_RUN_RESPONSE')
+    return { capability: 'READ_PAGE', params: { sourceKey, navigatePath } }
   })
 }
 
@@ -83,10 +84,16 @@ export function parseExecutableConnectorCommand(value: unknown): ConnectorComman
   if (!(IMPLEMENTED_CAPABILITIES as readonly string[]).includes(command.capability)) {
     throw new Error('UNKNOWN_CAPABILITY')
   }
-  if (command.capability !== 'READ_GRID') throw new Error('UNKNOWN_CAPABILITY')
+  if (command.capability !== 'READ_GRID' && command.capability !== 'READ_PAGE') {
+    throw new Error('UNKNOWN_CAPABILITY')
+  }
   const params = command.params
-  if (!('gridKey' in params) || !('navigatePath' in params)) throw new Error('INVALID_COMMAND')
-  if (!isGridKeyLabel(params.gridKey)) throw new Error('INVALID_COMMAND')
+  if (!('navigatePath' in params)) throw new Error('INVALID_COMMAND')
+  if (command.capability === 'READ_GRID') {
+    if (!('gridKey' in params) || !isGridKeyLabel(params.gridKey)) throw new Error('INVALID_COMMAND')
+  } else if (!('sourceKey' in params) || !isGridKeyLabel(params.sourceKey)) {
+    throw new Error('INVALID_COMMAND')
+  }
   if (!isSafeNavigatePath(params.navigatePath)) throw new Error('UNSAFE_NAVIGATE_PATH')
   return command
 }

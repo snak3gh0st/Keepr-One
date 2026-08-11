@@ -17,9 +17,9 @@ describe('National Life read coverage', () => {
     const keys = NATIONAL_LIFE_READ_COVERAGE.map((source) => source.key)
     expect(new Set(keys).size).toBe(keys.length)
     expect(nationalLifeReadCoverageSummary()).toEqual({
-      required: 30,
+      required: 31,
       automatic: 13,
-      remaining: 17,
+      remaining: 18,
     })
   })
 

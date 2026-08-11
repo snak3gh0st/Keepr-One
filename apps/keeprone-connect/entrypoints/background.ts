@@ -1,4 +1,4 @@
-import { parseStagePlan } from '../lib/capabilities'
+import { parseStagePlan, type StagePlan } from '../lib/capabilities'
 import {
   CONNECTOR_SCHEMA_VERSION,
   CONNECTOR_VERSION_HEADER,
@@ -14,12 +14,15 @@ import {
 import { clearDeviceKeys, getOrCreateDeviceKey } from '../lib/key-store'
 import {
   parseBridgeMessage,
+  parsePageCaptureAck,
   parseExternalMessage,
   type AbortGridMessage,
   type BeginGridMessage,
   type BridgeControlAck,
   type BridgeMessage,
+  type CapturePageMessage,
 } from '../lib/messages'
+import { PAGE_SIZE } from '../lib/paging'
 import { OUTDATED_CODES, revokesDevice } from '../lib/failure'
 import {
   PERMISSIVE_REMOTE_CONFIG,
@@ -41,7 +44,11 @@ import {
   writeSyncState,
 } from '../lib/state'
 
-type ActiveNavigation = BeginGridMessage & {
+type ActiveNavigation = {
+  type: 'BEGIN_GRID' | 'CAPTURE_PAGE'
+  gridKey: string
+  token: string
+  correlationId: string
   tabId: number
   recordsTotal?: number
   lastSequence?: number
@@ -118,6 +125,32 @@ async function sendBeginGridWithRetry(tabId: number, message: BeginGridMessage):
   throw lastError ?? new Error('BRIDGE_UNAVAILABLE')
 }
 
+async function capturePageWithRetry(tabId: number, message: CapturePageMessage) {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = parsePageCaptureAck(await chrome.tabs.sendMessage(tabId, message))
+      if (
+        !response ||
+        response.sourceKey !== message.sourceKey ||
+        response.token !== message.token ||
+        response.correlationId !== message.correlationId
+      ) {
+        throw new Error('BRIDGE_UNAVAILABLE')
+      }
+      return response.records
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      const active = activeNavigations.get(tabId)
+      if (!active || active.token !== message.token) break
+    }
+  }
+  throw lastError ?? new Error('BRIDGE_UNAVAILABLE')
+}
+
 function respond<T>(sendResponse: (response?: T) => void, promise: Promise<T>): void {
   void promise.then(sendResponse, (error) => {
     sendResponse({ ok: false, error: errorCode(error, 'CONNECTOR_UNAVAILABLE') } as T)
@@ -132,6 +165,10 @@ function versionedHeaders(base: Record<string, string>): Record<string, string> 
 function randomToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32))
   return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function stageKey(stage: StagePlan): string {
+  return stage.capability === 'READ_GRID' ? stage.params.gridKey : stage.params.sourceKey
 }
 
 function senderAllowed(sender: chrome.runtime.MessageSender): boolean {
@@ -510,7 +547,8 @@ async function startNewSync() {
   })
 }
 
-async function beginExtraction(tabId: number, gridKey: string) {
+async function beginExtraction(tabId: number, stage: StagePlan) {
+  const gridKey = stageKey(stage)
   const active = activeNavigations.get(tabId)
   if (active?.gridKey === gridKey) {
     const state = await readSyncState()
@@ -520,11 +558,13 @@ async function beginExtraction(tabId: number, gridKey: string) {
     // fresh BEGIN_GRID from reaching the bridge.
     activeNavigations.delete(tabId)
   }
-  const message: BeginGridMessage = {
-    type: 'BEGIN_GRID',
+  const token = randomToken()
+  const correlationId = crypto.randomUUID()
+  const message = {
+    type: stage.capability === 'READ_GRID' ? 'BEGIN_GRID' as const : 'CAPTURE_PAGE' as const,
     gridKey,
-    token: randomToken(),
-    correlationId: crypto.randomUUID(),
+    token,
+    correlationId,
   }
   activeNavigations.set(tabId, { ...message, tabId })
   await writeSyncState({ ...(await readSyncState()), status: 'EXTRACTING', errorCode: undefined })
@@ -532,10 +572,43 @@ async function beginExtraction(tabId: number, gridKey: string) {
     // `tabs.onUpdated(..., complete)` can arrive a few hundred milliseconds
     // before the document_start bridge has registered its listener. Treat that
     // race as a page-readiness delay, not as a failed sync.
-    await sendBeginGridWithRetry(tabId, message)
-  } catch {
+    if (stage.capability === 'READ_GRID') {
+      await sendBeginGridWithRetry(tabId, {
+        type: 'BEGIN_GRID',
+        gridKey,
+        token,
+        correlationId,
+      })
+      return
+    }
+
+    const records = await capturePageWithRetry(tabId, {
+      type: 'CAPTURE_PAGE',
+      sourceKey: gridKey,
+      token,
+      correlationId,
+    })
+    const chunks = records.length === 0
+      ? [[]]
+      : Array.from({ length: Math.ceil(records.length / PAGE_SIZE) }, (_, index) =>
+          records.slice(index * PAGE_SIZE, (index + 1) * PAGE_SIZE),
+        )
+    for (const [sequence, chunk] of chunks.entries()) {
+      await uploadChunk(tabId, {
+        type: 'GRID_CHUNK',
+        gridKey,
+        token,
+        correlationId,
+        sequence,
+        recordsTotal: records.length,
+        truncated: false,
+        records: chunk,
+      })
+    }
+    await finishGrid(tabId, gridKey)
+  } catch (error) {
     activeNavigations.delete(tabId)
-    await failSync('BRIDGE_UNAVAILABLE')
+    await failSync(errorCode(error, 'BRIDGE_UNAVAILABLE'))
   }
 }
 
@@ -582,7 +655,7 @@ async function handleTabReady(tabId: number, urlValue?: string) {
     }
     return
   }
-  await beginExtraction(tabId, stage.params.gridKey)
+  await beginExtraction(tabId, stage)
 }
 
 async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type: 'GRID_CHUNK' }>) {
@@ -594,7 +667,7 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
     !device.baseUrl ||
     !state.runId ||
     state.runId.length > 128 ||
-    currentStage(state)?.params.gridKey !== message.gridKey
+    !currentStage(state) || stageKey(currentStage(state)!) !== message.gridKey
   ) {
     throw new Error('SYNC_STATE_INVALID')
   }
@@ -647,7 +720,7 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
 async function finishGrid(tabId: number, gridKey: string) {
   const state = await readSyncState()
   const stage = currentStage(state)
-  if (!state.runId || !state.plan || stage?.params.gridKey !== gridKey) {
+  if (!state.runId || !state.plan || !stage || stageKey(stage) !== gridKey) {
     throw new Error('SYNC_STATE_INVALID')
   }
   const active = activeNavigations.get(tabId)

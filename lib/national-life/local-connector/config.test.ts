@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getNationalLifeLocalConnectorConfig } from './config'
+import {
+  getNationalLifeLocalConnectorConfig,
+  isNationalLifePageDiscoveryEnabled,
+} from './config'
 
 const extensionId = 'abcdefghijklmnopabcdefghijklmnop'
 
@@ -69,5 +72,18 @@ describe('local connector config', () => {
     vi.stubEnv('BETTER_AUTH_URL', 'https://app.keeprone.com')
 
     expect(() => getNationalLifeLocalConnectorConfig()).toThrow(/Chrome Web Store URL/)
+  })
+
+  it('keeps page discovery off until the new extension rollout is enabled', () => {
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_PAGE_DISCOVERY_ENABLED', '')
+    expect(isNationalLifePageDiscoveryEnabled()).toBe(false)
+
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_PAGE_DISCOVERY_ENABLED', 'true')
+    expect(isNationalLifePageDiscoveryEnabled()).toBe(true)
+  })
+
+  it('rejects an ambiguous page discovery flag', () => {
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_PAGE_DISCOVERY_ENABLED', 'yes')
+    expect(() => isNationalLifePageDiscoveryEnabled()).toThrow(/must be true or false/)
   })
 })
