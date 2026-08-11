@@ -23,6 +23,23 @@ const REPORT_ROW_GRIDS = new Set<NationalLifeGridKey>([
   'LIFE_PENDING_LAPSE',
   'COMMISSIONS_EARNING_REPORT',
   'PAYABLE_GROSS_COMMISSIONS',
+  // Structured snapshots of server-rendered and form-driven pages. Each row
+  // carries a record type (page metadata, visible text, table row, form, link)
+  // and is kept verbatim in addition to the faithful raw-page landing zone.
+  'AGENT_DASHBOARD',
+  'PLACEMENT_REPORT',
+  'INFORMAL_REQUESTS',
+  'TRANSFER_COMPANY_INFORMATION',
+  'POLICY_PAYMENT_HISTORY',
+  'DAILY_UNIT_VALUES',
+  'PIP_CONTRIBUTION_INCREASE',
+  'ANNUITY_PAST_DUE_CONTRIBUTIONS',
+  'ANNUITY_PAYROLL_FLOW_CHANGES',
+  'PREMIUM_REPORT_AGENCY',
+  'LIFE_PERSISTENCY',
+  'COMMISSIONS_OVERVIEW',
+  'COMMISSIONS_POLICY_HISTORY',
+  'PENDING_GROSS_COMMISSIONS',
 ])
 
 /// The grids `planRawIngest` can actually land somewhere, derived from the three

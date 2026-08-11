@@ -198,4 +198,20 @@ describe('local stage coverage', () => {
       expect.objectContaining({ gridKey: 'INFORCE_CLIENTS', state: 'READING', verifiedRecords: null }),
     ])
   })
+
+  it('marks a discovery page captured without claiming it was reconciled', () => {
+    expect(localStageCoverage({
+      plannedGridKeys: ['AGENT_DASHBOARD'],
+      totalStages: 1,
+      currentGridKey: null,
+      failedStages: 0,
+      completions: [{ gridKey: 'AGENT_DASHBOARD', expectedRecordCount: 12 }],
+    })).toEqual([
+      expect.objectContaining({
+        gridKey: 'AGENT_DASHBOARD',
+        state: 'CAPTURED',
+        verifiedRecords: 12,
+      }),
+    ])
+  })
 })

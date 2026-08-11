@@ -1,4 +1,5 @@
 import {
+  isNationalLifePageDiscoveryEnabled,
   isNationalLifeLocalConnectorEnabled,
   localConnectorUnavailableResponse,
 } from '@/lib/national-life/local-connector/config'
@@ -11,7 +12,10 @@ import {
   readLimitedBody,
 } from '@/lib/national-life/local-connector/request'
 import { refuseLocalConnectorCapability } from '@/lib/national-life/local-connector/remote-config'
-import { startLocalConnectorRun } from '@/lib/national-life/local-connector/run-service'
+import {
+  LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS,
+  startLocalConnectorRun,
+} from '@/lib/national-life/local-connector/run-service'
 import { prisma } from '@/lib/prisma'
 import { consumeRateLimit } from '@/lib/redis/rate-limit'
 
@@ -30,7 +34,12 @@ export async function POST(request: Request) {
   // que o cliente diz ter é auto-declarada, então o piso não é uma sugestão que
   // ele possa ignorar — é aqui que ele é aplicado. Um run é o começo de tudo;
   // barrar aqui evita abrir um run que o cliente não conseguiria terminar.
-  const refusal = refuseLocalConnectorCapability('READ_GRID', request.headers)
+  const pageDiscoveryEnabled = isNationalLifePageDiscoveryEnabled()
+  const refusal =
+    refuseLocalConnectorCapability('READ_GRID', request.headers) ??
+    (pageDiscoveryEnabled
+      ? refuseLocalConnectorCapability('READ_PAGE', request.headers)
+      : null)
   if (refusal) return refusal
 
   try {
@@ -53,7 +62,11 @@ export async function POST(request: Request) {
       )
     }
 
-    const run = await startLocalConnectorRun(prisma, device)
+    const run = await startLocalConnectorRun(
+      prisma,
+      device,
+      pageDiscoveryEnabled ? { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS } : undefined,
+    )
     return Response.json(run, { status: 201, headers: NO_STORE })
   } catch (error) {
     if (error instanceof LocalConnectorSignatureError) {

@@ -44,6 +44,22 @@ export type BeginGridMessage = {
   correlationId: string
 }
 
+export type CapturePageMessage = {
+  type: 'CAPTURE_PAGE'
+  sourceKey: string
+  token: string
+  correlationId: string
+}
+
+export type PageCaptureAck = {
+  ok: true
+  type: 'PAGE_CAPTURED'
+  sourceKey: string
+  token: string
+  correlationId: string
+  records: RawGridRow[]
+}
+
 /// Ordem de parar onde está, mandada pelo background ao extrator.
 ///
 /// O laço de paginação da página não tem como saber que o servidor recusou o
@@ -116,7 +132,7 @@ function isShortString(value: unknown, max: number, min = 1): value is string {
 /// Raw carrier rows are forwarded uninterpreted: the server owns every field name and
 /// every meaning. The background only bounds what it will relay — a plain object whose
 /// keys are short and whose serialized size fits the server's per-row cap.
-function isRawGridRow(value: unknown): value is RawGridRow {
+export function isRawGridRow(value: unknown): value is RawGridRow {
   if (!isObject(value)) return false
   if (Object.keys(value).some((key) => key.length > MAX_ROW_KEY_LENGTH)) return false
   try {
@@ -172,6 +188,38 @@ export function parseBeginGridMessage(value: unknown): BeginGridMessage | null {
 
 export function parseAbortGridMessage(value: unknown): AbortGridMessage | null {
   return parseGridControlMessage(value, 'ABORT_GRID') as AbortGridMessage | null
+}
+
+export function parseCapturePageMessage(value: unknown): CapturePageMessage | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ['type', 'sourceKey', 'token', 'correlationId']) ||
+    value.type !== 'CAPTURE_PAGE' ||
+    !isGridKeyLabel(value.sourceKey) ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16)
+  ) {
+    return null
+  }
+  return value as CapturePageMessage
+}
+
+export function parsePageCaptureAck(value: unknown): PageCaptureAck | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ['ok', 'type', 'sourceKey', 'token', 'correlationId', 'records']) ||
+    value.ok !== true ||
+    value.type !== 'PAGE_CAPTURED' ||
+    !isGridKeyLabel(value.sourceKey) ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16) ||
+    !Array.isArray(value.records) ||
+    value.records.length > MAX_PORTAL_RECORDS ||
+    !value.records.every(isRawGridRow)
+  ) {
+    return null
+  }
+  return value as PageCaptureAck
 }
 
 export function parseBridgeMessage(value: unknown): BridgeMessage | null {

@@ -39,31 +39,44 @@ function register(name: string) {
   }
 }
 
+async function defaultTabMessageResponse(tabId: number, message: unknown) {
+  void tabId
+  const value = message as {
+    type?: string
+    gridKey?: string
+    sourceKey?: string
+    token?: string
+    correlationId?: string
+  }
+  if (value.type === 'CAPTURE_PAGE') {
+    return {
+      ok: true,
+      type: 'PAGE_CAPTURED',
+      sourceKey: value.sourceKey,
+      token: value.token,
+      correlationId: value.correlationId,
+      records: [{ RecordType: 'PAGE_META', Title: 'Agent dashboard' }],
+    }
+  }
+  if (value.type === 'BEGIN_GRID' || value.type === 'ABORT_GRID') {
+    return {
+      ok: true,
+      type: value.type === 'BEGIN_GRID' ? 'BEGIN_GRID_ACK' : 'ABORT_GRID_ACK',
+      gridKey: value.gridKey,
+      token: value.token,
+      correlationId: value.correlationId,
+    }
+  }
+  return { ok: true }
+}
+
 const tabs = {
   query: vi.fn(async () => [] as unknown[]),
   update: vi.fn(async () => undefined),
   create: vi.fn(async () => ({ id: 4, active: false, url: undefined })),
   // Tipado com os dois argumentos reais para que um teste possa afirmar sobre a
   // mensagem enviada, e não só sobre ter havido envio.
-  sendMessage: vi.fn(async (tabId: number, message: unknown) => {
-    void tabId
-    const value = message as {
-      type?: string
-      gridKey?: string
-      token?: string
-      correlationId?: string
-    }
-    if (value.type === 'BEGIN_GRID' || value.type === 'ABORT_GRID') {
-      return {
-        ok: true,
-        type: value.type === 'BEGIN_GRID' ? 'BEGIN_GRID_ACK' : 'ABORT_GRID_ACK',
-        gridKey: value.gridKey,
-        token: value.token,
-        correlationId: value.correlationId,
-      }
-    }
-    return { ok: true }
-  }),
+  sendMessage: vi.fn(defaultTabMessageResponse),
   onUpdated: register('tabs.onUpdated'),
   onRemoved: register('tabs.onRemoved'),
 }
@@ -133,6 +146,7 @@ function beginGridMessage() {
 beforeEach(() => {
   for (const key of Object.keys(storage)) delete storage[key]
   vi.clearAllMocks()
+  tabs.sendMessage.mockImplementation(defaultTabMessageResponse)
   vi.mocked(signedJsonRequest).mockResolvedValue({})
   tabs.query.mockResolvedValue([])
   storage.device = { deviceId: 'device-1', baseUrl: 'http://localhost:3000', status: 'READY' }
@@ -307,6 +321,40 @@ describe('empurrão de atualização no caminho real', () => {
 })
 
 describe('background plan executor', () => {
+  it('captures and uploads a READ_PAGE source without a DataTables request', async () => {
+    const pagePlan = [{
+      capability: 'READ_PAGE',
+      params: { sourceKey: 'AGENT_DASHBOARD', navigatePath: '/agent/' },
+    }]
+    storage.sync = {
+      runId: 'run-page', carrierTabId: 7, plan: pagePlan, stageIndex: 0, status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}/agent/` }])
+    vi.mocked(signedJsonRequest).mockResolvedValue({} as never)
+
+    await bootBackground()
+    await flush()
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ type: 'CAPTURE_PAGE', sourceKey: 'AGENT_DASHBOARD' }),
+    )
+    await vi.waitFor(() => {
+      expect(vi.mocked(signedJsonRequest)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'PUT',
+          pathname: '/api/agent/integrations/national-life/local-connector/runs/run-page/stages/AGENT_DASHBOARD',
+          body: expect.objectContaining({
+            gridKey: 'AGENT_DASHBOARD',
+            recordsTotal: 1,
+            records: [{ RecordType: 'PAGE_META', Title: 'Agent dashboard' }],
+          }),
+        }),
+      )
+    }, { timeout: 3_000 })
+    expect(readSync()).toMatchObject({ runId: 'run-page', status: 'COMPLETED' })
+  })
+
   it('advances to the next stage of the plan when a grid finishes', async () => {
     storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])

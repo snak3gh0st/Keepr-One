@@ -26,6 +26,14 @@ function parseEnabled(value: string | undefined): boolean {
   return value === 'true'
 }
 
+function parseOptionalFlag(name: string, value: string | undefined): boolean {
+  if (value === undefined || value === '') return false
+  if (value !== 'true' && value !== 'false') {
+    throw new Error(`${name} must be true or false`)
+  }
+  return value === 'true'
+}
+
 function parseExtensionId(value: string | undefined): string {
   const extensionId = value?.trim() ?? ''
   if (!CHROME_EXTENSION_ID.test(extensionId)) {
@@ -112,6 +120,16 @@ export function getNationalLifeLocalConnectorConfig(): PublicLocalConnectorConfi
 
 export function isNationalLifeLocalConnectorEnabled(): boolean {
   return getNationalLifeLocalConnectorConfig().enabled
+}
+
+/// READ_PAGE is intentionally rolled out separately from the established grid
+/// sync. Chrome Web Store clients that predate the page collector must keep
+/// receiving the proven 13-grid plan until the new package is installed.
+export function isNationalLifePageDiscoveryEnabled(): boolean {
+  return parseOptionalFlag(
+    'NATIONAL_LIFE_LOCAL_CONNECTOR_PAGE_DISCOVERY_ENABLED',
+    process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_PAGE_DISCOVERY_ENABLED,
+  )
 }
 
 export function localConnectorUnavailableResponse(): Response {

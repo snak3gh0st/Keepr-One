@@ -59,7 +59,7 @@ describe('NationalLifeSyncProgress', () => {
     )
 
     expect(screen.getByText('Updating your National Life data')).toBeTruthy()
-    expect(screen.getByText('3 of 13 areas updated')).toBeTruthy()
+    expect(screen.getByText('3 of 13 portal sources captured')).toBeTruthy()
     expect(screen.getByText('Now reading and saving: correspondence')).toBeTruthy()
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '3')
     expect(screen.getByRole('progressbar')).toHaveAttribute('max', '13')
@@ -88,7 +88,7 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.getByText('Sign in to National Life to keep going.')).toBeTruthy()
     expect(screen.queryByText('AUTHENTICATION_STATE_INVALID')).toBeNull()
-    await waitFor(() => expect(screen.getByText('0 of 13 areas updated')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('0 of 13 portal sources captured')).toBeTruthy())
   })
 
   it('dates the last sync instead of saying "done" forever', () => {
@@ -177,7 +177,29 @@ describe('NationalLifeSyncProgress', () => {
 
     window.dispatchEvent(new Event(NATIONAL_LIFE_SYNC_STARTED_EVENT))
 
-    await waitFor(() => expect(screen.getByText('1 of 13 areas updated')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('1 of 13 portal sources captured')).toBeTruthy())
     expect(screen.getByText('Now reading and saving: new business')).toBeTruthy()
+  })
+
+  it('does not present the automatic grids as complete portal coverage', () => {
+    render(
+      <NationalLifeSyncProgress
+        initialStatus={status({
+          state: 'COMPLETED',
+          shouldPoll: false,
+          completed: 13,
+          percent: 100,
+          currentGridLabel: null,
+          stageCoverage: [{
+            gridKey: 'NEW_BUSINESS',
+            label: 'new business',
+            state: 'VERIFIED',
+            verifiedRecords: 857,
+          }],
+        })}
+      />,
+    )
+
+    expect(screen.getByText('13 of 31 known sources automated')).toBeTruthy()
   })
 })

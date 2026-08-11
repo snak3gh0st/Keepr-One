@@ -2,8 +2,10 @@ import {
   parseAbortGridMessage,
   parseBeginGridMessage,
   parseBridgeMessage,
+  parseCapturePageMessage,
   type BeginGridMessage,
 } from '../lib/messages'
+import { capturePageSnapshot } from '../lib/page-snapshot'
 
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
 
@@ -14,6 +16,18 @@ export default defineContentScript({
     let active: BeginGridMessage | null = null
 
     chrome.runtime.onMessage.addListener((value, _sender, sendResponse) => {
+      const capture = parseCapturePageMessage(value)
+      if (capture) {
+        sendResponse({
+          ok: true,
+          type: 'PAGE_CAPTURED',
+          sourceKey: capture.sourceKey,
+          token: capture.token,
+          correlationId: capture.correlationId,
+          records: capturePageSnapshot(document, new URL(location.href)),
+        })
+        return false
+      }
       const begin = parseBeginGridMessage(value)
       if (begin) {
         active = begin
