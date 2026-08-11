@@ -231,6 +231,7 @@ model Agent {
   illustrations          Illustration[]
   nationalLifeInforcePolicies NationalLifeInforcePolicy[]
   nationalLifeReportRows NationalLifeReportRow[]
+  nationalLifeRawGridPages NationalLifeRawGridPage[]
   nationalLifeConnectorPairings NationalLifeConnectorPairing[]
   nationalLifeConnectorDevices NationalLifeConnectorDevice[]
   nationalLifeConnectorCommands NationalLifeConnectorCommand[]
@@ -352,6 +353,34 @@ model NationalLifeReportRow {
   @@unique([agentId, deploymentScope, gridKey, rowKey])
   @@index([agentId, gridKey])
   @@index([fetchedAt])
+}
+
+/// Faithful, page-by-page landing zone for the latest verified carrier grid.
+///
+/// The normalized models above intentionally collapse duplicate policies and
+/// reject rows without a usable business key. This model does neither: every
+/// record delivered by the National Life grid is retained in its original
+/// order and shape. Pages from an older successful snapshot are removed only
+/// after the replacement stage has reconciled against `recordsTotal`.
+model NationalLifeRawGridPage {
+  id              String   @id @default(cuid())
+  agentId         String
+  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope String
+  runId           String
+  run             NationalLifeSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  gridKey         String
+  sequence        Int
+  recordCount     Int
+  contentHash     String
+  records         Json
+  observedAt      DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([runId, gridKey, sequence])
+  @@index([agentId, deploymentScope, gridKey])
+  @@index([runId, gridKey])
 }
 
 model NationalLifeForesightReadRun {
@@ -750,6 +779,7 @@ model NationalLifeSyncRun {
   jobs            BrowserAutomationJob[]
   stageReceipts   NationalLifeConnectorStageReceipt[]
   stageCompletions NationalLifeConnectorStageCompletion[]
+  rawGridPages    NationalLifeRawGridPage[]
 
   @@index([agentId, deploymentScope, state, createdAt])
   @@index([connectorDeviceId, createdAt])

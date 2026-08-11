@@ -38,6 +38,7 @@ type LocalConnectorDb = Pick<
   | 'nationalLifeCaseSnapshot'
   | 'nationalLifeInforcePolicy'
   | 'nationalLifeReportRow'
+  | 'nationalLifeRawGridPage'
   | '$transaction'
 >
 
@@ -440,6 +441,36 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
       }
 
       const writtenCount = await persistRecords(tx, input, observedAt)
+      // Preserve the carrier payload before normalization. Business models may
+      // collapse duplicate policies or reject a row without a natural key; the
+      // faithful page snapshot guarantees that this never becomes silent data
+      // loss and lets us remap old payloads without reading the carrier again.
+      await tx.nationalLifeRawGridPage.upsert({
+        where: {
+          runId_gridKey_sequence: {
+            runId: run.id,
+            gridKey: input.gridKey,
+            sequence: input.envelope.sequence,
+          },
+        },
+        create: {
+          agentId: input.agentId,
+          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+          runId: run.id,
+          gridKey: input.gridKey,
+          sequence: input.envelope.sequence,
+          recordCount: input.envelope.records.length,
+          contentHash: input.contentHash,
+          records: input.envelope.records as Prisma.InputJsonValue,
+          observedAt,
+        },
+        update: {
+          recordCount: input.envelope.records.length,
+          contentHash: input.contentHash,
+          records: input.envelope.records as Prisma.InputJsonValue,
+          observedAt,
+        },
+      })
       const created = await tx.nationalLifeConnectorStageReceipt.create({
         data: {
           deviceId: input.deviceId,
@@ -586,6 +617,18 @@ export async function completeLocalConnectorStage(
         finalSequence: input.finalSequence,
         truncated: false,
         completedAt: now,
+      },
+    })
+
+    // Keep exactly one verified raw snapshot per agent and grid. Crucially this
+    // happens only after every page reconciles with the carrier total, so a
+    // failed replacement can never destroy the previous complete snapshot.
+    await tx.nationalLifeRawGridPage.deleteMany({
+      where: {
+        agentId: input.agentId,
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+        gridKey: input.gridKey,
+        runId: { not: run.id },
       },
     })
 
