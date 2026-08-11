@@ -10,6 +10,7 @@ import {
 } from './contracts'
 import { planRawIngest } from './raw-ingest'
 import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
+import { NATIONAL_LIFE_SYNC_STAGES } from '../sync-progress'
 
 export { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 
@@ -20,14 +21,13 @@ export { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 /// that disagree on it are how the gap becomes reachable later.
 
 export const LOCAL_CONNECTOR_RUN_TTL_MS = 30 * 60_000
-/// The grids a run reads when the caller does not name any. The capability
-/// catalogue can plan any grid raw-ingest routes, but widening the default would
-/// change what an unattended device does at the same moment the protocol changed
-/// shape, so the extra grids are opt-in per run.
-export const LOCAL_CONNECTOR_DEFAULT_GRID_KEYS = [
+/// The grids a run reads when the caller does not name any. This is the common
+/// operational plan; callers can still request a narrower subset explicitly.
+export const LOCAL_CONNECTOR_LEGACY_GRID_KEYS = [
   'NEW_BUSINESS',
   'INFORCE_CLIENTS',
 ] as const satisfies readonly NationalLifeGridKey[]
+export const LOCAL_CONNECTOR_DEFAULT_GRID_KEYS = NATIONAL_LIFE_SYNC_STAGES
 const UPSERT_CHUNK_SIZE = 100
 
 type LocalConnectorDb = Pick<
@@ -39,6 +39,8 @@ type LocalConnectorDb = Pick<
   | 'nationalLifeReportRow'
   | '$transaction'
 >
+
+type LocalConnectorRunDb = Pick<PrismaClient, 'nationalLifeSyncRun'>
 
 export class LocalConnectorRunError extends Error {
   constructor(
@@ -60,20 +62,20 @@ export class LocalConnectorRunError extends Error {
 /// key in the URL and the one in the envelope both come from the device, so
 /// cross-checking them against each other proves nothing about authority.
 function plannedGridKeys(run: { plannedGridKeys: string[] }): readonly NationalLifeGridKey[] {
-  if (run.plannedGridKeys.length === 0) return LOCAL_CONNECTOR_DEFAULT_GRID_KEYS
+  if (run.plannedGridKeys.length === 0) return LOCAL_CONNECTOR_LEGACY_GRID_KEYS
   return run.plannedGridKeys as NationalLifeGridKey[]
 }
 
 async function failStaleLocalRuns(
-  db: LocalConnectorDb,
-  input: { agentId: string; deviceId: string; now: Date },
+  db: LocalConnectorRunDb,
+  input: { agentId: string; deviceId?: string; now: Date },
 ) {
   const staleBefore = new Date(input.now.getTime() - LOCAL_CONNECTOR_RUN_TTL_MS)
   await db.nationalLifeSyncRun.updateMany({
     where: {
       agentId: input.agentId,
       deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-      connectorDeviceId: input.deviceId,
+      ...(input.deviceId ? { connectorDeviceId: input.deviceId } : {}),
       executionSource: 'LOCAL',
       provider: NATIONAL_LIFE_PROVIDER,
       state: 'RUNNING',
@@ -85,6 +87,20 @@ async function failStaleLocalRuns(
       completedAt: input.now,
       updatedAt: input.now,
     },
+  })
+}
+
+/// Status polling is already a guaranteed path from the Keepr One page. Use it
+/// as a second safety net for a worker/tab that disappears without sending ERROR:
+/// a run that has not received a heartbeat for the TTL is no longer allowed to
+/// present itself as an endless sync.
+export async function expireStaleLocalConnectorRuns(
+  db: Pick<PrismaClient, 'nationalLifeSyncRun'>,
+  input: { agentId: string; now?: Date },
+) {
+  await failStaleLocalRuns(db, {
+    agentId: input.agentId,
+    now: input.now ?? new Date(),
   })
 }
 

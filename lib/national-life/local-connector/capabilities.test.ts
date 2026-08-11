@@ -57,10 +57,17 @@ describe('planReadGridStages', () => {
     expect(plan.every((stage) => isSafeNavigatePath(stage.params.navigatePath))).toBe(true)
   })
 
-  it('plans the default pair', () => {
+  it('plans the default operational sync set', () => {
     expect(planReadGridStages(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS).map((s) => s.params.gridKey)).toEqual([
       'NEW_BUSINESS',
+      'RECENTLY_CLOSED',
       'INFORCE_CLIENTS',
+      'PAID_COMMISSIONS',
+      'PROJECTED_COMMISSIONS',
+      'CLIENT_INTELLIGENCE',
+      'CORRESPONDENCE',
+      'COMMISSIONS_PAYMENT_PORTAL',
+      'PIP_PENDING',
     ])
   })
 
@@ -151,12 +158,22 @@ describe('planReadGridStages', () => {
 })
 
 describe('PLANNED_LOCAL_CONNECTOR_CAPABILITIES', () => {
-  it('names FlexLife/Foresight capabilities without treating them as implemented', () => {
+  it('declares every protocol capability while the extension executes only its closed subset', () => {
     expect(PLANNED_LOCAL_CONNECTOR_CAPABILITIES).toEqual([
+      'READ_GRID',
       'FORESIGHT_INVENTORY',
       'FORESIGHT_CASE_DETAIL',
       'FORESIGHT_REPORT',
+      'READ_APPLICATION_STATUS',
+      'READ_UNDERWRITING_STATUS',
+      'READ_DOCUMENT_REQUIREMENTS',
+      'READ_POLICY_DETAIL',
+      'READ_COMMISSIONS',
       'FLEXLIFE_QUOTE',
+      'GENERATE_ILLUSTRATION',
+      'PREPARE_APPLICATION_DRAFT',
+      'UPLOAD_APPLICATION_DOCUMENT',
+      'SUBMIT_APPLICATION',
     ])
   })
 })

@@ -1,14 +1,44 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+  LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
+  LOCAL_CONNECTOR_RUN_TTL_MS,
   failLocalConnectorRun,
+  expireStaleLocalConnectorRuns,
   ingestLocalConnectorStage,
   startLocalConnectorRun,
 } from './run-service'
+import { planReadGridStages } from './capabilities'
 
 const now = new Date('2026-08-04T18:00:00.000Z')
 
 describe('local connector runs', () => {
+  it('expires stale local runs during status polling without a device filter', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 })
+
+    await expireStaleLocalConnectorRuns(
+      { nationalLifeSyncRun: { updateMany } } as never,
+      { agentId: 'agent-1', now },
+    )
+
+    const request = updateMany.mock.calls[0]![0]
+    expect(request.where).toMatchObject({
+      agentId: 'agent-1',
+      deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+      executionSource: 'LOCAL',
+      provider: 'NATIONAL_LIFE',
+      state: 'RUNNING',
+      updatedAt: { lt: new Date(now.getTime() - LOCAL_CONNECTOR_RUN_TTL_MS) },
+    })
+    expect(request.where).not.toHaveProperty('connectorDeviceId')
+    expect(request.data).toMatchObject({
+      state: 'FAILED',
+      safeErrorCode: 'LOCAL_CONNECTOR_TIMEOUT',
+      completedAt: now,
+      updatedAt: now,
+    })
+  })
+
   it('creates a local run without browser jobs and reuses an active run', async () => {
     const create = vi.fn().mockResolvedValue({ id: 'run-1' })
     const updateMany = vi.fn().mockResolvedValue({ count: 0 })
@@ -25,22 +55,7 @@ describe('local connector runs', () => {
     ).resolves.toEqual({
       runId: 'run-1',
       schemaVersion: 2,
-      stages: [
-        {
-          capability: 'READ_GRID',
-          params: {
-            gridKey: 'NEW_BUSINESS',
-            navigatePath: '/agent/book-of-business/new-business/all-new-business-cases',
-          },
-        },
-        {
-          capability: 'READ_GRID',
-          params: {
-            gridKey: 'INFORCE_CLIENTS',
-            navigatePath: '/agent/book-of-business/inforce-book/all-clients',
-          },
-        },
-      ],
+      stages: planReadGridStages(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS),
       duplicate: false,
     })
     expect(create.mock.calls[0][0].data).toEqual(

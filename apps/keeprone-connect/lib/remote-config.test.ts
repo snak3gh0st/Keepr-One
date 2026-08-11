@@ -31,6 +31,14 @@ describe('configuração remota lida pela extensão', () => {
     ).toEqual(['READ_GRID'])
   })
 
+  it('lê somente capabilities declaradas pelo catálogo', () => {
+    expect(
+      parseRemoteConfig({
+        executableCapabilities: ['READ_GRID', 'FORESIGHT_INVENTORY', 'not-a-capability'],
+      }).executableCapabilities,
+    ).toEqual(['READ_GRID', 'FORESIGHT_INVENTORY'])
+  })
+
   it('limita o intervalo do batimento', () => {
     expect(parseRemoteConfig({ heartbeatSeconds: 1 }).heartbeatSeconds).toBe(60)
     expect(parseRemoteConfig({ heartbeatSeconds: 1e9 }).heartbeatSeconds).toBe(3600)

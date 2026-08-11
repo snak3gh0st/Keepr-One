@@ -1,4 +1,6 @@
 import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
+import { EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES } from '@/lib/national-life/local-connector/capabilities'
+import { CONNECTOR_COMMAND_PROTOCOL_VERSION } from '@/lib/national-life/connector-command-contract'
 import {
   getLocalConnectorRemoteConfig,
   readReportedClientVersion,
@@ -34,6 +36,8 @@ export async function GET(request: Request) {
       disabledCapabilities: remote.disabledCapabilities,
       minClientVersion: remote.minClientVersion,
       heartbeatSeconds: remote.heartbeatSeconds,
+      commandProtocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,
+      executableCapabilities: EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES,
       // Eco do que foi reportado, para a extensão conferir que o cabeçalho chegou
       // inteiro (proxy que remove header é falha silenciosa, senão).
       reportedVersion,

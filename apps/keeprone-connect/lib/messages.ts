@@ -87,6 +87,14 @@ export type GridErrorMessage = {
 
 export type BridgeMessage = GridChunkMessage | GridDoneMessage | GridErrorMessage
 
+export type BridgeControlAck = {
+  ok: true
+  type: 'BEGIN_GRID_ACK' | 'ABORT_GRID_ACK'
+  gridKey: string
+  token: string
+  correlationId: string
+}
+
 function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

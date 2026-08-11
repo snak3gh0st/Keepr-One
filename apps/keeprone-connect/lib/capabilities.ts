@@ -1,5 +1,6 @@
 import { isGridKeyLabel } from './constants'
 import { hasExactKeys } from './messages'
+import { parseConnectorCommand, type ConnectorCommand } from './command-contract'
 
 export type Capability = 'READ_GRID'
 
@@ -70,4 +71,22 @@ export function parseStagePlan(value: unknown): StagePlan[] {
     // entry in IMPLEMENTED_CAPABILITIES cannot silently collapse into READ_GRID.
     return { capability: capability as Capability, params: { gridKey, navigatePath } }
   })
+}
+
+/// Dispatch gate for the next command transport. The browser accepts only
+/// commands it can execute today, even if the server's wider catalog includes
+/// Foresight and application capabilities for the remote browser or a future
+/// extension release.
+export function parseExecutableConnectorCommand(value: unknown): ConnectorCommand {
+  const command = parseConnectorCommand(value)
+  if (!command) throw new Error('INVALID_COMMAND')
+  if (!(IMPLEMENTED_CAPABILITIES as readonly string[]).includes(command.capability)) {
+    throw new Error('UNKNOWN_CAPABILITY')
+  }
+  if (command.capability !== 'READ_GRID') throw new Error('UNKNOWN_CAPABILITY')
+  const params = command.params
+  if (!('gridKey' in params) || !('navigatePath' in params)) throw new Error('INVALID_COMMAND')
+  if (!isGridKeyLabel(params.gridKey)) throw new Error('INVALID_COMMAND')
+  if (!isSafeNavigatePath(params.navigatePath)) throw new Error('UNSAFE_NAVIGATE_PATH')
+  return command
 }

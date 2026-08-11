@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseStagePlan } from './capabilities'
+import { parseExecutableConnectorCommand, parseStagePlan } from './capabilities'
 
 describe('parseStagePlan', () => {
   it('accepts a READ_GRID stage from the server', () => {
@@ -156,5 +156,35 @@ describe('parseStagePlan', () => {
     expect(() =>
       parseStagePlan([{ capability: 'READ_GRID', params: 'x' }]),
     ).toThrow('INVALID_RUN_RESPONSE')
+  })
+})
+
+describe('parseExecutableConnectorCommand', () => {
+  it('accepts the current READ_GRID command and refuses an unshipped capability', () => {
+    expect(() => parseExecutableConnectorCommand({
+      protocolVersion: 1,
+      commandId: 'cmd_1',
+      runId: 'run_1',
+      capability: 'READ_GRID',
+      target: null,
+      params: { gridKey: 'NEW_BUSINESS', navigatePath: '/agent/book-of-business/new-business/all-new-business-cases' },
+      idempotencyKey: 'read-grid-1',
+      issuedAt: '2026-08-10T20:00:00.000Z',
+      expiresAt: '2026-08-10T20:30:00.000Z',
+      requiresConfirmation: false,
+    })).not.toThrow()
+
+    expect(() => parseExecutableConnectorCommand({
+      protocolVersion: 1,
+      commandId: 'cmd_2',
+      runId: 'run_2',
+      capability: 'FORESIGHT_INVENTORY',
+      target: null,
+      params: {},
+      idempotencyKey: 'foresight-1',
+      issuedAt: '2026-08-10T20:00:00.000Z',
+      expiresAt: '2026-08-10T20:30:00.000Z',
+      requiresConfirmation: false,
+    })).toThrow('UNKNOWN_CAPABILITY')
   })
 })

@@ -1,5 +1,6 @@
 import 'server-only'
 import type { LocalConnectorCapabilityName } from './capabilities'
+import { isConnectorCapability } from '../connector-command-contract'
 
 /// Alavancas que o servidor detém sobre extensões já instaladas.
 ///
@@ -78,7 +79,7 @@ function parseDisabledCapabilities(value: string | undefined): LocalConnectorCap
   return value
     .split(',')
     .map((entry) => entry.trim().toUpperCase())
-    .filter((entry): entry is LocalConnectorCapabilityName => entry === 'READ_GRID')
+    .filter((entry): entry is LocalConnectorCapabilityName => isConnectorCapability(entry))
 }
 
 function parseMinClientVersion(value: string | undefined): string | null {

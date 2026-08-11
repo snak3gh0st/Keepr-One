@@ -7,6 +7,7 @@ import {
   syncRunStateFromJobs,
   type NationalLifeSyncRunState,
 } from './sync-progress'
+import { expireStaleLocalConnectorRuns } from './local-connector/run-service'
 
 const ACTIVE_RUN_STATES: readonly NationalLifeSyncRunState[] = [
   'QUEUED',
@@ -192,6 +193,7 @@ export async function getNationalLifeSyncStatus(
   agentId: string,
   deploymentScope: string,
 ): Promise<NationalLifeSyncStatus | null> {
+  await expireStaleLocalConnectorRuns(prisma, { agentId })
   const run = await prisma.nationalLifeSyncRun.findFirst({
     where: {
       agentId,
@@ -254,4 +256,3 @@ export async function getNationalLifeSyncStatus(
     ...totals,
   }
 }
-

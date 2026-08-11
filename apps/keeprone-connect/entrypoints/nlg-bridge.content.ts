@@ -13,12 +13,19 @@ export default defineContentScript({
   main() {
     let active: BeginGridMessage | null = null
 
-    chrome.runtime.onMessage.addListener((value) => {
+    chrome.runtime.onMessage.addListener((value, _sender, sendResponse) => {
       const begin = parseBeginGridMessage(value)
       if (begin) {
         active = begin
         window.postMessage({ channel: CHANNEL, payload: begin }, location.origin)
-        return
+        sendResponse({
+          ok: true,
+          type: 'BEGIN_GRID_ACK',
+          gridKey: begin.gridKey,
+          token: begin.token,
+          correlationId: begin.correlationId,
+        })
+        return false
       }
 
       // A ordem de parar atravessa para a página pelo mesmo canal, e só se falar
@@ -35,7 +42,15 @@ export default defineContentScript({
         return
       }
       window.postMessage({ channel: CHANNEL, payload: abort }, location.origin)
+      sendResponse({
+        ok: true,
+        type: 'ABORT_GRID_ACK',
+        gridKey: abort.gridKey,
+        token: abort.token,
+        correlationId: abort.correlationId,
+      })
       active = null
+      return false
     })
 
     window.addEventListener('message', (event) => {
@@ -51,8 +66,23 @@ export default defineContentScript({
       ) {
         return
       }
-      void chrome.runtime.sendMessage(message)
-      if (message.type === 'GRID_DONE' || message.type === 'GRID_ERROR') active = null
+      // A terminal message is only retired after the service worker confirms that
+      // it processed the upload/finish. Before this, the bridge cleared `active`
+      // immediately and a closed message channel could lose the only GRID_DONE.
+      void chrome.runtime.sendMessage(message).then(
+        (response) => {
+          if (
+            response?.ok === true &&
+            (message.type === 'GRID_DONE' || message.type === 'GRID_ERROR')
+          ) {
+            active = null
+          }
+        },
+        () => {
+          // The background records the failure; swallowing here prevents an
+          // unchecked runtime.lastError from hiding the real sync status.
+        },
+      )
     })
   },
 })

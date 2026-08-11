@@ -42,13 +42,27 @@ function register(name: string) {
 const tabs = {
   query: vi.fn(async () => [] as unknown[]),
   update: vi.fn(async () => undefined),
-  create: vi.fn(async () => undefined),
+  create: vi.fn(async () => ({ id: 4, active: false, url: undefined })),
   // Tipado com os dois argumentos reais para que um teste possa afirmar sobre a
   // mensagem enviada, e não só sobre ter havido envio.
   sendMessage: vi.fn(async (tabId: number, message: unknown) => {
     void tabId
-    void message
-    return undefined
+    const value = message as {
+      type?: string
+      gridKey?: string
+      token?: string
+      correlationId?: string
+    }
+    if (value.type === 'BEGIN_GRID' || value.type === 'ABORT_GRID') {
+      return {
+        ok: true,
+        type: value.type === 'BEGIN_GRID' ? 'BEGIN_GRID_ACK' : 'ABORT_GRID_ACK',
+        gridKey: value.gridKey,
+        token: value.token,
+        correlationId: value.correlationId,
+      }
+    }
+    return { ok: true }
   }),
   onUpdated: register('tabs.onUpdated'),
   onRemoved: register('tabs.onRemoved'),
@@ -169,7 +183,7 @@ describe('empurrão de atualização no caminho real', () => {
     // um lote. `processBridgeMessage` chama `failSync` com a própria entrada dele
     // ainda pendente na fila da aba — contar essa entrada devolvia BUSY sempre,
     // que é o mesmo erro do `syncStartLock`, um braço adiante.
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
     await bootBackground()
     const begin = beginGridMessage()
@@ -201,7 +215,7 @@ describe('empurrão de atualização no caminho real', () => {
     // Recusar o upload já impedia o dado de entrar. O que não parava era a
     // extração: o laço na página fala com o portal, não com o Keepr One, e
     // seguia paginando a National Life até o estágio acabar sozinho.
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
     await bootBackground()
     const begin = beginGridMessage()
@@ -240,7 +254,7 @@ describe('empurrão de atualização no caminho real', () => {
     // `chrome.runtime.reload()`, que mata este worker. Uma ordem de parar
     // emitida depois disso nunca sairia, e o portal seguiria sendo dirigido
     // exatamente no caso em que a extensão inteira está sendo trocada.
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
     await bootBackground()
     const begin = beginGridMessage()
@@ -248,7 +262,7 @@ describe('empurrão de atualização no caminho real', () => {
     const order: string[] = []
     tabs.sendMessage.mockImplementation(async (_tabId: number, message: unknown) => {
       order.push((message as { type: string }).type)
-      return undefined
+      return { ok: true }
     })
     chromeStub.runtime.reload.mockImplementation(() => {
       order.push('reload')
@@ -288,7 +302,7 @@ describe('empurrão de atualização no caminho real', () => {
 
 describe('background plan executor', () => {
   it('advances to the next stage of the plan when a grid finishes', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
     await bootBackground()
 
@@ -313,7 +327,7 @@ describe('background plan executor', () => {
   })
 
   it('completes the run when the last stage of the plan finishes', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 1, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 1, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${INFORCE_PATH}` }])
     await bootBackground()
 
@@ -343,7 +357,7 @@ describe('background plan executor', () => {
   it('drops the pairing only when the server says the device is revoked', async () => {
     // Um 401 genérico não basta: ele cobre relógio fora da janela, que persiste
     // depois de reparear. Só a afirmação explícita solta o pareamento.
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
     const { SignedRequestError } = await import('../lib/signed-client')
     vi.mocked(signedJsonRequest).mockRejectedValue(
@@ -375,7 +389,7 @@ describe('background plan executor', () => {
   })
 
   it('keeps the pairing on a bare rejection, which may be nothing but clock skew', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
     const { SignedRequestError } = await import('../lib/signed-client')
     vi.mocked(signedJsonRequest).mockRejectedValue(
@@ -408,7 +422,7 @@ describe('background plan executor', () => {
   })
 
   it('counts uploaded batches so a long single stage still proves it is alive', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
     vi.mocked(signedJsonRequest).mockResolvedValue(undefined as never)
     await bootBackground()
@@ -439,7 +453,7 @@ describe('background plan executor', () => {
   it('resumes mid-plan after the service worker is evicted', async () => {
     // Nothing survives eviction except chrome.storage: the plan and the index in it are
     // the whole of what the next boot knows about the run.
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 1, status: 'EXTRACTING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 9, plan: TWO_STAGE_PLAN, stageIndex: 1, status: 'EXTRACTING' }
     tabs.query.mockResolvedValue([{ id: 9, active: true, url: `${NLG}${INFORCE_PATH}` }])
     await bootBackground()
 
@@ -451,7 +465,7 @@ describe('background plan executor', () => {
   })
 
   it('returns to the current stage when a stale carrier page is open', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${INFORCE_PATH}` }])
     await bootBackground()
 
@@ -469,7 +483,7 @@ describe('background plan executor', () => {
   })
 
   it('opens a background carrier tab when the visible carrier tab is on another page', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${INFORCE_PATH}` }])
     await bootBackground()
 
@@ -481,8 +495,14 @@ describe('background plan executor', () => {
   })
 
   it('starts extraction when Check again finds the current grid already open', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      runId: 'run-1',
+      schemaVersion: 2,
+      stages: TWO_STAGE_PLAN,
+      duplicate: true,
+    } as never)
     await bootBackground()
     tabs.sendMessage.mockClear()
     storage.sync = { ...readSync(), status: 'NAVIGATING' }
@@ -498,7 +518,8 @@ describe('background plan executor', () => {
   })
 
   it('goes to AUTH_REQUIRED instead of extracting on an auth interstitial', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}/agent/auth/login` }])
     await bootBackground()
 
     emit('tabs.onUpdated', 7, { status: 'complete' }, { url: `${NLG}/agent/auth/login` })
@@ -514,14 +535,14 @@ describe('background plan executor', () => {
     await bootBackground()
 
     expect(tabs.create).toHaveBeenCalledWith({
-      active: false,
+      active: true,
       url: `${NLG}${NEW_BUSINESS_PATH}`,
     })
     expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
   })
 
   it('recreates a closed carrier tab without stealing focus', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'EXTRACTING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'EXTRACTING' }
     tabs.query.mockResolvedValueOnce([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
     await bootBackground()
 
@@ -536,7 +557,7 @@ describe('background plan executor', () => {
   })
 
   it('keeps the Auth0 login tab instead of opening another login', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'AUTH_REQUIRED' }
+    storage.sync = { runId: 'run-1', carrierTabId: 12, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'AUTH_REQUIRED' }
     tabs.query.mockResolvedValue([{ id: 12, active: true, url: `${NLG_AUTH0}/login?state=pending` }])
     await bootBackground()
 
@@ -674,7 +695,7 @@ describe('background plan executor', () => {
   })
 
   it('uploads raw rows under schemaVersion 2 with a stage-scoped idempotency key', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 1, status: 'NAVIGATING' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 1, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${INFORCE_PATH}` }])
     vi.mocked(signedJsonRequest).mockResolvedValue({} as never)
     await bootBackground()

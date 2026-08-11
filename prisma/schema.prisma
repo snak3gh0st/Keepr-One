@@ -84,6 +84,25 @@ enum ApplicationStatus {
   WITHDRAWN
 }
 
+enum NationalLifeConnectorCommandState {
+  QUEUED
+  RUNNING
+  AUTH_REQUIRED
+  WAITING_FOR_CONFIRMATION
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum NationalLifeConnectorConfirmationState {
+  NOT_REQUIRED
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
 enum RequirementStatus {
   OPEN
   RECEIVED
@@ -214,6 +233,7 @@ model Agent {
   nationalLifeReportRows NationalLifeReportRow[]
   nationalLifeConnectorPairings NationalLifeConnectorPairing[]
   nationalLifeConnectorDevices NationalLifeConnectorDevice[]
+  nationalLifeConnectorCommands NationalLifeConnectorCommand[]
 
   @@index([parentAgentId])
 }
@@ -773,8 +793,73 @@ model NationalLifeConnectorDevice {
   replays               NationalLifeConnectorReplay[]
   stageReceipts         NationalLifeConnectorStageReceipt[]
   syncRuns              NationalLifeSyncRun[]
+  commands              NationalLifeConnectorCommand[]
 
   @@index([agentId, status])
+}
+
+/// Durable command ledger for both local Chrome and remote-browser execution.
+/// The payload is only the declared command parameters; carrier responses are
+/// stored as events and must remain redacted by the command-specific executor.
+model NationalLifeConnectorCommand {
+  id                    String                                  @id @default(cuid())
+  agentId               String
+  agent                 Agent                                   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deviceId              String?
+  device                NationalLifeConnectorDevice?            @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  protocolVersion       Int
+  runId                 String
+  capability            String
+  state                 NationalLifeConnectorCommandState       @default(QUEUED)
+  target                Json?
+  params                Json
+  payloadHash           String
+  idempotencyKey        String
+  requiresConfirmation  Boolean                                 @default(false)
+  confirmationState     NationalLifeConnectorConfirmationState  @default(NOT_REQUIRED)
+  safeErrorCode         String?
+  expiresAt             DateTime
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime                                @default(now())
+  updatedAt             DateTime                                @updatedAt
+  events                NationalLifeConnectorCommandEvent[]
+  confirmation          NationalLifeConnectorCommandConfirmation?
+
+  @@unique([agentId, idempotencyKey])
+  @@index([agentId, state, createdAt])
+  @@index([deviceId, state, createdAt])
+  @@index([expiresAt])
+}
+
+model NationalLifeConnectorCommandEvent {
+  id          String                             @id @default(cuid())
+  commandId   String
+  command     NationalLifeConnectorCommand       @relation(fields: [commandId], references: [id], onDelete: Cascade)
+  sequence    Int
+  type        String
+  payload     Json?
+  safeErrorCode String?
+  createdAt   DateTime                           @default(now())
+
+  @@unique([commandId, sequence])
+  @@index([commandId, createdAt])
+}
+
+model NationalLifeConnectorCommandConfirmation {
+  id                String                              @id @default(cuid())
+  commandId         String                              @unique
+  command           NationalLifeConnectorCommand        @relation(fields: [commandId], references: [id], onDelete: Cascade)
+  payloadHash       String
+  state             NationalLifeConnectorConfirmationState @default(PENDING)
+  confirmedByUserId String?
+  confirmedAt       DateTime?
+  rejectedAt        DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime                            @default(now())
+  updatedAt         DateTime                            @updatedAt
+
+  @@index([state, expiresAt])
 }
 
 model NationalLifeConnectorReplay {

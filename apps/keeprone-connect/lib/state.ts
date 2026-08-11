@@ -19,6 +19,10 @@ export type DeviceState = {
 
 export type SyncState = {
   runId?: string
+  /// Id da aba criada e mantida pelo conector. Nunca é inferido de uma aba do
+  /// usuário: sem este vínculo, um retry pode sequestrar o portal que o agente
+  /// está usando.
+  carrierTabId?: number
   /// The plan the server handed us for this run, plus where in it we are. The
   /// extension no longer knows which grids exist, so "what comes next" is data,
   /// not code. A stored state written by an older version has no plan; every

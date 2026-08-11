@@ -17,6 +17,7 @@ import {
   parseExternalMessage,
   type AbortGridMessage,
   type BeginGridMessage,
+  type BridgeControlAck,
   type BridgeMessage,
 } from '../lib/messages'
 import { OUTDATED_CODES, revokesDevice } from '../lib/failure'
@@ -60,7 +61,16 @@ async function sendBeginGridWithRetry(tabId: number, message: BeginGridMessage):
   let lastError: unknown
   for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
-      await chrome.tabs.sendMessage(tabId, message)
+      const response = await chrome.tabs.sendMessage<BeginGridMessage, BridgeControlAck>(tabId, message)
+      if (
+        response?.ok !== true ||
+        response.type !== 'BEGIN_GRID_ACK' ||
+        response.gridKey !== message.gridKey ||
+        response.token !== message.token ||
+        response.correlationId !== message.correlationId
+      ) {
+        throw new Error('BRIDGE_UNAVAILABLE')
+      }
       return
     } catch (error) {
       lastError = error
@@ -275,6 +285,7 @@ async function failSync(code: string, selfTabId?: number) {
 }
 
 async function createRun() {
+  const previous = await readSyncState()
   const device = await readDeviceState()
   if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
     throw new Error('CONNECTOR_NOT_PAIRED')
@@ -285,10 +296,14 @@ async function createRun() {
   // endpoint de run, na mesma viagem que já íamos fazer; isto aqui só evita abrir
   // um run condenado quando já sabemos, e dá ao agente a frase certa.
   const remote = (await readCachedRemoteConfig()) ?? PERMISSIVE_REMOTE_CONFIG
-  if (!remote.syncEnabled || remote.disabledCapabilities.includes('READ_GRID')) {
+  if (
+    !remote.syncEnabled ||
+    remote.disabledCapabilities.includes('READ_GRID') ||
+    !remote.executableCapabilities.includes('READ_GRID')
+  ) {
     throw new Error('CONNECTOR_PAUSED')
   }
-  await writeSyncState({ status: 'STARTING' })
+  await writeSyncState({ ...previous, status: 'STARTING', errorCode: undefined })
   const response = await signedJsonRequest<{ runId?: unknown; stages?: unknown }>({
     baseUrl: device.baseUrl,
     deviceId: device.deviceId,
@@ -303,10 +318,29 @@ async function createRun() {
   // only checks that every one of them names a capability it implements and a path
   // inside the agent tree. Adding a grid is a server deploy, not a release here.
   const plan = parseStagePlan(response.stages)
-  await writeSyncState({ runId: response.runId, plan, stageIndex: 0, status: 'NAVIGATING' })
+  if (previous.runId === response.runId && currentStage(previous)) {
+    // A retry of a still-live run must not rewind the stage. The server returns
+    // duplicate=true for that case; preserving the local cursor lets the retry
+    // reclaim only genuinely stale runs while leaving active work untouched.
+    await writeSyncState({
+      ...previous,
+      runId: response.runId,
+      plan,
+      status: 'NAVIGATING',
+      errorCode: undefined,
+    })
+  } else {
+    await writeSyncState({
+      runId: response.runId,
+      plan,
+      stageIndex: 0,
+      status: 'NAVIGATING',
+      carrierTabId: previous.carrierTabId,
+    })
+  }
 }
 
-async function findNationalLifeTab(expectedPath?: string): Promise<chrome.tabs.Tab | undefined> {
+async function findNationalLifeTab(): Promise<chrome.tabs.Tab | undefined> {
   const tabs = await chrome.tabs.query({
     url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
   })
@@ -319,32 +353,15 @@ async function findNationalLifeTab(expectedPath?: string): Promise<chrome.tabs.T
     }
   })
   const usableTabs = carrierTabs.filter((tab) => typeof tab.id === 'number')
-  if (expectedPath) {
-    const expected = usableTabs.find((tab) => {
-      try {
-        return new URL(tab.url ?? '').pathname === expectedPath
-      } catch {
-        return false
-      }
-    })
-    if (expected) return expected
-  }
   return usableTabs.find((tab) => !tab.active) ?? usableTabs.find((tab) => tab.active) ?? usableTabs[0]
 }
 
-async function findNationalLifeAuthTab(): Promise<chrome.tabs.Tab | undefined> {
+async function findConnectorTab(state: Awaited<ReturnType<typeof readSyncState>>) {
+  if (typeof state.carrierTabId !== 'number') return undefined
   const tabs = await chrome.tabs.query({
     url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
   })
-  const authTabs = tabs.filter((tab) => {
-    if (typeof tab.url !== 'string') return false
-    try {
-      return new URL(tab.url).origin === NLG_AUTH0_ORIGIN
-    } catch {
-      return false
-    }
-  })
-  return authTabs.find((tab) => typeof tab.id === 'number' && tab.active) ?? authTabs.find((tab) => typeof tab.id === 'number')
+  return tabs.find((tab) => tab.id === state.carrierTabId)
 }
 
 async function navigatePendingGrid() {
@@ -352,26 +369,16 @@ async function navigatePendingGrid() {
   const stage = currentStage(state)
   if (!state.runId || !stage) return
   const target = `${NLG_ORIGIN}${stage.params.navigatePath}`
-  const existing = await findNationalLifeTab(stage.params.navigatePath)
-  let existingIsAuth = false
+  const existing = await findConnectorTab(state)
   if (existing?.id !== undefined && existing.url) {
     try {
       if (isAuthPath(new URL(existing.url).pathname)) {
-        existingIsAuth = true
         await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
         await chrome.tabs.update(existing.id, { active: true })
         return
       }
     } catch {
       // Fall through to the normal target navigation for an unparseable tab URL.
-    }
-  }
-  if (existing?.id === undefined) {
-    const authTab = await findNationalLifeAuthTab()
-    if (authTab?.id !== undefined) {
-      await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
-      await chrome.tabs.update(authTab.id, { active: true })
-      return
     }
   }
   await writeSyncState({ ...state, status: 'NAVIGATING', errorCode: undefined })
@@ -396,7 +403,18 @@ async function navigatePendingGrid() {
       await chrome.tabs.update(existing.id, { url: target })
     }
   } else {
-    await chrome.tabs.create({ active: existingIsAuth || state.status === 'AUTH_REQUIRED', url: target })
+    const created = await chrome.tabs.create({
+      active: state.status === 'AUTH_REQUIRED',
+      url: target,
+    })
+    if (created?.id !== undefined) {
+      await writeSyncState({
+        ...(await readSyncState()),
+        carrierTabId: created.id,
+        status: 'NAVIGATING',
+        errorCode: undefined,
+      })
+    }
   }
 }
 
@@ -411,6 +429,10 @@ async function startNewSync() {
           current.status,
         )
       ) {
+        // Re-enter the signed start endpoint. It reuses a live run, but first
+        // expires a dead one; the response handling above preserves the cursor
+        // for the live case and starts at stage zero for a reclaimed run.
+        await createRun()
         await navigatePendingGrid()
         const after = await readSyncState()
         if (after.status === 'AUTH_REQUIRED') {
@@ -472,12 +494,18 @@ async function handleTabReady(tabId: number, urlValue?: string) {
   } catch {
     return
   }
-  if (url.origin !== NLG_ORIGIN) return
   const state = await readSyncState()
+  if (state.carrierTabId !== tabId) return
   const stage = currentStage(state)
   if (!state.runId || !stage || state.status === 'COMPLETED' || state.status === 'ERROR') {
     return
   }
+  if (url.origin === NLG_AUTH0_ORIGIN) {
+    await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
+    await chrome.tabs.update(tabId, { active: true })
+    return
+  }
+  if (url.origin !== NLG_ORIGIN) return
   if (isAuthPath(url.pathname)) {
     await writeSyncState({ ...state, status: 'AUTH_REQUIRED' })
     return
@@ -639,7 +667,7 @@ async function processBridgeMessage(tabId: number, message: BridgeMessage) {
   }
 }
 
-function enqueueBridgeMessage(tabId: number, message: BridgeMessage) {
+function enqueueBridgeMessage(tabId: number, message: BridgeMessage): Promise<void> {
   const previous = tabQueues.get(tabId) ?? Promise.resolve()
   // Profundidade por aba, não só "existe fila". `tabQueues` guarda a promessa da
   // cadeia inteira, então enquanto `processBridgeMessage` roda a entrada dele
@@ -655,14 +683,10 @@ function enqueueBridgeMessage(tabId: number, message: BridgeMessage) {
     if (tabQueues.get(tabId) === queued) tabQueues.delete(tabId)
   })
   tabQueues.set(tabId, queued)
+  return queued
 }
 
 async function retryPendingSync() {
-  const state = await readSyncState()
-  if (state.runId && currentStage(state) && state.status !== 'COMPLETED' && state.status !== 'ERROR') {
-    await navigatePendingGrid()
-    return { ok: true as const }
-  }
   return startNewSync()
 }
 
@@ -671,7 +695,7 @@ async function resumePending() {
   if (!state.runId || !currentStage(state) || state.status === 'COMPLETED' || state.status === 'ERROR') {
     return
   }
-  const tab = await findNationalLifeTab()
+  const tab = await findConnectorTab(state)
   if (tab?.id !== undefined && tab.url) {
     await handleTabReady(tab.id, tab.url)
   } else {
@@ -733,8 +757,8 @@ export default defineBackground(() => {
   chrome.runtime.onMessage.addListener((value, sender, sendResponse) => {
     const bridge = parseBridgeMessage(value)
     if (bridge && sender.tab?.id !== undefined && sender.url?.startsWith(`${NLG_ORIGIN}/agent/`)) {
-      enqueueBridgeMessage(sender.tab.id, bridge)
-      return
+      respond(sendResponse, enqueueBridgeMessage(sender.tab.id, bridge).then(() => ({ ok: true as const })))
+      return true
     }
     if (
       typeof value !== 'object' ||
@@ -782,7 +806,13 @@ export default defineBackground(() => {
     // authoritative. Recreate an inactive tab and let handleTabReady resume the
     // current stage. If the run is waiting for MFA, navigatePendingGrid brings
     // the login tab forward so the user can finish authentication.
-    void resumePending().catch(() => {})
+    void (async () => {
+      const state = await readSyncState()
+      if (state.carrierTabId === tabId) {
+        await writeSyncState({ ...state, carrierTabId: undefined, status: 'NAVIGATING' })
+      }
+      await resumePending()
+    })().catch(() => {})
   })
 
   void resumePending()

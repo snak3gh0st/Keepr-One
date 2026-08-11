@@ -3,19 +3,22 @@ import {
   NATIONAL_LIFE_GRIDS,
   type NationalLifeGridKey,
 } from '@/lib/national-life/portal-grid-client'
+import {
+  CONNECTOR_CAPABILITIES,
+  type ConnectorCapability,
+} from '@/lib/national-life/connector-command-contract'
 import { isRoutedGrid } from './raw-ingest'
 
-export type LocalConnectorCapabilityName = 'READ_GRID'
+export type LocalConnectorCapabilityName = ConnectorCapability
+
+/// The Chrome extension ships this closed subset. The larger protocol catalogue
+/// is deliberately not executable until a released browser executor validates it.
+export const EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES = ['READ_GRID'] as const satisfies readonly LocalConnectorCapabilityName[]
 
 /// Named for planning and UI copy only. The extension's IMPLEMENTED_CAPABILITIES
 /// must stay the closed set of what the device can actually run — do not add these
 /// there until each capability ships with a parser and executor.
-export const PLANNED_LOCAL_CONNECTOR_CAPABILITIES = [
-  'FORESIGHT_INVENTORY',
-  'FORESIGHT_CASE_DETAIL',
-  'FORESIGHT_REPORT',
-  'FLEXLIFE_QUOTE',
-] as const
+export const PLANNED_LOCAL_CONNECTOR_CAPABILITIES = CONNECTOR_CAPABILITIES
 
 export type PlannedLocalConnectorCapability =
   (typeof PLANNED_LOCAL_CONNECTOR_CAPABILITIES)[number]

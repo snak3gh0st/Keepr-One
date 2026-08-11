@@ -1,5 +1,6 @@
 import { requireAllowedBaseUrl } from './constants'
 import { CONNECTOR_VERSION_HEADER, readExtensionVersion } from './contract'
+import { isConnectorCapability } from './command-contract'
 
 /// O batimento, do lado do cliente.
 ///
@@ -23,6 +24,8 @@ const MAX_HEARTBEAT_SECONDS = 3600
 export type ConnectorRemoteConfig = {
   syncEnabled: boolean
   disabledCapabilities: readonly string[]
+  commandProtocolVersion: number
+  executableCapabilities: readonly string[]
   minClientVersion: string | null
   heartbeatSeconds: number
 }
@@ -36,6 +39,8 @@ export type CachedRemoteConfig = ConnectorRemoteConfig & { fetchedAt: number }
 export const PERMISSIVE_REMOTE_CONFIG: ConnectorRemoteConfig = {
   syncEnabled: true,
   disabledCapabilities: [],
+  commandProtocolVersion: 1,
+  executableCapabilities: ['READ_GRID'],
   minClientVersion: null,
   heartbeatSeconds: DEFAULT_HEARTBEAT_SECONDS,
 }
@@ -53,6 +58,15 @@ export function parseRemoteConfig(value: unknown): ConnectorRemoteConfig {
           (entry): entry is string => typeof entry === 'string' && /^[A-Z_]{1,64}$/.test(entry),
         )
       : [],
+    // Unknown protocol versions are not executable by this release. We retain
+    // version 1 locally so the caller uses its closed capability subset.
+    commandProtocolVersion:
+      typeof raw.commandProtocolVersion === 'number' && raw.commandProtocolVersion === 1
+        ? raw.commandProtocolVersion
+        : 1,
+    executableCapabilities: Array.isArray(raw.executableCapabilities)
+      ? raw.executableCapabilities.filter(isConnectorCapability)
+      : PERMISSIVE_REMOTE_CONFIG.executableCapabilities,
     minClientVersion:
       typeof raw.minClientVersion === 'string' &&
       /^[0-9]+(\.[0-9]+){0,3}$/.test(raw.minClientVersion)
