@@ -59,6 +59,7 @@ export const PORTAL_CODES: readonly string[] = [
   'INVALID_PORTAL_RESPONSE',
   'BRIDGE_UNAVAILABLE',
   'DEVICE_REQUEST_FAILED',
+  'CONNECTOR_TAB_CLOSED',
 ]
 
 export function connectorFailureRequiresReconnect(code: string | null | undefined): boolean {
