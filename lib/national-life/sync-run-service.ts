@@ -58,6 +58,10 @@ const GRID_LABELS: Record<string, string> = {
   CORRESPONDENCE: 'correspondence',
   COMMISSIONS_PAYMENT_PORTAL: 'commission payments',
   PIP_PENDING: 'pending increases',
+  TRANSFERS_EXCHANGES: 'transfers and exchanges',
+  LIFE_PENDING_LAPSE: 'pending lapse policies',
+  COMMISSIONS_EARNING_REPORT: 'commission earning detail',
+  PAYABLE_GROSS_COMMISSIONS: 'payable gross commissions',
 }
 
 export function nationalLifeSyncGridLabel(gridKey: string | null): string | null {

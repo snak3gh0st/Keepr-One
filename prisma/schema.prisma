@@ -749,6 +749,7 @@ model NationalLifeSyncRun {
   updatedAt       DateTime                 @updatedAt
   jobs            BrowserAutomationJob[]
   stageReceipts   NationalLifeConnectorStageReceipt[]
+  stageCompletions NationalLifeConnectorStageCompletion[]
 
   @@index([agentId, deploymentScope, state, createdAt])
   @@index([connectorDeviceId, createdAt])
@@ -792,6 +793,7 @@ model NationalLifeConnectorDevice {
   updatedAt             DateTime  @updatedAt
   replays               NationalLifeConnectorReplay[]
   stageReceipts         NationalLifeConnectorStageReceipt[]
+  stageCompletions      NationalLifeConnectorStageCompletion[]
   syncRuns              NationalLifeSyncRun[]
   commands              NationalLifeConnectorCommand[]
 
@@ -900,6 +902,27 @@ model NationalLifeConnectorStageReceipt {
   @@unique([deviceId, runId, gridKey, sequence])
   @@index([runId, gridKey])
   @@index([runId, truncated])
+}
+
+/// A completion is deliberately separate from a page receipt. A receipt proves
+/// that one batch landed; it cannot prove that the carrier's final page landed.
+/// The connector writes this only after it has uploaded every sequence and the
+/// server has reconciled the raw count against the carrier's recordsTotal.
+model NationalLifeConnectorStageCompletion {
+  id                   String   @id @default(cuid())
+  deviceId             String
+  device               NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  runId                String
+  run                  NationalLifeSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  gridKey              String
+  expectedRecordCount  Int
+  receivedRecordCount  Int
+  finalSequence        Int
+  truncated            Boolean  @default(false)
+  completedAt          DateTime @default(now())
+
+  @@unique([deviceId, runId, gridKey])
+  @@index([runId, gridKey])
 }
 
 model Illustration {

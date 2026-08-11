@@ -28,7 +28,7 @@ export type InforceRow = {
   servicingAgencyName: string | null;
 };
 
-export type CommissionRow = {
+export type PortalReportRow = {
   id: string;
   gridKey: string;
   label: string | null;
@@ -36,7 +36,7 @@ export type CommissionRow = {
   amounts: Record<string, string>;
 };
 
-type Tab = "cases" | "inforce" | "commissions";
+type Tab = "cases" | "inforce" | "reports";
 
 const PAGE_SIZE = 12;
 
@@ -114,11 +114,11 @@ function Meta({ label, value }: { label: string; value: string | null }) {
 export function NationalLifeDataTabs({
   cases,
   inforce,
-  commissions,
+  reports,
 }: {
   cases: CaseRow[];
   inforce: InforceRow[];
-  commissions: CommissionRow[];
+  reports: PortalReportRow[];
 }) {
   const [tab, setTab] = useState<Tab>("cases");
   const [page, setPage] = useState(1);
@@ -135,9 +135,9 @@ export function NationalLifeDataTabs({
       inforce: inforce.filter((row) =>
         matches([row.policyNumber, row.insuredClientName, row.ownerClientName, row.productName, row.policyStatus]),
       ),
-      commissions: commissions.filter((row) => matches([row.label, row.primaryDate, row.gridKey])),
+      reports: reports.filter((row) => matches([row.label, row.primaryDate, row.gridKey])),
     };
-  }, [cases, inforce, commissions, query]);
+  }, [cases, inforce, reports, query]);
 
   const active = filtered[tab];
   const pageCount = Math.max(1, Math.ceil(active.length / PAGE_SIZE));
@@ -160,10 +160,10 @@ export function NationalLifeDataTabs({
           onClick={() => switchTab("inforce")}
         />
         <TabButton
-          active={tab === "commissions"}
-          count={filtered.commissions.length}
-          label="Commissions"
-          onClick={() => switchTab("commissions")}
+          active={tab === "reports"}
+          count={filtered.reports.length}
+          label="Portal reports"
+          onClick={() => switchTab("reports")}
         />
       </div>
 
@@ -228,8 +228,8 @@ export function NationalLifeDataTabs({
               </EntityCard>
             ))}
 
-          {tab === "commissions" &&
-            (visible as CommissionRow[]).map((row, index) => {
+          {tab === "reports" &&
+            (visible as PortalReportRow[]).map((row, index) => {
               const entries = Object.entries(row.amounts).slice(0, 4);
               return (
                 <EntityCard key={row.id} index={index}>

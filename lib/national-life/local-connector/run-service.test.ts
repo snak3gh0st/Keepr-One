@@ -3,6 +3,7 @@ import {
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
   LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
   LOCAL_CONNECTOR_RUN_TTL_MS,
+  completeLocalConnectorStage,
   failLocalConnectorRun,
   expireStaleLocalConnectorRuns,
   ingestLocalConnectorStage,
@@ -365,13 +366,7 @@ describe('local connector runs', () => {
     })
 
     expect(runUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          state: 'RUNNING',
-          completedStages: 1,
-          completedAt: null,
-        }),
-      }),
+      expect.objectContaining({ data: expect.objectContaining({ state: 'RUNNING', currentGridKey: 'NEW_BUSINESS' }) }),
     )
   })
 
@@ -485,7 +480,7 @@ describe('local connector runs', () => {
     expect(result.receipt.writtenCount).toBe(0)
   })
 
-  it('does not complete a run until every grid has a non-truncated receipt', async () => {
+  it('does not treat a truncated page receipt as a completed grid', async () => {
     const caseUpsert = vi.fn().mockResolvedValue({})
     const runUpdate = vi.fn().mockResolvedValue({})
     const receipt = {
@@ -551,9 +546,7 @@ describe('local connector runs', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           state: 'RUNNING',
-          completedStages: 0,
           currentGridKey: 'NEW_BUSINESS',
-          completedAt: null,
         }),
       }),
     )
@@ -617,23 +610,19 @@ describe('local connector runs', () => {
       },
     })
 
-    // Only non-truncated receipts count towards finalizing a grid.
-    expect(receiptFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { runId: 'run-1', truncated: false } }),
-    )
+    // Page upload never finalizes a grid; an explicit reconciled completion does.
+    expect(receiptFindMany).not.toHaveBeenCalled()
     expect(runUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           state: 'RUNNING',
-          completedStages: 0,
           currentGridKey: 'NEW_BUSINESS',
-          completedAt: null,
         }),
       }),
     )
   })
 
-  it('completes only after final receipts for both grids', async () => {
+  it('does not complete a run merely because the final page receipt landed', async () => {
     const runUpdate = vi.fn().mockResolvedValue({})
     const receipt = {
       id: 'receipt-2',
@@ -695,10 +684,8 @@ describe('local connector runs', () => {
     expect(runUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          state: 'COMPLETED',
-          completedStages: 2,
-          currentGridKey: null,
-          completedAt: now,
+          state: 'RUNNING',
+          currentGridKey: 'INFORCE_CLIENTS',
         }),
       }),
     )
@@ -839,5 +826,51 @@ describe('local connector runs', () => {
         }),
       }),
     )
+  })
+
+  it('completes a grid only when every page sequence and the carrier total reconcile', async () => {
+    const runUpdate = vi.fn().mockResolvedValue({})
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'run-1', plannedGridKeys: ['NEW_BUSINESS'] }),
+        update: runUpdate,
+      },
+      nationalLifeConnectorStageReceipt: {
+        findMany: vi.fn().mockResolvedValue([
+          { sequence: 0, recordCount: 200 },
+          { sequence: 1, recordCount: 57 },
+        ]),
+      },
+      nationalLifeConnectorStageCompletion: {
+        upsert: vi.fn().mockResolvedValue({}),
+        findMany: vi.fn().mockResolvedValue([{ gridKey: 'NEW_BUSINESS' }]),
+      },
+    }
+    const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
+
+    await expect(completeLocalConnectorStage(db, {
+      agentId: 'agent-1', deviceId: 'device-1', runId: 'run-1', gridKey: 'NEW_BUSINESS',
+      expectedRecordCount: 257, finalSequence: 1, truncated: false, now,
+    })).resolves.toMatchObject({ completed: true, receivedRecordCount: 257 })
+    expect(runUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ state: 'COMPLETED', completedStages: 1, currentGridKey: null }),
+    }))
+  })
+
+  it('refuses a final marker when a page is missing', async () => {
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'run-1', plannedGridKeys: ['NEW_BUSINESS'] }),
+      },
+      nationalLifeConnectorStageReceipt: {
+        findMany: vi.fn().mockResolvedValue([{ sequence: 0, recordCount: 200 }]),
+      },
+    }
+    const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
+
+    await expect(completeLocalConnectorStage(db, {
+      agentId: 'agent-1', deviceId: 'device-1', runId: 'run-1', gridKey: 'NEW_BUSINESS',
+      expectedRecordCount: 257, finalSequence: 1, truncated: false, now,
+    })).rejects.toThrow('STAGE_INCOMPLETE')
   })
 })

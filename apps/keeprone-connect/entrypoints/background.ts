@@ -41,7 +41,12 @@ import {
   writeSyncState,
 } from '../lib/state'
 
-type ActiveNavigation = BeginGridMessage & { tabId: number }
+type ActiveNavigation = BeginGridMessage & {
+  tabId: number
+  recordsTotal?: number
+  lastSequence?: number
+  truncated?: boolean
+}
 
 const activeNavigations = new Map<number, ActiveNavigation>()
 const tabQueues = new Map<number, Promise<void>>()
@@ -560,7 +565,7 @@ async function handleTabReady(tabId: number, urlValue?: string) {
   await beginExtraction(tabId, stage.params.gridKey)
 }
 
-async function uploadChunk(message: Extract<BridgeMessage, { type: 'GRID_CHUNK' }>) {
+async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type: 'GRID_CHUNK' }>) {
   const device = await readDeviceState()
   const state = await readSyncState()
   if (
@@ -608,6 +613,15 @@ async function uploadChunk(message: Extract<BridgeMessage, { type: 'GRID_CHUNK' 
   // grande passa minutos subindo lote a lote.
   const after = await readSyncState()
   await writeSyncState({ ...after, uploads: (after.uploads ?? 0) + 1 })
+  const active = activeNavigations.get(tabId)
+  if (active && active.token === message.token && active.correlationId === message.correlationId) {
+    activeNavigations.set(tabId, {
+      ...active,
+      recordsTotal: message.recordsTotal,
+      lastSequence: message.sequence,
+      truncated: message.truncated,
+    })
+  }
 }
 
 async function finishGrid(tabId: number, gridKey: string) {
@@ -616,6 +630,34 @@ async function finishGrid(tabId: number, gridKey: string) {
   if (!state.runId || !state.plan || stage?.params.gridKey !== gridKey) {
     throw new Error('SYNC_STATE_INVALID')
   }
+  const active = activeNavigations.get(tabId)
+  if (
+    !active ||
+    active.gridKey !== gridKey ||
+    active.recordsTotal === undefined ||
+    active.lastSequence === undefined ||
+    active.truncated === undefined
+  ) {
+    throw new Error('STAGE_COMPLETION_INVALID')
+  }
+  const device = await readDeviceState()
+  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
+    throw new Error('SYNC_STATE_INVALID')
+  }
+  await signedJsonRequest({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname: `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}/stages/${encodeURIComponent(gridKey)}/complete`,
+    idempotencyKey: `nlc:${state.runId}:${state.stageIndex ?? 0}:${gridKey}:complete:${active.lastSequence}`,
+    body: {
+      runId: state.runId,
+      gridKey,
+      expectedRecordCount: active.recordsTotal,
+      finalSequence: active.lastSequence,
+      truncated: active.truncated,
+    },
+  })
   activeNavigations.delete(tabId)
   // currentStage already proved the stored plan parses; re-derive it so navigation
   // reads the validated array rather than the raw storage value.
@@ -678,7 +720,7 @@ async function processBridgeMessage(tabId: number, message: BridgeMessage) {
     return
   }
   try {
-    if (message.type === 'GRID_CHUNK') await uploadChunk(message)
+    if (message.type === 'GRID_CHUNK') await uploadChunk(tabId, message)
     else if (message.type === 'GRID_DONE') await finishGrid(tabId, message.gridKey)
     else {
       activeNavigations.delete(tabId)
