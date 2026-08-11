@@ -533,6 +533,7 @@ describe('background plan executor', () => {
       url: `${NLG}${NEW_BUSINESS_PATH}`,
     })
     expect(tabs.update).not.toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
+    expect(readSync()).toMatchObject({ carrierTabId: 4, status: 'NAVIGATING' })
   })
 
   it('starts extraction when Check again finds the current grid already open', async () => {
