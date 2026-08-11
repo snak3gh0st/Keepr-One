@@ -53,6 +53,10 @@ describe('startNationalLifeSync', () => {
       [6, 'CORRESPONDENCE'],
       [7, 'COMMISSIONS_PAYMENT_PORTAL'],
       [8, 'PIP_PENDING'],
+      [9, 'TRANSFERS_EXCHANGES'],
+      [10, 'LIFE_PENDING_LAPSE'],
+      [11, 'COMMISSIONS_EARNING_REPORT'],
+      [12, 'PAYABLE_GROSS_COMMISSIONS'],
     ])
     expect(tx.jobs.every((job) => job.operation === 'SYNC_NATIONAL_LIFE_GRID')).toBe(true)
   })

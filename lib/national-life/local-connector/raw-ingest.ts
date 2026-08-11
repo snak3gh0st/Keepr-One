@@ -16,6 +16,13 @@ const REPORT_ROW_GRIDS = new Set<NationalLifeGridKey>([
   'CORRESPONDENCE',
   'COMMISSIONS_PAYMENT_PORTAL',
   'PIP_PENDING',
+  // These grids are preserved as generic carrier report rows until their
+  // business-specific models are defined. Raw retention keeps no portal data
+  // hostage to a future mapper.
+  'TRANSFERS_EXCHANGES',
+  'LIFE_PENDING_LAPSE',
+  'COMMISSIONS_EARNING_REPORT',
+  'PAYABLE_GROSS_COMMISSIONS',
 ])
 
 /// The grids `planRawIngest` can actually land somewhere, derived from the three

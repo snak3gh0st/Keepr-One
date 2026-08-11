@@ -21,7 +21,7 @@ function status(overrides: Partial<NationalLifeSyncStatus> = {}): NationalLifeSy
     runId: 'run-1',
     state: 'RUNNING',
     completed: 0,
-    total: 9,
+    total: 13,
     percent: 0,
     failed: 0,
     currentGridKey: 'NEW_BUSINESS',
@@ -59,16 +59,16 @@ describe('NationalLifeSyncProgress', () => {
     )
 
     expect(screen.getByText('Updating your National Life data')).toBeTruthy()
-    expect(screen.getByText('3 of 9 areas updated')).toBeTruthy()
+    expect(screen.getByText('3 of 13 areas updated')).toBeTruthy()
     expect(screen.getByText('Now reading and saving: correspondence')).toBeTruthy()
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '3')
-    expect(screen.getByRole('progressbar')).toHaveAttribute('max', '9')
+    expect(screen.getByRole('progressbar')).toHaveAttribute('max', '13')
   })
 
   it('stops polling after the run reaches a terminal state', async () => {
     vi.useFakeTimers()
-    const fetchMock = answerWith(status({ completed: 9, percent: 100, state: 'COMPLETED', shouldPoll: false }))
-    render(<NationalLifeSyncProgress initialStatus={status({ state: 'COMPLETED', completed: 9, percent: 100, shouldPoll: false })} />)
+    const fetchMock = answerWith(status({ completed: 13, percent: 100, state: 'COMPLETED', shouldPoll: false }))
+    render(<NationalLifeSyncProgress initialStatus={status({ state: 'COMPLETED', completed: 13, percent: 100, shouldPoll: false })} />)
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4_000)
@@ -88,7 +88,7 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.getByText('Sign in to National Life to keep going.')).toBeTruthy()
     expect(screen.queryByText('AUTHENTICATION_STATE_INVALID')).toBeNull()
-    await waitFor(() => expect(screen.getByText('0 of 9 areas updated')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('0 of 13 areas updated')).toBeTruthy())
   })
 
   it('dates the last sync instead of saying "done" forever', () => {
@@ -97,7 +97,7 @@ describe('NationalLifeSyncProgress', () => {
         initialStatus={status({
           state: 'COMPLETED',
           shouldPoll: false,
-          completed: 9,
+          completed: 13,
           percent: 100,
           currentGridLabel: null,
           completedAt: new Date('2026-08-04T18:30:00.000Z'),
@@ -119,7 +119,7 @@ describe('NationalLifeSyncProgress', () => {
         initialStatus={status({
           state: 'COMPLETED',
           shouldPoll: false,
-          completed: 9,
+          completed: 13,
           percent: 100,
           currentGridLabel: null,
           completedAt: new Date('2026-08-04T18:30:00.000Z'),
@@ -138,7 +138,7 @@ describe('NationalLifeSyncProgress', () => {
         initialStatus={status({
           state: 'COMPLETED',
           shouldPoll: false,
-          completed: 9,
+          completed: 13,
           percent: 100,
           currentGridLabel: null,
           receivedRecords: null,
@@ -177,7 +177,7 @@ describe('NationalLifeSyncProgress', () => {
 
     window.dispatchEvent(new Event(NATIONAL_LIFE_SYNC_STARTED_EVENT))
 
-    await waitFor(() => expect(screen.getByText('1 of 9 areas updated')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('1 of 13 areas updated')).toBeTruthy())
     expect(screen.getByText('Now reading and saving: new business')).toBeTruthy()
   })
 })

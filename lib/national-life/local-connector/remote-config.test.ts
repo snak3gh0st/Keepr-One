@@ -11,6 +11,7 @@ import {
   parseConnectorVersion,
   readReportedClientVersion,
   refuseLocalConnectorRequest,
+  supportsStageCompletionProtocol,
 } from './remote-config'
 
 const ENV_KEYS = [
@@ -46,6 +47,13 @@ describe('versão reportada pelo cliente', () => {
     expect(compareConnectorVersions(parseConnectorVersion('0.10.0')!, parseConnectorVersion('0.9.0')!)).toBe(1)
     expect(compareConnectorVersions(parseConnectorVersion('1.0')!, parseConnectorVersion('1.0.0.0')!)).toBe(0)
     expect(compareConnectorVersions(parseConnectorVersion('0.1.0')!, parseConnectorVersion('0.1.1')!)).toBe(-1)
+  })
+
+  it('only enables reconciled stage completion in version 0.1.2 and later', () => {
+    expect(supportsStageCompletionProtocol(headers())).toBe(false)
+    expect(supportsStageCompletionProtocol(headers('0.1.1'))).toBe(false)
+    expect(supportsStageCompletionProtocol(headers('0.1.2'))).toBe(true)
+    expect(supportsStageCompletionProtocol(headers('0.2.0'))).toBe(true)
   })
 })
 

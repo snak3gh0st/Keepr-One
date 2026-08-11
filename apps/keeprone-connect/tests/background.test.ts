@@ -128,6 +128,7 @@ function beginGridMessage() {
 beforeEach(() => {
   for (const key of Object.keys(storage)) delete storage[key]
   vi.clearAllMocks()
+  vi.mocked(signedJsonRequest).mockResolvedValue({})
   tabs.query.mockResolvedValue([])
   storage.device = { deviceId: 'device-1', baseUrl: 'http://localhost:3000', status: 'READY' }
   vi.stubGlobal('chrome', chromeStub)
@@ -312,6 +313,16 @@ describe('background plan executor', () => {
     emit(
       'runtime.onMessage',
       {
+        type: 'GRID_CHUNK', gridKey: 'NEW_BUSINESS', token: begin.token,
+        correlationId: begin.correlationId, sequence: 0, recordsTotal: 1,
+        truncated: false, records: [{ PolicyNo: 'NB-1' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` }, vi.fn(),
+    )
+
+    emit(
+      'runtime.onMessage',
+      {
         type: 'GRID_DONE',
         gridKey: 'NEW_BUSINESS',
         token: begin.token,
@@ -333,6 +344,16 @@ describe('background plan executor', () => {
 
     const begin = beginGridMessage()
     expect(begin).toMatchObject({ gridKey: 'INFORCE_CLIENTS' })
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK', gridKey: 'INFORCE_CLIENTS', token: begin.token,
+        correlationId: begin.correlationId, sequence: 0, recordsTotal: 1,
+        truncated: false, records: [{ PolicyNumber: 'IF-1' }],
+      },
+      { tab: { id: 7 }, url: `${NLG}/agent/anything` }, vi.fn(),
+    )
 
     emit(
       'runtime.onMessage',

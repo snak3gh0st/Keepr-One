@@ -77,4 +77,26 @@ describe('syncNationalLifeGrid', () => {
     })
     expect(reportDeps.persistReportRows).toHaveBeenCalledOnce()
   })
+
+  it.each([
+    'TRANSFERS_EXCHANGES',
+    'LIFE_PENDING_LAPSE',
+    'COMMISSIONS_EARNING_REPORT',
+    'PAYABLE_GROSS_COMMISSIONS',
+  ] as const)('persists the expanded paginated report %s as raw carrier rows', async (gridKey) => {
+    const deps = dependencies()
+    await syncNationalLifeGrid({
+      gridKey,
+      page,
+      agentId: 'agent-1',
+      deploymentScope: 'scope-1',
+      portalLoginUrl: 'https://national-life.example/login',
+      fetchedAt,
+      dependencies: deps,
+    })
+
+    expect(deps.persistReportRows).toHaveBeenCalledWith(
+      expect.objectContaining({ gridKey, rows: expect.any(Array) }),
+    )
+  })
 })

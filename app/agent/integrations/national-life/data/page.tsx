@@ -16,7 +16,7 @@ import { foresightRunStore } from '@/lib/national-life/foresight-run-service'
 import {
   NationalLifeDataTabs,
   type CaseRow,
-  type CommissionRow,
+  type PortalReportRow,
   type InforceRow,
 } from './NationalLifeDataTabs'
 import { ForesightCaseTabs, type ForesightCaseRow } from './ForesightCaseTabs'
@@ -56,13 +56,13 @@ const reportSelect = {
   amounts: true,
 } as const
 
-function toCommissionRow(row: {
+function toPortalReportRow(row: {
   id: string
   gridKey: string
   label: string | null
   primaryDate: string | null
   amounts: unknown
-}): CommissionRow {
+}): PortalReportRow {
   const amounts =
     row.amounts && typeof row.amounts === 'object' && !Array.isArray(row.amounts)
       ? Object.fromEntries(
@@ -102,7 +102,7 @@ export default async function NationalLifeDataPage() {
 
   let cases: CaseRow[] = []
   let inforce: InforceRow[] = []
-  let commissions: CommissionRow[] = []
+  let reports: PortalReportRow[] = []
   let lastSyncedAt: Date | null = null
   let loadError = false
   let foresightCases: ForesightCaseRow[] = []
@@ -197,7 +197,7 @@ export default async function NationalLifeDataPage() {
 
     cases = caseRows
     inforce = inforceRows
-    commissions = reportRows.map(toCommissionRow)
+    reports = reportRows.map(toPortalReportRow)
     lastSyncedAt =
       deploymentScope === LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
         ? localRun?.completedAt ?? localRun?.updatedAt ?? null
@@ -222,7 +222,7 @@ export default async function NationalLifeDataPage() {
       <PageHeader
         title="National Life data"
         eyebrow="Integration"
-        description="Cases, in-force policies, and commissions read straight from the National Life portal."
+        description="Cases, in-force policies, and every synced portal report, read straight from National Life."
       >
         <Link
           href="/agent/integrations/national-life"
@@ -254,8 +254,8 @@ export default async function NationalLifeDataPage() {
               tone: attentionInforce > 0 ? 'gold' : 'green',
             },
             {
-              label: 'Commission lines',
-              value: commissions.length,
+              label: 'Portal report rows',
+              value: reports.length,
               detail: lastSyncedAt
                 ? `Last synced ${lastSyncedAt.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`
                 : 'Not synced yet',
@@ -267,7 +267,7 @@ export default async function NationalLifeDataPage() {
       <div className="module-content-grid">
         <section className="module-main-surface">
           {!loadError && (
-            <NationalLifeDataTabs cases={cases} inforce={inforce} commissions={commissions} />
+            <NationalLifeDataTabs cases={cases} inforce={inforce} reports={reports} />
           )}
         </section>
         <ContextPanel eyebrow="How to read this" title="Straight from the portal">
@@ -278,8 +278,8 @@ export default async function NationalLifeDataPage() {
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Amounts</p>
             <p className="mt-2">
-              Premiums and commissions arrive as text from the carrier and are shown exactly as
-              received, with no recalculation.
+              Premiums and commission amounts arrive as text from the carrier and are shown exactly
+              as received, with no recalculation.
             </p>
           </div>
         </ContextPanel>

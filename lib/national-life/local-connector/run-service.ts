@@ -34,6 +34,7 @@ type LocalConnectorDb = Pick<
   PrismaClient,
   | 'nationalLifeSyncRun'
   | 'nationalLifeConnectorStageReceipt'
+  | 'nationalLifeConnectorStageCompletion'
   | 'nationalLifeCaseSnapshot'
   | 'nationalLifeInforcePolicy'
   | 'nationalLifeReportRow'
@@ -49,6 +50,14 @@ export class LocalConnectorRunError extends Error {
       | 'IDEMPOTENCY_CONFLICT'
       | 'RUN_NOT_ACTIVE'
       | 'GRID_NOT_PLANNED',
+  ) {
+    super(code)
+  }
+}
+
+export class LocalConnectorStageCompletionError extends Error {
+  constructor(
+    readonly code: 'STAGE_INCOMPLETE' | 'STAGE_TRUNCATED',
   ) {
     super(code)
   }
@@ -209,6 +218,7 @@ type IngestInput = {
   idempotencyKey: string
   contentHash: string
   envelope: LocalConnectorRawStageEnvelope
+  legacyStageCompletion?: boolean
   now?: Date
 }
 
@@ -447,29 +457,39 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
         },
       })
 
-      const finalizedGrids = await tx.nationalLifeConnectorStageReceipt.findMany({
-        where: { runId: run.id, truncated: false },
-        distinct: ['gridKey'],
-        select: { gridKey: true },
-      })
-      // Identity, not arithmetic: every *planned* grid must have a non-truncated
-      // receipt. A count would let any N finalized grids close an N-stage run.
-      const finalizedPlanned = planned.filter((gridKey) =>
-        finalizedGrids.some((row) => row.gridKey === gridKey),
-      )
-      const completedStages = finalizedPlanned.length
-      const completed = finalizedPlanned.length === planned.length
-      const currentGridKey = completed ? null : input.gridKey
-      await tx.nationalLifeSyncRun.update({
-        where: { id: run.id },
-        data: {
-          state: completed ? 'COMPLETED' : 'RUNNING',
-          completedStages,
-          currentGridKey,
-          completedAt: completed ? now : null,
-          updatedAt: now,
-        },
-      })
+      if (input.legacyStageCompletion) {
+        // The retired protocol only sends chunks. Preserve its existing behaviour
+        // during Store rollout so an installed 0.1.0/0.1.1 does not hang; it is
+        // intentionally isolated from the 0.1.2+ path below, which never counts
+        // a page as a completed grid.
+        const finalizedGrids = await tx.nationalLifeConnectorStageReceipt.findMany({
+          where: { runId: run.id, truncated: false },
+          distinct: ['gridKey'],
+          select: { gridKey: true },
+        })
+        const completedStages = planned.filter((gridKey) =>
+          finalizedGrids.some((row) => row.gridKey === gridKey),
+        ).length
+        const completed = completedStages === planned.length
+        await tx.nationalLifeSyncRun.update({
+          where: { id: run.id },
+          data: {
+            state: completed ? 'COMPLETED' : 'RUNNING',
+            completedStages,
+            currentGridKey: completed ? null : input.gridKey,
+            completedAt: completed ? now : null,
+            updatedAt: now,
+          },
+        })
+      } else {
+        // A page receipt is deliberately not a stage completion. The extension
+        // must upload every sequence and then call completeLocalConnectorStage,
+        // which reconciles this durable receipt set with the carrier total.
+        await tx.nationalLifeSyncRun.update({
+          where: { id: run.id },
+          data: { state: 'RUNNING', currentGridKey: input.gridKey, updatedAt: now },
+        })
+      }
       return { receipt: created, duplicate: false as const }
     })
     return { receipt: publicReceipt(result.receipt), duplicate: result.duplicate }
@@ -487,4 +507,105 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
     }
     throw error
   }
+}
+
+/// Marks one grid complete only after every uploaded page has landed. `recordsTotal`
+/// comes from the carrier response and the receipts are the server's durable view of
+/// what actually arrived, so neither the extension's GRID_DONE nor an optimistic UI
+/// counter can make an incomplete stage look complete.
+export async function completeLocalConnectorStage(
+  db: LocalConnectorDb,
+  input: {
+    agentId: string
+    deviceId: string
+    runId: string
+    gridKey: NationalLifeGridKey
+    expectedRecordCount: number
+    finalSequence: number
+    truncated: boolean
+    now?: Date
+  },
+) {
+  const now = input.now ?? new Date()
+  return db.$transaction(async (tx) => {
+    const run = await tx.nationalLifeSyncRun.findFirst({
+      where: {
+        id: input.runId,
+        agentId: input.agentId,
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+        connectorDeviceId: input.deviceId,
+        executionSource: 'LOCAL',
+        provider: NATIONAL_LIFE_PROVIDER,
+        state: 'RUNNING',
+      },
+      select: { id: true, plannedGridKeys: true },
+    })
+    if (!run) throw new LocalConnectorRunError('RUN_NOT_FOUND')
+    if (!plannedGridKeys(run).includes(input.gridKey)) {
+      throw new LocalConnectorRunError('GRID_NOT_PLANNED')
+    }
+    if (input.truncated) throw new LocalConnectorStageCompletionError('STAGE_TRUNCATED')
+
+    const receipts = await tx.nationalLifeConnectorStageReceipt.findMany({
+      where: { deviceId: input.deviceId, runId: run.id, gridKey: input.gridKey },
+      orderBy: { sequence: 'asc' },
+      select: { sequence: true, recordCount: true },
+    })
+    const receivedRecordCount = receipts.reduce((total, receipt) => total + receipt.recordCount, 0)
+    const sequencesAreComplete =
+      receipts.length === input.finalSequence + 1 &&
+      receipts.every((receipt, index) => receipt.sequence === index)
+    if (!sequencesAreComplete || receivedRecordCount !== input.expectedRecordCount) {
+      throw new LocalConnectorStageCompletionError('STAGE_INCOMPLETE')
+    }
+
+    await tx.nationalLifeConnectorStageCompletion.upsert({
+      where: {
+        deviceId_runId_gridKey: {
+          deviceId: input.deviceId,
+          runId: run.id,
+          gridKey: input.gridKey,
+        },
+      },
+      create: {
+        deviceId: input.deviceId,
+        runId: run.id,
+        gridKey: input.gridKey,
+        expectedRecordCount: input.expectedRecordCount,
+        receivedRecordCount,
+        finalSequence: input.finalSequence,
+        truncated: false,
+        completedAt: now,
+      },
+      update: {
+        expectedRecordCount: input.expectedRecordCount,
+        receivedRecordCount,
+        finalSequence: input.finalSequence,
+        truncated: false,
+        completedAt: now,
+      },
+    })
+
+    const finalizedGrids = await tx.nationalLifeConnectorStageCompletion.findMany({
+      where: { runId: run.id, truncated: false },
+      distinct: ['gridKey'],
+      select: { gridKey: true },
+    })
+    const planned = plannedGridKeys(run)
+    const completedStages = planned.filter((gridKey) =>
+      finalizedGrids.some((row) => row.gridKey === gridKey),
+    ).length
+    const completed = completedStages === planned.length
+    await tx.nationalLifeSyncRun.update({
+      where: { id: run.id },
+      data: {
+        state: completed ? 'COMPLETED' : 'RUNNING',
+        completedStages,
+        currentGridKey: completed ? null : input.gridKey,
+        completedAt: completed ? now : null,
+        updatedAt: now,
+      },
+    })
+    return { runId: run.id, gridKey: input.gridKey, receivedRecordCount, completedStages, completed }
+  })
 }

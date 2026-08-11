@@ -68,6 +68,10 @@ describe('planReadGridStages', () => {
       'CORRESPONDENCE',
       'COMMISSIONS_PAYMENT_PORTAL',
       'PIP_PENDING',
+      'TRANSFERS_EXCHANGES',
+      'LIFE_PENDING_LAPSE',
+      'COMMISSIONS_EARNING_REPORT',
+      'PAYABLE_GROSS_COMMISSIONS',
     ])
   })
 

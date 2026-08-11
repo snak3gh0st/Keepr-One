@@ -20,7 +20,10 @@ import {
   parseJsonBody,
   readLimitedBody,
 } from '@/lib/national-life/local-connector/request'
-import { refuseLocalConnectorCapability } from '@/lib/national-life/local-connector/remote-config'
+import {
+  refuseLocalConnectorCapability,
+  supportsStageCompletionProtocol,
+} from '@/lib/national-life/local-connector/remote-config'
 import {
   ingestLocalConnectorStage,
   LocalConnectorRunError,
@@ -72,6 +75,10 @@ export async function PUT(
       idempotencyKey,
       contentHash: sha256Hex(body),
       envelope,
+      // Versions before 0.1.2 have no separate stage-complete call. This is a
+      // temporary compatibility bridge for already-installed pilot builds; new
+      // extensions always use the server-reconciled completion endpoint.
+      legacyStageCompletion: !supportsStageCompletionProtocol(request.headers),
     })
     return Response.json(result, { status: result.duplicate ? 200 : 201, headers: NO_STORE })
   } catch (error) {
