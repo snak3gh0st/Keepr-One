@@ -58,6 +58,11 @@ export const PAUSED_CODES: readonly string[] = ['CONNECTOR_PAUSED']
 
 export const RATE_LIMIT_CODES: readonly string[] = ['RUN_START_RATE_LIMITED']
 
+export const RECONCILIATION_CODES: readonly string[] = [
+  'STAGE_INCOMPLETE',
+  'STAGE_TRUNCATED',
+]
+
 /// O portal (ou a ponte com ele) não respondeu como esperado. Costuma passar.
 export const PORTAL_CODES: readonly string[] = [
   'PORTAL_REQUEST_FAILED',
@@ -66,6 +71,9 @@ export const PORTAL_CODES: readonly string[] = [
   'BRIDGE_UNAVAILABLE',
   'DEVICE_REQUEST_FAILED',
   'CONNECTOR_TAB_CLOSED',
+  'STAGE_INCOMPLETE',
+  'STAGE_TRUNCATED',
+  'LOCAL_CONNECTOR_TIMEOUT',
 ]
 
 export function revokesDevice(code: string | undefined | null): boolean {
@@ -106,6 +114,13 @@ export function connectorFailure(code: string | undefined | null): ConnectorFail
       action: 'retry',
       message:
         'Too many sync attempts were started. Wait a few minutes, then try once — your National Life connection is still intact.',
+    }
+  }
+  if (typeof code === 'string' && RECONCILIATION_CODES.includes(code)) {
+    return {
+      action: 'retry',
+      message:
+        'National Life stopped before this area was fully received. Saved batches are safe — resume the sync to collect the missing rows.',
     }
   }
   if (typeof code === 'string' && PORTAL_CODES.includes(code)) {

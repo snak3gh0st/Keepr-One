@@ -17,6 +17,9 @@ const EVERY_CODE = [
   'BRIDGE_UNAVAILABLE',
   'DEVICE_REQUEST_FAILED',
   'CONNECTOR_TAB_CLOSED',
+  'STAGE_INCOMPLETE',
+  'STAGE_TRUNCATED',
+  'LOCAL_CONNECTOR_TIMEOUT',
   'SYNC_STATE_INVALID',
   'WHATEVER_COMES_NEXT',
   null,
@@ -80,6 +83,7 @@ describe('connectorFailure', () => {
     const failure = connectorFailure('BRIDGE_UNAVAILABLE')
     expect(failure.action).toBe('retry')
     expect(failure.message).toMatch(/clears up/i)
+    expect(connectorFailure('STAGE_INCOMPLETE').action).toBe('retry')
   })
 
   it('keeps the generic message as a true fallback, not the common case', () => {

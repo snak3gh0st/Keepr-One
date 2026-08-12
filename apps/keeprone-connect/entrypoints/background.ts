@@ -66,6 +66,8 @@ const tabQueues = new Map<number, Promise<void>>()
 /// de "uma mensagem minha e outras esperando".
 const pendingBridgeMessages = new Map<number, number>()
 let syncStartLock: Promise<unknown> | null = null
+let tabNavigationLock: Promise<unknown> | null = null
+const tabReadyLocks = new Map<number, Promise<void>>()
 
 const BRIDGE_RETRY_DELAYS_MS = [150, 300, 600, 1_000, 1_500]
 // O Chrome recusa qualquer alteração de aba durante um arrasto do usuário. É
@@ -198,6 +200,39 @@ async function withSyncLock<T>(operation: () => Promise<T>): Promise<T> {
     if (syncStartLock === tracked) syncStartLock = null
   })
   syncStartLock = tracked
+  return run
+}
+
+async function withTabNavigationLock<T>(operation: () => Promise<T>): Promise<T> {
+  while (tabNavigationLock) {
+    try {
+      await tabNavigationLock
+    } catch {
+      // A failed navigation must not strand the next recovery attempt.
+    }
+  }
+  const run = operation()
+  const tracked: Promise<unknown> = run.finally(() => {
+    if (tabNavigationLock === tracked) tabNavigationLock = null
+  })
+  tabNavigationLock = tracked
+  return run
+}
+
+async function withTabReadyLock(tabId: number, operation: () => Promise<void>): Promise<void> {
+  const previous = tabReadyLocks.get(tabId)
+  if (previous) {
+    try {
+      await previous
+    } catch {
+      // The previous page event already recorded its failure.
+    }
+  }
+  const run = operation()
+  const tracked = run.finally(() => {
+    if (tabReadyLocks.get(tabId) === tracked) tabReadyLocks.delete(tabId)
+  })
+  tabReadyLocks.set(tabId, tracked)
   return run
 }
 
@@ -479,59 +514,63 @@ async function findConnectorTab(state: Awaited<ReturnType<typeof readSyncState>>
   return tabs.find((tab) => tab.id === state.carrierTabId)
 }
 
+async function findReusableConnectorTab(state: Awaited<ReturnType<typeof readSyncState>>) {
+  const bound = await findConnectorTab(state)
+  if (bound) return bound
+
+  const tabs = await chrome.tabs.query({
+    url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
+  })
+  const usable = tabs.filter((tab) => typeof tab.id === 'number')
+  // If an older attempt lost its stored tab id, bind to an existing carrier tab
+  // instead of creating a second one. This is deliberately one-tab-first: the
+  // connector must not multiply windows while recovering from a worker restart.
+  return usable.find((tab) => tab.active) ?? usable[0]
+}
+
 async function navigatePendingGrid() {
-  const state = await readSyncState()
-  const stage = currentStage(state)
-  if (!state.runId || !stage) return
-  const gridKey = stageKey(stage)
-  const targetPath = canonicalNationalLifeNavigatePath(gridKey, stage.params.navigatePath)
-  const target = `${NLG_ORIGIN}${targetPath}`
-  const existing = await findConnectorTab(state)
-  if (existing?.id !== undefined && existing.url) {
-    try {
-      if (isAuthPath(new URL(existing.url).pathname)) {
-        await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
-        await updateTab(existing.id, { active: true })
-        return
+  return withTabNavigationLock(async () => {
+    const state = await readSyncState()
+    const stage = currentStage(state)
+    if (!state.runId || !stage) return
+    const gridKey = stageKey(stage)
+    const targetPath = canonicalNationalLifeNavigatePath(gridKey, stage.params.navigatePath)
+    const target = `${NLG_ORIGIN}${targetPath}`
+    const existing = await findReusableConnectorTab(state)
+
+    if (existing?.id !== undefined) {
+      if (state.carrierTabId !== existing.id) {
+        await writeSyncState({ ...state, carrierTabId: existing.id })
       }
-    } catch {
-      // Fall through to the normal target navigation for an unparseable tab URL.
-    }
-  }
-  await writeSyncState({ ...state, status: 'NAVIGATING', errorCode: undefined })
-  if (existing?.id !== undefined) {
-    // A logged-in portal tab is an implementation detail of the connector. Do
-    // not steal focus from Keepr One or from the agent's other work. The only
-    // time we intentionally activate a tab is when the agent must complete
-    // National Life login/MFA above.
-    const existingPath = existing.url ? new URL(existing.url).pathname : undefined
-    if (
-      existingPath &&
-      matchesNationalLifeStagePath(gridKey, stage.params.navigatePath, existingPath)
-    ) {
-      // `Check again` can be pressed while the expected grid is already open.
-      // There is no tabs.onUpdated event in that case, so explicitly resume the
-      // bridge or the run would remain in NAVIGATING forever.
-      await handleTabReady(existing.id, existing.url)
+      if (existing.url) {
+        try {
+          const existingUrl = new URL(existing.url)
+          if (existingUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(existingUrl.pathname)) {
+            await writeSyncState({
+              ...(await readSyncState()),
+              status: 'AUTH_REQUIRED',
+              errorCode: undefined,
+            })
+            if (!existing.active) await updateTab(existing.id, { active: true })
+            return
+          }
+          if (matchesNationalLifeStagePath(gridKey, stage.params.navigatePath, existingUrl.pathname)) {
+            // There is no tabs.onUpdated event when the expected page is already
+            // open, so explicitly resume the bridge without changing tabs.
+            await handleTabReady(existing.id, existing.url)
+            return
+          }
+        } catch {
+          // Navigate the one bound tab when its URL is unavailable or malformed.
+        }
+      }
+      await writeSyncState({ ...(await readSyncState()), status: 'NAVIGATING', errorCode: undefined })
+      // Reuse the existing tab even when it is visible. Creating a background tab
+      // here was the source of the tab storm after retries and worker recovery.
+      await updateTab(existing.id, { url: target })
       return
     }
-    if (existing.active) {
-      // The agent may be using the visible carrier tab. Keep it untouched and
-      // bind the one quiet connector tab we create; without retaining this id,
-      // every later resume mistakes it for missing and opens another tab.
-      const created = await chrome.tabs.create({ active: false, url: target })
-      if (created?.id !== undefined) {
-        await writeSyncState({
-          ...(await readSyncState()),
-          carrierTabId: created.id,
-          status: 'NAVIGATING',
-          errorCode: undefined,
-        })
-      }
-    } else {
-      await updateTab(existing.id, { url: target })
-    }
-  } else {
+
     const created = await chrome.tabs.create({
       active: state.status === 'AUTH_REQUIRED',
       url: target,
@@ -544,7 +583,7 @@ async function navigatePendingGrid() {
         errorCode: undefined,
       })
     }
-  }
+  })
 }
 
 async function startNewSync() {
@@ -647,7 +686,7 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
   }
 }
 
-async function handleTabReady(tabId: number, urlValue?: string) {
+async function handleTabReadyInternal(tabId: number, urlValue?: string) {
   if (!urlValue) return
   let url: URL
   try {
@@ -702,6 +741,10 @@ async function handleTabReady(tabId: number, urlValue?: string) {
     return
   }
   await beginExtraction(tabId, stage)
+}
+
+async function handleTabReady(tabId: number, urlValue?: string) {
+  return withTabReadyLock(tabId, () => handleTabReadyInternal(tabId, urlValue))
 }
 
 async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type: 'GRID_CHUNK' }>) {
@@ -1046,6 +1089,7 @@ export default defineBackground(() => {
   chrome.tabs.onRemoved.addListener((tabId) => {
     activeNavigations.delete(tabId)
     tabQueues.delete(tabId)
+    tabReadyLocks.delete(tabId)
     // A visible Chrome tab is not a disposable implementation detail. The agent
     // closing it is an explicit stop signal, not permission to keep reopening
     // National Life behind their back. End this run cleanly; a later Sync starts

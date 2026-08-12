@@ -34,7 +34,14 @@ describe('connectorFailure', () => {
   })
 
   it('tells a portal hiccup that it usually clears up', () => {
-    for (const code of ['PORTAL_REQUEST_FAILED', 'TEMPLATE_UNAVAILABLE', 'DEVICE_REQUEST_FAILED']) {
+    for (const code of [
+      'PORTAL_REQUEST_FAILED',
+      'TEMPLATE_UNAVAILABLE',
+      'DEVICE_REQUEST_FAILED',
+      'STAGE_INCOMPLETE',
+      'STAGE_TRUNCATED',
+      'LOCAL_CONNECTOR_TIMEOUT',
+    ]) {
       const failure = connectorFailure(code)
       expect(failure.action).toBe('retry')
       expect(failure.message).toMatch(/National Life/)

@@ -52,6 +52,14 @@ function formatCount(value: number | null): string {
   return value === null ? '—' : value.toLocaleString('en-US')
 }
 
+function activeLine(status: NationalLifeSyncStatus): string {
+  if (!status.currentGridLabel) return `${status.percent}% done`
+  if (status.receivedRecords !== null && status.receivedRecords > 0) {
+    return `Reading and saving ${status.currentGridLabel}. ${formatCount(status.receivedRecords)} rows received so far.`
+  }
+  return `Reading and saving ${status.currentGridLabel}.`
+}
+
 function coverageTone(state: NonNullable<NationalLifeSyncStatus['stageCoverage']>[number]['state']) {
   if (state === 'VERIFIED') return 'border-teal/30 bg-teal-pale/45 text-teal-deep'
   if (state === 'CAPTURED') return 'border-blue-200 bg-blue-50 text-blue-800'
@@ -159,7 +167,7 @@ export function NationalLifeSyncProgress({
           )}
         </div>
         <span className="font-mono text-sm font-semibold tabular-nums text-teal">
-          {status.completed} of {status.total} portal sources captured
+          {status.completed} of {status.total} portal sources verified
         </span>
       </div>
 
@@ -171,11 +179,7 @@ export function NationalLifeSyncProgress({
       />
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-ink-muted">
-        {status.currentGridLabel && !terminal ? (
-          <span>Now reading and saving: {status.currentGridLabel}</span>
-        ) : (
-          <span>{outcome ?? `${status.percent}% done`}</span>
-        )}
+        <span>{outcome ?? activeLine(status)}</span>
         {message && (
           <span className="font-semibold text-gold">
             {message}
