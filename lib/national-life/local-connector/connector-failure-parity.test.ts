@@ -14,6 +14,7 @@ describe('classificação de falha do conector', () => {
     ['pairing', web.PAIRING_CODES, extension.PAIRING_CODES],
     ['update', web.OUTDATED_CODES, extension.OUTDATED_CODES],
     ['paused', web.PAUSED_CODES, extension.PAUSED_CODES],
+    ['rate-limit', web.RATE_LIMIT_CODES, extension.RATE_LIMIT_CODES],
     ['portal', web.PORTAL_CODES, extension.PORTAL_CODES],
   ] as const
 
@@ -29,6 +30,7 @@ describe('classificação de falha do conector', () => {
       ...web.PAIRING_CODES,
       ...web.OUTDATED_CODES,
       ...web.PAUSED_CODES,
+      ...web.RATE_LIMIT_CODES,
       ...web.PORTAL_CODES,
     ]
     expect(new Set(all).size).toBe(all.length)
@@ -67,6 +69,7 @@ describe('classificação de falha do conector', () => {
       ...web.PAIRING_CODES,
       ...web.OUTDATED_CODES,
       ...web.PAUSED_CODES,
+      ...web.RATE_LIMIT_CODES,
       ...web.PORTAL_CODES,
     ]) {
       expect(web.connectorFailure(code).action).toBe(extension.connectorFailure(code).action)

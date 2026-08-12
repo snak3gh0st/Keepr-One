@@ -4,6 +4,8 @@ import {
   parseBeginGridMessage,
   parseBridgeMessage,
   parseExternalMessage,
+  parseProbeAuthAck,
+  parseProbeAuthMessage,
 } from './messages'
 
 describe('message validation', () => {
@@ -116,5 +118,42 @@ describe('grid control messages', () => {
     expect(parseAbortGridMessage({ type: 'ABORT_GRID', ...base, gridKey: 'new business' })).toBeNull()
     expect(parseAbortGridMessage({ type: 'ABORT_GRID' })).toBeNull()
     expect(parseAbortGridMessage(null)).toBeNull()
+  })
+})
+
+describe('authentication probe messages', () => {
+  const probe = {
+    type: 'PROBE_AUTH',
+    token: 't'.repeat(32),
+    correlationId: 'c'.repeat(16),
+  }
+
+  it('accepts only an exact probe and correlated result', () => {
+    expect(parseProbeAuthMessage(probe)).toEqual(probe)
+    expect(parseProbeAuthMessage({ ...probe, extra: true })).toBeNull()
+    expect(parseProbeAuthAck({
+      ok: true,
+      type: 'AUTH_PROBED',
+      token: probe.token,
+      correlationId: probe.correlationId,
+      authenticated: true,
+    })).toMatchObject({ authenticated: true })
+  })
+
+  it('rejects an unbounded or ambiguous result', () => {
+    expect(parseProbeAuthAck({
+      ok: true,
+      type: 'AUTH_PROBED',
+      token: 'short',
+      correlationId: probe.correlationId,
+      authenticated: true,
+    })).toBeNull()
+    expect(parseProbeAuthAck({
+      ok: true,
+      type: 'AUTH_PROBED',
+      token: probe.token,
+      correlationId: probe.correlationId,
+      authenticated: 'yes',
+    })).toBeNull()
   })
 })

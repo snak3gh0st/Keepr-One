@@ -159,12 +159,46 @@ export async function startLocalConnectorRun(
       connectorDeviceId: input.deviceId,
       executionSource: 'LOCAL',
       provider: NATIONAL_LIFE_PROVIDER,
-      state: 'RUNNING',
+      OR: [
+        { state: 'RUNNING' },
+        // A retry should resume a recent failed run after its durable stage
+        // receipts, rather than re-reading every grid already verified. Runs
+        // without a completed stage still start fresh: there is no durable
+        // cursor worth preserving in that case.
+        {
+          state: 'FAILED',
+          completedStages: { gt: 0 },
+          updatedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_RUN_TTL_MS) },
+        },
+      ],
     },
     orderBy: { createdAt: 'desc' },
-    select: { id: true, plannedGridKeys: true, completedStages: true },
+    select: { id: true, state: true, plannedGridKeys: true, completedStages: true },
   })
   if (active) {
+    if (active.state === 'FAILED') {
+      // Reopen only the exact run/device/scope selected above. If another
+      // retry won the race, its update count is zero and returning the same
+      // run remains safe because both callers share the same durable cursor.
+      await db.nationalLifeSyncRun.updateMany({
+        where: {
+          id: active.id,
+          agentId: input.agentId,
+          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+          connectorDeviceId: input.deviceId,
+          executionSource: 'LOCAL',
+          provider: NATIONAL_LIFE_PROVIDER,
+          state: 'FAILED',
+        },
+        data: {
+          state: 'RUNNING',
+          safeErrorCode: null,
+          completedAt: null,
+          currentGridKey: plannedGridKeys(active)[active.completedStages] ?? null,
+          updatedAt: now,
+        },
+      })
+    }
     // The plan comes from the run that already exists, not from what this call
     // asked for: returning the requested grids would hand the device a plan whose
     // stages the run can never account for, and it would never complete.

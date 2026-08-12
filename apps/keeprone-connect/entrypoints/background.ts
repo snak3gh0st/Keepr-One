@@ -7,14 +7,18 @@ import {
 import {
   NLG_AUTH0_ORIGIN,
   NLG_ORIGIN,
+  LOGIN_PATH,
   allowedKeeprOrigins,
+  canonicalNationalLifeNavigatePath,
   isAuthPath,
+  matchesNationalLifeStagePath,
   requireAllowedBaseUrl,
 } from '../lib/constants'
 import { clearDeviceKeys, getOrCreateDeviceKey } from '../lib/key-store'
 import {
   parseBridgeMessage,
   parsePageCaptureAck,
+  parseProbeAuthAck,
   parseExternalMessage,
   type AbortGridMessage,
   type BeginGridMessage,
@@ -190,10 +194,40 @@ async function withSyncLock<T>(operation: () => Promise<T>): Promise<T> {
     }
   }
   const run = operation()
-  syncStartLock = run.finally(() => {
-    if (syncStartLock === run) syncStartLock = null
+  const tracked: Promise<unknown> = run.finally(() => {
+    if (syncStartLock === tracked) syncStartLock = null
   })
+  syncStartLock = tracked
   return run
+}
+
+async function hasAuthenticatedPortalSession(tabId: number): Promise<boolean> {
+  const token = randomToken()
+  const correlationId = crypto.randomUUID()
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = parseProbeAuthAck(await chrome.tabs.sendMessage(tabId, {
+        type: 'PROBE_AUTH',
+        token,
+        correlationId,
+      }))
+      if (
+        !response ||
+        response.token !== token ||
+        response.correlationId !== correlationId
+      ) {
+        throw new Error('BRIDGE_UNAVAILABLE')
+      }
+      return response.authenticated
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError ?? new Error('BRIDGE_UNAVAILABLE')
 }
 
 async function pairConnector(
@@ -449,7 +483,9 @@ async function navigatePendingGrid() {
   const state = await readSyncState()
   const stage = currentStage(state)
   if (!state.runId || !stage) return
-  const target = `${NLG_ORIGIN}${stage.params.navigatePath}`
+  const gridKey = stageKey(stage)
+  const targetPath = canonicalNationalLifeNavigatePath(gridKey, stage.params.navigatePath)
+  const target = `${NLG_ORIGIN}${targetPath}`
   const existing = await findConnectorTab(state)
   if (existing?.id !== undefined && existing.url) {
     try {
@@ -469,7 +505,10 @@ async function navigatePendingGrid() {
     // time we intentionally activate a tab is when the agent must complete
     // National Life login/MFA above.
     const existingPath = existing.url ? new URL(existing.url).pathname : undefined
-    if (existingPath === stage.params.navigatePath) {
+    if (
+      existingPath &&
+      matchesNationalLifeStagePath(gridKey, stage.params.navigatePath, existingPath)
+    ) {
       // `Check again` can be pressed while the expected grid is already open.
       // There is no tabs.onUpdated event in that case, so explicitly resume the
       // bridge or the run would remain in NAVIGATING forever.
@@ -641,7 +680,8 @@ async function handleTabReady(tabId: number, urlValue?: string) {
     await navigatePendingGrid()
     return
   }
-  if (url.pathname !== stage.params.navigatePath) {
+  const gridKey = stageKey(stage)
+  if (!matchesNationalLifeStagePath(gridKey, stage.params.navigatePath, url.pathname)) {
     // Auth interstitials are handled above. For any other carrier page, resume
     // the stage in a background tab; otherwise a stale tab (for example
     // All Clients left open after the previous stage) strands the run in
@@ -649,6 +689,16 @@ async function handleTabReady(tabId: number, urlValue?: string) {
     if (state.status !== 'AUTH_REQUIRED') {
       await navigatePendingGrid()
     }
+    return
+  }
+  // A carrier URL alone is not proof of a carrier session: stale callbacks and
+  // login interstitials have both appeared under `/agent/*`. Ask the isolated
+  // bridge to make one credentialed, non-following request to the agent shell.
+  // A redirect to Auth0 is then an explicit negative instead of a page-shape
+  // guess, and no extraction begins until this succeeds.
+  if (!(await hasAuthenticatedPortalSession(tabId))) {
+    await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
+    await updateTab(tabId, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
     return
   }
   await beginExtraction(tabId, stage)
@@ -770,7 +820,9 @@ async function finishGrid(tabId: number, gridKey: string) {
     status: 'NAVIGATING',
     uploads: state.uploads,
   })
-  await updateTab(tabId, { url: `${NLG_ORIGIN}${next.params.navigatePath}` })
+  const nextGridKey = stageKey(next)
+  const nextPath = canonicalNationalLifeNavigatePath(nextGridKey, next.params.navigatePath)
+  await updateTab(tabId, { url: `${NLG_ORIGIN}${nextPath}` })
 }
 
 /// Manda o extrator parar onde está.
@@ -855,9 +907,31 @@ async function resumePending(options?: { reconcileWithServer?: boolean }) {
   if (!state.runId || !currentStage(state) || state.status === 'COMPLETED' || state.status === 'ERROR') {
     return
   }
+  if (state.status === 'AUTH_REQUIRED') {
+    // Login and MFA are user-paced. Polling the run-start endpoint while the
+    // agent is typing consumes the server's retry budget and eventually turns a
+    // healthy pairing into a deterministic 429. Stay completely passive until
+    // the carrier tab itself leaves the authentication flow.
+    const authTab = await findConnectorTab(state)
+    if (!authTab?.url || authTab.id === undefined) return
+    try {
+      const authUrl = new URL(authTab.url)
+      if (authUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(authUrl.pathname)) return
+    } catch {
+      return
+    }
+    await handleTabReady(authTab.id, authTab.url)
+    return
+  }
   // The server is the durable cursor. A service worker may be evicted after it
   // confirms a grid and before it moves the tab to the next one.
-  if (options?.reconcileWithServer && activeNavigations.size === 0) await createRun()
+  if (
+    options?.reconcileWithServer &&
+    state.status === 'UPLOADING' &&
+    activeNavigations.size === 0
+  ) {
+    await createRun()
+  }
   const resumed = await readSyncState()
   if (!resumed.runId || !currentStage(resumed) || resumed.status === 'COMPLETED' || resumed.status === 'ERROR') {
     return

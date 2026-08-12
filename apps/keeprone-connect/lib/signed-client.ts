@@ -45,7 +45,9 @@ export async function signCanonicalMessage(key: CryptoKey, message: string): Pro
 
 export class SignedRequestError extends Error {
   constructor(
-    readonly code: 'DEVICE_KEY_UNAVAILABLE' | 'DEVICE_REVOKED' | 'DEVICE_REQUEST_REJECTED' | 'DEVICE_REQUEST_FAILED' | 'IDEMPOTENCY_CONFLICT' | 'PATH_NOT_ALLOWED' | 'CLIENT_TOO_OLD' | 'CONNECTOR_PAUSED',
+    readonly code: 'DEVICE_KEY_UNAVAILABLE' | 'DEVICE_REVOKED' | 'DEVICE_REQUEST_REJECTED' | 'DEVICE_REQUEST_FAILED' | 'IDEMPOTENCY_CONFLICT' | 'PATH_NOT_ALLOWED' | 'CLIENT_TOO_OLD' | 'CONNECTOR_PAUSED' | 'RUN_START_RATE_LIMITED',
+    readonly status?: number,
+    readonly retryAfterSeconds?: number,
   ) {
     super(code)
   }
@@ -64,12 +66,14 @@ export function classifyFailedResponse(
   | 'DEVICE_REQUEST_REJECTED'
   | 'DEVICE_REQUEST_FAILED'
   | 'CLIENT_TOO_OLD'
-  | 'CONNECTOR_PAUSED' {
+  | 'CONNECTOR_PAUSED'
+  | 'RUN_START_RATE_LIMITED' {
   // 426 e 503-pausado precisam de código próprio ou caem em DEVICE_REQUEST_FAILED,
   // que está na classe "portal" e diz ao agente "espere um minuto e tente de novo".
   // Para versão velha isso é falso e vira laço: tentar de novo nunca resolve, só
   // atualizar resolve. Para pausa, "um minuto" é uma promessa que ninguém fez.
   if (status === 426) return 'CLIENT_TOO_OLD'
+  if (status === 429) return 'RUN_START_RATE_LIMITED'
   if (status === 503 && headers.get('x-fyntra-connector-state') === 'PAUSED') {
     return 'CONNECTOR_PAUSED'
   }
@@ -129,7 +133,12 @@ export async function signedJsonRequest<T>(input: {
   })
   if (response.status === 409) throw new SignedRequestError('IDEMPOTENCY_CONFLICT')
   if (!response.ok) {
-    throw new SignedRequestError(classifyFailedResponse(response.status, response.headers))
+    const retryAfter = Number.parseInt(response.headers.get('retry-after') ?? '', 10)
+    throw new SignedRequestError(
+      classifyFailedResponse(response.status, response.headers),
+      response.status,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+    )
   }
   if (response.status === 204) return undefined as T
   return (await response.json()) as T

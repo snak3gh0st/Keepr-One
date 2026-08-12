@@ -3,8 +3,11 @@ import {
   parseBeginGridMessage,
   parseBridgeMessage,
   parseCapturePageMessage,
+  parseProbeAuthMessage,
   type BeginGridMessage,
 } from '../lib/messages'
+import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
+import { isAuthenticatedAgentResponse } from '../lib/auth-probe'
 import { capturePageSnapshot } from '../lib/page-snapshot'
 
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
@@ -13,9 +16,37 @@ export default defineContentScript({
   matches: ['https://www.nationallife.com/agent/*'],
   runAt: 'document_start',
   main() {
+    if (!shouldInstrumentNationalLifePath(location.pathname)) return
     let active: BeginGridMessage | null = null
 
     chrome.runtime.onMessage.addListener((value, _sender, sendResponse) => {
+      const probe = parseProbeAuthMessage(value)
+      if (probe) {
+        void fetch(`${NLG_ORIGIN}/agent/`, {
+          method: 'GET',
+          credentials: 'include',
+          cache: 'no-store',
+          redirect: 'manual',
+        }).then(
+          (response) => {
+            sendResponse({
+              ok: true,
+              type: 'AUTH_PROBED',
+              token: probe.token,
+              correlationId: probe.correlationId,
+              authenticated: isAuthenticatedAgentResponse(response),
+            })
+          },
+          () => sendResponse({
+            ok: true,
+            type: 'AUTH_PROBED',
+            token: probe.token,
+            correlationId: probe.correlationId,
+            authenticated: false,
+          }),
+        )
+        return true
+      }
       const capture = parseCapturePageMessage(value)
       if (capture) {
         sendResponse({

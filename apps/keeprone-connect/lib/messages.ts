@@ -51,6 +51,20 @@ export type CapturePageMessage = {
   correlationId: string
 }
 
+export type ProbeAuthMessage = {
+  type: 'PROBE_AUTH'
+  token: string
+  correlationId: string
+}
+
+export type ProbeAuthAck = {
+  ok: true
+  type: 'AUTH_PROBED'
+  token: string
+  correlationId: string
+  authenticated: boolean
+}
+
 export type PageCaptureAck = {
   ok: true
   type: 'PAGE_CAPTURED'
@@ -202,6 +216,34 @@ export function parseCapturePageMessage(value: unknown): CapturePageMessage | nu
     return null
   }
   return value as CapturePageMessage
+}
+
+export function parseProbeAuthMessage(value: unknown): ProbeAuthMessage | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ['type', 'token', 'correlationId']) ||
+    value.type !== 'PROBE_AUTH' ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16)
+  ) {
+    return null
+  }
+  return value as ProbeAuthMessage
+}
+
+export function parseProbeAuthAck(value: unknown): ProbeAuthAck | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ['ok', 'type', 'token', 'correlationId', 'authenticated']) ||
+    value.ok !== true ||
+    value.type !== 'AUTH_PROBED' ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16) ||
+    typeof value.authenticated !== 'boolean'
+  ) {
+    return null
+  }
+  return value as ProbeAuthAck
 }
 
 export function parsePageCaptureAck(value: unknown): PageCaptureAck | null {

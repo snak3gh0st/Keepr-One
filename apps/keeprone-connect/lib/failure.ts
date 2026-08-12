@@ -56,6 +56,8 @@ export const OUTDATED_CODES: readonly string[] = [
 /// portal, e não é coisa que atualizar resolva — a saída é esperar.
 export const PAUSED_CODES: readonly string[] = ['CONNECTOR_PAUSED']
 
+export const RATE_LIMIT_CODES: readonly string[] = ['RUN_START_RATE_LIMITED']
+
 /// O portal (ou a ponte com ele) não respondeu como esperado. Costuma passar.
 export const PORTAL_CODES: readonly string[] = [
   'PORTAL_REQUEST_FAILED',
@@ -97,6 +99,13 @@ export function connectorFailure(code: string | undefined | null): ConnectorFail
       action: 'paused',
       message:
         'Syncing is paused by Keepr One right now. Nothing is wrong with this computer — we will turn it back on.',
+    }
+  }
+  if (typeof code === 'string' && RATE_LIMIT_CODES.includes(code)) {
+    return {
+      action: 'retry',
+      message:
+        'Too many sync attempts were started. Wait a few minutes, then try once — your National Life connection is still intact.',
     }
   }
   if (typeof code === 'string' && PORTAL_CODES.includes(code)) {

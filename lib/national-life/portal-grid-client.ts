@@ -21,7 +21,11 @@ export const NATIONAL_LIFE_GRIDS = {
     '/agent/book-of-business/new-business/Transfer-Company-Information',
   TRANSFERS_EXCHANGES: '/agent/book-of-business/new-business/transfers-exchanges',
   // Inforce book — the basis for payment and commission reconciliation.
-  INFORCE_CLIENTS: '/agent/book-of-business/inforce-book/all-clients',
+  // The portal redirects the menu route to the actual agent grid surface. The
+  // final segment is part of the authenticated page route, not decoration: the
+  // connector must wait for this URL before asking the page bridge to extract.
+  INFORCE_CLIENTS:
+    '/agent/book-of-business/inforce-book/all-clients/all-clients-agent',
   POLICY_PAYMENT_HISTORY: '/agent/book-of-business/inforce-book/policy-payment-history',
   DAILY_UNIT_VALUES: '/agent/book-of-business/inforce-book/daily-unit-values',
   PIP_CONTRIBUTION_INCREASE:

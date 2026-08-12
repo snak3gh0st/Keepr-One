@@ -18,12 +18,27 @@ import { signedJsonRequest } from '../lib/signed-client'
 const NLG = 'https://www.nationallife.com'
 const NLG_AUTH0 = 'https://nlg-prod.auth0.com'
 const NEW_BUSINESS_PATH = '/agent/book-of-business/new-business/all-new-business-cases'
-const INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients'
+const INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients/all-clients-agent'
+const LEGACY_INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients'
 const COMMISSIONS_PATH = '/agent/compensation/commissions/paid-commissions'
 
 const TWO_STAGE_PLAN = [
   { capability: 'READ_GRID', params: { gridKey: 'NEW_BUSINESS', navigatePath: NEW_BUSINESS_PATH } },
   { capability: 'READ_GRID', params: { gridKey: 'INFORCE_CLIENTS', navigatePath: INFORCE_PATH } },
+]
+
+const LEGACY_INFORCE_STAGE_PLAN = [
+  { capability: 'READ_GRID', params: { gridKey: 'NEW_BUSINESS', navigatePath: NEW_BUSINESS_PATH } },
+  { capability: 'READ_GRID', params: { gridKey: 'INFORCE_CLIENTS', navigatePath: LEGACY_INFORCE_PATH } },
+]
+const PAID_COMMISSIONS_REDIRECT_PLAN = [
+  {
+    capability: 'READ_GRID',
+    params: {
+      gridKey: 'PAID_COMMISSIONS',
+      navigatePath: COMMISSIONS_PATH,
+    },
+  },
 ]
 
 type Listener = (...args: unknown[]) => unknown
@@ -56,6 +71,15 @@ async function defaultTabMessageResponse(tabId: number, message: unknown) {
       token: value.token,
       correlationId: value.correlationId,
       records: [{ RecordType: 'PAGE_META', Title: 'Agent dashboard' }],
+    }
+  }
+  if (value.type === 'PROBE_AUTH') {
+    return {
+      ok: true,
+      type: 'AUTH_PROBED',
+      token: value.token,
+      correlationId: value.correlationId,
+      authenticated: true,
     }
   }
   if (value.type === 'BEGIN_GRID' || value.type === 'ABORT_GRID') {
@@ -538,6 +562,48 @@ describe('background plan executor', () => {
     expect(readSync()).toMatchObject({ stageIndex: 1, status: 'EXTRACTING' })
   })
 
+  it('accepts the redirected in-force route for a run with the legacy plan path', async () => {
+    storage.sync = {
+      runId: 'run-legacy-route',
+      carrierTabId: 9,
+      plan: LEGACY_INFORCE_STAGE_PLAN,
+      stageIndex: 1,
+      status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{ id: 9, active: false, url: `${NLG}${INFORCE_PATH}` }])
+    await bootBackground()
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({ type: 'BEGIN_GRID', gridKey: 'INFORCE_CLIENTS' }),
+    )
+    expect(tabs.update).not.toHaveBeenCalled()
+    expect(readSync()).toMatchObject({ stageIndex: 1, status: 'EXTRACTING' })
+  })
+
+  it('starts paid commissions after the portal redirects its menu route', async () => {
+    storage.sync = {
+      runId: 'run-paid-redirect',
+      carrierTabId: 11,
+      plan: PAID_COMMISSIONS_REDIRECT_PLAN,
+      stageIndex: 0,
+      status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{
+      id: 11,
+      active: false,
+      url: `${NLG}/agent/compensation/commissions/paid-commissions/commissions-earning-report`,
+    }])
+    await bootBackground()
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(
+      11,
+      expect.objectContaining({ type: 'BEGIN_GRID', gridKey: 'PAID_COMMISSIONS' }),
+    )
+    expect(tabs.update).not.toHaveBeenCalled()
+    expect(readSync()).toMatchObject({ stageIndex: 0, status: 'EXTRACTING' })
+  })
+
   it('returns to the current stage when a stale carrier page is open', async () => {
     storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${INFORCE_PATH}` }])
@@ -620,12 +686,12 @@ describe('background plan executor', () => {
   })
 
   it('resumes the pending grid when login returns to the authenticated agent shell', async () => {
-    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'AUTH_REQUIRED' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'AUTH_REQUIRED' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}/agent/` }])
     await bootBackground()
 
     expect(tabs.create).toHaveBeenCalledWith({
-      active: true,
+      active: false,
       url: `${NLG}${NEW_BUSINESS_PATH}`,
     })
     expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
@@ -664,8 +730,77 @@ describe('background plan executor', () => {
     tabs.query.mockResolvedValue([{ id: 12, active: true, url: `${NLG_AUTH0}/login?state=pending` }])
     await bootBackground()
 
-    expect(tabs.update).toHaveBeenCalledWith(12, { active: true })
+    // Recovery and watchdog passes are passive during user-paced login. The tab
+    // was already activated when Auth0 first appeared; repeatedly activating it
+    // here would steal focus once a minute.
+    expect(tabs.update).not.toHaveBeenCalled()
     expect(tabs.create).not.toHaveBeenCalled()
+    expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED', stageIndex: 0 })
+  })
+
+  it('does not spend run-start attempts while login or MFA is pending', async () => {
+    storage.sync = { runId: 'run-1', carrierTabId: 12, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'AUTH_REQUIRED' }
+    tabs.query.mockResolvedValue([{ id: 12, active: true, url: `${NLG_AUTH0}/login?state=pending` }])
+    await bootBackground()
+    vi.mocked(signedJsonRequest).mockClear()
+    tabs.update.mockClear()
+
+    for (let minute = 0; minute < 15; minute += 1) {
+      emit('alarms.onAlarm', { name: 'keeprone-national-life-sync-watchdog' })
+      await flush()
+    }
+
+    expect(signedJsonRequest).not.toHaveBeenCalled()
+    expect(tabs.update).not.toHaveBeenCalled()
+    expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED', runId: 'run-1' })
+  })
+
+  it('releases the start lock after a sync request settles', async () => {
+    storage.sync = { status: 'IDLE' }
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      runId: 'run-1',
+      schemaVersion: 2,
+      stages: TWO_STAGE_PLAN,
+      completedStages: 0,
+    } as never)
+    await bootBackground()
+    const firstResponse = vi.fn()
+    emit('runtime.onMessageExternal', { type: 'START_NATIONAL_LIFE_SYNC' }, EXTERNAL_SENDER, firstResponse)
+    await vi.waitFor(() => expect(firstResponse).toHaveBeenCalled())
+
+    const secondResponse = vi.fn()
+    emit('runtime.onMessageExternal', { type: 'START_NATIONAL_LIFE_SYNC' }, EXTERNAL_SENDER, secondResponse)
+    await vi.waitFor(() => expect(secondResponse).toHaveBeenCalled())
+
+    expect(secondResponse).toHaveBeenCalledWith(expect.objectContaining({ ok: true }))
+  })
+
+  it('returns to login instead of extracting when the session probe fails', async () => {
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    tabs.sendMessage.mockImplementation(async (_tabId: number, message: unknown) => {
+      const value = message as { type?: string; token?: string; correlationId?: string }
+      if (value.type === 'PROBE_AUTH') {
+        return {
+          ok: true,
+          type: 'AUTH_PROBED',
+          token: value.token,
+          correlationId: value.correlationId,
+          authenticated: false,
+        }
+      }
+      return defaultTabMessageResponse(_tabId, message)
+    })
+    await bootBackground()
+
+    expect(tabs.sendMessage).not.toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ type: 'BEGIN_GRID' }),
+    )
+    expect(tabs.update).toHaveBeenCalledWith(7, {
+      active: true,
+      url: `${NLG}/agent/auth/login`,
+    })
     expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED', stageIndex: 0 })
   })
 

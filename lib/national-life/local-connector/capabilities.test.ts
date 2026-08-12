@@ -53,6 +53,17 @@ describe('planReadGridStages', () => {
     ])
   })
 
+  it('uses the authenticated in-force grid route after the portal redirect', () => {
+    expect(planReadGridStages(['INFORCE_CLIENTS'])).toEqual([{
+      capability: 'READ_GRID',
+      params: {
+        gridKey: 'INFORCE_CLIENTS',
+        navigatePath:
+          '/agent/book-of-business/inforce-book/all-clients/all-clients-agent',
+      },
+    }])
+  })
+
   it('produces a plan every routed grid key can reach', () => {
     const keys = [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS]
     const plan = planReadGridStages(keys)

@@ -1,4 +1,4 @@
-import { NLG_ORIGIN } from '../lib/constants'
+import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
 import { createGridExtractionRunner, type RequestTemplate } from '../lib/grid-extraction'
 import { parseAbortGridMessage, parseBeginGridMessage } from '../lib/messages'
 
@@ -37,6 +37,7 @@ export default defineContentScript({
   runAt: 'document_start',
   world: 'MAIN',
   main() {
+    if (!shouldInstrumentNationalLifePath(location.pathname)) return
     let template: RequestTemplate | null = null
     let resolveTemplate: ((value: RequestTemplate) => void) | null = null
     const originalFetch = window.fetch.bind(window)
