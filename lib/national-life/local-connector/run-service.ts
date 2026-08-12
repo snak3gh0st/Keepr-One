@@ -152,27 +152,32 @@ export async function startLocalConnectorRun(
   const stages = planLocalConnectorStages(options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS)
   await failStaleLocalRuns(db, { agentId: input.agentId, deviceId: input.deviceId, now })
 
-  const active = await db.nationalLifeSyncRun.findFirst({
-    where: {
-      agentId: input.agentId,
-      deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-      connectorDeviceId: input.deviceId,
-      executionSource: 'LOCAL',
-      provider: NATIONAL_LIFE_PROVIDER,
-      OR: [
-        { state: 'RUNNING' },
-        // A retry should resume a recent failed run. Stage receipts are
-        // idempotent, so this is safe even when the failure happened before the
-        // first grid was verified: the same run can re-send missing sequences
-        // and preserve everything the server already accepted.
-        {
-          state: 'FAILED',
-          updatedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_RUN_TTL_MS) },
-        },
-      ],
-    },
+  const runSelect = { id: true, state: true, plannedGridKeys: true, completedStages: true } as const
+  const runScope = {
+    agentId: input.agentId,
+    deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+    connectorDeviceId: input.deviceId,
+    executionSource: 'LOCAL' as const,
+    provider: NATIONAL_LIFE_PROVIDER,
+  }
+  // An already-running attempt always wins: starting another attempt against it
+  // would create competing navigations. Only when there is no live attempt do
+  // we look at failed runs, and then the greatest durable cursor wins. This is
+  // what prevents a retry from selecting a newer 0-stage failure and repeating
+  // areas already verified by an older, more advanced run.
+  const running = await db.nationalLifeSyncRun.findFirst({
+    where: { ...runScope, state: 'RUNNING' },
     orderBy: { createdAt: 'desc' },
-    select: { id: true, state: true, plannedGridKeys: true, completedStages: true },
+    select: runSelect,
+  })
+  const active = running ?? await db.nationalLifeSyncRun.findFirst({
+    where: {
+      ...runScope,
+      state: 'FAILED',
+      updatedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_RUN_TTL_MS) },
+    },
+    orderBy: [{ completedStages: 'desc' }, { createdAt: 'desc' }],
+    select: runSelect,
   })
   if (active) {
     if (active.state === 'FAILED') {

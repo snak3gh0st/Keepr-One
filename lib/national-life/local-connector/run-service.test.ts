@@ -46,6 +46,7 @@ describe('local connector runs', () => {
     const findFirst = vi
       .fn()
       .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ id: 'run-1', plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'], completedStages: 1 })
     const db = {
       nationalLifeSyncRun: { create, updateMany, findFirst },
@@ -147,6 +148,30 @@ describe('local connector runs', () => {
       }),
     }))
     expect(db.nationalLifeSyncRun.create).not.toHaveBeenCalled()
+  })
+
+  it('orders failed retries by the greatest verified cursor before recency', async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-most-progress',
+        state: 'FAILED',
+        plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS', 'PAID_COMMISSIONS'],
+        completedStages: 2,
+      })
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst,
+      },
+    } as never
+
+    await startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now })
+
+    expect(findFirst).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      orderBy: [{ completedStages: 'desc' }, { createdAt: 'desc' }],
+    }))
   })
 
   it('accepts a grid beyond the original two', async () => {
