@@ -12,6 +12,7 @@ const envelope = (schemaVersion: number) => ({
   runId: 'run_1',
   gridKey: 'NEW_BUSINESS',
   sequence: 0,
+  ...(schemaVersion >= 3 ? { sourceOffset: 0, nextOffset: 0 } : {}),
   observedAt: '2026-01-01T00:00:00.000Z',
   recordsTotal: 0,
   truncated: false,

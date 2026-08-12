@@ -446,7 +446,12 @@ async function createRun() {
     throw new Error('CONNECTOR_PAUSED')
   }
   await writeSyncState({ ...previous, status: 'STARTING', errorCode: undefined })
-  const response = await signedJsonRequest<{ runId?: unknown; stages?: unknown; completedStages?: unknown }>({
+  const response = await signedJsonRequest<{
+    runId?: unknown
+    stages?: unknown
+    completedStages?: unknown
+    resume?: { sequence?: unknown; offset?: unknown }
+  }>({
     baseUrl: device.baseUrl,
     deviceId: device.deviceId,
     method: 'POST',
@@ -463,8 +468,16 @@ async function createRun() {
   const completedStages = typeof response.completedStages === 'number' &&
     Number.isInteger(response.completedStages) &&
     response.completedStages >= 0 &&
-    response.completedStages < plan.length
+    response.completedStages <= plan.length
     ? response.completedStages
+    : 0
+  const resumeSequence = typeof response.resume?.sequence === 'number' &&
+    Number.isInteger(response.resume.sequence) && response.resume.sequence >= 0 && response.resume.sequence <= 10_000
+    ? response.resume.sequence
+    : 0
+  const resumeOffset = typeof response.resume?.offset === 'number' &&
+    Number.isInteger(response.resume.offset) && response.resume.offset >= 0 && response.resume.offset <= 200_000
+    ? response.resume.offset
     : 0
   if (previous.runId === response.runId && currentStage(previous)) {
     // A retry of a still-live run must resume from the server-confirmed cursor.
@@ -475,6 +488,8 @@ async function createRun() {
       runId: response.runId,
       plan,
       stageIndex: completedStages,
+      resumeSequence,
+      resumeOffset,
       status: 'NAVIGATING',
       errorCode: undefined,
     })
@@ -483,9 +498,23 @@ async function createRun() {
       runId: response.runId,
       plan,
       stageIndex: 0,
+      resumeSequence,
+      resumeOffset,
       status: 'NAVIGATING',
       carrierTabId: previous.carrierTabId,
     })
+  }
+  if (completedStages >= plan.length) {
+    await writeSyncState({
+      ...(await readSyncState()),
+      stageIndex: plan.length,
+      resumeSequence: undefined,
+      resumeOffset: undefined,
+      status: 'COMPLETED',
+      completedAt: new Date().toISOString(),
+    })
+    await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
+    return
   }
   chrome.alarms.create(SYNC_WATCHDOG_ALARM, { periodInMinutes: 1 })
 }
@@ -638,11 +667,16 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
   }
   const token = randomToken()
   const correlationId = crypto.randomUUID()
+  const state = await readSyncState()
+  const resumeSequence = state.resumeSequence ?? 0
+  const resumeOffset = state.resumeOffset ?? 0
   const message = {
     type: stage.capability === 'READ_GRID' ? 'BEGIN_GRID' as const : 'CAPTURE_PAGE' as const,
     gridKey,
     token,
     correlationId,
+    sequenceStart: resumeSequence,
+    offsetStart: resumeOffset,
   }
   activeNavigations.set(tabId, { ...message, tabId })
   await writeSyncState({ ...(await readSyncState()), status: 'EXTRACTING', errorCode: undefined })
@@ -656,6 +690,8 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
         gridKey,
         token,
         correlationId,
+        sequenceStart: resumeSequence,
+        offsetStart: resumeOffset,
       })
       return
     }
@@ -666,14 +702,21 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
       token,
       correlationId,
     })
-    const chunks = chunkRecordsForUpload(records)
-    for (const [sequence, chunk] of chunks.entries()) {
+    const remaining = records.slice(resumeOffset)
+    const chunks = chunkRecordsForUpload(remaining)
+    for (const [index, chunk] of chunks.entries()) {
+      const sequence = resumeSequence + index
+      const sourceOffset = resumeOffset + chunks
+        .slice(0, index)
+        .reduce((total, previous) => total + previous.length, 0)
       await uploadChunk(tabId, {
         type: 'GRID_CHUNK',
         gridKey,
         token,
         correlationId,
         sequence,
+        sourceOffset,
+        nextOffset: sourceOffset + chunk.length,
         recordsTotal: records.length,
         truncated: false,
         records: chunk,
@@ -779,6 +822,8 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
         runId: state.runId,
         gridKey: message.gridKey,
         sequence: message.sequence,
+        sourceOffset: message.sourceOffset ?? 0,
+        nextOffset: message.nextOffset ?? ((message.sourceOffset ?? 0) + message.records.length),
         observedAt: new Date().toISOString(),
         recordsTotal: message.recordsTotal,
         truncated: message.truncated,
@@ -849,6 +894,8 @@ async function finishGrid(tabId: number, gridKey: string) {
   if (!next) {
     await writeSyncState({
       runId: state.runId,
+      resumeSequence: undefined,
+      resumeOffset: undefined,
       status: 'COMPLETED',
       uploads: state.uploads,
       completedAt: new Date().toISOString(),
@@ -860,6 +907,8 @@ async function finishGrid(tabId: number, gridKey: string) {
     runId: state.runId,
     plan,
     stageIndex: nextIndex,
+    resumeSequence: 0,
+    resumeOffset: 0,
     status: 'NAVIGATING',
     uploads: state.uploads,
   })

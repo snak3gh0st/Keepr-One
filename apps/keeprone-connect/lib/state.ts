@@ -31,6 +31,9 @@ export type SyncState = {
   /// open run.
   plan?: StagePlan[]
   stageIndex?: number
+  /// Checkpoint durável devolvido pelo servidor para a fase atual.
+  resumeSequence?: number
+  resumeOffset?: number
   status: SyncStatus
   errorCode?: string
   /// Contador monotônico de lotes enviados neste run. Existe porque `status` e

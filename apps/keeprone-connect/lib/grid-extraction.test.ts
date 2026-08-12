@@ -74,6 +74,25 @@ describe('grid extraction', () => {
     expect(h.posts.map((post) => post.type)).toEqual(['GRID_CHUNK', 'GRID_CHUNK', 'GRID_DONE'])
   })
 
+  it('continues from the server checkpoint instead of rereading earlier pages', async () => {
+    const h = harness([
+      { data: rows(100, 200), recordsTotal: 300 },
+    ])
+    await runGridExtraction(
+      { ...MESSAGE, sequenceStart: 1, offsetStart: 200 },
+      deps(h),
+    )
+
+    expect(h.fetchPage).toHaveBeenCalledTimes(1)
+    expect(h.posts[0]).toMatchObject({
+      type: 'GRID_CHUNK',
+      sequence: 1,
+      sourceOffset: 200,
+      nextOffset: 300,
+    })
+    expect(h.posts.at(-1)).toMatchObject({ type: 'GRID_DONE' })
+  })
+
   it('sends one empty chunk for a grid with no rows', async () => {
     const h = harness([{ data: [], recordsTotal: 0 }])
 

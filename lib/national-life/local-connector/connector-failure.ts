@@ -58,6 +58,7 @@ export const RATE_LIMIT_CODES: readonly string[] = ['RUN_START_RATE_LIMITED']
 export const RECONCILIATION_CODES: readonly string[] = [
   'STAGE_INCOMPLETE',
   'STAGE_TRUNCATED',
+  'SYNC_INCOMPLETE',
 ]
 
 export const PORTAL_CODES: readonly string[] = [

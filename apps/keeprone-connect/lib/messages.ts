@@ -42,6 +42,8 @@ export type BeginGridMessage = {
   gridKey: string
   token: string
   correlationId: string
+  sequenceStart?: number
+  offsetStart?: number
 }
 
 export type CapturePageMessage = {
@@ -98,6 +100,8 @@ export type GridChunkMessage = {
   recordsTotal: number
   truncated: boolean
   records: RawGridRow[]
+  sourceOffset?: number
+  nextOffset?: number
 }
 
 export type GridDoneMessage = {
@@ -185,12 +189,18 @@ export function parseExternalMessage(value: unknown): ExternalMessage | null {
 function parseGridControlMessage<T extends string>(value: unknown, type: T) {
   if (
     !isObject(value) ||
-    !hasExactKeys(value, ['type', 'gridKey', 'token', 'correlationId']) ||
+    !(hasExactKeys(value, ['type', 'gridKey', 'token', 'correlationId']) ||
+      hasExactKeys(value, ['type', 'gridKey', 'token', 'correlationId', 'sequenceStart', 'offsetStart'])) ||
     value.type !== type ||
     !isGridKeyLabel(value.gridKey) ||
     !isShortString(value.token, 128, 32) ||
     !isShortString(value.correlationId, 128, 16)
   ) {
+    return null
+  }
+  if ('sequenceStart' in value &&
+    (!Number.isInteger(value.sequenceStart) || (value.sequenceStart as number) < 0 || (value.sequenceStart as number) > 10_000 ||
+      !Number.isInteger(value.offsetStart) || (value.offsetStart as number) < 0 || (value.offsetStart as number) > MAX_PORTAL_RECORDS)) {
     return null
   }
   return value
@@ -285,7 +295,7 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
   }
   if (
     value.type !== 'GRID_CHUNK' ||
-    !hasExactKeys(value, [
+    !(hasExactKeys(value, [
       'type',
       'gridKey',
       'token',
@@ -294,7 +304,18 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
       'recordsTotal',
       'truncated',
       'records',
-    ]) ||
+    ]) || hasExactKeys(value, [
+      'type',
+      'gridKey',
+      'token',
+      'correlationId',
+      'sequence',
+      'recordsTotal',
+      'truncated',
+      'records',
+      'sourceOffset',
+      'nextOffset',
+    ])) ||
     !Number.isInteger(value.sequence) ||
     (value.sequence as number) < 0 ||
     (value.sequence as number) > 10_000 ||
@@ -306,6 +327,11 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
     value.records.length > PAGE_SIZE ||
     !value.records.every(isRawGridRow)
   ) {
+    return null
+  }
+  if (('sourceOffset' in value || 'nextOffset' in value) &&
+    (!Number.isInteger(value.sourceOffset) || (value.sourceOffset as number) < 0 || (value.sourceOffset as number) > MAX_PORTAL_RECORDS ||
+      !Number.isInteger(value.nextOffset) || (value.nextOffset as number) < (value.sourceOffset as number) || (value.nextOffset as number) > MAX_PORTAL_RECORDS)) {
     return null
   }
   return value as GridChunkMessage
