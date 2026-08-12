@@ -45,7 +45,18 @@ export async function signCanonicalMessage(key: CryptoKey, message: string): Pro
 
 export class SignedRequestError extends Error {
   constructor(
-    readonly code: 'DEVICE_KEY_UNAVAILABLE' | 'DEVICE_REVOKED' | 'DEVICE_REQUEST_REJECTED' | 'DEVICE_REQUEST_FAILED' | 'IDEMPOTENCY_CONFLICT' | 'PATH_NOT_ALLOWED' | 'CLIENT_TOO_OLD' | 'CONNECTOR_PAUSED' | 'RUN_START_RATE_LIMITED',
+    readonly code:
+      | 'DEVICE_KEY_UNAVAILABLE'
+      | 'DEVICE_REVOKED'
+      | 'DEVICE_REQUEST_REJECTED'
+      | 'DEVICE_REQUEST_FAILED'
+      | 'IDEMPOTENCY_CONFLICT'
+      | 'STAGE_INCOMPLETE'
+      | 'STAGE_TRUNCATED'
+      | 'PATH_NOT_ALLOWED'
+      | 'CLIENT_TOO_OLD'
+      | 'CONNECTOR_PAUSED'
+      | 'RUN_START_RATE_LIMITED',
     readonly status?: number,
     readonly retryAfterSeconds?: number,
   ) {
@@ -131,7 +142,20 @@ export async function signedJsonRequest<T>(input: {
     cache: 'no-store',
     redirect: 'error',
   })
-  if (response.status === 409) throw new SignedRequestError('IDEMPOTENCY_CONFLICT')
+  if (response.status === 409) {
+    let conflictCode: unknown
+    try {
+      const payload = (await response.clone().json()) as { error?: unknown }
+      conflictCode = payload.error
+    } catch {
+      // Some 409 responses have no JSON body. Preserve the old idempotency
+      // fallback for those responses.
+    }
+    if (conflictCode === 'STAGE_INCOMPLETE' || conflictCode === 'STAGE_TRUNCATED') {
+      throw new SignedRequestError(conflictCode)
+    }
+    throw new SignedRequestError('IDEMPOTENCY_CONFLICT')
+  }
   if (!response.ok) {
     const retryAfter = Number.parseInt(response.headers.get('retry-after') ?? '', 10)
     throw new SignedRequestError(

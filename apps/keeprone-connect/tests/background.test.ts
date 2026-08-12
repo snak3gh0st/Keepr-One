@@ -637,17 +637,24 @@ describe('background plan executor', () => {
     expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
   })
 
-  it('opens a background carrier tab when the visible carrier tab is on another page', async () => {
+  it('reuses the visible carrier tab instead of opening a second one', async () => {
     storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${INFORCE_PATH}` }])
     await bootBackground()
 
-    expect(tabs.create).toHaveBeenCalledWith({
-      active: false,
-      url: `${NLG}${NEW_BUSINESS_PATH}`,
-    })
-    expect(tabs.update).not.toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
-    expect(readSync()).toMatchObject({ carrierTabId: 4, status: 'NAVIGATING' })
+    expect(tabs.create).not.toHaveBeenCalled()
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
+    expect(readSync()).toMatchObject({ carrierTabId: 7, status: 'NAVIGATING' })
+  })
+
+  it('binds an already-open National Life tab when the stored tab id is missing', async () => {
+    storage.sync = { runId: 'run-1', plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING' }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${INFORCE_PATH}` }])
+    await bootBackground()
+
+    expect(tabs.create).not.toHaveBeenCalled()
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
+    expect(readSync()).toMatchObject({ carrierTabId: 7, status: 'NAVIGATING' })
   })
 
   it('starts extraction when Check again finds the current grid already open', async () => {
@@ -690,10 +697,8 @@ describe('background plan executor', () => {
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}/agent/` }])
     await bootBackground()
 
-    expect(tabs.create).toHaveBeenCalledWith({
-      active: false,
-      url: `${NLG}${NEW_BUSINESS_PATH}`,
-    })
+    expect(tabs.create).not.toHaveBeenCalled()
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
     expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
   })
 

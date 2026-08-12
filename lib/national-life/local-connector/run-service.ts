@@ -161,13 +161,12 @@ export async function startLocalConnectorRun(
       provider: NATIONAL_LIFE_PROVIDER,
       OR: [
         { state: 'RUNNING' },
-        // A retry should resume a recent failed run after its durable stage
-        // receipts, rather than re-reading every grid already verified. Runs
-        // without a completed stage still start fresh: there is no durable
-        // cursor worth preserving in that case.
+        // A retry should resume a recent failed run. Stage receipts are
+        // idempotent, so this is safe even when the failure happened before the
+        // first grid was verified: the same run can re-send missing sequences
+        // and preserve everything the server already accepted.
         {
           state: 'FAILED',
-          completedStages: { gt: 0 },
           updatedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_RUN_TTL_MS) },
         },
       ],
@@ -708,7 +707,7 @@ export async function completeLocalConnectorStage(
       data: {
         state: completed ? 'COMPLETED' : 'RUNNING',
         completedStages,
-        currentGridKey: completed ? null : input.gridKey,
+        currentGridKey: completed ? null : planned[completedStages] ?? input.gridKey,
         completedAt: completed ? now : null,
         updatedAt: now,
       },
