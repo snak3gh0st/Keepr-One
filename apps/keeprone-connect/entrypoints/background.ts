@@ -9,7 +9,9 @@ import {
   NLG_ORIGIN,
   LOGIN_PATH,
   allowedKeeprOrigins,
+  canonicalNationalLifeNavigatePath,
   isAuthPath,
+  matchesNationalLifeStagePath,
   requireAllowedBaseUrl,
 } from '../lib/constants'
 import { clearDeviceKeys, getOrCreateDeviceKey } from '../lib/key-store'
@@ -481,7 +483,9 @@ async function navigatePendingGrid() {
   const state = await readSyncState()
   const stage = currentStage(state)
   if (!state.runId || !stage) return
-  const target = `${NLG_ORIGIN}${stage.params.navigatePath}`
+  const gridKey = stageKey(stage)
+  const targetPath = canonicalNationalLifeNavigatePath(gridKey, stage.params.navigatePath)
+  const target = `${NLG_ORIGIN}${targetPath}`
   const existing = await findConnectorTab(state)
   if (existing?.id !== undefined && existing.url) {
     try {
@@ -501,7 +505,10 @@ async function navigatePendingGrid() {
     // time we intentionally activate a tab is when the agent must complete
     // National Life login/MFA above.
     const existingPath = existing.url ? new URL(existing.url).pathname : undefined
-    if (existingPath === stage.params.navigatePath) {
+    if (
+      existingPath &&
+      matchesNationalLifeStagePath(gridKey, stage.params.navigatePath, existingPath)
+    ) {
       // `Check again` can be pressed while the expected grid is already open.
       // There is no tabs.onUpdated event in that case, so explicitly resume the
       // bridge or the run would remain in NAVIGATING forever.
@@ -673,7 +680,8 @@ async function handleTabReady(tabId: number, urlValue?: string) {
     await navigatePendingGrid()
     return
   }
-  if (url.pathname !== stage.params.navigatePath) {
+  const gridKey = stageKey(stage)
+  if (!matchesNationalLifeStagePath(gridKey, stage.params.navigatePath, url.pathname)) {
     // Auth interstitials are handled above. For any other carrier page, resume
     // the stage in a background tab; otherwise a stale tab (for example
     // All Clients left open after the previous stage) strands the run in
@@ -812,7 +820,9 @@ async function finishGrid(tabId: number, gridKey: string) {
     status: 'NAVIGATING',
     uploads: state.uploads,
   })
-  await updateTab(tabId, { url: `${NLG_ORIGIN}${next.params.navigatePath}` })
+  const nextGridKey = stageKey(next)
+  const nextPath = canonicalNationalLifeNavigatePath(nextGridKey, next.params.navigatePath)
+  await updateTab(tabId, { url: `${NLG_ORIGIN}${nextPath}` })
 }
 
 /// Manda o extrator parar onde está.

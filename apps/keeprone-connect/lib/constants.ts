@@ -2,6 +2,42 @@ export const NLG_ORIGIN = 'https://www.nationallife.com'
 export const NLG_AUTH0_ORIGIN = 'https://nlg-prod.auth0.com'
 export const LOGIN_PATH = '/agent/auth/login'
 
+// National Life currently redirects the old menu URL to this authenticated
+// grid route. Keep the alias here because an in-flight run can have persisted
+// the old server plan before an extension update.
+const LEGACY_INFORCE_CLIENTS_PATH =
+  '/agent/book-of-business/inforce-book/all-clients'
+const CANONICAL_INFORCE_CLIENTS_PATH =
+  '/agent/book-of-business/inforce-book/all-clients/all-clients-agent'
+const LEGACY_PAID_COMMISSIONS_PATH =
+  '/agent/compensation/commissions/paid-commissions'
+const REDIRECTED_PAID_COMMISSIONS_PATH =
+  '/agent/compensation/commissions/paid-commissions/commissions-earning-report'
+
+export function canonicalNationalLifeNavigatePath(gridKey: string, path: string): string {
+  if (gridKey === 'INFORCE_CLIENTS' && path === LEGACY_INFORCE_CLIENTS_PATH) {
+    return CANONICAL_INFORCE_CLIENTS_PATH
+  }
+  return path
+}
+
+export function matchesNationalLifeStagePath(
+  gridKey: string,
+  expectedPath: string,
+  actualPath: string,
+): boolean {
+  const canonicalPath = canonicalNationalLifeNavigatePath(gridKey, expectedPath)
+  if (actualPath === canonicalPath) return true
+  return (
+    ((gridKey === 'INFORCE_CLIENTS' &&
+      (expectedPath === LEGACY_INFORCE_CLIENTS_PATH || expectedPath === CANONICAL_INFORCE_CLIENTS_PATH) &&
+      (actualPath === LEGACY_INFORCE_CLIENTS_PATH || actualPath === CANONICAL_INFORCE_CLIENTS_PATH)) ||
+      (gridKey === 'PAID_COMMISSIONS' &&
+        expectedPath === LEGACY_PAID_COMMISSIONS_PATH &&
+        actualPath === REDIRECTED_PAID_COMMISSIONS_PATH))
+  )
+}
+
 /// `gridKey` is an opaque label. Which grids exist is the server's knowledge now, so
 /// the extension echoes the label back and never interprets it. What is still checked
 /// here is its shape — charset and length, never membership in a list — so a label

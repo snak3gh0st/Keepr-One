@@ -75,6 +75,45 @@ describe('local connector runs', () => {
     ).resolves.toMatchObject({ runId: 'run-1', duplicate: true, completedStages: 1 })
   })
 
+  it('resumes a recent failed run from its durable completed-stage cursor', async () => {
+    const updateMany = vi
+      .fn()
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 })
+    const findFirst = vi.fn().mockResolvedValue({
+      id: 'run-failed',
+      state: 'FAILED',
+      plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS', 'PAID_COMMISSIONS'],
+      completedStages: 2,
+    })
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany,
+        findFirst,
+      },
+    } as never
+
+    await expect(
+      startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now }),
+    ).resolves.toMatchObject({
+      runId: 'run-failed',
+      duplicate: true,
+      completedStages: 2,
+      stages: planReadGridStages(['NEW_BUSINESS', 'INFORCE_CLIENTS', 'PAID_COMMISSIONS']),
+    })
+    expect(updateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({ id: 'run-failed', state: 'FAILED' }),
+      data: expect.objectContaining({
+        state: 'RUNNING',
+        safeErrorCode: null,
+        completedAt: null,
+        currentGridKey: 'PAID_COMMISSIONS',
+      }),
+    }))
+    expect(db.nationalLifeSyncRun.create).not.toHaveBeenCalled()
+  })
+
   it('accepts a grid beyond the original two', async () => {
     const db = {
       nationalLifeSyncRun: {

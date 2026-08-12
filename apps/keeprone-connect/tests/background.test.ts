@@ -18,12 +18,27 @@ import { signedJsonRequest } from '../lib/signed-client'
 const NLG = 'https://www.nationallife.com'
 const NLG_AUTH0 = 'https://nlg-prod.auth0.com'
 const NEW_BUSINESS_PATH = '/agent/book-of-business/new-business/all-new-business-cases'
-const INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients'
+const INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients/all-clients-agent'
+const LEGACY_INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients'
 const COMMISSIONS_PATH = '/agent/compensation/commissions/paid-commissions'
 
 const TWO_STAGE_PLAN = [
   { capability: 'READ_GRID', params: { gridKey: 'NEW_BUSINESS', navigatePath: NEW_BUSINESS_PATH } },
   { capability: 'READ_GRID', params: { gridKey: 'INFORCE_CLIENTS', navigatePath: INFORCE_PATH } },
+]
+
+const LEGACY_INFORCE_STAGE_PLAN = [
+  { capability: 'READ_GRID', params: { gridKey: 'NEW_BUSINESS', navigatePath: NEW_BUSINESS_PATH } },
+  { capability: 'READ_GRID', params: { gridKey: 'INFORCE_CLIENTS', navigatePath: LEGACY_INFORCE_PATH } },
+]
+const PAID_COMMISSIONS_REDIRECT_PLAN = [
+  {
+    capability: 'READ_GRID',
+    params: {
+      gridKey: 'PAID_COMMISSIONS',
+      navigatePath: COMMISSIONS_PATH,
+    },
+  },
 ]
 
 type Listener = (...args: unknown[]) => unknown
@@ -545,6 +560,48 @@ describe('background plan executor', () => {
       expect.objectContaining({ type: 'BEGIN_GRID', gridKey: 'INFORCE_CLIENTS' }),
     )
     expect(readSync()).toMatchObject({ stageIndex: 1, status: 'EXTRACTING' })
+  })
+
+  it('accepts the redirected in-force route for a run with the legacy plan path', async () => {
+    storage.sync = {
+      runId: 'run-legacy-route',
+      carrierTabId: 9,
+      plan: LEGACY_INFORCE_STAGE_PLAN,
+      stageIndex: 1,
+      status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{ id: 9, active: false, url: `${NLG}${INFORCE_PATH}` }])
+    await bootBackground()
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({ type: 'BEGIN_GRID', gridKey: 'INFORCE_CLIENTS' }),
+    )
+    expect(tabs.update).not.toHaveBeenCalled()
+    expect(readSync()).toMatchObject({ stageIndex: 1, status: 'EXTRACTING' })
+  })
+
+  it('starts paid commissions after the portal redirects its menu route', async () => {
+    storage.sync = {
+      runId: 'run-paid-redirect',
+      carrierTabId: 11,
+      plan: PAID_COMMISSIONS_REDIRECT_PLAN,
+      stageIndex: 0,
+      status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{
+      id: 11,
+      active: false,
+      url: `${NLG}/agent/compensation/commissions/paid-commissions/commissions-earning-report`,
+    }])
+    await bootBackground()
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(
+      11,
+      expect.objectContaining({ type: 'BEGIN_GRID', gridKey: 'PAID_COMMISSIONS' }),
+    )
+    expect(tabs.update).not.toHaveBeenCalled()
+    expect(readSync()).toMatchObject({ stageIndex: 0, status: 'EXTRACTING' })
   })
 
   it('returns to the current stage when a stale carrier page is open', async () => {
