@@ -168,7 +168,7 @@ export function NationalLifeDataTabs({
       </div>
 
       <label className="mt-4 block">
-        <span className="sr-only">Search</span>
+        <span className="sr-only">Buscar dados do portal</span>
         <input
           value={query}
           onChange={(event) => {

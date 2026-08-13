@@ -183,6 +183,10 @@ export function NationalLifeActionQueue({ rows }: { rows: NationalLifeActionRow[
                       day: "2-digit",
                       month: "short",
                       year: "numeric",
+                      // Carrier dates are calendar dates. Pinning the timezone
+                      // keeps server HTML and browser hydration identical and
+                      // prevents midnight UTC from becoming the prior day.
+                      timeZone: "UTC",
                     })}
                     {row.eventCount > 1 ? ` · ${row.eventCount} sinais no período` : ""}
                   </p>
