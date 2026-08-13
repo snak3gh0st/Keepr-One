@@ -6,6 +6,7 @@ import {
   parseExternalMessage,
   parseProbeAuthAck,
   parseProbeAuthMessage,
+  parseBeginExportMessage,
 } from './messages'
 
 describe('message validation', () => {
@@ -162,6 +163,48 @@ describe('authentication probe messages', () => {
       token: probe.token,
       correlationId: probe.correlationId,
       authenticated: 'yes',
+    })).toBeNull()
+  })
+})
+
+describe('official export messages', () => {
+  const identity = {
+    gridKey: 'INFORCE_CLIENTS',
+    token: 't'.repeat(32),
+    correlationId: 'c'.repeat(16),
+  }
+
+  it('accepts the sealed export order and bounded XLSX chunks', () => {
+    expect(parseBeginExportMessage({
+      type: 'BEGIN_EXPORT',
+      sourceKey: 'INFORCE_CLIENTS',
+      token: identity.token,
+      correlationId: identity.correlationId,
+    })).not.toBeNull()
+    expect(parseBridgeMessage({
+      type: 'EXPORT_BEGIN',
+      ...identity,
+      fileName: 'NLG_InforceClientInfo_08132026.xlsx',
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      expectedBytes: 4,
+      expectedSha256: 'a'.repeat(64),
+    })).not.toBeNull()
+    expect(parseBridgeMessage({ type: 'EXPORT_CHUNK', ...identity, sequence: 0, bytes: [80, 75, 3, 4] })).not.toBeNull()
+    expect(parseBridgeMessage({ type: 'EXPORT_DONE', ...identity })).not.toBeNull()
+  })
+
+  it('refuses another source, oversized chunks, and executable content', () => {
+    expect(parseBeginExportMessage({
+      type: 'BEGIN_EXPORT', sourceKey: 'NEW_BUSINESS', token: identity.token,
+      correlationId: identity.correlationId,
+    })).toBeNull()
+    expect(parseBridgeMessage({
+      type: 'EXPORT_BEGIN', ...identity, fileName: 'payload.exe',
+      contentType: 'application/octet-stream', expectedBytes: 4, expectedSha256: 'a'.repeat(64),
+    })).toBeNull()
+    expect(parseBridgeMessage({
+      type: 'EXPORT_CHUNK', ...identity, sequence: 0,
+      bytes: Array.from({ length: 1024 * 1024 + 1 }, () => 0),
     })).toBeNull()
   })
 })

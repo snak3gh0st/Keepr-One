@@ -34,6 +34,7 @@ const MAX_HEARTBEAT_SECONDS = 3600
 /// builds have no final request after their last chunk, so the server keeps a
 /// narrowly-scoped compatibility path until the release is fully installed.
 const STAGE_COMPLETION_PROTOCOL_VERSION = [0, 1, 2, 0]
+const EXPORT_PROTOCOL_VERSION = [0, 1, 15, 0]
 
 export type LocalConnectorRemoteConfig = {
   /// `false` derruba o conector inteiro sem tocar na extensão. É o botão vermelho.
@@ -70,6 +71,11 @@ export function compareConnectorVersions(left: number[], right: number[]): numbe
 export function supportsStageCompletionProtocol(headers: Pick<Headers, 'get'>): boolean {
   const reported = parseConnectorVersion(headers.get(LOCAL_CONNECTOR_VERSION_HEADER))
   return reported !== null && compareConnectorVersions(reported, STAGE_COMPLETION_PROTOCOL_VERSION) >= 0
+}
+
+export function supportsExportProtocol(headers: Pick<Headers, 'get'>): boolean {
+  const reported = parseConnectorVersion(headers.get(LOCAL_CONNECTOR_VERSION_HEADER))
+  return reported !== null && compareConnectorVersions(reported, EXPORT_PROTOCOL_VERSION) >= 0
 }
 
 /// Auto-declarada e não confiável: qualquer cliente pode mentir o número. Serve

@@ -34,6 +34,10 @@ export async function sha256(value: string): Promise<string> {
   return hex(await crypto.subtle.digest('SHA-256', encoder.encode(value)))
 }
 
+export async function sha256Bytes(value: Uint8Array): Promise<string> {
+  return hex(await crypto.subtle.digest('SHA-256', Uint8Array.from(value).buffer))
+}
+
 export async function signCanonicalMessage(key: CryptoKey, message: string): Promise<string> {
   const signature = await crypto.subtle.sign(
     { name: 'ECDSA', hash: 'SHA-256' },
@@ -165,5 +169,47 @@ export async function signedJsonRequest<T>(input: {
     )
   }
   if (response.status === 204) return undefined as T
+  return (await response.json()) as T
+}
+
+export async function signedBinaryRequest<T>(input: {
+  baseUrl: string
+  deviceId: string
+  method: 'PUT'
+  pathname: string
+  body: Uint8Array
+}): Promise<T> {
+  const baseUrl = requireAllowedBaseUrl(input.baseUrl)
+  if (!input.pathname.startsWith('/api/agent/integrations/national-life/local-connector/')) {
+    throw new SignedRequestError('PATH_NOT_ALLOWED')
+  }
+  const key = await readPrivateKey()
+  if (!key) throw new SignedRequestError('DEVICE_KEY_UNAVAILABLE')
+  const bodyHash = await sha256Bytes(input.body)
+  const timestamp = new Date().toISOString()
+  const jti = crypto.randomUUID()
+  const canonical = canonicalMessage({ method: input.method, pathname: input.pathname, jti, timestamp, bodyHash })
+  const signature = await signCanonicalMessage(key, canonical)
+  const headers = new Headers({
+    'content-type': 'application/octet-stream',
+    'x-fyntra-device-id': input.deviceId,
+    'x-fyntra-jti': jti,
+    'x-fyntra-timestamp': timestamp,
+    'x-fyntra-body-sha256': bodyHash,
+    'x-fyntra-signature': signature,
+  })
+  const extensionVersion = readExtensionVersion()
+  if (extensionVersion) headers.set(CONNECTOR_VERSION_HEADER, extensionVersion)
+  const response = await fetch(`${baseUrl}${input.pathname}`, {
+    method: input.method,
+    headers,
+    body: input.body as BodyInit,
+    credentials: 'omit',
+    cache: 'no-store',
+    redirect: 'error',
+  })
+  if (!response.ok) {
+    throw new SignedRequestError(classifyFailedResponse(response.status, response.headers), response.status)
+  }
   return (await response.json()) as T
 }

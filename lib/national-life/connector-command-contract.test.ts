@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   CONNECTOR_COMMAND_PROTOCOL_VERSION,
+  connectorCapabilityRisk,
   parseConnectorCommand,
   parseConnectorCommandEvent,
+  requiresExplicitConfirmation,
 } from './connector-command-contract'
 
 const issuedAt = '2026-08-10T20:00:00.000Z'
@@ -71,6 +73,61 @@ describe('National Life connector command contract', () => {
         requiresConfirmation: false,
       }),
     ).toBeNull()
+  })
+
+  it('keeps navigation automatic but gates every carrier write', () => {
+    expect(connectorCapabilityRisk('OPEN_APPLICATION')).toBe('NAVIGATION_ONLY')
+    expect(requiresExplicitConfirmation('OPEN_APPLICATION')).toBe(false)
+
+    expect(connectorCapabilityRisk('GENERATE_ILLUSTRATION')).toBe('GENERATES_CARRIER_ARTIFACT')
+    expect(requiresExplicitConfirmation('GENERATE_ILLUSTRATION')).toBe(true)
+
+    expect(connectorCapabilityRisk('PREPARE_APPLICATION_DRAFT')).toBe('WRITES_CARRIER_DRAFT')
+    expect(requiresExplicitConfirmation('PREPARE_APPLICATION_DRAFT')).toBe(true)
+
+    expect(connectorCapabilityRisk('SUBMIT_APPLICATION')).toBe('SUBMITS_TO_CARRIER')
+    expect(requiresExplicitConfirmation('SUBMIT_APPLICATION')).toBe(true)
+  })
+
+  it('accepts sealed open commands without accepting a URL from the server', () => {
+    expect(parseConnectorCommand({
+      protocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,
+      commandId: 'cmd_igo_1',
+      runId: 'run_igo_1',
+      capability: 'OPEN_EAPP',
+      target: null,
+      params: {},
+      idempotencyKey: 'igo:open:1',
+      issuedAt,
+      expiresAt,
+      requiresConfirmation: false,
+    })).toMatchObject({ capability: 'OPEN_EAPP' })
+
+    expect(parseConnectorCommand({
+      protocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,
+      commandId: 'cmd_open_1',
+      runId: 'run_open_1',
+      capability: 'OPEN_POLICY',
+      target: { kind: 'POLICY', id: 'policy_1' },
+      params: { policyNumber: 'POLICY-1' },
+      idempotencyKey: 'policy_1:open:1',
+      issuedAt,
+      expiresAt,
+      requiresConfirmation: false,
+    })).toMatchObject({ capability: 'OPEN_POLICY', params: { policyNumber: 'POLICY-1' } })
+
+    expect(parseConnectorCommand({
+      protocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,
+      commandId: 'cmd_open_2',
+      runId: 'run_open_2',
+      capability: 'OPEN_POLICY',
+      target: { kind: 'POLICY', id: 'policy_1' },
+      params: { url: 'https://evil.example/' },
+      idempotencyKey: 'policy_1:open:2',
+      issuedAt,
+      expiresAt,
+      requiresConfirmation: false,
+    })).toBeNull()
   })
 
   it('accepts only sequenced events with safe errors', () => {

@@ -18,6 +18,10 @@ export const CONNECTOR_CAPABILITIES = [
   'READ_DOCUMENT_REQUIREMENTS',
   'READ_POLICY_DETAIL',
   'READ_COMMISSIONS',
+  'OPEN_APPLICATION',
+  'OPEN_EAPP',
+  'OPEN_POLICY',
+  'OPEN_ILLUSTRATION',
   'FLEXLIFE_QUOTE',
   'GENERATE_ILLUSTRATION',
   'PREPARE_APPLICATION_DRAFT',
@@ -26,6 +30,13 @@ export const CONNECTOR_CAPABILITIES = [
 ] as const
 
 export type ConnectorCapability = (typeof CONNECTOR_CAPABILITIES)[number]
+
+export type ConnectorCapabilityRisk =
+  | 'READ_ONLY'
+  | 'NAVIGATION_ONLY'
+  | 'GENERATES_CARRIER_ARTIFACT'
+  | 'WRITES_CARRIER_DRAFT'
+  | 'SUBMITS_TO_CARRIER'
 
 export const CONNECTOR_COMMAND_EVENTS = [
   'COMMAND_ACCEPTED',
@@ -99,10 +110,33 @@ export function isConnectorCapability(value: unknown): value is ConnectorCapabil
 }
 
 export function requiresExplicitConfirmation(capability: ConnectorCapability): boolean {
-  return (
-    capability === 'UPLOAD_APPLICATION_DOCUMENT' ||
-    capability === 'SUBMIT_APPLICATION'
-  )
+  return connectorCapabilityRisk(capability) !== 'READ_ONLY' &&
+    connectorCapabilityRisk(capability) !== 'NAVIGATION_ONLY'
+}
+
+/// The risk class is part of the protocol, not UI decoration. Both command
+/// issuance and executor dispatch derive their confirmation gate from this
+/// function so a newly added carrier write cannot accidentally run as a read.
+export function connectorCapabilityRisk(
+  capability: ConnectorCapability,
+): ConnectorCapabilityRisk {
+  switch (capability) {
+    case 'OPEN_APPLICATION':
+    case 'OPEN_EAPP':
+    case 'OPEN_POLICY':
+    case 'OPEN_ILLUSTRATION':
+      return 'NAVIGATION_ONLY'
+    case 'FLEXLIFE_QUOTE':
+    case 'GENERATE_ILLUSTRATION':
+      return 'GENERATES_CARRIER_ARTIFACT'
+    case 'PREPARE_APPLICATION_DRAFT':
+    case 'UPLOAD_APPLICATION_DOCUMENT':
+      return 'WRITES_CARRIER_DRAFT'
+    case 'SUBMIT_APPLICATION':
+      return 'SUBMITS_TO_CARRIER'
+    default:
+      return 'READ_ONLY'
+  }
 }
 
 export function isReadOnlyCapability(capability: ConnectorCapability): boolean {
@@ -118,6 +152,10 @@ export function isReadOnlyCapability(capability: ConnectorCapability): boolean {
     'READ_DOCUMENT_REQUIREMENTS',
     'READ_POLICY_DETAIL',
     'READ_COMMISSIONS',
+    'OPEN_APPLICATION',
+    'OPEN_EAPP',
+    'OPEN_POLICY',
+    'OPEN_ILLUSTRATION',
   ].includes(capability)
 }
 
@@ -193,6 +231,7 @@ function parseParams(
         ? { sourceKey: value.sourceKey, navigatePath: value.navigatePath, exportKey: 'DOWNLOAD_ALL' }
         : undefined
     case 'FORESIGHT_INVENTORY':
+    case 'OPEN_EAPP':
       return has([]) ? {} : undefined
     case 'FORESIGHT_CASE_DETAIL':
     case 'FORESIGHT_REPORT':
@@ -200,14 +239,18 @@ function parseParams(
     case 'READ_APPLICATION_STATUS':
     case 'READ_UNDERWRITING_STATUS':
     case 'READ_DOCUMENT_REQUIREMENTS':
+    case 'OPEN_APPLICATION':
       return has(['externalApplicationId']) && isIdentifier(value.externalApplicationId)
         ? { externalApplicationId: value.externalApplicationId }
         : undefined
     case 'READ_POLICY_DETAIL':
     case 'READ_COMMISSIONS':
+    case 'OPEN_POLICY':
       return has(['policyNumber']) && isIdentifier(value.policyNumber)
         ? { policyNumber: value.policyNumber }
         : undefined
+    case 'OPEN_ILLUSTRATION':
+      return has(['caseKey']) && isIdentifier(value.caseKey) ? { caseKey: value.caseKey } : undefined
     case 'GENERATE_ILLUSTRATION':
     case 'FLEXLIFE_QUOTE':
       return has(['illustrationId']) && isIdentifier(value.illustrationId)

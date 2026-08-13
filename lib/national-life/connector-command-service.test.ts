@@ -133,4 +133,33 @@ describe('connector command service', () => {
 
     expect(commands.get(issued.command.commandId)).toMatchObject({ state: 'RUNNING', confirmationState: 'APPROVED' })
   })
+
+  it('also holds generated illustrations and application drafts for review', async () => {
+    const { repository } = createRepository()
+    const illustration = await issueConnectorCommand(repository, {
+      agentId: 'agent_1',
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_1' },
+      params: { illustrationId: 'illustration_1' },
+      idempotencyKey: 'illustration_1:generate:1',
+      expiresAt: new Date(now.getTime() + 10 * 60_000),
+      now,
+    })
+    const draft = await issueConnectorCommand(repository, {
+      agentId: 'agent_1',
+      capability: 'PREPARE_APPLICATION_DRAFT',
+      target: { kind: 'APPLICATION', id: 'application_1' },
+      params: { applicationId: 'application_1' },
+      idempotencyKey: 'application_1:draft:1',
+      expiresAt: new Date(now.getTime() + 10 * 60_000),
+      now,
+    })
+
+    expect(illustration.command).toMatchObject({
+      requiresConfirmation: true,
+    })
+    expect(draft.command).toMatchObject({
+      requiresConfirmation: true,
+    })
+  })
 })

@@ -40,7 +40,7 @@ export const PERMISSIVE_REMOTE_CONFIG: ConnectorRemoteConfig = {
   syncEnabled: true,
   disabledCapabilities: [],
   commandProtocolVersion: 1,
-  executableCapabilities: ['READ_GRID', 'READ_PAGE'],
+  executableCapabilities: ['READ_GRID', 'READ_PAGE', 'READ_EXPORT'],
   minClientVersion: null,
   heartbeatSeconds: DEFAULT_HEARTBEAT_SECONDS,
 }

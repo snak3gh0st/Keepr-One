@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   isNationalLifePageDiscoveryEnabled,
+  isNationalLifeExportEnabled,
   isNationalLifeLocalConnectorEnabled,
   localConnectorUnavailableResponse,
 } from '@/lib/national-life/local-connector/config'
@@ -13,7 +14,10 @@ import {
   parseJsonBody,
   readLimitedBody,
 } from '@/lib/national-life/local-connector/request'
-import { refuseLocalConnectorCapability } from '@/lib/national-life/local-connector/remote-config'
+import {
+  refuseLocalConnectorCapability,
+  supportsExportProtocol,
+} from '@/lib/national-life/local-connector/remote-config'
 import {
   LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS,
   startLocalConnectorRun,
@@ -38,8 +42,10 @@ export async function POST(request: Request) {
   // ele possa ignorar — é aqui que ele é aplicado. Um run é o começo de tudo;
   // barrar aqui evita abrir um run que o cliente não conseguiria terminar.
   const pageDiscoveryEnabled = isNationalLifePageDiscoveryEnabled()
+  const exportEnabled = isNationalLifeExportEnabled() && supportsExportProtocol(request.headers)
   const refusal =
     refuseLocalConnectorCapability('READ_GRID', request.headers) ??
+    (exportEnabled ? refuseLocalConnectorCapability('READ_EXPORT', request.headers) : null) ??
     (pageDiscoveryEnabled
       ? refuseLocalConnectorCapability('READ_PAGE', request.headers)
       : null)
@@ -66,10 +72,11 @@ export async function POST(request: Request) {
       )
     }
 
-    const runOptions = pageDiscoveryEnabled || payload.forceRefresh === true
+    const runOptions = pageDiscoveryEnabled || exportEnabled || payload.forceRefresh === true
       ? {
           ...(pageDiscoveryEnabled ? { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS } : {}),
           ...(payload.forceRefresh === true ? { forceRefresh: true } : {}),
+          ...(exportEnabled ? { exportEnabled: true } : {}),
         }
       : undefined
     const run = await startLocalConnectorRun(prisma, device, runOptions)

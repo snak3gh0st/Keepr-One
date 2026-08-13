@@ -1,9 +1,12 @@
 import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
 import { createGridExtractionRunner, type RequestTemplate } from '../lib/grid-extraction'
-import { parseAbortGridMessage, parseBeginGridMessage } from '../lib/messages'
+import { parseAbortGridMessage, parseBeginExportMessage, parseBeginGridMessage } from '../lib/messages'
 
 const DATATABLE_PATH = '/agent/Datatable/GetJsonResult'
+const DOWNLOAD_EXCEL_PATH = '/agent/Datatable/DownloadExcel'
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
+const EXPORT_CHUNK_BYTES = 1024 * 1024
+const EXPORT_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 const ALLOWED_HEADERS = new Set(['content-type', 'x-requested-with'])
 
 function allowedHeader(name: string): boolean {
@@ -120,12 +123,84 @@ export default defineContentScript({
       post,
     })
 
+    async function sha256Hex(bytes: Uint8Array): Promise<string> {
+      const digest = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer)
+      return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+    }
+
+    async function beginOfficialExport(message: NonNullable<ReturnType<typeof parseBeginExportMessage>>) {
+      try {
+        const requestTemplate = await waitForTemplate()
+        const body = new URLSearchParams(requestTemplate.body)
+        body.set('IsEnableContactFields', 'true')
+        const response = await originalFetch(`${NLG_ORIGIN}${DOWNLOAD_EXCEL_PATH}`, {
+          method: 'POST',
+          headers: requestTemplate.headers,
+          body: body.toString(),
+          credentials: 'include',
+          cache: 'no-store',
+        })
+        if (!response.ok) throw new Error('PORTAL_REQUEST_FAILED')
+        const payload = await response.json() as Record<string, unknown>
+        if (
+          !Array.isArray(payload.FileContents) ||
+          !payload.FileContents.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255) ||
+          typeof payload.FileDownloadName !== 'string' ||
+          !/^NLG_InforceClientInfo_[0-9]{8}\.xlsx$/.test(payload.FileDownloadName)
+        ) throw new Error('INVALID_EXPORT_RESPONSE')
+        const bytes = Uint8Array.from(payload.FileContents)
+        if (bytes.length === 0 || bytes.length > 25 * 1024 * 1024 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
+          throw new Error('INVALID_EXPORT_RESPONSE')
+        }
+        const base = {
+          gridKey: message.sourceKey,
+          token: message.token,
+          correlationId: message.correlationId,
+        }
+        post({
+          type: 'EXPORT_BEGIN',
+          ...base,
+          fileName: payload.FileDownloadName,
+          contentType: EXPORT_CONTENT_TYPE,
+          expectedBytes: bytes.length,
+          expectedSha256: await sha256Hex(bytes),
+        })
+        for (let offset = 0, sequence = 0; offset < bytes.length; offset += EXPORT_CHUNK_BYTES, sequence += 1) {
+          post({
+            type: 'EXPORT_CHUNK',
+            ...base,
+            sequence,
+            bytes: Array.from(bytes.slice(offset, offset + EXPORT_CHUNK_BYTES)),
+          })
+        }
+        post({ type: 'EXPORT_DONE', ...base })
+      } catch (error) {
+        const code = error instanceof Error && error.message === 'TEMPLATE_UNAVAILABLE'
+          ? 'TEMPLATE_UNAVAILABLE'
+          : error instanceof Error && error.message === 'PORTAL_REQUEST_FAILED'
+            ? 'PORTAL_REQUEST_FAILED'
+            : 'INVALID_EXPORT_RESPONSE'
+        post({
+          type: 'EXPORT_ERROR',
+          gridKey: message.sourceKey,
+          token: message.token,
+          correlationId: message.correlationId,
+          code,
+        })
+      }
+    }
+
     window.addEventListener('message', (event) => {
       if (event.source !== window || event.origin !== location.origin) return
       if (typeof event.data !== 'object' || event.data === null || event.data.channel !== CHANNEL) return
       const begin = parseBeginGridMessage(event.data.payload)
       if (begin) {
         void runner.begin(begin)
+        return
+      }
+      const beginExport = parseBeginExportMessage(event.data.payload)
+      if (beginExport) {
+        void beginOfficialExport(beginExport)
         return
       }
       const abort = parseAbortGridMessage(event.data.payload)

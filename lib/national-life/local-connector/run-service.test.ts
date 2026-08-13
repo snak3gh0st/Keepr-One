@@ -14,7 +14,7 @@ import { planReadGridStages } from './capabilities'
 
 const now = new Date('2026-08-04T18:00:00.000Z')
 
-function planStageKey(stage: ReturnType<typeof planReadGridStages>[number] | { capability: 'READ_PAGE'; params: { sourceKey: string } }) {
+function planStageKey(stage: ReturnType<typeof planReadGridStages>[number] | { capability: 'READ_PAGE' | 'READ_EXPORT'; params: { sourceKey: string } }) {
   return stage.capability === 'READ_GRID' ? stage.params.gridKey : stage.params.sourceKey
 }
 
@@ -193,9 +193,12 @@ describe('local connector runs', () => {
       },
     } as never
 
-    await expect(
-      startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now }),
-    ).resolves.toMatchObject({
+    const resumed = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { exportEnabled: true },
+    )
+    expect(resumed).toMatchObject({
       runId: 'run-interrupted',
       duplicate: true,
       completedStages: 0,
@@ -347,14 +350,18 @@ describe('local connector runs', () => {
       nationalLifeConnectorStageReceipt: { findMany: receiptFindMany },
     } as never
 
-    await expect(
-      startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now }),
-    ).resolves.toMatchObject({
+    const resumed = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { exportEnabled: true },
+    )
+    expect(resumed).toMatchObject({
       runId: 'run-checkpoint',
       duplicate: true,
       completedStages: 1,
       resume: { sequence: 4, offset: 800 },
     })
+    expect(resumed.stages[1]?.capability).toBe('READ_GRID')
     expect(receiptFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { runId: 'run-checkpoint', gridKey: 'INFORCE_CLIENTS' },
       orderBy: { sequence: 'asc' },

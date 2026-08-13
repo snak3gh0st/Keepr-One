@@ -25,6 +25,7 @@ import {
   type BridgeControlAck,
   type BridgeMessage,
   type CapturePageMessage,
+  type BeginExportMessage,
 } from '../lib/messages'
 import { chunkRecordsForUpload } from '../lib/record-chunks'
 import { OUTDATED_CODES, revokesDevice } from '../lib/failure'
@@ -39,7 +40,7 @@ import {
   nudgeExtensionUpdate,
   type UpdateNudgeRecord,
 } from '../lib/update-nudge'
-import { SignedRequestError, signedJsonRequest } from '../lib/signed-client'
+import { SignedRequestError, signedBinaryRequest, signedJsonRequest } from '../lib/signed-client'
 import {
   currentStage,
   readDeviceState,
@@ -49,7 +50,7 @@ import {
 } from '../lib/state'
 
 type ActiveNavigation = {
-  type: 'BEGIN_GRID' | 'CAPTURE_PAGE'
+  type: 'BEGIN_GRID' | 'CAPTURE_PAGE' | 'BEGIN_EXPORT'
   gridKey: string
   token: string
   correlationId: string
@@ -57,6 +58,8 @@ type ActiveNavigation = {
   recordsTotal?: number
   lastSequence?: number
   truncated?: boolean
+  exportUploadId?: string
+  exportNextSequence?: number
 }
 
 const activeNavigations = new Map<number, ActiveNavigation>()
@@ -179,6 +182,25 @@ function randomToken(): string {
 
 function stageKey(stage: StagePlan): string {
   return stage.capability === 'READ_GRID' ? stage.params.gridKey : stage.params.sourceKey
+}
+
+async function sendBeginExportWithRetry(tabId: number, message: BeginExportMessage): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = await chrome.tabs.sendMessage<BeginExportMessage, BridgeControlAck>(tabId, message)
+      if (response?.ok !== true || response.type !== 'BEGIN_EXPORT_ACK' ||
+        response.gridKey !== message.sourceKey || response.token !== message.token ||
+        response.correlationId !== message.correlationId) throw new Error('BRIDGE_UNAVAILABLE')
+      return
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError ?? new Error('BRIDGE_UNAVAILABLE')
 }
 
 function senderAllowed(sender: chrome.runtime.MessageSender): boolean {
@@ -700,7 +722,8 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
   const resumeSequence = state.resumeSequence ?? 0
   const resumeOffset = state.resumeOffset ?? 0
   const message = {
-    type: stage.capability === 'READ_GRID' ? 'BEGIN_GRID' as const : 'CAPTURE_PAGE' as const,
+    type: stage.capability === 'READ_GRID' ? 'BEGIN_GRID' as const :
+      stage.capability === 'READ_EXPORT' ? 'BEGIN_EXPORT' as const : 'CAPTURE_PAGE' as const,
     gridKey,
     token,
     correlationId,
@@ -727,6 +750,15 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
         correlationId,
         sequenceStart: resumeSequence,
         offsetStart: resumeOffset,
+      })
+      return
+    }
+    if (stage.capability === 'READ_EXPORT') {
+      await sendBeginExportWithRetry(tabId, {
+        type: 'BEGIN_EXPORT',
+        sourceKey: 'INFORCE_CLIENTS',
+        token,
+        correlationId,
       })
       return
     }
@@ -961,6 +993,80 @@ async function finishGrid(tabId: number, gridKey: string) {
   await updateTab(tabId, { url: `${NLG_ORIGIN}${nextPath}` })
 }
 
+async function advanceAfterExport(tabId: number, result: { nextStageIndex?: unknown; terminal?: unknown }) {
+  const state = await readSyncState()
+  if (!state.runId || !state.plan) throw new Error('SYNC_STATE_INVALID')
+  const plan = parseStagePlan(state.plan)
+  const fallbackNextIndex = (state.stageIndex ?? 0) + 1
+  const nextIndex = typeof result.nextStageIndex === 'number' && Number.isInteger(result.nextStageIndex) &&
+    result.nextStageIndex >= 0 && result.nextStageIndex <= plan.length
+    ? result.nextStageIndex : fallbackNextIndex
+  const next = plan[nextIndex]
+  activeNavigations.delete(tabId)
+  if (result.terminal === true || !next) {
+    await writeSyncState({ runId: state.runId, stageIndex: plan.length, status: 'COMPLETED', uploads: state.uploads, completedAt: new Date().toISOString() })
+    await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
+    return
+  }
+  await writeSyncState({ runId: state.runId, plan, stageIndex: nextIndex, resumeSequence: 0, resumeOffset: 0, status: 'NAVIGATING', uploads: state.uploads })
+  const nextGridKey = stageKey(next)
+  await updateTab(tabId, { url: `${NLG_ORIGIN}${canonicalNationalLifeNavigatePath(nextGridKey, next.params.navigatePath)}` })
+}
+
+async function processExportMessage(tabId: number, message: Extract<BridgeMessage, { type: 'EXPORT_BEGIN' | 'EXPORT_CHUNK' | 'EXPORT_DONE' }>) {
+  const device = await readDeviceState()
+  const state = await readSyncState()
+  const active = activeNavigations.get(tabId)
+  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl || !state.runId || !active) {
+    throw new Error('SYNC_STATE_INVALID')
+  }
+  await writeSyncState({ ...state, status: 'UPLOADING', errorCode: undefined })
+  if (message.type === 'EXPORT_BEGIN') {
+    const result = await signedJsonRequest<{ uploadId?: unknown; nextSequence?: unknown; completed?: unknown }>({
+      baseUrl: device.baseUrl,
+      deviceId: device.deviceId,
+      method: 'POST',
+      pathname: `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}/exports/INFORCE_CLIENTS`,
+      body: {
+        runId: state.runId,
+        sourceKey: 'INFORCE_CLIENTS',
+        fileName: message.fileName,
+        contentType: message.contentType,
+        expectedBytes: message.expectedBytes,
+        expectedSha256: message.expectedSha256,
+      },
+    })
+    if (typeof result.uploadId !== 'string' || !Number.isInteger(result.nextSequence)) throw new Error('INVALID_EXPORT_RESPONSE')
+    activeNavigations.set(tabId, { ...active, exportUploadId: result.uploadId, exportNextSequence: result.nextSequence as number })
+    return
+  }
+  if (!active.exportUploadId) throw new Error('EXPORT_UPLOAD_NOT_STARTED')
+  if (message.type === 'EXPORT_CHUNK') {
+    if (message.sequence < (active.exportNextSequence ?? 0)) return
+    if (message.sequence !== (active.exportNextSequence ?? 0)) throw new Error('EXPORT_CHUNK_INVALID')
+    await signedBinaryRequest({
+      baseUrl: device.baseUrl,
+      deviceId: device.deviceId,
+      method: 'PUT',
+      pathname: `/api/agent/integrations/national-life/local-connector/exports/${encodeURIComponent(active.exportUploadId)}/chunks/${message.sequence}`,
+      body: Uint8Array.from(message.bytes),
+    })
+    const latest = activeNavigations.get(tabId)
+    if (latest) activeNavigations.set(tabId, { ...latest, exportNextSequence: message.sequence + 1 })
+    const after = await readSyncState()
+    await writeSyncState({ ...after, uploads: (after.uploads ?? 0) + 1 })
+    return
+  }
+  const result = await signedJsonRequest<{ nextStageIndex?: unknown; terminal?: unknown }>({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname: `/api/agent/integrations/national-life/local-connector/exports/${encodeURIComponent(active.exportUploadId)}/complete`,
+    body: { uploadId: active.exportUploadId },
+  })
+  await advanceAfterExport(tabId, result)
+}
+
 async function skipFailedStage(tabId: number, gridKey: string, code: string) {
   const state = await readSyncState()
   const stage = currentStage(state)
@@ -1053,7 +1159,9 @@ async function processBridgeMessage(tabId: number, message: BridgeMessage) {
     return
   }
   try {
-    if (message.type === 'GRID_CHUNK') await uploadChunk(tabId, message)
+    if (message.type === 'EXPORT_BEGIN' || message.type === 'EXPORT_CHUNK' || message.type === 'EXPORT_DONE') {
+      await processExportMessage(tabId, message)
+    } else if (message.type === 'GRID_CHUNK') await uploadChunk(tabId, message)
     else if (message.type === 'GRID_DONE') await finishGrid(tabId, message.gridKey)
     else {
       activeNavigations.delete(tabId)

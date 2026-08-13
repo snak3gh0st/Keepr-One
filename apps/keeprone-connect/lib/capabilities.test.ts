@@ -32,6 +32,21 @@ describe('parseStagePlan', () => {
     })
   })
 
+  it('accepts only the official in-force export with contact information', () => {
+    expect(parseStagePlan([{
+      capability: 'READ_EXPORT',
+      params: {
+        sourceKey: 'INFORCE_CLIENTS',
+        navigatePath: '/agent/book-of-business/inforce-book/all-clients/all-clients-agent',
+        includeContactInformation: true,
+      },
+    }])[0]).toMatchObject({ capability: 'READ_EXPORT' })
+    expect(() => parseStagePlan([{
+      capability: 'READ_EXPORT',
+      params: { sourceKey: 'NEW_BUSINESS', navigatePath: '/agent/x', includeContactInformation: true },
+    }])).toThrow('INVALID_RUN_RESPONSE')
+  })
+
   it('accepts multiple stages up to the cap', () => {
     const plan = parseStagePlan(
       Array.from({ length: 64 }, (_, i) => ({
