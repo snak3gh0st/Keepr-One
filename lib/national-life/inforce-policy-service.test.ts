@@ -46,6 +46,38 @@ describe('National Life inforce policy mapping', () => {
     expect(toInforcePolicySnapshot(row)?.raw).toBe(row)
   })
 
+  it('maps the official Inforce Client Information export headers', () => {
+    expect(toInforcePolicySnapshot({
+      'Policy #': 'NL-EXPORT-1',
+      Owner: 'Owner Name',
+      'Insured / Annuitant': 'Insured Name',
+      Status: 'Active',
+      Type: 'Life',
+      Product: 'FlexLife',
+      Agency: 'Agency Name',
+      Agent: 'Agent Name',
+      'Agent #': '5500',
+      'Issue Date': '08/13/2026',
+      'Owner Email': 'owner@example.com',
+      'Owner Phone': '5551112222',
+      'Owner Address Line 1': '10 Main St',
+      'Owner City': 'Orlando',
+      'Owner State': 'FL',
+      'Owner Zipcode': '32801',
+      'Anticipated Annual Premium': 2400,
+      'NB Policy #': 'NB-1',
+    })).toMatchObject({
+      policyNumber: 'NL-EXPORT-1',
+      nbPolicyNumber: 'NB-1',
+      insuredClientName: 'Insured Name',
+      ownerClientName: 'Owner Name',
+      ownerEmail: 'owner@example.com',
+      ownerAddressLine1: '10 Main St',
+      ownerCity: 'Orlando',
+      anticipatedAnnualPremium: '2400',
+    })
+  })
+
   it('drops a row with no policy number', () => {
     expect(toInforcePolicySnapshot({ InsuredClientName: 'Nobody' })).toBeNull()
   })

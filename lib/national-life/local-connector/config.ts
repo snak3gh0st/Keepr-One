@@ -132,6 +132,15 @@ export function isNationalLifePageDiscoveryEnabled(): boolean {
   )
 }
 
+/// The official XLSX collector is independently gated because it changes the
+/// in-force source from paginated reads to one authenticated carrier export.
+export function isNationalLifeExportEnabled(): boolean {
+  return parseOptionalFlag(
+    'NATIONAL_LIFE_LOCAL_CONNECTOR_EXPORT_ENABLED',
+    process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_EXPORT_ENABLED,
+  )
+}
+
 export function localConnectorUnavailableResponse(): Response {
   return Response.json(
     { error: 'NOT_AVAILABLE' },

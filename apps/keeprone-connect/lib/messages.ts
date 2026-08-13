@@ -54,6 +54,13 @@ export type CapturePageMessage = {
   correlationId: string
 }
 
+export type BeginExportMessage = {
+  type: 'BEGIN_EXPORT'
+  sourceKey: 'INFORCE_CLIENTS'
+  token: string
+  correlationId: string
+}
+
 export type ProbeAuthMessage = {
   type: 'PROBE_AUTH'
   token: string
@@ -120,11 +127,48 @@ export type GridErrorMessage = {
   code: 'TEMPLATE_UNAVAILABLE' | 'PORTAL_REQUEST_FAILED' | 'INVALID_PORTAL_RESPONSE'
 }
 
-export type BridgeMessage = GridChunkMessage | GridDoneMessage | GridErrorMessage
+export type ExportBeginMessage = {
+  type: 'EXPORT_BEGIN'
+  gridKey: 'INFORCE_CLIENTS'
+  token: string
+  correlationId: string
+  fileName: string
+  contentType: string
+  expectedBytes: number
+  expectedSha256: string
+}
+
+export type ExportChunkMessage = {
+  type: 'EXPORT_CHUNK'
+  gridKey: 'INFORCE_CLIENTS'
+  token: string
+  correlationId: string
+  sequence: number
+  bytes: number[]
+}
+
+export type ExportDoneMessage = {
+  type: 'EXPORT_DONE'
+  gridKey: 'INFORCE_CLIENTS'
+  token: string
+  correlationId: string
+}
+
+export type ExportErrorMessage = {
+  type: 'EXPORT_ERROR'
+  gridKey: 'INFORCE_CLIENTS'
+  token: string
+  correlationId: string
+  code: 'TEMPLATE_UNAVAILABLE' | 'PORTAL_REQUEST_FAILED' | 'INVALID_EXPORT_RESPONSE'
+}
+
+export type BridgeMessage =
+  | GridChunkMessage | GridDoneMessage | GridErrorMessage
+  | ExportBeginMessage | ExportChunkMessage | ExportDoneMessage | ExportErrorMessage
 
 export type BridgeControlAck = {
   ok: true
-  type: 'BEGIN_GRID_ACK' | 'ABORT_GRID_ACK'
+  type: 'BEGIN_GRID_ACK' | 'BEGIN_EXPORT_ACK' | 'ABORT_GRID_ACK'
   gridKey: string
   token: string
   correlationId: string
@@ -231,6 +275,18 @@ export function parseCapturePageMessage(value: unknown): CapturePageMessage | nu
   return value as CapturePageMessage
 }
 
+export function parseBeginExportMessage(value: unknown): BeginExportMessage | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ['type', 'sourceKey', 'token', 'correlationId']) ||
+    value.type !== 'BEGIN_EXPORT' ||
+    value.sourceKey !== 'INFORCE_CLIENTS' ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16)
+  ) return null
+  return value as BeginExportMessage
+}
+
 export function parseProbeAuthMessage(value: unknown): ProbeAuthMessage | null {
   if (
     !isObject(value) ||
@@ -282,6 +338,36 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
     return null
   }
   if (!isShortString(value.correlationId, 128, 16) || typeof value.type !== 'string') return null
+
+  if (value.type === 'EXPORT_DONE') {
+    return value.gridKey === 'INFORCE_CLIENTS' &&
+      hasExactKeys(value, ['type', 'gridKey', 'token', 'correlationId'])
+      ? value as ExportDoneMessage : null
+  }
+  if (value.type === 'EXPORT_ERROR') {
+    const codes = ['TEMPLATE_UNAVAILABLE', 'PORTAL_REQUEST_FAILED', 'INVALID_EXPORT_RESPONSE']
+    return value.gridKey === 'INFORCE_CLIENTS' &&
+      hasExactKeys(value, ['type', 'gridKey', 'token', 'correlationId', 'code']) &&
+      typeof value.code === 'string' && codes.includes(value.code)
+      ? value as ExportErrorMessage : null
+  }
+  if (value.type === 'EXPORT_BEGIN') {
+    return value.gridKey === 'INFORCE_CLIENTS' &&
+      hasExactKeys(value, ['type', 'gridKey', 'token', 'correlationId', 'fileName', 'contentType', 'expectedBytes', 'expectedSha256']) &&
+      typeof value.fileName === 'string' && /^NLG_InforceClientInfo_[0-9]{8}\.xlsx$/.test(value.fileName) &&
+      value.contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' &&
+      Number.isSafeInteger(value.expectedBytes) && (value.expectedBytes as number) > 0 && (value.expectedBytes as number) <= 25 * 1024 * 1024 &&
+      typeof value.expectedSha256 === 'string' && /^[a-f0-9]{64}$/.test(value.expectedSha256)
+      ? value as ExportBeginMessage : null
+  }
+  if (value.type === 'EXPORT_CHUNK') {
+    return value.gridKey === 'INFORCE_CLIENTS' &&
+      hasExactKeys(value, ['type', 'gridKey', 'token', 'correlationId', 'sequence', 'bytes']) &&
+      Number.isSafeInteger(value.sequence) && (value.sequence as number) >= 0 && (value.sequence as number) <= 25 &&
+      Array.isArray(value.bytes) && value.bytes.length > 0 && value.bytes.length <= 1024 * 1024 &&
+      value.bytes.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+      ? value as ExportChunkMessage : null
+  }
 
   if (value.type === 'GRID_DONE') {
     return hasExactKeys(value, ['type', 'gridKey', 'token', 'correlationId'])

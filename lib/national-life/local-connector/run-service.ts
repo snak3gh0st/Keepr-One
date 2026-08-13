@@ -6,6 +6,7 @@ import type { NationalLifeGridKey } from '../portal-grid-client'
 import {
   planReadGridStages,
   planReadPageStages,
+  planReadExportStages,
   type LocalConnectorStagePlan,
 } from './capabilities'
 import {
@@ -109,10 +110,15 @@ function nextUnsettledStageIndex(
   return index === -1 ? planned.length : index
 }
 
-function planLocalConnectorStages(keys: readonly NationalLifeGridKey[]): LocalConnectorStagePlan[] {
+function planLocalConnectorStages(
+  keys: readonly NationalLifeGridKey[],
+  options?: { exportEnabled?: boolean },
+): LocalConnectorStagePlan[] {
   const unique = [...new Set(keys)]
   return unique.map((key) =>
-    DISCOVERY_PAGE_KEYS.has(key)
+    options?.exportEnabled && key === 'INFORCE_CLIENTS'
+      ? planReadExportStages([key])[0]!
+      : DISCOVERY_PAGE_KEYS.has(key)
       ? planReadPageStages([key])[0]!
       : planReadGridStages([key])[0]!,
   )
@@ -159,7 +165,7 @@ export async function expireStaleLocalConnectorRuns(
 export async function startLocalConnectorRun(
   db: LocalConnectorDb,
   input: { agentId: string; deviceId: string; now?: Date },
-  options?: { gridKeys?: readonly NationalLifeGridKey[]; forceRefresh?: boolean },
+  options?: { gridKeys?: readonly NationalLifeGridKey[]; forceRefresh?: boolean; exportEnabled?: boolean },
 ): Promise<{
   runId: string
   schemaVersion: typeof LOCAL_CONNECTOR_SCHEMA_VERSION
@@ -172,7 +178,10 @@ export async function startLocalConnectorRun(
   const now = input.now ?? new Date()
   // Planned before any write: an unknown grid key must fail the request rather
   // than leave a RUNNING run behind that no device can ever finish.
-  const stages = planLocalConnectorStages(options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS)
+  const stages = planLocalConnectorStages(
+    options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
+    { exportEnabled: options?.exportEnabled },
+  )
   await failStaleLocalRuns(db, { agentId: input.agentId, deviceId: input.deviceId, now })
 
   const runSelect = {
@@ -322,12 +331,14 @@ export async function startLocalConnectorRun(
     }
     let resume: { sequence: number; offset: number } | undefined
     const currentGridKey = activePlan[nextStageIndex]
+    let currentStageHasReceipts = false
     if (currentGridKey && db.nationalLifeConnectorStageReceipt) {
       const receipts = await db.nationalLifeConnectorStageReceipt.findMany({
         where: { runId: active.id, gridKey: currentGridKey },
         orderBy: { sequence: 'asc' },
         select: { sequence: true, nextOffset: true, recordCount: true },
       })
+      currentStageHasReceipts = receipts.length > 0
       // Receipts created by v2 have no meaningful offset. Restart that stage
       // from its first page instead of guessing and skipping source rows.
       if (!receipts.some((receipt) => receipt.nextOffset === 0 &&
@@ -348,7 +359,14 @@ export async function startLocalConnectorRun(
     return {
       runId: active.id,
       schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
-      stages: planLocalConnectorStages(activePlan),
+      // Never switch an in-flight in-force stage from paginated receipts to an
+      // XLSX export. Both use the same durable receipt coordinates, so mixing
+      // them would correctly trip idempotency conflicts instead of completing.
+      stages: planLocalConnectorStages(activePlan, {
+        exportEnabled: options?.exportEnabled && !(
+          currentGridKey === 'INFORCE_CLIENTS' && currentStageHasReceipts
+        ),
+      }),
       duplicate: true as const,
       completedStages,
       nextStageIndex,

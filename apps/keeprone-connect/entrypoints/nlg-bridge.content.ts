@@ -3,6 +3,7 @@ import {
   parseBeginGridMessage,
   parseBridgeMessage,
   parseCapturePageMessage,
+  parseBeginExportMessage,
   parseProbeAuthMessage,
   type BeginGridMessage,
 } from '../lib/messages'
@@ -17,7 +18,7 @@ export default defineContentScript({
   runAt: 'document_start',
   main() {
     if (!shouldInstrumentNationalLifePath(location.pathname)) return
-    let active: BeginGridMessage | null = null
+    let active: BeginGridMessage | { type: 'BEGIN_EXPORT'; sourceKey: 'INFORCE_CLIENTS'; token: string; correlationId: string } | null = null
 
     chrome.runtime.onMessage.addListener((value, _sender, sendResponse) => {
       const probe = parseProbeAuthMessage(value)
@@ -72,17 +73,31 @@ export default defineContentScript({
         })
         return false
       }
+      const beginExport = parseBeginExportMessage(value)
+      if (beginExport) {
+        active = beginExport
+        window.postMessage({ channel: CHANNEL, payload: beginExport }, location.origin)
+        sendResponse({
+          ok: true,
+          type: 'BEGIN_EXPORT_ACK',
+          gridKey: beginExport.sourceKey,
+          token: beginExport.token,
+          correlationId: beginExport.correlationId,
+        })
+        return false
+      }
 
       // A ordem de parar atravessa para a página pelo mesmo canal, e só se falar
       // da extração que esta ponte está acompanhando: uma ordem com token de
       // outra extração pararia a errada.
       const abort = parseAbortGridMessage(value)
+      const activeGridKey = active && ('gridKey' in active ? active.gridKey : active.sourceKey)
       if (
         !abort ||
         !active ||
         abort.token !== active.token ||
         abort.correlationId !== active.correlationId ||
-        abort.gridKey !== active.gridKey
+        abort.gridKey !== activeGridKey
       ) {
         return
       }
@@ -107,7 +122,7 @@ export default defineContentScript({
         !active ||
         message.token !== active.token ||
         message.correlationId !== active.correlationId ||
-        message.gridKey !== active.gridKey
+        message.gridKey !== ('gridKey' in active ? active.gridKey : active.sourceKey)
       ) {
         return
       }
@@ -118,7 +133,7 @@ export default defineContentScript({
         (response) => {
           if (
             response?.ok === true &&
-            (message.type === 'GRID_DONE' || message.type === 'GRID_ERROR')
+            (message.type === 'GRID_DONE' || message.type === 'GRID_ERROR' || message.type === 'EXPORT_DONE' || message.type === 'EXPORT_ERROR')
           ) {
             active = null
           }

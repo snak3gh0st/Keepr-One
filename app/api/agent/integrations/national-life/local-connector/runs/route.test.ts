@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   enabled: vi.fn(),
   pageDiscoveryEnabled: vi.fn(),
+  exportEnabled: vi.fn(),
   mockVerify: vi.fn(),
   mockStartRun: vi.fn(),
 }))
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/national-life/local-connector/config', () => ({
   isNationalLifeLocalConnectorEnabled: mocks.enabled,
   isNationalLifePageDiscoveryEnabled: mocks.pageDiscoveryEnabled,
+  isNationalLifeExportEnabled: mocks.exportEnabled,
   localConnectorUnavailableResponse: () =>
     Response.json(
       { error: 'NOT_AVAILABLE' },
@@ -55,6 +57,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.enabled.mockReturnValue(true)
   mocks.pageDiscoveryEnabled.mockReturnValue(false)
+  mocks.exportEnabled.mockReturnValue(false)
   for (const key of REMOTE_ENV) delete process.env[key]
 })
 
@@ -187,6 +190,32 @@ describe('local connector runs route', () => {
       { deviceId: 'dev_1', agentId: 'agent_1' },
       undefined,
     )
+  })
+
+  it('enables the official export only for extension 0.1.15 or newer', async () => {
+    mocks.exportEnabled.mockReturnValue(true)
+    mockVerify.mockResolvedValue({ agentId: 'agent-1', deviceId: 'device-1' })
+    mockStartRun.mockResolvedValue({ runId: 'run-export' })
+    const request = signedRequest()
+    request.headers.set('x-fyntra-connector-version', '0.1.15')
+
+    expect((await POST(request)).status).toBe(201)
+    expect(mockStartRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ exportEnabled: true }),
+    )
+  })
+
+  it('keeps the paginated fallback for older extension versions', async () => {
+    mocks.exportEnabled.mockReturnValue(true)
+    mockVerify.mockResolvedValue({ agentId: 'agent-1', deviceId: 'device-1' })
+    mockStartRun.mockResolvedValue({ runId: 'run-grid' })
+    const request = signedRequest()
+    request.headers.set('x-fyntra-connector-version', '0.1.14')
+
+    expect((await POST(request)).status).toBe(201)
+    expect(mockStartRun).toHaveBeenCalledWith(expect.anything(), expect.anything(), undefined)
   })
 
   it('forwards an explicit full-refresh request without changing the default', async () => {

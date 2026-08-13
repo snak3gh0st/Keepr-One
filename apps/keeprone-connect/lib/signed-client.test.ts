@@ -4,6 +4,7 @@ import {
   canonicalMessage,
   classifyFailedResponse,
   sha256,
+  sha256Bytes,
   signCanonicalMessage,
 } from './signed-client'
 
@@ -27,6 +28,11 @@ describe('signed device requests', () => {
 
   it('hashes UTF-8 bodies as lowercase SHA-256 hex', async () => {
     expect(await sha256('{}')).toBe('44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a')
+  })
+
+  it('hashes binary export chunks without JSON expansion', async () => {
+    expect(await sha256Bytes(new Uint8Array([0, 1, 2, 255])))
+      .toBe('3d1f57c984978ef98a18378c8166c1cb8ede02c03eeb6aee7e2f121dfeee3e56')
   })
 
   it('creates a base64url P-256 signature that verifies', async () => {

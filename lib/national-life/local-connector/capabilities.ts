@@ -20,7 +20,7 @@ export type LocalConnectorCapabilityName = ConnectorCapability
 
 /// The Chrome extension ships this closed subset. The larger protocol catalogue
 /// is deliberately not executable until a released browser executor validates it.
-export const EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES = ['READ_GRID', 'READ_PAGE'] as const satisfies readonly LocalConnectorCapabilityName[]
+export const EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES = ['READ_GRID', 'READ_PAGE', 'READ_EXPORT'] as const satisfies readonly LocalConnectorCapabilityName[]
 
 /// Named for planning and UI copy only. The extension's IMPLEMENTED_CAPABILITIES
 /// must stay the closed set of what the device can actually run — do not add these
@@ -57,7 +57,16 @@ export type ReadPageStagePlan = {
   params: { sourceKey: NationalLifeGridKey; navigatePath: string }
 }
 
-export type LocalConnectorStagePlan = ReadGridStagePlan | ReadPageStagePlan
+export type ReadExportStagePlan = {
+  capability: 'READ_EXPORT'
+  params: {
+    sourceKey: 'INFORCE_CLIENTS'
+    navigatePath: string
+    includeContactInformation: true
+  }
+}
+
+export type LocalConnectorStagePlan = ReadGridStagePlan | ReadPageStagePlan | ReadExportStagePlan
 
 /// The extension refuses anything outside the agent tree. Every portal grid hits the
 /// same endpoint — only the page you open first differs — so one capability covers
@@ -146,5 +155,26 @@ export function planReadPageStages(
       throw new LocalConnectorPlanError('GRID_NOT_ROUTED', sourceKey)
     }
     return { capability: 'READ_PAGE', params: { sourceKey, navigatePath } }
+  })
+}
+
+export function planReadExportStages(
+  sourceKeys: readonly NationalLifeGridKey[],
+): ReadExportStagePlan[] {
+  return [...new Set(sourceKeys)].map((sourceKey) => {
+    if (sourceKey !== 'INFORCE_CLIENTS') {
+      throw new Error(`Source ${sourceKey} has no official export collector`)
+    }
+    const navigatePath = NATIONAL_LIFE_GRIDS[sourceKey]
+    if (!isSafeNavigatePath(navigatePath)) {
+      throw new Error(`Unsafe navigate path for source ${sourceKey}`)
+    }
+    if (!isRoutedGrid(sourceKey)) {
+      throw new LocalConnectorPlanError('GRID_NOT_ROUTED', sourceKey)
+    }
+    return {
+      capability: 'READ_EXPORT',
+      params: { sourceKey, navigatePath, includeContactInformation: true },
+    }
   })
 }

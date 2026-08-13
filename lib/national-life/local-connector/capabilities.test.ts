@@ -5,6 +5,7 @@ import {
   isSafeNavigatePath,
   planReadGridStages,
   planReadPageStages,
+  planReadExportStages,
 } from './capabilities'
 import { LOCAL_CONNECTOR_ROUTED_GRIDS, planRawIngest } from './raw-ingest'
 import {
@@ -115,6 +116,18 @@ describe('planReadGridStages', () => {
     }])
   })
 
+  it('plans the official in-force XLSX export with contacts', () => {
+    expect(planReadExportStages(['INFORCE_CLIENTS'])).toEqual([{
+      capability: 'READ_EXPORT',
+      params: {
+        sourceKey: 'INFORCE_CLIENTS',
+        navigatePath: '/agent/book-of-business/inforce-book/all-clients/all-clients-agent',
+        includeContactInformation: true,
+      },
+    }])
+    expect(() => planReadExportStages(['NEW_BUSINESS'])).toThrow(/no official export collector/)
+  })
+
   it('never lets a source run with the wrong collector', () => {
     expect(() => planReadGridStages(['COMMISSIONS_OVERVIEW'])).toThrow(/requires READ_PAGE/)
     expect(() => planReadPageStages(['NEW_BUSINESS'])).toThrow(/requires READ_GRID/)
@@ -209,6 +222,10 @@ describe('PLANNED_LOCAL_CONNECTOR_CAPABILITIES', () => {
       'READ_DOCUMENT_REQUIREMENTS',
       'READ_POLICY_DETAIL',
       'READ_COMMISSIONS',
+      'OPEN_APPLICATION',
+      'OPEN_EAPP',
+      'OPEN_POLICY',
+      'OPEN_ILLUSTRATION',
       'FLEXLIFE_QUOTE',
       'GENERATE_ILLUSTRATION',
       'PREPARE_APPLICATION_DRAFT',

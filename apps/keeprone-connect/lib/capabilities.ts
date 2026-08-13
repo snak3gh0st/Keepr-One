@@ -2,13 +2,14 @@ import { isGridKeyLabel } from './constants'
 import { hasExactKeys } from './messages'
 import { parseConnectorCommand, type ConnectorCommand } from './command-contract'
 
-export type Capability = 'READ_GRID' | 'READ_PAGE'
+export type Capability = 'READ_GRID' | 'READ_PAGE' | 'READ_EXPORT'
 
 export type StagePlan =
   | { capability: 'READ_GRID'; params: { gridKey: string; navigatePath: string } }
   | { capability: 'READ_PAGE'; params: { sourceKey: string; navigatePath: string } }
+  | { capability: 'READ_EXPORT'; params: { sourceKey: string; navigatePath: string; includeContactInformation: true } }
 
-const IMPLEMENTED_CAPABILITIES = ['READ_GRID', 'READ_PAGE'] as const
+const IMPLEMENTED_CAPABILITIES = ['READ_GRID', 'READ_PAGE', 'READ_EXPORT'] as const
 // A plan is server-authorized and each stage is independently bounded. Leave
 // room for the source inventory to grow without making the 33rd source a hard
 // client-side rollout failure.
@@ -70,6 +71,18 @@ export function parseStagePlan(value: unknown): StagePlan[] {
       if (!isGridKeyLabel(gridKey)) throw new Error('INVALID_RUN_RESPONSE')
       return { capability, params: { gridKey, navigatePath } }
     }
+    if (capability === 'READ_EXPORT') {
+      if (!hasExactKeys(params, ['sourceKey', 'navigatePath', 'includeContactInformation'])) {
+        throw new Error('INVALID_RUN_RESPONSE')
+      }
+      const sourceKey = 'sourceKey' in params ? params.sourceKey : undefined
+      const includeContactInformation = 'includeContactInformation' in params
+        ? params.includeContactInformation : undefined
+      if (sourceKey !== 'INFORCE_CLIENTS' || includeContactInformation !== true) {
+        throw new Error('INVALID_RUN_RESPONSE')
+      }
+      return { capability, params: { sourceKey, navigatePath, includeContactInformation: true } }
+    }
     if (!hasExactKeys(params, ['sourceKey', 'navigatePath'])) throw new Error('INVALID_RUN_RESPONSE')
     const sourceKey = 'sourceKey' in params ? params.sourceKey : undefined
     if (!isGridKeyLabel(sourceKey)) throw new Error('INVALID_RUN_RESPONSE')
@@ -87,7 +100,7 @@ export function parseExecutableConnectorCommand(value: unknown): ConnectorComman
   if (!(IMPLEMENTED_CAPABILITIES as readonly string[]).includes(command.capability)) {
     throw new Error('UNKNOWN_CAPABILITY')
   }
-  if (command.capability !== 'READ_GRID' && command.capability !== 'READ_PAGE') {
+  if (command.capability !== 'READ_GRID' && command.capability !== 'READ_PAGE' && command.capability !== 'READ_EXPORT') {
     throw new Error('UNKNOWN_CAPABILITY')
   }
   const params = command.params

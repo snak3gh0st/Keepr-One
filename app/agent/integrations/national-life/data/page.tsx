@@ -342,9 +342,10 @@ export default async function NationalLifeDataPage() {
               Limite conhecido
             </p>
             <p className="mt-2">
-              A carteira em vigor não fornece e-mail, telefone, prêmio anual ou valor em dinheiro.
-              O Keepr One mostra esses campos como ausentes, nunca como zero. Contatos são usados
-              apenas quando aparecem no histórico de atendimento.
+              A grade atual não fornece e-mail, telefone, prêmio anual ou valor em dinheiro. O
+              relatório oficial de carteira com contatos fornece endereços, parte dos contatos e
+              prêmio anual; essa fonte será importada pelo novo canal de downloads. Até ela entrar,
+              o Keepr One mostra os campos como ausentes, nunca como zero.
             </p>
           </div>
           <div className="mt-5 border-t border-white/10 pt-4">

@@ -29,6 +29,18 @@ export type InforcePolicySnapshot = {
   ownerDob: string | null
   ownerEmail: string | null
   ownerPhoneNumber: string | null
+  insuredAddress: string | null
+  insuredAddressLine1: string | null
+  insuredAddressLine2: string | null
+  insuredCity: string | null
+  insuredState: string | null
+  insuredZipcode: string | null
+  ownerAddress: string | null
+  ownerAddressLine1: string | null
+  ownerAddressLine2: string | null
+  ownerCity: string | null
+  ownerState: string | null
+  ownerZipcode: string | null
   accumulatedCashValue: string | null
   anticipatedAnnualPremium: string | null
   termConversionDate: string | null
@@ -64,39 +76,51 @@ function text(row: GridRow, ...keys: string[]): string | null {
 }
 
 export function toInforcePolicySnapshot(row: GridRow): InforcePolicySnapshot | null {
-  const policyNumber = text(row, 'PolicyNumber', 'PolicyNo')
+  const policyNumber = text(row, 'PolicyNumber', 'PolicyNo', 'Policy #')
   if (!policyNumber) {
     return null
   }
 
   return {
     policyNumber,
-    nbPolicyNumber: text(row, 'NBPolicyNumber'),
-    policyStatus: text(row, 'PolicyStatus', 'PolStatus'),
-    policyIssueDate: text(row, 'PolicyIssueDate'),
-    lastStatusChangeDate: text(row, 'LastStatusChangeDate'),
-    productClass: text(row, 'ProductClass'),
+    nbPolicyNumber: text(row, 'NBPolicyNumber', 'NB Policy #'),
+    policyStatus: text(row, 'PolicyStatus', 'PolStatus', 'Status'),
+    policyIssueDate: text(row, 'PolicyIssueDate', 'Issue Date'),
+    lastStatusChangeDate: text(row, 'LastStatusChangeDate', 'Inactive Status Date'),
+    productClass: text(row, 'ProductClass', 'Type'),
     productName: text(row, 'ProductName', 'Product'),
     productCode: text(row, 'ProductCode'),
     companyCode: text(row, 'CompanyCode'),
     systemCode: text(row, 'SystemCode'),
     planCode: text(row, 'PlanCode'),
-    agentNumber: text(row, 'AgentNumber'),
-    agentName: text(row, 'AgentName'),
+    agentNumber: text(row, 'AgentNumber', 'Agent #'),
+    agentName: text(row, 'AgentName', 'Agent'),
     servicingAgentName: text(row, 'ServicingAgentName'),
-    servicingAgencyName: text(row, 'ServicingAgencyName'),
-    insuredClientName: text(row, 'InsuredClientName'),
+    servicingAgencyName: text(row, 'ServicingAgencyName', 'Agency'),
+    insuredClientName: text(row, 'InsuredClientName', 'Insured / Annuitant'),
     insuredDob: text(row, 'InsuredDOB'),
-    insuredEmail: text(row, 'InsuredEmail'),
-    insuredPhoneNumber: text(row, 'InsuredPhoneNumber'),
-    ownerClientName: text(row, 'OwnerClientName'),
+    insuredEmail: text(row, 'InsuredEmail', 'Insured/Annuitant Email'),
+    insuredPhoneNumber: text(row, 'InsuredPhoneNumber', 'Insured/Annuitant Phone'),
+    ownerClientName: text(row, 'OwnerClientName', 'Owner'),
     ownerDob: text(row, 'OwnerDOB'),
-    ownerEmail: text(row, 'OwnerEmail'),
-    ownerPhoneNumber: text(row, 'OwnerPhoneNumber'),
+    ownerEmail: text(row, 'OwnerEmail', 'Owner Email'),
+    ownerPhoneNumber: text(row, 'OwnerPhoneNumber', 'Owner Phone'),
+    insuredAddress: text(row, 'InsuredAddress', 'Insured / Annuitant Address'),
+    insuredAddressLine1: text(row, 'InsuredAddressLine1', 'Insured / Annuitant Address Line 1'),
+    insuredAddressLine2: text(row, 'InsuredAddressLine2', 'Insured / Annuitant Address Line 2'),
+    insuredCity: text(row, 'InsuredCity', 'Insured / Annuitant City'),
+    insuredState: text(row, 'InsuredState', 'Insured / Annuitant State'),
+    insuredZipcode: text(row, 'InsuredZipcode', 'Insured / Annuitant Zipcode'),
+    ownerAddress: text(row, 'OwnerAddress', 'Owner Address'),
+    ownerAddressLine1: text(row, 'OwnerAddressLine1', 'Owner Address Line 1'),
+    ownerAddressLine2: text(row, 'OwnerAddressLine2', 'Owner Address Line 2'),
+    ownerCity: text(row, 'OwnerCity', 'Owner City'),
+    ownerState: text(row, 'OwnerState', 'Owner State'),
+    ownerZipcode: text(row, 'OwnerZipcode', 'Owner Zipcode'),
     accumulatedCashValue: text(row, 'AccumulatedCashValue'),
-    anticipatedAnnualPremium: text(row, 'AAP', 'AnticipatedAnnualPremium'),
-    termConversionDate: text(row, 'TermConversionDate'),
-    levelPeriodEndDate: text(row, 'LevelPeriodEndDate'),
+    anticipatedAnnualPremium: text(row, 'AAP', 'AnticipatedAnnualPremium', 'Anticipated Annual Premium'),
+    termConversionDate: text(row, 'TermConversionDate', 'Term Conversion Ending'),
+    levelPeriodEndDate: text(row, 'LevelPeriodEndDate', 'End of Level Period'),
     employerName: text(row, 'EmployerName'),
     raw: row,
   }

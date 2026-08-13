@@ -190,9 +190,9 @@ model User {
   client            Client?
   imports           ImportBatch[]
   auditLogs         AuditLog[]
-  emailVerified     Boolean            @default(false)
+  emailVerified     Boolean          @default(false)
   image             String?
-  updatedAt         DateTime           @updatedAt
+  updatedAt         DateTime         @updatedAt
   sessions          Session[]
   accounts          Account[]
   uploadedDocuments PolicyDocument[]
@@ -212,29 +212,30 @@ model Agent {
   status        AgentStatus @default(ACTIVE)
   createdAt     DateTime    @default(now())
 
-  clients           Client[]
-  policies          Policy[]
-  commissionRecords CommissionRecord[]
-  prospects         Prospect[]
-  insuranceCases    InsuranceCase[]
-  commissionTransactions CommissionTransaction[]
-  integrationCredentials AgentIntegrationCredential[]
-  integrationSessions    AgentIntegrationSession[]
-  nationalLifeConnectionAttempts NationalLifeConnectionAttempt[]
-  browserJobs            BrowserAutomationJob[]
-  nationalLifeSyncRuns   NationalLifeSyncRun[]
-  nationalLifeCaseSnapshots NationalLifeCaseSnapshot[]
-  nationalLifeForesightReadRuns NationalLifeForesightReadRun[]
-  nationalLifeForesightCaseSnapshots NationalLifeForesightCaseSnapshot[]
+  clients                               Client[]
+  policies                              Policy[]
+  commissionRecords                     CommissionRecord[]
+  prospects                             Prospect[]
+  insuranceCases                        InsuranceCase[]
+  commissionTransactions                CommissionTransaction[]
+  integrationCredentials                AgentIntegrationCredential[]
+  integrationSessions                   AgentIntegrationSession[]
+  nationalLifeConnectionAttempts        NationalLifeConnectionAttempt[]
+  browserJobs                           BrowserAutomationJob[]
+  nationalLifeSyncRuns                  NationalLifeSyncRun[]
+  nationalLifeCaseSnapshots             NationalLifeCaseSnapshot[]
+  nationalLifeForesightReadRuns         NationalLifeForesightReadRun[]
+  nationalLifeForesightCaseSnapshots    NationalLifeForesightCaseSnapshot[]
   nationalLifeForesightServiceSnapshots NationalLifeForesightServiceSnapshot[]
-  nationalLifeForesightDocuments NationalLifeForesightDocument[]
-  illustrations          Illustration[]
-  nationalLifeInforcePolicies NationalLifeInforcePolicy[]
-  nationalLifeReportRows NationalLifeReportRow[]
-  nationalLifeRawGridPages NationalLifeRawGridPage[]
-  nationalLifeConnectorPairings NationalLifeConnectorPairing[]
-  nationalLifeConnectorDevices NationalLifeConnectorDevice[]
-  nationalLifeConnectorCommands NationalLifeConnectorCommand[]
+  nationalLifeForesightDocuments        NationalLifeForesightDocument[]
+  illustrations                         Illustration[]
+  nationalLifeInforcePolicies           NationalLifeInforcePolicy[]
+  nationalLifeReportRows                NationalLifeReportRow[]
+  nationalLifeRawGridPages              NationalLifeRawGridPage[]
+  nationalLifeConnectorPairings         NationalLifeConnectorPairing[]
+  nationalLifeConnectorDevices          NationalLifeConnectorDevice[]
+  nationalLifeConnectorCommands         NationalLifeConnectorCommand[]
+  nationalLifeExportUploads             NationalLifeExportUpload[]
 
   @@index([parentAgentId])
 }
@@ -284,42 +285,54 @@ model NationalLifeCaseSnapshot {
 /// Contains real client PII, stored in plaintext to match how Client already
 /// stores name/email/phone in this schema — same trust boundary, no new gap.
 model NationalLifeInforcePolicy {
-  id                    String   @id @default(cuid())
-  agentId               String
-  agent                 Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  deploymentScope       String
-  policyNumber          String
-  nbPolicyNumber        String?
-  policyStatus          String?
-  policyIssueDate       String?
-  lastStatusChangeDate  String?
-  productClass          String?
-  productName           String?
-  productCode           String?
-  companyCode           String?
-  systemCode            String?
-  planCode              String?
-  agentNumber           String?
-  agentName             String?
-  servicingAgentName    String?
-  servicingAgencyName   String?
-  insuredClientName     String?
-  insuredDob            String?
-  insuredEmail          String?
-  insuredPhoneNumber    String?
-  ownerClientName       String?
-  ownerDob              String?
-  ownerEmail            String?
-  ownerPhoneNumber      String?
-  accumulatedCashValue  String?
+  id                       String   @id @default(cuid())
+  agentId                  String
+  agent                    Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope          String
+  policyNumber             String
+  nbPolicyNumber           String?
+  policyStatus             String?
+  policyIssueDate          String?
+  lastStatusChangeDate     String?
+  productClass             String?
+  productName              String?
+  productCode              String?
+  companyCode              String?
+  systemCode               String?
+  planCode                 String?
+  agentNumber              String?
+  agentName                String?
+  servicingAgentName       String?
+  servicingAgencyName      String?
+  insuredClientName        String?
+  insuredDob               String?
+  insuredEmail             String?
+  insuredPhoneNumber       String?
+  ownerClientName          String?
+  ownerDob                 String?
+  ownerEmail               String?
+  ownerPhoneNumber         String?
+  insuredAddress           String?
+  insuredAddressLine1      String?
+  insuredAddressLine2      String?
+  insuredCity              String?
+  insuredState             String?
+  insuredZipcode           String?
+  ownerAddress             String?
+  ownerAddressLine1        String?
+  ownerAddressLine2        String?
+  ownerCity                String?
+  ownerState               String?
+  ownerZipcode             String?
+  accumulatedCashValue     String?
   anticipatedAnnualPremium String?
-  termConversionDate    String?
-  levelPeriodEndDate    String?
-  employerName          String?
-  raw                   Json
-  fetchedAt             DateTime
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  termConversionDate       String?
+  levelPeriodEndDate       String?
+  employerName             String?
+  raw                      Json
+  fetchedAt                DateTime
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 
   @@unique([agentId, deploymentScope, policyNumber])
   @@index([agentId])
@@ -363,9 +376,9 @@ model NationalLifeReportRow {
 /// order and shape. Pages from an older successful snapshot are removed only
 /// after the replacement stage has reconciled against `recordsTotal`.
 model NationalLifeRawGridPage {
-  id              String   @id @default(cuid())
+  id              String              @id @default(cuid())
   agentId         String
-  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent           Agent               @relation(fields: [agentId], references: [id], onDelete: Cascade)
   deploymentScope String
   runId           String
   run             NationalLifeSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -375,8 +388,8 @@ model NationalLifeRawGridPage {
   contentHash     String
   records         Json
   observedAt      DateTime
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
   @@unique([runId, gridKey, sequence])
   @@index([agentId, deploymentScope, gridKey])
@@ -384,36 +397,36 @@ model NationalLifeRawGridPage {
 }
 
 model NationalLifeForesightReadRun {
-  id                String                               @id @default(cuid())
+  id                String                            @id @default(cuid())
   agentId           String
-  agent             Agent                                @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  deploymentScope   String                               @default("SINGLE_DEPLOYMENT")
-  provider          String                               @default("NATIONAL_LIFE")
+  agent             Agent                             @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope   String                            @default("SINGLE_DEPLOYMENT")
+  provider          String                            @default("NATIONAL_LIFE")
   mode              NationalLifeForesightReadMode
-  state             NationalLifeForesightReadRunState    @default(QUEUED)
+  state             NationalLifeForesightReadRunState @default(QUEUED)
   targetCaseId      String?
-  totalCases        Int                                  @default(0)
-  inventoriedCases  Int                                  @default(0)
-  totalServices     Int                                  @default(0)
-  completedServices Int                                  @default(0)
+  totalCases        Int                               @default(0)
+  inventoriedCases  Int                               @default(0)
+  totalServices     Int                               @default(0)
+  completedServices Int                               @default(0)
   currentCaseName   String?
   currentService    String?
   safeErrorCode     String?
   startedAt         DateTime?
   completedAt       DateTime?
-  createdAt         DateTime                             @default(now())
-  updatedAt         DateTime                             @updatedAt
+  createdAt         DateTime                          @default(now())
+  updatedAt         DateTime                          @updatedAt
   jobs              BrowserAutomationJob[]
 
   @@index([agentId, deploymentScope, state, createdAt])
 }
 
 model NationalLifeForesightCaseSnapshot {
-  id              String   @id @default(cuid())
+  id              String                                 @id @default(cuid())
   agentId         String
-  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent           Agent                                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
   deploymentScope String
-  provider        String   @default("NATIONAL_LIFE")
+  provider        String                                 @default("NATIONAL_LIFE")
   externalKey     String
   displayName     String
   caseKind        String?
@@ -422,8 +435,8 @@ model NationalLifeForesightCaseSnapshot {
   state           String?
   observedAt      DateTime
   raw             Json
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime                               @default(now())
+  updatedAt       DateTime                               @updatedAt
   services        NationalLifeForesightServiceSnapshot[]
   documents       NationalLifeForesightDocument[]
 
@@ -433,20 +446,20 @@ model NationalLifeForesightCaseSnapshot {
 }
 
 model NationalLifeForesightServiceSnapshot {
-  id              String   @id @default(cuid())
+  id              String                            @id @default(cuid())
   caseSnapshotId  String
   agentId         String
-  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent           Agent                             @relation(fields: [agentId], references: [id], onDelete: Cascade)
   deploymentScope String
-  provider        String   @default("NATIONAL_LIFE")
+  provider        String                            @default("NATIONAL_LIFE")
   caseSnapshot    NationalLifeForesightCaseSnapshot @relation(fields: [caseSnapshotId, agentId, deploymentScope, provider], references: [id, agentId, deploymentScope, provider], onDelete: Cascade)
   serviceName     String
   payloadShape    Json
   payload         Json
   validationState String
   observedAt      DateTime
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime                          @default(now())
+  updatedAt       DateTime                          @updatedAt
 
   @@unique([caseSnapshotId, serviceName])
   @@index([caseSnapshotId, observedAt])
@@ -454,12 +467,12 @@ model NationalLifeForesightServiceSnapshot {
 }
 
 model NationalLifeForesightDocument {
-  id              String   @id @default(cuid())
+  id              String                            @id @default(cuid())
   caseSnapshotId  String
   agentId         String
-  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent           Agent                             @relation(fields: [agentId], references: [id], onDelete: Cascade)
   deploymentScope String
-  provider        String   @default("NATIONAL_LIFE")
+  provider        String                            @default("NATIONAL_LIFE")
   caseSnapshot    NationalLifeForesightCaseSnapshot @relation(fields: [caseSnapshotId, agentId, deploymentScope, provider], references: [id, agentId, deploymentScope, provider], onDelete: Cascade)
   reportKey       String
   filename        String
@@ -479,8 +492,8 @@ model NationalLifeForesightDocument {
   renderState     String
   safeErrorCode   String?
   fetchedAt       DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime                          @default(now())
+  updatedAt       DateTime                          @updatedAt
 
   @@unique([caseSnapshotId, reportKey])
   @@index([caseSnapshotId, createdAt])
@@ -488,9 +501,9 @@ model NationalLifeForesightDocument {
 }
 
 model Client {
-  id              String   @id @default(cuid())
-  userId          String?  @unique
-  user            User?    @relation(fields: [userId], references: [id])
+  id              String    @id @default(cuid())
+  userId          String?   @unique
+  user            User?     @relation(fields: [userId], references: [id])
   name            String
   email           String?
   phone           String?
@@ -499,59 +512,59 @@ model Client {
   // are computable instead of needing to be re-parsed at every call site.
   dateOfBirth     DateTime?
   assignedAgentId String
-  assignedAgent   Agent    @relation(fields: [assignedAgentId], references: [id])
-  createdAt       DateTime @default(now())
+  assignedAgent   Agent     @relation(fields: [assignedAgentId], references: [id])
+  createdAt       DateTime  @default(now())
 
-  policies Policy[]
+  policies       Policy[]
   insuranceCases InsuranceCase[]
-  illustrations Illustration[]
+  illustrations  Illustration[]
 
   @@index([assignedAgentId])
 }
 
 model Policy {
-  id            String       @id @default(cuid())
-  clientId      String
-  client        Client       @relation(fields: [clientId], references: [id])
-  agentId       String
-  agent         Agent        @relation(fields: [agentId], references: [id])
-  carrier       String
-  product       String
-  policyNumber  String       @unique
-  faceAmount    Decimal
+  id               String         @id @default(cuid())
+  clientId         String
+  client           Client         @relation(fields: [clientId], references: [id])
+  agentId          String
+  agent            Agent          @relation(fields: [agentId], references: [id])
+  carrier          String
+  product          String
+  policyNumber     String         @unique
+  faceAmount       Decimal
   // The modal premium — what the client actually pays each time — kept with the
   // mode it is paid in. Annualising on write would destroy the distinction the
   // client chose: $250 monthly and $250 annual are different policies.
-  premium       Decimal
-  premiumMode   String?
-  status        PolicyStatus
-  effectiveDate DateTime?
-  lastPaymentDate DateTime?
-  statusChangedAt DateTime?
-  importBatchId String?
-  importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id])
-  caseId        String?
-  case          InsuranceCase? @relation(fields: [caseId], references: [id])
-  sourceProvider String?
+  premium          Decimal
+  premiumMode      String?
+  status           PolicyStatus
+  effectiveDate    DateTime?
+  lastPaymentDate  DateTime?
+  statusChangedAt  DateTime?
+  importBatchId    String?
+  importBatch      ImportBatch?   @relation(fields: [importBatchId], references: [id])
+  caseId           String?
+  case             InsuranceCase? @relation(fields: [caseId], references: [id])
+  sourceProvider   String?
   sourceExternalId String?
-  sourceUpdatedAt DateTime?
-  createdAt     DateTime     @default(now())
+  sourceUpdatedAt  DateTime?
+  createdAt        DateTime       @default(now())
 
-  commissionRecords CommissionRecord[]
-  documents         PolicyDocument[]
-  snapshots         PolicySnapshot[]
-  transactions      PolicyTransaction[]
+  commissionRecords      CommissionRecord[]
+  documents              PolicyDocument[]
+  snapshots              PolicySnapshot[]
+  transactions           PolicyTransaction[]
   commissionTransactions CommissionTransaction[]
-  reviews           PolicyReview[]
+  reviews                PolicyReview[]
 
+  @@unique([sourceProvider, sourceExternalId])
   @@index([agentId])
   @@index([clientId])
   @@index([caseId])
-  @@unique([sourceProvider, sourceExternalId])
 }
 
 model Prospect {
-  id              String   @id @default(cuid())
+  id              String          @id @default(cuid())
   firstName       String
   lastName        String
   email           String?
@@ -560,32 +573,32 @@ model Prospect {
   state           String?
   tobaccoStatus   String?
   assignedAgentId String
-  assignedAgent   Agent    @relation(fields: [assignedAgentId], references: [id])
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  assignedAgent   Agent           @relation(fields: [assignedAgentId], references: [id])
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
   cases           InsuranceCase[]
 
   @@index([assignedAgentId])
 }
 
 model InsuranceCase {
-  id              String      @id @default(cuid())
+  id              String                 @id @default(cuid())
   prospectId      String
-  prospect        Prospect    @relation(fields: [prospectId], references: [id])
+  prospect        Prospect               @relation(fields: [prospectId], references: [id])
   assignedAgentId String
-  assignedAgent   Agent       @relation(fields: [assignedAgentId], references: [id])
+  assignedAgent   Agent                  @relation(fields: [assignedAgentId], references: [id])
   clientId        String?
-  client          Client?     @relation(fields: [clientId], references: [id])
-  stage           CaseStage   @default(LEAD)
-  status          CaseStatus  @default(OPEN)
+  client          Client?                @relation(fields: [clientId], references: [id])
+  stage           CaseStage              @default(LEAD)
+  status          CaseStatus             @default(OPEN)
   objective       String?
   targetCoverage  Decimal?
   monthlyBudget   Decimal?
   needsAnalysis   Json?
   carrier         String?
   productType     String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
   illustrations   Illustration[]
   applications    Application[]
   timelineEvents  CaseTimelineEvent[]
@@ -598,9 +611,9 @@ model InsuranceCase {
 }
 
 model AgentIntegrationCredential {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   agentId         String
-  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent           Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
   provider        String
   maskedUsername  String
   keyVersion      String
@@ -608,37 +621,37 @@ model AgentIntegrationCredential {
   iv              String
   ciphertext      String
   authTag         String
-  status          String   @default("UNTESTED")
+  status          String    @default("UNTESTED")
   lastTestedAt    DateTime?
   lastSucceededAt DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@unique([agentId, provider])
   @@index([provider, status])
 }
 
 model AgentIntegrationSession {
-  id                 String   @id @default(cuid())
-  agentId            String
-  agent              Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  deploymentScope    String   @default("SINGLE_DEPLOYMENT")
-  provider           String
-  purpose            String   @default("CARRIER_SESSION")
-  status             String   @default("CONNECTED")
-  formatVersion      Int      @default(1)
-  keyVersion         String?
-  algorithm          String?
-  iv                 String?
-  ciphertext         String?
-  authTag            String?
+  id                       String    @id @default(cuid())
+  agentId                  String
+  agent                    Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope          String    @default("SINGLE_DEPLOYMENT")
+  provider                 String
+  purpose                  String    @default("CARRIER_SESSION")
+  status                   String    @default("CONNECTED")
+  formatVersion            Int       @default(1)
+  keyVersion               String?
+  algorithm                String?
+  iv                       String?
+  ciphertext               String?
+  authTag                  String?
   // Derived from the shortest cookie expiry, which measured on 2026-07-31 is
   // Cloudflare's 30-minute bot cookie — the portal answered authenticated three
   // minutes past it. Kept because the probe output references it, but it is not
   // a session deadline and is no longer shown as one.
-  carrierExpiresAt   DateTime?
-  lastConnectedAt    DateTime
-  lastUsedAt         DateTime?
+  carrierExpiresAt         DateTime?
+  lastConnectedAt          DateTime
+  lastUsedAt               DateTime?
   // The illustration path (Foresight) sits behind the carrier's Auth0 tenant,
   // whose session dies while the portal session lives. Written by the outcome of
   // the two jobs that actually cross the SSO jump (SYNC_FORESIGHT_READ and
@@ -646,8 +659,8 @@ model AgentIntegrationSession {
   // production, and is why this field used to go stale. The agent learns the PDF
   // is out of reach before clicking towards it. Last crossing only — nothing
   // here predicts the next one.
-  illustrationSsoReachable  Boolean?
-  illustrationSsoCheckedAt  DateTime?
+  illustrationSsoReachable Boolean?
+  illustrationSsoCheckedAt DateTime?
   /// The browser the human actually logged in on, kept alive instead of thrown
   /// away.
   ///
@@ -667,41 +680,41 @@ model AgentIntegrationSession {
   /// Null is the ordinary state, not an error: it means no live browser is
   /// held and every job builds its own from the stored context, exactly as
   /// before this column existed.
-  liveSteelSessionId String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  liveSteelSessionId       String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   @@unique([agentId, deploymentScope, provider, purpose])
   @@index([provider, status])
 }
 
 model NationalLifeConnectionAttempt {
-  id                String   @id @default(cuid())
-  agentId           String
-  agent             Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  deploymentScope   String   @default("SINGLE_DEPLOYMENT")
-  provider          String
-  purpose           String   @default("INTERACTIVE_CONNECTION_ATTEMPT")
-  state             String
-  formatVersion     Int      @default(1)
-  runtimeKeyVersion String?
-  runtimeAlgorithm  String?
-  runtimeIv         String?
-  runtimeCiphertext String?
-  runtimeAuthTag    String?
-  viewerNonceHash   String?
-  currentOrigin     String?
-  safeErrorCode     String?
-  nextPollAt        DateTime?
-  reconnectAttemptCount Int @default(0)
-  browserProvider   String?
-  browserShardId    String?
+  id                     String    @id @default(cuid())
+  agentId                String
+  agent                  Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope        String    @default("SINGLE_DEPLOYMENT")
+  provider               String
+  purpose                String    @default("INTERACTIVE_CONNECTION_ATTEMPT")
+  state                  String
+  formatVersion          Int       @default(1)
+  runtimeKeyVersion      String?
+  runtimeAlgorithm       String?
+  runtimeIv              String?
+  runtimeCiphertext      String?
+  runtimeAuthTag         String?
+  viewerNonceHash        String?
+  currentOrigin          String?
+  safeErrorCode          String?
+  nextPollAt             DateTime?
+  reconnectAttemptCount  Int       @default(0)
+  browserProvider        String?
+  browserShardId         String?
   lastTransportFailureAt DateTime?
-  leaseOwner        String?
-  leaseExpiresAt    DateTime?
-  expiresAt         DateTime
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  leaseOwner             String?
+  leaseExpiresAt         DateTime?
+  expiresAt              DateTime
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   @@unique([agentId, deploymentScope, provider, purpose])
   @@index([state, expiresAt])
@@ -710,28 +723,28 @@ model NationalLifeConnectionAttempt {
 }
 
 model BrowserAutomationJob {
-  id                     String              @id @default(cuid())
+  id                     String                        @id @default(cuid())
   agentId                String
-  agent                  Agent               @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent                  Agent                         @relation(fields: [agentId], references: [id], onDelete: Cascade)
   deploymentScope        String?
   caseId                 String?
-  insuranceCase          InsuranceCase?      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  insuranceCase          InsuranceCase?                @relation(fields: [caseId], references: [id], onDelete: Cascade)
   provider               String
   operation              BrowserJobOperation
   syncRunId              String?
-  syncRun                NationalLifeSyncRun? @relation(fields: [syncRunId], references: [id], onDelete: Cascade)
+  syncRun                NationalLifeSyncRun?          @relation(fields: [syncRunId], references: [id], onDelete: Cascade)
   foresightRunId         String?
   foresightRun           NationalLifeForesightReadRun? @relation(fields: [foresightRunId], references: [id], onDelete: Cascade)
   syncStageIndex         Int?
   syncGridKey            String?
-  state                  BrowserJobState     @default(QUEUED)
-  idempotencyKey         String              @unique
+  state                  BrowserJobState               @default(QUEUED)
+  idempotencyKey         String                        @unique
   input                  Json
   result                 Json?
   safeErrorCode          String?
   safeErrorDetail        Json?
-  attemptCount           Int                 @default(0)
-  availableAt            DateTime            @default(now())
+  attemptCount           Int                           @default(0)
+  availableAt            DateTime                      @default(now())
   leaseOwner             String?
   leaseExpiresAt         DateTime?
   continuationKeyVersion String?
@@ -741,8 +754,8 @@ model BrowserAutomationJob {
   continuationExpiresAt  DateTime?
   startedAt              DateTime?
   finishedAt             DateTime?
-  createdAt              DateTime            @default(now())
-  updatedAt              DateTime            @updatedAt
+  createdAt              DateTime                      @default(now())
+  updatedAt              DateTime                      @updatedAt
 
   @@index([state, availableAt])
   @@index([agentId, createdAt])
@@ -752,35 +765,36 @@ model BrowserAutomationJob {
 }
 
 model NationalLifeSyncRun {
-  id              String                   @id @default(cuid())
-  agentId         String
-  agent           Agent                    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  id                String                                 @id @default(cuid())
+  agentId           String
+  agent             Agent                                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
   connectorDeviceId String?
-  connectorDevice NationalLifeConnectorDevice? @relation(fields: [connectorDeviceId], references: [id], onDelete: SetNull)
-  deploymentScope String                   @default("SINGLE_DEPLOYMENT")
-  provider        String                   @default("NATIONAL_LIFE")
-  executionSource String                   @default("REMOTE")
-  state           NationalLifeSyncRunState @default(QUEUED)
-  totalStages     Int
-  completedStages Int                      @default(0)
-  failedStages    Int                      @default(0)
-  currentGridKey  String?
+  connectorDevice   NationalLifeConnectorDevice?           @relation(fields: [connectorDeviceId], references: [id], onDelete: SetNull)
+  deploymentScope   String                                 @default("SINGLE_DEPLOYMENT")
+  provider          String                                 @default("NATIONAL_LIFE")
+  executionSource   String                                 @default("REMOTE")
+  state             NationalLifeSyncRunState               @default(QUEUED)
+  totalStages       Int
+  completedStages   Int                                    @default(0)
+  failedStages      Int                                    @default(0)
+  currentGridKey    String?
   /// As grades que este run planejou ler. Vazio significa "o par padrão legado"
   /// (NEW_BUSINESS, INFORCE_CLIENTS): runs criados antes desta coluna só podiam
   /// ter planejado essas duas, então nenhum backfill é necessário. É a autoridade
   /// do servidor sobre quais estágios pertencem a este run — sem ela o dispositivo
   /// decidiria o que conta como completo.
-  plannedGridKeys String[]                 @default([])
-  safeErrorCode   String?
-  startedAt       DateTime?
-  completedAt     DateTime?
-  createdAt       DateTime                 @default(now())
-  updatedAt       DateTime                 @updatedAt
-  jobs            BrowserAutomationJob[]
-  stageReceipts   NationalLifeConnectorStageReceipt[]
-  stageCompletions NationalLifeConnectorStageCompletion[]
-  stageFailures   NationalLifeConnectorStageFailure[]
-  rawGridPages    NationalLifeRawGridPage[]
+  plannedGridKeys   String[]                               @default([])
+  safeErrorCode     String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime                               @default(now())
+  updatedAt         DateTime                               @updatedAt
+  jobs              BrowserAutomationJob[]
+  stageReceipts     NationalLifeConnectorStageReceipt[]
+  stageCompletions  NationalLifeConnectorStageCompletion[]
+  stageFailures     NationalLifeConnectorStageFailure[]
+  rawGridPages      NationalLifeRawGridPage[]
+  exportUploads     NationalLifeExportUpload[]
 
   @@index([agentId, deploymentScope, state, createdAt])
   @@index([connectorDeviceId, createdAt])
@@ -811,23 +825,24 @@ model NationalLifeConnectorPairing {
 }
 
 model NationalLifeConnectorDevice {
-  id                    String    @id @default(cuid())
-  agentId               String
-  agent                 Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  label                 String
-  publicKeyJwk          Json
-  publicKeyThumbprint   String    @unique
-  status                String    @default("ACTIVE")
-  lastSeenAt            DateTime?
-  revokedAt             DateTime?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-  replays               NationalLifeConnectorReplay[]
-  stageReceipts         NationalLifeConnectorStageReceipt[]
-  stageCompletions      NationalLifeConnectorStageCompletion[]
-  stageFailures         NationalLifeConnectorStageFailure[]
-  syncRuns              NationalLifeSyncRun[]
-  commands              NationalLifeConnectorCommand[]
+  id                  String                                 @id @default(cuid())
+  agentId             String
+  agent               Agent                                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  label               String
+  publicKeyJwk        Json
+  publicKeyThumbprint String                                 @unique
+  status              String                                 @default("ACTIVE")
+  lastSeenAt          DateTime?
+  revokedAt           DateTime?
+  createdAt           DateTime                               @default(now())
+  updatedAt           DateTime                               @updatedAt
+  replays             NationalLifeConnectorReplay[]
+  stageReceipts       NationalLifeConnectorStageReceipt[]
+  stageCompletions    NationalLifeConnectorStageCompletion[]
+  stageFailures       NationalLifeConnectorStageFailure[]
+  syncRuns            NationalLifeSyncRun[]
+  commands            NationalLifeConnectorCommand[]
+  exportUploads       NationalLifeExportUpload[]
 
   @@index([agentId, status])
 }
@@ -836,29 +851,29 @@ model NationalLifeConnectorDevice {
 /// The payload is only the declared command parameters; carrier responses are
 /// stored as events and must remain redacted by the command-specific executor.
 model NationalLifeConnectorCommand {
-  id                    String                                  @id @default(cuid())
-  agentId               String
-  agent                 Agent                                   @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  deviceId              String?
-  device                NationalLifeConnectorDevice?            @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  protocolVersion       Int
-  runId                 String
-  capability            String
-  state                 NationalLifeConnectorCommandState       @default(QUEUED)
-  target                Json?
-  params                Json
-  payloadHash           String
-  idempotencyKey        String
-  requiresConfirmation  Boolean                                 @default(false)
-  confirmationState     NationalLifeConnectorConfirmationState  @default(NOT_REQUIRED)
-  safeErrorCode         String?
-  expiresAt             DateTime
-  startedAt             DateTime?
-  completedAt           DateTime?
-  createdAt             DateTime                                @default(now())
-  updatedAt             DateTime                                @updatedAt
-  events                NationalLifeConnectorCommandEvent[]
-  confirmation          NationalLifeConnectorCommandConfirmation?
+  id                   String                                    @id @default(cuid())
+  agentId              String
+  agent                Agent                                     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deviceId             String?
+  device               NationalLifeConnectorDevice?              @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  protocolVersion      Int
+  runId                String
+  capability           String
+  state                NationalLifeConnectorCommandState         @default(QUEUED)
+  target               Json?
+  params               Json
+  payloadHash          String
+  idempotencyKey       String
+  requiresConfirmation Boolean                                   @default(false)
+  confirmationState    NationalLifeConnectorConfirmationState    @default(NOT_REQUIRED)
+  safeErrorCode        String?
+  expiresAt            DateTime
+  startedAt            DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime                                  @default(now())
+  updatedAt            DateTime                                  @updatedAt
+  events               NationalLifeConnectorCommandEvent[]
+  confirmation         NationalLifeConnectorCommandConfirmation?
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, state, createdAt])
@@ -867,62 +882,62 @@ model NationalLifeConnectorCommand {
 }
 
 model NationalLifeConnectorCommandEvent {
-  id          String                             @id @default(cuid())
-  commandId   String
-  command     NationalLifeConnectorCommand       @relation(fields: [commandId], references: [id], onDelete: Cascade)
-  sequence    Int
-  type        String
-  payload     Json?
+  id            String                       @id @default(cuid())
+  commandId     String
+  command       NationalLifeConnectorCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)
+  sequence      Int
+  type          String
+  payload       Json?
   safeErrorCode String?
-  createdAt   DateTime                           @default(now())
+  createdAt     DateTime                     @default(now())
 
   @@unique([commandId, sequence])
   @@index([commandId, createdAt])
 }
 
 model NationalLifeConnectorCommandConfirmation {
-  id                String                              @id @default(cuid())
-  commandId         String                              @unique
-  command           NationalLifeConnectorCommand        @relation(fields: [commandId], references: [id], onDelete: Cascade)
+  id                String                                 @id @default(cuid())
+  commandId         String                                 @unique
+  command           NationalLifeConnectorCommand           @relation(fields: [commandId], references: [id], onDelete: Cascade)
   payloadHash       String
   state             NationalLifeConnectorConfirmationState @default(PENDING)
   confirmedByUserId String?
   confirmedAt       DateTime?
   rejectedAt        DateTime?
   expiresAt         DateTime
-  createdAt         DateTime                            @default(now())
-  updatedAt         DateTime                            @updatedAt
+  createdAt         DateTime                               @default(now())
+  updatedAt         DateTime                               @updatedAt
 
   @@index([state, expiresAt])
 }
 
 model NationalLifeConnectorReplay {
-  id        String   @id @default(cuid())
+  id        String                      @id @default(cuid())
   deviceId  String
   device    NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   jti       String
   expiresAt DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime                    @default(now())
+  updatedAt DateTime                    @updatedAt
 
   @@unique([deviceId, jti])
   @@index([expiresAt])
 }
 
 model NationalLifeConnectorStageReceipt {
-  id             String   @id @default(cuid())
+  id             String                      @id @default(cuid())
   deviceId       String
   device         NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   runId          String
-  run            NationalLifeSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run            NationalLifeSyncRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
   gridKey        String
   sequence       Int
   /// Offset da página no portal. Mantido junto do recibo para que a extensão
   /// possa continuar uma fase interrompida sem voltar ao início da grade.
-  sourceOffset   Int      @default(0)
+  sourceOffset   Int                         @default(0)
   /// Primeiro offset que ainda não foi enviado depois deste lote/página.
-  nextOffset     Int      @default(0)
-  truncated      Boolean  @default(true)
+  nextOffset     Int                         @default(0)
+  truncated      Boolean                     @default(true)
   contentHash    String
   /// Linhas recebidas na página. Não entra no hash de conteúdo — este é o sha256
   /// do corpo cru. O que fixa seu significado é ser campo público do recibo e,
@@ -932,9 +947,9 @@ model NationalLifeConnectorStageReceipt {
   /// anteriores a esta coluna. Distingue "recebi 200, escrevi 0" — uma página que
   /// o mapeador descartou inteira — de uma página vazia de verdade.
   writtenCount   Int?
-  idempotencyKey String   @unique
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  idempotencyKey String                      @unique
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
 
   @@unique([deviceId, runId, gridKey, sequence])
   @@index([runId, gridKey])
@@ -946,17 +961,17 @@ model NationalLifeConnectorStageReceipt {
 /// The connector writes this only after it has uploaded every sequence and the
 /// server has reconciled the raw count against the carrier's recordsTotal.
 model NationalLifeConnectorStageCompletion {
-  id                   String   @id @default(cuid())
-  deviceId             String
-  device               NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  runId                String
-  run                  NationalLifeSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  gridKey              String
-  expectedRecordCount  Int
-  receivedRecordCount  Int
-  finalSequence        Int
-  truncated            Boolean  @default(false)
-  completedAt          DateTime @default(now())
+  id                  String                      @id @default(cuid())
+  deviceId            String
+  device              NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  runId               String
+  run                 NationalLifeSyncRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  gridKey             String
+  expectedRecordCount Int
+  receivedRecordCount Int
+  finalSequence       Int
+  truncated           Boolean                     @default(false)
+  completedAt         DateTime                    @default(now())
 
   @@unique([deviceId, runId, gridKey])
   @@index([runId, gridKey])
@@ -966,63 +981,111 @@ model NationalLifeConnectorStageCompletion {
 /// run. `resolvedAt` preserves the attempt while letting a retry make the source
 /// pending again without rereading stages that already have completion receipts.
 model NationalLifeConnectorStageFailure {
-  id            String   @id @default(cuid())
+  id            String                      @id @default(cuid())
   deviceId      String
   device        NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   runId         String
-  run           NationalLifeSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run           NationalLifeSyncRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
   gridKey       String
   safeErrorCode String
-  retryable     Boolean  @default(true)
-  failedAt      DateTime @default(now())
+  retryable     Boolean                     @default(true)
+  failedAt      DateTime                    @default(now())
   resolvedAt    DateTime?
-  updatedAt     DateTime @updatedAt
+  updatedAt     DateTime                    @updatedAt
 
   @@unique([deviceId, runId, gridKey])
   @@index([runId, resolvedAt])
 }
 
+/// Private, resumable landing zone for official carrier exports. The web UI
+/// only receives normalized rows and provenance after validation succeeds.
+model NationalLifeExportUpload {
+  id             String                      @id @default(cuid())
+  agentId        String
+  agent          Agent                       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deviceId       String
+  device         NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  runId          String
+  run            NationalLifeSyncRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sourceKey      String
+  fileName       String
+  contentType    String
+  expectedBytes  Int
+  expectedSha256 String
+  totalChunks    Int
+  state          String                      @default("UPLOADING")
+  receivedBytes  Int                         @default(0)
+  receivedChunks Int                         @default(0)
+  rowCount       Int?
+  writtenCount   Int?
+  safeErrorCode  String?
+  fileBytes      Bytes?
+  completedAt    DateTime?
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+  chunks         NationalLifeExportChunk[]
+
+  @@unique([deviceId, runId, sourceKey])
+  @@index([agentId, createdAt])
+  @@index([state, updatedAt])
+}
+
+model NationalLifeExportChunk {
+  id          String                   @id @default(cuid())
+  uploadId    String
+  upload      NationalLifeExportUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  sequence    Int
+  byteOffset  Int
+  byteLength  Int
+  contentHash String
+  bytes       Bytes
+  createdAt   DateTime                 @default(now())
+
+  @@unique([uploadId, sequence])
+  @@index([uploadId, byteOffset])
+}
+
 model Illustration {
-  id              String           @id @default(cuid())
+  id                 String                 @id @default(cuid())
   // A quote is pre-sale: the insured is a prospect who has no case and often no
   // client record either. Requiring a case made the table impossible to write
   // to — it stayed empty from the day it was created.
-  caseId          String?
-  insuranceCase   InsuranceCase?   @relation(fields: [caseId], references: [id])
-  clientId        String?
-  client          Client?          @relation(fields: [clientId], references: [id])
+  caseId             String?
+  insuranceCase      InsuranceCase?         @relation(fields: [caseId], references: [id])
+  clientId           String?
+  client             Client?                @relation(fields: [clientId], references: [id])
   // Always known, and the only thing that scopes a quote to who may read it.
-  agentId         String
-  agent           Agent            @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  kind            IllustrationKind
-  provider        String?
-  externalId      String?
-  sourceUpdatedAt DateTime?
-  productName     String?
-  faceAmount      Decimal?
-  premium         Decimal?
+  agentId            String
+  agent              Agent                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  kind               IllustrationKind
+  provider           String?
+  externalId         String?
+  sourceUpdatedAt    DateTime?
+  productName        String?
+  faceAmount         Decimal?
+  premium            Decimal?
   // Held on the illustration rather than only through a relation, so a quote
   // for someone who is not in the system yet still says who it was for.
   insuredName        String?
   insuredDateOfBirth DateTime?
-  documentUrl     String?
+  documentUrl        String?
   // The illustration PDF as the carrier rendered it. Held as bytes rather than
   // on disk because the carrier runtime is a separate container from the web
   // app, so a file written there is not readable here; at ~1.5 MB a document
   // and this volume that is a fair trade, and moving to object storage later
   // does not change how a caller asks for it.
-  documentBytes     Bytes?
-  documentMimeType  String?
-  documentFetchedAt DateTime?
-  rawPayload      Json?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  scenarios       IllustrationScenario[]
+  documentBytes      Bytes?
+  documentMimeType   String?
+  documentFetchedAt  DateTime?
+  rawPayload         Json?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  scenarios          IllustrationScenario[]
 
+  @@unique([provider, externalId])
   @@index([caseId])
   @@index([agentId, createdAt])
   @@index([clientId])
-  @@unique([provider, externalId])
 }
 
 model IllustrationScenario {
@@ -1039,21 +1102,21 @@ model IllustrationScenario {
 }
 
 model Application {
-  id              String            @id @default(cuid())
+  id              String                   @id @default(cuid())
   caseId          String
-  insuranceCase   InsuranceCase     @relation(fields: [caseId], references: [id])
-  status          ApplicationStatus @default(DRAFT)
+  insuranceCase   InsuranceCase            @relation(fields: [caseId], references: [id])
+  status          ApplicationStatus        @default(DRAFT)
   provider        String?
   externalId      String?
   sourceUpdatedAt DateTime?
   submittedAt     DateTime?
   rawPayload      Json?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
   requirements    ApplicationRequirement[]
 
-  @@index([caseId])
   @@unique([provider, externalId])
+  @@index([caseId])
 }
 
 model ApplicationRequirement {
@@ -1071,42 +1134,42 @@ model ApplicationRequirement {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  @@index([applicationId, status])
   @@unique([provider, externalId])
+  @@index([applicationId, status])
 }
 
 model CaseTimelineEvent {
-  id        String        @id @default(cuid())
-  caseId    String
+  id            String        @id @default(cuid())
+  caseId        String
   insuranceCase InsuranceCase @relation(fields: [caseId], references: [id])
-  type      String
-  title     String
-  body      String?
-  metadata  Json?
-  dueAt     DateTime?
-  doneAt    DateTime?
-  createdAt DateTime      @default(now())
+  type          String
+  title         String
+  body          String?
+  metadata      Json?
+  dueAt         DateTime?
+  doneAt        DateTime?
+  createdAt     DateTime      @default(now())
 
   @@index([caseId, createdAt])
 }
 
 model PolicySnapshot {
-  id              String   @id @default(cuid())
+  id              String       @id @default(cuid())
   policyId        String
-  policy          Policy   @relation(fields: [policyId], references: [id])
+  policy          Policy       @relation(fields: [policyId], references: [id])
   status          PolicyStatus
   faceAmount      Decimal?
   plannedPremium  Decimal?
   lastPaymentDate DateTime?
-  observedAt      DateTime @default(now())
+  observedAt      DateTime     @default(now())
   provider        String?
   externalId      String?
   sourceUpdatedAt DateTime?
   rawPayload      Json?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime     @default(now())
 
-  @@index([policyId, observedAt])
   @@unique([provider, externalId])
+  @@index([policyId, observedAt])
 }
 
 model PolicyTransaction {
@@ -1122,31 +1185,31 @@ model PolicyTransaction {
   rawPayload      Json?
   createdAt       DateTime              @default(now())
 
-  @@index([policyId, occurredAt])
   @@unique([provider, externalId])
+  @@index([policyId, occurredAt])
 }
 
 model CommissionTransaction {
-  id                  String                    @id @default(cuid())
-  policyId            String
-  policy              Policy                    @relation(fields: [policyId], references: [id])
-  agentId             String
-  agent               Agent                     @relation(fields: [agentId], references: [id])
-  type                CommissionTransactionType
-  amount              Decimal
-  occurredAt          DateTime
-  provider            String?
-  externalId          String?
-  sourceTransactionId String?
-  sourceUpdatedAt     DateTime?
+  id                    String                    @id @default(cuid())
+  policyId              String
+  policy                Policy                    @relation(fields: [policyId], references: [id])
+  agentId               String
+  agent                 Agent                     @relation(fields: [agentId], references: [id])
+  type                  CommissionTransactionType
+  amount                Decimal
+  occurredAt            DateTime
+  provider              String?
+  externalId            String?
+  sourceTransactionId   String?
+  sourceUpdatedAt       DateTime?
   originalTransactionId String?
-  rawPayload          Json?
-  createdAt           DateTime                  @default(now())
+  rawPayload            Json?
+  createdAt             DateTime                  @default(now())
 
-  @@index([policyId, occurredAt])
-  @@index([agentId, occurredAt])
   @@unique([provider, externalId])
   @@unique([provider, sourceTransactionId])
+  @@index([policyId, occurredAt])
+  @@index([agentId, occurredAt])
 }
 
 model PolicyReview {
@@ -1163,30 +1226,30 @@ model PolicyReview {
 }
 
 model IntegrationConnection {
-  id             String     @id @default(cuid())
-  provider       String     @unique
-  status         SyncStatus @default(PENDING)
-  isEnabled      Boolean    @default(false)
-  configuration  Json?
-  lastSyncedAt   DateTime?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  syncEvents     SyncEvent[]
+  id            String      @id @default(cuid())
+  provider      String      @unique
+  status        SyncStatus  @default(PENDING)
+  isEnabled     Boolean     @default(false)
+  configuration Json?
+  lastSyncedAt  DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  syncEvents    SyncEvent[]
 }
 
 model ExternalReference {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   entityType      String
   entityId        String
   provider        String
   externalId      String
   sourceUpdatedAt DateTime?
   metadata        Json?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  @@index([entityType, entityId])
   @@unique([provider, externalId])
+  @@index([entityType, entityId])
 }
 
 model SyncEvent {
@@ -1206,8 +1269,8 @@ model SyncEvent {
   createdAt               DateTime               @default(now())
   updatedAt               DateTime               @updatedAt
 
-  @@index([integrationConnectionId, status])
   @@unique([provider, externalId])
+  @@index([integrationConnectionId, status])
 }
 
 model CommissionPlan {
