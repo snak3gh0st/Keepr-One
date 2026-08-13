@@ -47,13 +47,17 @@ export type ReadGridParams = {
   navigatePath: string
 }
 
-export type LocalConnectorStagePlan = {
+export type ReadGridStagePlan = {
   capability: 'READ_GRID'
   params: ReadGridParams
-} | {
+}
+
+export type ReadPageStagePlan = {
   capability: 'READ_PAGE'
   params: { sourceKey: NationalLifeGridKey; navigatePath: string }
 }
+
+export type LocalConnectorStagePlan = ReadGridStagePlan | ReadPageStagePlan
 
 /// The extension refuses anything outside the agent tree. Every portal grid hits the
 /// same endpoint — only the page you open first differs — so one capability covers
@@ -95,7 +99,7 @@ export function isSafeNavigatePath(path: string): boolean {
 /// raw-ingest so the two cannot drift.
 export function planReadGridStages(
   gridKeys: readonly NationalLifeGridKey[],
-): LocalConnectorStagePlan[] {
+): ReadGridStagePlan[] {
   const seenPaths = new Map<string, NationalLifeGridKey>()
   return [...new Set(gridKeys)].map((gridKey) => {
     // Types are gone at runtime: a key that isn't an own property of the catalogue
@@ -126,7 +130,7 @@ export function planReadGridStages(
 
 export function planReadPageStages(
   sourceKeys: readonly NationalLifeGridKey[],
-): LocalConnectorStagePlan[] {
+): ReadPageStagePlan[] {
   return [...new Set(sourceKeys)].map((sourceKey) => {
     if (!Object.hasOwn(NATIONAL_LIFE_GRIDS, sourceKey)) {
       throw new Error(`Unknown source key ${String(sourceKey)}`)

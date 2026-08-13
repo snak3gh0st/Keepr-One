@@ -9,6 +9,7 @@ export type SyncStatus =
   | 'UPLOADING'
   | 'AUTH_REQUIRED'
   | 'COMPLETED'
+  | 'PARTIAL'
   | 'ERROR'
 
 export type DeviceState = {

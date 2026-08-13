@@ -191,7 +191,7 @@ describe('local stage coverage', () => {
       plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
       totalStages: 2,
       currentGridKey: 'INFORCE_CLIENTS',
-      failedStages: 0,
+      failedGridKeys: [],
       completions: [{ gridKey: 'NEW_BUSINESS', expectedRecordCount: 715 }],
     })).toEqual([
       expect.objectContaining({ gridKey: 'NEW_BUSINESS', state: 'VERIFIED', verifiedRecords: 715 }),
@@ -204,7 +204,7 @@ describe('local stage coverage', () => {
       plannedGridKeys: ['AGENT_DASHBOARD'],
       totalStages: 1,
       currentGridKey: null,
-      failedStages: 0,
+      failedGridKeys: [],
       completions: [{ gridKey: 'AGENT_DASHBOARD', expectedRecordCount: 12 }],
     })).toEqual([
       expect.objectContaining({
@@ -212,6 +212,23 @@ describe('local stage coverage', () => {
         state: 'CAPTURED',
         verifiedRecords: 12,
       }),
+    ])
+  })
+
+  it('marks only the exact isolated source as failed', () => {
+    expect(localStageCoverage({
+      plannedGridKeys: ['NEW_BUSINESS', 'PROJECTED_COMMISSIONS', 'INFORCE_CLIENTS'],
+      totalStages: 3,
+      currentGridKey: null,
+      failedGridKeys: ['PROJECTED_COMMISSIONS'],
+      completions: [
+        { gridKey: 'NEW_BUSINESS', expectedRecordCount: 10 },
+        { gridKey: 'INFORCE_CLIENTS', expectedRecordCount: 20 },
+      ],
+    }).map((stage) => [stage.gridKey, stage.state])).toEqual([
+      ['NEW_BUSINESS', 'VERIFIED'],
+      ['PROJECTED_COMMISSIONS', 'FAILED'],
+      ['INFORCE_CLIENTS', 'VERIFIED'],
     ])
   })
 })

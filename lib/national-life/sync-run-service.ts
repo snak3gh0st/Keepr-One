@@ -99,7 +99,7 @@ export function localStageCoverage(input: {
   plannedGridKeys: readonly string[]
   totalStages: number
   currentGridKey: string | null
-  failedStages: number
+  failedGridKeys: readonly string[]
   completions: ReadonlyArray<{ gridKey: string; expectedRecordCount: number }>
 }): NationalLifeStageCoverage[] {
   const planned = input.plannedGridKeys.length > 0
@@ -113,7 +113,7 @@ export function localStageCoverage(input: {
       ? DISCOVERY_PAGE_KEYS.has(gridKey) ? 'CAPTURED' : 'VERIFIED'
       : gridKey === input.currentGridKey
         ? 'READING'
-        : input.failedStages > 0 && !input.currentGridKey
+        : input.failedGridKeys.includes(gridKey)
           ? 'FAILED'
           : 'PENDING',
     verifiedRecords: completed.get(gridKey) ?? null,
@@ -275,6 +275,10 @@ export async function getNationalLifeSyncStatus(
       },
       stageReceipts: { select: { recordCount: true, writtenCount: true } },
       stageCompletions: { select: { gridKey: true, expectedRecordCount: true } },
+      stageFailures: {
+        where: { resolvedAt: null },
+        select: { gridKey: true },
+      },
     },
   })
   if (!run) {
@@ -303,7 +307,7 @@ export async function getNationalLifeSyncStatus(
         plannedGridKeys: run.plannedGridKeys,
         totalStages: total,
         currentGridKey: run.currentGridKey,
-        failedStages: run.failedStages,
+        failedGridKeys: run.stageFailures.map((failure) => failure.gridKey),
         completions: run.stageCompletions,
       }),
     }

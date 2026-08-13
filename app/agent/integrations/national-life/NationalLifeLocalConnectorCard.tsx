@@ -16,7 +16,15 @@ type ConnectorResponse = {
   status?: string
   deviceId?: string
   device?: { status?: string; deviceId?: string }
-  sync?: { runId?: string; status?: string; errorCode?: string; uploads?: number; stageIndex?: number }
+  sync?: {
+    runId?: string
+    status?: string
+    errorCode?: string
+    uploads?: number
+    stageIndex?: number
+    stageKey?: string
+    totalStages?: number
+  }
 }
 
 type ConnectorMessage =
@@ -42,6 +50,7 @@ type ConnectorState =
   | 'login-required'
   | 'syncing'
   | 'slow'
+  | 'partial'
   | 'success'
   | 'error'
 
@@ -131,8 +140,9 @@ const storeStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
   installing: 'Opening the secure install page…',
   connecting: 'Connecting to Keepr One…',
   'login-required': 'Sign in to the National Life portal to continue. Your sync picks up from there on its own.',
-  syncing: 'Syncing in the background. You can leave this page or come back later.',
-  slow: 'Still syncing in the background. A large book of business can take several minutes — you can come back later.',
+  syncing: 'Reading National Life and saving each completed area to Keepr One.',
+  slow: 'Waiting for National Life to finish the current area. Completed areas remain saved.',
+  partial: 'The available areas were saved. Sync again to retry only the areas National Life did not return.',
   success: 'Your National Life data is up to date.',
 }
 
@@ -157,6 +167,30 @@ function progressSignature(sync: ConnectorResponse['sync']): string {
   return [sync?.status, sync?.stageIndex, sync?.uploads].join('|')
 }
 
+function humanizeSourceKey(value: string | undefined): string | null {
+  if (!value) return null
+  return value.toLowerCase().replace(/_/g, ' ')
+}
+
+function liveProgressCopy(
+  state: ConnectorState,
+  sync: ConnectorResponse['sync'],
+): string | null {
+  if ((state !== 'syncing' && state !== 'slow') || !sync) return null
+  const stageNumber = typeof sync.stageIndex === 'number' ? sync.stageIndex + 1 : null
+  const total = typeof sync.totalStages === 'number' ? sync.totalStages : null
+  const source = humanizeSourceKey(sync.stageKey)
+  const position = stageNumber && total ? `Area ${Math.min(stageNumber, total)} of ${total}` : null
+  const action = source ? `Reading ${source}.` : 'Reading National Life.'
+  const batches = typeof sync.uploads === 'number' && sync.uploads > 0
+    ? ` ${sync.uploads.toLocaleString('en-US')} batches saved so far.`
+    : ''
+  const wait = state === 'slow'
+    ? ' Waiting for the portal response; completed areas remain saved.'
+    : ''
+  return `${position ? `${position} · ` : ''}${action}${batches}${wait}`
+}
+
 export function NationalLifeLocalConnectorCard({
   extensionId,
   storeUrl = null,
@@ -177,6 +211,7 @@ export function NationalLifeLocalConnectorCard({
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [compatible, setCompatible] = useState(false)
   const [pairedDeviceId, setPairedDeviceId] = useState<string | null>(null)
+  const [liveSync, setLiveSync] = useState<ConnectorResponse['sync']>(undefined)
   // The capability probe is asynchronous after hydration, but a user can click
   // before that microtask settles. Read the browser surface as a fallback so the
   // first click is not mistaken for an unsupported browser.
@@ -188,6 +223,7 @@ export function NationalLifeLocalConnectorCard({
   const recoverable =
     state === 'idle' ||
     state === 'success' ||
+    state === 'partial' ||
     state === 'error' ||
     state === 'slow' ||
     state === 'login-required' ||
@@ -244,6 +280,7 @@ export function NationalLifeLocalConnectorCard({
       if (token !== watchAbort.current) return
       const status = await sendConnectorMessage(extensionId, { type: 'GET_CONNECTOR_STATUS' })
       const syncStatus = status.sync?.status
+      setLiveSync(status.sync)
       setPairedDeviceId(status.device?.deviceId ?? null)
       const durable = status.sync?.runId ? await readDurableSync(status.sync.runId) : null
       if (durable?.state === 'COMPLETED') {
@@ -251,7 +288,12 @@ export function NationalLifeLocalConnectorCard({
         router.refresh()
         return
       }
-      if (durable?.state === 'FAILED' || durable?.state === 'PARTIAL') {
+      if (durable?.state === 'PARTIAL') {
+        setState('partial')
+        router.refresh()
+        return
+      }
+      if (durable?.state === 'FAILED') {
         fail(durable.safeErrorCode ?? 'SYNC_INCOMPLETE')
         router.refresh()
         return
@@ -262,6 +304,11 @@ export function NationalLifeLocalConnectorCard({
       }
       if (syncStatus === 'COMPLETED') {
         setState('success')
+        router.refresh()
+        return
+      }
+      if (syncStatus === 'PARTIAL') {
+        setState('partial')
         router.refresh()
         return
       }
@@ -470,14 +517,14 @@ export function NationalLifeLocalConnectorCard({
   return (
     <section
       aria-labelledby="local-connector-title"
-      className="overflow-hidden rounded-[24px] border border-teal/35 bg-paper shadow-[var(--shadow-card)]"
+      className="overflow-hidden rounded-xl border border-border-steel bg-paper"
     >
-      <div className="relative border-b border-border-steel bg-[radial-gradient(circle_at_100%_0%,rgba(39,171,143,0.13),transparent_38%)] p-5 sm:p-7">
+      <div className="relative border-b border-border-steel bg-panel/45 p-5 sm:p-7">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-3">
             <span
               aria-hidden="true"
-              className="grid h-12 w-12 place-items-center rounded-2xl bg-rail-strong text-sm font-bold tracking-[0.12em] text-paper shadow-[0_8px_20px_rgba(21,45,43,0.14)]"
+              className="grid h-12 w-12 place-items-center rounded-lg bg-rail-strong text-sm font-bold tracking-[0.12em] text-paper"
             >
               NL
             </span>
@@ -517,13 +564,13 @@ export function NationalLifeLocalConnectorCard({
             <span
               aria-hidden="true"
               className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
-                state === 'error' ? 'bg-danger' : state === 'success' ? 'bg-success' : busy ? 'animate-pulse bg-teal' : 'bg-ink-muted/45'
+                state === 'error' ? 'bg-danger' : state === 'success' ? 'bg-success' : state === 'partial' ? 'bg-gold' : busy ? 'animate-pulse bg-teal' : 'bg-ink-muted/45'
               }`}
             />
             <p
               role="status"
               aria-live="polite"
-              className={`text-sm leading-6 ${state === 'error' ? 'text-danger' : state === 'success' ? 'text-success' : 'text-ink-muted'}`}
+              className={`text-sm leading-6 ${state === 'error' ? 'text-danger' : state === 'success' ? 'text-success' : state === 'partial' ? 'text-gold-ink' : 'text-ink-muted'}`}
             >
               {!browserCapabilityResolved
                 ? 'Connecting on this computer needs Google Chrome or Microsoft Edge.'
@@ -531,7 +578,7 @@ export function NationalLifeLocalConnectorCard({
                   ? connectorFailure(errorCode).message
                   : state === 'idle' && pairedDeviceId
                     ? 'This computer is connected and ready to sync your National Life data.'
-                    : stateCopy[state]}
+                    : liveProgressCopy(state, liveSync) ?? stateCopy[state]}
             </p>
           </div>
           {remoteAvailable && !browserCapabilityResolved && (
@@ -559,6 +606,8 @@ export function NationalLifeLocalConnectorCard({
                         : 'Connecting…'
                       : state === 'success'
                         ? 'Sync again'
+                        : state === 'partial'
+                          ? 'Retry remaining areas'
                         : pairedDeviceId
                           ? 'Sync National Life'
                           : 'Connect National Life'}
@@ -582,7 +631,7 @@ export function NationalLifeLocalConnectorCard({
           </a>
         </div>
       )}
-      {(state === 'success' || state === 'syncing' || state === 'slow') && (
+      {(state === 'success' || state === 'partial' || state === 'syncing' || state === 'slow') && (
         <div className="border-t border-border-steel px-5 py-4 sm:px-6">
           <Link
             href="/agent/integrations/national-life/data"

@@ -59,7 +59,7 @@ describe('NationalLifeSyncProgress', () => {
     )
 
     expect(screen.getByText('Updating your National Life data')).toBeTruthy()
-    expect(screen.getByText('3 of 13 portal sources verified')).toBeTruthy()
+    expect(screen.getByText('3 of 13 portal areas checked')).toBeTruthy()
     expect(screen.getByText('Reading and saving correspondence.')).toBeTruthy()
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '3')
     expect(screen.getByRole('progressbar')).toHaveAttribute('max', '13')
@@ -75,7 +75,7 @@ describe('NationalLifeSyncProgress', () => {
     })
 
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(screen.getByText('Your National Life data')).toBeTruthy()
+    expect(screen.getByText('Your National Life data is up to date')).toBeTruthy()
   })
 
   it('explains a paused run without exposing its internal error code', async () => {
@@ -88,7 +88,7 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.getByText('Sign in to National Life to keep going.')).toBeTruthy()
     expect(screen.queryByText('AUTHENTICATION_STATE_INVALID')).toBeNull()
-    await waitFor(() => expect(screen.getByText('0 of 13 portal sources verified')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('0 of 13 portal areas checked')).toBeTruthy())
   })
 
   it('dates the last sync instead of saying "done" forever', () => {
@@ -147,7 +147,7 @@ describe('NationalLifeSyncProgress', () => {
       />,
     )
 
-    expect(screen.getByText('100% done')).toBeTruthy()
+    expect(screen.getByText('13 of 13 areas checked.')).toBeTruthy()
   })
 
   it('claims nothing about records while the run is still going', () => {
@@ -165,7 +165,7 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.queryByText(/nothing new to send/)).toBeNull()
     expect(screen.queryByText(/could be saved/)).toBeNull()
-    expect(screen.getByText('0% done')).toBeTruthy()
+    expect(screen.getByText('0 of 13 areas checked.')).toBeTruthy()
   })
 
   it('shows a ready state and starts polling when the card starts a new sync', async () => {
@@ -177,7 +177,7 @@ describe('NationalLifeSyncProgress', () => {
 
     window.dispatchEvent(new Event(NATIONAL_LIFE_SYNC_STARTED_EVENT))
 
-    await waitFor(() => expect(screen.getByText('1 of 13 portal sources verified')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('1 of 13 portal areas checked')).toBeTruthy())
     expect(screen.getByText('Reading and saving new business.')).toBeTruthy()
   })
 
@@ -201,5 +201,21 @@ describe('NationalLifeSyncProgress', () => {
     )
 
     expect(screen.getByText('13 of 31 known sources automated')).toBeTruthy()
+  })
+
+  it('shows an isolated failure as non-blocking while the remaining areas continue', () => {
+    render(
+      <NationalLifeSyncProgress
+        initialStatus={status({
+          completed: 4,
+          failed: 1,
+          currentGridLabel: 'client intelligence',
+        })}
+      />,
+    )
+
+    expect(screen.getByText('5 of 13 portal areas checked')).toBeTruthy()
+    expect(screen.getByText(/The sync is continuing with the remaining areas/)).toBeTruthy()
+    expect(screen.getByRole('progressbar')).toHaveAttribute('value', '5')
   })
 })

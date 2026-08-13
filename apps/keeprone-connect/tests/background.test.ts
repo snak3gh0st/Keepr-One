@@ -21,10 +21,19 @@ const NEW_BUSINESS_PATH = '/agent/book-of-business/new-business/all-new-business
 const INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients/all-clients-agent'
 const LEGACY_INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients'
 const COMMISSIONS_PATH = '/agent/compensation/commissions/paid-commissions'
+const PROJECTED_COMMISSIONS_PATH = '/agent/compensation/commissions/projected-commissions'
 
 const TWO_STAGE_PLAN = [
   { capability: 'READ_GRID', params: { gridKey: 'NEW_BUSINESS', navigatePath: NEW_BUSINESS_PATH } },
   { capability: 'READ_GRID', params: { gridKey: 'INFORCE_CLIENTS', navigatePath: INFORCE_PATH } },
+]
+const THREE_STAGE_PLAN = [
+  TWO_STAGE_PLAN[0],
+  {
+    capability: 'READ_GRID',
+    params: { gridKey: 'PROJECTED_COMMISSIONS', navigatePath: PROJECTED_COMMISSIONS_PATH },
+  },
+  TWO_STAGE_PLAN[1],
 ]
 
 const LEGACY_INFORCE_STAGE_PLAN = [
@@ -411,6 +420,45 @@ describe('background plan executor', () => {
     await flush()
 
     expect(readSync()).toMatchObject({ runId: 'run-1', stageIndex: 1, status: 'NAVIGATING' })
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${INFORCE_PATH}` })
+  })
+
+  it('records a portal-source failure and continues without failing the whole run', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: THREE_STAGE_PLAN, stageIndex: 1, status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{
+      id: 7, active: false, url: `${NLG}${PROJECTED_COMMISSIONS_PATH}`,
+    }])
+    vi.mocked(signedJsonRequest).mockResolvedValue({ nextStageIndex: 2, terminal: false } as never)
+    await bootBackground()
+    const begin = beginGridMessage()
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_ERROR',
+        gridKey: 'PROJECTED_COMMISSIONS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        code: 'TEMPLATE_UNAVAILABLE',
+      },
+      { tab: { id: 7 }, url: `${NLG}${PROJECTED_COMMISSIONS_PATH}` },
+      vi.fn(),
+    )
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST',
+      pathname: '/api/agent/integrations/national-life/local-connector/runs/run-1/stages/PROJECTED_COMMISSIONS/fail',
+      body: {
+        runId: 'run-1',
+        gridKey: 'PROJECTED_COMMISSIONS',
+        code: 'TEMPLATE_UNAVAILABLE',
+        retryable: true,
+      },
+    }))
+    expect(readSync()).toMatchObject({ runId: 'run-1', stageIndex: 2, status: 'NAVIGATING' })
     expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${INFORCE_PATH}` })
   })
 

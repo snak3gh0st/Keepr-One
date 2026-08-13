@@ -9,6 +9,7 @@ const STATUS_TEXT: Record<Exclude<SyncState['status'], 'ERROR'>, string> = {
   UPLOADING: 'Sending your data securely to Keepr One…',
   AUTH_REQUIRED: 'Sign in to National Life. Your sync picks up from there on its own.',
   COMPLETED: 'Your data is up to date.',
+  PARTIAL: 'Available areas were saved. Retry from Keepr One to finish the remaining areas.',
 }
 
 export function popupStatusText(device: DeviceState, sync: SyncState): string {
@@ -28,6 +29,7 @@ export function popupStatusText(device: DeviceState, sync: SyncState): string {
 export function popupCanRetry(device: DeviceState, sync: SyncState): boolean {
   if (device.status !== 'READY') return false
   if (sync.status === 'AUTH_REQUIRED') return true
+  if (sync.status === 'PARTIAL') return true
   if (sync.status !== 'ERROR') return false
   const action = connectorFailure(sync.errorCode).action
   return action === 'retry' || action === 'support'

@@ -9,6 +9,36 @@ const issuedAt = '2026-08-10T20:00:00.000Z'
 const expiresAt = '2026-08-10T20:30:00.000Z'
 
 describe('National Life connector command contract', () => {
+  it('accepts only the sealed official-export operation', () => {
+    const base = {
+      protocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,
+      commandId: 'cmd_export_1',
+      runId: 'run_export_1',
+      capability: 'READ_EXPORT',
+      target: null,
+      idempotencyKey: 'export:payable:1',
+      issuedAt,
+      expiresAt,
+      requiresConfirmation: false,
+    }
+    expect(parseConnectorCommand({
+      ...base,
+      params: {
+        sourceKey: 'PAYABLE_GROSS_COMMISSIONS',
+        navigatePath: '/agent/compensation/commissions/projected-commissions/payable-gross-commissions',
+        exportKey: 'DOWNLOAD_ALL',
+      },
+    })).toMatchObject({ capability: 'READ_EXPORT' })
+    expect(parseConnectorCommand({
+      ...base,
+      params: {
+        sourceKey: 'PAYABLE_GROSS_COMMISSIONS',
+        navigatePath: '/agent/compensation/commissions/projected-commissions/payable-gross-commissions',
+        exportKey: 'CLICK_SELECTOR',
+      },
+    })).toBeNull()
+  })
+
   it('accepts a closed, safe Foresight read command', () => {
     expect(
       parseConnectorCommand({

@@ -51,6 +51,7 @@ type LocalConnectorDb = Pick<
   | 'nationalLifeSyncRun'
   | 'nationalLifeConnectorStageReceipt'
   | 'nationalLifeConnectorStageCompletion'
+  | 'nationalLifeConnectorStageFailure'
   | 'nationalLifeCaseSnapshot'
   | 'nationalLifeInforcePolicy'
   | 'nationalLifeReportRow'
@@ -90,6 +91,16 @@ export class LocalConnectorStageCompletionError extends Error {
 function plannedGridKeys(run: { plannedGridKeys: string[] }): readonly NationalLifeGridKey[] {
   if (run.plannedGridKeys.length === 0) return LOCAL_CONNECTOR_LEGACY_GRID_KEYS
   return run.plannedGridKeys as NationalLifeGridKey[]
+}
+
+function nextUnsettledStageIndex(
+  planned: readonly NationalLifeGridKey[],
+  completedKeys: readonly string[],
+  failedKeys: readonly string[],
+): number {
+  const settled = new Set([...completedKeys, ...failedKeys])
+  const index = planned.findIndex((gridKey) => !settled.has(gridKey))
+  return index === -1 ? planned.length : index
 }
 
 function planLocalConnectorStages(keys: readonly NationalLifeGridKey[]): LocalConnectorStagePlan[] {
@@ -149,6 +160,7 @@ export async function startLocalConnectorRun(
   stages: LocalConnectorStagePlan[]
   duplicate: boolean
   completedStages: number
+  nextStageIndex: number
   resume?: { sequence: number; offset: number }
 }> {
   const now = input.now ?? new Date()
@@ -163,6 +175,8 @@ export async function startLocalConnectorRun(
     plannedGridKeys: true,
     completedStages: true,
     currentGridKey: true,
+    stageCompletions: { select: { gridKey: true } },
+    stageFailures: { where: { resolvedAt: null }, select: { gridKey: true } },
   } as const
   const runScope = {
     agentId: input.agentId,
@@ -184,8 +198,16 @@ export async function startLocalConnectorRun(
   const failed = await db.nationalLifeSyncRun.findFirst({
     where: {
       ...runScope,
-      state: 'FAILED',
-      updatedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_RUN_TTL_MS) },
+      OR: [
+        {
+          state: 'FAILED',
+          updatedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_RUN_TTL_MS) },
+        },
+        {
+          state: 'PARTIAL',
+          completedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_VERIFIED_FRESH_MS) },
+        },
+      ],
     },
     orderBy: [{ completedStages: 'desc' }, { createdAt: 'desc' }],
     select: runSelect,
@@ -200,7 +222,28 @@ export async function startLocalConnectorRun(
     select: runSelect,
   })
   if (active) {
-    if (active.state === 'FAILED') {
+    const activePlan = plannedGridKeys(active)
+    const receiptCompletedKeys = active.stageCompletions?.map((row) => row.gridKey) ?? []
+    // Runs created before stage-completion receipts used a verified prefix
+    // counter. Preserve that cursor during rollout; current runs use exact keys.
+    const completedKeys = receiptCompletedKeys.length > 0
+      ? receiptCompletedKeys
+      : activePlan.slice(0, active.completedStages)
+    const failedKeys = active.stageFailures?.map((row) => row.gridKey) ?? []
+    const currentIndex = active.currentGridKey
+      ? activePlan.indexOf(active.currentGridKey as NationalLifeGridKey)
+      : -1
+    const firstFailedIndex = failedKeys
+      .map((key) => activePlan.indexOf(key as NationalLifeGridKey))
+      .find((index) => index >= 0)
+    const nextStageIndex = active.state === 'COMPLETED'
+      ? activePlan.length
+      : active.state === 'PARTIAL' && firstFailedIndex !== undefined
+        ? firstFailedIndex
+        : currentIndex >= 0
+          ? currentIndex
+          : nextUnsettledStageIndex(activePlan, completedKeys, failedKeys)
+    if (active.state === 'FAILED' || active.state === 'PARTIAL') {
       // Reopen only the exact run/device/scope selected above. If another
       // retry won the race, its update count is zero and returning the same
       // run remains safe because both callers share the same durable cursor.
@@ -212,19 +255,26 @@ export async function startLocalConnectorRun(
           connectorDeviceId: input.deviceId,
           executionSource: 'LOCAL',
           provider: NATIONAL_LIFE_PROVIDER,
-          state: 'FAILED',
+          state: active.state,
         },
         data: {
           state: 'RUNNING',
           safeErrorCode: null,
           completedAt: null,
-          currentGridKey: plannedGridKeys(active)[active.completedStages] ?? null,
+          failedStages: 0,
+          currentGridKey: activePlan[nextStageIndex] ?? null,
           updatedAt: now,
         },
       })
+      if (active.state === 'PARTIAL') {
+        await db.nationalLifeConnectorStageFailure.updateMany({
+          where: { runId: active.id, deviceId: input.deviceId, resolvedAt: null },
+          data: { resolvedAt: now, updatedAt: now },
+        })
+      }
     }
     let resume: { sequence: number; offset: number } | undefined
-    const currentGridKey = active.currentGridKey ?? plannedGridKeys(active)[active.completedStages]
+    const currentGridKey = activePlan[nextStageIndex]
     if (currentGridKey && db.nationalLifeConnectorStageReceipt) {
       const receipts = await db.nationalLifeConnectorStageReceipt.findMany({
         where: { runId: active.id, gridKey: currentGridKey },
@@ -251,9 +301,10 @@ export async function startLocalConnectorRun(
     return {
       runId: active.id,
       schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
-      stages: planLocalConnectorStages(plannedGridKeys(active)),
+      stages: planLocalConnectorStages(activePlan),
       duplicate: true as const,
       completedStages: active.completedStages,
+      nextStageIndex,
       ...(resume ? { resume } : {}),
     }
   }
@@ -288,7 +339,107 @@ export async function startLocalConnectorRun(
     stages,
     duplicate: false as const,
     completedStages: 0,
+    nextStageIndex: 0,
   }
+}
+
+export async function failLocalConnectorStage(
+  db: LocalConnectorDb,
+  input: {
+    agentId: string
+    deviceId: string
+    runId: string
+    gridKey: NationalLifeGridKey
+    safeErrorCode: string
+    retryable?: boolean
+    now?: Date
+  },
+) {
+  const now = input.now ?? new Date()
+  return db.$transaction(async (tx) => {
+    const run = await tx.nationalLifeSyncRun.findFirst({
+      where: {
+        id: input.runId,
+        agentId: input.agentId,
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+        connectorDeviceId: input.deviceId,
+        executionSource: 'LOCAL',
+        provider: NATIONAL_LIFE_PROVIDER,
+        state: 'RUNNING',
+      },
+      select: { id: true, plannedGridKeys: true },
+    })
+    if (!run) throw new LocalConnectorRunError('RUN_NOT_ACTIVE')
+    const planned = plannedGridKeys(run)
+    if (!planned.includes(input.gridKey)) throw new LocalConnectorRunError('GRID_NOT_PLANNED')
+
+    await tx.nationalLifeConnectorStageFailure.upsert({
+      where: {
+        deviceId_runId_gridKey: {
+          deviceId: input.deviceId,
+          runId: run.id,
+          gridKey: input.gridKey,
+        },
+      },
+      create: {
+        deviceId: input.deviceId,
+        runId: run.id,
+        gridKey: input.gridKey,
+        safeErrorCode: input.safeErrorCode.slice(0, 80),
+        retryable: input.retryable ?? true,
+        failedAt: now,
+        updatedAt: now,
+      },
+      update: {
+        safeErrorCode: input.safeErrorCode.slice(0, 80),
+        retryable: input.retryable ?? true,
+        failedAt: now,
+        resolvedAt: null,
+        updatedAt: now,
+      },
+    })
+
+    const [completions, failures] = await Promise.all([
+      tx.nationalLifeConnectorStageCompletion.findMany({
+        where: { runId: run.id, truncated: false },
+        distinct: ['gridKey'],
+        select: { gridKey: true },
+      }),
+      tx.nationalLifeConnectorStageFailure.findMany({
+        where: { runId: run.id, resolvedAt: null },
+        select: { gridKey: true },
+      }),
+    ])
+    const completedStages = completions.length
+    const failedStages = failures.length
+    const nextStageIndex = nextUnsettledStageIndex(
+      planned,
+      completions.map((row) => row.gridKey),
+      failures.map((row) => row.gridKey),
+    )
+    const terminal = nextStageIndex === planned.length
+    await tx.nationalLifeSyncRun.update({
+      where: { id: run.id },
+      data: {
+        state: terminal ? 'PARTIAL' : 'RUNNING',
+        completedStages,
+        failedStages,
+        currentGridKey: terminal ? null : planned[nextStageIndex] ?? null,
+        safeErrorCode: terminal ? 'SOURCE_PARTIAL_FAILURE' : null,
+        completedAt: terminal ? now : null,
+        updatedAt: now,
+      },
+    })
+    return {
+      runId: run.id,
+      gridKey: input.gridKey,
+      completedStages,
+      failedStages,
+      nextStageIndex,
+      terminal,
+      state: terminal ? 'PARTIAL' as const : 'RUNNING' as const,
+    }
+  })
 }
 
 export async function failLocalConnectorRun(
@@ -764,6 +915,10 @@ export async function completeLocalConnectorStage(
         completedAt: now,
       },
     })
+    await tx.nationalLifeConnectorStageFailure.updateMany({
+      where: { runId: run.id, deviceId: input.deviceId, gridKey: input.gridKey, resolvedAt: null },
+      data: { resolvedAt: now, updatedAt: now },
+    })
 
     // Keep exactly one verified raw snapshot per agent and grid. Crucially this
     // happens only after every page reconciles with the carrier total, so a
@@ -777,26 +932,49 @@ export async function completeLocalConnectorStage(
       },
     })
 
-    const finalizedGrids = await tx.nationalLifeConnectorStageCompletion.findMany({
-      where: { runId: run.id, truncated: false },
-      distinct: ['gridKey'],
-      select: { gridKey: true },
-    })
+    const [finalizedGrids, failedGrids] = await Promise.all([
+      tx.nationalLifeConnectorStageCompletion.findMany({
+        where: { runId: run.id, truncated: false },
+        distinct: ['gridKey'],
+        select: { gridKey: true },
+      }),
+      tx.nationalLifeConnectorStageFailure.findMany({
+        where: { runId: run.id, resolvedAt: null },
+        select: { gridKey: true },
+      }),
+    ])
     const planned = plannedGridKeys(run)
     const completedStages = planned.filter((gridKey) =>
       finalizedGrids.some((row) => row.gridKey === gridKey),
     ).length
-    const completed = completedStages === planned.length
+    const nextStageIndex = nextUnsettledStageIndex(
+      planned,
+      finalizedGrids.map((row) => row.gridKey),
+      failedGrids.map((row) => row.gridKey),
+    )
+    const terminal = nextStageIndex === planned.length
+    const completed = terminal && failedGrids.length === 0
     await tx.nationalLifeSyncRun.update({
       where: { id: run.id },
       data: {
-        state: completed ? 'COMPLETED' : 'RUNNING',
+        state: completed ? 'COMPLETED' : terminal ? 'PARTIAL' : 'RUNNING',
         completedStages,
-        currentGridKey: completed ? null : planned[completedStages] ?? input.gridKey,
-        completedAt: completed ? now : null,
+        failedStages: failedGrids.length,
+        currentGridKey: terminal ? null : planned[nextStageIndex] ?? input.gridKey,
+        safeErrorCode: terminal && !completed ? 'SOURCE_PARTIAL_FAILURE' : null,
+        completedAt: terminal ? now : null,
         updatedAt: now,
       },
     })
-    return { runId: run.id, gridKey: input.gridKey, receivedRecordCount, completedStages, completed }
+    return {
+      runId: run.id,
+      gridKey: input.gridKey,
+      receivedRecordCount,
+      completedStages,
+      failedStages: failedGrids.length,
+      nextStageIndex,
+      terminal,
+      completed,
+    }
   })
 }
