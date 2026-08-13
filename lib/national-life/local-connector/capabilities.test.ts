@@ -77,7 +77,6 @@ describe('planReadGridStages', () => {
       'RECENTLY_CLOSED',
       'INFORCE_CLIENTS',
       'PAID_COMMISSIONS',
-      'PROJECTED_COMMISSIONS',
       'CLIENT_INTELLIGENCE',
       'CORRESPONDENCE',
       'COMMISSIONS_PAYMENT_PORTAL',

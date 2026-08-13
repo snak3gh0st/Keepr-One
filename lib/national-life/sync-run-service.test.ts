@@ -49,15 +49,14 @@ describe('startNationalLifeSync', () => {
       [1, 'RECENTLY_CLOSED'],
       [2, 'INFORCE_CLIENTS'],
       [3, 'PAID_COMMISSIONS'],
-      [4, 'PROJECTED_COMMISSIONS'],
-      [5, 'CLIENT_INTELLIGENCE'],
-      [6, 'CORRESPONDENCE'],
-      [7, 'COMMISSIONS_PAYMENT_PORTAL'],
-      [8, 'PIP_PENDING'],
-      [9, 'TRANSFERS_EXCHANGES'],
-      [10, 'LIFE_PENDING_LAPSE'],
-      [11, 'COMMISSIONS_EARNING_REPORT'],
-      [12, 'PAYABLE_GROSS_COMMISSIONS'],
+      [4, 'CLIENT_INTELLIGENCE'],
+      [5, 'CORRESPONDENCE'],
+      [6, 'COMMISSIONS_PAYMENT_PORTAL'],
+      [7, 'PIP_PENDING'],
+      [8, 'TRANSFERS_EXCHANGES'],
+      [9, 'LIFE_PENDING_LAPSE'],
+      [10, 'COMMISSIONS_EARNING_REPORT'],
+      [11, 'PAYABLE_GROSS_COMMISSIONS'],
     ])
     expect(tx.jobs.every((job) => job.operation === 'SYNC_NATIONAL_LIFE_GRID')).toBe(true)
   })
@@ -192,7 +191,8 @@ describe('local stage coverage', () => {
       totalStages: 2,
       currentGridKey: 'INFORCE_CLIENTS',
       failedGridKeys: [],
-      completions: [{ gridKey: 'NEW_BUSINESS', expectedRecordCount: 715 }],
+      resumedAt: null,
+      completions: [{ gridKey: 'NEW_BUSINESS', expectedRecordCount: 715, completedAt: now }],
     })).toEqual([
       expect.objectContaining({ gridKey: 'NEW_BUSINESS', state: 'VERIFIED', verifiedRecords: 715 }),
       expect.objectContaining({ gridKey: 'INFORCE_CLIENTS', state: 'READING', verifiedRecords: null }),
@@ -205,7 +205,8 @@ describe('local stage coverage', () => {
       totalStages: 1,
       currentGridKey: null,
       failedGridKeys: [],
-      completions: [{ gridKey: 'AGENT_DASHBOARD', expectedRecordCount: 12 }],
+      resumedAt: null,
+      completions: [{ gridKey: 'AGENT_DASHBOARD', expectedRecordCount: 12, completedAt: now }],
     })).toEqual([
       expect.objectContaining({
         gridKey: 'AGENT_DASHBOARD',
@@ -221,14 +222,34 @@ describe('local stage coverage', () => {
       totalStages: 3,
       currentGridKey: null,
       failedGridKeys: ['PROJECTED_COMMISSIONS'],
+      resumedAt: null,
       completions: [
-        { gridKey: 'NEW_BUSINESS', expectedRecordCount: 10 },
-        { gridKey: 'INFORCE_CLIENTS', expectedRecordCount: 20 },
+        { gridKey: 'NEW_BUSINESS', expectedRecordCount: 10, completedAt: now },
+        { gridKey: 'INFORCE_CLIENTS', expectedRecordCount: 20, completedAt: now },
       ],
     }).map((stage) => [stage.gridKey, stage.state])).toEqual([
       ['NEW_BUSINESS', 'VERIFIED'],
       ['PROJECTED_COMMISSIONS', 'FAILED'],
       ['INFORCE_CLIENTS', 'VERIFIED'],
+    ])
+  })
+
+  it('distinguishes verified areas reused after a resumed attempt', () => {
+    const resumedAt = new Date('2026-08-04T19:00:00.000Z')
+    expect(localStageCoverage({
+      plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+      totalStages: 2,
+      currentGridKey: 'INFORCE_CLIENTS',
+      failedGridKeys: [],
+      resumedAt,
+      completions: [{
+        gridKey: 'NEW_BUSINESS',
+        expectedRecordCount: 859,
+        completedAt: new Date('2026-08-04T18:00:00.000Z'),
+      }],
+    })).toEqual([
+      expect.objectContaining({ gridKey: 'NEW_BUSINESS', state: 'REUSED', verifiedRecords: 859 }),
+      expect.objectContaining({ gridKey: 'INFORCE_CLIENTS', state: 'READING' }),
     ])
   })
 })

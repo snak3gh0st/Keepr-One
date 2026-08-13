@@ -52,21 +52,34 @@ function formatCount(value: number | null): string {
   return value === null ? '—' : value.toLocaleString('en-US')
 }
 
-function activeLine(status: NationalLifeSyncStatus): string {
+function activeLine(status: NationalLifeSyncStatus, reused: number): string {
   const checked = status.completed + status.failed
-  if (!status.currentGridLabel) return `${checked} of ${status.total} areas checked.`
+  const reusePrefix = reused > 0
+    ? `${reused} previously verified ${reused === 1 ? 'area was' : 'areas were'} reused. `
+    : ''
+  if (!status.currentGridLabel) return `${reusePrefix}${checked} of ${status.total} areas checked.`
   if (status.receivedRecords !== null && status.receivedRecords > 0) {
-    return `Reading and saving ${status.currentGridLabel}. ${formatCount(status.receivedRecords)} rows received so far.`
+    return `${reusePrefix}Reading and saving ${status.currentGridLabel}. ${formatCount(status.receivedRecords)} rows received so far.`
   }
-  return `Reading and saving ${status.currentGridLabel}.`
+  return `${reusePrefix}Reading and saving ${status.currentGridLabel}.`
 }
 
 function coverageTone(state: NonNullable<NationalLifeSyncStatus['stageCoverage']>[number]['state']) {
   if (state === 'VERIFIED') return 'border-teal/30 bg-teal-pale/45 text-teal-deep'
+  if (state === 'REUSED') return 'border-teal/30 bg-teal-pale/25 text-teal-deep'
   if (state === 'CAPTURED') return 'border-blue-200 bg-blue-50 text-blue-800'
   if (state === 'READING') return 'border-gold/40 bg-gold-pale text-gold-ink'
   if (state === 'FAILED') return 'border-red-300 bg-red-50 text-red-700'
   return 'border-border-steel bg-panel/55 text-ink-muted'
+}
+
+function coverageLabel(state: NonNullable<NationalLifeSyncStatus['stageCoverage']>[number]['state']) {
+  if (state === 'VERIFIED') return 'Verified'
+  if (state === 'REUSED') return 'Reused'
+  if (state === 'CAPTURED') return 'Captured'
+  if (state === 'READING') return 'Reading'
+  if (state === 'FAILED') return 'Needs retry'
+  return 'Waiting'
 }
 
 export function NationalLifeSyncProgress({
@@ -139,6 +152,7 @@ export function NationalLifeSyncProgress({
   const terminal = status.state === 'COMPLETED' || status.state === 'PARTIAL' || status.state === 'FAILED'
   const active = status.shouldPoll
   const checked = Math.min(status.total, status.completed + status.failed)
+  const reused = status.stageCoverage?.filter((stage) => stage.state === 'REUSED').length ?? 0
   const lastSynced = formatMoment(status.completedAt)
   // Só depois do fim. No meio do run, "nada novo desta vez" ou "120 gravados"
   // seriam a mesma mentira do "concluído" eterno, apontada para o outro lado.
@@ -185,7 +199,7 @@ export function NationalLifeSyncProgress({
       />
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-ink-muted">
-        <span>{outcome ?? activeLine(status)}</span>
+        <span>{outcome ?? activeLine(status, reused)}</span>
         {message && (
           <span className="font-semibold text-gold">
             {message}
@@ -221,14 +235,16 @@ export function NationalLifeSyncProgress({
         <div className="mt-5 border-t border-border-steel pt-4">
           <div className="flex items-baseline justify-between gap-3">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">Portal source coverage</p>
-            <p className="text-xs text-ink-muted">Verified means every paginated row was reconciled.</p>
+            <p className="text-xs text-ink-muted">
+              Reused areas were already verified in the previous attempt.
+            </p>
           </div>
           <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {status.stageCoverage.map((stage) => (
               <li key={stage.gridKey} className={`rounded-lg border px-3 py-2 text-xs ${coverageTone(stage.state)}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold capitalize">{stage.label ?? stage.gridKey.replace(/_/g, ' ').toLowerCase()}</span>
-                  <span className="font-mono text-[10px] uppercase">{stage.state}</span>
+                  <span className="font-mono text-[10px] uppercase">{coverageLabel(stage.state)}</span>
                 </div>
                 {stage.verifiedRecords !== null && (
                   <p className="mt-1 font-mono tabular-nums">

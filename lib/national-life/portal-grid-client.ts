@@ -54,10 +54,10 @@ export const NATIONAL_LIFE_GRIDS = {
     '/agent/compensation/commissions/paid-commissions/commissions-payment-portal',
   PROJECTED_COMMISSIONS: '/agent/compensation/commissions/projected-commissions',
   PAYABLE_GROSS_COMMISSIONS:
-    '/agent/compensation/commissions/projected-commissions/payable-gross-commissions',
+    '/agent/compensation/commissions/projected-commissions/payable-gross-commissions/personal',
   // Redirects to `/personal`; gross pending split by product line.
   PENDING_GROSS_COMMISSIONS:
-    '/agent/compensation/commissions/projected-commissions/pending-gross-commissions',
+    '/agent/compensation/commissions/projected-commissions/pending-gross-commissions/personal',
 } as const
 
 export type NationalLifeGridKey = keyof typeof NATIONAL_LIFE_GRIDS

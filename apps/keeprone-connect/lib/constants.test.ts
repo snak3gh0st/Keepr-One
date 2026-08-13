@@ -53,4 +53,19 @@ describe('National Life content-script boundary', () => {
       '/agent/compensation/commissions/paid-commissions/commissions-earning-report',
     )).toBe(false)
   })
+
+  it('lands legacy projected and payable routes on the carrier personal report', () => {
+    const personal =
+      '/agent/compensation/commissions/projected-commissions/payable-gross-commissions/personal'
+    expect(matchesNationalLifeStagePath(
+      'PROJECTED_COMMISSIONS',
+      '/agent/compensation/commissions/projected-commissions',
+      personal,
+    )).toBe(true)
+    expect(matchesNationalLifeStagePath(
+      'PAYABLE_GROSS_COMMISSIONS',
+      '/agent/compensation/commissions/projected-commissions/payable-gross-commissions',
+      personal,
+    )).toBe(true)
+  })
 })

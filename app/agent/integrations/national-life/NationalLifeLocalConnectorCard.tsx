@@ -28,7 +28,7 @@ type ConnectorResponse = {
 }
 
 type ConnectorMessage =
-  | { type: 'START_NATIONAL_LIFE_SYNC' }
+  | { type: 'START_NATIONAL_LIFE_SYNC'; forceRefresh?: true }
   | { type: 'GET_CONNECTOR_STATUS' }
   | { type: 'UNPAIR_CONNECTOR' }
   | { type: 'PAIR_CONNECTOR'; code: string; label: string; baseUrl: string }
@@ -359,9 +359,10 @@ export function NationalLifeLocalConnectorCard({
     await startSync()
   }
 
-  async function startSync(): Promise<void> {
+  async function startSync(forceRefresh = false): Promise<void> {
     const result = await sendConnectorMessage(extensionId, {
       type: 'START_NATIONAL_LIFE_SYNC',
+      ...(forceRefresh ? { forceRefresh: true as const } : {}),
     })
     if (!result.ok) {
       if (result.error === 'CONNECTOR_NOT_PAIRED') {
@@ -376,6 +377,15 @@ export function NationalLifeLocalConnectorCard({
     }
     window.dispatchEvent(new Event(NATIONAL_LIFE_SYNC_STARTED_EVENT))
     await watchSyncProgress()
+  }
+
+  async function handleFullRefresh(): Promise<void> {
+    beginAttempt('checking')
+    try {
+      await startSync(true)
+    } catch (error) {
+      fail(error instanceof Error ? error.message : null)
+    }
   }
 
   function notifySyncStarted() {
@@ -612,6 +622,16 @@ export function NationalLifeLocalConnectorCard({
                           ? 'Sync National Life'
                           : 'Connect National Life'}
           </Button>
+          {pairedDeviceId && !busy && !failure && ['idle', 'success', 'partial'].includes(state) && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleFullRefresh}
+              title="Read every portal area again instead of reusing verified areas"
+            >
+              Refresh all areas
+            </Button>
+          )}
           {pairedDeviceId && !busy && (
             <Button type="button" variant="secondary" onClick={handleDisconnect}>
               Disconnect
