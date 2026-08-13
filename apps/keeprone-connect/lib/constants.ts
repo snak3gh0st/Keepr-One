@@ -24,6 +24,10 @@ const LEGACY_PAYABLE_GROSS_COMMISSIONS_PATH =
   '/agent/compensation/commissions/projected-commissions/payable-gross-commissions'
 const CANONICAL_PAYABLE_GROSS_COMMISSIONS_PATH =
   '/agent/compensation/commissions/projected-commissions/payable-gross-commissions/personal'
+const LEGACY_LIFE_PENDING_LAPSE_PATH =
+  '/agent/book-of-business/inforce-book/life-pending-lapse-report'
+const CANONICAL_LIFE_PENDING_LAPSE_PATH =
+  '/agent/book-of-business/inforce-book/life-pending-lapse-report/personal'
 
 export function canonicalNationalLifeNavigatePath(gridKey: string, path: string): string {
   if (gridKey === 'INFORCE_CLIENTS' && path === LEGACY_INFORCE_CLIENTS_PATH) {
@@ -40,6 +44,9 @@ export function canonicalNationalLifeNavigatePath(gridKey: string, path: string)
     path === LEGACY_PAYABLE_GROSS_COMMISSIONS_PATH
   ) {
     return CANONICAL_PAYABLE_GROSS_COMMISSIONS_PATH
+  }
+  if (gridKey === 'LIFE_PENDING_LAPSE' && path === LEGACY_LIFE_PENDING_LAPSE_PATH) {
+    return CANONICAL_LIFE_PENDING_LAPSE_PATH
   }
   return path
 }

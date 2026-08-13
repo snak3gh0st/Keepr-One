@@ -68,4 +68,12 @@ describe('National Life content-script boundary', () => {
       personal,
     )).toBe(true)
   })
+
+  it('accepts the final personal route for pending lapse policies', () => {
+    expect(matchesNationalLifeStagePath(
+      'LIFE_PENDING_LAPSE',
+      '/agent/book-of-business/inforce-book/life-pending-lapse-report',
+      '/agent/book-of-business/inforce-book/life-pending-lapse-report/personal',
+    )).toBe(true)
+  })
 })

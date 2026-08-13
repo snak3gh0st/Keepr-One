@@ -35,7 +35,7 @@ export const NATIONAL_LIFE_GRIDS = {
   ANNUITY_PAYROLL_FLOW_CHANGES:
     '/agent/book-of-business/inforce-book/annuity-flow-report/payroll-flow-changes',
   PREMIUM_REPORT_AGENCY: '/agent/book-of-business/inforce-book/premium-report-agency',
-  LIFE_PENDING_LAPSE: '/agent/book-of-business/inforce-book/life-pending-lapse-report',
+  LIFE_PENDING_LAPSE: '/agent/book-of-business/inforce-book/life-pending-lapse-report/personal',
   LIFE_PERSISTENCY: '/agent/book-of-business/inforce-book/life-persistency-report',
   CORRESPONDENCE: '/agent/book-of-business/inforce-book/correspondence',
   PIP_PENDING: '/agent/book-of-business/inforce-book/pip-pending-report',
