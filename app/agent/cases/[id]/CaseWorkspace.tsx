@@ -5,21 +5,50 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CrmNavigation } from "@/components/CrmNavigation";
-import { CaseStagePill, PolicyStatusPill } from "@/components/StatusPill";
+import { PolicyStatusPill } from "@/components/StatusPill";
 import { PageHeader } from "@/components/PageHeader";
 import { ModuleSummary } from "@/components/ModuleSummary";
-import { caseStageLabel, type CaseStage } from "@/lib/case-workflow";
 import { computeNeedsAnalysis, type NeedsAnalysisInput } from "@/lib/needs-analysis";
 import { formatMoney } from "@/lib/format";
-import { transitionCase, updateRequirement, startApplication, saveNeedsAnalysis, addCaseNote, addFollowUp, completeFollowUp } from "./actions";
+import type { CrmStageView } from "@/lib/crm";
+import { CrmStageSelect } from "@/components/crm/CrmStageSelect";
+import { FollowUpModal } from "@/components/crm/FollowUpModal";
+import { FollowUpPanel } from "@/components/crm/FollowUpPanel";
+import { CalendarEventModal } from "@/components/calendar/CalendarEventModal";
+import { CaseMeetingsSection, caseMeetingCopy } from "@/components/calendar/CaseMeetingsSection";
+import type {
+  CalendarConnectionView,
+  CalendarEventInput,
+  CalendarEventView,
+  CalendarMutationResult,
+  CalendarSourceView,
+} from "@/components/calendar/types";
+import {
+  cancelCalendarEventAction,
+  checkCalendarAvailabilityAction,
+  createCalendarEventAction,
+  retryCalendarEventSyncAction,
+  updateCalendarEventAction,
+} from "@/app/agent/calendar/actions";
+import { moveCaseAndScheduleAction, moveCaseStageAction } from "../actions";
+import {
+  updateRequirement,
+  startApplication,
+  saveNeedsAnalysis,
+  addCaseNote,
+  cancelCaseFollowUp,
+  completeCaseFollowUp,
+  rescheduleCaseFollowUp,
+  scheduleCaseFollowUp,
+} from "./actions";
 
 type Requirement = { id: string; title: string; status: string };
 type Application = { id: string; status: string; requirements: Requirement[] };
 
 type CaseData = {
   id: string;
-  stage: CaseStage;
-  status: string;
+  crmStage: Pick<CrmStageView, "id" | "name" | "systemKey"> | null;
+  crmStages: CrmStageView[];
   objective: string | null;
   productType: string | null;
   carrier: string | null;
@@ -30,7 +59,6 @@ type CaseData = {
     result: { grossNeed: number; resources: number; recommendedCoverage: number };
     savedAt: string;
   } | null;
-  nextStages: CaseStage[];
   prospect: {
     name: string;
     email: string | null;
@@ -52,6 +80,22 @@ type CaseData = {
     dueAt: string | null;
     doneAt: string | null;
   }[];
+  followUps: {
+    id: string;
+    title: string;
+    scheduledAt: string;
+    status: "SCHEDULED" | "COMPLETED" | "CANCELLED";
+    completedAt: string | null;
+    cancelledAt: string | null;
+  }[];
+  calendar: {
+    canManage: boolean;
+    connection: CalendarConnectionView;
+    calendars: CalendarSourceView[];
+    timeZone: string;
+    events: CalendarEventView[];
+  };
+  now: string;
 };
 
 const PRODUCT_LABEL: Record<string, string> = { TERM: "Term", IUL: "IUL", UNDECIDED: "A definir" };
@@ -108,6 +152,15 @@ const NEEDS_FIELDS: { key: keyof NeedsAnalysisInput; label: string }[] = [
 
 const usd = formatMoney;
 const TOBACCO_LABEL: Record<string, string> = { NON_TOBACCO: "Não fumante", TOBACCO: "Fumante" };
+const CRM_DATE = new Intl.DateTimeFormat("pt-BR", {
+  timeZone: "America/New_York",
+  dateStyle: "short",
+});
+const CRM_DATE_TIME = new Intl.DateTimeFormat("pt-BR", {
+  timeZone: "America/New_York",
+  dateStyle: "short",
+  timeStyle: "short",
+});
 
 function NeedsAnalysisForm({
   caseId,
@@ -176,7 +229,7 @@ function NeedsAnalysisForm({
       </Button>
       {saved && (
         <p className="text-xs text-ink-muted">
-          Última atualização: {new Date(saved.savedAt).toLocaleString("pt-BR")} · define a cobertura-alvo da oportunidade.
+          Última atualização: {CRM_DATE_TIME.format(new Date(saved.savedAt))} · define a cobertura-alvo da oportunidade.
         </p>
       )}
     </div>
@@ -187,22 +240,14 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
+  const [stageFollowUpId, setStageFollowUpId] = useState<string | null>(null);
+  const [calendarModal, setCalendarModal] = useState<
+    | { mode: "create" }
+    | { mode: "details" | "edit"; event: CalendarEventView }
+    | null
+  >(null);
 
-  const forward = c.nextStages.filter((s) => s !== "WITHDRAWN");
-  const primary = forward[0] ?? null;
   const age = ageFrom(c.prospect.dateOfBirth);
-
-  function move(stage: CaseStage) {
-    if (stage === "WITHDRAWN" && !window.confirm("Encerrar esta oportunidade? Esta ação é definitiva e não pode ser desfeita.")) {
-      return;
-    }
-    setMessage(null);
-    startTransition(async () => {
-      const result = await transitionCase(c.id, stage);
-      if (result.ok) router.refresh();
-      else setMessage(result.message);
-    });
-  }
 
   function setRequirement(id: string, status: "RECEIVED" | "WAIVED" | "OPEN") {
     startTransition(async () => {
@@ -224,10 +269,28 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
   const hasApplication = c.applications.length > 0;
   const requirements = c.applications.flatMap((application) => application.requirements);
   const openRequirements = requirements.filter((requirement) => requirement.status === "OPEN").length;
+  const meetingCopy = caseMeetingCopy(c.crmStage?.systemKey ?? null, c.prospect.name);
+
+  async function mutateCalendar(
+    action: (input: CalendarEventInput) => Promise<CalendarMutationResult>,
+    input: CalendarEventInput,
+  ) {
+    const result = await action(input);
+    if (result.ok) router.refresh();
+    return result;
+  }
+
+  async function cancelCalendar(event: CalendarEventView) {
+    const result = await cancelCalendarEventAction({
+      id: event.id,
+      baseRevision: event.localRevision,
+      sendInvites: true,
+    });
+    if (result.ok) router.refresh();
+    return result;
+  }
 
   const [note, setNote] = useState("");
-  const [fuTitle, setFuTitle] = useState("");
-  const [fuDue, setFuDue] = useState("");
 
   function submitNote() {
     if (!note.trim()) return;
@@ -237,25 +300,6 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
       if (result.ok) { setNote(""); router.refresh(); } else setMessage(result.message);
     });
   }
-
-  function submitFollowUp() {
-    if (!fuTitle.trim() || !fuDue) return;
-    setMessage(null);
-    startTransition(async () => {
-      const result = await addFollowUp(c.id, fuTitle, fuDue);
-      if (result.ok) { setFuTitle(""); setFuDue(""); router.refresh(); } else setMessage(result.message);
-    });
-  }
-
-  function markFollowUpDone(id: string) {
-    startTransition(async () => {
-      const result = await completeFollowUp(id);
-      if (result.ok) router.refresh(); else setMessage(result.message);
-    });
-  }
-
-  const todayISO = new Date().toISOString().slice(0, 10);
-
   return (
     <div className="space-y-4">
       <CrmNavigation active="opportunities" />
@@ -264,7 +308,17 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         eyebrow="CRM · Oportunidade em andamento"
         description={
           <div className="space-y-3">
-            <CaseStagePill stage={c.stage} />
+            <CrmStageSelect
+              caseId={c.id}
+              stage={c.crmStage}
+              stages={c.crmStages}
+              onChange={async (caseId, stageId) => {
+                const result = await moveCaseStageAction(caseId, stageId);
+                if (result.ok) router.refresh();
+                return result;
+              }}
+              onFollowUpRequired={setStageFollowUpId}
+            />
             <p>
               {OBJECTIVE_LABEL[c.objective ?? ""] ?? "—"} · {PRODUCT_LABEL[c.productType ?? ""] ?? c.productType ?? "—"} · {c.carrier ?? "—"}
             </p>
@@ -283,32 +337,21 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
           </span>
           <span>Voltar para o CRM</span>
         </Link>
-        <div className="flex flex-wrap items-center gap-2">
-          {primary && (
-            <Button
-              variant="primary"
-              className="!bg-paper !text-ink hover:!bg-panel"
-              disabled={pending}
-              onClick={() => move(primary)}
-            >
-              Avançar para {caseStageLabel[primary]}
-            </Button>
-          )}
-          {c.nextStages
-            .filter((s) => s !== primary)
-            .map((s) => (
-              <Button
-                key={s}
-                variant={s === "WITHDRAWN" ? "danger" : "secondary"}
-                className={s === "WITHDRAWN" ? "" : "!border-white/15 !bg-white/[0.06] !text-paper hover:!bg-white/[0.12]"}
-                disabled={pending}
-                onClick={() => move(s)}
-              >
-                {caseStageLabel[s]}
-              </Button>
-            ))}
-          {c.nextStages.length === 0 && <span className="text-sm text-ink-muted">Oportunidade encerrada.</span>}
-        </div>
+        <Link
+          href="/agent/activities"
+          className="inline-flex min-h-11 items-center rounded-full border border-white/15 bg-white/[0.06] px-4 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.12]"
+        >
+          Ver atividades <span aria-hidden className="ml-2">↗</span>
+        </Link>
+        {c.calendar.canManage && c.calendar.connection.status === "CONNECTED" ? (
+          <button
+            type="button"
+            onClick={() => setCalendarModal({ mode: "create" })}
+            className="inline-flex min-h-11 items-center rounded-full bg-paper px-4 text-sm font-semibold text-rail-strong transition-transform duration-300 hover:-translate-y-0.5"
+          >
+            Agendar reunião <span aria-hidden className="ml-2">＋</span>
+          </button>
+        ) : null}
       </PageHeader>
 
       <ModuleSummary
@@ -417,6 +460,30 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         )}
       </Section>
 
+      <FollowUpPanel
+        now={c.now}
+        prospectName={c.prospect.name}
+        followUps={c.followUps}
+        onSchedule={(input) => scheduleCaseFollowUp({ caseId: c.id, ...input })}
+        onReschedule={(followUpId, input) =>
+          rescheduleCaseFollowUp({ caseId: c.id, followUpId, ...input })
+        }
+        onComplete={(followUpId) => completeCaseFollowUp({ caseId: c.id, followUpId })}
+        onCancel={(followUpId) => cancelCaseFollowUp({ caseId: c.id, followUpId })}
+        onRefresh={() => router.refresh()}
+      />
+
+      <CaseMeetingsSection
+        canManage={c.calendar.canManage}
+        connection={c.calendar.connection}
+        events={c.calendar.events}
+        now={c.now}
+        systemKey={c.crmStage?.systemKey ?? null}
+        prospectName={c.prospect.name}
+        onSchedule={() => setCalendarModal({ mode: "create" })}
+        onOpen={(event) => setCalendarModal({ mode: "details", event })}
+      />
+
       <Section title="Histórico do atendimento">
         <div className="space-y-3">
           <div className="flex gap-2">
@@ -429,22 +496,6 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
             />
             <Button variant="secondary" disabled={pending || !note.trim()} onClick={submitNote}>Anotar</Button>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <input
-              value={fuTitle}
-              onChange={(e) => setFuTitle(e.target.value)}
-              placeholder="Agendar retorno…"
-              className="min-h-11 min-w-[12rem] flex-1 rounded-xl border border-border-steel bg-paper px-3.5 py-2.5 text-sm text-ink outline-none transition-[border-color,box-shadow] focus:border-teal focus:ring-[3px] focus:ring-teal-pale"
-            />
-            <input
-              type="date"
-              min={todayISO}
-              value={fuDue}
-              onChange={(e) => setFuDue(e.target.value)}
-              className="min-h-11 rounded-xl border border-border-steel bg-paper px-3.5 py-2.5 text-sm text-ink outline-none transition-[border-color,box-shadow] focus:border-teal focus:ring-[3px] focus:ring-teal-pale"
-            />
-            <Button variant="secondary" disabled={pending || !fuTitle.trim() || !fuDue} onClick={submitFollowUp}>Agendar</Button>
-          </div>
         </div>
 
         {c.timeline.length === 0 ? (
@@ -452,11 +503,10 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         ) : (
           <ol className="mt-4 space-y-3">
             {c.timeline.map((t) => {
-              const isFollowUp = t.type === "FOLLOW_UP";
-              const open = isFollowUp && !t.doneAt;
-              const overdue = open && t.dueAt != null && new Date(t.dueAt) < new Date();
+              const isFollowUp = t.type.startsWith("FOLLOW_UP");
+              const overdue = t.dueAt != null && !t.doneAt && new Date(t.dueAt) < new Date(c.now);
               return (
-                <li key={t.id} className={`border-l-2 pl-3 ${overdue ? "border-danger" : open ? "border-gold" : "border-border-steel"}`}>
+                <li key={t.id} className={`border-l-2 pl-3 ${overdue ? "border-danger" : isFollowUp ? "border-gold" : "border-border-steel"}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-medium text-ink">
@@ -471,12 +521,9 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
                       </p>
                       {t.body && <p className="text-xs text-ink-muted">{t.body}</p>}
                       <p className="text-xs text-ink-muted">
-                        {t.dueAt ? `Vence ${new Date(t.dueAt).toLocaleDateString("pt-BR")}` : new Date(t.createdAt).toLocaleString("pt-BR")}
+                        {t.dueAt ? `Vence ${CRM_DATE.format(new Date(t.dueAt))}` : CRM_DATE_TIME.format(new Date(t.createdAt))}
                       </p>
                     </div>
-                    {open && (
-                      <Button variant="secondary" disabled={pending} onClick={() => markFollowUpDone(t.id)}>Concluir</Button>
-                    )}
                   </div>
                 </li>
               );
@@ -484,6 +531,49 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
           </ol>
         )}
       </Section>
+
+      <FollowUpModal
+        key={stageFollowUpId ?? "closed"}
+        open={Boolean(stageFollowUpId)}
+        onClose={() => setStageFollowUpId(null)}
+        prospectName={c.prospect.name}
+        onSubmit={async ({ title, scheduledAt }) => {
+          if (!stageFollowUpId) return { ok: false, message: "Etapa não encontrada." };
+          const result = await moveCaseAndScheduleAction({
+            caseId: c.id,
+            stageId: stageFollowUpId,
+            title,
+            scheduledAt,
+          });
+          if (result.ok) router.refresh();
+          return result;
+        }}
+      />
+
+      <CalendarEventModal
+        key={calendarModal?.mode === "create" ? "create" : `${calendarModal?.mode ?? "closed"}:${calendarModal && "event" in calendarModal ? calendarModal.event.id : "none"}`}
+        open={calendarModal !== null}
+        mode={calendarModal?.mode ?? "create"}
+        event={calendarModal && "event" in calendarModal ? calendarModal.event : null}
+        initialCase={{ id: c.id, name: c.prospect.name, email: c.prospect.email, stage: c.crmStage?.name ?? null }}
+        initialTitle={meetingCopy.defaultTitle}
+        timeZone={c.calendar.timeZone}
+        calendars={c.calendar.calendars}
+        cases={[{ id: c.id, name: c.prospect.name, email: c.prospect.email, stage: c.crmStage?.name ?? null }]}
+        onClose={() => setCalendarModal(null)}
+        onSubmit={(input) => mutateCalendar(
+          calendarModal?.mode === "edit" ? updateCalendarEventAction : createCalendarEventAction,
+          input,
+        )}
+        onRequestEdit={(event) => setCalendarModal({ mode: "edit", event })}
+        onCancelEvent={cancelCalendar}
+        onRetrySync={async (event) => {
+          const result = await retryCalendarEventSyncAction({ id: event.id });
+          if (result.ok) router.refresh();
+          return result;
+        }}
+        onCheckAvailability={checkCalendarAvailabilityAction}
+      />
     </div>
   );
 }

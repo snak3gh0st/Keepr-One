@@ -1,6 +1,10 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../prisma'
 import type { GridRow } from './portal-grid-client'
+import {
+  syncConfirmedInforcePromotionCreditsSafely,
+  type PromotionCreditSyncResult,
+} from './promotion-credit-sync'
 
 /// Normalised view of one inforce-book grid row. Every carrier field arrives as
 /// a string, so nothing is coerced here beyond trimming: the untouched row is
@@ -43,6 +47,7 @@ export type InforcePolicySnapshot = {
   ownerZipcode: string | null
   accumulatedCashValue: string | null
   anticipatedAnnualPremium: string | null
+  targetPremium: string | null
   termConversionDate: string | null
   levelPeriodEndDate: string | null
   employerName: string | null
@@ -119,6 +124,17 @@ export function toInforcePolicySnapshot(row: GridRow): InforcePolicySnapshot | n
     ownerZipcode: text(row, 'OwnerZipcode', 'Owner Zipcode'),
     accumulatedCashValue: text(row, 'AccumulatedCashValue'),
     anticipatedAnnualPremium: text(row, 'AAP', 'AnticipatedAnnualPremium', 'Anticipated Annual Premium'),
+    // Only carrier fields that explicitly mean CTP may populate this value.
+    // PremiumAmt and commission fields are deliberately not fallbacks.
+    targetPremium: text(
+      row,
+      'TargetPremium',
+      'Target Premium',
+      'CommissionableTargetPremium',
+      'Commissionable Target Premium',
+      'CTP',
+      'TargetPremiumAmount',
+    ),
     termConversionDate: text(row, 'TermConversionDate', 'Term Conversion Ending'),
     levelPeriodEndDate: text(row, 'LevelPeriodEndDate', 'End of Level Period'),
     employerName: text(row, 'EmployerName'),
@@ -151,7 +167,7 @@ const UPSERT_CHUNK_SIZE = 500
 
 export async function persistInforcePolicies(
   input: PersistInforcePoliciesInput,
-): Promise<{ written: number }> {
+): Promise<{ written: number; promotionCredits?: PromotionCreditSyncResult }> {
   let written = 0
 
   for (let offset = 0; offset < input.snapshots.length; offset += UPSERT_CHUNK_SIZE) {
@@ -183,5 +199,7 @@ export async function persistInforcePolicies(
     written += chunk.length
   }
 
-  return { written }
+  const promotionCredits = await syncConfirmedInforcePromotionCreditsSafely(input)
+
+  return { written, promotionCredits }
 }

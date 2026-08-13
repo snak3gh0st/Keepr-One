@@ -5,16 +5,18 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getDownlineIds } from '@/lib/hierarchy'
 import { canAccessCase } from '@/lib/case-access'
-import { allowedTransitions } from '@/lib/case-workflow'
 import { decimalToNumber } from '@/lib/decimal'
 import { formatMoney } from '@/lib/format'
 import { Shell } from '@/components/Shell'
 import { CaseWorkspace } from './CaseWorkspace'
+import { getPipelineForAgent } from '@/lib/crm'
+import { getCalendarConnectionForUser, getCalendarEventsForCase } from '@/lib/calendar'
+import { mapDomainCalendarConnectionToUi, mapDomainCalendarEventToUi } from '@/components/calendar/server-adapter'
 
 export default async function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const agent = await getCurrentAgent()
-  const user = await prisma.user.findUnique({ where: { id: agent.userId } })
+  const user = await prisma.user.findUnique({ where: { id: agent.userId }, select: { name: true, timeZone: true } })
   const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
   const scope = [agent.id, ...getDownlineIds(allAgents, agent.id)]
 
@@ -22,15 +24,42 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
     where: { id },
     include: {
       prospect: true,
-      assignedAgent: { select: { user: { select: { name: true } } } },
+      assignedAgent: { select: { userId: true, user: { select: { name: true } } } },
       illustrations: { orderBy: { createdAt: 'desc' } },
       applications: { include: { requirements: { orderBy: { createdAt: 'asc' } } }, orderBy: { createdAt: 'desc' } },
       timelineEvents: { orderBy: { createdAt: 'desc' } },
+      followUps: { orderBy: { createdAt: 'desc' } },
+      crmStage: { select: { id: true, name: true, systemKey: true } },
       policies: true,
     },
   })
 
   if (!c || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, c)) notFound()
+  const pipeline = await getPipelineForAgent(c.assignedAgentId)
+  const ownsCase = c.assignedAgentId === agent.id
+  let calendarConnectionDomain = null
+  let calendarEventDomains: Awaited<ReturnType<typeof getCalendarEventsForCase>> = []
+  // CRM hierarchy grants access to the lead, never to another agent's private
+  // calendar. Only the assigned agent can load provider/account metadata or
+  // event details; leaders receive the neutral read-only placeholder below.
+  if (ownsCase) {
+    try {
+      ;[calendarConnectionDomain, calendarEventDomains] = await Promise.all([
+        getCalendarConnectionForUser(agent.userId),
+        getCalendarEventsForCase({ ownerUserId: agent.userId, caseId: c.id }),
+      ])
+    } catch (error) {
+      console.error('Case calendar query error', error)
+    }
+  }
+  const mappedCalendar = mapDomainCalendarConnectionToUi(calendarConnectionDomain)
+  const calendarById = new Map(mappedCalendar.calendars.map((calendar) => [calendar.id, calendar]))
+  const calendarCase = {
+    id: c.id,
+    name: `${c.prospect.firstName} ${c.prospect.lastName}`.trim(),
+    email: c.prospect.email,
+    stage: c.crmStage?.name ?? null,
+  }
 
   const money = (v: unknown) => (v != null ? formatMoney(decimalToNumber(v)) : null)
 
@@ -39,8 +68,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
       <CaseWorkspace
         caseData={{
           id: c.id,
-          stage: c.stage,
-          status: c.status,
+          now: new Date().toISOString(),
+          crmStage: c.crmStage,
+          crmStages: pipeline.stages,
           objective: c.objective,
           productType: c.productType,
           carrier: c.carrier,
@@ -51,7 +81,6 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             result: { grossNeed: number; resources: number; recommendedCoverage: number }
             savedAt: string
           } | null,
-          nextStages: allowedTransitions(c.stage),
           prospect: {
             name: `${c.prospect.firstName} ${c.prospect.lastName}`.trim(),
             email: c.prospect.email,
@@ -93,6 +122,25 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             dueAt: t.dueAt ? t.dueAt.toISOString() : null,
             doneAt: t.doneAt ? t.doneAt.toISOString() : null,
           })),
+          followUps: c.followUps.map((followUp) => ({
+            id: followUp.id,
+            title: followUp.title,
+            scheduledAt: followUp.scheduledAt.toISOString(),
+            status: followUp.status,
+            completedAt: followUp.completedAt?.toISOString() ?? null,
+            cancelledAt: followUp.cancelledAt?.toISOString() ?? null,
+          })),
+          calendar: {
+            canManage: ownsCase,
+            connection: mappedCalendar.connection,
+            calendars: mappedCalendar.calendars,
+            timeZone: user?.timeZone ?? 'America/New_York',
+            events: calendarEventDomains.map((event) => mapDomainCalendarEventToUi(event, {
+              timeZone: event.timeZone ?? 'America/New_York',
+              case: calendarCase,
+              canWrite: ownsCase && (calendarById.get(event.calendar.id)?.canWrite ?? false),
+            })),
+          },
         }}
       />
     </Shell>

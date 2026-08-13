@@ -1,16 +1,23 @@
 "use server";
 
 import { prisma } from '@/lib/prisma'
+import type { ApplicationStatus } from '@prisma/client'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getDownlineIds } from '@/lib/hierarchy'
 import { canAccessCase } from '@/lib/case-access'
-import { canTransitionCase, caseStageLabel, type CaseStage } from '@/lib/case-workflow'
 import { computeNeedsAnalysis, type NeedsAnalysisInput } from '@/lib/needs-analysis'
 import { revalidatePath } from 'next/cache'
+import {
+  CrmDomainError,
+  cancelFollowUp as cancelCrmFollowUp,
+  completeFollowUp as completeCrmFollowUp,
+  advanceCaseCrmToSystemStage,
+  rescheduleFollowUp as rescheduleCrmFollowUp,
+  scheduleFollowUp as scheduleCrmFollowUp,
+  parseCrmLocalDateTime,
+} from '@/lib/crm'
 
 type ActionResult = { ok: true } | { ok: false; message: string }
-
-const TERMINAL: CaseStage[] = ['PLACED', 'DECLINED', 'WITHDRAWN']
 
 async function agentScopeIds(): Promise<{ agentId: string; scope: string[] }> {
   const agent = await getCurrentAgent()
@@ -18,44 +25,90 @@ async function agentScopeIds(): Promise<{ agentId: string; scope: string[] }> {
   return { agentId: agent.id, scope: [agent.id, ...getDownlineIds(allAgents, agent.id)] }
 }
 
-export async function transitionCase(caseId: string, nextStage: CaseStage): Promise<ActionResult> {
-  const { scope } = await agentScopeIds()
+function crmActionError(error: unknown): ActionResult {
+  if (error instanceof CrmDomainError) return { ok: false, message: error.message }
+  console.error('CRM follow-up action error', error)
+  return { ok: false, message: 'Não foi possível concluir a ação. Tente novamente.' }
+}
 
-  const insuranceCase = await prisma.insuranceCase.findUnique({
-    where: { id: caseId },
-    select: { id: true, stage: true, assignedAgentId: true },
-  })
-  if (!insuranceCase || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, insuranceCase)) {
-    return { ok: false, message: 'Caso não encontrado ou fora da sua carteira.' }
+function parseCrmWallClock(value: string) {
+  try {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) throw new Error('invalid')
+    return parseCrmLocalDateTime(value)
+  } catch {
+    throw new CrmDomainError('VALIDATION_ERROR', 'Data ou horário de follow-up inválido.')
   }
+}
 
-  if (!canTransitionCase(insuranceCase.stage, nextStage)) {
-    return { ok: false, message: 'Esta mudança de etapa não é permitida.' }
-  }
-
-  await prisma.$transaction([
-    prisma.insuranceCase.update({
-      where: { id: caseId },
-      data: {
-        stage: nextStage,
-        status: TERMINAL.includes(nextStage) ? 'CLOSED' : 'OPEN',
-      },
-    }),
-    prisma.caseTimelineEvent.create({
-      data: {
-        caseId,
-        type: 'STAGE_CHANGED',
-        title: `Etapa alterada para ${caseStageLabel[nextStage]}`,
-        body: `De ${caseStageLabel[insuranceCase.stage]} para ${caseStageLabel[nextStage]}.`,
-        // Structured from/to powers pipeline cycle-time analytics.
-        metadata: { from: insuranceCase.stage, to: nextStage },
-      },
-    }),
-  ])
-
+function revalidateCrmFollowUp(caseId: string) {
   revalidatePath(`/agent/cases/${caseId}`)
   revalidatePath('/agent/cases')
-  return { ok: true }
+  revalidatePath('/agent')
+  revalidatePath('/agent/activities')
+}
+
+export async function scheduleCaseFollowUp(input: {
+  caseId: string; title: string; scheduledAt: string
+}): Promise<ActionResult> {
+  try {
+    const { scope } = await agentScopeIds()
+    const agent = await getCurrentAgent()
+    await scheduleCrmFollowUp({
+      caseId: input.caseId, title: input.title,
+      scheduledAt: parseCrmWallClock(input.scheduledAt),
+      actorUserId: agent.userId, scopeAgentIds: scope,
+    })
+    revalidateCrmFollowUp(input.caseId)
+    return { ok: true }
+  } catch (error) {
+    return crmActionError(error)
+  }
+}
+
+export async function rescheduleCaseFollowUp(input: {
+  caseId: string; followUpId: string; title: string; scheduledAt: string
+}): Promise<ActionResult> {
+  try {
+    const { scope } = await agentScopeIds()
+    const agent = await getCurrentAgent()
+    await rescheduleCrmFollowUp({
+      followUpId: input.followUpId, title: input.title,
+      scheduledAt: parseCrmWallClock(input.scheduledAt),
+      actorUserId: agent.userId, scopeAgentIds: scope,
+    })
+    revalidateCrmFollowUp(input.caseId)
+    return { ok: true }
+  } catch (error) {
+    return crmActionError(error)
+  }
+}
+
+export async function completeCaseFollowUp(input: {
+  caseId: string; followUpId: string
+}): Promise<ActionResult> {
+  try {
+    const { scope } = await agentScopeIds()
+    const agent = await getCurrentAgent()
+    await completeCrmFollowUp({ followUpId: input.followUpId, actorUserId: agent.userId, scopeAgentIds: scope })
+    revalidateCrmFollowUp(input.caseId)
+    return { ok: true }
+  } catch (error) {
+    return crmActionError(error)
+  }
+}
+
+export async function cancelCaseFollowUp(input: {
+  caseId: string; followUpId: string
+}): Promise<ActionResult> {
+  try {
+    const { scope } = await agentScopeIds()
+    const agent = await getCurrentAgent()
+    await cancelCrmFollowUp({ followUpId: input.followUpId, actorUserId: agent.userId, scopeAgentIds: scope })
+    revalidateCrmFollowUp(input.caseId)
+    return { ok: true }
+  } catch (error) {
+    return crmActionError(error)
+  }
 }
 
 // Standard life-application document checklist. These are Keepr One-owned tracking
@@ -71,43 +124,71 @@ const STANDARD_REQUIREMENTS = [
 
 // An application is "active" until it terminates. Only one active application
 // per case — a declined/withdrawn one can be superseded by a fresh start.
-const ACTIVE_APPLICATION: string[] = ['DRAFT', 'STARTED', 'SUBMITTED', 'UNDERWRITING', 'APPROVED', 'ISSUED']
+const ACTIVE_APPLICATION: ApplicationStatus[] = ['DRAFT', 'STARTED', 'SUBMITTED', 'UNDERWRITING', 'APPROVED', 'ISSUED']
+
+type LockedInsuranceCase = {
+  id: string
+  assignedAgentId: string
+}
 
 export async function startApplication(caseId: string): Promise<ActionResult> {
   const { scope } = await agentScopeIds()
+  const agent = await getCurrentAgent()
 
-  const insuranceCase = await prisma.insuranceCase.findUnique({
-    where: { id: caseId },
-    select: { id: true, assignedAgentId: true, applications: { select: { status: true } } },
-  })
-  if (!insuranceCase || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, insuranceCase)) {
-    return { ok: false, message: 'Caso não encontrado ou fora da sua carteira.' }
-  }
+  const result = await prisma.$transaction(async (tx): Promise<ActionResult> => {
+    // Serialize application starts for this case. The active-application check
+    // must happen after this row lock; otherwise two simultaneous requests can
+    // both observe an empty application list and create duplicates.
+    const [insuranceCase] = await tx.$queryRaw<LockedInsuranceCase[]>`
+      SELECT "id", "assignedAgentId"
+      FROM "InsuranceCase"
+      WHERE "id" = ${caseId}
+      FOR UPDATE
+    `
 
-  if (insuranceCase.applications.some((a) => ACTIVE_APPLICATION.includes(a.status))) {
-    return { ok: false, message: 'Já existe uma aplicação em andamento para este caso.' }
-  }
+    if (!insuranceCase || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, insuranceCase)) {
+      return { ok: false, message: 'Caso não encontrado ou fora da sua carteira.' }
+    }
 
-  await prisma.$transaction([
-    prisma.application.create({
+    const activeApplication = await tx.application.findFirst({
+      where: { caseId, status: { in: ACTIVE_APPLICATION } },
+      select: { id: true },
+    })
+    if (activeApplication) {
+      return { ok: false, message: 'Já existe uma aplicação em andamento para este caso.' }
+    }
+
+    await tx.application.create({
       data: {
         caseId,
         status: 'STARTED',
         requirements: { create: STANDARD_REQUIREMENTS.map((title) => ({ title })) },
       },
-    }),
-    prisma.caseTimelineEvent.create({
+    })
+    await tx.caseTimelineEvent.create({
       data: {
         caseId,
         type: 'APPLICATION_STARTED',
         title: 'Aplicação iniciada',
         body: `Checklist padrão criado com ${STANDARD_REQUIREMENTS.length} requirements.`,
       },
-    }),
-  ])
+    })
+    await advanceCaseCrmToSystemStage(tx, {
+      caseId,
+      systemKey: 'APPLICATION',
+      actorUserId: agent.userId,
+    })
+
+    return { ok: true }
+  })
+
+  if (!result.ok) return result
 
   revalidatePath(`/agent/cases/${caseId}`)
-  return { ok: true }
+  revalidatePath('/agent/cases')
+  revalidatePath('/agent')
+  revalidatePath('/agent/activities')
+  return result
 }
 
 export async function addCaseNote(caseId: string, body: string): Promise<ActionResult> {
@@ -128,44 +209,6 @@ export async function addCaseNote(caseId: string, body: string): Promise<ActionR
     data: { caseId, type: 'NOTE', title: 'Nota', body: text },
   })
   revalidatePath(`/agent/cases/${caseId}`)
-  return { ok: true }
-}
-
-export async function addFollowUp(caseId: string, title: string, dueAt: string): Promise<ActionResult> {
-  const text = title.trim()
-  if (!text) return { ok: false, message: 'Descreva o follow-up.' }
-  const due = new Date(dueAt)
-  if (Number.isNaN(due.getTime())) return { ok: false, message: 'Data de follow-up inválida.' }
-
-  const { scope } = await agentScopeIds()
-  const insuranceCase = await prisma.insuranceCase.findUnique({
-    where: { id: caseId },
-    select: { id: true, assignedAgentId: true },
-  })
-  if (!insuranceCase || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, insuranceCase)) {
-    return { ok: false, message: 'Caso não encontrado ou fora da sua carteira.' }
-  }
-
-  await prisma.caseTimelineEvent.create({
-    data: { caseId, type: 'FOLLOW_UP', title: text, dueAt: due },
-  })
-  revalidatePath(`/agent/cases/${caseId}`)
-  return { ok: true }
-}
-
-export async function completeFollowUp(eventId: string): Promise<ActionResult> {
-  const { scope } = await agentScopeIds()
-  const event = await prisma.caseTimelineEvent.findUnique({
-    where: { id: eventId },
-    select: { id: true, caseId: true, doneAt: true, insuranceCase: { select: { assignedAgentId: true } } },
-  })
-  if (!event || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, event.insuranceCase)) {
-    return { ok: false, message: 'Follow-up não encontrado ou fora da sua carteira.' }
-  }
-  if (event.doneAt) return { ok: true } // idempotent — already done
-
-  await prisma.caseTimelineEvent.update({ where: { id: eventId }, data: { doneAt: new Date() } })
-  revalidatePath(`/agent/cases/${event.caseId}`)
   return { ok: true }
 }
 
