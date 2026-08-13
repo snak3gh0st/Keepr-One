@@ -10,6 +10,7 @@ export type NavIconName =
   | "users"
   | "document"
   | "money"
+  | "calendar"
   | "link"
   | "chat";
 
@@ -76,6 +77,13 @@ const ICON_PATHS: Record<NavIconName, ReactNode> = {
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <circle cx="12" cy="12" r="3" />
       <path d="M7 9h.01M17 15h.01" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M8 3v4M16 3v4M3 10h18" />
+      <path d="M8 14h.01M12 14h.01M16 14h.01M8 17.5h.01M12 17.5h.01" />
     </>
   ),
   link: (

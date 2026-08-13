@@ -7,6 +7,12 @@ import type { Prisma, PrismaClient } from '@prisma/client'
 import { NATIONAL_LIFE_PROVIDER } from '../constants'
 import type { NationalLifeGridKey } from '../portal-grid-client'
 import {
+  syncConfirmedCasePromotionCreditsSafely,
+  syncConfirmedInforcePromotionCreditsSafely,
+  type PromotionCreditSyncResult,
+  type PromotionDatabase,
+} from '../promotion-credit-sync'
+import {
   planReadGridStages,
   planReadPageStages,
   planReadExportStages,
@@ -814,6 +820,46 @@ async function existingReceipt(db: LocalConnectorDb, input: IngestInput) {
   return publicReceipt(receipt)
 }
 
+function supportsPromotionSync(db: LocalConnectorDb): db is LocalConnectorDb & PromotionDatabase {
+  return 'agent' in db && typeof (db as { agent?: unknown }).agent === 'object'
+}
+
+async function syncLocalPromotionCredits(
+  db: LocalConnectorDb,
+  input: IngestInput,
+  observedAt: Date,
+): Promise<PromotionCreditSyncResult | undefined> {
+  // Production passes the full Prisma client. Narrow test/in-memory stores keep
+  // the legacy ingest contract and simply do not expose the promotion models.
+  if (!supportsPromotionSync(db)) return undefined
+
+  const plan = planRawIngest(input.gridKey, input.envelope.records)
+  if (plan.target === 'CASE_SNAPSHOT') {
+    return syncConfirmedCasePromotionCreditsSafely(
+      {
+        agentId: input.agentId,
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+        gridKey: input.gridKey,
+        snapshots: plan.snapshots,
+        fetchedAt: observedAt,
+      },
+      db,
+    )
+  }
+  if (plan.target === 'INFORCE_POLICY') {
+    return syncConfirmedInforcePromotionCreditsSafely(
+      {
+        agentId: input.agentId,
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+        snapshots: plan.snapshots,
+        fetchedAt: observedAt,
+      },
+      db,
+    )
+  }
+  return undefined
+}
+
 async function receiptForSequence(
   tx: Prisma.TransactionClient,
   input: IngestInput,
@@ -831,11 +877,14 @@ async function receiptForSequence(
 }
 
 export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: IngestInput) {
+  const observedAt = new Date(input.envelope.observedAt)
   const duplicate = await existingReceipt(db, input)
-  if (duplicate) return { receipt: duplicate, duplicate: true }
+  if (duplicate) {
+    const promotionCredits = await syncLocalPromotionCredits(db, input, observedAt)
+    return { receipt: duplicate, duplicate: true, promotionCredits }
+  }
 
   const now = input.now ?? new Date()
-  const observedAt = new Date(input.envelope.observedAt)
   try {
     const result = await db.$transaction(async (tx) => {
       const run = await tx.nationalLifeSyncRun.findFirst({
@@ -966,7 +1015,12 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
       }
       return { receipt: created, duplicate: false as const }
     })
-    return { receipt: publicReceipt(result.receipt), duplicate: result.duplicate }
+    const promotionCredits = await syncLocalPromotionCredits(db, input, observedAt)
+    return {
+      receipt: publicReceipt(result.receipt),
+      duplicate: result.duplicate,
+      promotionCredits,
+    }
   } catch (error) {
     if (error instanceof LocalConnectorRunError) throw error
     if (

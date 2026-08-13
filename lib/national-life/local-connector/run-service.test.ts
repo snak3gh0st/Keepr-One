@@ -705,6 +705,71 @@ describe('local connector runs', () => {
     }))
   })
 
+  it('keeps the local snapshot receipt successful when promotion sync needs review', async () => {
+    const caseUpsert = vi.fn().mockResolvedValue({})
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'run_1', plannedGridKeys: ['NEW_BUSINESS'] }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      nationalLifeConnectorStageReceipt: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 'receipt-promotion-review',
+          deviceId: 'device-1',
+          runId: 'run_1',
+          gridKey: 'NEW_BUSINESS',
+          sequence: 0,
+          truncated: false,
+          contentHash: '9'.repeat(64),
+          recordCount: 1,
+          writtenCount: 1,
+          idempotencyKey: 'nlc:run_1:NEW_BUSINESS:promotion-review',
+          createdAt: now,
+        }),
+        findMany: vi.fn().mockResolvedValue([{ gridKey: 'NEW_BUSINESS' }]),
+      },
+      nationalLifeCaseSnapshot: { upsert: caseUpsert },
+      nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
+    }
+    const db = {
+      agent: { findMany: vi.fn().mockRejectedValue(new Error('promotion ledger unavailable')) },
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+    } as never
+
+    const result = await ingestLocalConnectorStage(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      gridKey: 'NEW_BUSINESS',
+      idempotencyKey: 'nlc:run_1:NEW_BUSINESS:promotion-review',
+      contentHash: '9'.repeat(64),
+      now,
+      envelope: {
+        schemaVersion: 2,
+        runId: 'run_1',
+        gridKey: 'NEW_BUSINESS',
+        sequence: 0,
+        observedAt: '2026-08-04T00:00:00.000Z',
+        recordsTotal: 1,
+        truncated: false,
+        records: [{ PolicyNo: 'X-PROMOTION-REVIEW' }],
+      },
+    })
+
+    expect(caseUpsert).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({
+      duplicate: false,
+      receipt: { writtenCount: 1 },
+      promotionCredits: {
+        status: 'NEEDS_REVIEW',
+        skipped: { PROMOTION_WRITER_FAILED: 1 },
+      },
+    })
+  })
+
   it('routes a report grid to report rows with the untouched row', async () => {
     const reportUpsert = vi.fn().mockResolvedValue({})
     const tx = {

@@ -14,6 +14,8 @@ export function formatCompactMoney(value: number): string {
     style: 'currency',
     currency: 'USD',
     notation: 'compact',
+    minimumFractionDigits: 0,
     maximumFractionDigits: 2,
+    trailingZeroDisplay: 'stripIfInteger',
   }).format(value)
 }

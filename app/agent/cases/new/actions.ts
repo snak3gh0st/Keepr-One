@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { revalidatePath } from 'next/cache'
+import { getOrCreateNewLeadStageId } from '@/lib/crm'
 
 const NewCaseSchema = z.object({
   firstName: z.string().trim().min(1, 'Informe o nome.'),
@@ -47,6 +48,7 @@ export async function createInsuranceCase(formData: FormData): Promise<CreateCas
   const data = parsed.data
 
   const insuranceCase = await prisma.$transaction(async (tx) => {
+    const crmStageId = await getOrCreateNewLeadStageId(tx, agent.id)
     const prospect = await tx.prospect.create({
       data: {
         firstName: data.firstName,
@@ -65,6 +67,7 @@ export async function createInsuranceCase(formData: FormData): Promise<CreateCas
       data: {
         prospectId: prospect.id,
         assignedAgentId: agent.id,
+        crmStageId,
         objective: data.objective,
         productType: data.productType,
         targetCoverage: data.targetCoverage ?? null,

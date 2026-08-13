@@ -18,9 +18,15 @@
     "backfill:reviews": "tsx prisma/backfill-reviews.ts"
   },
   "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "seed": "NODE_OPTIONS=--conditions=react-server tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@fullcalendar/core": "^6.1.21",
+    "@fullcalendar/daygrid": "^6.1.21",
+    "@fullcalendar/interaction": "^6.1.21",
+    "@fullcalendar/luxon3": "^6.1.21",
+    "@fullcalendar/react": "^6.1.21",
+    "@fullcalendar/timegrid": "^6.1.21",
     "@gsap/react": "^2.1.2",
     "@prisma/client": "^6.19.3",
     "@sentry/nextjs": "^10.68.0",
@@ -33,12 +39,14 @@
     "gsap": "^3.15.0",
     "http-proxy": "^1.18.1",
     "ioredis": "^6.0.0",
+    "luxon": "^3.7.2",
     "motion": "^12.42.2",
     "next": "16.2.10",
     "playwright-core": "^1.62.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "resend": "^6.18.1",
+    "server-only": "^0.0.1",
     "steel-sdk": "^0.18.0",
     "zod": "^4.4.3"
   },
