@@ -305,6 +305,19 @@ export async function startLocalConnectorRun(
           where: { runId: active.id, deviceId: input.deviceId, resolvedAt: null },
           data: { resolvedAt: now, updatedAt: now },
         })
+      } else if (planChanged) {
+        // A plan migration must also retire failures for sources removed from
+        // that plan. Otherwise the final stage counts an obsolete failure and
+        // the run finishes as "2 failed" while only one planned source failed.
+        await db.nationalLifeConnectorStageFailure.updateMany({
+          where: {
+            runId: active.id,
+            deviceId: input.deviceId,
+            gridKey: { in: [...DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS] },
+            resolvedAt: null,
+          },
+          data: { resolvedAt: now, updatedAt: now },
+        })
       }
     }
     let resume: { sequence: number; offset: number } | undefined
