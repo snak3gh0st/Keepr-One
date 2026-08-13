@@ -2,6 +2,11 @@ export const NLG_ORIGIN = 'https://www.nationallife.com'
 export const NLG_AUTH0_ORIGIN = 'https://nlg-prod.auth0.com'
 export const LOGIN_PATH = '/agent/auth/login'
 
+// This module is imported by the server-side parity tests as well as by WXT.
+// Keep the declaration beside the compile-time replacement so the root Next.js
+// typecheck does not depend on the extension-only globals.d.ts being included.
+declare const __KEEPR_ORIGIN__: string
+
 // National Life currently redirects the old menu URL to this authenticated
 // grid route. Keep the alias here because an in-flight run can have persisted
 // the old server plan before an extension update.
