@@ -22,6 +22,8 @@ const INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients/all-clien
 const LEGACY_INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients'
 const COMMISSIONS_PATH = '/agent/compensation/commissions/paid-commissions'
 const PROJECTED_COMMISSIONS_PATH = '/agent/compensation/commissions/projected-commissions'
+const PAYABLE_PERSONAL_PATH =
+  '/agent/compensation/commissions/projected-commissions/payable-gross-commissions/personal'
 
 const TWO_STAGE_PLAN = [
   { capability: 'READ_GRID', params: { gridKey: 'NEW_BUSINESS', navigatePath: NEW_BUSINESS_PATH } },
@@ -354,6 +356,31 @@ describe('empurrão de atualização no caminho real', () => {
 })
 
 describe('background plan executor', () => {
+  it('forwards an explicit full refresh to the run endpoint', async () => {
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      runId: 'run-full',
+      stages: TWO_STAGE_PLAN,
+      completedStages: 0,
+      nextStageIndex: 0,
+    } as never)
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+
+    emit(
+      'runtime.onMessageExternal',
+      { type: 'START_NATIONAL_LIFE_SYNC', forceRefresh: true },
+      EXTERNAL_SENDER,
+      vi.fn(),
+    )
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST',
+      pathname: '/api/agent/integrations/national-life/local-connector/runs',
+      body: { forceRefresh: true },
+    }))
+  })
+
   it('captures and uploads a READ_PAGE source without a DataTables request', async () => {
     const pagePlan = [{
       capability: 'READ_PAGE',
@@ -428,7 +455,7 @@ describe('background plan executor', () => {
       runId: 'run-1', carrierTabId: 7, plan: THREE_STAGE_PLAN, stageIndex: 1, status: 'NAVIGATING',
     }
     tabs.query.mockResolvedValue([{
-      id: 7, active: false, url: `${NLG}${PROJECTED_COMMISSIONS_PATH}`,
+      id: 7, active: false, url: `${NLG}${PAYABLE_PERSONAL_PATH}`,
     }])
     vi.mocked(signedJsonRequest).mockResolvedValue({ nextStageIndex: 2, terminal: false } as never)
     await bootBackground()
@@ -682,6 +709,59 @@ describe('background plan executor', () => {
     )
     expect(tabs.update).not.toHaveBeenCalled()
     expect(readSync()).toMatchObject({ stageIndex: 0, status: 'EXTRACTING' })
+  })
+
+  it('starts a legacy projected stage on the payable personal report', async () => {
+    storage.sync = {
+      runId: 'run-projected-redirect',
+      carrierTabId: 12,
+      plan: THREE_STAGE_PLAN,
+      stageIndex: 1,
+      status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{
+      id: 12,
+      active: false,
+      url: `${NLG}${PAYABLE_PERSONAL_PATH}`,
+    }])
+    await bootBackground()
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(
+      12,
+      expect.objectContaining({ type: 'BEGIN_GRID', gridKey: 'PROJECTED_COMMISSIONS' }),
+    )
+    expect(tabs.update).not.toHaveBeenCalled()
+  })
+
+  it('isolates a source after repeated unexpected carrier redirects', async () => {
+    storage.sync = {
+      runId: 'run-route-loop',
+      carrierTabId: 7,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 0,
+      status: 'NAVIGATING',
+    }
+    const unexpected = `${NLG}/agent/unexpected-report`
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: unexpected }])
+    vi.mocked(signedJsonRequest).mockResolvedValue({ nextStageIndex: 1, terminal: false } as never)
+    await bootBackground()
+
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { url: unexpected })
+    await flush()
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { url: unexpected })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST',
+      pathname: '/api/agent/integrations/national-life/local-connector/runs/run-route-loop/stages/NEW_BUSINESS/fail',
+      body: {
+        runId: 'run-route-loop',
+        gridKey: 'NEW_BUSINESS',
+        code: 'PORTAL_ROUTE_CHANGED',
+        retryable: true,
+      },
+    }))
+    expect(readSync()).toMatchObject({ stageIndex: 1, status: 'NAVIGATING' })
   })
 
   it('returns to the current stage when a stale carrier page is open', async () => {

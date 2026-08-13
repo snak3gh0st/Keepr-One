@@ -200,7 +200,7 @@ describe('NationalLifeSyncProgress', () => {
       />,
     )
 
-    expect(screen.getByText('13 of 31 known sources automated')).toBeTruthy()
+    expect(screen.getByText('12 of 30 known sources automated')).toBeTruthy()
   })
 
   it('shows an isolated failure as non-blocking while the remaining areas continue', () => {
@@ -217,5 +217,36 @@ describe('NationalLifeSyncProgress', () => {
     expect(screen.getByText('5 of 13 portal areas checked')).toBeTruthy()
     expect(screen.getByText(/The sync is continuing with the remaining areas/)).toBeTruthy()
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '5')
+  })
+
+  it('keeps resumed progress stable and labels verified areas as reused', () => {
+    render(
+      <NationalLifeSyncProgress
+        initialStatus={status({
+          completed: 4,
+          total: 12,
+          currentGridKey: 'CLIENT_INTELLIGENCE',
+          currentGridLabel: 'client intelligence',
+          stageCoverage: [
+            {
+              gridKey: 'NEW_BUSINESS',
+              label: 'new business',
+              state: 'REUSED',
+              verifiedRecords: 859,
+            },
+            {
+              gridKey: 'CLIENT_INTELLIGENCE',
+              label: 'client intelligence',
+              state: 'READING',
+              verifiedRecords: null,
+            },
+          ],
+        })}
+      />,
+    )
+
+    expect(screen.getByText('Reused')).toBeTruthy()
+    expect(screen.getByText(/1 previously verified area was reused/)).toBeTruthy()
+    expect(screen.getByText('4 of 12 portal areas checked')).toBeTruthy()
   })
 })

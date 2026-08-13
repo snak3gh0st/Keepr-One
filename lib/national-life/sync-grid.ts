@@ -23,7 +23,6 @@ const CASE_SNAPSHOT_GRIDS: readonly NationalLifeSyncStage[] = [
 ]
 const REPORT_ROW_GRIDS: readonly NationalLifeSyncStage[] = [
   'PAID_COMMISSIONS',
-  'PROJECTED_COMMISSIONS',
   'CLIENT_INTELLIGENCE',
   'CORRESPONDENCE',
   'COMMISSIONS_PAYMENT_PORTAL',

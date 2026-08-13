@@ -189,6 +189,28 @@ describe('local connector runs route', () => {
     )
   })
 
+  it('forwards an explicit full-refresh request without changing the default', async () => {
+    mockVerify.mockResolvedValueOnce({ deviceId: 'dev_1', agentId: 'agent_1' })
+    mockStartRun.mockResolvedValueOnce({
+      runId: 'run_1', schemaVersion: 3, stages: [], duplicate: false, completedStages: 0,
+    })
+    const request = new Request(
+      'https://app.keepr.one/api/agent/integrations/national-life/local-connector/runs',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ forceRefresh: true }),
+      },
+    )
+
+    expect((await POST(request)).status).toBe(201)
+    expect(mockStartRun).toHaveBeenCalledWith(
+      {},
+      { deviceId: 'dev_1', agentId: 'agent_1' },
+      { forceRefresh: true },
+    )
+  })
+
   it('starts a run when the signature and start succeed', async () => {
     mockVerify.mockResolvedValueOnce({ deviceId: 'dev_1', agentId: 'agent_1' })
     mockStartRun.mockResolvedValueOnce({

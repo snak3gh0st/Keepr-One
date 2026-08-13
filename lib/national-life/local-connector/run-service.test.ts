@@ -129,6 +129,50 @@ describe('local connector runs', () => {
     expect(create).not.toHaveBeenCalled()
   })
 
+  it('keeps verified failed-run checkpoints reusable for 24 hours', async () => {
+    const findFirst = vi.fn().mockResolvedValue(null)
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn().mockResolvedValue({ id: 'run-new' }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst,
+      },
+    } as never
+
+    await startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now })
+
+    expect(findFirst.mock.calls[1]![0].where.OR[0]).toEqual({
+      state: 'FAILED',
+      updatedAt: { gte: new Date(now.getTime() - 24 * 60 * 60_000) },
+    })
+  })
+
+  it('starts a fresh run only when a full refresh is explicitly requested', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'run-full' })
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-failed',
+        state: 'FAILED',
+        plannedGridKeys: ['NEW_BUSINESS'],
+        completedStages: 1,
+      })
+    const db = {
+      nationalLifeSyncRun: {
+        create,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst,
+      },
+    } as never
+
+    await expect(startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { forceRefresh: true },
+    )).resolves.toMatchObject({ runId: 'run-full', duplicate: false, completedStages: 0 })
+    expect(create).toHaveBeenCalledOnce()
+  })
+
   it('resumes a recent failed run even when its first stage was interrupted', async () => {
     const create = vi.fn()
     const updateMany = vi
@@ -227,7 +271,11 @@ describe('local connector runs', () => {
       completedStages: 1,
     })
     expect(runUpdateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      data: expect.objectContaining({ currentGridKey: 'PROJECTED_COMMISSIONS', failedStages: 0 }),
+      data: expect.objectContaining({
+        plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        currentGridKey: 'INFORCE_CLIENTS',
+        failedStages: 0,
+      }),
     }))
     expect(failureUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { runId: 'run-partial', deviceId: 'device-1', resolvedAt: null },

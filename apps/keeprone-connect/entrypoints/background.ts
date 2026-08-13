@@ -76,6 +76,10 @@ const BRIDGE_RETRY_DELAYS_MS = [150, 300, 600, 1_000, 1_500]
 // de uma espera curta.
 const TAB_EDIT_RETRY_DELAYS_MS = [50, 100, 200, 400, 800]
 const SYNC_WATCHDOG_ALARM = 'keeprone-national-life-sync-watchdog'
+// One navigation can legitimately start from the previous grid. A second
+// redirect can be the carrier's canonical route. If that canonical route still
+// does not match, a third trip would be a loop, so isolate the source instead.
+const MAX_STAGE_NAVIGATION_ATTEMPTS = 2
 
 function errorCode(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
@@ -426,7 +430,7 @@ async function failSync(code: string, selfTabId?: number) {
   if (OUTDATED_CODES.includes(code)) await nudgeUpdateIfSafe(selfTabId)
 }
 
-async function createRun() {
+async function createRun(forceRefresh = false) {
   const previous = await readSyncState()
   const device = await readDeviceState()
   if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
@@ -457,7 +461,7 @@ async function createRun() {
     deviceId: device.deviceId,
     method: 'POST',
     pathname: '/api/agent/integrations/national-life/local-connector/runs',
-    body: {},
+    body: forceRefresh ? { forceRefresh: true } : {},
   })
   if (typeof response.runId !== 'string' || response.runId.length === 0) {
     throw new Error('INVALID_RUN_RESPONSE')
@@ -497,6 +501,8 @@ async function createRun() {
       stageIndex: nextStageIndex,
       resumeSequence,
       resumeOffset,
+      navigationGridKey: undefined,
+      navigationAttempts: undefined,
       status: 'NAVIGATING',
       errorCode: undefined,
     })
@@ -507,6 +513,8 @@ async function createRun() {
       stageIndex: nextStageIndex,
       resumeSequence,
       resumeOffset,
+      navigationGridKey: undefined,
+      navigationAttempts: undefined,
       status: 'NAVIGATING',
       carrierTabId: previous.carrierTabId,
     })
@@ -573,6 +581,9 @@ async function navigatePendingGrid() {
     const targetPath = canonicalNationalLifeNavigatePath(gridKey, stage.params.navigatePath)
     const target = `${NLG_ORIGIN}${targetPath}`
     const existing = await findReusableConnectorTab(state)
+    const navigationAttempts = state.navigationGridKey === gridKey
+      ? state.navigationAttempts ?? 0
+      : 0
 
     if (existing?.id !== undefined) {
       if (state.carrierTabId !== existing.id) {
@@ -596,11 +607,20 @@ async function navigatePendingGrid() {
             await handleTabReady(existing.id, existing.url)
             return
           }
+          if (navigationAttempts >= MAX_STAGE_NAVIGATION_ATTEMPTS) {
+            return skipFailedStage(existing.id, gridKey, 'PORTAL_ROUTE_CHANGED')
+          }
         } catch {
           // Navigate the one bound tab when its URL is unavailable or malformed.
         }
       }
-      await writeSyncState({ ...(await readSyncState()), status: 'NAVIGATING', errorCode: undefined })
+      await writeSyncState({
+        ...(await readSyncState()),
+        status: 'NAVIGATING',
+        errorCode: undefined,
+        navigationGridKey: gridKey,
+        navigationAttempts: navigationAttempts + 1,
+      })
       // Reuse the existing tab even when it is visible. Creating a background tab
       // here was the source of the tab storm after retries and worker recovery.
       await updateTab(existing.id, { url: target })
@@ -617,12 +637,14 @@ async function navigatePendingGrid() {
         carrierTabId: created.id,
         status: 'NAVIGATING',
         errorCode: undefined,
+        navigationGridKey: gridKey,
+        navigationAttempts: 1,
       })
     }
   })
 }
 
-async function startNewSync() {
+async function startNewSync(forceRefresh = false) {
   return withSyncLock(async () => {
     try {
       const current = await readSyncState()
@@ -636,7 +658,7 @@ async function startNewSync() {
         // Re-enter the signed start endpoint. It reuses a live run, but first
         // expires a dead one; the response handling above preserves the cursor
         // for the live case and starts at stage zero for a reclaimed run.
-        await createRun()
+        await createRun(forceRefresh)
         await navigatePendingGrid()
         const after = await readSyncState()
         if (after.status === 'AUTH_REQUIRED') {
@@ -644,7 +666,7 @@ async function startNewSync() {
         }
         return { ok: true as const, status: after.status }
       }
-      await createRun()
+      await createRun(forceRefresh)
       await navigatePendingGrid()
       return { ok: true as const, status: 'NAVIGATING' as const }
     } catch (error) {
@@ -686,7 +708,13 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
     offsetStart: resumeOffset,
   }
   activeNavigations.set(tabId, { ...message, tabId })
-  await writeSyncState({ ...(await readSyncState()), status: 'EXTRACTING', errorCode: undefined })
+  await writeSyncState({
+    ...(await readSyncState()),
+    status: 'EXTRACTING',
+    errorCode: undefined,
+    navigationGridKey: undefined,
+    navigationAttempts: undefined,
+  })
   try {
     // `tabs.onUpdated(..., complete)` can arrive a few hundred milliseconds
     // before the document_start bridge has registered its listener. Treat that
@@ -1163,7 +1191,7 @@ export default defineBackground(() => {
       respond(sendResponse, unpairConnector())
       return true
     }
-    respond(sendResponse, startNewSync())
+    respond(sendResponse, startNewSync(message.forceRefresh === true))
     return true
   })
 

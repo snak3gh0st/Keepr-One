@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import {
   isNationalLifePageDiscoveryEnabled,
   isNationalLifeLocalConnectorEnabled,
@@ -9,6 +10,7 @@ import {
 } from '@/lib/national-life/local-connector/device-signature'
 import {
   LocalConnectorRequestError,
+  parseJsonBody,
   readLimitedBody,
 } from '@/lib/national-life/local-connector/request'
 import { refuseLocalConnectorCapability } from '@/lib/national-life/local-connector/remote-config'
@@ -27,6 +29,7 @@ const NO_STORE = { 'Cache-Control': 'no-store' }
 /// ainda para um loop antes de ele custar uma sessão inteira do carrier.
 const RUN_START_MAX = 10
 const RUN_START_WINDOW_SECONDS = 600
+const bodySchema = z.strictObject({ forceRefresh: z.literal(true).optional() })
 
 export async function POST(request: Request) {
   if (!isNationalLifeLocalConnectorEnabled()) return localConnectorUnavailableResponse()
@@ -44,6 +47,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await readLimitedBody(request, MAX_RUN_BODY_BYTES)
+    const payload = bodySchema.parse(parseJsonBody(body))
     const device = await verifyLocalConnectorDeviceRequest(prisma, {
       method: request.method,
       pathname: new URL(request.url).pathname,
@@ -62,11 +66,13 @@ export async function POST(request: Request) {
       )
     }
 
-    const run = await startLocalConnectorRun(
-      prisma,
-      device,
-      pageDiscoveryEnabled ? { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS } : undefined,
-    )
+    const runOptions = pageDiscoveryEnabled || payload.forceRefresh === true
+      ? {
+          ...(pageDiscoveryEnabled ? { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS } : {}),
+          ...(payload.forceRefresh === true ? { forceRefresh: true } : {}),
+        }
+      : undefined
+    const run = await startLocalConnectorRun(prisma, device, runOptions)
     return Response.json(run, { status: 201, headers: NO_STORE })
   } catch (error) {
     if (error instanceof LocalConnectorSignatureError) {
@@ -79,7 +85,7 @@ export async function POST(request: Request) {
         { status: 401, headers: { ...NO_STORE, 'x-fyntra-device-error': error.code } },
       )
     }
-    if (error instanceof LocalConnectorRequestError) {
+    if (error instanceof LocalConnectorRequestError || error instanceof z.ZodError || error instanceof SyntaxError) {
       return Response.json({ error: 'INVALID_REQUEST' }, { status: 400, headers: NO_STORE })
     }
     return Response.json({ error: 'RUN_START_FAILED' }, { status: 500, headers: NO_STORE })

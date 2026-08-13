@@ -18,10 +18,28 @@ const LEGACY_PAID_COMMISSIONS_PATH =
   '/agent/compensation/commissions/paid-commissions'
 const REDIRECTED_PAID_COMMISSIONS_PATH =
   '/agent/compensation/commissions/paid-commissions/commissions-earning-report'
+const LEGACY_PROJECTED_COMMISSIONS_PATH =
+  '/agent/compensation/commissions/projected-commissions'
+const LEGACY_PAYABLE_GROSS_COMMISSIONS_PATH =
+  '/agent/compensation/commissions/projected-commissions/payable-gross-commissions'
+const CANONICAL_PAYABLE_GROSS_COMMISSIONS_PATH =
+  '/agent/compensation/commissions/projected-commissions/payable-gross-commissions/personal'
 
 export function canonicalNationalLifeNavigatePath(gridKey: string, path: string): string {
   if (gridKey === 'INFORCE_CLIENTS' && path === LEGACY_INFORCE_CLIENTS_PATH) {
     return CANONICAL_INFORCE_CLIENTS_PATH
+  }
+  // "Projected commissions" is a menu route, not a separate grid. Older runs
+  // can still contain it, so land them on the payable report instead of
+  // bouncing forever between the menu route and the carrier redirect.
+  if (gridKey === 'PROJECTED_COMMISSIONS' && path === LEGACY_PROJECTED_COMMISSIONS_PATH) {
+    return CANONICAL_PAYABLE_GROSS_COMMISSIONS_PATH
+  }
+  if (
+    gridKey === 'PAYABLE_GROSS_COMMISSIONS' &&
+    path === LEGACY_PAYABLE_GROSS_COMMISSIONS_PATH
+  ) {
+    return CANONICAL_PAYABLE_GROSS_COMMISSIONS_PATH
   }
   return path
 }

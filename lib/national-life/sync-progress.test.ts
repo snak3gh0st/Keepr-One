@@ -6,8 +6,8 @@ import {
 } from './sync-progress'
 
 describe('National Life sync progress', () => {
-  it('has the thirteen read-only portal stages in the execution order', () => {
-    expect(NATIONAL_LIFE_SYNC_STAGES).toHaveLength(13)
+  it('has the twelve distinct read-only portal stages in the execution order', () => {
+    expect(NATIONAL_LIFE_SYNC_STAGES).toHaveLength(12)
     expect(NATIONAL_LIFE_SYNC_STAGES[0]).toBe('NEW_BUSINESS')
     expect(NATIONAL_LIFE_SYNC_STAGES.at(-1)).toBe('PAYABLE_GROSS_COMMISSIONS')
   })
@@ -21,8 +21,8 @@ describe('National Life sync progress', () => {
       ]),
     ).toEqual({
       completed: 2,
-      total: 13,
-      percent: 15,
+      total: 12,
+      percent: 17,
       currentGridKey: 'INFORCE_CLIENTS',
       failed: 0,
     })

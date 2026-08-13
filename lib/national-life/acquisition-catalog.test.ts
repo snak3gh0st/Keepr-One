@@ -7,7 +7,7 @@ describe('National Life acquisition catalogue', () => {
     expect(NATIONAL_LIFE_ACQUISITION_CATALOG.map((source) => source.key)).toEqual(
       NATIONAL_LIFE_READ_COVERAGE.map((source) => source.key),
     )
-    expect(new Set(NATIONAL_LIFE_ACQUISITION_CATALOG.map((source) => source.key)).size).toBe(31)
+    expect(new Set(NATIONAL_LIFE_ACQUISITION_CATALOG.map((source) => source.key)).size).toBe(30)
   })
 
   it('does not activate an official export until its portal request is proven', () => {
@@ -25,7 +25,6 @@ describe('National Life acquisition catalogue', () => {
   it('declares overlapping commission sources instead of double counting them', () => {
     const grouped = NATIONAL_LIFE_ACQUISITION_CATALOG.filter((source) => source.dedupeGroup)
     expect(grouped.map((source) => source.key)).toEqual(expect.arrayContaining([
-      'PROJECTED_COMMISSIONS',
       'PAYABLE_GROSS_COMMISSIONS',
       'PAID_COMMISSIONS',
       'COMMISSIONS_EARNING_REPORT',

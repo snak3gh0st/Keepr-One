@@ -44,6 +44,12 @@ export const LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS = [
   ...NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
 ] as const
 const DISCOVERY_PAGE_KEYS = new Set<NationalLifeGridKey>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
+// The carrier's projected-commission route is only a menu redirect to payable
+// gross commissions. Keep the catalogue key for old envelopes, but never plan
+// it as an independent source again.
+const DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS = new Set<NationalLifeGridKey>([
+  'PROJECTED_COMMISSIONS',
+])
 const UPSERT_CHUNK_SIZE = 100
 
 type LocalConnectorDb = Pick<
@@ -153,7 +159,7 @@ export async function expireStaleLocalConnectorRuns(
 export async function startLocalConnectorRun(
   db: LocalConnectorDb,
   input: { agentId: string; deviceId: string; now?: Date },
-  options?: { gridKeys?: readonly NationalLifeGridKey[] },
+  options?: { gridKeys?: readonly NationalLifeGridKey[]; forceRefresh?: boolean },
 ): Promise<{
   runId: string
   schemaVersion: typeof LOCAL_CONNECTOR_SCHEMA_VERSION
@@ -201,7 +207,7 @@ export async function startLocalConnectorRun(
       OR: [
         {
           state: 'FAILED',
-          updatedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_RUN_TTL_MS) },
+          updatedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_VERIFIED_FRESH_MS) },
         },
         {
           state: 'PARTIAL',
@@ -212,24 +218,33 @@ export async function startLocalConnectorRun(
     orderBy: [{ completedStages: 'desc' }, { createdAt: 'desc' }],
     select: runSelect,
   })
-  const active = running ?? failed ?? await db.nationalLifeSyncRun.findFirst({
-    where: {
-      ...runScope,
-      state: 'COMPLETED',
-      completedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_VERIFIED_FRESH_MS) },
-    },
-    orderBy: { completedAt: 'desc' },
-    select: runSelect,
-  })
+  const completed = options?.forceRefresh
+    ? null
+    : await db.nationalLifeSyncRun.findFirst({
+        where: {
+          ...runScope,
+          state: 'COMPLETED',
+          completedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_VERIFIED_FRESH_MS) },
+        },
+        orderBy: { completedAt: 'desc' },
+        select: runSelect,
+      })
+  const active = running ?? (options?.forceRefresh ? null : failed) ?? completed
   if (active) {
-    const activePlan = plannedGridKeys(active)
-    const receiptCompletedKeys = active.stageCompletions?.map((row) => row.gridKey) ?? []
+    const storedPlan = plannedGridKeys(active)
+    const activePlan = storedPlan.filter((gridKey) => !DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS.has(gridKey))
+    const planChanged = activePlan.length !== storedPlan.length
+    const receiptCompletedKeys = active.stageCompletions
+      ?.map((row) => row.gridKey)
+      .filter((gridKey) => activePlan.includes(gridKey as NationalLifeGridKey)) ?? []
     // Runs created before stage-completion receipts used a verified prefix
     // counter. Preserve that cursor during rollout; current runs use exact keys.
     const completedKeys = receiptCompletedKeys.length > 0
       ? receiptCompletedKeys
       : activePlan.slice(0, active.completedStages)
-    const failedKeys = active.stageFailures?.map((row) => row.gridKey) ?? []
+    const failedKeys = active.stageFailures
+      ?.map((row) => row.gridKey)
+      .filter((gridKey) => activePlan.includes(gridKey as NationalLifeGridKey)) ?? []
     const currentIndex = active.currentGridKey
       ? activePlan.indexOf(active.currentGridKey as NationalLifeGridKey)
       : -1
@@ -243,7 +258,11 @@ export async function startLocalConnectorRun(
         : currentIndex >= 0
           ? currentIndex
           : nextUnsettledStageIndex(activePlan, completedKeys, failedKeys)
-    if (active.state === 'FAILED' || active.state === 'PARTIAL') {
+    const reopening = active.state === 'FAILED' || active.state === 'PARTIAL'
+    const completedStages = completedKeys.filter((key) =>
+      activePlan.includes(key as NationalLifeGridKey),
+    ).length
+    if (reopening || planChanged) {
       // Reopen only the exact run/device/scope selected above. If another
       // retry won the race, its update count is zero and returning the same
       // run remains safe because both callers share the same durable cursor.
@@ -258,10 +277,25 @@ export async function startLocalConnectorRun(
           state: active.state,
         },
         data: {
-          state: 'RUNNING',
-          safeErrorCode: null,
-          completedAt: null,
-          failedStages: 0,
+          ...(reopening
+            ? {
+                state: 'RUNNING' as const,
+                safeErrorCode: null,
+                completedAt: null,
+                failedStages: 0,
+                startedAt: now,
+              }
+            : {
+                failedStages: failedKeys.length,
+                ...(active.state === 'RUNNING' && planChanged ? { startedAt: now } : {}),
+              }),
+          ...(planChanged
+            ? {
+                plannedGridKeys: [...activePlan],
+                totalStages: activePlan.length,
+                completedStages,
+              }
+            : {}),
           currentGridKey: activePlan[nextStageIndex] ?? null,
           updatedAt: now,
         },
@@ -303,7 +337,7 @@ export async function startLocalConnectorRun(
       schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
       stages: planLocalConnectorStages(activePlan),
       duplicate: true as const,
-      completedStages: active.completedStages,
+      completedStages,
       nextStageIndex,
       ...(resume ? { resume } : {}),
     }

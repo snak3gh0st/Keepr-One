@@ -20,13 +20,20 @@ const baseUrl = 'https://app.keeprone.com'
 type RuntimeCallback = (response?: Record<string, unknown>) => void
 
 function installChromeMock(
-  handler: (message: { type: string }, callback: RuntimeCallback) => void,
+  handler: (
+    message: { type: string; forceRefresh?: true },
+    callback: RuntimeCallback,
+  ) => void,
 ) {
   Object.defineProperty(window, 'chrome', {
     configurable: true,
     value: {
       runtime: {
-        sendMessage: (_id: string, message: { type: string }, callback: RuntimeCallback) =>
+        sendMessage: (
+          _id: string,
+          message: { type: string; forceRefresh?: true },
+          callback: RuntimeCallback,
+        ) =>
           handler(message, callback),
       },
     },
@@ -231,6 +238,7 @@ describe('NationalLifeLocalConnectorCard', () => {
   it('shows a sync action when an existing paired computer is detected', async () => {
     let started = false
     const messages: string[] = []
+    const refreshModes: Array<true | undefined> = []
     const syncStarted = vi.fn()
     window.addEventListener(NATIONAL_LIFE_SYNC_STARTED_EVENT, syncStarted)
     installChromeMock((message, callback) => {
@@ -244,6 +252,7 @@ describe('NationalLifeLocalConnectorCard', () => {
         return
       }
       if (message.type === 'START_NATIONAL_LIFE_SYNC') {
+        refreshModes.push(message.forceRefresh)
         started = true
         callback({ ok: true })
         return
@@ -269,6 +278,9 @@ describe('NationalLifeLocalConnectorCard', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('up to date'))
     expect(messages).toContain('START_NATIONAL_LIFE_SYNC')
     expect(syncStarted).toHaveBeenCalledOnce()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh all areas' }))
+    await waitFor(() => expect(refreshModes).toEqual([undefined, true]))
   })
 
   it('surfaces AUTH_REQUIRED while the agent logs into National Life', async () => {

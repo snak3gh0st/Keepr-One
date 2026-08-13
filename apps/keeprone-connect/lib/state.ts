@@ -35,6 +35,10 @@ export type SyncState = {
   /// Checkpoint durável devolvido pelo servidor para a fase atual.
   resumeSequence?: number
   resumeOffset?: number
+  /// Counts consecutive attempts to reach the current carrier route. It is
+  /// persisted because Chrome can evict the worker between redirects.
+  navigationGridKey?: string
+  navigationAttempts?: number
   status: SyncStatus
   errorCode?: string
   /// Contador monotônico de lotes enviados neste run. Existe porque `status` e

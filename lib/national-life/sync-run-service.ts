@@ -54,7 +54,7 @@ export type NationalLifeSyncStatus = {
 export type NationalLifeStageCoverage = {
   gridKey: string
   label: string | null
-  state: 'PENDING' | 'READING' | 'CAPTURED' | 'VERIFIED' | 'FAILED'
+  state: 'PENDING' | 'READING' | 'CAPTURED' | 'VERIFIED' | 'REUSED' | 'FAILED'
   verifiedRecords: number | null
 }
 
@@ -100,23 +100,31 @@ export function localStageCoverage(input: {
   totalStages: number
   currentGridKey: string | null
   failedGridKeys: readonly string[]
-  completions: ReadonlyArray<{ gridKey: string; expectedRecordCount: number }>
+  resumedAt: Date | null
+  completions: ReadonlyArray<{
+    gridKey: string
+    expectedRecordCount: number
+    completedAt: Date
+  }>
 }): NationalLifeStageCoverage[] {
   const planned = input.plannedGridKeys.length > 0
     ? input.plannedGridKeys
     : NATIONAL_LIFE_SYNC_STAGES.slice(0, input.totalStages)
-  const completed = new Map(input.completions.map((row) => [row.gridKey, row.expectedRecordCount]))
+  const completed = new Map(input.completions.map((row) => [row.gridKey, row]))
   return planned.map((gridKey) => ({
     gridKey,
     label: nationalLifeSyncGridLabel(gridKey),
     state: completed.has(gridKey)
-      ? DISCOVERY_PAGE_KEYS.has(gridKey) ? 'CAPTURED' : 'VERIFIED'
+      ? input.resumedAt &&
+          completed.get(gridKey)!.completedAt.getTime() < input.resumedAt.getTime()
+        ? 'REUSED'
+        : DISCOVERY_PAGE_KEYS.has(gridKey) ? 'CAPTURED' : 'VERIFIED'
       : gridKey === input.currentGridKey
         ? 'READING'
         : input.failedGridKeys.includes(gridKey)
           ? 'FAILED'
           : 'PENDING',
-    verifiedRecords: completed.get(gridKey) ?? null,
+    verifiedRecords: completed.get(gridKey)?.expectedRecordCount ?? null,
   }))
 }
 
@@ -268,13 +276,16 @@ export async function getNationalLifeSyncStatus(
       currentGridKey: true,
       plannedGridKeys: true,
       safeErrorCode: true,
+      startedAt: true,
       completedAt: true,
       jobs: {
         select: { state: true, syncStageIndex: true, syncGridKey: true },
         orderBy: { syncStageIndex: 'asc' },
       },
       stageReceipts: { select: { recordCount: true, writtenCount: true } },
-      stageCompletions: { select: { gridKey: true, expectedRecordCount: true } },
+      stageCompletions: {
+        select: { gridKey: true, expectedRecordCount: true, completedAt: true },
+      },
       stageFailures: {
         where: { resolvedAt: null },
         select: { gridKey: true },
@@ -308,6 +319,7 @@ export async function getNationalLifeSyncStatus(
         totalStages: total,
         currentGridKey: run.currentGridKey,
         failedGridKeys: run.stageFailures.map((failure) => failure.gridKey),
+        resumedAt: run.startedAt,
         completions: run.stageCompletions,
       }),
     }

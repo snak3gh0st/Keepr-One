@@ -21,6 +21,14 @@ describe('message validation', () => {
     expect(parseExternalMessage({ type: 'START_NATIONAL_LIFE_SYNC' })).toEqual({
       type: 'START_NATIONAL_LIFE_SYNC',
     })
+    expect(parseExternalMessage({
+      type: 'START_NATIONAL_LIFE_SYNC',
+      forceRefresh: true,
+    })).toEqual({ type: 'START_NATIONAL_LIFE_SYNC', forceRefresh: true })
+    expect(parseExternalMessage({
+      type: 'START_NATIONAL_LIFE_SYNC',
+      forceRefresh: false,
+    })).toBeNull()
     expect(parseExternalMessage({ type: 'GET_CONNECTOR_STATUS' })).toEqual({
       type: 'GET_CONNECTOR_STATUS',
     })

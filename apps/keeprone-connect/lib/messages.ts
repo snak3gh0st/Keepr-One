@@ -21,6 +21,7 @@ export type PairConnectorMessage = {
 
 export type StartSyncMessage = {
   type: 'START_NATIONAL_LIFE_SYNC'
+  forceRefresh?: true
 }
 
 export type GetConnectorStatusMessage = {
@@ -162,11 +163,13 @@ export function isRawGridRow(value: unknown): value is RawGridRow {
 
 export function parseExternalMessage(value: unknown): ExternalMessage | null {
   if (!isObject(value) || typeof value.type !== 'string') return null
-  if (
-    value.type === 'START_NATIONAL_LIFE_SYNC' ||
-    value.type === 'GET_CONNECTOR_STATUS' ||
-    value.type === 'UNPAIR_CONNECTOR'
-  ) {
+  if (value.type === 'START_NATIONAL_LIFE_SYNC') {
+    if (hasExactKeys(value, ['type'])) return { type: value.type }
+    return hasExactKeys(value, ['type', 'forceRefresh']) && value.forceRefresh === true
+      ? { type: value.type, forceRefresh: true }
+      : null
+  }
+  if (value.type === 'GET_CONNECTOR_STATUS' || value.type === 'UNPAIR_CONNECTOR') {
     return hasExactKeys(value, ['type']) ? { type: value.type } : null
   }
   if (value.type !== 'PAIR_CONNECTOR' || !hasExactKeys(value, ['type', 'code', 'label', 'baseUrl'])) {
