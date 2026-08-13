@@ -68,6 +68,80 @@ enum CaseStatus {
   CLOSED
 }
 
+enum FollowUpStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum CalendarProvider {
+  GOOGLE
+}
+
+enum CalendarIntegrationStatus {
+  CONNECTED
+  RECONNECT_REQUIRED
+  ERROR
+  DISCONNECTED
+}
+
+enum CalendarSyncStatus {
+  SYNCED
+  PENDING
+  PROCESSING
+  ERROR
+}
+
+enum CalendarEventStatus {
+  CONFIRMED
+  TENTATIVE
+  CANCELLED
+}
+
+enum CalendarEventSource {
+  CRM
+  GOOGLE
+}
+
+enum CalendarAttendeeResponseStatus {
+  NEEDS_ACTION
+  ACCEPTED
+  DECLINED
+  TENTATIVE
+}
+
+enum CalendarWatchStatus {
+  ACTIVE
+  EXPIRED
+  STOPPED
+  ERROR
+}
+
+enum CalendarSyncDirection {
+  INBOUND
+  OUTBOUND
+  RECONCILE
+  RENEW_WATCH
+}
+
+enum CalendarSyncOperation {
+  CREATE_EVENT
+  UPDATE_EVENT
+  DELETE_EVENT
+  INCREMENTAL_SYNC
+  FULL_SYNC
+  RENEW_WATCH
+  STOP_WATCH
+}
+
+enum CalendarSyncJobStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  DEAD_LETTER
+}
+
 enum IllustrationKind {
   PRELIMINARY
   OFFICIAL
@@ -122,6 +196,36 @@ enum CommissionTransactionType {
   PAID
   CHARGEBACK
   ADJUSTMENT
+}
+
+/// A promotion credit is an immutable event, not a mutable balance. Carrier
+/// confirmations, corrections and reversals therefore append another event.
+enum PromotionCreditStatus {
+  ESTIMATED
+  PENDING_CARRIER
+  CONFIRMED
+  ADJUSTED
+  REVERSED
+}
+
+/// PERSONAL and AGENCY are separate roll-up views of the same production event.
+/// Consumers must aggregate one kind at a time so the producer is never counted
+/// twice inside an agency total.
+enum PromotionCreditAttributionKind {
+  PERSONAL
+  AGENCY
+}
+
+/// Entitlement for the Journey surface. This is an explicit plan capability,
+/// never inferred from whether an agent currently has children in the hierarchy.
+enum PromotionAccessScope {
+  PERSONAL
+  AGENCY
+}
+
+enum PromotionAchievementRoute {
+  PERSONAL
+  AGENCY
 }
 
 enum SyncStatus {
@@ -185,32 +289,41 @@ model User {
   name      String
   role      Role
   createdAt DateTime @default(now())
+  /// IANA zone used by Agenda, reminders and local wall-clock input. Existing
+  /// users retain the product's historical New York behavior after migration.
+  timeZone  String   @default("America/New_York")
 
-  agent             Agent?
-  client            Client?
-  imports           ImportBatch[]
-  auditLogs         AuditLog[]
-  emailVerified     Boolean          @default(false)
-  image             String?
-  updatedAt         DateTime         @updatedAt
-  sessions          Session[]
-  accounts          Account[]
-  uploadedDocuments PolicyDocument[]
+  agent                Agent?
+  client               Client?
+  imports              ImportBatch[]
+  auditLogs            AuditLog[]
+  emailVerified        Boolean               @default(false)
+  image                String?
+  updatedAt            DateTime              @updatedAt
+  sessions             Session[]
+  accounts             Account[]
+  uploadedDocuments    PolicyDocument[]
+  createdFollowUps     FollowUp[]            @relation("FollowUpCreator")
+  notifications        Notification[]        @relation("NotificationRecipient")
+  calendarIntegrations CalendarIntegration[]
+  calendarEvents       CalendarEvent[]       @relation("CalendarEventOwner")
+  calendarOAuthStates  CalendarOAuthState[]
 
   @@map("user")
 }
 
 model Agent {
-  id            String      @id @default(cuid())
-  userId        String      @unique
-  user          User        @relation(fields: [userId], references: [id])
-  parentAgentId String?
-  parentAgent   Agent?      @relation("AgentHierarchy", fields: [parentAgentId], references: [id])
-  subAgents     Agent[]     @relation("AgentHierarchy")
-  rank          String
-  npn           String?     @unique
-  status        AgentStatus @default(ACTIVE)
-  createdAt     DateTime    @default(now())
+  id                   String               @id @default(cuid())
+  userId               String               @unique
+  user                 User                 @relation(fields: [userId], references: [id])
+  parentAgentId        String?
+  parentAgent          Agent?               @relation("AgentHierarchy", fields: [parentAgentId], references: [id])
+  subAgents            Agent[]              @relation("AgentHierarchy")
+  rank                 String
+  npn                  String?              @unique
+  status               AgentStatus          @default(ACTIVE)
+  promotionAccessScope PromotionAccessScope @default(PERSONAL)
+  createdAt            DateTime             @default(now())
 
   clients                               Client[]
   policies                              Policy[]
@@ -236,6 +349,12 @@ model Agent {
   nationalLifeConnectorDevices          NationalLifeConnectorDevice[]
   nationalLifeConnectorCommands         NationalLifeConnectorCommand[]
   nationalLifeExportUploads             NationalLifeExportUpload[]
+  producedPromotionCredits              PromotionCredit[]                      @relation("PromotionCreditProducer")
+  promotionCreditAttributions           PromotionCreditAttribution[]           @relation("PromotionCreditAttributedAgent")
+  ledPromotionCreditAttributions        PromotionCreditAttribution[]           @relation("PromotionCreditAttributionLeader")
+  promotionAchievements                 PromotionAchievement[]
+  crmPipeline                           CrmPipeline?
+  ownedFollowUps                        FollowUp[]                             @relation("FollowUpOwner")
 
   @@index([parentAgentId])
 }
@@ -262,6 +381,9 @@ model NationalLifeCaseSnapshot {
   sentDate                 String?
   modalPremium             String?
   anticipatedAnnualPremium String?
+  /// Carrier Target Premium / CTP as reported. Kept distinct from AAP above;
+  /// neither value is derived from commission dollars.
+  targetPremium            String?
   submitMethod             String?
   caseManager              String?
   agency                   String?
@@ -326,6 +448,9 @@ model NationalLifeInforcePolicy {
   ownerZipcode             String?
   accumulatedCashValue     String?
   anticipatedAnnualPremium String?
+  /// Carrier Target Premium / CTP as reported. Optional because the in-force
+  /// grid may omit it; `raw` remains the source trace.
+  targetPremium            String?
   termConversionDate       String?
   levelPeriodEndDate       String?
   employerName             String?
@@ -590,6 +715,10 @@ model InsuranceCase {
   clientId        String?
   client          Client?                @relation(fields: [clientId], references: [id])
   stage           CaseStage              @default(LEAD)
+  /// Dynamic CRM stage. Nullable during rolling deploys; the CRM migration
+  /// backfills every existing case and services always assign it for new work.
+  crmStageId      String?
+  crmStage        CrmStage?              @relation(fields: [crmStageId], references: [id])
   status          CaseStatus             @default(OPEN)
   objective       String?
   targetCoverage  Decimal?
@@ -604,10 +733,327 @@ model InsuranceCase {
   timelineEvents  CaseTimelineEvent[]
   policies        Policy[]
   browserJobs     BrowserAutomationJob[]
+  followUps       FollowUp[]
+  notifications   Notification[]
+  calendarEvents  CalendarEvent[]
 
   @@index([assignedAgentId, stage])
+  @@index([assignedAgentId, crmStageId])
   @@index([prospectId])
   @@index([clientId])
+}
+
+/// One independently configurable CRM pipeline per agent account. "Todos" is
+/// intentionally not stored here: it is a virtual filter in the CRM query.
+model CrmPipeline {
+  id        String     @id @default(cuid())
+  agentId   String     @unique
+  agent     Agent      @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  stages    CrmStage[]
+}
+
+model CrmStage {
+  id         String          @id @default(cuid())
+  pipelineId String
+  pipeline   CrmPipeline     @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name       String
+  position   Int
+  /// Stable meaning for product-owned stages (for example FOLLOW_UP). Custom
+  /// stages leave this null and remain fully renameable/reorderable.
+  systemKey  String?
+  active     Boolean         @default(true)
+  archivedAt DateTime?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  cases      InsuranceCase[]
+
+  @@unique([pipelineId, systemKey])
+  @@index([pipelineId, active, position])
+}
+
+model FollowUp {
+  id                    String             @id @default(cuid())
+  caseId                String
+  insuranceCase         InsuranceCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  ownerAgentId          String
+  ownerAgent            Agent              @relation("FollowUpOwner", fields: [ownerAgentId], references: [id], onDelete: Cascade)
+  createdByUserId       String
+  createdByUser         User               @relation("FollowUpCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  title                 String             @default("Follow-up")
+  scheduledAt           DateTime           @db.Timestamptz(3)
+  status                FollowUpStatus     @default(SCHEDULED)
+  completedAt           DateTime?          @db.Timestamptz(3)
+  cancelledAt           DateTime?          @db.Timestamptz(3)
+  sourceTimelineEventId String?            @unique
+  sourceTimelineEvent   CaseTimelineEvent? @relation(fields: [sourceTimelineEventId], references: [id], onDelete: SetNull)
+  createdAt             DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime           @updatedAt @db.Timestamptz(3)
+  notifications         Notification[]
+  // Partial unique (one SCHEDULED row per case) lives in SQL migration because
+  // Prisma schema syntax cannot represent a PostgreSQL WHERE predicate.
+
+  @@index([ownerAgentId, status, scheduledAt])
+  @@index([caseId, status, scheduledAt])
+  @@index([status, scheduledAt])
+}
+
+model Notification {
+  id              String         @id @default(cuid())
+  recipientUserId String
+  recipient       User           @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  followUpId      String?
+  followUp        FollowUp?      @relation(fields: [followUpId], references: [id], onDelete: Cascade)
+  caseId          String?
+  insuranceCase   InsuranceCase? @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  calendarEventId String?
+  calendarEvent   CalendarEvent? @relation(fields: [calendarEventId], references: [id], onDelete: Cascade)
+  type            String
+  title           String
+  message         String
+  href            String
+  dedupeKey       String         @unique
+  readAt          DateTime?      @db.Timestamptz(3)
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@index([recipientUserId, readAt, createdAt])
+  @@index([followUpId])
+  @@index([caseId])
+  @@index([calendarEventId])
+}
+
+/// One Google account connection owned by exactly one authenticated user. It is
+/// intentionally independent from Better Auth's Account table: Calendar OAuth
+/// grants are product integrations and their tokens are encrypted at rest.
+model CalendarIntegration {
+  id                String                    @id @default(cuid())
+  userId            String
+  user              User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          CalendarProvider          @default(GOOGLE)
+  providerAccountId String
+  providerEmail     String
+  displayName       String?
+  status            CalendarIntegrationStatus @default(CONNECTED)
+  grantedScopes     String[]                  @default([])
+
+  accessKeyVersion  String?
+  accessAlgorithm   String?
+  accessIv          String?
+  accessCiphertext  String?
+  accessAuthTag     String?
+  refreshKeyVersion String?
+  refreshAlgorithm  String?
+  refreshIv         String?
+  refreshCiphertext String?
+  refreshAuthTag    String?
+  tokenExpiresAt    DateTime? @db.Timestamptz(3)
+
+  connectedAt    DateTime  @default(now()) @db.Timestamptz(3)
+  lastSyncAt     DateTime? @db.Timestamptz(3)
+  lastErrorCode  String?
+  disconnectedAt DateTime? @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+
+  calendars     CalendarSource[]
+  events        CalendarEvent[]
+  watchChannels CalendarWatchChannel[]
+  syncJobs      CalendarSyncJob[]
+
+  @@unique([userId, provider])
+  @@index([userId, status])
+  @@index([provider, status])
+}
+
+/// A calendar returned by Google CalendarList. Visibility and CRM default are
+/// user preferences; syncToken belongs to this exact event collection.
+model CalendarSource {
+  id                    String              @id @default(cuid())
+  integrationId         String
+  integration           CalendarIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  providerCalendarId    String
+  name                  String
+  description           String?
+  colorId               String?
+  backgroundColor       String?
+  foregroundColor       String?
+  isPrimary             Boolean             @default(false)
+  visible               Boolean             @default(true)
+  crmDefault            Boolean             @default(false)
+  accessRole            String?
+  timeZone              String?
+  syncToken             String?
+  syncStatus            CalendarSyncStatus  @default(PENDING)
+  lastIncrementalSyncAt DateTime?           @db.Timestamptz(3)
+  lastFullSyncAt        DateTime?           @db.Timestamptz(3)
+  lastErrorCode         String?
+  createdAt             DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime            @updatedAt @db.Timestamptz(3)
+
+  events        CalendarEvent[]
+  watchChannels CalendarWatchChannel[]
+  syncJobs      CalendarSyncJob[]
+
+  @@unique([integrationId, providerCalendarId])
+  @@index([integrationId, visible])
+  @@index([integrationId, crmDefault])
+}
+
+/// Local projection of one provider event. External events remain owned by the
+/// connected user and are never promoted into CRM activity without an explicit
+/// insuranceCaseId association.
+model CalendarEvent {
+  id              String              @id @default(cuid())
+  ownerUserId     String
+  ownerUser       User                @relation("CalendarEventOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  integrationId   String
+  integration     CalendarIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  calendarId      String
+  calendar        CalendarSource      @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  insuranceCaseId String?
+  insuranceCase   InsuranceCase?      @relation(fields: [insuranceCaseId], references: [id], onDelete: SetNull)
+
+  providerEventId           String?
+  providerRecurringEventId  String?
+  providerOriginalStartAt   DateTime? @db.Timestamptz(3)
+  providerOriginalStartDate DateTime? @db.Date
+  recurrence                String[]  @default([])
+  iCalUid                   String?
+  etag                      String?
+  sequence                  Int?
+
+  title          String
+  description    String?
+  startsAt       DateTime? @db.Timestamptz(3)
+  endsAt         DateTime? @db.Timestamptz(3)
+  startDate      DateTime? @db.Date
+  endDate        DateTime? @db.Date
+  timeZone       String?
+  allDay         Boolean   @default(false)
+  location       String?
+  meetingUrl     String?
+  conferenceData Json?
+  reminders      Json?
+  colorId        String?
+  visibility     String?
+  transparency   String?
+
+  status            CalendarEventStatus @default(CONFIRMED)
+  source            CalendarEventSource @default(GOOGLE)
+  syncStatus        CalendarSyncStatus  @default(PENDING)
+  syncErrorCode     String?
+  providerUpdatedAt DateTime?           @db.Timestamptz(3)
+  deletedAt         DateTime?           @db.Timestamptz(3)
+  lastSyncedAt      DateTime?           @db.Timestamptz(3)
+  localRevision     Int                 @default(1)
+  createdAt         DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
+
+  attendees     CalendarEventAttendee[]
+  syncJobs      CalendarSyncJob[]
+  notifications Notification[]
+
+  @@unique([calendarId, providerEventId])
+  @@index([ownerUserId, startsAt, status])
+  @@index([ownerUserId, startDate, status])
+  @@index([insuranceCaseId, startsAt])
+  @@index([integrationId, syncStatus])
+  @@index([providerRecurringEventId, providerOriginalStartAt])
+}
+
+model CalendarEventAttendee {
+  id             String                         @id @default(cuid())
+  eventId        String
+  event          CalendarEvent                  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  email          String
+  name           String?
+  responseStatus CalendarAttendeeResponseStatus @default(NEEDS_ACTION)
+  isSelf         Boolean                        @default(false)
+  isOrganizer    Boolean                        @default(false)
+  createdAt      DateTime                       @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime                       @updatedAt @db.Timestamptz(3)
+
+  @@unique([eventId, email])
+  @@index([email])
+}
+
+/// Google push notifications contain no event body. A channel only identifies
+/// which CalendarSource needs an incremental sync.
+model CalendarWatchChannel {
+  id                String              @id @default(cuid())
+  integrationId     String
+  integration       CalendarIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  calendarId        String
+  calendar          CalendarSource      @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  providerChannelId String              @unique
+  resourceId        String
+  resourceUri       String?
+  channelTokenHash  String
+  expiresAt         DateTime            @db.Timestamptz(3)
+  lastMessageNumber BigInt?
+  status            CalendarWatchStatus @default(ACTIVE)
+  lastReceivedAt    DateTime?           @db.Timestamptz(3)
+  createdAt         DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
+
+  @@index([calendarId, status, expiresAt])
+  @@index([integrationId, status])
+}
+
+/// Durable outbox and background work queue. Local event mutations enqueue a
+/// job in the same transaction; workers lease rows with SKIP LOCKED.
+model CalendarSyncJob {
+  id              String                @id @default(cuid())
+  integrationId   String
+  integration     CalendarIntegration   @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  calendarId      String?
+  calendar        CalendarSource?       @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  eventId         String?
+  event           CalendarEvent?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  direction       CalendarSyncDirection
+  operation       CalendarSyncOperation
+  status          CalendarSyncJobStatus @default(PENDING)
+  desiredRevision Int?
+  sendInvites     Boolean               @default(false)
+  payload         Json?
+  attempts        Int                   @default(0)
+  availableAt     DateTime              @default(now()) @db.Timestamptz(3)
+  leaseOwner      String?
+  leaseExpiresAt  DateTime?             @db.Timestamptz(3)
+  idempotencyKey  String                @unique
+  lastErrorCode   String?
+  createdAt       DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime              @updatedAt @db.Timestamptz(3)
+
+  @@index([status, availableAt])
+  @@index([integrationId, status])
+  @@index([calendarId, status])
+  @@index([eventId, status])
+  @@index([leaseExpiresAt])
+}
+
+/// One-use, short-lived OAuth transaction. The raw state and PKCE verifier are
+/// never persisted in plaintext; callbacks consume this row atomically.
+model CalendarOAuthState {
+  id                 String           @id @default(cuid())
+  userId             String
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider           CalendarProvider @default(GOOGLE)
+  stateHash          String           @unique
+  sessionTokenHash   String
+  verifierKeyVersion String
+  verifierAlgorithm  String
+  verifierIv         String
+  verifierCiphertext String
+  verifierAuthTag    String
+  returnTo           String?
+  expiresAt          DateTime         @db.Timestamptz(3)
+  consumedAt         DateTime?        @db.Timestamptz(3)
+  createdAt          DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt, consumedAt])
 }
 
 model AgentIntegrationCredential {
@@ -1046,41 +1492,45 @@ model NationalLifeExportChunk {
 }
 
 model Illustration {
-  id                 String                 @id @default(cuid())
+  id                  String                 @id @default(cuid())
   // A quote is pre-sale: the insured is a prospect who has no case and often no
   // client record either. Requiring a case made the table impossible to write
   // to — it stayed empty from the day it was created.
-  caseId             String?
-  insuranceCase      InsuranceCase?         @relation(fields: [caseId], references: [id])
-  clientId           String?
-  client             Client?                @relation(fields: [clientId], references: [id])
+  caseId              String?
+  insuranceCase       InsuranceCase?         @relation(fields: [caseId], references: [id])
+  clientId            String?
+  client              Client?                @relation(fields: [clientId], references: [id])
   // Always known, and the only thing that scopes a quote to who may read it.
-  agentId            String
-  agent              Agent                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  kind               IllustrationKind
-  provider           String?
-  externalId         String?
-  sourceUpdatedAt    DateTime?
-  productName        String?
-  faceAmount         Decimal?
-  premium            Decimal?
+  agentId             String
+  agent               Agent                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  kind                IllustrationKind
+  provider            String?
+  externalId          String?
+  sourceUpdatedAt     DateTime?
+  productName         String?
+  faceAmount          Decimal?
+  premium             Decimal?
+  /// The target-premium input or carrier result for this illustration. This is
+  /// an estimate until a separate carrier production event confirms the credit.
+  targetPremium       Decimal?
+  targetPremiumSource String?
   // Held on the illustration rather than only through a relation, so a quote
   // for someone who is not in the system yet still says who it was for.
-  insuredName        String?
-  insuredDateOfBirth DateTime?
-  documentUrl        String?
+  insuredName         String?
+  insuredDateOfBirth  DateTime?
+  documentUrl         String?
   // The illustration PDF as the carrier rendered it. Held as bytes rather than
   // on disk because the carrier runtime is a separate container from the web
   // app, so a file written there is not readable here; at ~1.5 MB a document
   // and this volume that is a fair trade, and moving to object storage later
   // does not change how a caller asks for it.
-  documentBytes      Bytes?
-  documentMimeType   String?
-  documentFetchedAt  DateTime?
-  rawPayload         Json?
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @updatedAt
-  scenarios          IllustrationScenario[]
+  documentBytes       Bytes?
+  documentMimeType    String?
+  documentFetchedAt   DateTime?
+  rawPayload          Json?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  scenarios           IllustrationScenario[]
 
   @@unique([provider, externalId])
   @@index([caseId])
@@ -1139,16 +1589,17 @@ model ApplicationRequirement {
 }
 
 model CaseTimelineEvent {
-  id            String        @id @default(cuid())
-  caseId        String
-  insuranceCase InsuranceCase @relation(fields: [caseId], references: [id])
-  type          String
-  title         String
-  body          String?
-  metadata      Json?
-  dueAt         DateTime?
-  doneAt        DateTime?
-  createdAt     DateTime      @default(now())
+  id             String        @id @default(cuid())
+  caseId         String
+  insuranceCase  InsuranceCase @relation(fields: [caseId], references: [id])
+  type           String
+  title          String
+  body           String?
+  metadata       Json?
+  dueAt          DateTime?
+  doneAt         DateTime?
+  createdAt      DateTime      @default(now())
+  sourceFollowUp FollowUp?
 
   @@index([caseId, createdAt])
 }
@@ -1210,6 +1661,90 @@ model CommissionTransaction {
   @@unique([provider, sourceTransactionId])
   @@index([policyId, occurredAt])
   @@index([agentId, occurredAt])
+}
+
+/// Append-only ledger of promotion-production events.
+///
+/// `creditedPc` is the signed delta recognized at `recognizedAt`; it is not a
+/// commission amount. A correction or reversal is a new row linked through
+/// `supersedesCreditId`, so the facts that produced an earlier rank never move.
+model PromotionCredit {
+  id                       String                       @id @default(cuid())
+  carrier                  String
+  source                   String
+  externalId               String
+  policyNumber             String?
+  producerAgentId          String
+  producerAgent            Agent                        @relation("PromotionCreditProducer", fields: [producerAgentId], references: [id], onDelete: Restrict)
+  targetPremium            Decimal?
+  anticipatedAnnualPremium Decimal?
+  qualificationWeight      Decimal?
+  creditedPc               Decimal
+  status                   PromotionCreditStatus
+  recognizedAt             DateTime
+  supersedesCreditId       String?
+  supersedesCredit         PromotionCredit?             @relation("PromotionCreditSupersession", fields: [supersedesCreditId], references: [id], onDelete: Restrict)
+  supersededBy             PromotionCredit[]            @relation("PromotionCreditSupersession")
+  rawPayload               Json?
+  createdAt                DateTime                     @default(now())
+  attributions             PromotionCreditAttribution[]
+
+  /// Carrier + source surface + carrier event id is the idempotency boundary.
+  /// Agent id is intentionally absent: replaying one event under another agent
+  /// must conflict instead of silently duplicating production.
+  @@unique([carrier, source, externalId])
+  @@index([producerAgentId, recognizedAt])
+  @@index([status, recognizedAt])
+  @@index([policyNumber, recognizedAt])
+  @@index([supersedesCreditId])
+}
+
+/// Frozen ownership of one promotion event. Every credit has one PERSONAL row
+/// and may have one AGENCY row per eligible upline. Each agency row preserves
+/// one leader who owned the producer when the event landed, even if any level of
+/// the hierarchy changes later. Partial unique indexes in the migration enforce
+/// one personal row and one agency row per leader.
+model PromotionCreditAttribution {
+  id                String                         @id @default(cuid())
+  promotionCreditId String
+  promotionCredit   PromotionCredit                @relation(fields: [promotionCreditId], references: [id], onDelete: Restrict)
+  kind              PromotionCreditAttributionKind
+  agentId           String
+  agent             Agent                          @relation("PromotionCreditAttributedAgent", fields: [agentId], references: [id], onDelete: Restrict)
+  leaderAgentId     String?
+  leaderAgent       Agent?                         @relation("PromotionCreditAttributionLeader", fields: [leaderAgentId], references: [id], onDelete: Restrict)
+  frozenAt          DateTime                       @default(now())
+
+  @@index([promotionCreditId, kind])
+  @@index([agentId, kind])
+  @@index([leaderAgentId, kind])
+}
+
+/// Durable record of the highest ranks an agent has earned. Rolling production
+/// may later fall outside the active 12-month window without erasing a jacket or
+/// title already achieved; only an explicit invalidation changes that history.
+model PromotionAchievement {
+  id                    String                    @id @default(cuid())
+  agentId               String
+  agent                 Agent                     @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  rankId                String
+  step                  Int
+  route                 PromotionAchievementRoute
+  achievedAt            DateTime
+  qualifyingWindowStart DateTime
+  qualifyingWindowEnd   DateTime
+  personalPc            Decimal
+  agencyPc              Decimal
+  ruleSetVersion        String
+  invalidatedAt         DateTime?
+  invalidationReason    String?
+  createdAt             DateTime                  @default(now())
+
+  /// The migration enforces one active row with a partial unique index on
+  /// (agentId, rankId) WHERE invalidatedAt IS NULL. Historical invalidated rows
+  /// remain queryable and the same rank may be earned again later.
+  @@index([agentId, rankId])
+  @@index([agentId, step])
 }
 
 model PolicyReview {

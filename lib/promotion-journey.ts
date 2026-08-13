@@ -1,5 +1,9 @@
 export type PromotionMode = "individual" | "agency";
 
+export type PromotionQualificationRoute = "personal" | "agency" | null;
+
+export type PromotionAchievement = "qualified" | "inherited" | null;
+
 export type JacketTone = "blue" | "red" | "green" | "purple" | "black";
 
 export type PromotionRank = {
@@ -107,11 +111,15 @@ export const PROMOTION_RANKS: readonly PromotionRank[] = [
 
 export type PromotionStage = PromotionRank & {
   status: "achieved" | "current" | "locked";
+  achievement: PromotionAchievement;
   progress: number;
   personalProgress: number;
   agencyProgress: number | null;
+  agencyPersonalProgress: number | null;
   personalRemaining: number;
   agencyRemaining: number | null;
+  agencyPersonalRemaining: number | null;
+  qualificationRoute: PromotionQualificationRoute;
   qualifies: boolean;
 };
 
@@ -122,8 +130,15 @@ export type PromotionJourney = {
   currentRank: PromotionRank | null;
   nextRank: PromotionRank | null;
   currentIndex: number;
+  qualificationRoute: PromotionQualificationRoute;
   finalReached: boolean;
   overallProgress: number;
+  personalProgress: number;
+  agencyProgress: number | null;
+  agencyPersonalProgress: number | null;
+  personalRemaining: number;
+  agencyRemaining: number | null;
+  agencyPersonalRemaining: number | null;
   stages: PromotionStage[];
 };
 
@@ -152,17 +167,62 @@ function ratio(value: number, target: number) {
   return Math.min(Math.max(value / target, 0), 1);
 }
 
-function qualifiesForRank(
+function getRankQualification(
   rank: PromotionRank,
   mode: PromotionMode,
   personalPc: number,
   agencyPc: number,
 ) {
-  if (mode === "individual") return personalPc >= rank.personalTarget;
-  return (
-    agencyPc >= rank.agencyTarget &&
-    personalPc >= rank.agencyPersonalMinimum
+  const personalProgress = ratio(personalPc, rank.personalTarget);
+  const personalRemaining = Math.max(rank.personalTarget - personalPc, 0);
+  const personalQualifies = personalPc >= rank.personalTarget;
+
+  if (mode === "individual") {
+    return {
+      qualifies: personalQualifies,
+      qualificationRoute: personalQualifies ? ("personal" as const) : null,
+      progress: personalProgress,
+      personalProgress,
+      agencyProgress: null,
+      agencyPersonalProgress: null,
+      personalRemaining,
+      agencyRemaining: null,
+      agencyPersonalRemaining: null,
+    };
+  }
+
+  const agencyProductionProgress = ratio(agencyPc, rank.agencyTarget);
+  const agencyPersonalProgress = ratio(
+    personalPc,
+    rank.agencyPersonalMinimum,
   );
+  const agencyProgress = Math.min(
+    agencyProductionProgress,
+    agencyPersonalProgress,
+  );
+  const agencyQualifies =
+    agencyPc >= rank.agencyTarget &&
+    personalPc >= rank.agencyPersonalMinimum;
+  const qualificationRoute: PromotionQualificationRoute = personalQualifies
+    ? "personal"
+    : agencyQualifies
+      ? "agency"
+      : null;
+
+  return {
+    qualifies: personalQualifies || agencyQualifies,
+    qualificationRoute,
+    progress: Math.max(personalProgress, agencyProgress),
+    personalProgress,
+    agencyProgress,
+    agencyPersonalProgress,
+    personalRemaining,
+    agencyRemaining: Math.max(rank.agencyTarget - agencyPc, 0),
+    agencyPersonalRemaining: Math.max(
+      rank.agencyPersonalMinimum - personalPc,
+      0,
+    ),
+  };
 }
 
 export function getPromotionJourney({
@@ -176,54 +236,37 @@ export function getPromotionJourney({
 }): PromotionJourney {
   const safePersonalPc = safePc(personalPc);
   const safeAgencyPc = safePc(agencyPc);
-  const qualifyingIndexes = PROMOTION_RANKS.flatMap((rank, index) =>
-    qualifiesForRank(rank, mode, safePersonalPc, safeAgencyPc) ? [index] : [],
+  const rankQualifications = PROMOTION_RANKS.map((rank) =>
+    getRankQualification(rank, mode, safePersonalPc, safeAgencyPc),
+  );
+  const qualifyingIndexes = rankQualifications.flatMap((qualification, index) =>
+    qualification.qualifies ? [index] : [],
   );
   const currentIndex = qualifyingIndexes.at(-1) ?? -1;
   const nextIndex = currentIndex + 1;
   const finalReached = currentIndex === PROMOTION_RANKS.length - 1;
-  const finalRank = PROMOTION_RANKS[PROMOTION_RANKS.length - 1];
-  const overallProgress =
-    mode === "individual"
-      ? ratio(safePersonalPc, finalRank.personalTarget)
-      : Math.min(
-          ratio(safeAgencyPc, finalRank.agencyTarget),
-          ratio(safePersonalPc, finalRank.agencyPersonalMinimum),
-        );
+  const finalQualification = rankQualifications[rankQualifications.length - 1];
+  const currentQualification =
+    currentIndex >= 0 ? rankQualifications[currentIndex] : null;
 
   const stages = PROMOTION_RANKS.map((rank, index): PromotionStage => {
-    const personalTarget =
-      mode === "individual" ? rank.personalTarget : rank.agencyPersonalMinimum;
-    const personalProgress = ratio(safePersonalPc, personalTarget);
-    const agencyProgress =
-      mode === "agency" ? ratio(safeAgencyPc, rank.agencyTarget) : null;
-    const progress =
-      mode === "agency"
-        ? Math.min(personalProgress, agencyProgress ?? 0)
-        : personalProgress;
+    const qualification = rankQualifications[index];
+    const achieved = index <= currentIndex;
 
     return {
       ...rank,
       status:
-        index <= currentIndex
+        achieved
           ? "achieved"
           : index === nextIndex
             ? "current"
             : "locked",
-      progress,
-      personalProgress,
-      agencyProgress,
-      personalRemaining: Math.max(personalTarget - safePersonalPc, 0),
-      agencyRemaining:
-        mode === "agency"
-          ? Math.max(rank.agencyTarget - safeAgencyPc, 0)
-          : null,
-      qualifies: qualifiesForRank(
-        rank,
-        mode,
-        safePersonalPc,
-        safeAgencyPc,
-      ),
+      achievement: achieved
+        ? qualification.qualifies
+          ? "qualified"
+          : "inherited"
+        : null,
+      ...qualification,
     };
   });
 
@@ -234,8 +277,15 @@ export function getPromotionJourney({
     currentRank: currentIndex >= 0 ? PROMOTION_RANKS[currentIndex] : null,
     nextRank: finalReached ? null : PROMOTION_RANKS[nextIndex],
     currentIndex,
+    qualificationRoute: currentQualification?.qualificationRoute ?? null,
     finalReached,
-    overallProgress,
+    overallProgress: finalQualification.progress,
+    personalProgress: finalQualification.personalProgress,
+    agencyProgress: finalQualification.agencyProgress,
+    agencyPersonalProgress: finalQualification.agencyPersonalProgress,
+    personalRemaining: finalQualification.personalRemaining,
+    agencyRemaining: finalQualification.agencyRemaining,
+    agencyPersonalRemaining: finalQualification.agencyPersonalRemaining,
     stages,
   };
 }

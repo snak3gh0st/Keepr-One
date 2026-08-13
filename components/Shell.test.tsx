@@ -28,6 +28,12 @@ const BLUE_JACKET = {
   jacket: 'Blue Jacket',
 }
 
+const BLACK_JACKET = {
+  tone: 'black' as const,
+  rankTitle: 'Executive Vice President',
+  jacket: 'Black Jacket',
+}
+
 const STANDARD_RANK = {
   tone: 'standard' as const,
   rankTitle: 'Regional Leader',
@@ -94,6 +100,34 @@ describe('Shell sign-out ordering', () => {
 })
 
 describe('Shell achievement band', () => {
+  it('keeps the Black Jacket preview URL in both journey entry points', () => {
+    render(
+      <AgentPromotionProvider initialIdentity={STANDARD_RANK}>
+        <Shell
+          role="AGENT"
+          userName="Ana"
+          promotionIdentity={BLACK_JACKET}
+          journeyHref="/agent/journey?preview=black-jacket"
+        >
+          <p>Hoje</p>
+        </Shell>
+      </AgentPromotionProvider>,
+    )
+
+    expect(screen.getByLabelText('Conquista atual: Black Jacket')).toHaveAttribute(
+      'data-achievement-tone',
+      'black',
+    )
+    expect(screen.getByText('Executive Vice President')).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /jornada/i })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          href: expect.stringContaining('/agent/journey?preview=black-jacket'),
+        }),
+      ]),
+    )
+  })
+
   it('shows a jacket achievement without hiding the current module', async () => {
     mocks.pathname = '/agent/policies'
     // Overrides the beforeEach stub so this test also proves the topbar

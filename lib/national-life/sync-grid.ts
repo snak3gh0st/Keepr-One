@@ -10,6 +10,7 @@ import {
   toInforcePolicySnapshots,
 } from './inforce-policy-service'
 import { persistReportRows, toReportRows } from './report-row-service'
+import type { PromotionCreditSyncResult } from './promotion-credit-sync'
 import {
   NATIONAL_LIFE_SYNC_STAGES,
   type NationalLifeSyncStage,
@@ -39,6 +40,7 @@ export type GridSyncResult = {
   truncated: boolean
   snapshots: number
   written: number
+  promotionCredits?: PromotionCreditSyncResult
 }
 
 export type NationalLifeGridPersistence = {
@@ -102,7 +104,12 @@ export async function syncNationalLifeGrid(
       snapshots,
       fetchedAt: input.fetchedAt,
     })
-    return { ...counts, snapshots: snapshots.length, written: persisted.written }
+    return {
+      ...counts,
+      snapshots: snapshots.length,
+      written: persisted.written,
+      promotionCredits: persisted.promotionCredits,
+    }
   }
 
   if (REPORT_ROW_GRIDS.includes(input.gridKey)) {
@@ -126,7 +133,12 @@ export async function syncNationalLifeGrid(
       snapshots,
       fetchedAt: input.fetchedAt,
     })
-    return { ...counts, snapshots: snapshots.length, written: persisted.written }
+    return {
+      ...counts,
+      snapshots: snapshots.length,
+      written: persisted.written,
+      promotionCredits: persisted.promotionCredits,
+    }
   }
 
   // The allowlist and the three routing branches are intentionally exhaustive.

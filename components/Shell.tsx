@@ -16,6 +16,7 @@ import { Logo } from "@/components/Logo";
 import { Avatar } from "@/components/Avatar";
 import { NavIcon, type NavIconName } from "@/components/NavIcon";
 import { CarrierSyncBadge } from "@/components/CarrierSyncBadge";
+import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import type { JacketTone, PromotionIdentity } from "@/lib/promotion-journey";
 
 gsap.registerPlugin(useGSAP);
@@ -57,6 +58,7 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
   ],
   AGENT: [
     { href: "/agent", label: "Hoje", icon: "grid", group: "Operação" },
+    { href: "/agent/calendar", label: "Agenda", icon: "calendar", group: "Operação" },
     {
       href: "/agent/cases",
       label: "CRM",
@@ -73,10 +75,11 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
     { href: "/agent/journey", label: "Jornada", icon: "chart", group: "Carteira" },
     { href: "/agent/hierarchy", label: "Equipe", icon: "hierarchy", group: "Gestão" },
     {
-      href: "/agent/integrations/national-life",
+      href: "/agent/integrations",
       label: "Integrações",
       icon: "link",
       group: "Gestão",
+      matches: ["/agent/integrations"],
     },
   ],
   CLIENT: [{ href: "/client", label: "Minhas apólices", icon: "document" }],
@@ -92,6 +95,7 @@ const PAGE_NAMES: Record<string, string> = {
   "/admin/audit": "Auditoria",
   "/admin/integrations/national-life": "Saúde da integração National Life",
   "/agent": "Hoje",
+  "/agent/calendar": "Agenda",
   "/agent/cases": "CRM · Oportunidades",
   "/agent/cases/new": "Novo atendimento",
   "/agent/activities": "CRM · Atividades",
@@ -104,6 +108,8 @@ const PAGE_NAMES: Record<string, string> = {
   "/agent/commissions": "Extrato de comissões",
   "/agent/journey": "Jornada de promoção",
   "/agent/integrations/national-life": "Conexão National Life",
+  "/agent/integrations": "Integrações",
+  "/agent/integrations/google-calendar": "Google Calendar",
   "/client": "Minhas apólices",
 };
 
@@ -118,11 +124,13 @@ export function Shell({
   role,
   userName,
   promotionIdentity,
+  journeyHref = "/agent/journey",
   children,
 }: {
   role: "ADMIN" | "AGENT" | "CLIENT";
   userName: string;
   promotionIdentity?: PromotionIdentity;
+  journeyHref?: string;
   children: React.ReactNode;
 }) {
   const root = useRef<HTMLDivElement>(null);
@@ -141,7 +149,9 @@ export function Shell({
   const currentPage = resolvePageName(pathname, role);
   const roleLabel = role === "ADMIN" ? "Administração" : role === "AGENT" ? "Área do agente" : "Portal do cliente";
   const quickAction =
-    role === "AGENT" && pathname === "/agent"
+    role === "AGENT" && pathname === "/agent/calendar"
+      ? { href: "/agent/calendar?create=1", label: "Novo compromisso" }
+      : role === "AGENT" && pathname === "/agent"
       ? { href: "/agent/cases/new", label: "Novo atendimento" }
       : role === "ADMIN" && pathname === "/admin"
         ? { href: "/admin/import", label: "Importar dados" }
@@ -285,7 +295,7 @@ export function Shell({
         Ir para o conteúdo
       </a>
 
-      <div className="shell-mobile-header flex items-center justify-between border-b border-white/[0.08] bg-[#0a0a0a] px-4 py-3 text-white md:hidden">
+      <div className="shell-mobile-header flex items-center justify-between border-b border-white/[0.08] bg-[#0a0a0a] px-4 py-2.5 text-white md:hidden">
         <span>
           <Logo size={28} className="text-base text-white" />
         </span>
@@ -313,7 +323,7 @@ export function Shell({
           </span>
           <div className="mt-7 rounded-2xl border border-white/[0.11] bg-white/[0.035] px-4 py-3.5">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">Workspace</p>
-            <p className="mt-1.5 text-sm font-medium text-white/88">Operações RICOS</p>
+            <p className="mt-1.5 text-sm font-medium text-white/88">Agência conectada</p>
           </div>
         </div>
 
@@ -324,6 +334,10 @@ export function Shell({
         <ul className="relative flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain md:flex-1 md:snap-none md:flex-col md:gap-1.5 md:overflow-y-auto md:px-3">
           {items.map((item, index) => {
             const matchPaths = item.matches ?? [item.href];
+            const itemHref =
+              role === "AGENT" && item.href === "/agent/journey"
+                ? journeyHref
+                : item.href;
             const active = matchPaths.some((matchPath) => {
               const isSection = matchPath.split("/").filter(Boolean).length > 1;
               return pathname === matchPath || (isSection && pathname.startsWith(`${matchPath}/`));
@@ -345,7 +359,7 @@ export function Shell({
                 )}
                 <li className={`${mobileItemWidth} shrink-0 snap-start md:w-auto md:flex-none`}>
                   <Link
-                    href={item.href}
+                    href={itemHref}
                     aria-current={active ? "page" : undefined}
                     className={`shell-nav-link group flex flex-1 flex-col items-center gap-1.5 whitespace-nowrap px-1 py-2.5 text-center text-[10px] font-semibold transition-all duration-300 focus-visible:outline-white/75 md:flex-row md:rounded-xl md:px-3.5 md:py-3 md:text-left md:text-[13px] ${
                       active
@@ -406,7 +420,7 @@ export function Shell({
           )}
           <div className="relative z-[1] mx-auto flex h-[72px] max-w-[1500px] items-center justify-between gap-4">
             {hasAchievement ? (
-              <div className="flex min-w-0 items-center gap-3" data-achievement-reveal>
+              <div className="shell-achievement-identity flex min-w-0 items-center" data-achievement-reveal>
                 <span className="shell-achievement-emblem" data-achievement-mark>
                   <svg
                     aria-hidden="true"
@@ -424,22 +438,21 @@ export function Shell({
                     />
                   )}
                 </span>
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-2">
+                <div className="shell-achievement-copy min-w-0">
+                  <div className="shell-achievement-overline flex min-w-0 items-center">
                     <p className="shell-topbar-kicker truncate text-[10px] font-semibold uppercase tracking-[0.17em]">
                       {rankJacket}
                     </p>
-                    <span className="shell-achievement-divider h-0.5 w-0.5 shrink-0 rounded-full" />
+                    <span className="shell-achievement-divider h-3 w-px shrink-0" />
                     <span className="shell-current-module truncate text-[10px] font-medium">
                       {currentPage}
                     </span>
                   </div>
-                  <div className="mt-1 flex min-w-0 items-center gap-2">
+                  <div className="shell-achievement-rank flex min-w-0 items-center">
                     <p className="shell-topbar-title truncate text-sm font-semibold tracking-[-0.02em]">
                       {rankTitle}
                     </p>
-                    <span className="shell-topbar-separator hidden h-1 w-1 shrink-0 rounded-full sm:block" />
-                    {role === 'AGENT' && <CarrierSyncBadge />}
+                    {role === 'AGENT' && <CarrierSyncBadge separated />}
                   </div>
                 </div>
               </div>
@@ -484,7 +497,7 @@ export function Shell({
               )}
               {hasAchievement && !isJourney && (
                 <Link
-                  href="/agent/journey"
+                  href={journeyHref}
                   className="shell-journey-link hidden min-h-9 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold md:inline-flex"
                   data-achievement-reveal
                 >
@@ -493,6 +506,11 @@ export function Shell({
                     <path d="M3.25 10.75 10.75 3.25M5 3.25h5.75V9" />
                   </svg>
                 </Link>
+              )}
+              {role === 'AGENT' && (
+                <div>
+                  <NotificationCenter inverse={hasAchievement} />
+                </div>
               )}
               <span className="shell-role-pill hidden rounded-full border border-border-steel bg-paper/80 px-3 py-2 text-xs font-medium text-ink-muted xl:inline-flex">
                 {roleLabel}

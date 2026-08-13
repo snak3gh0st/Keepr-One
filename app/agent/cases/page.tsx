@@ -5,11 +5,9 @@ import { decimalToNumber } from '@/lib/decimal'
 import { Shell } from '@/components/Shell'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { CasesBoard } from './CasesBoard'
-import type { CaseStage } from '@/lib/case-workflow'
+import { getPipelineForAgent } from '@/lib/crm'
 
 export const dynamic = 'force-dynamic'
-
-const TERMINAL: CaseStage[] = ['PLACED', 'DECLINED', 'WITHDRAWN']
 
 export default async function CasesPage() {
   const agent = await getCurrentAgent()
@@ -26,10 +24,17 @@ export default async function CasesPage() {
     loadError = true
   }
 
+  const pipelines = await Promise.all(scopeAgentIds.map((agentId) => getPipelineForAgent(agentId)))
+  const currentPipeline = pipelines.find((pipeline) => pipeline.agentId === agent.id) ?? pipelines[0]
+  const stageOptionsByAgent = Object.fromEntries(
+    pipelines.map((pipeline) => [pipeline.agentId, pipeline.stages]),
+  )
+
   const boardCases = cases
     .map((c) => ({
       id: c.id,
-      stage: c.stage,
+      assignedAgentId: c.assignedAgentId,
+      crmStage: c.crmStage,
       prospectName: `${c.prospect.firstName} ${c.prospect.lastName}`.trim(),
       agentName: c.assignedAgent.user?.name ?? '—',
       productType: c.productType ?? 'UNDECIDED',
@@ -39,8 +44,8 @@ export default async function CasesPage() {
       updatedAt: c.updatedAt.toISOString(),
     }))
     .sort((a, b) => {
-      const at = TERMINAL.includes(a.stage) ? 1 : 0
-      const bt = TERMINAL.includes(b.stage) ? 1 : 0
+      const at = ['ACTIVE_CLIENT', 'LOST'].includes(a.crmStage?.systemKey ?? '') ? 1 : 0
+      const bt = ['ACTIVE_CLIENT', 'LOST'].includes(b.crmStage?.systemKey ?? '') ? 1 : 0
       if (at !== bt) return at - bt
       return b.updatedAt.localeCompare(a.updatedAt)
     })
@@ -48,7 +53,13 @@ export default async function CasesPage() {
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       {loadError && <ErrorBanner>Não foi possível carregar suas oportunidades agora. Tente atualizar a página.</ErrorBanner>}
-      {!loadError && <CasesBoard cases={boardCases} />}
+      {!loadError && currentPipeline && (
+        <CasesBoard
+          cases={boardCases}
+          stages={currentPipeline.stages}
+          stageOptionsByAgent={stageOptionsByAgent}
+        />
+      )}
     </Shell>
   )
 }
@@ -58,7 +69,8 @@ function loadCases(scopeAgentIds: string[]) {
     where: { assignedAgentId: { in: scopeAgentIds } },
     select: {
       id: true,
-      stage: true,
+      assignedAgentId: true,
+      crmStage: { select: { id: true, name: true, systemKey: true } },
       objective: true,
       productType: true,
       targetCoverage: true,

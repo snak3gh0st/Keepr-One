@@ -23,6 +23,33 @@ export async function register() {
     } catch (error) {
       Sentry.captureException(error);
     }
+
+    // Follow-up reminders are persisted server-side even if no user has the
+    // application open. Each pass catches up every due reminder and the domain
+    // dedupe key makes restarts/retries safe. As with the janitor, a scheduler
+    // configuration or database failure must never make the web server fail to
+    // boot.
+    try {
+      const { startFollowUpNotificationScheduler } = await import(
+        "./lib/crm/follow-up-notification-scheduler"
+      );
+      startFollowUpNotificationScheduler();
+    } catch (error) {
+      Sentry.captureException(error);
+    }
+
+    // Google push notifications are wake-ups, not event payloads. The durable
+    // outbox applies those incremental syncs and a conservative reconciliation
+    // pass repairs missed webhooks / renews expiring channels. Configuration is
+    // optional and boot must remain available when the integration is disabled.
+    try {
+      const { startGoogleCalendarScheduler } = await import(
+        "./lib/calendar/google/scheduler"
+      );
+      startGoogleCalendarScheduler();
+    } catch (error) {
+      Sentry.captureException(error);
+    }
   }
 
   if (process.env.NEXT_RUNTIME === "edge") {

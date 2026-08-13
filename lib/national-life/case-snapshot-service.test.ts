@@ -1,5 +1,24 @@
-import { describe, expect, it } from 'vitest'
-import { toCaseSnapshot, toCaseSnapshots } from './case-snapshot-service'
+import { describe, expect, it, vi } from 'vitest'
+
+const persistenceMocks = vi.hoisted(() => ({
+  caseUpsert: vi.fn(),
+  transaction: vi.fn(),
+  agentFindMany: vi.fn(),
+}))
+
+vi.mock('../prisma', () => ({
+  prisma: {
+    nationalLifeCaseSnapshot: { upsert: persistenceMocks.caseUpsert },
+    $transaction: persistenceMocks.transaction,
+    agent: { findMany: persistenceMocks.agentFindMany },
+  },
+}))
+
+import {
+  persistCaseSnapshots,
+  toCaseSnapshot,
+  toCaseSnapshots,
+} from './case-snapshot-service'
 
 describe('National Life case snapshot mapping', () => {
   it('maps the carrier field names onto the snapshot shape', () => {
@@ -16,6 +35,7 @@ describe('National Life case snapshot mapping', () => {
       SentDate: null,
       ModalPremium: '125.00',
       AnticipatedAnnualPremium: '1500.00',
+      CommissionableTargetPremium: '1200.00',
       SubmitMethod: 'eApp',
       CaseManager: 'Smith, Bob',
       Agency: 'Some Agency',
@@ -30,6 +50,7 @@ describe('National Life case snapshot mapping', () => {
       carrierStatus: 'Pending Requirements',
       deliveryStatus: 'Not Sent',
       anticipatedAnnualPremium: '1500.00',
+      targetPremium: '1200.00',
       companyCode: 'NLIC',
       sentDate: null,
     })
@@ -57,8 +78,38 @@ describe('National Life case snapshot mapping', () => {
   })
 
   it('coerces non-string scalars the carrier occasionally returns', () => {
-    const snapshot = toCaseSnapshot({ PolicyNo: 'NL3', ModalPremium: 125, CompanyCode: 0 })
-    expect(snapshot).toMatchObject({ modalPremium: '125', companyCode: '0' })
+    const snapshot = toCaseSnapshot({
+      PolicyNo: 'NL3',
+      ModalPremium: 125,
+      TargetPremium: 1200,
+      CompanyCode: 0,
+    })
+    expect(snapshot).toMatchObject({
+      modalPremium: '125',
+      targetPremium: '1200',
+      companyCode: '0',
+    })
+  })
+
+  it.each([
+    'TargetPremium',
+    'CommissionableTargetPremium',
+    'CTP',
+    'TargetPremiumAmount',
+  ])('normalises the explicit carrier alias %s', (alias) => {
+    const snapshot = toCaseSnapshot({ PolicyNo: 'NL-CTP', [alias]: ' 1,200.00 ' })
+    expect(snapshot?.targetPremium).toBe('1,200.00')
+  })
+
+  it('does not derive Target Premium from modal premium, generic premium, or commission', () => {
+    const snapshot = toCaseSnapshot({
+      PolicyNo: 'NL-NO-CTP',
+      ModalPremium: '100.00',
+      PremiumAmt: '1200.00',
+      Commission: '960.00',
+    })
+
+    expect(snapshot?.targetPremium).toBeNull()
   })
 
   it('collapses a policy repeated across pages onto one snapshot', () => {
@@ -110,5 +161,31 @@ describe('National Life grid field-name drift', () => {
       PolicyStatus: 'Issued',
     })
     expect(snapshot?.carrierStatus).toBe('Issued')
+  })
+})
+
+describe('National Life case persistence isolation', () => {
+  it('returns the written snapshots when the optional promotion writer fails', async () => {
+    persistenceMocks.caseUpsert.mockResolvedValue({})
+    persistenceMocks.transaction.mockResolvedValue([])
+    persistenceMocks.agentFindMany.mockRejectedValue(new Error('promotion ledger unavailable'))
+    const snapshot = toCaseSnapshot({ PolicyNo: 'NL-SAFE-SYNC' })
+    if (!snapshot) throw new Error('Expected mapped case snapshot')
+
+    await expect(
+      persistCaseSnapshots({
+        agentId: 'agent-1',
+        deploymentScope: 'test',
+        gridKey: 'NEW_BUSINESS',
+        snapshots: [snapshot],
+        fetchedAt: new Date('2026-08-10T00:00:00.000Z'),
+      }),
+    ).resolves.toMatchObject({
+      written: 1,
+      promotionCredits: {
+        status: 'NEEDS_REVIEW',
+        skipped: { PROMOTION_WRITER_FAILED: 1 },
+      },
+    })
   })
 })
