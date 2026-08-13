@@ -1,0 +1,3 @@
+ALTER TABLE "NationalLifeConnectorStageReceipt"
+ADD COLUMN "sourceOffset" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "nextOffset" INTEGER NOT NULL DEFAULT 0;

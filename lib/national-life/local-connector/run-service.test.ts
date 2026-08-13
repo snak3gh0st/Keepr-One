@@ -47,7 +47,14 @@ describe('local connector runs', () => {
       .fn()
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: 'run-1', plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'], completedStages: 1 })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-1',
+        state: 'RUNNING',
+        plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        completedStages: 1,
+        currentGridKey: 'INFORCE_CLIENTS',
+      })
     const db = {
       nationalLifeSyncRun: { create, updateMany, findFirst },
     } as never
@@ -56,7 +63,7 @@ describe('local connector runs', () => {
       startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now }),
     ).resolves.toEqual({
       runId: 'run-1',
-      schemaVersion: 2,
+      schemaVersion: 3,
       stages: planReadGridStages(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS),
       duplicate: false,
       completedStages: 0,
@@ -171,6 +178,74 @@ describe('local connector runs', () => {
 
     expect(findFirst).toHaveBeenNthCalledWith(2, expect.objectContaining({
       orderBy: [{ completedStages: 'desc' }, { createdAt: 'desc' }],
+    }))
+  })
+
+  it('returns the next durable batch checkpoint for an interrupted stage', async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-checkpoint',
+        state: 'FAILED',
+        plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        completedStages: 1,
+        currentGridKey: 'INFORCE_CLIENTS',
+      })
+    const receiptFindMany = vi.fn().mockResolvedValue([
+      { sequence: 0, nextOffset: 400, recordCount: 200 },
+      { sequence: 1, nextOffset: 600, recordCount: 200 },
+      { sequence: 2, nextOffset: 800, recordCount: 200 },
+      { sequence: 3, nextOffset: 800, recordCount: 0 },
+    ])
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst,
+      },
+      nationalLifeConnectorStageReceipt: { findMany: receiptFindMany },
+    } as never
+
+    await expect(
+      startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now }),
+    ).resolves.toMatchObject({
+      runId: 'run-checkpoint',
+      duplicate: true,
+      completedStages: 1,
+      resume: { sequence: 4, offset: 800 },
+    })
+    expect(receiptFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { runId: 'run-checkpoint', gridKey: 'INFORCE_CLIENTS' },
+      orderBy: { sequence: 'asc' },
+    }))
+  })
+
+  it('does not reopen a recently verified run and reread every source', async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-complete',
+        state: 'COMPLETED',
+        plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        completedStages: 2,
+        currentGridKey: null,
+      })
+    const create = vi.fn()
+    const db = {
+      nationalLifeSyncRun: { create, updateMany: vi.fn(), findFirst },
+    } as never
+
+    await expect(
+      startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now }),
+    ).resolves.toMatchObject({
+      runId: 'run-complete',
+      duplicate: true,
+      completedStages: 2,
+    })
+    expect(create).not.toHaveBeenCalled()
+    expect(findFirst).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      where: expect.objectContaining({ state: 'COMPLETED' }),
     }))
   })
 

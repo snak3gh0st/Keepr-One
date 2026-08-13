@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '../portal-grid-client'
 
-export const LOCAL_CONNECTOR_SCHEMA_VERSION = 2 as const
+export const LOCAL_CONNECTOR_SCHEMA_VERSION = 3 as const
 
 /// O que o servidor *aceita*, que não é o mesmo que o que ele *emite*.
 ///
@@ -22,7 +22,7 @@ export const LOCAL_CONNECTOR_SCHEMA_VERSION = 2 as const
 /// Ordem do corte: (1) adicionar a versão nova aqui, (2) publicar a extensão que
 /// a emite, (3) esperar a frota migrar — `x-fyntra-connector-version` diz quando —,
 /// (4) remover a antiga daqui. Nunca (4) antes de (3).
-export const LOCAL_CONNECTOR_ACCEPTED_SCHEMA_VERSIONS = [2] as const
+export const LOCAL_CONNECTOR_ACCEPTED_SCHEMA_VERSIONS = [2, 3] as const
 
 export type LocalConnectorSchemaVersion =
   (typeof LOCAL_CONNECTOR_ACCEPTED_SCHEMA_VERSIONS)[number]
@@ -86,12 +86,27 @@ export const localConnectorRawStageEnvelopeSchema = z
       Object.keys(NATIONAL_LIFE_GRIDS) as [NationalLifeGridKey, ...NationalLifeGridKey[]],
     ),
     sequence: z.number().int().min(0).max(10_000),
+    /// Present in schema v3. Optional here so a rolling deployment can still
+    /// accept v2 envelopes from an older installed extension.
+    sourceOffset: z.number().int().min(0).max(LOCAL_CONNECTOR_MAX_RECORDS_TOTAL).optional(),
+    nextOffset: z.number().int().min(0).max(LOCAL_CONNECTOR_MAX_RECORDS_TOTAL).optional(),
     observedAt: z.string().datetime({ offset: true }),
     recordsTotal: z.number().int().min(0).max(LOCAL_CONNECTOR_MAX_RECORDS_TOTAL),
     truncated: z.boolean(),
     records: z.array(rawGridRowSchema).max(LOCAL_CONNECTOR_MAX_RECORDS),
   })
   .superRefine((envelope, ctx) => {
+    if (envelope.schemaVersion === 3 &&
+      (envelope.sourceOffset === undefined || envelope.nextOffset === undefined)) {
+      ctx.addIssue({ code: 'custom', message: 'schema v3 requires source offsets' })
+    }
+    if (
+      envelope.sourceOffset !== undefined &&
+      envelope.nextOffset !== undefined &&
+      envelope.nextOffset < envelope.sourceOffset
+    ) {
+      ctx.addIssue({ code: 'custom', message: 'nextOffset is before sourceOffset' })
+    }
     if (envelope.recordsTotal < envelope.records.length) {
       ctx.addIssue({ code: 'custom', message: 'recordsTotal is below the page it carries' })
     }

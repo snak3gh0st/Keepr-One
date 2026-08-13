@@ -26,6 +26,10 @@ export { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 /// that disagree on it are how the gap becomes reachable later.
 
 export const LOCAL_CONNECTOR_RUN_TTL_MS = 30 * 60_000
+/// Um clique repetido depois de um sync completo não deve reabrir o portal e
+/// reler tudo. A janela é deliberadamente finita: depois dela, Sync significa
+/// buscar uma fotografia nova, não servir indefinidamente a antiga.
+export const LOCAL_CONNECTOR_VERIFIED_FRESH_MS = 24 * 60 * 60_000
 /// The grids a run reads when the caller does not name any. This is the common
 /// operational plan; callers can still request a narrower subset explicitly.
 export const LOCAL_CONNECTOR_LEGACY_GRID_KEYS = [
@@ -145,6 +149,7 @@ export async function startLocalConnectorRun(
   stages: LocalConnectorStagePlan[]
   duplicate: boolean
   completedStages: number
+  resume?: { sequence: number; offset: number }
 }> {
   const now = input.now ?? new Date()
   // Planned before any write: an unknown grid key must fail the request rather
@@ -152,7 +157,13 @@ export async function startLocalConnectorRun(
   const stages = planLocalConnectorStages(options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS)
   await failStaleLocalRuns(db, { agentId: input.agentId, deviceId: input.deviceId, now })
 
-  const runSelect = { id: true, state: true, plannedGridKeys: true, completedStages: true } as const
+  const runSelect = {
+    id: true,
+    state: true,
+    plannedGridKeys: true,
+    completedStages: true,
+    currentGridKey: true,
+  } as const
   const runScope = {
     agentId: input.agentId,
     deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
@@ -170,13 +181,22 @@ export async function startLocalConnectorRun(
     orderBy: { createdAt: 'desc' },
     select: runSelect,
   })
-  const active = running ?? await db.nationalLifeSyncRun.findFirst({
+  const failed = await db.nationalLifeSyncRun.findFirst({
     where: {
       ...runScope,
       state: 'FAILED',
       updatedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_RUN_TTL_MS) },
     },
     orderBy: [{ completedStages: 'desc' }, { createdAt: 'desc' }],
+    select: runSelect,
+  })
+  const active = running ?? failed ?? await db.nationalLifeSyncRun.findFirst({
+    where: {
+      ...runScope,
+      state: 'COMPLETED',
+      completedAt: { gte: new Date(now.getTime() - LOCAL_CONNECTOR_VERIFIED_FRESH_MS) },
+    },
+    orderBy: { completedAt: 'desc' },
     select: runSelect,
   })
   if (active) {
@@ -203,6 +223,28 @@ export async function startLocalConnectorRun(
         },
       })
     }
+    let resume: { sequence: number; offset: number } | undefined
+    const currentGridKey = active.currentGridKey ?? plannedGridKeys(active)[active.completedStages]
+    if (currentGridKey && db.nationalLifeConnectorStageReceipt) {
+      const receipts = await db.nationalLifeConnectorStageReceipt.findMany({
+        where: { runId: active.id, gridKey: currentGridKey },
+        orderBy: { sequence: 'asc' },
+        select: { sequence: true, nextOffset: true, recordCount: true },
+      })
+      // Receipts created by v2 have no meaningful offset. Restart that stage
+      // from its first page instead of guessing and skipping source rows.
+      if (!receipts.some((receipt) => receipt.nextOffset === 0 &&
+        (receipt.sequence > 0 || receipt.recordCount > 0))) {
+        let sequence = 0
+        let offset = 0
+        for (const receipt of receipts) {
+          if (receipt.sequence !== sequence || receipt.nextOffset < offset) break
+          sequence += 1
+          offset = receipt.nextOffset
+        }
+        if (sequence > 0 || offset > 0) resume = { sequence, offset }
+      }
+    }
     // The plan comes from the run that already exists, not from what this call
     // asked for: returning the requested grids would hand the device a plan whose
     // stages the run can never account for, and it would never complete.
@@ -212,6 +254,7 @@ export async function startLocalConnectorRun(
       stages: planLocalConnectorStages(plannedGridKeys(active)),
       duplicate: true as const,
       completedStages: active.completedStages,
+      ...(resume ? { resume } : {}),
     }
   }
 
@@ -417,6 +460,8 @@ function publicReceipt(receipt: {
   contentHash: string
   recordCount: number
   writtenCount: number | null
+  sourceOffset?: number
+  nextOffset?: number
   createdAt: Date
 }) {
   return {
@@ -427,6 +472,8 @@ function publicReceipt(receipt: {
     contentHash: receipt.contentHash,
     recordCount: receipt.recordCount,
     writtenCount: receipt.writtenCount,
+    sourceOffset: receipt.sourceOffset ?? 0,
+    nextOffset: receipt.nextOffset ?? 0,
     createdAt: receipt.createdAt.toISOString(),
   }
 }
@@ -479,7 +526,10 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
           connectorDeviceId: input.deviceId,
           executionSource: 'LOCAL',
           provider: NATIONAL_LIFE_PROVIDER,
-          state: { in: ['RUNNING', 'COMPLETED'] },
+          // A late retry of an already accepted chunk is handled by the
+          // idempotency lookup above. A new chunk must never reopen a completed
+          // run and move the authoritative status backwards to RUNNING.
+          state: 'RUNNING',
         },
         select: { id: true, plannedGridKeys: true },
       })
@@ -542,6 +592,9 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
           runId: run.id,
           gridKey: input.gridKey,
           sequence: input.envelope.sequence,
+          sourceOffset: input.envelope.sourceOffset ?? 0,
+          nextOffset: input.envelope.nextOffset ??
+            ((input.envelope.sourceOffset ?? 0) + input.envelope.records.length),
           truncated: input.envelope.truncated,
           contentHash: input.contentHash,
           // Rows received, not rows written. The content hash is taken over the
@@ -635,13 +688,40 @@ export async function completeLocalConnectorStage(
         connectorDeviceId: input.deviceId,
         executionSource: 'LOCAL',
         provider: NATIONAL_LIFE_PROVIDER,
-        state: 'RUNNING',
+        state: { in: ['RUNNING', 'COMPLETED'] },
       },
-      select: { id: true, plannedGridKeys: true },
+      select: { id: true, state: true, plannedGridKeys: true, completedStages: true },
     })
     if (!run) throw new LocalConnectorRunError('RUN_NOT_FOUND')
     if (!plannedGridKeys(run).includes(input.gridKey)) {
       throw new LocalConnectorRunError('GRID_NOT_PLANNED')
+    }
+    if (run.state === 'COMPLETED') {
+      const completed = await tx.nationalLifeConnectorStageCompletion.findUnique({
+        where: {
+          deviceId_runId_gridKey: {
+            deviceId: input.deviceId,
+            runId: run.id,
+            gridKey: input.gridKey,
+          },
+        },
+        select: { expectedRecordCount: true, finalSequence: true, receivedRecordCount: true },
+      })
+      if (
+        completed &&
+        completed.expectedRecordCount === input.expectedRecordCount &&
+        completed.finalSequence === input.finalSequence &&
+        input.truncated === false
+      ) {
+        return {
+          runId: run.id,
+          gridKey: input.gridKey,
+          receivedRecordCount: completed.receivedRecordCount,
+          completedStages: run.completedStages,
+          completed: true,
+        }
+      }
+      throw new LocalConnectorRunError('RUN_NOT_FOUND')
     }
     if (input.truncated) throw new LocalConnectorStageCompletionError('STAGE_TRUNCATED')
 

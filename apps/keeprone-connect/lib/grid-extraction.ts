@@ -30,9 +30,9 @@ export async function runGridExtraction(
 ): Promise<void> {
   try {
     const requestTemplate = await deps.waitForTemplate()
-    let start = 0
+    let start = message.offsetStart ?? 0
     let draw = 1
-    let sequence = 0
+    let sequence = message.sequenceStart ?? 0
     let sentAny = false
 
     while (true) {
@@ -71,6 +71,8 @@ export async function runGridExtraction(
           token: message.token,
           correlationId: message.correlationId,
           sequence,
+          sourceOffset: start,
+          nextOffset: start + page.rows.length,
           recordsTotal: page.recordsTotal,
           truncated: page.truncated,
           records: records.slice(offset, offset + PAGE_SIZE),
@@ -86,7 +88,9 @@ export async function runGridExtraction(
             gridKey: message.gridKey,
             token: message.token,
             correlationId: message.correlationId,
-            sequence: 0,
+            sequence: message.sequenceStart ?? 0,
+            sourceOffset: start,
+            nextOffset: start,
             recordsTotal: page.recordsTotal,
             truncated: page.truncated,
             records: [],

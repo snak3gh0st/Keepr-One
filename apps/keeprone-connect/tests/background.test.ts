@@ -562,6 +562,38 @@ describe('background plan executor', () => {
     expect(readSync()).toMatchObject({ stageIndex: 1, status: 'EXTRACTING' })
   })
 
+  it('passes the server batch checkpoint into the resumed extraction', async () => {
+    storage.sync = {
+      runId: 'run-1',
+      carrierTabId: 9,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 1,
+      status: 'ERROR',
+    }
+    tabs.query.mockResolvedValue([{ id: 9, active: true, url: `${NLG}${INFORCE_PATH}` }])
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      runId: 'run-1',
+      schemaVersion: 3,
+      stages: TWO_STAGE_PLAN,
+      duplicate: true,
+      completedStages: 1,
+      resume: { sequence: 3, offset: 600 },
+    } as never)
+    await bootBackground()
+    emit('runtime.onMessage', { type: 'RETRY_SYNC' }, {}, vi.fn())
+    await flush()
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({
+        type: 'BEGIN_GRID',
+        gridKey: 'INFORCE_CLIENTS',
+        sequenceStart: 3,
+        offsetStart: 600,
+      }),
+    )
+  })
+
   it('accepts the redirected in-force route for a run with the legacy plan path', async () => {
     storage.sync = {
       runId: 'run-legacy-route',
@@ -662,7 +694,7 @@ describe('background plan executor', () => {
     tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
     vi.mocked(signedJsonRequest).mockResolvedValue({
       runId: 'run-1',
-      schemaVersion: 2,
+      schemaVersion: 3,
       stages: TWO_STAGE_PLAN,
       duplicate: true,
     } as never)
@@ -764,7 +796,7 @@ describe('background plan executor', () => {
     storage.sync = { status: 'IDLE' }
     vi.mocked(signedJsonRequest).mockResolvedValue({
       runId: 'run-1',
-      schemaVersion: 2,
+      schemaVersion: 3,
       stages: TWO_STAGE_PLAN,
       completedStages: 0,
     } as never)
@@ -937,7 +969,7 @@ describe('background plan executor', () => {
     )
   })
 
-  it('uploads raw rows under schemaVersion 2 with a stage-scoped idempotency key', async () => {
+  it('uploads raw rows under schemaVersion 3 with a stage-scoped idempotency key', async () => {
     storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 1, status: 'NAVIGATING' }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${INFORCE_PATH}` }])
     vi.mocked(signedJsonRequest).mockResolvedValue({} as never)
@@ -969,7 +1001,7 @@ describe('background plan executor', () => {
       idempotencyKey: 'nlc:run-1:1:INFORCE_CLIENTS:0',
     })
     expect(request.body).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       gridKey: 'INFORCE_CLIENTS',
       records: [{ PolicyNumber: 'NL-1', Anything: { nested: true } }],
     })

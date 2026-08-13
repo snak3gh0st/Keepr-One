@@ -5,7 +5,7 @@
 /// aceito. Enquanto o número estava embutido no corpo do upload em `background.ts`,
 /// nada ligava os dois lados — a divergência só apareceria como 400 no dispositivo
 /// de um agente.
-export const CONNECTOR_SCHEMA_VERSION = 2
+export const CONNECTOR_SCHEMA_VERSION = 3
 
 /// Cabeçalho que a extensão carimba em toda requisição. É auto-declarado, logo
 /// não vale como controle de segurança: serve para o servidor saber o que está

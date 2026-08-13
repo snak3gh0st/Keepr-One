@@ -154,6 +154,45 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(mocks.refresh).toHaveBeenCalled()
   })
 
+  it('stops showing sync when the authoritative server run has completed', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        run: { runId: 'run-server', state: 'COMPLETED', safeErrorCode: null },
+      }), { status: 200 }),
+    )
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: { runId: 'run-server', status: 'UPLOADING' },
+        })
+        return
+      }
+      callback({ ok: true })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
+
+    await waitFor(
+      () => expect(screen.getByRole('status')).toHaveTextContent('up to date'),
+      { timeout: 3_000 },
+    )
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/agent/integrations/national-life/sync',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    expect(mocks.refresh).toHaveBeenCalled()
+  })
+
   it('shows a sync action when an existing paired computer is detected', async () => {
     let started = false
     const messages: string[] = []

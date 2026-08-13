@@ -915,6 +915,11 @@ model NationalLifeConnectorStageReceipt {
   run            NationalLifeSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
   gridKey        String
   sequence       Int
+  /// Offset da página no portal. Mantido junto do recibo para que a extensão
+  /// possa continuar uma fase interrompida sem voltar ao início da grade.
+  sourceOffset   Int      @default(0)
+  /// Primeiro offset que ainda não foi enviado depois deste lote/página.
+  nextOffset     Int      @default(0)
   truncated      Boolean  @default(true)
   contentHash    String
   /// Linhas recebidas na página. Não entra no hash de conteúdo — este é o sha256

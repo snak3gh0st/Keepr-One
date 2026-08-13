@@ -16,7 +16,7 @@ type ConnectorResponse = {
   status?: string
   deviceId?: string
   device?: { status?: string; deviceId?: string }
-  sync?: { status?: string; errorCode?: string; uploads?: number; stageIndex?: number }
+  sync?: { runId?: string; status?: string; errorCode?: string; uploads?: number; stageIndex?: number }
 }
 
 type ConnectorMessage =
@@ -103,6 +103,26 @@ function browserSupportsConnector(): boolean {
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function readDurableSync(runId: string) {
+  try {
+    const response = await fetch('/api/agent/integrations/national-life/sync', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+    })
+    if (!response.ok) return null
+    const body = (await response.json()) as {
+      run?: { runId?: unknown; state?: unknown; safeErrorCode?: unknown } | null
+    }
+    if (!body.run || body.run.runId !== runId) return null
+    return {
+      state: typeof body.run.state === 'string' ? body.run.state : null,
+      safeErrorCode: typeof body.run.safeErrorCode === 'string' ? body.run.safeErrorCode : null,
+    }
+  } catch {
+    return null
+  }
 }
 
 const storeStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
@@ -225,6 +245,17 @@ export function NationalLifeLocalConnectorCard({
       const status = await sendConnectorMessage(extensionId, { type: 'GET_CONNECTOR_STATUS' })
       const syncStatus = status.sync?.status
       setPairedDeviceId(status.device?.deviceId ?? null)
+      const durable = status.sync?.runId ? await readDurableSync(status.sync.runId) : null
+      if (durable?.state === 'COMPLETED') {
+        setState('success')
+        router.refresh()
+        return
+      }
+      if (durable?.state === 'FAILED' || durable?.state === 'PARTIAL') {
+        fail(durable.safeErrorCode ?? 'SYNC_INCOMPLETE')
+        router.refresh()
+        return
+      }
       if (syncStatus === 'AUTH_REQUIRED') {
         setState('login-required')
         return

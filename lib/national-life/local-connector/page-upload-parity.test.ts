@@ -51,6 +51,8 @@ function envelopeFor(records: readonly Record<string, unknown>[], sequence: numb
     runId: 'run_page_parity',
     gridKey: 'AGENT_DASHBOARD',
     sequence,
+    sourceOffset: 0,
+    nextOffset: records.length,
     observedAt: '2026-08-11T00:00:00.000Z',
     recordsTotal: records.length,
     truncated: false,

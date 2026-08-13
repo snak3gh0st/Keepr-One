@@ -21,6 +21,25 @@ describe('local connector raw stage envelope', () => {
     expect(envelope.records[0].Nested).toEqual({ a: 1 })
   })
 
+  it('requires a source checkpoint in schema v3', () => {
+    const base = {
+      schemaVersion: 3,
+      runId: 'run_1',
+      gridKey: 'NEW_BUSINESS',
+      sequence: 0,
+      observedAt: '2026-08-04T00:00:00.000Z',
+      recordsTotal: 0,
+      truncated: false,
+      records: [],
+    }
+    expect(localConnectorRawStageEnvelopeSchema.safeParse(base).success).toBe(false)
+    expect(localConnectorRawStageEnvelopeSchema.safeParse({
+      ...base,
+      sourceOffset: 0,
+      nextOffset: 0,
+    }).success).toBe(true)
+  })
+
   it('accepts exactly the page cap of records', () => {
     const records = Array.from({ length: 200 }, (_, i) => ({ PolicyNo: `X${i}` }))
     const envelope = localConnectorRawStageEnvelopeSchema.parse({
