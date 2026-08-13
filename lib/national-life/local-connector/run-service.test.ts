@@ -282,6 +282,46 @@ describe('local connector runs', () => {
     }))
   })
 
+  it('resolves failures for a deprecated source when migrating a running plan', async () => {
+    const failureUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run-running',
+          state: 'RUNNING',
+          plannedGridKeys: ['NEW_BUSINESS', 'PROJECTED_COMMISSIONS', 'INFORCE_CLIENTS'],
+          completedStages: 1,
+          currentGridKey: 'INFORCE_CLIENTS',
+          stageCompletions: [{ gridKey: 'NEW_BUSINESS' }],
+          stageFailures: [{ gridKey: 'PROJECTED_COMMISSIONS' }],
+        }),
+      },
+      nationalLifeConnectorStageFailure: { updateMany: failureUpdateMany },
+      nationalLifeConnectorStageReceipt: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never
+
+    await expect(startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+    )).resolves.toMatchObject({
+      runId: 'run-running',
+      stages: planReadGridStages(['NEW_BUSINESS', 'INFORCE_CLIENTS']),
+      completedStages: 1,
+      nextStageIndex: 1,
+    })
+    expect(failureUpdateMany).toHaveBeenCalledWith({
+      where: {
+        runId: 'run-running',
+        deviceId: 'device-1',
+        gridKey: { in: ['PROJECTED_COMMISSIONS'] },
+        resolvedAt: null,
+      },
+      data: { resolvedAt: now, updatedAt: now },
+    })
+  })
+
   it('returns the next durable batch checkpoint for an interrupted stage', async () => {
     const findFirst = vi.fn()
       .mockResolvedValueOnce(null)
