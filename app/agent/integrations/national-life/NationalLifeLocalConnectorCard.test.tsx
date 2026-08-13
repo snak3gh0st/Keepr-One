@@ -193,6 +193,41 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(mocks.refresh).toHaveBeenCalled()
   })
 
+  it('offers a focused retry when the run finishes with isolated source failures', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        run: { runId: 'run-partial', state: 'PARTIAL', safeErrorCode: 'SOURCE_PARTIAL_FAILURE' },
+      }), { status: 200 }),
+    )
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: { runId: 'run-partial', status: 'COMPLETED' },
+        })
+        return
+      }
+      callback({ ok: true })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+    await userEvent.click(screen.getByRole('button', { name: /National Life/ }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('available areas were saved')
+    })
+    expect(screen.getByRole('button', { name: 'Retry remaining areas' })).toBeEnabled()
+    expect(screen.getByRole('status')).not.toHaveTextContent('stopped')
+  })
+
   it('shows a sync action when an existing paired computer is detected', async () => {
     let started = false
     const messages: string[] = []
@@ -430,12 +465,13 @@ describe('NationalLifeLocalConnectorCard', () => {
       />,
     )
     await vi.advanceTimersByTimeAsync(0)
-    screen.getByRole('button', { name: 'Connect National Life' }).click()
+    screen.getByRole('button', { name: /National Life/ }).click()
 
     // Muito além do antigo limite fixo de 180 leituras.
     await vi.advanceTimersByTimeAsync(400_000)
 
-    expect(screen.getByRole('status')).toHaveTextContent('Syncing in the background')
+    expect(screen.getByRole('status')).toHaveTextContent('Reading National Life')
+    expect(screen.getByRole('status')).toHaveTextContent('batches saved so far')
     vi.useRealTimers()
   })
 
@@ -472,12 +508,12 @@ describe('NationalLifeLocalConnectorCard', () => {
       />,
     )
     await vi.advanceTimersByTimeAsync(0)
-    screen.getByRole('button', { name: 'Connect National Life' }).click()
+    screen.getByRole('button', { name: /National Life/ }).click()
     await act(async () => {
       await vi.advanceTimersByTimeAsync(90_000)
     })
 
-    expect(screen.getByRole('status')).toHaveTextContent('Still syncing')
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting for the portal response')
     expect(screen.getByRole('status')).not.toHaveTextContent('stopped')
 
     // Continua consultando: o run que termina depois ainda vira sucesso.

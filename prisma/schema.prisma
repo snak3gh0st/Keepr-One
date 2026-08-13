@@ -779,6 +779,7 @@ model NationalLifeSyncRun {
   jobs            BrowserAutomationJob[]
   stageReceipts   NationalLifeConnectorStageReceipt[]
   stageCompletions NationalLifeConnectorStageCompletion[]
+  stageFailures   NationalLifeConnectorStageFailure[]
   rawGridPages    NationalLifeRawGridPage[]
 
   @@index([agentId, deploymentScope, state, createdAt])
@@ -824,6 +825,7 @@ model NationalLifeConnectorDevice {
   replays               NationalLifeConnectorReplay[]
   stageReceipts         NationalLifeConnectorStageReceipt[]
   stageCompletions      NationalLifeConnectorStageCompletion[]
+  stageFailures         NationalLifeConnectorStageFailure[]
   syncRuns              NationalLifeSyncRun[]
   commands              NationalLifeConnectorCommand[]
 
@@ -958,6 +960,26 @@ model NationalLifeConnectorStageCompletion {
 
   @@unique([deviceId, runId, gridKey])
   @@index([runId, gridKey])
+}
+
+/// A source failure is a durable, isolated outcome, not a failure of the whole
+/// run. `resolvedAt` preserves the attempt while letting a retry make the source
+/// pending again without rereading stages that already have completion receipts.
+model NationalLifeConnectorStageFailure {
+  id            String   @id @default(cuid())
+  deviceId      String
+  device        NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  runId         String
+  run           NationalLifeSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  gridKey       String
+  safeErrorCode String
+  retryable     Boolean  @default(true)
+  failedAt      DateTime @default(now())
+  resolvedAt    DateTime?
+  updatedAt     DateTime @updatedAt
+
+  @@unique([deviceId, runId, gridKey])
+  @@index([runId, resolvedAt])
 }
 
 model Illustration {

@@ -41,7 +41,7 @@ function outcomeLine(status: NationalLifeSyncStatus): string | null {
   if (status.writtenRecords === null) return null
   if (status.writtenRecords === 0) {
     return status.receivedRecords && status.receivedRecords > 0
-      ? 'National Life returned records, but none of them could be saved. Try syncing again — if it repeats, contact support.'
+      ? 'National Life returned records, but none of them could be saved. Try syncing again; if it repeats, contact support.'
       : 'National Life had nothing new to send this time.'
   }
   const plural = status.writtenRecords === 1 ? 'record' : 'records'
@@ -53,7 +53,8 @@ function formatCount(value: number | null): string {
 }
 
 function activeLine(status: NationalLifeSyncStatus): string {
-  if (!status.currentGridLabel) return `${status.percent}% done`
+  const checked = status.completed + status.failed
+  if (!status.currentGridLabel) return `${checked} of ${status.total} areas checked.`
   if (status.receivedRecords !== null && status.receivedRecords > 0) {
     return `Reading and saving ${status.currentGridLabel}. ${formatCount(status.receivedRecords)} rows received so far.`
   }
@@ -119,7 +120,7 @@ export function NationalLifeSyncProgress({
     return (
       <section
         aria-label="National Life sync progress"
-        className="mb-6 rounded-2xl border border-border-steel bg-paper p-5 shadow-[var(--shadow-card)] sm:p-6"
+        className="mb-6 rounded-xl border border-border-steel bg-paper p-5 sm:p-6"
       >
         <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Sync status</p>
         <h2 className="mt-1 text-lg font-semibold text-ink">Ready to bring National Life into Keepr One</h2>
@@ -135,8 +136,9 @@ export function NationalLifeSyncProgress({
   }
 
   const message = friendlyState(status)
-  const terminal = status.state === 'COMPLETED'
+  const terminal = status.state === 'COMPLETED' || status.state === 'PARTIAL' || status.state === 'FAILED'
   const active = status.shouldPoll
+  const checked = Math.min(status.total, status.completed + status.failed)
   const lastSynced = formatMoment(status.completedAt)
   // Só depois do fim. No meio do run, "nada novo desta vez" ou "120 gravados"
   // seriam a mesma mentira do "concluído" eterno, apontada para o outro lado.
@@ -146,7 +148,7 @@ export function NationalLifeSyncProgress({
     <section
       aria-label="National Life sync progress"
       aria-busy={active}
-      className="mb-6 rounded-2xl border border-border-steel bg-paper p-5 shadow-[var(--shadow-card)] sm:p-6"
+      className="mb-6 rounded-xl border border-border-steel bg-paper p-5 sm:p-6"
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -160,14 +162,18 @@ export function NationalLifeSyncProgress({
             )}
           </div>
           <h2 className="mt-1 text-lg font-semibold text-ink">
-            {terminal ? 'Your National Life data' : 'Updating your National Life data'}
+            {status.state === 'COMPLETED'
+              ? 'Your National Life data is up to date'
+              : terminal
+                ? 'Sync finished with areas to retry'
+                : 'Updating your National Life data'}
           </h2>
           {terminal && lastSynced && (
             <p className="mt-1 text-sm text-ink-muted">Last synced {lastSynced}</p>
           )}
         </div>
         <span className="font-mono text-sm font-semibold tabular-nums text-teal">
-          {status.completed} of {status.total} portal sources verified
+          {checked} of {status.total} portal areas checked
         </span>
       </div>
 
@@ -175,7 +181,7 @@ export function NationalLifeSyncProgress({
         aria-label="Update progress"
         className="mt-5 h-2 w-full overflow-hidden rounded-full accent-teal"
         max={status.total}
-        value={status.completed}
+        value={checked}
       />
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-ink-muted">
@@ -192,13 +198,19 @@ export function NationalLifeSyncProgress({
         )}
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-border-steel bg-panel/55 p-4">
+      {active && status.failed > 0 && (
+        <div className="mt-4 rounded-xl border border-gold/35 bg-gold-pale px-4 py-3 text-sm text-gold-ink">
+          {status.failed} {status.failed === 1 ? 'area could' : 'areas could'} not be read. The sync is continuing with the remaining areas.
+        </div>
+      )}
+
+      <div className="mt-5 grid overflow-hidden rounded-lg border border-border-steel bg-panel/55 divide-y divide-border-steel sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+        <div className="p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">Received from National Life</p>
           <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">{formatCount(status.receivedRecords)}</p>
           <p className="mt-1 text-xs text-ink-muted">Rows delivered by the portal</p>
         </div>
-        <div className="rounded-xl border border-teal/30 bg-teal-pale/45 p-4">
+        <div className="bg-teal-pale/45 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">Saved in Keepr One</p>
           <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">{formatCount(status.writtenRecords)}</p>
           <p className="mt-1 text-xs text-ink-muted">Rows written to your National Life data</p>
@@ -228,7 +240,7 @@ export function NationalLifeSyncProgress({
             ))}
           </ul>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-steel bg-panel/45 px-3 py-2 text-xs text-ink-muted">
-            <span>V1 portal coverage</span>
+            <span>Automated coverage today</span>
             <span className="font-mono font-semibold tabular-nums text-ink">
               {PORTAL_COVERAGE.automatic} of {PORTAL_COVERAGE.required} known sources automated
             </span>

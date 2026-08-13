@@ -4,6 +4,7 @@ import {
   LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
   LOCAL_CONNECTOR_RUN_TTL_MS,
   completeLocalConnectorStage,
+  failLocalConnectorStage,
   failLocalConnectorRun,
   expireStaleLocalConnectorRuns,
   ingestLocalConnectorStage,
@@ -12,6 +13,10 @@ import {
 import { planReadGridStages } from './capabilities'
 
 const now = new Date('2026-08-04T18:00:00.000Z')
+
+function planStageKey(stage: ReturnType<typeof planReadGridStages>[number] | { capability: 'READ_PAGE'; params: { sourceKey: string } }) {
+  return stage.capability === 'READ_GRID' ? stage.params.gridKey : stage.params.sourceKey
+}
 
 describe('local connector runs', () => {
   it('expires stale local runs during status polling without a device filter', async () => {
@@ -67,6 +72,7 @@ describe('local connector runs', () => {
       stages: planReadGridStages(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS),
       duplicate: false,
       completedStages: 0,
+      nextStageIndex: 0,
     })
     expect(create.mock.calls[0][0].data).toEqual(
       expect.objectContaining({
@@ -84,6 +90,7 @@ describe('local connector runs', () => {
   })
 
   it('resumes a recent failed run from its durable completed-stage cursor', async () => {
+    const create = vi.fn()
     const updateMany = vi
       .fn()
       .mockResolvedValueOnce({ count: 0 })
@@ -96,7 +103,7 @@ describe('local connector runs', () => {
     })
     const db = {
       nationalLifeSyncRun: {
-        create: vi.fn(),
+        create,
         updateMany,
         findFirst,
       },
@@ -119,10 +126,11 @@ describe('local connector runs', () => {
         currentGridKey: 'PAID_COMMISSIONS',
       }),
     }))
-    expect(db.nationalLifeSyncRun.create).not.toHaveBeenCalled()
+    expect(create).not.toHaveBeenCalled()
   })
 
   it('resumes a recent failed run even when its first stage was interrupted', async () => {
+    const create = vi.fn()
     const updateMany = vi
       .fn()
       .mockResolvedValueOnce({ count: 0 })
@@ -135,7 +143,7 @@ describe('local connector runs', () => {
     })
     const db = {
       nationalLifeSyncRun: {
-        create: vi.fn(),
+        create,
         updateMany,
         findFirst,
       },
@@ -154,7 +162,7 @@ describe('local connector runs', () => {
         currentGridKey: 'NEW_BUSINESS',
       }),
     }))
-    expect(db.nationalLifeSyncRun.create).not.toHaveBeenCalled()
+    expect(create).not.toHaveBeenCalled()
   })
 
   it('orders failed retries by the greatest verified cursor before recency', async () => {
@@ -178,6 +186,51 @@ describe('local connector runs', () => {
 
     expect(findFirst).toHaveBeenNthCalledWith(2, expect.objectContaining({
       orderBy: [{ completedStages: 'desc' }, { createdAt: 'desc' }],
+    }))
+  })
+
+  it('retries only failed sources from a partial run and keeps verified sources skipped', async () => {
+    const runUpdateMany = vi
+      .fn()
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 })
+    const failureUpdateMany = vi.fn().mockResolvedValue({ count: 2 })
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: runUpdateMany,
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            id: 'run-partial',
+            state: 'PARTIAL',
+            plannedGridKeys: ['NEW_BUSINESS', 'PROJECTED_COMMISSIONS', 'INFORCE_CLIENTS'],
+            completedStages: 1,
+            currentGridKey: null,
+            stageCompletions: [{ gridKey: 'NEW_BUSINESS' }],
+            stageFailures: [
+              { gridKey: 'PROJECTED_COMMISSIONS' },
+              { gridKey: 'INFORCE_CLIENTS' },
+            ],
+          }),
+      },
+      nationalLifeConnectorStageFailure: { updateMany: failureUpdateMany },
+      nationalLifeConnectorStageReceipt: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never
+
+    await expect(startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+    )).resolves.toMatchObject({
+      runId: 'run-partial',
+      nextStageIndex: 1,
+      completedStages: 1,
+    })
+    expect(runUpdateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      data: expect.objectContaining({ currentGridKey: 'PROJECTED_COMMISSIONS', failedStages: 0 }),
+    }))
+    expect(failureUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { runId: 'run-partial', deviceId: 'device-1', resolvedAt: null },
     }))
   })
 
@@ -265,7 +318,7 @@ describe('local connector runs', () => {
     )
 
     expect(run.stages).toHaveLength(1)
-    expect(run.stages[0].params.gridKey).toBe('PAID_COMMISSIONS')
+    expect(planStageKey(run.stages[0]!)).toBe('PAID_COMMISSIONS')
     expect(run.stages[0].params.navigatePath).toBe(
       '/agent/compensation/commissions/paid-commissions',
     )
@@ -595,7 +648,7 @@ describe('local connector runs', () => {
     )
 
     expect(run.duplicate).toBe(true)
-    expect(run.stages.map((stage) => stage.params.gridKey)).toEqual([
+    expect(run.stages.map(planStageKey)).toEqual([
       'NEW_BUSINESS',
       'INFORCE_CLIENTS',
     ])
@@ -617,7 +670,7 @@ describe('local connector runs', () => {
       now,
     })
 
-    expect(run.stages.map((stage) => stage.params.gridKey)).toEqual([
+    expect(run.stages.map(planStageKey)).toEqual([
       'NEW_BUSINESS',
       'INFORCE_CLIENTS',
     ])
@@ -1098,6 +1151,82 @@ describe('local connector runs', () => {
     )
   })
 
+  it('records one source failure and advances to the next unsettled source', async () => {
+    const runUpdate = vi.fn().mockResolvedValue({})
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run-1',
+          plannedGridKeys: ['NEW_BUSINESS', 'PROJECTED_COMMISSIONS', 'INFORCE_CLIENTS'],
+        }),
+        update: runUpdate,
+      },
+      nationalLifeConnectorStageCompletion: {
+        findMany: vi.fn().mockResolvedValue([{ gridKey: 'NEW_BUSINESS' }]),
+      },
+      nationalLifeConnectorStageFailure: {
+        upsert: vi.fn().mockResolvedValue({}),
+        findMany: vi.fn().mockResolvedValue([{ gridKey: 'PROJECTED_COMMISSIONS' }]),
+      },
+    }
+    const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
+
+    await expect(failLocalConnectorStage(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      runId: 'run-1',
+      gridKey: 'PROJECTED_COMMISSIONS',
+      safeErrorCode: 'TEMPLATE_UNAVAILABLE',
+      now,
+    })).resolves.toMatchObject({
+      state: 'RUNNING',
+      nextStageIndex: 2,
+      completedStages: 1,
+      failedStages: 1,
+      terminal: false,
+    })
+    expect(runUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        state: 'RUNNING',
+        currentGridKey: 'INFORCE_CLIENTS',
+      }),
+    }))
+  })
+
+  it('finishes as partial only after every planned source has an outcome', async () => {
+    const runUpdate = vi.fn().mockResolvedValue({})
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run-1',
+          plannedGridKeys: ['NEW_BUSINESS', 'PROJECTED_COMMISSIONS'],
+        }),
+        update: runUpdate,
+      },
+      nationalLifeConnectorStageCompletion: {
+        findMany: vi.fn().mockResolvedValue([{ gridKey: 'NEW_BUSINESS' }]),
+      },
+      nationalLifeConnectorStageFailure: {
+        upsert: vi.fn().mockResolvedValue({}),
+        findMany: vi.fn().mockResolvedValue([{ gridKey: 'PROJECTED_COMMISSIONS' }]),
+      },
+    }
+    const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
+
+    await expect(failLocalConnectorStage(db, {
+      agentId: 'agent-1', deviceId: 'device-1', runId: 'run-1',
+      gridKey: 'PROJECTED_COMMISSIONS', safeErrorCode: 'PORTAL_REQUEST_FAILED', now,
+    })).resolves.toMatchObject({ state: 'PARTIAL', nextStageIndex: 2, terminal: true })
+    expect(runUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        state: 'PARTIAL',
+        failedStages: 1,
+        currentGridKey: null,
+        safeErrorCode: 'SOURCE_PARTIAL_FAILURE',
+      }),
+    }))
+  })
+
   it('completes a grid only when every page sequence and the carrier total reconcile', async () => {
     const runUpdate = vi.fn().mockResolvedValue({})
     const tx = {
@@ -1117,6 +1246,10 @@ describe('local connector runs', () => {
       nationalLifeConnectorStageCompletion: {
         upsert: vi.fn().mockResolvedValue({}),
         findMany: vi.fn().mockResolvedValue([{ gridKey: 'NEW_BUSINESS' }]),
+      },
+      nationalLifeConnectorStageFailure: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findMany: vi.fn().mockResolvedValue([]),
       },
       nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
     }

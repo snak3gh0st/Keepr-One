@@ -450,6 +450,7 @@ async function createRun() {
     runId?: unknown
     stages?: unknown
     completedStages?: unknown
+    nextStageIndex?: unknown
     resume?: { sequence?: unknown; offset?: unknown }
   }>({
     baseUrl: device.baseUrl,
@@ -471,6 +472,12 @@ async function createRun() {
     response.completedStages <= plan.length
     ? response.completedStages
     : 0
+  const nextStageIndex = typeof response.nextStageIndex === 'number' &&
+    Number.isInteger(response.nextStageIndex) &&
+    response.nextStageIndex >= 0 &&
+    response.nextStageIndex <= plan.length
+    ? response.nextStageIndex
+    : completedStages
   const resumeSequence = typeof response.resume?.sequence === 'number' &&
     Number.isInteger(response.resume.sequence) && response.resume.sequence >= 0 && response.resume.sequence <= 10_000
     ? response.resume.sequence
@@ -487,7 +494,7 @@ async function createRun() {
       ...previous,
       runId: response.runId,
       plan,
-      stageIndex: completedStages,
+      stageIndex: nextStageIndex,
       resumeSequence,
       resumeOffset,
       status: 'NAVIGATING',
@@ -497,14 +504,14 @@ async function createRun() {
     await writeSyncState({
       runId: response.runId,
       plan,
-      stageIndex: 0,
+      stageIndex: nextStageIndex,
       resumeSequence,
       resumeOffset,
       status: 'NAVIGATING',
       carrierTabId: previous.carrierTabId,
     })
   }
-  if (completedStages >= plan.length) {
+  if (nextStageIndex >= plan.length) {
     await writeSyncState({
       ...(await readSyncState()),
       stageIndex: plan.length,
@@ -871,7 +878,10 @@ async function finishGrid(tabId: number, gridKey: string) {
   if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
     throw new Error('SYNC_STATE_INVALID')
   }
-  await signedJsonRequest({
+  const result = await signedJsonRequest<{
+    nextStageIndex?: unknown
+    terminal?: unknown
+  }>({
     baseUrl: device.baseUrl,
     deviceId: device.deviceId,
     method: 'POST',
@@ -889,14 +899,75 @@ async function finishGrid(tabId: number, gridKey: string) {
   // currentStage already proved the stored plan parses; re-derive it so navigation
   // reads the validated array rather than the raw storage value.
   const plan = parseStagePlan(state.plan)
-  const nextIndex = (state.stageIndex ?? 0) + 1
+  const fallbackNextIndex = (state.stageIndex ?? 0) + 1
+  const nextIndex = typeof result.nextStageIndex === 'number' &&
+    Number.isInteger(result.nextStageIndex) &&
+    result.nextStageIndex >= 0 &&
+    result.nextStageIndex <= plan.length
+    ? result.nextStageIndex
+    : fallbackNextIndex
   const next = plan[nextIndex]
-  if (!next) {
+  if (result.terminal === true || !next) {
     await writeSyncState({
       runId: state.runId,
       resumeSequence: undefined,
       resumeOffset: undefined,
       status: 'COMPLETED',
+      uploads: state.uploads,
+      completedAt: new Date().toISOString(),
+    })
+    await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
+    return
+  }
+  await writeSyncState({
+    runId: state.runId,
+    plan,
+    stageIndex: nextIndex,
+    resumeSequence: 0,
+    resumeOffset: 0,
+    status: 'NAVIGATING',
+    uploads: state.uploads,
+  })
+  const nextGridKey = stageKey(next)
+  const nextPath = canonicalNationalLifeNavigatePath(nextGridKey, next.params.navigatePath)
+  await updateTab(tabId, { url: `${NLG_ORIGIN}${nextPath}` })
+}
+
+async function skipFailedStage(tabId: number, gridKey: string, code: string) {
+  const state = await readSyncState()
+  const stage = currentStage(state)
+  const device = await readDeviceState()
+  if (
+    !state.runId || !state.plan || !stage || stageKey(stage) !== gridKey ||
+    device.status !== 'READY' || !device.deviceId || !device.baseUrl
+  ) {
+    throw new Error('SYNC_STATE_INVALID')
+  }
+  const result = await signedJsonRequest<{
+    nextStageIndex?: unknown
+    terminal?: unknown
+  }>({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname: `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}/stages/${encodeURIComponent(gridKey)}/fail`,
+    idempotencyKey: `nlc:${state.runId}:${state.stageIndex ?? 0}:${gridKey}:fail:${code}`,
+    body: { runId: state.runId, gridKey, code, retryable: true },
+  })
+  const plan = parseStagePlan(state.plan)
+  const fallbackNextIndex = (state.stageIndex ?? 0) + 1
+  const nextIndex = typeof result.nextStageIndex === 'number' &&
+    Number.isInteger(result.nextStageIndex) &&
+    result.nextStageIndex >= 0 &&
+    result.nextStageIndex <= plan.length
+    ? result.nextStageIndex
+    : fallbackNextIndex
+  const next = plan[nextIndex]
+  if (result.terminal === true || !next) {
+    await writeSyncState({
+      runId: state.runId,
+      stageIndex: plan.length,
+      status: 'PARTIAL',
       uploads: state.uploads,
       completedAt: new Date().toISOString(),
     })
@@ -958,7 +1029,7 @@ async function processBridgeMessage(tabId: number, message: BridgeMessage) {
     else if (message.type === 'GRID_DONE') await finishGrid(tabId, message.gridKey)
     else {
       activeNavigations.delete(tabId)
-      await failSync(message.code, tabId)
+      await skipFailedStage(tabId, message.gridKey, message.code)
     }
   } catch (error) {
     // A ordem de parar vem antes de tudo: antes do `delete`, que apaga o token
@@ -1038,7 +1109,16 @@ async function resumePending(options?: { reconcileWithServer?: boolean }) {
 
 async function getConnectorStatus() {
   const [device, sync] = await Promise.all([readDeviceState(), readSyncState()])
-  return { ok: true as const, device, sync }
+  const stage = currentStage(sync)
+  return {
+    ok: true as const,
+    device,
+    sync: {
+      ...sync,
+      stageKey: stage ? stageKey(stage) : undefined,
+      totalStages: sync.plan?.length,
+    },
+  }
 }
 
 export default defineBackground(() => {

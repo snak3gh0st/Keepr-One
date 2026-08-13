@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import type { Prisma } from '@prisma/client'
 import type { ConnectorCommandRepository } from './connector-command-service'
+import type { ConnectorCommandState } from './connector-command-contract'
 import {
   ConnectorCommandError,
   approveConnectorCommand,
@@ -17,9 +19,11 @@ type MemoryCommand = {
   capability: string
   runId: string
   requiresConfirmation: boolean
-  confirmationState: string
-  state: string
+  confirmationState: 'NOT_REQUIRED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'
+  state: ConnectorCommandState
   expiresAt: Date
+  target: Prisma.JsonValue | null
+  params: Prisma.JsonValue
   events: Array<{ sequence: number }>
 } & Record<string, unknown>
 
@@ -36,12 +40,13 @@ function createRepository() {
       return command?.agentId === input.agentId ? command : null
     },
     async createCommand(input) {
-      const command: MemoryCommand = { ...input, events: [] }
+      const command = { ...input, events: [] } as unknown as MemoryCommand
       commands.set(command.id, command)
       return command as never
     },
     async updateCommand(input) {
-      Object.assign(commands.get(input.commandId), input.patch)
+      const command = commands.get(input.commandId)
+      if (command) Object.assign(command, input.patch)
     },
     async createConfirmation() {},
     async approveConfirmation() {},

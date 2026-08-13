@@ -143,7 +143,7 @@ describe('empurrão de atualização', () => {
     for (const status of ['STARTING', 'NAVIGATING', 'EXTRACTING', 'UPLOADING', 'AUTH_REQUIRED']) {
       expect(isBusySyncStatus(status)).toBe(true)
     }
-    for (const status of ['IDLE', 'COMPLETED', 'ERROR', undefined]) {
+    for (const status of ['IDLE', 'COMPLETED', 'PARTIAL', 'ERROR', undefined]) {
       expect(isBusySyncStatus(status)).toBe(false)
     }
   })
