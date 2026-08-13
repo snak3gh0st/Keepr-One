@@ -14,12 +14,20 @@ import { PageHeader } from '@/components/PageHeader'
 import { Shell } from '@/components/Shell'
 import { foresightRunStore } from '@/lib/national-life/foresight-run-service'
 import {
+  buildClientActionQueue,
+  toClientServiceEvents,
+} from '@/lib/national-life/client-intelligence'
+import {
   NationalLifeDataTabs,
   type CaseRow,
   type PortalReportRow,
   type InforceRow,
 } from './NationalLifeDataTabs'
 import { ForesightCaseTabs, type ForesightCaseRow } from './ForesightCaseTabs'
+import {
+  NationalLifeActionQueue,
+  type NationalLifeActionRow,
+} from './NationalLifeActionQueue'
 
 export const dynamic = 'force-dynamic'
 
@@ -103,7 +111,10 @@ export default async function NationalLifeDataPage() {
   let cases: CaseRow[] = []
   let inforce: InforceRow[] = []
   let reports: PortalReportRow[] = []
+  let actions: NationalLifeActionRow[] = []
   let lastSyncedAt: Date | null = null
+  let verifiedStageCount = 0
+  let totalStageCount = 0
   let loadError = false
   let foresightCases: ForesightCaseRow[] = []
   let foresightRun: Awaited<ReturnType<typeof foresightRunStore.getStatus>> = null
@@ -133,6 +144,7 @@ export default async function NationalLifeDataPage() {
       caseRows,
       inforceRows,
       reportRows,
+      intelligenceRows,
       session,
       localRun,
       foresightRows,
@@ -149,9 +161,21 @@ export default async function NationalLifeDataPage() {
         orderBy: [{ policyStatus: 'asc' }, { policyNumber: 'asc' }],
       }),
       prisma.nationalLifeReportRow.findMany({
-        where: { agentId: agent.id, deploymentScope },
+        where: {
+          agentId: agent.id,
+          deploymentScope,
+          gridKey: { not: 'CLIENT_INTELLIGENCE' },
+        },
         select: reportSelect,
         orderBy: [{ gridKey: 'asc' }, { primaryDate: 'desc' }],
+      }),
+      prisma.nationalLifeReportRow.findMany({
+        where: {
+          agentId: agent.id,
+          deploymentScope,
+          gridKey: 'CLIENT_INTELLIGENCE',
+        },
+        select: { id: true, raw: true },
       }),
       remoteScope && deploymentScope === remoteScope
         ? prisma.agentIntegrationSession.findFirst({
@@ -166,13 +190,19 @@ export default async function NationalLifeDataPage() {
         : Promise.resolve(null),
       deploymentScope === LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
         ? prisma.nationalLifeSyncRun.findFirst({
+            select: {
+              completedAt: true,
+              updatedAt: true,
+              completedStages: true,
+              totalStages: true,
+            },
             where: {
               agentId: agent.id,
               deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
               executionSource: 'LOCAL',
               provider: 'NATIONAL_LIFE',
+              state: 'COMPLETED',
             },
-            select: { completedAt: true, updatedAt: true },
             orderBy: { createdAt: 'desc' },
           })
         : Promise.resolve(null),
@@ -202,6 +232,28 @@ export default async function NationalLifeDataPage() {
       deploymentScope === LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
         ? localRun?.completedAt ?? localRun?.updatedAt ?? null
         : session?.lastUsedAt ?? session?.lastConnectedAt ?? null
+    verifiedStageCount = localRun?.completedStages ?? 0
+    totalStageCount = localRun?.totalStages ?? 0
+
+    const actionQueue = buildClientActionQueue(toClientServiceEvents(intelligenceRows), {
+      asOf: lastSyncedAt ?? new Date(),
+      windowDays: 30,
+    })
+    const linkedPolicies = actionQueue.length
+      ? await prisma.policy.findMany({
+          where: {
+            agentId: agent.id,
+            policyNumber: { in: actionQueue.map((item) => item.policyNumber) },
+          },
+          select: { id: true, policyNumber: true },
+        })
+      : []
+    const policyIds = new Map(linkedPolicies.map((policy) => [policy.policyNumber, policy.id]))
+    actions = actionQueue.map((item) => ({
+      ...item,
+      occurredAt: item.occurredAt.toISOString(),
+      policyId: policyIds.get(item.policyNumber) ?? null,
+    }))
     foresightCases = foresightRows.map(({ _count, ...row }) => ({ ...row, serviceCount: _count.services }))
     foresightRun = currentForesightRun
   } catch (error) {
@@ -216,19 +268,24 @@ export default async function NationalLifeDataPage() {
     const status = (row.policyStatus ?? '').toLowerCase()
     return status.includes('lapse') || status.includes('not active')
   }).length
+  const riskActions = actions.filter((row) => row.signal === 'AT_RISK').length
+  const opportunityActions = actions.filter((row) => row.signal === 'OPPORTUNITY').length
+  const syncDetail = lastSyncedAt
+    ? lastSyncedAt.toLocaleString('pt-BR', { dateStyle: 'medium', timeStyle: 'short' })
+    : 'Ainda não sincronizado'
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <PageHeader
-        title="National Life data"
-        eyebrow="Integration"
-        description="Cases, in-force policies, and every synced portal report, read straight from National Life."
+        title="National Life"
+        eyebrow="Carteira conectada"
+        description="Dados atuais da carteira e sinais concretos para orientar o próximo contato com cada cliente."
       >
         <Link
           href="/agent/integrations/national-life"
           className="inline-flex items-center rounded-full border border-border-steel bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-colors hover:border-teal hover:bg-panel"
         >
-          Manage connection
+          Gerenciar conexão
         </Link>
       </PageHeader>
 
@@ -240,25 +297,32 @@ export default async function NationalLifeDataPage() {
 
       {!loadError && (
         <ModuleSummary
-          label="Saved in Keepr One"
+          label="Resumo da National Life"
           items={[
             {
-              label: 'Cases',
-              value: cases.length,
-              detail: 'New business and recently closed',
-            },
-            {
-              label: 'In force',
+              label: 'Carteira em vigor',
               value: activeInforce,
-              detail: `${inforce.length} policies read · ${attentionInforce} need attention`,
-              tone: attentionInforce > 0 ? 'gold' : 'green',
+              detail: `${inforce.length} apólices observadas no portal`,
+              tone: 'green',
             },
             {
-              label: 'Portal report rows',
-              value: reports.length,
-              detail: lastSyncedAt
-                ? `Last synced ${lastSyncedAt.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`
-                : 'Not synced yet',
+              label: 'Precisa de ação',
+              value: riskActions,
+              detail: 'Apólices com sinal de risco nos últimos 30 dias',
+              tone: riskActions > 0 ? 'danger' : 'green',
+            },
+            {
+              label: 'Oportunidades',
+              value: opportunityActions,
+              detail: 'Aniversários e datas para relacionamento',
+              tone: opportunityActions > 0 ? 'gold' : 'neutral',
+            },
+            {
+              label: 'Fontes verificadas',
+              value: totalStageCount > 0 ? `${verifiedStageCount}/${totalStageCount}` : '—',
+              detail: syncDetail,
+              tone:
+                totalStageCount > 0 && verifiedStageCount === totalStageCount ? 'green' : 'gold',
             },
           ]}
         />
@@ -266,20 +330,31 @@ export default async function NationalLifeDataPage() {
 
       <div className="module-content-grid">
         <section className="module-main-surface">
-          {!loadError && (
-            <NationalLifeDataTabs cases={cases} inforce={inforce} reports={reports} />
-          )}
+          {!loadError && <NationalLifeActionQueue rows={actions} />}
         </section>
-        <ContextPanel eyebrow="How to read this" title="Straight from the portal">
+        <ContextPanel eyebrow="Confiança dos dados" title="Atual e rastreável">
           <p>
-            These records are a copy of what the National Life portal showed at the time of the last
-            sync. They do not replace your policies in Keepr One.
+            A carteira, os casos e os sinais abaixo vêm da última leitura concluída da National Life.
+            A data da atualização e o número de fontes verificadas ficam sempre visíveis.
           </p>
           <div className="mt-5 border-t border-white/10 pt-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Amounts</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">
+              Limite conhecido
+            </p>
             <p className="mt-2">
-              Premiums and commission amounts arrive as text from the carrier and are shown exactly
-              as received, with no recalculation.
+              A carteira em vigor não fornece e-mail, telefone, prêmio anual ou valor em dinheiro.
+              O Keepr One mostra esses campos como ausentes, nunca como zero. Contatos são usados
+              apenas quando aparecem no histórico de atendimento.
+            </p>
+          </div>
+          <div className="mt-5 border-t border-white/10 pt-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">
+              Estado da carteira
+            </p>
+            <p className="mt-2">
+              {attentionInforce} apólices estão em lapse, pending lapse ou not active. A fila de ação
+              usa somente sinais registrados nos últimos 30 dias, para não misturar histórico antigo
+              com prioridade atual.
             </p>
           </div>
         </ContextPanel>
@@ -287,10 +362,28 @@ export default async function NationalLifeDataPage() {
       <section className="mt-8 module-main-surface">
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Foresight</p>
-            <h2 className="mt-1 text-xl font-semibold text-ink">Cases seen in the portal</h2>
+            <h2 className="text-xl font-semibold text-ink">Dados recebidos do portal</h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              Consulte casos, carteira e relatórios exatamente como foram recebidos.
+            </p>
           </div>
-          <p className="text-sm text-ink-muted">View-only · {foresightCases.length} cases</p>
+          <p className="text-sm text-ink-muted">
+            {cases.length} casos · {inforce.length} apólices · {reports.length} linhas de relatório
+          </p>
+        </div>
+        {!loadError && (
+          <NationalLifeDataTabs cases={cases} inforce={inforce} reports={reports} />
+        )}
+      </section>
+      <section className="mt-8 module-main-surface">
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">
+              Leitura detalhada
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-ink">Casos identificados no portal</h2>
+          </div>
+          <p className="text-sm text-ink-muted">Somente leitura · {foresightCases.length} casos</p>
         </div>
         <ForesightCaseTabs cases={foresightCases} run={foresightRun} />
       </section>

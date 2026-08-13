@@ -26,6 +26,19 @@ export type ClientServiceEvent = {
   signal: ClientServiceSignal
 }
 
+export type ClientActionItem = {
+  policyNumber: string
+  customerName: string | null
+  email: string | null
+  phone: string | null
+  category: string | null
+  reason: string | null
+  description: string | null
+  occurredAt: Date
+  signal: Exclude<ClientServiceSignal, 'ROUTINE'>
+  eventCount: number
+}
+
 /// Reasons that mean the money stopped or the policy is on its way out.
 ///
 /// This is our reading, not the carrier's. The carrier files most of these
@@ -139,6 +152,74 @@ export function toClientServiceEvents(
       // happen to the client.
       if (!left.occurredAt) return 1
       if (!right.occurredAt) return -1
+      return right.occurredAt.getTime() - left.occurredAt.getTime()
+    })
+}
+
+const SIGNAL_PRIORITY: Record<ClientServiceSignal, number> = {
+  AT_RISK: 2,
+  OPPORTUNITY: 1,
+  ROUTINE: 0,
+}
+
+/// Builds the operational call list from the carrier's contact history.
+///
+/// The queue is intentionally one row per policy. A client can generate several
+/// portal events in a month, but the agent needs one next action, with the most
+/// urgent recent signal and the best contact details available in that period.
+export function buildClientActionQueue(
+  events: ClientServiceEvent[],
+  options: { asOf: Date; windowDays?: number },
+): ClientActionItem[] {
+  const windowDays = options.windowDays ?? 30
+  const windowStart = new Date(options.asOf.getTime() - windowDays * 24 * 60 * 60_000)
+  const grouped = new Map<string, ClientServiceEvent[]>()
+
+  for (const event of events) {
+    if (
+      !event.policyNumber ||
+      !event.occurredAt ||
+      event.signal === 'ROUTINE' ||
+      event.occurredAt < windowStart ||
+      event.occurredAt > options.asOf
+    ) {
+      continue
+    }
+    const existing = grouped.get(event.policyNumber) ?? []
+    existing.push(event)
+    grouped.set(event.policyNumber, existing)
+  }
+
+  return [...grouped.entries()]
+    .map(([policyNumber, policyEvents]) => {
+      const ordered = [...policyEvents].sort((left, right) => {
+        const priority = SIGNAL_PRIORITY[right.signal] - SIGNAL_PRIORITY[left.signal]
+        if (priority !== 0) return priority
+        return right.occurredAt!.getTime() - left.occurredAt!.getTime()
+      })
+      const selected = ordered[0]!
+      const byRecency = [...policyEvents].sort(
+        (left, right) => right.occurredAt!.getTime() - left.occurredAt!.getTime(),
+      )
+      const contact = byRecency.find((event) => event.email || event.phone)
+      const named = byRecency.find((event) => event.customerName)
+
+      return {
+        policyNumber,
+        customerName: selected.customerName ?? named?.customerName ?? null,
+        email: selected.email ?? contact?.email ?? null,
+        phone: selected.phone ?? contact?.phone ?? null,
+        category: selected.category,
+        reason: selected.reason,
+        description: selected.description,
+        occurredAt: selected.occurredAt!,
+        signal: selected.signal as ClientActionItem['signal'],
+        eventCount: policyEvents.length,
+      }
+    })
+    .sort((left, right) => {
+      const priority = SIGNAL_PRIORITY[right.signal] - SIGNAL_PRIORITY[left.signal]
+      if (priority !== 0) return priority
       return right.occurredAt.getTime() - left.occurredAt.getTime()
     })
 }

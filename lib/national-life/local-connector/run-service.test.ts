@@ -1339,7 +1339,14 @@ describe('local connector runs', () => {
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         findMany: vi.fn().mockResolvedValue([]),
       },
-      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
+      nationalLifeCaseSnapshot: { deleteMany: vi.fn().mockResolvedValue({ count: 3 }) },
+      nationalLifeInforcePolicy: { deleteMany: vi.fn() },
+      nationalLifeReportRow: { deleteMany: vi.fn() },
+      nationalLifeRawGridPage: {
+        upsert: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue({ observedAt: now }),
+        deleteMany: vi.fn(),
+      },
     }
     const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
 
@@ -1354,6 +1361,61 @@ describe('local connector runs', () => {
         currentGridKey: 'INFORCE_CLIENTS',
       }),
     }))
+    expect(tx.nationalLifeCaseSnapshot.deleteMany).toHaveBeenCalledWith({
+      where: {
+        agentId: 'agent-1',
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+        gridKey: 'NEW_BUSINESS',
+        fetchedAt: { lt: now },
+      },
+    })
+  })
+
+  it.each([
+    ['INFORCE_CLIENTS', 'nationalLifeInforcePolicy'],
+    ['PAID_COMMISSIONS', 'nationalLifeReportRow'],
+  ] as const)('prunes stale normalized rows after verifying %s', async (gridKey, targetModel) => {
+    const models = {
+      nationalLifeCaseSnapshot: { deleteMany: vi.fn() },
+      nationalLifeInforcePolicy: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
+      nationalLifeReportRow: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
+    }
+    const tx = {
+      nationalLifeSyncRun: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'run-1', plannedGridKeys: [gridKey] }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      nationalLifeConnectorStageReceipt: {
+        findMany: vi.fn().mockResolvedValue([{ sequence: 0, recordCount: 1 }]),
+      },
+      nationalLifeConnectorStageCompletion: {
+        upsert: vi.fn().mockResolvedValue({}),
+        findMany: vi.fn().mockResolvedValue([{ gridKey }]),
+      },
+      nationalLifeConnectorStageFailure: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      ...models,
+      nationalLifeRawGridPage: {
+        findFirst: vi.fn().mockResolvedValue({ observedAt: now }),
+        deleteMany: vi.fn(),
+      },
+    }
+    const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
+
+    await completeLocalConnectorStage(db, {
+      agentId: 'agent-1', deviceId: 'device-1', runId: 'run-1', gridKey,
+      expectedRecordCount: 1, finalSequence: 0, truncated: false, now,
+    })
+
+    const expectedWhere = {
+      agentId: 'agent-1',
+      deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+      fetchedAt: { lt: now },
+      ...(targetModel === 'nationalLifeReportRow' ? { gridKey } : {}),
+    }
+    expect(models[targetModel].deleteMany).toHaveBeenCalledWith({ where: expectedWhere })
   })
 
   it('refuses a final marker when a page is missing', async () => {

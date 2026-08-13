@@ -650,6 +650,44 @@ async function persistRecords(
   return plan.rows.length
 }
 
+/// Removes rows that disappeared from a newly verified carrier snapshot.
+///
+/// Upserts alone cannot do this: a policy or report row that existed yesterday
+/// remains forever when it is absent today. The oldest page timestamp in this
+/// run is the publication boundary. Pruning happens only after every page and
+/// the carrier total reconcile, so an interrupted refresh keeps the last known
+/// complete snapshot intact.
+async function pruneRowsMissingFromVerifiedSnapshot(
+  tx: Prisma.TransactionClient,
+  input: Pick<IngestInput, 'agentId' | 'gridKey'> & { runId: string },
+) {
+  const firstPage = await tx.nationalLifeRawGridPage.findFirst({
+    where: { runId: input.runId, gridKey: input.gridKey },
+    orderBy: { observedAt: 'asc' },
+    select: { observedAt: true },
+  })
+  if (!firstPage) throw new LocalConnectorStageCompletionError('STAGE_INCOMPLETE')
+
+  const commonWhere = {
+    agentId: input.agentId,
+    deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+    fetchedAt: { lt: firstPage.observedAt },
+  }
+  const target = planRawIngest(input.gridKey, []).target
+
+  if (target === 'CASE_SNAPSHOT') {
+    return tx.nationalLifeCaseSnapshot.deleteMany({
+      where: { ...commonWhere, gridKey: input.gridKey },
+    })
+  }
+  if (target === 'INFORCE_POLICY') {
+    return tx.nationalLifeInforcePolicy.deleteMany({ where: commonWhere })
+  }
+  return tx.nationalLifeReportRow.deleteMany({
+    where: { ...commonWhere, gridKey: input.gridKey },
+  })
+}
+
 function publicReceipt(receipt: {
   id: string
   runId: string
@@ -965,6 +1003,12 @@ export async function completeLocalConnectorStage(
     await tx.nationalLifeConnectorStageFailure.updateMany({
       where: { runId: run.id, deviceId: input.deviceId, gridKey: input.gridKey, resolvedAt: null },
       data: { resolvedAt: now, updatedAt: now },
+    })
+
+    await pruneRowsMissingFromVerifiedSnapshot(tx, {
+      agentId: input.agentId,
+      runId: run.id,
+      gridKey: input.gridKey,
     })
 
     // Keep exactly one verified raw snapshot per agent and grid. Crucially this

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildClientActionQueue,
   classifySignal,
   stripMarkup,
   toClientServiceEvent,
@@ -104,5 +105,71 @@ describe('toClientServiceEvents', () => {
       { id: 'dated', raw: { ...base, CreatedDate: '01/02/2026' } },
     ])
     expect(events.map((event) => event.id)).toEqual(['dated', 'undated'])
+  })
+})
+
+describe('buildClientActionQueue', () => {
+  const event = (
+    id: string,
+    policyNumber: string,
+    signal: 'AT_RISK' | 'OPPORTUNITY' | 'ROUTINE',
+    occurredAt: string,
+    extra: Partial<ReturnType<typeof toClientServiceEvent>> = {},
+  ) => ({
+    id,
+    policyNumber,
+    customerName: 'Client',
+    email: null,
+    phone: null,
+    category: 'Payments',
+    reason: signal === 'AT_RISK' ? 'EftFailure' : 'Policy Anniversary',
+    occurredAt: new Date(occurredAt),
+    agentName: null,
+    description: null,
+    signal,
+    ...extra,
+  })
+
+  it('returns one prioritized action per policy inside the requested window', () => {
+    const queue = buildClientActionQueue(
+      [
+        event('opportunity', 'POL-1', 'OPPORTUNITY', '2026-08-12T12:00:00.000Z'),
+        event('risk', 'POL-1', 'AT_RISK', '2026-08-10T12:00:00.000Z'),
+        event('routine', 'POL-2', 'ROUTINE', '2026-08-12T12:00:00.000Z'),
+        event('old', 'POL-3', 'AT_RISK', '2026-06-01T12:00:00.000Z'),
+      ],
+      { asOf: new Date('2026-08-13T15:00:00.000Z'), windowDays: 30 },
+    )
+
+    expect(queue).toHaveLength(1)
+    expect(queue[0]).toMatchObject({ policyNumber: 'POL-1', signal: 'AT_RISK', eventCount: 2 })
+  })
+
+  it('uses the newest available contact without weakening the selected signal', () => {
+    const queue = buildClientActionQueue(
+      [
+        event('risk', 'POL-1', 'AT_RISK', '2026-08-10T12:00:00.000Z'),
+        event('contact', 'POL-1', 'OPPORTUNITY', '2026-08-12T12:00:00.000Z', {
+          email: 'client@example.com',
+          phone: '+15551234567',
+        }),
+      ],
+      { asOf: new Date('2026-08-13T15:00:00.000Z') },
+    )
+
+    expect(queue[0]).toMatchObject({
+      signal: 'AT_RISK',
+      email: 'client@example.com',
+      phone: '+15551234567',
+    })
+  })
+
+  it('does not include future-dated carrier events', () => {
+    const queue = buildClientActionQueue(
+      [event('future', 'POL-1', 'AT_RISK', '2026-08-14T12:00:00.000Z')],
+      { asOf: new Date('2026-08-13T15:00:00.000Z') },
+    )
+
+    expect(queue).toEqual([])
   })
 })
