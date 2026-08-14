@@ -5,16 +5,18 @@ import {
   NATIONAL_LIFE_LOGIN_REQUIRED_CODES,
   NATIONAL_LIFE_PROVIDER,
 } from '@/lib/national-life/constants'
-import { isNationalLifeConfigured } from '@/lib/national-life/env'
 import { carrierSyncState } from '@/lib/national-life/carrier-sync-state'
-import { getNationalLifeEnv } from '@/lib/national-life/env'
+import {
+  getNationalLifeLocalConnectorConfig,
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+} from '@/lib/national-life/local-connector/config'
 import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
 
 /// What the top bar asks once, on mount. Deliberately not a poll: the badge is
 /// a reassurance, not a live monitor, and a request per agent per few seconds
 /// buys nothing an agent would notice.
 export async function GET() {
-  if (!isNationalLifeConfigured()) {
+  if (!getNationalLifeLocalConnectorConfig().enabled) {
     // No integration, no badge. Not every agent connects one.
     return NextResponse.json({ state: null })
   }
@@ -38,7 +40,7 @@ export async function GET() {
           safeErrorCode: { in: [...NATIONAL_LIFE_LOGIN_REQUIRED_CODES] },
         },
       }),
-      getNationalLifeSyncStatus(agent.id, getNationalLifeEnv().sessionScopeId),
+      getNationalLifeSyncStatus(agent.id, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE),
     ])
     return NextResponse.json({
       state: carrierSyncState({ working, blocked }),

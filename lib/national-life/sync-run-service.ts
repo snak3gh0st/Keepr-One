@@ -9,12 +9,7 @@ import {
 } from './sync-progress'
 import { expireStaleLocalConnectorRuns } from './local-connector/run-service'
 import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from './read-coverage'
-
-const ACTIVE_RUN_STATES: readonly NationalLifeSyncRunState[] = [
-  'QUEUED',
-  'RUNNING',
-  'PAUSED',
-]
+import { CANONICAL_NATIONAL_LIFE_SYNC } from './sync-engine'
 
 export type StartNationalLifeSyncInput = {
   agentId: string
@@ -152,54 +147,21 @@ export function summarizeStageReceipts(
   }
 }
 
+/**
+ * @deprecated The remote grid engine is retired. National Life book syncs are
+ * started by the local connector run service, after KeeproneConnect is paired.
+ * Keep this symbol as a hard failure for stale callers instead of allowing a
+ * login flow or an operator script to enqueue a second source of truth.
+ */
 export async function startNationalLifeSync(
   tx: NationalLifeSyncRunTransaction,
   input: StartNationalLifeSyncInput,
-): Promise<{ runId: string; duplicate: boolean }> {
-  const active = await tx.nationalLifeSyncRun.findFirst({
-    where: {
-      agentId: input.agentId,
-      deploymentScope: input.deploymentScope,
-      provider: NATIONAL_LIFE_PROVIDER,
-      executionSource: 'REMOTE',
-      state: { in: [...ACTIVE_RUN_STATES] },
-    },
-    orderBy: { createdAt: 'desc' },
-    select: { id: true },
+): Promise<never> {
+  void tx
+  void input
+  throw Object.assign(new Error('National Life book sync requires KeeproneConnect'), {
+    code: 'LOCAL_CONNECTOR_REQUIRED',
   })
-  if (active) {
-    return { runId: active.id, duplicate: true }
-  }
-
-  const run = await tx.nationalLifeSyncRun.create({
-    data: {
-      agentId: input.agentId,
-      deploymentScope: input.deploymentScope,
-      provider: NATIONAL_LIFE_PROVIDER,
-      executionSource: 'REMOTE',
-      totalStages: NATIONAL_LIFE_SYNC_STAGES.length,
-      createdAt: input.now,
-      updatedAt: input.now,
-    },
-    select: { id: true },
-  })
-
-  await tx.browserAutomationJob.createMany({
-    data: NATIONAL_LIFE_SYNC_STAGES.map((gridKey, syncStageIndex) => ({
-      agentId: input.agentId,
-      provider: NATIONAL_LIFE_PROVIDER,
-      operation: 'SYNC_NATIONAL_LIFE_GRID' as const,
-      syncRunId: run.id,
-      syncStageIndex,
-      syncGridKey: gridKey,
-      state: 'QUEUED' as const,
-      idempotencyKey: `national-life:sync:${input.agentId}:${run.id}:${syncStageIndex}`,
-      input: { syncRunId: run.id, gridKey },
-      availableAt: input.now,
-    })),
-  })
-
-  return { runId: run.id, duplicate: false }
 }
 
 type ReconcileInput = StartNationalLifeSyncInput & { runId: string }
@@ -258,12 +220,16 @@ export async function getNationalLifeSyncStatus(
   agentId: string,
   deploymentScope: string,
 ): Promise<NationalLifeSyncStatus | null> {
+  if (deploymentScope !== CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope) {
+    return null
+  }
   await expireStaleLocalConnectorRuns(prisma, { agentId })
   const run = await prisma.nationalLifeSyncRun.findFirst({
     where: {
       agentId,
       deploymentScope,
       provider: NATIONAL_LIFE_PROVIDER,
+      executionSource: CANONICAL_NATIONAL_LIFE_SYNC.executionSource,
     },
     orderBy: { createdAt: 'desc' },
     select: {

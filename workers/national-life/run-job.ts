@@ -33,7 +33,6 @@ import {
 import type { BrowserJobState } from '../../lib/national-life/job-state'
 import {
   NATIONAL_LIFE_SYNC_GRID_KEYS,
-  type GridSyncResult,
 } from '../../lib/national-life/sync-grid'
 import { redactDiagnostic } from '../../lib/national-life/redaction'
 import { recordForesightReachability } from '../../lib/national-life/interactive-connection-service'
@@ -44,6 +43,7 @@ import type {
 
 const TRANSIENT_RETRY_DELAY_MS = 2 * 60_000
 const AUTHENTICATION_STATE_INVALID = 'AUTHENTICATION_STATE_INVALID'
+const LOCAL_CONNECTOR_REQUIRED = 'LOCAL_CONNECTOR_REQUIRED'
 const MANUAL_REVIEW_CODES = new Set([
   'PORTAL_LAYOUT_CHANGED',
   'SCHEMA_VALIDATION_FAILED',
@@ -93,12 +93,6 @@ type NationalLifeJobAdapter = {
   renderForesightReport(
     caseNameFragment?: string,
   ): Promise<{ caseName: string; bytes: Buffer; mimeType: string } | null>
-  syncGrid(input: {
-    gridKey: NationalLifeGridJobInput['gridKey']
-    agentId: string
-    deploymentScope: string
-    fetchedAt: Date
-  }): Promise<GridSyncResult>
 }
 
 export type NationalLifeJobStore = {
@@ -678,6 +672,20 @@ export async function runNationalLifeJob(
     return { kind: 'COMPLETED' }
   }
 
+  // Book-of-business sync is owned by KeeproneConnect. Keep this guard before
+  // any stored-session lookup or browser creation so a queued job from the
+  // retired remote grid engine cannot re-open the carrier browser directly.
+  if (gridInput) {
+    await deps.jobStore.transitionJob({
+      jobId: job.id,
+      from: 'RUNNING',
+      to: 'FAILED',
+      safeErrorCode: LOCAL_CONNECTOR_REQUIRED,
+    })
+    await deps.syncRunStore.reconcile(gridInput.syncRunId, job.agentId)
+    return { kind: 'COMPLETED' }
+  }
+
   const foresightDetailSnapshot =
     foresightReadInput?.mode === 'DETAIL'
       ? await deps.foresightRunStore.findCase({
@@ -723,7 +731,6 @@ export async function runNationalLifeJob(
   )
   if (!isUsableSession(storedSession, deps.now())) {
     await requestReconnect(job, deps)
-    if (gridInput) await deps.syncRunStore.reconcile(gridInput.syncRunId, job.agentId)
     await reconcileForesightRun(foresightReadInput, job, deps)
     return { kind: 'COMPLETED' }
   }
@@ -735,7 +742,6 @@ export async function runNationalLifeJob(
       : decryptStoredContext(storedSession!, deps.env)
   } catch {
     await requestReconnect(job, deps)
-    if (gridInput) await deps.syncRunStore.reconcile(gridInput.syncRunId, job.agentId)
     await reconcileForesightRun(foresightReadInput, job, deps)
     return { kind: 'COMPLETED' }
   }
@@ -874,20 +880,6 @@ export async function runNationalLifeJob(
             to: 'SUCCEEDED',
             result: syncResult,
           })
-        } else if (gridInput) {
-          const result = await adapter.syncGrid({
-            gridKey: gridInput.gridKey,
-            agentId: job.agentId,
-            deploymentScope: deps.env.sessionScopeId,
-            fetchedAt: deps.now(),
-          })
-
-          await deps.jobStore.transitionJob({
-            jobId: job.id,
-            from: 'RUNNING',
-            to: 'SUCCEEDED',
-            result,
-          })
         } else if (foresightReadInput) {
           const observedAt = deps.now()
           if (foresightReadInput.mode === 'INVENTORY') {
@@ -1022,9 +1014,6 @@ export async function runNationalLifeJob(
     await handleFailure(job, error, deps)
   }
 
-  if (gridInput) {
-    await deps.syncRunStore.reconcile(gridInput.syncRunId, job.agentId)
-  }
   await reconcileForesightRun(foresightReadInput, job, deps)
 
   return { kind: 'COMPLETED' }

@@ -4,7 +4,7 @@ import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
 const mocks = vi.hoisted(() => ({
   getCurrentAgent: vi.fn(),
   count: vi.fn(),
-  isConfigured: vi.fn(),
+  localConnectorConfig: vi.fn(),
   getStatus: vi.fn(),
 }))
 
@@ -12,9 +12,9 @@ vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }
 vi.mock('@/lib/prisma', () => ({
   prisma: { browserAutomationJob: { count: mocks.count } },
 }))
-vi.mock('@/lib/national-life/env', () => ({
-  getNationalLifeEnv: () => ({ sessionScopeId: 'scope-1' }),
-  isNationalLifeConfigured: mocks.isConfigured,
+vi.mock('@/lib/national-life/local-connector/config', () => ({
+  getNationalLifeLocalConnectorConfig: mocks.localConnectorConfig,
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE: 'LOCAL_CONNECTOR',
 }))
 vi.mock('@/lib/national-life/sync-run-service', () => ({
   getNationalLifeSyncStatus: mocks.getStatus,
@@ -24,7 +24,7 @@ import { GET } from './route'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.isConfigured.mockReturnValue(true)
+  mocks.localConnectorConfig.mockReturnValue({ enabled: true })
   mocks.getStatus.mockResolvedValue(null)
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1' })
 })
@@ -74,7 +74,7 @@ describe('carrier sync badge route', () => {
   })
 
   it('renders no badge when the integration is not configured', async () => {
-    mocks.isConfigured.mockReturnValue(false)
+    mocks.localConnectorConfig.mockReturnValue({ enabled: false })
 
     const response = await GET()
 

@@ -498,7 +498,7 @@ describe('National Life owned interactive connection service', () => {
     expect(memory.attempts).toHaveLength(0)
   })
 
-  it('creates the twelve-grid sync and one scoped Foresight inventory atomically after login', async () => {
+  it('creates only the scoped Foresight operation after login; book sync stays on KeeproneConnect', async () => {
     const state: CompletionState = {
       attemptExists: true,
       sessions: [],
@@ -509,8 +509,8 @@ describe('National Life owned interactive connection service', () => {
 
     await expect(completeInMemoryTransaction(state)).resolves.toBeUndefined()
 
-    expect(state.syncRuns).toHaveLength(1)
-    expect(state.jobs.filter((job) => job.operation === 'SYNC_NATIONAL_LIFE_GRID')).toHaveLength(12)
+    expect(state.syncRuns).toHaveLength(0)
+    expect(state.jobs.filter((job) => job.operation === 'SYNC_NATIONAL_LIFE_GRID')).toHaveLength(0)
     expect(state.foresightRuns).toEqual([
       expect.objectContaining({
         agentId: 'agent-1',
@@ -531,7 +531,7 @@ describe('National Life owned interactive connection service', () => {
     state.attemptExists = true
     await expect(completeInMemoryTransaction(state)).resolves.toBeUndefined()
     expect(state.jobs.filter((job) => job.operation === 'SYNC_FORESIGHT_READ')).toHaveLength(1)
-    expect(state.jobs.filter((job) => job.operation === 'SYNC_NATIONAL_LIFE_GRID')).toHaveLength(12)
+    expect(state.jobs.filter((job) => job.operation === 'SYNC_NATIONAL_LIFE_GRID')).toHaveLength(0)
   })
 
   it('rolls back the connection when scoped Foresight inventory creation fails', async () => {

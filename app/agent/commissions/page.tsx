@@ -5,7 +5,10 @@ import { decimalToNumber } from '@/lib/decimal'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { ErrorBanner } from '@/components/ErrorBanner'
-import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
+import {
+  getNationalLifeLocalConnectorConfig,
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+} from '@/lib/national-life/local-connector/config'
 import { toCarrierCommissionRecords } from '@/lib/national-life/commission-records'
 import { getDownlineIds } from '@/lib/hierarchy'
 import { CommissionsList } from './CommissionsList'
@@ -57,6 +60,7 @@ export default async function CommissionsPage() {
   let loadError = false
 
   try {
+    const localConnectorEnabled = getNationalLifeLocalConnectorConfig().enabled
     const stored = await prisma.commissionRecord.findMany({
       where: { agentId: agent.id },
       include: { policy: { include: { agent: { include: { user: true } } } } },
@@ -64,11 +68,11 @@ export default async function CommissionsPage() {
     })
 
     let carrierRecords: Record_[] = []
-    if (isNationalLifeConfigured()) {
+    if (localConnectorEnabled) {
       const carrierRows = await prisma.nationalLifeReportRow.findMany({
         where: {
           agentId: agent.id,
-          deploymentScope: getNationalLifeEnv().sessionScopeId,
+          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
           gridKey: 'COMMISSION_DETAIL_NLD_COMMISSION_EARNING',
         },
         select: { id: true, raw: true, amounts: true },

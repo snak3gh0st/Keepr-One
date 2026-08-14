@@ -20,19 +20,18 @@ apólice, com timeline, requisitos, snapshots e ledger de comissões.
 
 ## Integração National Life
 
-O agente conecta a própria conta da National Life em um navegador isolado
-dentro do Keepr One:
+O sync de carteira tem um único engine e atravessa sempre as mesmas fronteiras:
 
-1. o Keepr One cria uma tentativa temporária vinculada ao agente;
-2. um runtime dedicado abre a página oficial da National Life/Auth0;
-3. o agente informa login e MFA diretamente no navegador remoto;
-4. após autenticação, somente o contexto da sessão é cifrado e vinculado ao
-   agente;
-5. jobs autorizados restauram esse contexto em novas sessões isoladas.
+1. o Keepr One cria o run, o plano e os checkpoints;
+2. o KeeproneConnect pareado solicita a fonte planejada;
+3. a extensão conduz a sessão autenticada no navegador oficial da National Life;
+4. o KeeproneConnect devolve lotes raw assinados e resumíveis;
+5. o Keepr One valida, elimina duplicidades/redundâncias, persiste o snapshot
+   verificado e renderiza somente esse snapshot no app.
 
 O Keepr One não possui formulário próprio para a senha da National Life e não
-armazena a senha do agente. O Steel Browser permanece em rede privada; apenas o
-viewer broker autenticado e temporário é exposto.
+armazena a senha do agente. O browser remoto legado não é uma fonte de sync nem
+alimenta a tela principal de dados.
 
 Documentação operacional:
 
@@ -45,7 +44,9 @@ Documentação operacional:
 - Prisma 6 e PostgreSQL
 - Better Auth com controle de acesso por papel
 - Tailwind CSS v4
-- Runtime National Life em Node.js, Playwright e Steel Browser isolado
+- KeeproneConnect em Chrome/Edge para o sync autenticado da carteira
+- Runtime National Life em Node.js, Playwright e Steel Browser isolado para
+  operações legadas e superfícies que ainda não foram migradas para o conector
 - Coolify/Docker no host de aplicações `btapps`
 
 Superfícies públicas:

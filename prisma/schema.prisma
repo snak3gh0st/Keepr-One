@@ -947,6 +947,13 @@ model NationalLifeConnectorStageReceipt {
   /// anteriores a esta coluna. Distingue "recebi 200, escrevi 0" — uma página que
   /// o mapeador descartou inteira — de uma página vazia de verdade.
   writtenCount   Int?
+  /// Linhas repetidas dentro do lote, removidas pela chave estável antes do
+  /// upsert. Repetições entre lotes continuam protegidas pela chave única do
+  /// modelo normalizado e pelo idempotency key do recibo.
+  duplicateCount Int                      @default(0)
+  /// Linhas sem uma chave mínima para a entidade normalizada. A cópia raw da
+  /// página continua preservada para auditoria e remapeamento futuro.
+  rejectedCount  Int                      @default(0)
   idempotencyKey String                      @unique
   createdAt      DateTime                    @default(now())
   updatedAt      DateTime                    @updatedAt

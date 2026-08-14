@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 import {
   getNationalLifeLocalConnectorConfig,
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
 import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
+import {
+  NATIONAL_LIFE_SYNC_ENGINE,
+  NATIONAL_LIFE_SYNC_PIPELINE,
+} from '@/lib/national-life/sync-engine'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
 
@@ -18,23 +21,28 @@ function publicSyncStatus(status: Awaited<ReturnType<typeof getNationalLifeSyncS
 
 export async function GET() {
   const localEnabled = getNationalLifeLocalConnectorConfig().enabled
-  const remoteConfigured = isNationalLifeConfigured()
-  if (!localEnabled && !remoteConfigured) {
-    return NextResponse.json({ run: null }, { headers: NO_STORE })
+  if (!localEnabled) {
+    return NextResponse.json(
+      { engine: NATIONAL_LIFE_SYNC_ENGINE, pipeline: NATIONAL_LIFE_SYNC_PIPELINE, run: null },
+      { headers: NO_STORE },
+    )
   }
 
   try {
     const agent = await getCurrentAgent()
-    const localStatus = localEnabled
-      ? await getNationalLifeSyncStatus(agent.id, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE)
-      : null
-    const status =
-      localStatus ??
-      (remoteConfigured
-        ? await getNationalLifeSyncStatus(agent.id, getNationalLifeEnv().sessionScopeId)
-        : null)
-    return NextResponse.json({ run: publicSyncStatus(status) }, { headers: NO_STORE })
+    const status = await getNationalLifeSyncStatus(agent.id, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE)
+    return NextResponse.json(
+      {
+        engine: NATIONAL_LIFE_SYNC_ENGINE,
+        pipeline: NATIONAL_LIFE_SYNC_PIPELINE,
+        run: publicSyncStatus(status),
+      },
+      { headers: NO_STORE },
+    )
   } catch {
-    return NextResponse.json({ run: null }, { headers: NO_STORE })
+    return NextResponse.json(
+      { engine: NATIONAL_LIFE_SYNC_ENGINE, pipeline: NATIONAL_LIFE_SYNC_PIPELINE, run: null },
+      { headers: NO_STORE },
+    )
   }
 }

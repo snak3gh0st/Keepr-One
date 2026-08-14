@@ -1,9 +1,6 @@
 import { cache } from "react";
 import { decimalToNumber } from "@/lib/decimal";
-import {
-  getNationalLifeEnv,
-  isNationalLifeConfigured,
-} from "@/lib/national-life/env";
+import { getNationalLifeLocalConnectorConfig, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from "@/lib/national-life/local-connector/config";
 import { toCarrierCommissionRecords } from "@/lib/national-life/commission-records";
 import { prisma } from "@/lib/prisma";
 import {
@@ -48,6 +45,7 @@ export const getAgentPromotionSnapshot = cache(
     agentId: string,
   ): Promise<AgentPromotionSnapshot> {
     try {
+      const localConnectorEnabled = getNationalLifeLocalConnectorConfig().enabled;
       const [childAgent, storedRecords, carrierRows] = await Promise.all([
         prisma.agent.findFirst({
           where: { parentAgentId: agentId },
@@ -57,11 +55,11 @@ export const getAgentPromotionSnapshot = cache(
           where: { agentId },
           select: { amount: true, type: true },
         }),
-        isNationalLifeConfigured()
+        localConnectorEnabled
           ? prisma.nationalLifeReportRow.findMany({
               where: {
                 agentId,
-                deploymentScope: getNationalLifeEnv().sessionScopeId,
+                deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
                 gridKey: "COMMISSION_DETAIL_NLD_COMMISSION_EARNING",
               },
               select: { id: true, raw: true, amounts: true },

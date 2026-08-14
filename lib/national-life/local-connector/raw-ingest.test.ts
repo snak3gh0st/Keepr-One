@@ -22,6 +22,23 @@ describe('planRawIngest', () => {
     expect(plan.target).toBe('REPORT_ROW')
   })
 
+  it('records duplicate and rejected rows before the normalized upsert', () => {
+    const plan = planRawIngest('NEW_BUSINESS', [
+      { PolicyNo: 'P1', Status: 'old' },
+      { PolicyNo: 'P1', Status: 'new' },
+      { InsuredName: 'No stable key' },
+    ])
+
+    expect(plan.stats).toEqual({
+      receivedCount: 3,
+      duplicateCount: 1,
+      rejectedCount: 1,
+    })
+    if (plan.target !== 'CASE_SNAPSHOT') throw new Error('expected CASE_SNAPSHOT')
+    expect(plan.snapshots).toHaveLength(1)
+    expect(plan.snapshots[0].carrierStatus).toBe('new')
+  })
+
   it('rejects a grid key it does not route with a distinguishable error', () => {
     expect(() => planRawIngest('NOT_A_GRID' as never, [])).toThrow(LocalConnectorRawIngestError)
     try {

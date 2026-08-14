@@ -1,10 +1,19 @@
 import 'server-only'
-import { toCaseSnapshots, type CaseSnapshot } from '@/lib/national-life/case-snapshot-service'
 import {
+  toCaseSnapshot,
+  toCaseSnapshots,
+  type CaseSnapshot,
+} from '@/lib/national-life/case-snapshot-service'
+import {
+  toInforcePolicySnapshot,
   toInforcePolicySnapshots,
   type InforcePolicySnapshot,
 } from '@/lib/national-life/inforce-policy-service'
-import { toReportRows, type ReportRow } from '@/lib/national-life/report-row-service'
+import {
+  toReportRow,
+  toReportRows,
+  type ReportRow,
+} from '@/lib/national-life/report-row-service'
 import type { NationalLifeGridKey } from '@/lib/national-life/portal-grid-client'
 
 const CASE_SNAPSHOT_GRIDS = new Set<NationalLifeGridKey>(['NEW_BUSINESS', 'RECENTLY_CLOSED'])
@@ -63,9 +72,56 @@ export class LocalConnectorRawIngestError extends Error {
 }
 
 export type RawIngestPlan =
-  | { target: 'CASE_SNAPSHOT'; gridKey: NationalLifeGridKey; snapshots: CaseSnapshot[] }
-  | { target: 'INFORCE_POLICY'; gridKey: NationalLifeGridKey; snapshots: InforcePolicySnapshot[] }
-  | { target: 'REPORT_ROW'; gridKey: NationalLifeGridKey; rows: ReportRow[] }
+  | {
+      target: 'CASE_SNAPSHOT'
+      gridKey: NationalLifeGridKey
+      snapshots: CaseSnapshot[]
+      stats: RawIngestStats
+    }
+  | {
+      target: 'INFORCE_POLICY'
+      gridKey: NationalLifeGridKey
+      snapshots: InforcePolicySnapshot[]
+      stats: RawIngestStats
+    }
+  | {
+      target: 'REPORT_ROW'
+      gridKey: NationalLifeGridKey
+      rows: ReportRow[]
+      stats: RawIngestStats
+    }
+
+export type RawIngestStats = {
+  receivedCount: number
+  duplicateCount: number
+  rejectedCount: number
+}
+
+function countMappedRows<T>(
+  rows: Record<string, unknown>[],
+  map: (row: Record<string, unknown>) => T | null,
+  key: (row: T) => string,
+): RawIngestStats {
+  const seen = new Set<string>()
+  let duplicateCount = 0
+  let rejectedCount = 0
+
+  for (const row of rows) {
+    const mapped = map(row)
+    if (!mapped) {
+      rejectedCount += 1
+      continue
+    }
+    const identity = key(mapped)
+    if (seen.has(identity)) {
+      duplicateCount += 1
+    } else {
+      seen.add(identity)
+    }
+  }
+
+  return { receivedCount: rows.length, duplicateCount, rejectedCount }
+}
 
 /// Mirrors the routing in sync-grid.ts so the local and remote paths cannot drift.
 /// Pure: the caller owns the write, because the persist helpers bind the module-level
@@ -75,13 +131,28 @@ export function planRawIngest(
   rows: Record<string, unknown>[],
 ): RawIngestPlan {
   if (CASE_SNAPSHOT_GRIDS.has(gridKey)) {
-    return { target: 'CASE_SNAPSHOT', gridKey, snapshots: toCaseSnapshots(rows) }
+    return {
+      target: 'CASE_SNAPSHOT',
+      gridKey,
+      snapshots: toCaseSnapshots(rows),
+      stats: countMappedRows(rows, toCaseSnapshot, (row) => row.policyNo),
+    }
   }
   if (INFORCE_GRIDS.has(gridKey)) {
-    return { target: 'INFORCE_POLICY', gridKey, snapshots: toInforcePolicySnapshots(rows) }
+    return {
+      target: 'INFORCE_POLICY',
+      gridKey,
+      snapshots: toInforcePolicySnapshots(rows),
+      stats: countMappedRows(rows, toInforcePolicySnapshot, (row) => row.policyNumber),
+    }
   }
   if (REPORT_ROW_GRIDS.has(gridKey)) {
-    return { target: 'REPORT_ROW', gridKey, rows: toReportRows(gridKey, rows) }
+    return {
+      target: 'REPORT_ROW',
+      gridKey,
+      rows: toReportRows(gridKey, rows),
+      stats: countMappedRows(rows, (row) => toReportRow(gridKey, row), (row) => row.rowKey),
+    }
   }
   throw new LocalConnectorRawIngestError('GRID_NOT_ROUTED', gridKey)
 }

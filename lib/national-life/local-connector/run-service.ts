@@ -559,15 +559,15 @@ async function inChunks<T>(items: T[], write: (chunk: T[]) => Promise<unknown>) 
   }
 }
 
-/// Returns rows actually written. It can be below `envelope.records.length`: the
-/// mappers drop rows with no natural key and dedupe on it, so a whole page can
-/// normalize to nothing. The receipt records both numbers so a run that ingested
-/// zero rows is visible instead of looking like a clean empty grid.
+/// Returns the quality counters alongside rows actually written. It can be below
+/// `envelope.records.length`: the mappers drop rows with no natural key and dedupe
+/// on it, so a whole page can normalize to nothing. The receipt records all three
+/// numbers so a run that ingested zero rows is visible instead of looking clean.
 async function persistRecords(
   tx: Prisma.TransactionClient,
   input: IngestInput,
   observedAt: Date,
-): Promise<number> {
+): Promise<{ writtenCount: number; duplicateCount: number; rejectedCount: number }> {
   const plan = planRawIngest(input.gridKey, input.envelope.records)
 
   if (plan.target === 'CASE_SNAPSHOT') {
@@ -600,7 +600,11 @@ async function persistRecords(
         }),
       ),
     )
-    return plan.snapshots.length
+    return {
+      writtenCount: plan.snapshots.length,
+      duplicateCount: plan.stats.duplicateCount,
+      rejectedCount: plan.stats.rejectedCount,
+    }
   }
 
   if (plan.target === 'INFORCE_POLICY') {
@@ -631,7 +635,11 @@ async function persistRecords(
         }),
       ),
     )
-    return plan.snapshots.length
+    return {
+      writtenCount: plan.snapshots.length,
+      duplicateCount: plan.stats.duplicateCount,
+      rejectedCount: plan.stats.rejectedCount,
+    }
   }
 
   await inChunks(plan.rows, (chunk) =>
@@ -665,7 +673,11 @@ async function persistRecords(
       }),
     ),
   )
-  return plan.rows.length
+  return {
+    writtenCount: plan.rows.length,
+    duplicateCount: plan.stats.duplicateCount,
+    rejectedCount: plan.stats.rejectedCount,
+  }
 }
 
 /// Removes rows that disappeared from a newly verified carrier snapshot.
@@ -714,6 +726,8 @@ function publicReceipt(receipt: {
   contentHash: string
   recordCount: number
   writtenCount: number | null
+  duplicateCount?: number | null
+  rejectedCount?: number | null
   sourceOffset?: number
   nextOffset?: number
   createdAt: Date
@@ -726,6 +740,8 @@ function publicReceipt(receipt: {
     contentHash: receipt.contentHash,
     recordCount: receipt.recordCount,
     writtenCount: receipt.writtenCount,
+    duplicateCount: receipt.duplicateCount ?? 0,
+    rejectedCount: receipt.rejectedCount ?? 0,
     sourceOffset: receipt.sourceOffset ?? 0,
     nextOffset: receipt.nextOffset ?? 0,
     createdAt: receipt.createdAt.toISOString(),
@@ -809,7 +825,7 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
         throw new LocalConnectorRunError('IDEMPOTENCY_CONFLICT')
       }
 
-      const writtenCount = await persistRecords(tx, input, observedAt)
+      const ingest = await persistRecords(tx, input, observedAt)
       // Preserve the carrier payload before normalization. Business models may
       // collapse duplicate policies or reject a row without a natural key; the
       // faithful page snapshot guarantees that this never becomes silent data
@@ -856,7 +872,9 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
           // that it is a public receipt field, and that paired with writtenCount
           // it makes "received 200, wrote 0" visible instead of clean.
           recordCount: input.envelope.records.length,
-          writtenCount,
+          writtenCount: ingest.writtenCount,
+          duplicateCount: ingest.duplicateCount,
+          rejectedCount: ingest.rejectedCount,
           idempotencyKey: input.idempotencyKey,
           createdAt: now,
           updatedAt: now,
