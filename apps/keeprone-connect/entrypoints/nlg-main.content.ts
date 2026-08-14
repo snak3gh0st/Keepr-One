@@ -1,6 +1,7 @@
 import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
 import { createGridExtractionRunner, type RequestTemplate } from '../lib/grid-extraction'
 import { parseAbortGridMessage, parseBeginExportMessage, parseBeginGridMessage } from '../lib/messages'
+import { buildOfficialExportRequest } from '../lib/official-export-request'
 
 const DATATABLE_PATH = '/agent/Datatable/GetJsonResult'
 const DOWNLOAD_EXCEL_PATH = '/agent/Datatable/DownloadExcel'
@@ -8,6 +9,13 @@ const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
 const EXPORT_CHUNK_BYTES = 1024 * 1024
 const EXPORT_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 const ALLOWED_HEADERS = new Set(['content-type', 'x-requested-with'])
+
+type DatatableConfig = {
+  DatatableId?: unknown
+  ExportExcelFileName?: unknown
+  FieldList?: unknown
+  [key: string]: unknown
+}
 
 function allowedHeader(name: string): boolean {
   const lower = name.toLowerCase()
@@ -33,6 +41,37 @@ function filteredHeaders(headers: Headers): Record<string, string> {
     if (allowedHeader(name)) safe[name.toLowerCase()] = value
   })
   return safe
+}
+
+function officialExportHeaders(template: RequestTemplate | null): Record<string, string> {
+  return {
+    ...(template?.headers ?? {}),
+    'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+  }
+}
+
+function inforceDatatableConfig(): DatatableConfig | null {
+  const models = (window as Window & { datatableViewModel?: unknown }).datatableViewModel
+  if (!Array.isArray(models)) return null
+  return models.find((model): model is DatatableConfig => {
+    if (!model || typeof model !== 'object' || Array.isArray(model)) return false
+    const candidate = model as DatatableConfig
+    if (candidate.ExportExcelFileName === 'InforceClientInfo') return true
+    return Array.isArray(candidate.FieldList) && candidate.FieldList.some((field) =>
+      field && typeof field === 'object' && !Array.isArray(field) &&
+      (field as { data?: unknown }).data === 'PolicyNumber',
+    )
+  }) ?? null
+}
+
+function currentPortalFilters(): Record<string, unknown>[] {
+  const active = (window as Window & { activeFilterItems?: unknown }).activeFilterItems
+  if (!Array.isArray(active)) return []
+  return active.filter((item): item is Record<string, unknown> => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false
+    const value = item as Record<string, unknown>
+    return typeof value.Key === 'string' && typeof value.Value === 'string'
+  })
 }
 
 export default defineContentScript({
@@ -130,13 +169,20 @@ export default defineContentScript({
 
     async function beginOfficialExport(message: NonNullable<ReturnType<typeof parseBeginExportMessage>>) {
       try {
-        const requestTemplate = await waitForTemplate()
-        const body = new URLSearchParams(requestTemplate.body)
-        body.set('IsEnableContactFields', 'true')
+        // Inforce is currently server-rendered (`IsAjax: false`), so it never
+        // emits the GetJsonResult request that the grid reader normally captures.
+        // Prefer that captured model when it exists, and otherwise rebuild the
+        // same DataTables form from the portal's own datatableViewModel.
+        const requestTemplate = template
+        const body = buildOfficialExportRequest(
+          requestTemplate?.body ?? null,
+          inforceDatatableConfig(),
+          currentPortalFilters(),
+        )
         const response = await originalFetch(`${NLG_ORIGIN}${DOWNLOAD_EXCEL_PATH}`, {
           method: 'POST',
-          headers: requestTemplate.headers,
-          body: body.toString(),
+          headers: officialExportHeaders(requestTemplate),
+          body,
           credentials: 'include',
           cache: 'no-store',
         })
