@@ -1,5 +1,8 @@
-import 'server-only'
-
+/**
+ * Shared by Next server routes and the standalone National Life TSX worker.
+ * Keep this dependency graph free of `server-only`: that package intentionally
+ * throws when the worker imports the shared run service outside Next.
+ */
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { NATIONAL_LIFE_PROVIDER } from '../constants'
 import type { NationalLifeGridKey } from '../portal-grid-client'

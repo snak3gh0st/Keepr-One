@@ -1,4 +1,3 @@
-import 'server-only'
 import {
   NATIONAL_LIFE_GRIDS,
   type NationalLifeGridKey,
