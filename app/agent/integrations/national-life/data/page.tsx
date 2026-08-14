@@ -1,18 +1,15 @@
 import Link from 'next/link'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { chooseMostRecentNationalLifeScope } from '@/lib/national-life/data-source'
-import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 import {
   getNationalLifeLocalConnectorConfig,
-  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
+import { CANONICAL_NATIONAL_LIFE_SYNC } from '@/lib/national-life/sync-engine'
 import { prisma } from '@/lib/prisma'
 import { ContextPanel } from '@/components/ContextPanel'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { ModuleSummary } from '@/components/ModuleSummary'
 import { PageHeader } from '@/components/PageHeader'
 import { Shell } from '@/components/Shell'
-import { foresightRunStore } from '@/lib/national-life/foresight-run-service'
 import {
   buildClientActionQueue,
   toClientServiceEvents,
@@ -23,13 +20,14 @@ import {
   type PortalReportRow,
   type InforceRow,
 } from './NationalLifeDataTabs'
-import { ForesightCaseTabs, type ForesightCaseRow } from './ForesightCaseTabs'
 import {
   NationalLifeActionQueue,
   type NationalLifeActionRow,
 } from './NationalLifeActionQueue'
 
 export const dynamic = 'force-dynamic'
+
+const CANONICAL_SCOPE = CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope
 
 /// Only what the tabs render. The staging rows also carry the untouched carrier
 /// payload in `raw`, which is deliberately not shipped to the browser.
@@ -87,9 +85,8 @@ export default async function NationalLifeDataPage() {
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
   const localEnabled = getNationalLifeLocalConnectorConfig().enabled
-  const remoteConfigured = isNationalLifeConfigured()
 
-  if (!localEnabled && !remoteConfigured) {
+  if (!localEnabled) {
     return (
       <Shell role="AGENT" userName={user?.name ?? ''}>
         <PageHeader
@@ -102,12 +99,6 @@ export default async function NationalLifeDataPage() {
     )
   }
 
-  const remoteScope = remoteConfigured ? getNationalLifeEnv().sessionScopeId : null
-  const allowedScopes = [
-    ...(localEnabled ? [LOCAL_CONNECTOR_DEPLOYMENT_SCOPE] : []),
-    ...(remoteScope ? [remoteScope] : []),
-  ]
-
   let cases: CaseRow[] = []
   let inforce: InforceRow[] = []
   let reports: PortalReportRow[] = []
@@ -116,54 +107,29 @@ export default async function NationalLifeDataPage() {
   let verifiedStageCount = 0
   let totalStageCount = 0
   let loadError = false
-  let foresightCases: ForesightCaseRow[] = []
-  let foresightRun: Awaited<ReturnType<typeof foresightRunStore.getStatus>> = null
 
   try {
-    const [latestCase, latestInforce] = await Promise.all([
-      prisma.nationalLifeCaseSnapshot.findFirst({
-        where: { agentId: agent.id, deploymentScope: { in: allowedScopes } },
-        select: { deploymentScope: true, fetchedAt: true },
-        orderBy: { fetchedAt: 'desc' },
-      }),
-      prisma.nationalLifeInforcePolicy.findFirst({
-        where: { agentId: agent.id, deploymentScope: { in: allowedScopes } },
-        select: { deploymentScope: true, fetchedAt: true },
-        orderBy: { fetchedAt: 'desc' },
-      }),
-    ])
-    const deploymentScope = chooseMostRecentNationalLifeScope(allowedScopes, [
-      latestCase && { deploymentScope: latestCase.deploymentScope, observedAt: latestCase.fetchedAt },
-      latestInforce && {
-        deploymentScope: latestInforce.deploymentScope,
-        observedAt: latestInforce.fetchedAt,
-      },
-    ])
-
     const [
       caseRows,
       inforceRows,
       reportRows,
       intelligenceRows,
-      session,
       localRun,
-      foresightRows,
-      currentForesightRun,
     ] = await Promise.all([
       prisma.nationalLifeCaseSnapshot.findMany({
-        where: { agentId: agent.id, deploymentScope },
+        where: { agentId: agent.id, deploymentScope: CANONICAL_SCOPE },
         select: caseSelect,
         orderBy: [{ submitDate: 'desc' }, { policyNo: 'asc' }],
       }),
       prisma.nationalLifeInforcePolicy.findMany({
-        where: { agentId: agent.id, deploymentScope },
+        where: { agentId: agent.id, deploymentScope: CANONICAL_SCOPE },
         select: inforceSelect,
         orderBy: [{ policyStatus: 'asc' }, { policyNumber: 'asc' }],
       }),
       prisma.nationalLifeReportRow.findMany({
         where: {
           agentId: agent.id,
-          deploymentScope,
+          deploymentScope: CANONICAL_SCOPE,
           gridKey: { not: 'CLIENT_INTELLIGENCE' },
         },
         select: reportSelect,
@@ -172,66 +138,33 @@ export default async function NationalLifeDataPage() {
       prisma.nationalLifeReportRow.findMany({
         where: {
           agentId: agent.id,
-          deploymentScope,
+          deploymentScope: CANONICAL_SCOPE,
           gridKey: 'CLIENT_INTELLIGENCE',
         },
         select: { id: true, raw: true },
       }),
-      remoteScope && deploymentScope === remoteScope
-        ? prisma.agentIntegrationSession.findFirst({
-            where: {
-              agentId: agent.id,
-              deploymentScope: remoteScope,
-              provider: 'NATIONAL_LIFE',
-              purpose: 'CARRIER_SESSION',
-            },
-            select: { lastConnectedAt: true, lastUsedAt: true },
-          })
-        : Promise.resolve(null),
-      deploymentScope === LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
-        ? prisma.nationalLifeSyncRun.findFirst({
-            select: {
-              completedAt: true,
-              updatedAt: true,
-              completedStages: true,
-              totalStages: true,
-            },
-            where: {
-              agentId: agent.id,
-              deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-              executionSource: 'LOCAL',
-              provider: 'NATIONAL_LIFE',
-              state: 'COMPLETED',
-            },
-            orderBy: { createdAt: 'desc' },
-          })
-        : Promise.resolve(null),
-      remoteScope
-        ? prisma.nationalLifeForesightCaseSnapshot.findMany({
-            where: { agentId: agent.id, deploymentScope: remoteScope, provider: 'NATIONAL_LIFE' },
-            select: {
-              id: true,
-              displayName: true,
-              caseKind: true,
-              product: true,
-              status: true,
-              state: true,
-              observedAt: true,
-              _count: { select: { services: true } },
-            },
-            orderBy: [{ observedAt: 'desc' }, { displayName: 'asc' }],
-          })
-        : Promise.resolve([]),
-      remoteScope ? foresightRunStore.getStatus(agent.id, remoteScope) : Promise.resolve(null),
+      prisma.nationalLifeSyncRun.findFirst({
+        select: {
+          completedAt: true,
+          updatedAt: true,
+          completedStages: true,
+          totalStages: true,
+        },
+        where: {
+          agentId: agent.id,
+          deploymentScope: CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope,
+          executionSource: CANONICAL_NATIONAL_LIFE_SYNC.executionSource,
+          provider: CANONICAL_NATIONAL_LIFE_SYNC.provider,
+          state: 'COMPLETED',
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
     ])
 
     cases = caseRows
     inforce = inforceRows
     reports = reportRows.map(toPortalReportRow)
-    lastSyncedAt =
-      deploymentScope === LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
-        ? localRun?.completedAt ?? localRun?.updatedAt ?? null
-        : session?.lastUsedAt ?? session?.lastConnectedAt ?? null
+    lastSyncedAt = localRun?.completedAt ?? localRun?.updatedAt ?? null
     verifiedStageCount = localRun?.completedStages ?? 0
     totalStageCount = localRun?.totalStages ?? 0
 
@@ -254,8 +187,6 @@ export default async function NationalLifeDataPage() {
       occurredAt: item.occurredAt.toISOString(),
       policyId: policyIds.get(item.policyNumber) ?? null,
     }))
-    foresightCases = foresightRows.map(({ _count, ...row }) => ({ ...row, serviceCount: _count.services }))
-    foresightRun = currentForesightRun
   } catch (error) {
     console.error('National Life data query error', error)
     loadError = true
@@ -375,18 +306,6 @@ export default async function NationalLifeDataPage() {
         {!loadError && (
           <NationalLifeDataTabs cases={cases} inforce={inforce} reports={reports} />
         )}
-      </section>
-      <section className="mt-8 module-main-surface">
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">
-              Leitura detalhada
-            </p>
-            <h2 className="mt-1 text-xl font-semibold text-ink">Casos identificados no portal</h2>
-          </div>
-          <p className="text-sm text-ink-muted">Somente leitura · {foresightCases.length} casos</p>
-        </div>
-        <ForesightCaseTabs cases={foresightCases} run={foresightRun} />
       </section>
     </Shell>
   )

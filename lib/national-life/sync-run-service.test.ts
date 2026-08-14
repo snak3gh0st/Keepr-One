@@ -5,74 +5,22 @@ import {
   nationalLifeSyncGridLabel,
   localStageCoverage,
   reconcileNationalLifeSync,
+  getNationalLifeSyncStatus,
   startNationalLifeSync,
   summarizeStageReceipts,
 } from './sync-run-service'
 
 const now = new Date('2026-08-03T17:00:00.000Z')
 
-function createFakeTransaction() {
-  const fake = {
-    activeRun: null as { id: string; state: string } | null,
-    createdRun: null as Record<string, unknown> | null,
-    jobs: [] as Array<Record<string, unknown>>,
-    nationalLifeSyncRun: {
-      findFirst: async () => fake.activeRun,
-      create: async ({ data }: { data: Record<string, unknown> }) => {
-        fake.createdRun = { id: 'run-1', ...data }
-        return { id: 'run-1' }
-      },
-    },
-    browserAutomationJob: {
-      createMany: async ({ data }: { data: Array<Record<string, unknown>> }) => {
-        fake.jobs.push(...data)
-        return { count: data.length }
-      },
-    },
-  }
-  return fake
-}
-
 describe('startNationalLifeSync', () => {
-  it('creates one run and one ordered job for each fixed grid', async () => {
-    const tx = createFakeTransaction()
-
-    const result = await startNationalLifeSync(tx as never, {
-      agentId: 'agent-1',
-      deploymentScope: 'scope-1',
-      now,
-    })
-
-    expect(result).toEqual({ runId: 'run-1', duplicate: false })
-    expect(tx.jobs.map((job) => [job.syncStageIndex, job.syncGridKey])).toEqual([
-      [0, 'NEW_BUSINESS'],
-      [1, 'RECENTLY_CLOSED'],
-      [2, 'INFORCE_CLIENTS'],
-      [3, 'PAID_COMMISSIONS'],
-      [4, 'CLIENT_INTELLIGENCE'],
-      [5, 'CORRESPONDENCE'],
-      [6, 'COMMISSIONS_PAYMENT_PORTAL'],
-      [7, 'PIP_PENDING'],
-      [8, 'TRANSFERS_EXCHANGES'],
-      [9, 'LIFE_PENDING_LAPSE'],
-      [10, 'COMMISSIONS_EARNING_REPORT'],
-      [11, 'PAYABLE_GROSS_COMMISSIONS'],
-    ])
-    expect(tx.jobs.every((job) => job.operation === 'SYNC_NATIONAL_LIFE_GRID')).toBe(true)
-  })
-
-  it('does not create a second active run for the same agent and scope', async () => {
-    const tx = createFakeTransaction()
-    tx.activeRun = { id: 'run-existing', state: 'RUNNING' }
-
+  it('hard-fails stale callers instead of creating a remote run', async () => {
     await expect(
-      startNationalLifeSync(tx as never, {
+      startNationalLifeSync({} as never, {
         agentId: 'agent-1',
         deploymentScope: 'scope-1',
         now,
       }),
-    ).resolves.toEqual({ runId: 'run-existing', duplicate: true })
-    expect(tx.jobs).toHaveLength(0)
+    ).rejects.toMatchObject({ code: 'LOCAL_CONNECTOR_REQUIRED' })
   })
 
   it('reconciles child jobs into a partial run without exposing row data', async () => {
@@ -111,7 +59,7 @@ describe('startNationalLifeSync', () => {
     expect(nationalLifeSyncGridLabel('INFORCE_CLIENTS')).toBe('in-force policies')
   })
 
-  it('is wired into both login completion transactions', () => {
+  it('does not enqueue the retired remote sync from login completion', () => {
     const runtime = readFileSync(
       resolve(process.cwd(), 'workers/national-life/runtime.ts'),
       'utf8',
@@ -121,8 +69,8 @@ describe('startNationalLifeSync', () => {
       'utf8',
     )
 
-    expect(runtime).toContain('startNationalLifeSync(transaction')
-    expect(interactive).toContain('startNationalLifeSync(transaction')
+    expect(runtime).not.toContain('startNationalLifeSync(transaction')
+    expect(interactive).not.toContain('startNationalLifeSync(transaction')
   })
 })
 
@@ -161,6 +109,12 @@ describe('summarizeStageReceipts', () => {
         { recordCount: 5, writtenCount: null },
       ]),
     ).toEqual({ receivedRecords: 15, writtenRecords: null })
+  })
+})
+
+describe('getNationalLifeSyncStatus', () => {
+  it('does not expose a remote deployment scope as book-sync status', async () => {
+    await expect(getNationalLifeSyncStatus('agent-1', 'SINGLE_DEPLOYMENT')).resolves.toBeNull()
   })
 })
 

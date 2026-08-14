@@ -29,7 +29,6 @@ import { prisma } from '../../lib/prisma'
 import { applyCaseObservation } from '../../lib/national-life/sync-service'
 import {
   reconcileNationalLifeSync,
-  startNationalLifeSync,
 } from '../../lib/national-life/sync-run-service'
 import { NationalLifeAdapter } from './adapter'
 import { writeConnectionTrace } from './connection-trace'
@@ -496,12 +495,6 @@ export function createNationalLifeAttemptStore(
           deploymentScope: env.sessionScopeId,
           now: input.now,
         })
-        await startNationalLifeSync(transaction, {
-          agentId: input.agentId,
-          deploymentScope: env.sessionScopeId,
-          now: input.now,
-        })
-
         await transaction.nationalLifeConnectionAttempt.delete({
           where: { id: input.attemptId },
         })

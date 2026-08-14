@@ -1,45 +1,30 @@
 import Link from 'next/link'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getAgentSessionSummary } from '@/lib/national-life/interactive-connection-service'
-import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
 import {
   getNationalLifeLocalConnectorConfig,
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
-import { foresightRunStore } from '@/lib/national-life/foresight-run-service'
 import { prisma } from '@/lib/prisma'
 import { PageHeader } from '@/components/PageHeader'
 import { Shell } from '@/components/Shell'
 import { EmptyState } from '@/components/Table'
-import { NationalLifeConnectionCard } from './NationalLifeConnectionCard'
 import { NationalLifeLocalConnectorCard } from './NationalLifeLocalConnectorCard'
 import { NationalLifeSyncProgress } from './NationalLifeSyncProgress'
-import { NationalLifeForesightProgress } from './NationalLifeForesightProgress'
 
 export const dynamic = 'force-dynamic'
 
 export default async function NationalLifeConnectionPage() {
   const agent = await getCurrentAgent()
   const localConfig = getNationalLifeLocalConnectorConfig()
-  const remoteConfigured = isNationalLifeConfigured()
-  const remoteEnv = remoteConfigured ? getNationalLifeEnv() : null
-  const localSyncStatus = localConfig.enabled
+  const syncStatus = localConfig.enabled
     ? await getNationalLifeSyncStatus(agent.id, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE)
     : null
-  const selectedSyncStatus =
-    localSyncStatus ??
-    (remoteEnv ? await getNationalLifeSyncStatus(agent.id, remoteEnv.sessionScopeId) : null)
-  const [user, summary, syncStatus, foresightStatus] = await Promise.all([
+  const [user] = await Promise.all([
     prisma.user.findUnique({
       where: { id: agent.userId },
       select: { name: true, role: true },
     }),
-    remoteConfigured ? getAgentSessionSummary(agent.id) : Promise.resolve(null),
-    Promise.resolve(selectedSyncStatus),
-    remoteEnv
-      ? foresightRunStore.getStatus(agent.id, remoteEnv.sessionScopeId)
-      : Promise.resolve(null),
   ])
 
   const role = user?.role === 'ADMIN' ? 'ADMIN' : 'AGENT'
@@ -60,7 +45,7 @@ export default async function NationalLifeConnectionPage() {
         </Link>
       </PageHeader>
 
-      {localConfig.enabled || remoteConfigured ? (
+      {localConfig.enabled ? (
         <div className="mt-8 max-w-6xl space-y-8">
           <section className="relative overflow-hidden rounded-[28px] border border-border-steel bg-paper shadow-[var(--shadow-card)]">
             <div
@@ -99,9 +84,11 @@ export default async function NationalLifeConnectionPage() {
 
               <ol aria-label="Connection steps" className="grid content-center gap-3">
                 {[
-                  ['01', 'Open the connector', 'Use Chrome or Edge on this computer.'],
-                  ['02', 'Sign in on National Life', 'Your credentials stay on the official portal.'],
-                  ['03', 'Watch the import', 'Keepr One shows what was received and saved.'],
+                  ['01', 'Keeprone Sync', 'Keepr One creates the signed run and its checkpoints.'],
+                  ['02', 'KeeproneConnect', 'The paired extension requests only the planned source.'],
+                  ['03', 'National Life browser', 'The agent signs in on the official portal.'],
+                  ['04', 'Validate and save', 'KeeproneConnect returns raw batches; Keepr One deduplicates and persists only verified data.'],
+                  ['05', 'Keepr One app', 'The app renders the verified database snapshot.'],
                 ].map(([number, title, copy]) => (
                   <li
                     key={number}
@@ -124,29 +111,10 @@ export default async function NationalLifeConnectionPage() {
               storeUrl={localConfig.storeUrl}
               installMode={localConfig.installMode}
               baseUrl={localConfig.baseUrl}
-              remoteAvailable={remoteConfigured}
             />
           )}
 
           <NationalLifeSyncProgress initialStatus={syncStatus} />
-          {remoteConfigured && <NationalLifeForesightProgress initialStatus={foresightStatus} />}
-
-          {remoteConfigured && (
-            <details id="national-life-remote" className="scroll-mt-6 group">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-2xl border border-border-steel bg-paper px-5 py-4 shadow-[var(--shadow-card)] transition-colors hover:border-ink-muted sm:px-6">
-                <span>
-                  <span className="block text-sm font-semibold text-ink">Use the automatic connection instead</span>
-                  <span className="mt-1 block text-sm text-ink-muted">A remote browser handles the portal without an extension on this computer.</span>
-                </span>
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-panel text-xl text-ink-muted transition-transform duration-200 group-open:rotate-45" aria-hidden="true">
-                  +
-                </span>
-              </summary>
-              <div className="pt-5">
-                <NationalLifeConnectionCard summary={summary} />
-              </div>
-            </details>
-          )}
 
           <p className="border-t border-border-steel pt-5 text-sm leading-6 text-ink-muted">
             National Life data is copied into Keepr One as a read-only snapshot.{' '}

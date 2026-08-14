@@ -1,9 +1,10 @@
 import 'server-only'
+import { CANONICAL_NATIONAL_LIFE_SYNC } from '../sync-engine'
 
 const CHROME_EXTENSION_ID = /^[a-p]{32}$/
 const CHROME_WEB_STORE_HOST = 'chromewebstore.google.com'
 
-export const LOCAL_CONNECTOR_DEPLOYMENT_SCOPE = 'LOCAL_CONNECTOR'
+export const LOCAL_CONNECTOR_DEPLOYMENT_SCOPE = CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope
 
 export type LocalConnectorInstallMode = 'pilot' | 'store'
 

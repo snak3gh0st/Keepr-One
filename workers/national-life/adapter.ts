@@ -22,11 +22,6 @@ import {
   type ForesightCaseListing,
   type ForesightServiceObservation,
 } from '../../lib/national-life/foresight-sync'
-import {
-  syncNationalLifeGrid,
-  type GridSyncResult,
-} from '../../lib/national-life/sync-grid'
-import type { GridPage, NationalLifeGridKey } from '../../lib/national-life/portal-grid-client'
 import type { BrowserSession, NationalLifeCaseObservation } from './types'
 
 export type AdapterConfig = Readonly<{
@@ -227,22 +222,6 @@ export class NationalLifeAdapter {
         'National Life session is not authenticated',
       )
     }
-  }
-
-  async syncGrid(input: {
-    gridKey: NationalLifeGridKey
-    agentId: string
-    deploymentScope: string
-    fetchedAt: Date
-  }): Promise<GridSyncResult> {
-    return syncNationalLifeGrid({
-      gridKey: input.gridKey,
-      page: this.getPage() as unknown as GridPage,
-      agentId: input.agentId,
-      deploymentScope: input.deploymentScope,
-      portalLoginUrl: this.config.loginUrl,
-      fetchedAt: input.fetchedAt,
-    })
   }
 
   async readCase(lookup: { kind: 'EXTERNAL_ID'; value: string }): Promise<NationalLifeCaseObservation> {

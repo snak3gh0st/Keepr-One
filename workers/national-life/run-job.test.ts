@@ -247,13 +247,6 @@ function createDeps(options: {
     bytes: Buffer
     mimeType: string
   } | null
-  syncGrid?: () => Promise<{
-    recordsTotal: number
-    rowsFetched: number
-    truncated: boolean
-    snapshots: number
-    written: number
-  }>
   browserBusy?: boolean
   saveContext?: () => void
   reattachError?: Error
@@ -402,18 +395,6 @@ function createDeps(options: {
               annualPremium: 3_748.8,
               monthlyPremium: 312.4,
               lapseYear: null,
-            }
-          )
-        },
-        async syncGrid() {
-          calls.push('adapter:sync-grid')
-          return (
-            options.syncGrid?.() ?? {
-              recordsTotal: 2,
-              rowsFetched: 2,
-              truncated: false,
-              snapshots: 2,
-              written: 2,
             }
           )
         },
@@ -647,7 +628,7 @@ describe('National Life restored-context job orchestration', () => {
     })
   })
 
-  it('runs one allowlisted grid and reconciles its durable sync run', async () => {
+  it('rejects retired remote grid jobs before opening a browser', async () => {
     const test = createDeps({
       job: buildJob({
         operation: 'SYNC_NATIONAL_LIFE_GRID',
@@ -658,12 +639,13 @@ describe('National Life restored-context job orchestration', () => {
 
     await runNationalLifeJob('job-1', test.deps)
 
-    expect(test.calls).toContain('adapter:sync-grid')
+    expect(test.calls).not.toContain('adapter:sync-grid')
     expect(test.reconciledRuns).toEqual(['run-1'])
     expect(test.store.transitions.at(-1)).toMatchObject({
-      to: 'SUCCEEDED',
-      result: { recordsTotal: 2, rowsFetched: 2, written: 2 },
+      to: 'FAILED',
+      safeErrorCode: 'LOCAL_CONNECTOR_REQUIRED',
     })
+    expect(test.calls).not.toContain('session-store:find')
   })
 
   it('persists every Foresight inventory listing without service observations', async () => {

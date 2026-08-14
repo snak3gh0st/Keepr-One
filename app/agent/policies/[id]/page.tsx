@@ -20,7 +20,10 @@ import {
 } from '@/lib/national-life/client-intelligence'
 import { toCarrierCommissionRecords } from '@/lib/national-life/commission-records'
 import { carrierPolicyNumberVariants } from '@/lib/national-life/policy-number'
-import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
+import {
+  getNationalLifeLocalConnectorConfig,
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+} from '@/lib/national-life/local-connector/config'
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -67,8 +70,8 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   // client's service calls on this screen.
   const isCarrierNationalLife = /national life/i.test(policy.carrier ?? '')
 
-  if (isNationalLifeConfigured() && isCarrierNationalLife && policy.policyNumber) {
-    const scopeId = getNationalLifeEnv().sessionScopeId
+  if (getNationalLifeLocalConnectorConfig().enabled && isCarrierNationalLife && policy.policyNumber) {
+    const scopeId = LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
     const [commissionRows, documentRows, serviceRows] = await Promise.all([
       prisma.nationalLifeReportRow.findMany({
         where: {
