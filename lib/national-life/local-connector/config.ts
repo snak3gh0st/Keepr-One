@@ -1,4 +1,3 @@
-import 'server-only'
 import { CANONICAL_NATIONAL_LIFE_SYNC } from '../sync-engine'
 
 const CHROME_EXTENSION_ID = /^[a-p]{32}$/
