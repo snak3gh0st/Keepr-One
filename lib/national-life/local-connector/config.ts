@@ -124,7 +124,8 @@ export function isNationalLifeLocalConnectorEnabled(): boolean {
 
 /// READ_PAGE is intentionally rolled out separately from the established grid
 /// sync. Chrome Web Store clients that predate the page collector must keep
-/// receiving the proven 13-grid plan until the new package is installed.
+/// receiving the proven grid-only plan (`NATIONAL_LIFE_AUTOMATIC_GRID_KEYS`)
+/// until the new package is installed.
 export function isNationalLifePageDiscoveryEnabled(): boolean {
   return parseOptionalFlag(
     'NATIONAL_LIFE_LOCAL_CONNECTOR_PAGE_DISCOVERY_ENABLED',
