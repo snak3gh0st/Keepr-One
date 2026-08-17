@@ -12,6 +12,7 @@ import {
   startLocalConnectorRun,
 } from './run-service'
 import { planReadGridStages } from './capabilities'
+import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from '../read-coverage'
 
 const now = new Date('2026-08-04T18:00:00.000Z')
 
@@ -421,15 +422,25 @@ describe('local connector runs', () => {
       nationalLifeSyncRun: { create, updateMany: vi.fn().mockResolvedValue({ count: 0 }), findFirst },
     } as never
 
+    // Both flags on at once is what the rollout actually turns on, and the
+    // superseding path plans from scratch instead of reusing the active run's
+    // stages — so the export stage has to survive that path, not just this one.
     const run = await startLocalConnectorRun(
       db,
       { agentId: 'agent-1', deviceId: 'device-1', now },
-      { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS },
+      { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS, exportEnabled: true },
     )
 
     expect(run).toMatchObject({ runId: 'run-wide', duplicate: false, completedStages: 0 })
     expect(run.stages.map(planStageKey)).toEqual([...LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS])
     expect(create).toHaveBeenCalledTimes(1)
+
+    const byKey = new Map(run.stages.map((stage) => [planStageKey(stage), stage.capability]))
+    expect(byKey.get('INFORCE_CLIENTS')).toBe('READ_EXPORT')
+    expect(byKey.get('NEW_BUSINESS')).toBe('READ_GRID')
+    for (const sourceKey of NATIONAL_LIFE_DISCOVERY_PAGE_KEYS) {
+      expect(byKey.get(sourceKey)).toBe('READ_PAGE')
+    }
   })
 
   /// A failed run owns a durable cursor, so it keeps its narrower plan and

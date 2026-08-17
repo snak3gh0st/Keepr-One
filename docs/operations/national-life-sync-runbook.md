@@ -133,7 +133,7 @@ guarda a contradição em aberto.
 
 | Sintoma | Causa provável |
 | --- | --- |
-| Progresso mostra 12, não 26 | Run `COMPLETED`/`FAILED` sendo retomado — use Full refresh |
+| Progresso mostra 12, não 26 | Run `FAILED`/`PARTIAL` sendo retomado no plano antigo — use Full refresh. (Um run `COMPLETED` já não causa isso: é substituído automaticamente.) |
 | Export não roda, sem erro | Extensão carregada é < 0.1.15 (passo 0) |
 | Run termina `PARTIAL` | Uma ou mais páginas `NEEDS_PROBE` não renderam — é a medição, veja passo 4 |
 | App não sobe após a flag | Valor diferente de `true`/`false` |
