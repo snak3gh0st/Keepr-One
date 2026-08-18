@@ -87,3 +87,22 @@ export async function ingestNationalLifePortfolio(
 
   return report
 }
+
+/// Called at the end of a run, outside the stage transaction — the persist helpers
+/// bind the module-level Prisma client and cannot run inside it.
+///
+/// Swallows its own failures on purpose. The connector is blocked on the response
+/// that triggers this, and a portfolio that could not be written is a problem for
+/// the portfolio, not a reason to tell the device its sync failed. The report comes
+/// back as `null` so the caller can say nothing rather than say something false.
+export async function ingestPortfolioIfRunFinished(
+  deps: IngestDeps,
+  input: { agentId: string; terminal: boolean },
+): Promise<IngestReport | null> {
+  if (!input.terminal) return null
+  try {
+    return await ingestNationalLifePortfolio(deps, { agentId: input.agentId })
+  } catch {
+    return null
+  }
+}

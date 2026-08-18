@@ -15,6 +15,8 @@ import {
   LocalConnectorStageCompletionError,
 } from '@/lib/national-life/local-connector/run-service'
 import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '@/lib/national-life/portal-grid-client'
+import { ingestPortfolioIfRunFinished } from '@/lib/national-life/portfolio-ingest'
+import { prismaIngestDeps } from '@/lib/national-life/portfolio-ingest-prisma'
 import { prisma } from '@/lib/prisma'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
@@ -53,7 +55,17 @@ export async function POST(
       return Response.json({ error: 'INVALID_REQUEST' }, { status: 400, headers: NO_STORE })
     }
     const result = await completeLocalConnectorStage(prisma, { ...device, ...body })
-    return Response.json(result, { status: 201, headers: NO_STORE })
+    // The book only becomes the agent's portfolio once every stage has settled:
+    // running earlier would ingest a half-read export and report counts that the
+    // next stage contradicts. This never throws — see `ingestPortfolioIfRunFinished`.
+    const portfolio = await ingestPortfolioIfRunFinished(prismaIngestDeps(prisma), {
+      agentId: device.agentId,
+      // A replayed completion for an already-settled stage returns without
+      // `terminal`. The ingestion ran on the original request, so the absence is
+      // the answer: do not run it again.
+      terminal: result.terminal === true,
+    })
+    return Response.json({ ...result, portfolio }, { status: 201, headers: NO_STORE })
   } catch (error) {
     if (error instanceof LocalConnectorSignatureError) {
       return Response.json(

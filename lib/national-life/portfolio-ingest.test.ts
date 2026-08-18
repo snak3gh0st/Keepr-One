@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { ingestNationalLifePortfolio, type IngestDeps } from './portfolio-ingest'
+import {
+  ingestNationalLifePortfolio,
+  ingestPortfolioIfRunFinished,
+  type IngestDeps,
+} from './portfolio-ingest'
 import type { InforceRow } from './portfolio-reconcile'
 
 const row = (overrides: Partial<InforceRow>): InforceRow => ({
@@ -79,5 +83,36 @@ describe('ingestNationalLifePortfolio', () => {
 
     expect(touched).toEqual(['LS1'])
     expect(report.policiesUpserted).toBe(1)
+  })
+})
+
+describe('ingestPortfolioIfRunFinished', () => {
+  it('does nothing while the run still has stages left', async () => {
+    const h = harness([row({})])
+    const report = await ingestPortfolioIfRunFinished(h.deps, { agentId: 'a1', terminal: false })
+
+    expect(report).toBeNull()
+    expect(h.upserted).toEqual([])
+  })
+
+  it('ingests once the last stage settles', async () => {
+    const h = harness([row({})])
+    const report = await ingestPortfolioIfRunFinished(h.deps, { agentId: 'a1', terminal: true })
+
+    expect(report?.policiesUpserted).toBe(1)
+  })
+
+  it('never lets an ingestion failure fail the sync', async () => {
+    // The device is waiting on this response to finish its run. A portfolio that
+    // could not be written is a problem for the portfolio, not a reason to tell
+    // the connector its sync failed.
+    const h = harness([row({})])
+    h.deps.loadInforceRows = async () => {
+      throw new Error('database on fire')
+    }
+
+    await expect(
+      ingestPortfolioIfRunFinished(h.deps, { agentId: 'a1', terminal: true }),
+    ).resolves.toBeNull()
   })
 })
