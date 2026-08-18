@@ -711,3 +711,41 @@ indefinidamente. Não é sessão expirada nem bloqueio do carrier, e nenhuma
 mensagem do produto aponta para a causa. Para um agente não-técnico isso é
 indistinguível de "a integração quebrou". Vale um check de espaço em disco no
 diagnóstico da extensão.
+
+## 16. Comissão: existe dado bom, não existe mês
+
+Levantado pelo dono do produto e verificado em seguida. A comissão detalhada
+chega **bem estruturada** — 5.408 linhas em
+`COMMISSION_DETAIL_NLD_COMMISSION_EARNING`, cada uma com data, número da apólice
+e valores:
+
+```
+primaryDate  label       amounts
+07/28/2026   748726800   {CommRate: "1.0%", PremiumAmt: "$38.72",
+                          GrossCommEarned: "$0.39", ParticipationPercentage: "100.0%"}
+```
+
+**O problema é a janela.** Todas as 5.408 linhas caem entre **07/07/2026 e
+28/07/2026** — três semanas de um único mês. As telas de comissão do portal são
+filtradas por período e o sync captura apenas a janela default. A página de
+overview tem uma aba **"Calendar View"** que nunca é acionada.
+
+Ou seja: **não existe histórico mensal porque nunca pedimos os outros meses.**
+Não é bug de parser nem de schema — é uma dimensão que a captura ignora. Sem ela
+não há conciliação de comissão, que é justamente o uso que justifica o dado.
+
+Dois defeitos menores na mesma família:
+
+1. `COMMISSIONS_OVERVIEW` é capturada como `READ_PAGE`, então suas 245 "linhas"
+   são `PAGE_META`/`PAGE_TEXT`, não registros de comissão. O dado está lá como
+   texto, não como número.
+2. `PREMIUM_REPORT_AGENCY` grava rótulos de cabeçalho no campo de data —
+   `primaryDate` vale `"New Policies this period"` e `"Premium"` em duas linhas.
+   Mesma família do rodapé do XLSX (§15.4): texto de layout entrando como dado.
+
+E, como as apólices antes da §15, nada disso vira `CommissionRecord`. Continua
+numa tabela paralela.
+
+**Subprojeto próprio**, com três partes na ordem: acionar o filtro de período
+para varrer meses; estruturar `COMMISSIONS_OVERVIEW` em vez de fotografá-la; e só
+então ingerir em `CommissionRecord` com a dimensão de mês preservada.
