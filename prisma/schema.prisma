@@ -236,6 +236,7 @@ model Agent {
   nationalLifeConnectorDevices          NationalLifeConnectorDevice[]
   nationalLifeConnectorCommands         NationalLifeConnectorCommand[]
   nationalLifeExportUploads             NationalLifeExportUpload[]
+  messagingAccount                      AgentMessagingAccount?
 
   @@index([parentAgentId])
 }
@@ -617,6 +618,22 @@ model InsuranceCase {
   @@index([assignedAgentId, stage])
   @@index([prospectId])
   @@index([clientId])
+}
+
+/// One Chatwoot account per agent, never a shared account with per-inbox rules:
+/// agents are independent and a configuration slip would show one agent's book to
+/// a competitor. Isolation is structural here, not procedural.
+model AgentMessagingAccount {
+  id                String   @id @default(cuid())
+  agentId           String   @unique
+  agent             Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  provider          String   @default("CHATWOOT")
+  externalAccountId String
+  externalUserId    String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([provider, externalAccountId])
 }
 
 model AgentIntegrationCredential {
