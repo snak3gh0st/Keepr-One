@@ -100,7 +100,7 @@ export const NATIONAL_LIFE_READ_COVERAGE: readonly NationalLifeReadSource[] = [
     label: 'Agent dashboard totals and action-required items',
     route: NATIONAL_LIFE_GRIDS.AGENT_DASHBOARD,
     collector: 'DASHBOARD',
-    implementation: 'NEEDS_COLLECTOR',
+    implementation: 'AUTOMATIC',
     requiredForFullSync: true,
   },
   {
@@ -108,7 +108,7 @@ export const NATIONAL_LIFE_READ_COVERAGE: readonly NationalLifeReadSource[] = [
     label: 'Premium report',
     route: NATIONAL_LIFE_GRIDS.PREMIUM_REPORT_AGENCY,
     collector: 'FILTERED_REPORT',
-    implementation: 'NEEDS_COLLECTOR',
+    implementation: 'AUTOMATIC',
     requiredForFullSync: true,
   },
   {
@@ -140,7 +140,7 @@ export const NATIONAL_LIFE_READ_COVERAGE: readonly NationalLifeReadSource[] = [
     label: 'Commission overview by payment date',
     route: NATIONAL_LIFE_GRIDS.COMMISSIONS_OVERVIEW,
     collector: 'FILTERED_REPORT',
-    implementation: 'NEEDS_COLLECTOR',
+    implementation: 'AUTOMATIC',
     requiredForFullSync: true,
   },
   {
