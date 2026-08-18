@@ -258,3 +258,65 @@ dias de trabalho — a ordem certa é checar primeiro.
 
 Nada disso invalida D1: `faceAmount` nullable continua certo justamente porque o
 preenchimento é caro e demorado, qualquer que seja o caminho.
+
+---
+
+## 9. Correção de D2, e a sonda que decide o backfill
+
+### D2 foi decidida com uma premissa errada
+
+D2 descartou o backfill dedicado ("modo buscar tudo") porque ele exigiria o agente
+relogando várias vezes durante a execução. **Essa premissa não se sustenta.**
+
+`docs/operations/national-life-portal-contract.md` registra a medição, e ela
+separa duas sessões que morrem por motivos opostos:
+
+> *"o keep-alive preserva o portal e não preserva o SSO a jusante"*
+
+> *"Sem toque periódico no IdP, ela vive. Com toque a cada 10 min, morria em ~7.
+> O keep-alive do SSO era a causa, não o remédio."*
+
+O que se envenena ao ser tocado é o **Auth0**: cruzar o SSO rotaciona o cookie, e
+apresentar o antigo é lido como replay. Isso é o caminho do Foresight.
+
+O backfill não passa por lá. `policy-details` é portal puro, e para o portal o
+keep-alive é exatamente o que funciona. Mais que isso: **o backfill é o próprio
+keep-alive** — buscando páginas continuamente, a sessão nunca fica ociosa. Os
+~20 min são janela de inatividade deslizante, não teto absoluto, o que bate com
+2026-08-17: a sessão atravessou o sync inteiro trabalhando e morreu ~29 min
+depois que ele parou.
+
+Sem re-login forçado, o backfill dedicado deixa de ser exigência técnica no fluxo
+do agente — que era a **única** razão pela qual D2 o rejeitou.
+
+### Por que o desenho fica em aberto em vez de ser reescrito agora
+
+Três desenhos, com custo separado por duas ordens de grandeza:
+
+| desenho | custo | depende de |
+| --- | --- | --- |
+| coluna ligável no grid | ~zero | o dropdown ter capital segurado |
+| colher ids + buscar detalhes | ~10.800 carregamentos | page size do grid |
+| idem, sustentado por keep-alive | mesmo volume, menos sessões | keep-alive valer na extensão |
+
+Escolher agora é escolher o mais caro com os dois mais baratos sem medir. As
+medições custam minutos; o desenho errado custa dias. **Não construir até medir.**
+
+### A sonda — quatro perguntas, uma sessão viva
+
+Ordem deliberada: cada resposta pode tornar as seguintes desnecessárias.
+
+1. **Abrir "Column Selection dropdown" na tela All Clients e listar as colunas
+   disponíveis.** Se capital segurado estiver lá, itens 2–4 não existem: muda-se
+   o export e o backfill morre. A config do datatable expõe
+   `IsEnableAddRemoveColumn`, que é o indício.
+2. **Abrir "Show N rows per page" e registrar o maior valor.** Decide a etapa de
+   colheita de ids: a 10/página são ~983 carregamentos, a 100 são ~99.
+3. **Confirmar de onde vem o `id` hex.** Medido: não está no JSON do grid nem nas
+   33 colunas do export; só aparece como `href` no HTML renderizado. Confirmar
+   que a página renderizada com N linhas traz N links `policy-details?id=`.
+4. **Medir o keep-alive na extensão.** A medição do §9 veio do caminho Steel.
+   Mesma sessão de portal e mesmo mecanismo, mas na extensão nunca foi medido.
+   Buscar uma página a cada ~5 min por ~40 min e ver se a sessão sobrevive.
+
+Só com essas quatro respostas o backfill vira desenho em vez de aposta.
