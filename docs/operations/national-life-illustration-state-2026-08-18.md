@@ -36,12 +36,34 @@ capacidades já nomeadas no contrato do executor
 (`FORESIGHT_INVENTORY`, `FORESIGHT_CASE_DETAIL`, `FORESIGHT_REPORT` em
 `connector-command-contract.ts`).
 
-**Não confirmado**: se o KeeproneConnect (extensão do navegador) de fato
-implementa essas três capacidades. As três tabelas de staging do Foresight
-estão com **zero linhas** em produção, e `NationalLifeForesightReadRun`
-também tem zero linhas — nenhum run foi disparado nem concluído até hoje. A
-conexão atual do Felipe é anterior a esse código, então o disparo automático
-em `startForesightInventory` nunca rodou para ele.
+**Confirmado (atualização 2026-08-18, mais tarde no mesmo dia)**: o
+KeeproneConnect **não implementa** as três capacidades Foresight. O executor
+local vive em `apps/keeprone-connect` — que é parte deste monorepo, não um
+projeto externo como a dúvida original supunha. Em
+`apps/keeprone-connect/lib/capabilities.ts`:
+
+```ts
+const IMPLEMENTED_CAPABILITIES = ['READ_GRID', 'READ_PAGE', 'READ_EXPORT'] as const
+```
+
+Foresight não está na lista. O comentário no dispatch gate
+(`parseExecutableConnectorCommand`) confirma que isso é proposital, não um
+esquecimento:
+
+> "The browser accepts only commands it can execute today, **even if the
+> server's wider catalog includes Foresight and application capabilities**
+> for the remote browser or a future extension release."
+
+As únicas duas ocorrências de `FORESIGHT` no runtime são em testes
+(`capabilities.test.ts`, `remote-config.test.ts`) que verificam que o
+*servidor* pode declarar a capability no catálogo remoto — não que o
+executor a implementa. Se o servidor mandar um comando `FORESIGHT_*` hoje, o
+executor rejeita com `UNKNOWN_CAPABILITY`.
+
+Isso explica por que as três tabelas de staging do Foresight estão com
+**zero linhas** em produção e `NationalLifeForesightReadRun` também tem zero
+linhas: mesmo que `startForesightInventory` dispare o run na conclusão de
+uma conexão, não há executor do lado da extensão para cumpri-lo.
 
 ## Por que isso não foi resolvido nesta sessão
 
@@ -53,15 +75,15 @@ sessão.
 
 ## Próximo passo concreto
 
-1. Confirmar se o executor do KeeproneConnect já implementa
-   `FORESIGHT_INVENTORY`/`FORESIGHT_CASE_DETAIL`/`FORESIGHT_REPORT` —
-   procurar no runtime da extensão (fora deste repo Next.js;
-   `docs/superpowers/plans/2026-08-04-keeprone-connect-local-executor.md` e o
-   worktree `keeprone-national-life-runtime` são os candidatos).
-2. Se não implementa: é o trabalho grande, planejar como projeto próprio.
-3. Se implementa: falta só disparar um run para o Felipe (reconectar, ou
-   adicionar um botão manual que chame `startForesightInventory` sem exigir
-   reconexão completa) e observar se ele completa.
-4. Decidir o destino do Rapid Solve enquanto isso: manter só como cotação
+1. ~~Confirmar se o executor do KeeproneConnect já implementa
+   `FORESIGHT_INVENTORY`/`FORESIGHT_CASE_DETAIL`/`FORESIGHT_REPORT`~~ —
+   **feito 2026-08-18**: não implementa. Ver seção acima.
+2. Construir o coletor do Foresight é o trabalho grande — planejar como
+   projeto próprio, do mesmo tamanho da integração National Life original
+   (coreografia de dois saltos de autenticação, chamadas ASMX, extração de
+   PDF, escrita nas três tabelas, e os três executores novos em
+   `apps/keeprone-connect/lib/capabilities.ts` adicionados a
+   `IMPLEMENTED_CAPABILITIES`).
+3. Decidir o destino do Rapid Solve enquanto isso: manter só como cotação
    interna do agente (nunca exposta ao cliente) é o uso que a condição do
    carrier permite.
