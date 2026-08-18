@@ -676,6 +676,38 @@ currently unavailable") — a rota está certa, o dado é que não existe no mom
 o `READ_PAGE` vai capturar esse estado em vez de falhar, que é o comportamento
 correto.
 
-**Ainda não medido:** falta um run de ponta a ponta com a `0.1.17` carregada e o
-servidor deployado para confirmar 26/26. O fix do §15.2 (`INFORCE_CLIENTS`) já
-foi confirmado ao vivo; este ainda não.
+### 15.5 Medido: 26/26, run `COMPLETED`
+
+Servidor deployado (`main`, deploy `finished`, container healthy) e sync
+disparado ao vivo pelo portal do agente. Run `cmsxrtar90003pj01c0j9wr4d`,
+2026-08-18 01:59 UTC:
+
+```
+state:  COMPLETED          (era PARTIAL)
+fontes: 26 de 26           (era 20)
+linhas: 19.167 recebidas / 18.878 gravadas   (eram 7.115)
+```
+
+Todas as 6 falhas do dia estão com `resolvedAt` preenchido — as 5 de rota e a
+do export. **Pela primeira vez o run fecha `COMPLETED`, sem fonte pendente.**
+
+Dois fatos que a medição confirmou de graça:
+
+1. **A ordem de deploy não importa mesmo.** Este run passou com o servidor novo
+   e a extensão ainda na `0.1.16` — o catálogo corrigido do servidor já entrega
+   a rota final, e a função antiga da extensão a devolve inalterada. A tabela de
+   alias da `0.1.17` é a rede de proteção para o caminho inverso, e não foi
+   exercitada aqui.
+2. **`LIFE_PERSISTENCY` falhou uma vez neste run e resolveu no retry.** A falha
+   caiu às 01:55:06, exatamente no minuto em que a sessão do portal estava sendo
+   restabelecida — a rota em si carrega e permanece (`$153.037,86` emitido, 87%
+   de persistência, verificado na sequência). Foi colateral do login, não de
+   rota. O retry resolveu sem intervenção.
+
+**Nota operacional que custou tempo nesta sessão:** o disco da máquina do agente
+encheu (503 MB livres). Com disco cheio o Chrome não grava o cookie store, então
+o login do carrier passa pelo MFA, mostra tela branca e volta para o login —
+indefinidamente. Não é sessão expirada nem bloqueio do carrier, e nenhuma
+mensagem do produto aponta para a causa. Para um agente não-técnico isso é
+indistinguível de "a integração quebrou". Vale um check de espaço em disco no
+diagnóstico da extensão.
