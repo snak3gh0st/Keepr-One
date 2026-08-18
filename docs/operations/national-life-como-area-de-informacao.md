@@ -309,31 +309,43 @@ inexistente. Essa afirmação está contestada; ver §9.
 `git log main..HEAD` devolve **5**. Os PRs #38–#54 foram merjados. O hardening
 está em `main`.
 
-**§3 — "`faceAmount` não tem fonte no portal. Nenhuma."** *Contestado, e a
-contradição não se resolve sem uma sessão viva.* As duas evidências são reais e
-se chocam de frente:
+**§3 — "`faceAmount` não tem fonte no portal. Nenhuma."** ~~Contestado~~
+**Resolvido em 2026-08-17, sessão viva, verificado por mim ao vivo (Policy #
+LS1473219).**
 
-| Evidência | Data | Diz |
-| --- | --- | --- |
-| `scripts/national-life-sample-policy-details.ts`, 40 carregamentos, 3 amostras (`portal-contract.md:332-403`) | 2026-07-30 | `faceAmountHitRate` **0%** na página `policy-details?id=`. `describe-page` viu **uma única tabela** `Date, Category, Detail`. |
-| Varredura em sessão autenticada (`orchestrator-contract-2026-08-13.md:88-98`) | 2026-08-13 | A página de detalhe da apólice entrega **total face amount, net death benefit, cash value, surrender, loans, beneficiaries, pagamentos**. |
+Abri `policy-details?id=<32-hex>` sem clicar em nada e rolei a página — sem
+interação nenhuma além de scroll:
 
-A sonda de 07-30 **não** é fraca: usou browser real (Steel/Playwright,
-`page.content()` após `domcontentloaded` + 3 s), corrigiu um falso negativo de
-regex antes de concluir, e tinha controle `anyMoney` — que deu 87,5% numa amostra
-e 16,7% em outra. Ou seja: havia cifras na página, só não rotuladas como face
-amount.
+```
+Coverage Details
+  Total Face Amount: $133,000.00
+  Net Death Benefit: $133,000.00
+  Guideline Premium Limit: $41,760.60 through 06/10/2027
+  MEC Limit: $29,461.28 through 06/10/2027
+```
 
-A hipótese que concilia as duas — e é a única que sobrevive ao fato de ambas
-usarem browser real — é que a sonda leu **a aba/estado default**, e os números
-moram atrás de uma interação (aba `Policy & Coverage`, seção expansível, XHR
-disparado por clique) que a sonda nunca fez. A variação do `anyMoney` entre
-amostras reforça isso.
+Aba `VALUES` (um clique):
 
-Custo de resolver: **abrir uma apólice no portal e olhar**. Minutos. Enquanto não
-for feito, `READ_POLICY_DETAIL` é a aposta mais provável para capital segurado,
-mas **não é um caminho confirmado** — e o PDF via `EncryptedDocumentHandle` não
-pode ser descartado ainda.
+```
+Accumulated Cash Value: $4,467.92
+Surrender Penalty: $2,541.63
+Net Cash Value: $2,031.44
+Maximum Loan Available / Outstanding Balance / Interest Rate
+Strategy Values (por subconta, com percentual)
+```
+
+A sonda de 07-30 não estava errada em metodologia — usou browser real e tinha
+controle (`anyMoney` 87,5%/16,7%). O que ela mediu foi **conteúdo que não
+carregou a tempo**: 3 s de espera fixa após `domcontentloaded` não foi
+suficiente para a seção `Coverage Details`, que fica abaixo da dobra na aba
+`POLICY` (default) — nenhuma aba escondida precisou ser clicada para o face
+amount; só rolar. A leitura de `describe-page` como "uma única tabela
+Date/Category/Detail" é inconsistente com o que a página mostra hoje; pode ter
+sido outra rota, ou a página mudou de estrutura entre 07-30 e agora.
+
+**Consequência para o projeto:** `READ_POLICY_DETAIL` é o caminho confirmado
+para face amount, net death benefit e cash value. Vale a pena escrever o
+executor. Ver §12.
 
 **§3 — "e-mail, telefone e endereço vêm nulos".** Endereçado no código, **não
 medido contra o portal**, pelo export oficial.
@@ -402,23 +414,210 @@ Dois defeitos menores no caminho:
 2. O comentário em `config.ts:125` ainda diz "the proven 13-grid plan"; o array
    tem 12 desde a depreciação de `PROJECTED_COMMISSIONS`.
 
-## 11. Ordem revista
+## 11. A run ao vivo de 2026-08-17 — resultado real, não simulado
 
-1. **Ligar as duas flags** (`PAGE_DISCOVERY_ENABLED`, `EXPORT_ENABLED`), com
-   extensão ≥ 0.1.15 carregada, e disparar por **Full refresh** num agente
-   piloto. Custo: uma variável de ambiente cada. Retorno: 12 → 26 fontes
-   planejadas e 14 medidas pela primeira vez, mais contato de insured/owner via
-   export oficial. Nada disso precisa de código novo — precisa de uma execução
-   contra o portal vivo, que é o que não foi feito.
-2. **Antes de escrever `READ_POLICY_DETAIL`, abrir uma apólice e olhar.** A
-   contradição do §9 decide se essa capability vale o esforço ou se o caminho é
-   documento + parse. Cinco minutos de sessão viva separam as duas. Se os números
-   estiverem lá atrás de uma aba, `READ_POLICY_DETAIL` vira a entrega nº 2 (passo
-   2 do contrato de 2026-08-13); se não estiverem, a sonda de correspondência
-   volta ao topo.
-3. **Fechar a ingestão** — inalterado do §7.3. Continua sendo o gargalo de
-   produto, e nenhuma das duas anteriores o resolve.
+Com as três flags ligadas em produção (`ENABLED`, `EXPORT_ENABLED` já estava
+`true` de antes; `PAGE_DISCOVERY_ENABLED` ligada nesta sessão) e a extensão
+0.1.15 carregada, rodei um sync completo contra o portal vivo do agente
+`felipe@keeprone.com`. Run `cmsxrtar90003pj01c0j9wr4d`, 2026-08-17 21:53–22:16
+UTC.
 
-A sonda de correspondência (§7.1) desce de prioridade: ela testava uma hipótese
-sobre o único caminho *então conhecido* para capital segurado. Agora existe outro,
-mais direto.
+**Resultado: `PARTIAL`, 20 de 26 fontes escreveram dado, 6 falharam — todas
+`retryable`, nenhuma travou o run.**
+
+| Fonte | Recebido/Escrito |
+| --- | --- |
+| `CLIENT_INTELLIGENCE` | 2.692 |
+| `TRANSFER_COMPANY_INFORMATION` | 1.399 |
+| `NEW_BUSINESS` | 857 recebidos / 713 escritos |
+| `RECENTLY_CLOSED` | 143 / 122 |
+| `AGENT_DASHBOARD` | 256 |
+| `CORRESPONDENCE` | 94 (índice de documentos, não os PDFs) |
+| `COMMISSIONS_OVERVIEW`, `POLICY_PAYMENT_HISTORY`, `PENDING_GROSS_COMMISSIONS`, `COMMISSIONS_POLICY_HISTORY`, `DAILY_UNIT_VALUES`, `PIP_CONTRIBUTION_INCREASE`, `INFORMAL_REQUESTS` | ~225–245 cada |
+| `PAID_COMMISSIONS`, `COMMISSIONS_EARNING_REPORT`, `PAYABLE_GROSS_COMMISSIONS`, `COMMISSIONS_PAYMENT_PORTAL` | valores pequenos, sem rejeição |
+| `LIFE_PENDING_LAPSE`, `PIP_PENDING`, `TRANSFERS_EXCHANGES` | 0 — portal respondeu vazio, sem erro (livro sem casos nessas categorias agora) |
+
+**Falharam (6), todas `retryable`:**
+
+- `INFORCE_CLIENTS` → `PORTAL_REQUEST_FAILED`. É a etapa `READ_EXPORT`: o
+  `POST /agent/Datatable/DownloadExcel` não respondeu OK na primeira tentativa.
+  Confirma o que o §9 já marcava como "endereçado no código, não medido" — agora
+  está medido, e falhou uma vez. Precisa investigar se é intermitente ou
+  sistemático antes de confiar nele em produção.
+- `PREMIUM_REPORT_AGENCY`, `LIFE_PERSISTENCY`, `PLACEMENT_REPORT`,
+  `ANNUITY_PAST_DUE_CONTRIBUTIONS`, `ANNUITY_PAYROLL_FLOW_CHANGES` →
+  `PORTAL_ROUTE_CHANGED`. A extensão navegou até a URL esperada repetidas vezes
+  e a aba nunca chegou lá — o carrier redireciona para outra tela. Confirma a
+  natureza `NEEDS_PROBE` dessas 5: não são rota direta, precisam de
+  filtro/formulário antes de existir como página própria. Não é bug da
+  extensão; é o catálogo assumindo rota que o portal não oferece assim.
+
+## 12. Capital segurado — resolvido ao vivo, mesma sessão
+
+Abri manualmente `policy-details?id=<hex>` de uma apólice do book (LS1473219,
+Enrico Abdalla). **Face amount, net death benefit e cash value estão lá**, sem
+precisar de interação nenhuma além de rolar a página e clicar na aba `VALUES`.
+Detalhe completo em §9. Isso fecha a contradição que travava a decisão sobre
+`READ_POLICY_DETAIL` — ver §13.
+
+## 13. Documentos — o endpoint existe, e devolve o PDF direto
+
+Também ao vivo: a aba `DOCUMENTS` de cada apólice lista documentos (Annual
+Statements, Confirmation Statements, etc.) com "Retrieve Selected" e "Merge All
+PDF". Selecionar um e clicar Retrieve dispara:
+
+```
+POST /agent/Document/GetDocumentViewerUrl
+  → abre nova aba: /agent/correspondence/documentviewer?id=<32-hex>
+```
+
+Essa segunda URL é servida pelo **visualizador nativo de PDF do Chrome** — a
+extensão de automação nem consegue tirar screenshot dela ("cannot attach to
+this target"), o que por si confirma que é um `GET` autenticado por cookie que
+devolve os bytes do PDF diretamente, sem wrapper de app. Mesmo padrão do
+`EncryptedDocumentHandle` já mapeado em `CORRESPONDENCE`.
+
+**Isso é bom sinal para `CORRESPONDENCE_DOCUMENTS`**: o mecanismo de busca é um
+`fetch` autenticado simples — a mesma classe de trabalho que `READ_EXPORT` já
+resolveu (baixar bytes, hash, enviar em chunks). Não foi medido se o PDF é
+texto extraível ou imagem escaneada (decide se basta parse ou se precisa OCR) —
+isso ainda é sonda de conteúdo, não de mecanismo.
+
+## 14. Ordem revista, com o que a sessão de hoje já decidiu
+
+1. ~~Ligar as duas flags~~ **Feito e medido.** 20/26 fontes confirmadas
+   funcionando ao vivo; 6 identificadas com causa clara (ver §11). Duas ficam
+   pendentes: por que `READ_EXPORT` falhou uma vez (retry manual resolveria, ou
+   é sistemático?), e se as 5 `PORTAL_ROUTE_CHANGED` precisam de filtro/data
+   antes de navegar — provável correção de catálogo, não de arquitetura.
+2. **`READ_POLICY_DETAIL` está confirmado e vale escrever.** Não é mais aposta —
+   é a entrega nº 2 do contrato de 2026-08-13, com o campo exato (Coverage
+   Details + Values tab) e a URL (`policy-details?id=`) já mapeados por esta
+   sessão.
+3. **`CORRESPONDENCE_DOCUMENTS` também está mais barato do que parecia** — o
+   mecanismo é `fetch` + `GetDocumentViewerUrl`, não scraping. Pode entrar no
+   mesmo lote que `READ_POLICY_DETAIL`, já que ambos são "abrir uma tela
+   adicional e extrair o que já é renderizado", a mesma classe de trabalho.
+4. **Fechar a ingestão** — inalterado do §7.3. Continua sendo o gargalo de
+   produto, e nenhuma das entregas acima o resolve: os dados continuam numa
+   tela paralela até o upsert em `ExternalReference` existir.
+
+A sonda de correspondência antiga (§7.1, script não executado) fica obsoleta:
+media uma hipótese sobre 64/9.614 documentos por causa de um suposto filtro de
+data. A sessão de hoje já confirma que o mecanismo de busca funciona por
+handle individual, não por essa listagem — a pergunta que a sonda faria deixou
+de ser a pergunta certa.
+
+## 15. Continuação da mesma sessão: as três tarefas do punch list
+
+### 15.1 O "hang" em READ_PAGE não existe — hipótese refutada com evidência de banco
+
+A hipótese herdada da sessão anterior ("o coletor trava em página com tabela
+vazia") não sobreviveu à leitura do código nem à consulta ao Postgres de
+produção:
+
+- `capturePageSnapshot` (`apps/keeprone-connect/lib/page-snapshot.ts`) é uma
+  função síncrona e pura. Não espera tabela popular, não tem noção de "página
+  pronta" — captura o DOM no instante em que a mensagem `CAPTURE_PAGE` chega.
+- `capturePageWithRetry` (`background.ts`) só retenta se o ack não bater com o
+  esperado; não há espera por conteúdo.
+- Consulta direta no Postgres (`NationalLifeConnectorStageFailure`, run
+  `cmsxrtar90003pj01c0j9wr4d`): as 6 falhas foram gravadas entre 23:26:10 e
+  23:31:10 UTC, em cadência de ~60s — exatamente `SYNC_WATCHDOG_ALARM` (1 min)
+  × `MAX_STAGE_NAVIGATION_ATTEMPTS` (2). O run avançou e terminou sozinho
+  (`PARTIAL`); não há nenhum `NationalLifeSyncRun` criado após 22:49 UTC no
+  dia. O que a sessão anterior viu como "travado" era um retry em andamento,
+  observado no meio de uma sessão de debug manual que também tinha um diálogo
+  nativo do Chrome ("keep me logged in") bloqueando a automação (ver memória
+  `project_national_life_sync_live_run_2026_08_17`) — confundidor plausível,
+  não reproduzido como defeito do coletor.
+- Naveguei ao vivo para `annuity-flow-report/past-due-contribution/personal`:
+  carrega direto, sem redirect, estado vazio real. Nenhum código foi alterado
+  para este item — não havia o que corrigir.
+
+### 15.2 INFORCE_CLIENTS / READ_EXPORT: causa raiz encontrada e corrigida
+
+Reproduzi o `PORTAL_REQUEST_FAILED` isolado, ao vivo, comparando byte a byte o
+corpo que a extensão reconstrói (`buildOfficialExportRequest`) com o corpo que
+o próprio botão "Download" da UI envia (capturado via patch de
+`XMLHttpRequest.prototype.send`, sem tocar em cookies). Divergência real: o
+nosso corpo incluía um campo `page` que a UI nunca envia — só `draw`, `start`,
+`length`, `columns`, `order`, `DatatableId`, `IsEnableContactFields`.
+
+Corrigido com TDD em `apps/keeprone-connect/lib/official-export-request.ts`
+(campo `page` removido de `modelFromServerRenderedConfig`), teste novo em
+`official-export-request.test.ts` comparando a forma exata do payload capturado
+ao vivo. Extensão reconstruída, versão `0.1.16`.
+
+Não ficou provado que esse campo extra é a causa dos HTTP 500 medidos em
+produção (abrir o diálogo de download na UI real também disparou 3× 500
+automaticamente, antes de qualquer clique — sugere alguma instabilidade do
+lado do carrier independente do payload), mas é uma divergência de contrato
+real e concreta, e vale corrigir de qualquer forma.
+
+**Medido em produção, mesma sessão:** extensão recarregada (v0.1.16), sync
+disparado via `app.keeprone.com/agent/integrations/national-life` → "Sync
+National Life". Run `cmsxrtar90003pj01c0j9wr4d` retomado, `INFORCE_CLIENTS`
+completou com **10.926 registros recebidos / 10.802 gravados, sem
+truncamento** — contra 0 registros / `PORTAL_REQUEST_FAILED` antes do fix.
+`resolvedAt` da falha antiga ficou marcado. Confirmado: o fix resolve o
+problema. Run terminou `PARTIAL` só pelas 5 rotas `PORTAL_ROUTE_CHANGED`
+(catálogo, item pendente separado) — 21 de 26 fontes ok agora, subindo de
+20/26.
+
+### 15.3 READ_POLICY_DETAIL: o bloqueio de desenho resolvido, a capability não
+
+O bloqueio nomeado no punch list — `isSafeNavigatePath` rejeita qualquer `?`,
+e `policy-details?id=<hex>` precisa de um `?` — está resolvido como uma
+primitiva isolada e testada, **não** como a capability inteira ligada.
+
+Decisão de desenho: `isSafeNavigatePath` continua uma allowlist de catálogo
+fechado (fica rejeitando todo `?`, de propósito — afrouxar isso abriria `?`
+para qualquer rota estática, não só esta). Em vez disso, uma segunda função,
+estreita e separada, cobre só esta página:
+
+- `policyDetailNavigatePath(id)` — monta `policy-details?id=<id>`, lança
+  `UNSAFE_ENTITY_ID` se `id` não for exatamente 32 hex minúsculos (a forma que
+  os links do próprio portal usam, verificada ao vivo).
+- `isSafePolicyDetailPath(path)` — aceita só exatamente essa rota, com só o
+  parâmetro `id`, no formato acima; rejeita rota errada, query extra,
+  fragmento, traversal e scheme smuggling na posição do id.
+
+Implementado nos dois lados da fronteira de confiança de novo como
+quase-duplicata deliberada (mesmo padrão de `isSafeNavigatePath`):
+`lib/national-life/local-connector/capabilities.ts` (servidor) e
+`apps/keeprone-connect/lib/capabilities.ts` (extensão), com 11 casos de teste
+novos em cada lado — todos os 88 arquivos de teste do lado servidor (766
+testes) e os 15 do lado extensão (154 testes) passam, `tsc --noEmit` limpo dos
+dois lados.
+
+**O que falta para a capability existir de verdade, e não foi feito aqui:**
+
+1. `READ_POLICY_DETAIL` já está no protocolo mais amplo
+   (`connector-command-contract.ts`) e no catálogo
+   (`read-coverage.ts:POLICY_DETAIL`, `collector: 'ENTITY_DETAIL'`,
+   `implementation: 'ON_DEMAND'`), com params `{ policyNumber }` — não
+   `navigatePath` cru. Isso significa: a resolução `policyNumber → id hex`
+   precisa acontecer em algum lugar antes de chamar
+   `policyDetailNavigatePath`. O candidato óbvio é o próprio `AGENT_LINK` que
+   `capturePageSnapshot` já captura do grid `INFORCE_CLIENTS`/`CLIENT_DETAIL`
+   (`href` inclui `policy-details?id=`, `Label` é o texto do link) — mas isso
+   ainda não foi verificado como fonte suficiente para todos os 10.924
+   registros do book, nem desenhado como tabela de lookup.
+2. Não existe parser para o conteúdo da página (`Total Face Amount` / IUL vs
+   `Base Face Amount` / Term, `Accumulated Cash Value` na aba `VALUES`, etc. —
+   ver §12). `capturePageSnapshot` capturaria o texto bruto, mas extrair os
+   campos estruturados por produto ainda não foi escrito nem testado.
+3. Não há rota de ingestão nem colunas de destino para os campos de capital
+   segurado — decisão de schema que cabe ao dono do produto, não a esta
+   sessão.
+4. `EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES` continua `['READ_GRID',
+   'READ_PAGE', 'READ_EXPORT']` — `READ_POLICY_DETAIL` não foi adicionado, de
+   propósito: adicionar sem os três itens acima anunciaria uma capability
+   executável que na verdade quebraria no primeiro run.
+
+Ordem sugerida para retomar: (1) verificar se `AGENT_LINK` de
+`INFORCE_CLIENTS`/`CLIENT_DETAIL` cobre o book inteiro como fonte do id; (2)
+escrever o parser de `Coverage Details` + aba `VALUES` com TDD, cobrindo IUL e
+Term; (3) só então ligar `READ_POLICY_DETAIL` em
+`EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES` e no plano do run.

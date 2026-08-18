@@ -47,6 +47,36 @@ describe('official National Life export request', () => {
     expect(body.get('filters[0][Value]')).toBe('Life')
   })
 
+  it('matches the field shape of the carrier\'s own Download button request', () => {
+    // Captured live from the portal's own "Download" button click on All
+    // Clients (2026-08-17): draw, start, length, columns, order,
+    // DatatableId, IsEnableContactFields. No `page` field — the carrier's
+    // own client never sends one, and an extra field here is a contract
+    // drift, not a harmless addition.
+    const body = new URLSearchParams(buildOfficialExportRequest(null, {
+      DatatableId: 'server-grid',
+      PageIndex: 0,
+      PageLength: 10,
+      InitialDrawCount: '1',
+      DefaultSortFieldIndex: 0,
+      DefaultSortDirection: 'asc',
+      IsSortable: true,
+      FieldList: [{ data: 'PolicyNumber', searchable: false, orderable: true }],
+    }, []))
+
+    expect(body.has('page')).toBe(false)
+    expect(body.get('start')).toBe('0')
+    expect(body.get('draw')).toBe('1')
+    expect(body.get('length')).toBe('10')
+    expect([...body.keys()].map((key) => key.replace(/\[\d+\]/g, '[]'))).toEqual(
+      expect.arrayContaining([
+        'draw', 'start', 'length', 'DatatableId', 'IsEnableContactFields',
+        'columns[][data]', 'columns[][name]', 'columns[][searchable]', 'columns[][orderable]',
+        'columns[][search][value]', 'columns[][search][regex]', 'order[][column]', 'order[][dir]',
+      ]),
+    )
+  })
+
   it('rejects when neither the captured request nor the page model exists', () => {
     expect(() => buildOfficialExportRequest(null, null)).toThrow('EXPORT_TEMPLATE_UNAVAILABLE')
   })
