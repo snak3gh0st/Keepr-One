@@ -45,6 +45,33 @@ function isSafeNavigatePath(path: string): boolean {
   return /^[A-Za-z0-9/_-]+$/.test(path)
 }
 
+/// READ_POLICY_DETAIL's target is not a static catalogue entry: the page is fixed but
+/// the portal assigns an opaque id per policy (`policy-details?id=<32-hex>`, captured
+/// live against the portal 2026-08-17). `isSafeNavigatePath` above stays a closed
+/// catalogue check that rejects every `?` on purpose — loosening it to allow query
+/// strings generally would let a compromised plan attach `?` to any static route, not
+/// just this one page. This mirrors `policyDetailNavigatePath` /
+/// `isSafePolicyDetailPath` in `lib/national-life/local-connector/capabilities.ts` on
+/// the server, for the same reason `isSafeNavigatePath` above is duplicated rather than
+/// shared: this is a trust boundary.
+const POLICY_DETAIL_ROUTE = '/agent/book-of-business/inforce-book/all-clients/policy-details'
+const POLICY_DETAIL_ID_PATTERN = /^[0-9a-f]{32}$/
+
+export function policyDetailNavigatePath(id: string): string {
+  if (!POLICY_DETAIL_ID_PATTERN.test(id)) throw new Error('UNSAFE_ENTITY_ID')
+  return `${POLICY_DETAIL_ROUTE}?id=${id}`
+}
+
+export function isSafePolicyDetailPath(path: string): boolean {
+  const [base, ...rest] = path.split('?')
+  if (base !== POLICY_DETAIL_ROUTE || rest.length !== 1) return false
+  const query = rest[0]
+  if (query === undefined) return false
+  const match = /^id=([^&#]*)$/.exec(query)
+  const id = match?.[1]
+  return id !== undefined && POLICY_DETAIL_ID_PATTERN.test(id)
+}
+
 export function parseStagePlan(value: unknown): StagePlan[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_STAGES) {
     throw new Error('INVALID_RUN_RESPONSE')

@@ -179,12 +179,12 @@ export async function startLocalConnectorRun(
   resume?: { sequence: number; offset: number }
 }> {
   const now = input.now ?? new Date()
+  const requestedGridKeys = options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS
   // Planned before any write: an unknown grid key must fail the request rather
   // than leave a RUNNING run behind that no device can ever finish.
-  const stages = planLocalConnectorStages(
-    options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
-    { exportEnabled: options?.exportEnabled },
-  )
+  const stages = planLocalConnectorStages(requestedGridKeys, {
+    exportEnabled: options?.exportEnabled,
+  })
   await failStaleLocalRuns(db, { agentId: input.agentId, deviceId: input.deviceId, now })
 
   const runSelect = {
@@ -241,7 +241,29 @@ export async function startLocalConnectorRun(
         orderBy: { completedAt: 'desc' },
         select: runSelect,
       })
-  const active = running ?? (options?.forceRefresh ? null : failed) ?? completed
+  // Turning on page discovery or the official export widens the plan the server
+  // asks for, and a run that predates the new sources says nothing about them.
+  // Reusing one would report "verified" for a whole freshness window while those
+  // sources had never been opened — the flag would read as inert.
+  //
+  // Only COMPLETED is superseded, and the asymmetry is deliberate:
+  //
+  // - RUNNING keeps its plan. Swapping stages under a device that is already
+  //   navigating is exactly what the plan-authority rule below exists to prevent.
+  // - FAILED/PARTIAL keeps its plan too, because it owns a durable cursor worth
+  //   resuming. It costs at most one cycle: when it finishes on the narrow plan
+  //   it becomes COMPLETED, and the next start supersedes it here.
+  // - COMPLETED has nothing left to resume and no reopen path — `reopening` does
+  //   not include it, and its `nextStageIndex` is the end of the plan — so it can
+  //   only be replaced. Widening it in place would leave a finished run holding
+  //   12 of 26 stages with nothing to hand the device.
+  const missesRequestedSources = (run: { plannedGridKeys?: string[] } | null) => {
+    if (!run) return false
+    const stored = plannedGridKeys({ plannedGridKeys: run.plannedGridKeys ?? [] })
+    return requestedGridKeys.some((gridKey) => !stored.includes(gridKey))
+  }
+  const reusableCompleted = missesRequestedSources(completed) ? null : completed
+  const active = running ?? (options?.forceRefresh ? null : failed) ?? reusableCompleted
   if (active) {
     const storedPlan = plannedGridKeys(active)
     const activePlan = storedPlan.filter((gridKey) => !DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS.has(gridKey))

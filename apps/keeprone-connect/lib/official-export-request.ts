@@ -92,7 +92,6 @@ function modelFromServerRenderedConfig(
   const length = integerValue(config.PageLength, 10)
   const model: JsonObject = {
     draw: integerValue(config.InitialDrawCount, 1),
-    page,
     start: page,
     length,
     columns,

@@ -15,7 +15,10 @@ export const NATIONAL_LIFE_GRIDS = {
   // New business pipeline.
   NEW_BUSINESS: '/agent/book-of-business/new-business/all-new-business-cases',
   RECENTLY_CLOSED: '/agent/book-of-business/new-business/recently-closed-cases',
-  PLACEMENT_REPORT: '/agent/book-of-business/new-business/placement-report',
+  // Redirects to `/agent` — not `/personal` like the inforce reports below. Verified
+  // live 2026-08-17; naming the menu route instead failed the stage as
+  // PORTAL_ROUTE_CHANGED, because the connector waits for the URL it asked for.
+  PLACEMENT_REPORT: '/agent/book-of-business/new-business/placement-report/agent',
   INFORMAL_REQUESTS: '/agent/book-of-business/new-business/informal-request',
   TRANSFER_COMPANY_INFORMATION:
     '/agent/book-of-business/new-business/Transfer-Company-Information',
@@ -30,13 +33,16 @@ export const NATIONAL_LIFE_GRIDS = {
   DAILY_UNIT_VALUES: '/agent/book-of-business/inforce-book/daily-unit-values',
   PIP_CONTRIBUTION_INCREASE:
     '/agent/book-of-business/inforce-book/pip-contribution-increase',
+  // These four follow the same `/personal` redirect as `LIFE_PENDING_LAPSE`, verified
+  // live 2026-08-17. Naming the menu route instead is what failed them as
+  // PORTAL_ROUTE_CHANGED in that day's run.
   ANNUITY_PAST_DUE_CONTRIBUTIONS:
-    '/agent/book-of-business/inforce-book/annuity-flow-report/past-due-contribution',
+    '/agent/book-of-business/inforce-book/annuity-flow-report/past-due-contribution/personal',
   ANNUITY_PAYROLL_FLOW_CHANGES:
-    '/agent/book-of-business/inforce-book/annuity-flow-report/payroll-flow-changes',
-  PREMIUM_REPORT_AGENCY: '/agent/book-of-business/inforce-book/premium-report-agency',
+    '/agent/book-of-business/inforce-book/annuity-flow-report/payroll-flow-changes/personal',
+  PREMIUM_REPORT_AGENCY: '/agent/book-of-business/inforce-book/premium-report-agency/personal',
   LIFE_PENDING_LAPSE: '/agent/book-of-business/inforce-book/life-pending-lapse-report/personal',
-  LIFE_PERSISTENCY: '/agent/book-of-business/inforce-book/life-persistency-report',
+  LIFE_PERSISTENCY: '/agent/book-of-business/inforce-book/life-persistency-report/personal',
   CORRESPONDENCE: '/agent/book-of-business/inforce-book/correspondence',
   PIP_PENDING: '/agent/book-of-business/inforce-book/pip-pending-report',
   // The follow-up log: client email, phone and free-text notes, which no other

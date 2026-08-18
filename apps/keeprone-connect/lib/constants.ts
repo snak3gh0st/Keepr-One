@@ -29,26 +29,58 @@ const LEGACY_LIFE_PENDING_LAPSE_PATH =
 const CANONICAL_LIFE_PENDING_LAPSE_PATH =
   '/agent/book-of-business/inforce-book/life-pending-lapse-report/personal'
 
-export function canonicalNationalLifeNavigatePath(gridKey: string, path: string): string {
-  if (gridKey === 'INFORCE_CLIENTS' && path === LEGACY_INFORCE_CLIENTS_PATH) {
-    return CANONICAL_INFORCE_CLIENTS_PATH
-  }
+/// Menu routes the carrier redirects to a child page the plan did not name. The
+/// stage waits for the URL it asked for, so an unnamed redirect target reads as
+/// PORTAL_ROUTE_CHANGED and the stage fails — which is exactly what happened to five
+/// reports in the 2026-08-17 run. The server catalogue names the final route now;
+/// this table is what keeps a run whose plan was persisted before that deploy working.
+///
+/// Keyed by grid too, not by path alone: the same menu path can front different
+/// reports, and a redirect learned for one grid must not silently retarget another.
+const STAGE_PATH_REDIRECTS = new Map<string, string>([
+  [`INFORCE_CLIENTS ${LEGACY_INFORCE_CLIENTS_PATH}`, CANONICAL_INFORCE_CLIENTS_PATH],
   // "Projected commissions" is a menu route, not a separate grid. Older runs
   // can still contain it, so land them on the payable report instead of
   // bouncing forever between the menu route and the carrier redirect.
-  if (gridKey === 'PROJECTED_COMMISSIONS' && path === LEGACY_PROJECTED_COMMISSIONS_PATH) {
-    return CANONICAL_PAYABLE_GROSS_COMMISSIONS_PATH
-  }
-  if (
-    gridKey === 'PAYABLE_GROSS_COMMISSIONS' &&
-    path === LEGACY_PAYABLE_GROSS_COMMISSIONS_PATH
-  ) {
-    return CANONICAL_PAYABLE_GROSS_COMMISSIONS_PATH
-  }
-  if (gridKey === 'LIFE_PENDING_LAPSE' && path === LEGACY_LIFE_PENDING_LAPSE_PATH) {
-    return CANONICAL_LIFE_PENDING_LAPSE_PATH
-  }
-  return path
+  [
+    `PROJECTED_COMMISSIONS ${LEGACY_PROJECTED_COMMISSIONS_PATH}`,
+    CANONICAL_PAYABLE_GROSS_COMMISSIONS_PATH,
+  ],
+  [
+    `PAYABLE_GROSS_COMMISSIONS ${LEGACY_PAYABLE_GROSS_COMMISSIONS_PATH}`,
+    CANONICAL_PAYABLE_GROSS_COMMISSIONS_PATH,
+  ],
+  [
+    `LIFE_PENDING_LAPSE ${LEGACY_LIFE_PENDING_LAPSE_PATH}`,
+    CANONICAL_LIFE_PENDING_LAPSE_PATH,
+  ],
+  // Verified live against the portal on 2026-08-17. Four land on `/personal` and the
+  // placement report lands on `/agent` — the suffix is an observation per report, not
+  // a convention to extrapolate.
+  [
+    'ANNUITY_PAST_DUE_CONTRIBUTIONS /agent/book-of-business/inforce-book/annuity-flow-report/past-due-contribution',
+    '/agent/book-of-business/inforce-book/annuity-flow-report/past-due-contribution/personal',
+  ],
+  [
+    'ANNUITY_PAYROLL_FLOW_CHANGES /agent/book-of-business/inforce-book/annuity-flow-report/payroll-flow-changes',
+    '/agent/book-of-business/inforce-book/annuity-flow-report/payroll-flow-changes/personal',
+  ],
+  [
+    'PREMIUM_REPORT_AGENCY /agent/book-of-business/inforce-book/premium-report-agency',
+    '/agent/book-of-business/inforce-book/premium-report-agency/personal',
+  ],
+  [
+    'LIFE_PERSISTENCY /agent/book-of-business/inforce-book/life-persistency-report',
+    '/agent/book-of-business/inforce-book/life-persistency-report/personal',
+  ],
+  [
+    'PLACEMENT_REPORT /agent/book-of-business/new-business/placement-report',
+    '/agent/book-of-business/new-business/placement-report/agent',
+  ],
+])
+
+export function canonicalNationalLifeNavigatePath(gridKey: string, path: string): string {
+  return STAGE_PATH_REDIRECTS.get(`${gridKey} ${path}`) ?? path
 }
 
 export function matchesNationalLifeStagePath(

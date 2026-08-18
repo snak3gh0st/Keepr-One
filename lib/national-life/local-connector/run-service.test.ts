@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
   LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
+  LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS,
   LOCAL_CONNECTOR_RUN_TTL_MS,
   completeLocalConnectorStage,
   failLocalConnectorStage,
@@ -11,6 +12,7 @@ import {
   startLocalConnectorRun,
 } from './run-service'
 import { planReadGridStages } from './capabilities'
+import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from '../read-coverage'
 
 const now = new Date('2026-08-04T18:00:00.000Z')
 
@@ -375,8 +377,8 @@ describe('local connector runs', () => {
       .mockResolvedValueOnce({
         id: 'run-complete',
         state: 'COMPLETED',
-        plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
-        completedStages: 2,
+        plannedGridKeys: [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS],
+        completedStages: LOCAL_CONNECTOR_DEFAULT_GRID_KEYS.length,
         currentGridKey: null,
       })
     const create = vi.fn()
@@ -389,12 +391,117 @@ describe('local connector runs', () => {
     ).resolves.toMatchObject({
       runId: 'run-complete',
       duplicate: true,
-      completedStages: 2,
+      completedStages: LOCAL_CONNECTOR_DEFAULT_GRID_KEYS.length,
     })
     expect(create).not.toHaveBeenCalled()
     expect(findFirst).toHaveBeenNthCalledWith(3, expect.objectContaining({
       where: expect.objectContaining({ state: 'COMPLETED' }),
     }))
+  })
+
+  /// Turning on page discovery or the official export widens the plan the server
+  /// asks for. A terminal run that never planned those sources says nothing about
+  /// them, so serving it as a fresh answer would make the new flag look inert for
+  /// a whole freshness window — the sync would report "verified" while 14 sources
+  /// had never been opened. Only terminal runs are superseded; an in-flight one
+  /// still owns its plan, because swapping stages under a navigating device is
+  /// exactly what the plan-authority rule exists to prevent.
+  it('supersedes a verified run whose plan predates the requested sources', async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-complete',
+        state: 'COMPLETED',
+        plannedGridKeys: [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS],
+        completedStages: LOCAL_CONNECTOR_DEFAULT_GRID_KEYS.length,
+        currentGridKey: null,
+      })
+    const create = vi.fn().mockResolvedValue({ id: 'run-wide' })
+    const db = {
+      nationalLifeSyncRun: { create, updateMany: vi.fn().mockResolvedValue({ count: 0 }), findFirst },
+    } as never
+
+    // Both flags on at once is what the rollout actually turns on, and the
+    // superseding path plans from scratch instead of reusing the active run's
+    // stages — so the export stage has to survive that path, not just this one.
+    const run = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS, exportEnabled: true },
+    )
+
+    expect(run).toMatchObject({ runId: 'run-wide', duplicate: false, completedStages: 0 })
+    expect(run.stages.map(planStageKey)).toEqual([...LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS])
+    expect(create).toHaveBeenCalledTimes(1)
+
+    const byKey = new Map(run.stages.map((stage) => [planStageKey(stage), stage.capability]))
+    expect(byKey.get('INFORCE_CLIENTS')).toBe('READ_EXPORT')
+    expect(byKey.get('NEW_BUSINESS')).toBe('READ_GRID')
+    for (const sourceKey of NATIONAL_LIFE_DISCOVERY_PAGE_KEYS) {
+      expect(byKey.get(sourceKey)).toBe('READ_PAGE')
+    }
+  })
+
+  /// A failed run owns a durable cursor, so it keeps its narrower plan and
+  /// resumes rather than being discarded. The widened plan reaches it one cycle
+  /// later, when it completes and the branch above supersedes it.
+  it('resumes a failed run on its own plan even when the request adds sources', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-failed',
+        state: 'FAILED',
+        plannedGridKeys: ['NEW_BUSINESS', 'RECENTLY_CLOSED'],
+        completedStages: 1,
+        currentGridKey: null,
+        stageCompletions: [{ gridKey: 'NEW_BUSINESS' }],
+        stageFailures: [],
+      })
+      .mockResolvedValueOnce(null)
+    const create = vi.fn()
+    const db = {
+      nationalLifeSyncRun: { create, updateMany, findFirst },
+    } as never
+
+    const run = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS },
+    )
+
+    expect(create).not.toHaveBeenCalled()
+    expect(run).toMatchObject({ runId: 'run-failed', duplicate: true, completedStages: 1 })
+    expect(run.stages.map(planStageKey)).toEqual(['NEW_BUSINESS', 'RECENTLY_CLOSED'])
+    expect(run.nextStageIndex).toBe(1)
+  })
+
+  it('never swaps the plan under an in-flight run, even when sources were added', async () => {
+    const create = vi.fn()
+    const db = {
+      nationalLifeSyncRun: {
+        create,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run-live',
+          state: 'RUNNING',
+          plannedGridKeys: [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS],
+          completedStages: 2,
+          currentGridKey: 'INFORCE_CLIENTS',
+        }),
+      },
+    } as never
+
+    const run = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS },
+    )
+
+    expect(run.duplicate).toBe(true)
+    expect(run.stages.map(planStageKey)).toEqual([...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS])
+    expect(create).not.toHaveBeenCalled()
   })
 
   it('accepts a grid beyond the original two', async () => {
