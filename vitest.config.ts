@@ -11,5 +11,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     setupFiles: ['./tests/setup.ts'],
+    // `.worktrees/` holds full checkouts of other branches. Without this, every
+    // run also executed their copies of these tests — inflating the count by
+    // roughly half and failing on code that is not in this branch at all.
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.worktrees/**'],
   },
 })
