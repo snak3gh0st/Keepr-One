@@ -531,7 +531,16 @@ model Policy {
   carrier          String
   product          String
   policyNumber     String         @unique
-  faceAmount       Decimal
+  // Null means "not known yet", not zero. Face amount is absent from all 33
+  // columns of the carrier's official export and exists only on the per-policy
+  // detail page, so it arrives by backfill, long after the row itself. The
+  // previous required column is why the CSV import wrote 0.00 on all 9,614
+  // rows — a wrong number is worse than a missing one.
+  faceAmount       Decimal?
+  // The carrier's own status string, kept beside the mapped enum. PolicyStatus
+  // has no "Pending Lapse", and that is precisely the status worth acting on,
+  // so mapping it to INFORCE alone would erase the signal.
+  sourceStatus     String?
   // The modal premium — what the client actually pays each time — kept with the
   // mode it is paid in. Annualising on write would destroy the distinction the
   // client chose: $250 monthly and $250 annual are different policies.
