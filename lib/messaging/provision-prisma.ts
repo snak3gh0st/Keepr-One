@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client'
 import { createChatwootClient } from './chatwoot-client'
+import { randomChatwootPassword } from './random-password'
 import type { ProvisionDeps } from './provision-agent-inbox'
 
 export function prismaProvisionDeps(
@@ -25,10 +26,6 @@ export function prismaProvisionDeps(
       http: (url, init) => fetch(url, init),
     }),
 
-    // Long and random because nobody types it: the agent reaches the inbox by SSO.
-    randomPassword: () =>
-      [...crypto.getRandomValues(new Uint8Array(18))]
-        .map((byte) => byte.toString(16).padStart(2, '0'))
-        .join(''),
+    randomPassword: randomChatwootPassword,
   }
 }

@@ -35,7 +35,12 @@ export default async function MensagensPage() {
         platformToken: config.platformToken,
         http: (url, init) => fetch(url, init),
       }).createSsoUrl({ userId })
-    } catch {
+    } catch (error) {
+      // Reported, never swallowed. The first version hid a 422 from Chatwoot's
+      // password policy behind this screen, and the only symptom an agent had was
+      // an inbox that was simply empty — the same silence that made a full disk
+      // look like a broken carrier login.
+      console.error('[mensagens] provisioning failed', error)
       failed = true
     }
   }
