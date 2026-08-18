@@ -447,10 +447,14 @@ UTC.
 - `PREMIUM_REPORT_AGENCY`, `LIFE_PERSISTENCY`, `PLACEMENT_REPORT`,
   `ANNUITY_PAST_DUE_CONTRIBUTIONS`, `ANNUITY_PAYROLL_FLOW_CHANGES` →
   `PORTAL_ROUTE_CHANGED`. A extensão navegou até a URL esperada repetidas vezes
-  e a aba nunca chegou lá — o carrier redireciona para outra tela. Confirma a
-  natureza `NEEDS_PROBE` dessas 5: não são rota direta, precisam de
-  filtro/formulário antes de existir como página própria. Não é bug da
+  e a aba nunca chegou lá — o carrier redireciona para outra tela. Não é bug da
   extensão; é o catálogo assumindo rota que o portal não oferece assim.
+
+  > **Correção (§15.4, mesma sessão):** a leitura original deste parágrafo —
+  > "confirma a natureza `NEEDS_PROBE` dessas 5: precisam de filtro/formulário
+  > antes de existir como página própria" — **estava errada**. As 5 são rota
+  > direta sim; o catálogo só apontava para a rota-menu em vez do filho para
+  > onde ela redireciona. Diagnóstico e correção em §15.4.
 
 ## 12. Capital segurado — resolvido ao vivo, mesma sessão
 
@@ -621,3 +625,57 @@ Ordem sugerida para retomar: (1) verificar se `AGENT_LINK` de
 escrever o parser de `Coverage Details` + aba `VALUES` com TDD, cobrindo IUL e
 Term; (3) só então ligar `READ_POLICY_DETAIL` em
 `EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES` e no plano do run.
+
+### 15.4 As 5 `PORTAL_ROUTE_CHANGED`: rota-menu vs rota final, corrigido
+
+Verifiquei as 5 ao vivo, uma a uma, no portal autenticado. Nenhuma precisa de
+filtro ou formulário: **todas são rota direta, e todas redirecionam da rota-menu
+para um filho que o catálogo não nomeava.** O conector espera exatamente a URL
+que pediu, então o redirect não-nomeado lê como `PORTAL_ROUTE_CHANGED` e derruba
+o estágio — mesmo com a página carregando perfeitamente.
+
+| Chave | Catálogo (antes) | Real, medido ao vivo |
+| --- | --- | --- |
+| `ANNUITY_PAST_DUE_CONTRIBUTIONS` | `.../annuity-flow-report/past-due-contribution` | `.../past-due-contribution/personal` |
+| `ANNUITY_PAYROLL_FLOW_CHANGES` | `.../annuity-flow-report/payroll-flow-changes` | `.../payroll-flow-changes/personal` |
+| `PREMIUM_REPORT_AGENCY` | `.../inforce-book/premium-report-agency` | `.../premium-report-agency/personal` |
+| `LIFE_PERSISTENCY` | `.../inforce-book/life-persistency-report` | `.../life-persistency-report/personal` |
+| `PLACEMENT_REPORT` | `.../new-business/placement-report` | `.../placement-report/**agent**` |
+
+**O detalhe que não se pode extrapolar:** 4 caem em `/personal`, mas
+`PLACEMENT_REPORT` cai em `/agent`. Ler `/personal` como convenção em vez de
+como observação por relatório teria deixado essa quinta falhando exatamente
+igual. O teste cobre as 5 explicitamente, e comenta o porquê.
+
+É o mesmo padrão que o repo já tratava para `LIFE_PENDING_LAPSE`,
+`PAYABLE_GROSS_COMMISSIONS`, `PENDING_GROSS_COMMISSIONS` e `INFORCE_CLIENTS` —
+essas 5 simplesmente nunca tinham sido medidas.
+
+Correção em dois lugares, como o padrão existente exige:
+
+1. **Catálogo do servidor** (`lib/national-life/portal-grid-client.ts`) passa a
+   nomear a rota final. Runs novos já nascem certos.
+2. **Alias na extensão** (`apps/keeprone-connect/lib/constants.ts`) cobre um run
+   cujo plano foi persistido antes do deploy. Aproveitei para trocar a pilha de
+   `if`s por uma tabela `STAGE_PATH_REDIRECTS` — ia virar o 9º `if` idêntico, e
+   agora um redirect novo é uma linha. A tabela é chaveada por *grid + path*,
+   não por path só: a mesma rota-menu pode servir relatórios diferentes, e um
+   redirect aprendido para um grid não pode redirecionar outro em silêncio.
+
+Testes: 5 casos parametrizados na extensão (ida, volta e idempotência do path já
+canônico) mais 2 negativos garantindo que um relatório não aceita a página do
+outro; 1 caso no servidor fixando as 5 rotas finais. Extensão `0.1.17`.
+
+**Conteúdo real por trás de cada rota, agora que dá para chegar nelas:**
+`PREMIUM_REPORT_AGENCY` tem $48.924,01 em prêmio total YTD e 21,70 apólices
+novas; `LIFE_PERSISTENCY` tem $153.037,86 emitido / $133.353,28 in-force e 87%
+de persistência; `ANNUITY_PAST_DUE_CONTRIBUTIONS` está legitimamente vazia
+("You have no records at this time"). `PLACEMENT_REPORT` carrega mas o próprio
+carrier informa que o relatório está fora do ar ("The Life Placement Report is
+currently unavailable") — a rota está certa, o dado é que não existe no momento;
+o `READ_PAGE` vai capturar esse estado em vez de falhar, que é o comportamento
+correto.
+
+**Ainda não medido:** falta um run de ponta a ponta com a `0.1.17` carregada e o
+servidor deployado para confirmar 26/26. O fix do §15.2 (`INFORCE_CLIENTS`) já
+foi confirmado ao vivo; este ainda não.
