@@ -140,3 +140,55 @@ melhor descobrir agora do que quando o primeiro agente reclamar de lentidão.
 - painel de contexto resolve cliente por telefone e cai para nome sem quebrar
 - painel não vaza apólice de outro agente quando o telefone bate por acaso
 - queda de sessão do QR aparece como estado explícito, não como silêncio
+
+---
+
+## 8. Multicanal: e-mail, Instagram e os outros
+
+Verificado no código-fonte do Chatwoot (`app/models/channel/`), não em
+documentação: **12 tipos de canal nativos.**
+
+`whatsapp` · `email` · `instagram` · `facebook_page` · `telegram` · `sms` ·
+`twilio_sms` · `line` · `tiktok` · `twitter_profile` · `web_widget` · `api`
+
+Para o agente que usa Gmail, o caso é o melhor possível: `channel_email` tem
+campo `provider` com valores `google` e `microsoft`, e o repositório traz
+serviços de renovação de token OAuth (`app/services/google/`,
+`app/services/microsoft/`, `base_refresh_oauth_token_service.rb`). É **"Entrar
+com Google" nativo**, com refresh — não senha de aplicativo. Outlook idem, e
+IMAP/SMTP genérico para o resto.
+
+**Isto é a decisão D2 se pagando.** Canal novo é configuração, não código: todos
+chegam como a mesma conversa, na mesma UI, com o mesmo painel de contexto ao
+lado. Com interface própria, cada canal seria um projeto.
+
+### D5 — E-mail entra por encaminhamento, não por inbox inteira
+
+`channel_email` tem dois modos, e a diferença é de privacidade, não de esforço:
+
+- **OAuth/IMAP**: o Chatwoot puxa a caixa do agente inteira. Completo, e traz
+  junto o e-mail pessoal dele — banco, família, tudo. Para um agente de seguro
+  de vida isso é sensível, e passa a viver na nossa infra.
+- **Encaminhamento**: o Chatwoot provisiona um endereço (`forward_to_email`, que
+  é `not null`, sempre existe) e o agente cria um filtro no Gmail mandando para
+  lá o que for de cliente.
+
+O padrão é **encaminhamento**, e o OAuth fica como opção para quem pedir
+explicitamente. O agente que usa um e-mail só de trabalho vai querer OAuth; o
+que usa o pessoal, não — e ele não vai perceber a diferença sozinho. O default
+tem que ser o que não invade.
+
+### D6 — Resolver o cliente por telefone **ou** e-mail
+
+O §3 dizia "telefone, caindo para nome". Com multicanal isso fica errado: o mesmo
+cliente chega por WhatsApp com telefone e por e-mail com endereço, e vira dois
+contatos no Chatwoot.
+
+A regra passa a ser: **telefone normalizado ou e-mail**, e só então nome. Isso
+melhora a cobertura em vez de piorar — os **840** registros com e-mail e os
+**838** com telefone se somam em vez de competir, e o Chatwoot ainda oferece
+merge de contato quando os dois se confirmarem a mesma pessoa.
+
+O teste do §7 que verifica "não vaza apólice de outro agente quando o telefone
+bate por acaso" vale igual para e-mail, e ganha um caso: dois contatos distintos
+que resolvem para o mesmo `Client`.
