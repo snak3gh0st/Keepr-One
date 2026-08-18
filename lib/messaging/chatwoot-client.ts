@@ -15,7 +15,7 @@ export type ChatwootResponse = {
 export type ChatwootHttp = (url: string, init: RequestInit) => Promise<ChatwootResponse>
 
 export type ChatwootClient = {
-  createAccount: (input: { name: string }) => Promise<{ id: string }>
+  createAccount: (input: { name: string; locale: string }) => Promise<{ id: string }>
   createUser: (input: {
     name: string
     email: string
@@ -23,7 +23,30 @@ export type ChatwootClient = {
   }) => Promise<{ id: string; accessToken: string }>
   linkUserToAccount: (input: { accountId: string; userId: string }) => Promise<void>
   createSsoUrl: (input: { userId: string }) => Promise<string>
+  simplifyAccount: (input: { accountId: string }) => Promise<void>
 }
+
+/// A solo insurance agent connects a channel and talks to clients. Everything
+/// below is built for a support team — assignment queues, bots, analytics, a
+/// knowledge base, Chatwoot's own support inbox — and each one is a sidebar entry
+/// or a settings page the agent has to read past to find what they came for.
+const FEATURES_A_SOLO_AGENT_NEVER_USES = [
+  'agent_bots',
+  'agent_management',
+  'team_management',
+  'api_and_webhooks',
+  'assignment_v2',
+  'automations',
+  'campaigns',
+  'captain_tasks',
+  'help_center',
+  'reports',
+  'macros',
+  'integrations',
+  'contact_chatwoot_support_team',
+  'channel_tiktok',
+  'custom_attributes',
+]
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
@@ -48,10 +71,12 @@ export function createChatwootClient(config: {
   }
 
   return {
-    createAccount: async ({ name }) => {
+    createAccount: async ({ name, locale }) => {
       const body = await call('/platform/api/v1/accounts', {
         method: 'POST',
-        body: JSON.stringify({ name }),
+        // Chatwoot defaults an account to English. The agent reads Portuguese, and
+        // an inbox that greets them in another language is not theirs.
+        body: JSON.stringify({ name, locale }),
       })
       return { id: String(body.id) }
     },
@@ -68,6 +93,13 @@ export function createChatwootClient(config: {
       await call(`/platform/api/v1/accounts/${accountId}/account_users`, {
         method: 'POST',
         body: JSON.stringify({ user_id: userId, role: 'administrator' }),
+      })
+    },
+
+    simplifyAccount: async ({ accountId }) => {
+      await call(`/platform/api/v1/accounts/${accountId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ disabled_features: FEATURES_A_SOLO_AGENT_NEVER_USES }),
       })
     },
 

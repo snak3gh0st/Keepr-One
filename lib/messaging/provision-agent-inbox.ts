@@ -42,8 +42,12 @@ export async function provisionAgentInbox(
     // exists only because Chatwoot requires one.
     password: deps.randomPassword(),
   })
-  const account = await deps.chatwoot.createAccount({ name: input.agentName })
+  const account = await deps.chatwoot.createAccount({ name: input.agentName, locale: 'pt_BR' })
   await deps.chatwoot.linkUserToAccount({ accountId: account.id, userId: user.id })
+  // Best effort: an agent with a slightly busier sidebar still has a working
+  // inbox, and failing the whole connection over cosmetics would be worse than
+  // the clutter.
+  await deps.chatwoot.simplifyAccount({ accountId: account.id }).catch(() => {})
 
   await deps.saveAccount({
     agentId: input.agentId,

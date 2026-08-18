@@ -24,18 +24,19 @@ describe('createChatwootClient', () => {
     const { http, calls } = recorder([{ id: 7, name: 'Felipe' }])
     const client = createChatwootClient(config(http))
 
-    const account = await client.createAccount({ name: 'Felipe' })
+    const account = await client.createAccount({ name: 'Felipe', locale: 'pt_BR' })
 
     expect(account).toEqual({ id: '7' })
     expect(calls[0]?.url).toBe('https://chat.example.com/platform/api/v1/accounts')
     expect(calls[0]?.init.method).toBe('POST')
+    expect(JSON.parse(String(calls[0]?.init.body)).locale).toBe('pt_BR')
   })
 
   it('authenticates with the platform token header on every call', async () => {
     const { http, calls } = recorder([{ id: 7 }])
     const client = createChatwootClient(config(http))
 
-    await client.createAccount({ name: 'Felipe' })
+    await client.createAccount({ name: 'Felipe', locale: 'pt_BR' })
 
     const headers = calls[0]?.init.headers as Record<string, string>
     expect(headers.api_access_token).toBe('secret-token')
@@ -74,6 +75,6 @@ describe('createChatwootClient', () => {
     const http: ChatwootHttp = async () => ({ ok: false, status: 422, json: async () => ({ message: 'taken' }) })
     const client = createChatwootClient(config(http))
 
-    await expect(client.createAccount({ name: 'Felipe' })).rejects.toThrow('CHATWOOT_REQUEST_FAILED')
+    await expect(client.createAccount({ name: 'Felipe', locale: 'pt_BR' })).rejects.toThrow('CHATWOOT_REQUEST_FAILED')
   })
 })

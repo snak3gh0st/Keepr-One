@@ -13,6 +13,7 @@ function harness(existing: { externalAccountId: string; externalUserId: string }
       createUser: vi.fn(async () => ({ id: '12', accessToken: 'tok' })),
       linkUserToAccount: vi.fn(async () => {}),
       createSsoUrl: vi.fn(async () => 'https://chat.example.com/app/login?sso_auth_token=abc'),
+      simplifyAccount: vi.fn(async () => {}),
     },
     randomPassword: () => 'p'.repeat(24),
   }

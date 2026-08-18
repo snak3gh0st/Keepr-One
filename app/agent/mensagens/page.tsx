@@ -47,19 +47,21 @@ export default async function MensagensPage() {
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
-      <PageHeader
-        title="Mensagens"
-        eyebrow="Conversa com seus clientes"
-        description="Fale com quem já está na sua carteira, sem sair do Keepr One."
-      />
       {inboxUrl ? (
         <InboxFrame src={inboxUrl} />
       ) : (
+        <>
+        <PageHeader
+          title="Mensagens"
+          eyebrow="Conversa com seus clientes"
+          description="Fale com quem já está na sua carteira, sem sair do Keepr One."
+        />
         <EmptyState>
           {failed
             ? 'Não foi possível abrir suas mensagens agora. Tente de novo em alguns instantes — nada do que você enviou foi perdido.'
             : 'Assim que a conversa com clientes for liberada para a sua conta, ela aparece aqui.'}
         </EmptyState>
+        </>
       )}
     </Shell>
   )

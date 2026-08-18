@@ -10,11 +10,18 @@
 /// longer list than it removes.
 export function InboxFrame({ src }: { src: string }) {
   return (
-    <div className="module-panel" style={{ padding: 0, overflow: 'hidden' }}>
+    // No panel, no border, no rounded corner: the inbox *is* the page here. A
+    // framed box around it is what made it read as another product bolted on, and
+    // the hero above it was taking a fifth of the screen from the one thing the
+    // agent came to do.
+    // Viewport height rather than `inset: 0`: the shell's main region is not a
+    // positioned ancestor, so absolute would have escaped it and covered the
+    // sidebar. The small subtraction is the shell's own top bar.
+    <div style={{ height: 'calc(100vh - 4.5rem)', overflow: 'hidden' }}>
       <iframe
         src={src}
         title="Mensagens"
-        style={{ width: '100%', height: 'calc(100vh - 260px)', minHeight: 520, border: 0, display: 'block' }}
+        style={{ width: '100%', height: '100%', border: 0, display: 'block' }}
         allow="clipboard-write; microphone; camera"
       />
     </div>
