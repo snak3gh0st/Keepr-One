@@ -192,3 +192,60 @@ merge de contato quando os dois se confirmarem a mesma pessoa.
 O teste do §7 que verifica "não vaza apólice de outro agente quando o telefone
 bate por acaso" vale igual para e-mail, e ganha um caso: dois contatos distintos
 que resolvem para o mesmo `Client`.
+
+---
+
+## 9. D7 — Embutido no Keepr One, sem segunda URL
+
+O agente abre **Mensagens** dentro do Keepr One e conversa ali. Não digita, não vê
+e não é redirecionado para outro endereço. O subdomínio (`chat.keeprone.com`)
+continua existindo como `src` do iframe e alvo do certificado, invisível do mesmo
+jeito que a URL de um CDN.
+
+### O que quebraria isso, e por que não quebra
+
+Embutir aplicação de terceiro em iframe costuma morrer por **cookie de terceiro**:
+o navegador bloqueia, a sessão não cola, e falha em silêncio — a mesma classe de
+erro que fez o login do carrier parecer quebrado em 2026-08-17.
+
+Não se aplica aqui. O `config/initializers/session_store.rb` do Chatwoot diz, no
+próprio comentário:
+
+> *"Sessions are used only for the super_admin dashboard (flash/CSRF), not for API
+> auth."*
+
+O dashboard do agente autentica por **token**, não por cookie de sessão. Política
+de cookie de terceiro não o afeta.
+
+### O bloqueio real: `X-Frame-Options`
+
+Chatwoot só remove esse header no widget (`widgets_controller.rb:81`) e no portal
+público. No dashboard vale o padrão do Rails, `SAMEORIGIN`, e como
+`app.keeprone.com` e `chat.keeprone.com` são origens distintas, o iframe seria
+recusado.
+
+**Resolve-se no proxy, não no Chatwoot.** Um middleware do Traefik remove
+`X-Frame-Options` e devolve no lugar:
+
+```
+Content-Security-Policy: frame-ancestors https://app.keeprone.com
+```
+
+Duas razões para preferir isso a simplesmente apagar o header:
+
+1. `frame-ancestors` autoriza **só** o Keepr One a embutir, em vez de liberar
+   para qualquer site — é mais restrito que o padrão que está sendo substituído.
+2. Não toca no código do Chatwoot, o que mantém a obrigação AGPL do §5.4 fora do
+   caminho.
+
+### Efeito colateral bom
+
+O navegador particiona armazenamento de iframe por site de topo, então a sessão do
+Chatwoot fica presa ao contexto do Keepr One. Isolamento adicional sem trabalho.
+
+### O que isso não resolve
+
+Servir o Chatwoot sob um caminho do próprio domínio (`app.keeprone.com/chat`)
+seria mesma origem e dispensaria o iframe, mas o Chatwoot não suporta subpath
+oficialmente, e proxiar uma SPA Rails com ActionCable por baixo do Next.js é
+frágil demais para o ganho. Iframe em subdomínio do mesmo site é o desenho.
