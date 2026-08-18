@@ -14,9 +14,9 @@ export function prismaProvisionDeps(
         select: { externalAccountId: true, externalUserId: true },
       }),
 
-    saveAccount: async ({ agentId, externalAccountId, externalUserId }) => {
+    saveAccount: async ({ agentId, externalAccountId, externalUserId, externalUserToken }) => {
       await prisma.agentMessagingAccount.create({
-        data: { agentId, externalAccountId, externalUserId },
+        data: { agentId, externalAccountId, externalUserId, externalUserToken },
       })
     },
 

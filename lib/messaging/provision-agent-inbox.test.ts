@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { provisionAgentInbox, type ProvisionDeps } from './provision-agent-inbox'
 
 function harness(existing: { externalAccountId: string; externalUserId: string } | null) {
-  const saved: { agentId: string; externalAccountId: string; externalUserId: string }[] = []
+  const saved: {
+    agentId: string
+    externalAccountId: string
+    externalUserId: string
+    externalUserToken: string
+  }[] = []
   const deps: ProvisionDeps = {
     findAccount: async () => existing,
     saveAccount: async (row) => {
@@ -29,7 +34,9 @@ describe('provisionAgentInbox', () => {
 
     expect(result).toEqual({ accountId: '7', userId: '12', created: true })
     expect(h.deps.chatwoot.linkUserToAccount).toHaveBeenCalledWith({ accountId: '7', userId: '12' })
-    expect(h.saved).toEqual([{ agentId: 'a1', externalAccountId: '7', externalUserId: '12' }])
+    expect(h.saved).toEqual([
+      { agentId: 'a1', externalAccountId: '7', externalUserId: '12', externalUserToken: 'tok' },
+    ])
   })
 
   it('is idempotent: reconnecting reuses the account instead of creating a second', async () => {

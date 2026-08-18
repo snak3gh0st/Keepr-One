@@ -22,14 +22,17 @@ export async function POST() {
 
     const link = await prisma.agentMessagingAccount.findUnique({
       where: { agentId: agent.id },
-      select: { externalAccountId: true },
+      select: { externalAccountId: true, externalUserToken: true },
     })
-    if (link) {
+    // A row without a token predates it being saved. Linking with an empty
+    // token fails Chatwoot auth silently and the agent never finds out why
+    // their WhatsApp never shows up in the inbox.
+    if (link?.externalUserToken) {
       await client
         .linkToInbox({
           agentId: agent.id,
           chatwootAccountId: link.externalAccountId,
-          chatwootUserToken: process.env.CHATWOOT_AGENT_TOKEN ?? '',
+          chatwootUserToken: link.externalUserToken,
           chatwootUrl: process.env.CHATWOOT_BASE_URL ?? '',
         })
         .catch(() => {})

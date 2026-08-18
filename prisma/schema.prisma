@@ -630,6 +630,7 @@ model AgentMessagingAccount {
   provider          String   @default("CHATWOOT")
   externalAccountId String
   externalUserId    String
+  externalUserToken String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

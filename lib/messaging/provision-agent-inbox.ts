@@ -8,6 +8,7 @@ export type ProvisionDeps = {
     agentId: string
     externalAccountId: string
     externalUserId: string
+    externalUserToken: string
   }) => Promise<void>
   chatwoot: ChatwootClient
   randomPassword: () => string
@@ -53,6 +54,7 @@ export async function provisionAgentInbox(
     agentId: input.agentId,
     externalAccountId: account.id,
     externalUserId: user.id,
+    externalUserToken: user.accessToken,
   })
 
   return { accountId: account.id, userId: user.id, created: true }
