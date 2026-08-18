@@ -31,7 +31,10 @@ export async function provisionAgentInbox(
     }
   }
 
-  const account = await deps.chatwoot.createAccount({ name: input.agentName })
+  // The user first, deliberately. It is the call Chatwoot validates — a password
+  // policy lives behind it — while creating an account almost never fails. Doing
+  // it the other way round meant every refused user left an orphan account, and
+  // nine accumulated in production from one afternoon of retries.
   const user = await deps.chatwoot.createUser({
     name: input.agentName,
     email: input.agentEmail,
@@ -39,6 +42,7 @@ export async function provisionAgentInbox(
     // exists only because Chatwoot requires one.
     password: deps.randomPassword(),
   })
+  const account = await deps.chatwoot.createAccount({ name: input.agentName })
   await deps.chatwoot.linkUserToAccount({ accountId: account.id, userId: user.id })
 
   await deps.saveAccount({

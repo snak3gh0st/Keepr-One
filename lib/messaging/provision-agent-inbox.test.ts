@@ -51,6 +51,26 @@ describe('provisionAgentInbox', () => {
     expect(call?.email).toBe('felipe@keeprone.com')
   })
 
+  it('creates the user before the account, so a refused user leaks nothing', async () => {
+    // The user is the call with validation behind it — Chatwoot enforces a
+    // password policy there. Creating the account first meant every refusal left
+    // an orphan account behind, and nine of them accumulated in production from a
+    // single afternoon of retries.
+    const h = harness(null)
+    const order: string[] = []
+    h.deps.chatwoot.createAccount = vi.fn(async () => {
+      order.push('account')
+      return { id: '7' }
+    })
+    h.deps.chatwoot.createUser = vi.fn(async () => {
+      order.push('user')
+      throw new Error('422')
+    })
+
+    await expect(provisionAgentInbox(h.deps, input)).rejects.toThrow('422')
+    expect(order).toEqual(['user'])
+  })
+
   it('does not persist a half-provisioned agent when linking fails', async () => {
     // A saved row with no working link would make every later connect think the
     // agent is already set up, and they would never reach an inbox.
