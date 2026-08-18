@@ -505,12 +505,12 @@ describe('chatwootConfigFromEnv', () => {
   })
 
   it('drops a trailing slash so paths do not double up', () => {
-    expect(
-      chatwootConfigFromEnv({
-        CHATWOOT_BASE_URL: 'https://chat.keeprone.com/',
-        CHATWOOT_PLATFORM_TOKEN: 'tok',
-      } as NodeJS.ProcessEnv),
-    )?.baseUrl === 'https://chat.keeprone.com'
+    const config = chatwootConfigFromEnv({
+      CHATWOOT_BASE_URL: 'https://chat.keeprone.com/',
+      CHATWOOT_PLATFORM_TOKEN: 'tok',
+    } as NodeJS.ProcessEnv)
+
+    expect(config?.baseUrl).toBe('https://chat.keeprone.com')
   })
 })
 ```
