@@ -8,6 +8,9 @@ import { prismaProvisionDeps } from '@/lib/messaging/provision-prisma'
 import { provisionAgentInbox } from '@/lib/messaging/provision-agent-inbox'
 import { createChatwootClient } from '@/lib/messaging/chatwoot-client'
 import { InboxFrame } from './InboxFrame'
+import { ConnectWhatsapp } from './ConnectWhatsapp'
+import { whatsappConfigFromEnv } from '@/lib/messaging/whatsapp-config'
+import { createWhatsappClient } from '@/lib/messaging/whatsapp-client'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,6 +23,9 @@ export default async function MensagensPage() {
   // messaging shows the screen explaining that, never a broken frame.
   let inboxUrl: string | null = null
   let failed = false
+  // The inbox is only worth showing once a channel reaches it. Before that the page
+  // is the connect screen, not an empty Chatwoot asking the agent to configure it.
+  let whatsappConnected = false
 
   if (config) {
     try {
@@ -35,6 +41,13 @@ export default async function MensagensPage() {
         platformToken: config.platformToken,
         http: (url, init) => fetch(url, init),
       }).createSsoUrl({ userId })
+      const whatsapp = whatsappConfigFromEnv(process.env)
+      if (whatsapp) {
+        whatsappConnected =
+          (await createWhatsappClient({ ...whatsapp, http: (url, init) => fetch(url, init) })
+            .connectionState({ agentId: agent.id })
+            .catch(() => 'close')) === 'open'
+      }
     } catch (error) {
       // Reported, never swallowed. The first version hid a 422 from Chatwoot's
       // password policy behind this screen, and the only symptom an agent had was
@@ -47,8 +60,17 @@ export default async function MensagensPage() {
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
-      {inboxUrl ? (
+      {inboxUrl && whatsappConnected ? (
         <InboxFrame src={inboxUrl} />
+      ) : inboxUrl ? (
+        <>
+          <PageHeader
+            title="Mensagens"
+            eyebrow="Conversa com seus clientes"
+            description="Fale com quem já está na sua carteira, sem sair do Keepr One."
+          />
+          <ConnectWhatsapp />
+        </>
       ) : (
         <>
         <PageHeader
