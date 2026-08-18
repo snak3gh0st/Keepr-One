@@ -222,3 +222,39 @@ TDD, com os casos vindos dos dados reais medidos:
 O maior é D6. Fundir dois clientes distintos é irreversível e o agente vê. O
 desenho erra deliberadamente para o lado de duplicar, e a lista `baixaConfianca[]`
 existe para que a duplicação seja visível e corrigível em vez de silenciosa.
+
+---
+
+## 8. Adendo (mesma sessão): o backfill é maior do que D2 assumiu
+
+D2 dimensionou o backfill em 9.834 buscas de página. Está errado, e a etapa que
+falta é obrigatória.
+
+A URL do detalhe é `policy-details?id=<32-hex>`, e **o id não é o número da
+apólice**. Medido no que já temos guardado:
+
+- O grid e o export devolvem valor puro na célula — `1464801X`, sem HTML e sem
+  link. O id não viaja no payload da API.
+- Os snapshots de `READ_PAGE` capturaram **5** links `policy-details` no total,
+  contra 9.834 apólices. O id só aparece no HTML renderizado da tela All
+  Clients, dez linhas por vez.
+
+Então o backfill tem duas etapas, não uma:
+
+| etapa | custo |
+| --- | --- |
+| colher os ids paginando a tela renderizada | ~983 carregamentos a 10 linhas/página |
+| buscar o capital segurado | 9.834 páginas de detalhe |
+
+~10.800 carregamentos contra uma sessão de ~20 minutos. O seletor "Show N rows
+per page" pode derrubar bastante a primeira etapa, mas isso não foi medido.
+
+**Antes de construir qualquer coisa disso, checar o "Column Selection dropdown"
+da tela All Clients.** A configuração do datatable expõe
+`IsEnableAddRemoveColumn`, o que sugere colunas ligáveis além das 33 default. Se
+capital segurado estiver na lista, as duas etapas acima deixam de existir e o
+dado vem na requisição que já fazemos. São dois minutos de sessão viva contra
+dias de trabalho — a ordem certa é checar primeiro.
+
+Nada disso invalida D1: `faceAmount` nullable continua certo justamente porque o
+preenchimento é caro e demorado, qualquer que seja o caminho.
