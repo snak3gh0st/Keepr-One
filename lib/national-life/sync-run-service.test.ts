@@ -81,34 +81,72 @@ describe('summarizeStageReceipts', () => {
     expect(summarizeStageReceipts([])).toEqual({
       receivedRecords: null,
       writtenRecords: null,
+      duplicateRecords: null,
+      rejectedRecords: null,
     })
   })
 
   it('exposes received-but-not-written instead of hiding it behind a success', () => {
     expect(
       summarizeStageReceipts([
-        { recordCount: 200, writtenCount: 0 },
-        { recordCount: 0, writtenCount: 0 },
+        { recordCount: 200, writtenCount: 0, duplicateCount: 0, rejectedCount: 200 },
+        { recordCount: 0, writtenCount: 0, duplicateCount: 0, rejectedCount: 0 },
       ]),
-    ).toEqual({ receivedRecords: 200, writtenRecords: 0 })
+    ).toEqual({
+      receivedRecords: 200,
+      writtenRecords: 0,
+      duplicateRecords: 0,
+      rejectedRecords: 200,
+    })
   })
 
   it('adds up what was received and what survived normalization', () => {
     expect(
       summarizeStageReceipts([
-        { recordCount: 120, writtenCount: 118 },
-        { recordCount: 80, writtenCount: 80 },
+        { recordCount: 120, writtenCount: 118, duplicateCount: 2, rejectedCount: 0 },
+        { recordCount: 80, writtenCount: 80, duplicateCount: 0, rejectedCount: 0 },
       ]),
-    ).toEqual({ receivedRecords: 200, writtenRecords: 198 })
+    ).toEqual({
+      receivedRecords: 200,
+      writtenRecords: 198,
+      duplicateRecords: 2,
+      rejectedRecords: 0,
+    })
   })
+
+  /// "988 received, 823 saved" is unreadable without knowing which half is
+  /// which: a row collapsed as a duplicate is benign — new business repeats a
+  /// policy per coverage — while a row dropped for having no policy number is
+  /// real loss. Both are already counted per receipt and neither reached the
+  /// screen, so the agent saw a 165-row gap with no way to tell harm from
+  /// housekeeping.
+  it('separates rows collapsed as duplicates from rows dropped outright', () => {
+    expect(
+      summarizeStageReceipts([
+        { recordCount: 870, writtenCount: 720, duplicateCount: 140, rejectedCount: 10 },
+        { recordCount: 118, writtenCount: 103, duplicateCount: 15, rejectedCount: 0 },
+      ]),
+    ).toMatchObject({
+      receivedRecords: 988,
+      writtenRecords: 823,
+      duplicateRecords: 155,
+      rejectedRecords: 10,
+    })
+  })
+
 
   it('keeps written unknown when every receipt predates the column', () => {
     expect(
       summarizeStageReceipts([
-        { recordCount: 10, writtenCount: null },
-        { recordCount: 5, writtenCount: null },
+        { recordCount: 10, writtenCount: null, duplicateCount: 0, rejectedCount: 0 },
+        { recordCount: 5, writtenCount: null, duplicateCount: 0, rejectedCount: 0 },
       ]),
-    ).toEqual({ receivedRecords: 15, writtenRecords: null })
+    ).toEqual({
+      receivedRecords: 15,
+      writtenRecords: null,
+      duplicateRecords: 0,
+      rejectedRecords: 0,
+    })
   })
 })
 

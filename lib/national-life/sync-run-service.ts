@@ -41,6 +41,12 @@ export type NationalLifeSyncStatus = {
   /// escrevi 0.
   receivedRecords: number | null
   writtenRecords: number | null
+  /// Why received and written disagree, split by what the difference means. A
+  /// duplicate is the source listing one policy once per coverage, merged at no
+  /// cost; a rejected row had no policy number to key on and is gone. Reporting
+  /// only the gap would leave the agent unable to tell the two apart.
+  duplicateRecords: number | null
+  rejectedRecords: number | null
   /// The per-area truth behind the headline counter. A local run only becomes
   /// VERIFIED after the connector reconciles all its pages with recordsTotal.
   stageCoverage?: NationalLifeStageCoverage[]
@@ -129,16 +135,37 @@ export function localStageCoverage(input: {
 export type StageReceiptTotals = {
   receivedRecords: number | null
   writtenRecords: number | null
+  duplicateRecords: number | null
+  rejectedRecords: number | null
 }
 
 /// `writtenCount` é opcional no schema: recibos anteriores à coluna são nulos.
 /// Somá-los como zero transformaria "não sei" em "não escrevi nada", que é a
 /// mentira oposta à que a coluna existe para evitar.
+/// The gap between received and written has two causes that mean opposite
+/// things, and reporting only the gap forces the reader to guess which. A
+/// duplicate is a row the source repeated — new business lists a policy once per
+/// coverage — and collapsing it costs nothing. A rejected row had no policy
+/// number to key on and is simply gone. Both are counted per receipt already;
+/// summing them here is what carries that distinction to the screen.
+///
+/// Unlike `writtenCount`, both columns are non-null with a zero default, so a
+/// sum of zero means zero rather than "no receipt knew".
 export function summarizeStageReceipts(
-  receipts: ReadonlyArray<{ recordCount: number; writtenCount: number | null }>,
+  receipts: ReadonlyArray<{
+    recordCount: number
+    writtenCount: number | null
+    duplicateCount: number
+    rejectedCount: number
+  }>,
 ): StageReceiptTotals {
   if (receipts.length === 0) {
-    return { receivedRecords: null, writtenRecords: null }
+    return {
+      receivedRecords: null,
+      writtenRecords: null,
+      duplicateRecords: null,
+      rejectedRecords: null,
+    }
   }
   const known = receipts.filter((receipt) => typeof receipt.writtenCount === 'number')
   return {
@@ -147,6 +174,8 @@ export function summarizeStageReceipts(
       known.length === 0
         ? null
         : known.reduce((total, receipt) => total + (receipt.writtenCount ?? 0), 0),
+    duplicateRecords: receipts.reduce((total, receipt) => total + receipt.duplicateCount, 0),
+    rejectedRecords: receipts.reduce((total, receipt) => total + receipt.rejectedCount, 0),
   }
 }
 
@@ -251,7 +280,14 @@ export async function getNationalLifeSyncStatus(
         select: { state: true, syncStageIndex: true, syncGridKey: true },
         orderBy: { syncStageIndex: 'asc' },
       },
-      stageReceipts: { select: { recordCount: true, writtenCount: true } },
+      stageReceipts: {
+        select: {
+          recordCount: true,
+          writtenCount: true,
+          duplicateCount: true,
+          rejectedCount: true,
+        },
+      },
       stageCompletions: {
         select: { gridKey: true, expectedRecordCount: true, completedAt: true },
       },

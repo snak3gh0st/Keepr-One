@@ -31,6 +31,8 @@ function status(overrides: Partial<NationalLifeSyncStatus> = {}): NationalLifeSy
     completedAt: null,
     receivedRecords: null,
     writtenRecords: null,
+    duplicateRecords: null,
+    rejectedRecords: null,
     ...overrides,
   }
 }
@@ -42,6 +44,25 @@ function answerWith(value: unknown) {
 }
 
 describe('NationalLifeSyncProgress', () => {
+  /// A bare "988 received, 823 saved" makes the agent guess whether 165 policies
+  /// went missing. Repeats are how the source lists one policy per coverage and
+  /// cost nothing; rows with no policy number are the only real loss. Naming the
+  /// two separately is the difference between a number that alarms and a number
+  /// that informs.
+  it('explains the gap between received and saved rows', () => {
+    render(<NationalLifeSyncProgress initialStatus={status({
+      state: 'PARTIAL',
+      shouldPoll: false,
+      receivedRecords: 988,
+      writtenRecords: 823,
+      duplicateRecords: 155,
+      rejectedRecords: 10,
+    })} />)
+    expect(document.body.textContent).toContain('155')
+    expect(document.body.textContent).toContain('10')
+    expect(document.body.textContent).toMatch(/repeat/i)
+  })
+
   it('is mounted on the National Life connection page', () => {
     const page = readFileSync(
       resolve(process.cwd(), 'app/agent/integrations/national-life/page.tsx'),
