@@ -442,6 +442,43 @@ describe('local connector runs', () => {
     expect(resumed.stages[1]?.capability).toBe('READ_GRID')
   })
 
+  /// Once the export stage reports its own timeout the run settles PARTIAL, not
+  /// FAILED, and resume re-enters through `firstFailedIndex`. The downgrade has
+  /// to key on the in-force stage having already been tried and not completed —
+  /// not on which of the two terminal states the run happened to land in.
+  it('falls back to the paginated grid when an in-force export already failed', async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-export-failed',
+        state: 'PARTIAL',
+        plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        completedStages: 1,
+        currentGridKey: null,
+        stageCompletions: [{ gridKey: 'NEW_BUSINESS' }],
+        stageFailures: [{ gridKey: 'INFORCE_CLIENTS' }],
+      })
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst,
+      },
+      nationalLifeConnectorStageFailure: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      nationalLifeConnectorStageReceipt: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never
+
+    const resumed = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { exportEnabled: true },
+    )
+
+    expect(resumed.nextStageIndex).toBe(1)
+    expect(resumed.stages[1]?.capability).toBe('READ_GRID')
+  })
+
+
 
   it('does not reopen a recently verified run and reread every source', async () => {
     const findFirst = vi.fn()

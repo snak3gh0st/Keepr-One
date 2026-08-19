@@ -359,6 +359,8 @@ export async function startLocalConnectorRun(
     }
     let resume: { sequence: number; offset: number } | undefined
     const currentGridKey = activePlan[nextStageIndex]
+    const inForceRetriedAfterFailure =
+      active.state === 'FAILED' || failedKeys.includes('INFORCE_CLIENTS')
     let currentStageHasReceipts = false
     if (currentGridKey && db.nationalLifeConnectorStageReceipt) {
       const receipts = await db.nationalLifeConnectorStageReceipt.findMany({
@@ -381,28 +383,33 @@ export async function startLocalConnectorRun(
         if (sequence > 0 || offset > 0) resume = { sequence, offset }
       }
     }
+    const inForceExportExhausted =
+      currentGridKey === 'INFORCE_CLIENTS' &&
+      (currentStageHasReceipts || inForceRetriedAfterFailure)
     // The plan comes from the run that already exists, not from what this call
     // asked for: returning the requested grids would hand the device a plan whose
     // stages the run can never account for, and it would never complete.
     return {
       runId: active.id,
       schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
-      // Never switch an in-flight in-force stage from paginated receipts to an
-      // XLSX export. Both use the same durable receipt coordinates, so mixing
-      // them would correctly trip idempotency conflicts instead of completing.
+      // The in-force export gets one attempt per run. Past that, the retry goes
+      // through the paginated grid.
       //
-      // A FAILED run sitting on the in-force stage is the other direction of the
-      // same rule. The export answered nothing before the TTL killed the run, so
-      // replaying it replays the identical silent hang and every stage after it
-      // — all seven commission sources among them — stays unreachable. Fall back
-      // to the paginated grid, which shares this parser: the policies still land,
-      // and only the export-only contact columns are lost. Degrading beats
-      // blocking, and neither skips the source.
+      // Three ways the attempt is spent, and the terminal state does not
+      // distinguish them: partial receipts exist (mixing strategies would trip
+      // idempotency, since both share the same durable coordinates), the stage
+      // reported its own failure (run settles PARTIAL), or the export answered
+      // nothing at all and the TTL killed the run parked on it (run settles
+      // FAILED, no failure row). Keying on the state would cover one and miss
+      // the others.
+      //
+      // Replaying the export replays the same silent hang, and INFORCE_CLIENTS
+      // is index 2 of 26 — every source after it, all seven commission ones
+      // included, stays unreachable. The grid shares this parser, so the
+      // policies still land and only the export-only contact columns are lost.
+      // Degrading beats blocking, and neither skips the source.
       stages: planLocalConnectorStages(activePlan, {
-        exportEnabled: options?.exportEnabled && !(
-          currentGridKey === 'INFORCE_CLIENTS' &&
-          (currentStageHasReceipts || active.state === 'FAILED')
-        ),
+        exportEnabled: options?.exportEnabled && !inForceExportExhausted,
       }),
       duplicate: true as const,
       completedStages,
