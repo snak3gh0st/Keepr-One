@@ -334,7 +334,10 @@ export async function startLocalConnectorRun(
           updatedAt: now,
         },
       })
-      if (active.state === 'PARTIAL') {
+      // Whatever writes `failedStages: 0` owes the same answer to the rows.
+      // Resolving only PARTIAL left a reopened FAILED run reporting zero
+      // failures while its unresolved rows still fed `failedKeys` next pass.
+      if (reopening && db.nationalLifeConnectorStageFailure) {
         await db.nationalLifeConnectorStageFailure.updateMany({
           where: { runId: active.id, deviceId: input.deviceId, resolvedAt: null },
           data: { resolvedAt: now, updatedAt: now },

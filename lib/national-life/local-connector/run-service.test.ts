@@ -287,6 +287,44 @@ describe('local connector runs', () => {
     }))
   })
 
+  /// Reopening writes `failedStages: 0` for FAILED and PARTIAL alike, but only
+  /// PARTIAL resolved the failure rows. A reopened FAILED run therefore reported
+  /// zero failures while its unresolved rows still fed `failedKeys` on the next
+  /// pass — the counter and the rows disagreeing about the same run.
+  it('resolves stage failures when reopening a failed run', async () => {
+    const failureUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const runUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: runUpdateMany,
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            id: 'run-failed',
+            state: 'FAILED',
+            plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+            completedStages: 1,
+            currentGridKey: null,
+            stageCompletions: [{ gridKey: 'NEW_BUSINESS' }],
+            stageFailures: [{ gridKey: 'INFORCE_CLIENTS' }],
+          }),
+      },
+      nationalLifeConnectorStageFailure: { updateMany: failureUpdateMany },
+      nationalLifeConnectorStageReceipt: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never
+
+    await startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now })
+
+    expect(runUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ failedStages: 0 }),
+    }))
+    expect(failureUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { runId: 'run-failed', deviceId: 'device-1', resolvedAt: null },
+    }))
+  })
+
+
   it('resolves failures for a deprecated source when migrating a running plan', async () => {
     const failureUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
     const db = {
