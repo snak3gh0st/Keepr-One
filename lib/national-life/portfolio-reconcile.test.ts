@@ -51,6 +51,31 @@ describe('reconcileInforceRows', () => {
     expect(discarded).toEqual([{ reason: 'MISSING_POLICY_NUMBER', policyStatus: 'Exported On: 08/17/2026' }])
   })
 
+  it('discards footer rows even when the export bleeds the banner text into every column', () => {
+    // Production shape: the parser upstream does not leave a blank `PolicyNumber`
+    // for the trailing banner row, it copies the same footer string into every
+    // field of the row, including `PolicyNumber` and `InsuredClientName`.
+    const { policies, discarded } = reconcileInforceRows([
+      row({
+        policyNumber: 'Exported On: 08/17/2026',
+        policyStatus: 'Exported On: 08/17/2026',
+        insuredClientName: 'Exported On: 08/17/2026',
+      }),
+      row({
+        policyNumber: 'Exported By: Novaes, Beatriz Moraes',
+        policyStatus: 'Exported By: Novaes, Beatriz Moraes',
+        insuredClientName: 'Exported By: Novaes, Beatriz Moraes',
+      }),
+      row({ policyNumber: 'LS1' }),
+    ])
+
+    expect(policies.map((p) => p.policyNumber)).toEqual(['LS1'])
+    expect(discarded).toEqual([
+      { reason: 'MISSING_POLICY_NUMBER', policyStatus: 'Exported On: 08/17/2026' },
+      { reason: 'MISSING_POLICY_NUMBER', policyStatus: 'Exported By: Novaes, Beatriz Moraes' },
+    ])
+  })
+
   it('maps carrier statuses to the enum while keeping the carrier string', () => {
     const { policies } = reconcileInforceRows([row({ policyStatus: 'Pending Lapse' })])
 

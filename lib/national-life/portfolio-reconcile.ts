@@ -87,12 +87,16 @@ export function reconcileInforceRows(rows: InforceRow[]): ReconcileResult {
   const byPolicy = new Map<string, ReconciledPolicy>()
   const discarded: DiscardedRow[] = []
 
-  // The export's trailing banner rows ("Exported On:", "Exported By:") arrive in
-  // the same shape as data. They carry no policy number, which is what separates
-  // them from a real row.
+  // The export's trailing banner rows ("Exported On: ...", "Exported By: ...")
+  // arrive in the same shape as data, and in production the upstream parser
+  // copies that same banner string into every column of the row — including
+  // `PolicyNumber` — rather than leaving it blank. A real carrier policy number
+  // never starts with "Exported ", so that prefix is treated the same as a
+  // missing one.
+  const EXPORT_BANNER_PREFIX = /^Exported (On|By):/
   for (const row of rows) {
     const policyNumber = text(row.policyNumber)
-    if (!policyNumber) {
+    if (!policyNumber || EXPORT_BANNER_PREFIX.test(policyNumber)) {
       discarded.push({ reason: 'MISSING_POLICY_NUMBER', policyStatus: row.policyStatus })
       continue
     }
