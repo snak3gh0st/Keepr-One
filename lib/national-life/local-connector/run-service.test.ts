@@ -370,6 +370,41 @@ describe('local connector runs', () => {
     }))
   })
 
+  /// The TTL kills a run whose in-force export never answered, leaving
+  /// `currentGridKey` on INFORCE_CLIENTS with no receipts at all. Resuming with
+  /// the export still enabled replays the identical hang, so stages after it are
+  /// unreachable forever. Fall back to the paginated grid: the policies still
+  /// land, only the contact columns are lost.
+  it('falls back to the paginated grid when an in-force export left no receipts', async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-hung-export',
+        state: 'FAILED',
+        plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        completedStages: 1,
+        currentGridKey: 'INFORCE_CLIENTS',
+      })
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst,
+      },
+      nationalLifeConnectorStageReceipt: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never
+
+    const resumed = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { exportEnabled: true },
+    )
+
+    expect(resumed.nextStageIndex).toBe(1)
+    expect(resumed.stages[1]?.capability).toBe('READ_GRID')
+  })
+
+
   it('does not reopen a recently verified run and reread every source', async () => {
     const findFirst = vi.fn()
       .mockResolvedValueOnce(null)

@@ -387,9 +387,18 @@ export async function startLocalConnectorRun(
       // Never switch an in-flight in-force stage from paginated receipts to an
       // XLSX export. Both use the same durable receipt coordinates, so mixing
       // them would correctly trip idempotency conflicts instead of completing.
+      //
+      // A FAILED run sitting on the in-force stage is the other direction of the
+      // same rule. The export answered nothing before the TTL killed the run, so
+      // replaying it replays the identical silent hang and every stage after it
+      // — all seven commission sources among them — stays unreachable. Fall back
+      // to the paginated grid, which shares this parser: the policies still land,
+      // and only the export-only contact columns are lost. Degrading beats
+      // blocking, and neither skips the source.
       stages: planLocalConnectorStages(activePlan, {
         exportEnabled: options?.exportEnabled && !(
-          currentGridKey === 'INFORCE_CLIENTS' && currentStageHasReceipts
+          currentGridKey === 'INFORCE_CLIENTS' &&
+          (currentStageHasReceipts || active.state === 'FAILED')
         ),
       }),
       duplicate: true as const,
