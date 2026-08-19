@@ -206,4 +206,23 @@ describe('local stage coverage', () => {
       expect.objectContaining({ gridKey: 'INFORCE_CLIENTS', state: 'READING' }),
     ])
   })
+
+  /// A run reopened onto a stage that already failed is both the current stage
+  /// and a failed one. READING won that tie, so the screen showed a source
+  /// quietly being read while its recorded failure went unmentioned — the state
+  /// most likely to need the agent's attention was the one it hid.
+  it('reports a failed stage as failed even while it is the current one', () => {
+    expect(localStageCoverage({
+      plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+      totalStages: 2,
+      currentGridKey: 'INFORCE_CLIENTS',
+      failedGridKeys: ['INFORCE_CLIENTS'],
+      resumedAt: null,
+      completions: [],
+    })).toEqual([
+      expect.objectContaining({ gridKey: 'NEW_BUSINESS', state: 'PENDING' }),
+      expect.objectContaining({ gridKey: 'INFORCE_CLIENTS', state: 'FAILED' }),
+    ])
+  })
+
 })

@@ -114,10 +114,13 @@ export function localStageCoverage(input: {
           completed.get(gridKey)!.completedAt.getTime() < input.resumedAt.getTime()
         ? 'REUSED'
         : DISCOVERY_PAGE_KEYS.has(gridKey) ? 'CAPTURED' : 'VERIFIED'
-      : gridKey === input.currentGridKey
-        ? 'READING'
-        : input.failedGridKeys.includes(gridKey)
-          ? 'FAILED'
+      // Failure outranks currency. A run reopened onto a stage that already
+      // failed is both, and letting READING win hid the recorded failure behind
+      // a source that looked like it was simply being read.
+      : input.failedGridKeys.includes(gridKey)
+        ? 'FAILED'
+        : gridKey === input.currentGridKey
+          ? 'READING'
           : 'PENDING',
     verifiedRecords: completed.get(gridKey)?.expectedRecordCount ?? null,
   }))
