@@ -20,6 +20,7 @@ import {
 } from '@/lib/national-life/client-intelligence'
 import { toCarrierCommissionRecords } from '@/lib/national-life/commission-records'
 import { carrierPolicyNumberVariants } from '@/lib/national-life/policy-number'
+import { COMMISSION_EARNING_GRID_KEYS } from '@/lib/national-life/commission-grid-keys'
 import {
   getNationalLifeLocalConnectorConfig,
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
@@ -76,7 +77,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       prisma.nationalLifeReportRow.findMany({
         where: {
           deploymentScope: scopeId,
-          gridKey: 'COMMISSION_DETAIL_NLD_COMMISSION_EARNING',
+          gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
           raw: { path: ['PolicyNumber'], equals: policy.policyNumber },
         },
         select: { id: true, raw: true, amounts: true },

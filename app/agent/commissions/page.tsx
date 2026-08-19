@@ -12,6 +12,7 @@ import {
 import { toCarrierCommissionRecords } from '@/lib/national-life/commission-records'
 import { getDownlineIds } from '@/lib/hierarchy'
 import { CommissionsList } from './CommissionsList'
+import { COMMISSION_EARNING_GRID_KEYS } from '@/lib/national-life/commission-grid-keys'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,7 +74,7 @@ export default async function CommissionsPage() {
         where: {
           agentId: agent.id,
           deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-          gridKey: 'COMMISSION_DETAIL_NLD_COMMISSION_EARNING',
+          gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
         },
         select: { id: true, raw: true, amounts: true },
       })

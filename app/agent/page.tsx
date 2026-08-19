@@ -26,6 +26,7 @@ import {
 import { OperationSignals, type OperationSignal } from '@/components/OperationSignals'
 import { getAgentPromotionSnapshot } from '@/lib/agent-promotion'
 import { JourneyDashboardPreview } from './JourneyDashboardPreview'
+import { COMMISSION_EARNING_GRID_KEYS } from '@/lib/national-life/commission-grid-keys'
 
 function BreakdownList({
   title,
@@ -310,7 +311,7 @@ export default async function AgentDashboard() {
         where: {
           agentId: agent.id,
           deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-          gridKey: 'COMMISSION_DETAIL_NLD_COMMISSION_EARNING',
+          gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
         },
         select: { id: true, raw: true, amounts: true },
       })

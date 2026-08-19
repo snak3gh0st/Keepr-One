@@ -3,6 +3,7 @@ import { decimalToNumber } from "@/lib/decimal";
 import { getNationalLifeLocalConnectorConfig, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from "@/lib/national-life/local-connector/config";
 import { toCarrierCommissionRecords } from "@/lib/national-life/commission-records";
 import { prisma } from "@/lib/prisma";
+import { COMMISSION_EARNING_GRID_KEYS } from "./national-life/commission-grid-keys";
 import {
   getPromotionIdentity,
   getPromotionJourney,
@@ -60,7 +61,7 @@ export const getAgentPromotionSnapshot = cache(
               where: {
                 agentId,
                 deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-                gridKey: "COMMISSION_DETAIL_NLD_COMMISSION_EARNING",
+                gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
               },
               select: { id: true, raw: true, amounts: true },
             })
