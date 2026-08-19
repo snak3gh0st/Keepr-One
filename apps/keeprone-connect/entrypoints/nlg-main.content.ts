@@ -2,11 +2,17 @@ import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
 import { createGridExtractionRunner, type RequestTemplate } from '../lib/grid-extraction'
 import { parseAbortGridMessage, parseBeginExportMessage, parseBeginGridMessage } from '../lib/messages'
 import { buildOfficialExportRequest } from '../lib/official-export-request'
+import { fetchWithinBudget } from '../lib/fetch-budget'
 
 const DATATABLE_PATH = '/agent/Datatable/GetJsonResult'
 const DOWNLOAD_EXCEL_PATH = '/agent/Datatable/DownloadExcel'
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
 const EXPORT_CHUNK_BYTES = 1024 * 1024
+/// Generous for an export that works — the portal builds the whole workbook
+/// server-side — while staying far short of both the 30-minute run TTL and the
+/// ~20-minute carrier session, so a hung request costs one stage instead of the
+/// entire sync. Every source after in-force depends on this giving up.
+const EXPORT_BUDGET_MS = 3 * 60_000
 const EXPORT_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 const ALLOWED_HEADERS = new Set(['content-type', 'x-requested-with'])
 
@@ -179,13 +185,18 @@ export default defineContentScript({
           inforceDatatableConfig(),
           currentPortalFilters(),
         )
-        const response = await originalFetch(`${NLG_ORIGIN}${DOWNLOAD_EXCEL_PATH}`, {
-          method: 'POST',
-          headers: officialExportHeaders(requestTemplate),
-          body,
-          credentials: 'include',
-          cache: 'no-store',
-        })
+        const response = await fetchWithinBudget(
+          originalFetch,
+          `${NLG_ORIGIN}${DOWNLOAD_EXCEL_PATH}`,
+          {
+            method: 'POST',
+            headers: officialExportHeaders(requestTemplate),
+            body,
+            credentials: 'include',
+            cache: 'no-store',
+          },
+          EXPORT_BUDGET_MS,
+        )
         if (!response.ok) throw new Error('PORTAL_REQUEST_FAILED')
         const payload = await response.json() as Record<string, unknown>
         if (
