@@ -28,6 +28,10 @@ import {
   type BeginExportMessage,
 } from '../lib/messages'
 import { chunkRecordsForUpload } from '../lib/record-chunks'
+import {
+  parseCommissionDetailTargets,
+  type CommissionDetailTarget,
+} from '../lib/commission-detail'
 import { OUTDATED_CODES, revokesDevice } from '../lib/failure'
 import {
   PERMISSIVE_REMOTE_CONFIG,
@@ -60,6 +64,7 @@ type ActiveNavigation = {
   truncated?: boolean
   exportUploadId?: string
   exportNextSequence?: number
+  detailStatementId?: string
 }
 
 const activeNavigations = new Map<number, ActiveNavigation>()
@@ -182,6 +187,33 @@ function randomToken(): string {
 
 function stageKey(stage: StagePlan): string {
   return stage.capability === 'READ_GRID' ? stage.params.gridKey : stage.params.sourceKey
+}
+
+function isCommissionDetailStage(stage: StagePlan | undefined): boolean {
+  return stage?.capability === 'READ_GRID' &&
+    stage.params.gridKey === 'COMMISSIONS_EARNING_REPORT' &&
+    stage.params.mode === 'COMMISSION_DETAILS'
+}
+
+function commissionDetailTarget(
+  state: Awaited<ReturnType<typeof readSyncState>>,
+): CommissionDetailTarget | undefined {
+  if (!state.commissionDetailLinks) return undefined
+  try {
+    const links = parseCommissionDetailTargets({ links: state.commissionDetailLinks })
+    return links[state.commissionDetailIndex ?? 0]
+  } catch {
+    return undefined
+  }
+}
+
+function stageTargetPath(
+  state: Awaited<ReturnType<typeof readSyncState>>,
+  stage: StagePlan,
+): string {
+  const detail = commissionDetailTarget(state)
+  if (isCommissionDetailStage(stage) && detail) return detail.path
+  return canonicalNationalLifeNavigatePath(stageKey(stage), stage.params.navigatePath)
 }
 
 async function sendBeginExportWithRetry(tabId: number, message: BeginExportMessage): Promise<void> {
@@ -477,7 +509,7 @@ async function createRun(forceRefresh = false) {
     stages?: unknown
     completedStages?: unknown
     nextStageIndex?: unknown
-    resume?: { sequence?: unknown; offset?: unknown }
+    resume?: { sequence?: unknown; offset?: unknown; recordCount?: unknown }
   }>({
     baseUrl: device.baseUrl,
     deviceId: device.deviceId,
@@ -508,10 +540,22 @@ async function createRun(forceRefresh = false) {
     Number.isInteger(response.resume.sequence) && response.resume.sequence >= 0 && response.resume.sequence <= 10_000
     ? response.resume.sequence
     : 0
-  const resumeOffset = typeof response.resume?.offset === 'number' &&
+  const serverResumeOffset = typeof response.resume?.offset === 'number' &&
     Number.isInteger(response.resume.offset) && response.resume.offset >= 0 && response.resume.offset <= 200_000
     ? response.resume.offset
     : 0
+  const serverResumeRecordCount = typeof response.resume?.recordCount === 'number' &&
+    Number.isInteger(response.resume.recordCount) && response.resume.recordCount >= 0 && response.resume.recordCount <= 200_000
+    ? response.resume.recordCount
+    : 0
+  // Detail pages share one server stage, so the server checkpoint is global to
+  // that stage while the page extractor must restart from the beginning of the
+  // current statement only. The durable base offset tells us which part belongs
+  // to earlier statement links.
+  const previousDetailStage = isCommissionDetailStage(currentStage(previous))
+  const resumeOffset = previousDetailStage
+    ? Math.max(0, serverResumeOffset - (previous.commissionDetailOffset ?? 0))
+    : serverResumeOffset
   if (previous.runId === response.runId && currentStage(previous)) {
     // A retry of a still-live run must resume from the server-confirmed cursor.
     // Local storage can be stale when Chrome evicts the worker between a grid
@@ -523,6 +567,7 @@ async function createRun(forceRefresh = false) {
       stageIndex: nextStageIndex,
       resumeSequence,
       resumeOffset,
+      ...(previousDetailStage ? { commissionDetailReceivedRecords: serverResumeRecordCount } : {}),
       navigationGridKey: undefined,
       navigationAttempts: undefined,
       status: 'NAVIGATING',
@@ -600,7 +645,7 @@ async function navigatePendingGrid() {
     const stage = currentStage(state)
     if (!state.runId || !stage) return
     const gridKey = stageKey(stage)
-    const targetPath = canonicalNationalLifeNavigatePath(gridKey, stage.params.navigatePath)
+    const targetPath = stageTargetPath(state, stage)
     const target = `${NLG_ORIGIN}${targetPath}`
     const existing = await findReusableConnectorTab(state)
     const navigationAttempts = state.navigationGridKey === gridKey
@@ -623,7 +668,11 @@ async function navigatePendingGrid() {
             if (!existing.active) await updateTab(existing.id, { active: true })
             return
           }
-          if (matchesNationalLifeStagePath(gridKey, stage.params.navigatePath, existingUrl.pathname)) {
+          const existingPath = `${existingUrl.pathname}${existingUrl.search}`
+          const isExpected = isCommissionDetailStage(stage)
+            ? existingPath === targetPath
+            : matchesNationalLifeStagePath(gridKey, stage.params.navigatePath, existingUrl.pathname)
+          if (isExpected) {
             // There is no tabs.onUpdated event when the expected page is already
             // open, so explicitly resume the bridge without changing tabs.
             await handleTabReady(existing.id, existing.url)
@@ -705,6 +754,50 @@ async function startNewSync(forceRefresh = false) {
   })
 }
 
+async function beginCommissionDetailStage(tabId: number) {
+  const device = await readDeviceState()
+  const state = await readSyncState()
+  const stage = currentStage(state)
+  if (
+    device.status !== 'READY' ||
+    !device.deviceId ||
+    !device.baseUrl ||
+    !state.runId ||
+    !stage ||
+    !isCommissionDetailStage(stage)
+  ) {
+    throw new Error('SYNC_STATE_INVALID')
+  }
+
+  const response = await signedJsonRequest<unknown>({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname:
+      `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}` +
+      '/stages/COMMISSIONS_EARNING_REPORT/details',
+    body: { runId: state.runId, gridKey: 'COMMISSIONS_EARNING_REPORT' },
+  })
+  const links = parseCommissionDetailTargets(response)
+  if (links.length === 0) throw new Error('NO_COMMISSION_DETAIL_LINKS')
+
+  const nextState = {
+    ...state,
+    commissionDetailLinks: links,
+    commissionDetailIndex: 0,
+    commissionDetailOffset: 0,
+    commissionDetailCurrentOffset: 0,
+    commissionDetailReceivedRecords: 0,
+    resumeSequence: 0,
+    resumeOffset: 0,
+    status: 'NAVIGATING' as const,
+    navigationGridKey: stageKey(stage),
+    navigationAttempts: 0,
+  }
+  await writeSyncState(nextState)
+  await updateTab(tabId, { url: `${NLG_ORIGIN}${links[0]!.path}` })
+}
+
 async function beginExtraction(tabId: number, stage: StagePlan) {
   const gridKey = stageKey(stage)
   const active = activeNavigations.get(tabId)
@@ -721,6 +814,10 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
   const state = await readSyncState()
   const resumeSequence = state.resumeSequence ?? 0
   const resumeOffset = state.resumeOffset ?? 0
+  const detailTarget = isCommissionDetailStage(stage) ? commissionDetailTarget(state) : undefined
+  if (isCommissionDetailStage(stage) && !detailTarget) {
+    throw new Error('COMMISSION_DETAIL_LINK_UNAVAILABLE')
+  }
   const message = {
     type: stage.capability === 'READ_GRID' ? 'BEGIN_GRID' as const :
       stage.capability === 'READ_EXPORT' ? 'BEGIN_EXPORT' as const : 'CAPTURE_PAGE' as const,
@@ -730,7 +827,11 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
     sequenceStart: resumeSequence,
     offsetStart: resumeOffset,
   }
-  activeNavigations.set(tabId, { ...message, tabId })
+  activeNavigations.set(tabId, {
+    ...message,
+    tabId,
+    ...(detailTarget ? { detailStatementId: detailTarget.statementId } : {}),
+  })
   await writeSyncState({
     ...(await readSyncState()),
     status: 'EXTRACTING',
@@ -826,10 +927,36 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
   // user does not have to click Sync again (and accidentally start another login
   // navigation).
   if (state.status === 'AUTH_REQUIRED' && url.pathname.startsWith('/agent/')) {
-    await navigatePendingGrid()
-    return
+    const expectedAfterAuth = isCommissionDetailStage(stage)
+      ? `${url.pathname}${url.search}` === stageTargetPath(state, stage)
+      : matchesNationalLifeStagePath(stageKey(stage), stage.params.navigatePath, url.pathname)
+    if (!expectedAfterAuth) {
+      await navigatePendingGrid()
+      return
+    }
   }
   const gridKey = stageKey(stage)
+  if (isCommissionDetailStage(stage)) {
+    const detail = commissionDetailTarget(state)
+    const basePath = canonicalNationalLifeNavigatePath(gridKey, stage.params.navigatePath)
+    const actualPath = `${url.pathname}${url.search}`
+    const expectedPath = detail?.path ?? basePath
+    if (actualPath !== expectedPath) {
+      if (state.status !== 'AUTH_REQUIRED') await navigatePendingGrid()
+      return
+    }
+    if (!(await hasAuthenticatedPortalSession(tabId))) {
+      await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
+      await updateTab(tabId, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+      return
+    }
+    if (!detail) {
+      await beginCommissionDetailStage(tabId)
+    } else {
+      await beginExtraction(tabId, stage)
+    }
+    return
+  }
   if (!matchesNationalLifeStagePath(gridKey, stage.params.navigatePath, url.pathname)) {
     // Auth interstitials are handled above. For any other carrier page, resume
     // the stage in a background tab; otherwise a stale tab (for example
@@ -860,20 +987,37 @@ async function handleTabReady(tabId: number, urlValue?: string) {
 async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type: 'GRID_CHUNK' }>) {
   const device = await readDeviceState()
   const state = await readSyncState()
+  const stage = currentStage(state)
+  const detailStage = isCommissionDetailStage(stage)
+  const activeNavigation = activeNavigations.get(tabId)
   if (
     device.status !== 'READY' ||
     !device.deviceId ||
     !device.baseUrl ||
     !state.runId ||
     state.runId.length > 128 ||
-    !currentStage(state) || stageKey(currentStage(state)!) !== message.gridKey
+    !stage ||
+    stageKey(stage) !== message.gridKey ||
+    (detailStage && !activeNavigation?.detailStatementId)
   ) {
     throw new Error('SYNC_STATE_INVALID')
   }
+  const detailBaseOffset = detailStage ? state.commissionDetailOffset ?? 0 : 0
+  const localSourceOffset = message.sourceOffset ?? 0
+  const localNextOffset = message.nextOffset ?? (localSourceOffset + message.records.length)
+  const records = detailStage
+    ? message.records.map((record) => ({
+        ...record,
+        CommissionStatementId: activeNavigation!.detailStatementId,
+      }))
+    : message.records
+  const sourceOffset = detailBaseOffset + localSourceOffset
+  const nextOffset = detailBaseOffset + localNextOffset
   await writeSyncState({ ...state, status: 'UPLOADING', errorCode: undefined })
   const pathname = `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}/stages/${encodeURIComponent(message.gridKey)}`
+  let uploadResult: { duplicate?: unknown } | undefined
   try {
-    await signedJsonRequest({
+    uploadResult = await signedJsonRequest<{ duplicate?: unknown }>({
       baseUrl: device.baseUrl,
       deviceId: device.deviceId,
       method: 'PUT',
@@ -889,12 +1033,12 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
         runId: state.runId,
         gridKey: message.gridKey,
         sequence: message.sequence,
-        sourceOffset: message.sourceOffset ?? 0,
-        nextOffset: message.nextOffset ?? ((message.sourceOffset ?? 0) + message.records.length),
+        sourceOffset,
+        nextOffset,
         observedAt: new Date().toISOString(),
         recordsTotal: message.recordsTotal,
         truncated: message.truncated,
-        records: message.records,
+        records,
       },
     })
   } catch (error) {
@@ -906,7 +1050,19 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
   // Prova de vida do run. É o único sinal que se move quando uma única grade
   // grande passa minutos subindo lote a lote.
   const after = await readSyncState()
-  await writeSyncState({ ...after, uploads: (after.uploads ?? 0) + 1 })
+  const detailReceivedRecords = detailStage && uploadResult?.duplicate !== true
+    ? (after.commissionDetailReceivedRecords ?? 0) + records.length
+    : after.commissionDetailReceivedRecords
+  await writeSyncState({
+    ...after,
+    uploads: (after.uploads ?? 0) + 1,
+    ...(detailStage
+      ? {
+          commissionDetailCurrentOffset: localNextOffset,
+          commissionDetailReceivedRecords: detailReceivedRecords,
+        }
+      : {}),
+  })
   const active = activeNavigations.get(tabId)
   if (active && active.token === message.token && active.correlationId === message.correlationId) {
     activeNavigations.set(tabId, {
@@ -916,6 +1072,99 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
       truncated: message.truncated,
     })
   }
+}
+
+async function finishCommissionDetailGrid(
+  tabId: number,
+  gridKey: string,
+  state: Awaited<ReturnType<typeof readSyncState>>,
+  active: ActiveNavigation,
+) {
+  const links = state.commissionDetailLinks
+    ? parseCommissionDetailTargets({ links: state.commissionDetailLinks })
+    : []
+  const index = state.commissionDetailIndex ?? 0
+  if (!state.plan || !state.runId || !links[index]) {
+    throw new Error('COMMISSION_DETAIL_STATE_INVALID')
+  }
+  if (active.truncated) throw new Error('STAGE_TRUNCATED')
+
+  const currentOffset = state.commissionDetailCurrentOffset ?? 0
+  const nextIndex = index + 1
+  const nextTarget = links[nextIndex]
+  if (nextTarget) {
+    activeNavigations.delete(tabId)
+    await writeSyncState({
+      ...state,
+      commissionDetailIndex: nextIndex,
+      commissionDetailOffset: (state.commissionDetailOffset ?? 0) + currentOffset,
+      commissionDetailCurrentOffset: 0,
+      resumeSequence: (active.lastSequence ?? 0) + 1,
+      resumeOffset: 0,
+      status: 'NAVIGATING',
+      navigationGridKey: gridKey,
+      navigationAttempts: 0,
+    })
+    await updateTab(tabId, { url: `${NLG_ORIGIN}${nextTarget.path}` })
+    return
+  }
+
+  const device = await readDeviceState()
+  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
+    throw new Error('SYNC_STATE_INVALID')
+  }
+  const result = await signedJsonRequest<{
+    nextStageIndex?: unknown
+    terminal?: unknown
+  }>({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname: `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}/stages/${encodeURIComponent(gridKey)}/complete`,
+    idempotencyKey: `nlc:${state.runId}:${state.stageIndex ?? 0}:${gridKey}:complete:${active.lastSequence}`,
+    body: {
+      runId: state.runId,
+      gridKey,
+      expectedRecordCount: state.commissionDetailReceivedRecords ?? 0,
+      finalSequence: active.lastSequence,
+      truncated: false,
+    },
+  })
+  activeNavigations.delete(tabId)
+  const plan = parseStagePlan(state.plan)
+  const fallbackNextIndex = (state.stageIndex ?? 0) + 1
+  const resolvedNextIndex = typeof result.nextStageIndex === 'number' &&
+    Number.isInteger(result.nextStageIndex) &&
+    result.nextStageIndex >= 0 &&
+    result.nextStageIndex <= plan.length
+    ? result.nextStageIndex
+    : fallbackNextIndex
+  const next = plan[resolvedNextIndex]
+  if (result.terminal === true || !next) {
+    await writeSyncState({
+      runId: state.runId,
+      resumeSequence: undefined,
+      resumeOffset: undefined,
+      status: 'COMPLETED',
+      uploads: state.uploads,
+      completedAt: new Date().toISOString(),
+    })
+    await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
+    return
+  }
+  await writeSyncState({
+    runId: state.runId,
+    plan,
+    stageIndex: resolvedNextIndex,
+    resumeSequence: 0,
+    resumeOffset: 0,
+    status: 'NAVIGATING',
+    uploads: state.uploads,
+  })
+  const nextGridKey = stageKey(next)
+  await updateTab(tabId, {
+    url: `${NLG_ORIGIN}${canonicalNationalLifeNavigatePath(nextGridKey, next.params.navigatePath)}`,
+  })
 }
 
 async function finishGrid(tabId: number, gridKey: string) {
@@ -933,6 +1182,10 @@ async function finishGrid(tabId: number, gridKey: string) {
     active.truncated === undefined
   ) {
     throw new Error('STAGE_COMPLETION_INVALID')
+  }
+  if (isCommissionDetailStage(stage)) {
+    await finishCommissionDetailGrid(tabId, gridKey, state, active)
+    return
   }
   const device = await readDeviceState()
   if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {

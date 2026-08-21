@@ -86,6 +86,22 @@ describe('parseStagePlan', () => {
     })
   })
 
+  it('accepts the explicit commission-detail mode', () => {
+    const [stage] = parseStagePlan([{
+      capability: 'READ_GRID',
+      params: {
+        gridKey: 'COMMISSIONS_EARNING_REPORT',
+        navigatePath:
+          '/agent/compensation/commissions/paid-commissions/commissions-earning-report',
+        mode: 'COMMISSION_DETAILS',
+      },
+    }])
+    expect(stage).toMatchObject({
+      capability: 'READ_GRID',
+      params: { mode: 'COMMISSION_DETAILS' },
+    })
+  })
+
   it('accepts only the official in-force export with contact information', () => {
     expect(parseStagePlan([{
       capability: 'READ_EXPORT',

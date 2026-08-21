@@ -221,7 +221,7 @@ describe('NationalLifeSyncProgress', () => {
       />,
     )
 
-    expect(screen.getByText('15 of 30 known sources automated')).toBeTruthy()
+    expect(screen.getByText('12 of 30 known sources automated')).toBeTruthy()
   })
 
   it('shows an isolated failure as non-blocking while the remaining areas continue', () => {

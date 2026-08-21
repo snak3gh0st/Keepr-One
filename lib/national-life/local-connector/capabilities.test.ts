@@ -125,6 +125,18 @@ describe('planReadGridStages', () => {
     }])
   })
 
+  it('marks the earning-report stage as a per-statement detail collector', () => {
+    expect(planReadGridStages(['COMMISSIONS_EARNING_REPORT'])).toEqual([{
+      capability: 'READ_GRID',
+      params: {
+        gridKey: 'COMMISSIONS_EARNING_REPORT',
+        navigatePath:
+          '/agent/compensation/commissions/paid-commissions/commissions-earning-report',
+        mode: 'COMMISSION_DETAILS',
+      },
+    }])
+  })
+
   it('produces a plan every routed grid key can reach', () => {
     const keys = [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS]
     const plan = planReadGridStages(keys)

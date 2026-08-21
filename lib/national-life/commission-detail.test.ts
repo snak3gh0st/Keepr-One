@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { extractCommissionDetailLinks } from './commission-detail'
+import {
+  extractCommissionDetailLinks,
+  extractNationalLifeCommissionEarningLinks,
+  normalizeNationalLifeCommissionEarningPath,
+} from './commission-detail'
 
 const NLD_CELL =
   "<a href='/agent/compensation/commissions/paid-commissions/commissions-earning-report/nld-commission-earning?id=e3ec1234a5678ac9a1a00000d123bb45'>NLD</a>"
@@ -85,5 +89,38 @@ describe('National Life chargeback debt drill-down', () => {
     })
 
     expect(links.map((link) => link.kind).sort()).toEqual(['CHARGEBACK', 'CHARGEBACK_DEBT'])
+  })
+})
+
+describe('National Life earning-link handoff', () => {
+  it('deduplicates statement links across the stored parent rows', () => {
+    expect(
+      extractNationalLifeCommissionEarningLinks([
+        { NLDCommEarningAmt: NLD_CELL },
+        { ESICommEarningAmt: NLD_CELL },
+      ]),
+    ).toEqual([
+      {
+        path:
+          '/agent/compensation/commissions/paid-commissions/commissions-earning-report/nld-commission-earning?id=e3ec1234a5678ac9a1a00000d123bb45',
+        statementId: 'e3ec1234a5678ac9a1a00000d123bb45',
+      },
+    ])
+  })
+
+  it('rejects an absolute link on another origin', () => {
+    expect(
+      normalizeNationalLifeCommissionEarningPath(
+        'https://evil.example/agent/compensation/commissions/paid-commissions/commissions-earning-report/nld-commission-earning?id=abc',
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects extra query parameters instead of handing them to the extension', () => {
+    expect(
+      normalizeNationalLifeCommissionEarningPath(
+        '/agent/compensation/commissions/paid-commissions/commissions-earning-report/nld-commission-earning?id=abc&x=1',
+      ),
+    ).toBeNull()
   })
 })

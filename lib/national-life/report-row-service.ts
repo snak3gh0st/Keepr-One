@@ -103,6 +103,7 @@ export function deriveRowKey(gridKey: NationalLifeGridKey, row: GridRow): string
         // so the transaction type and dates are part of its identity.
         if (row.PolicyNumber !== undefined && row.GrossCommEarned !== undefined) {
           return [
+            text(row, 'CommissionStatementId'),
             text(row, 'PolicyNumber'),
             text(row, 'TransactionType'),
             text(row, 'PremiumEffDate'),

@@ -44,6 +44,7 @@ export class LocalConnectorPlanError extends Error {
 export type ReadGridParams = {
   gridKey: NationalLifeGridKey
   navigatePath: string
+  mode?: 'COMMISSION_DETAILS'
 }
 
 export type ReadGridStagePlan = {
@@ -156,7 +157,14 @@ export function planReadGridStages(
       throw new LocalConnectorPlanError('GRID_NOT_ROUTED', gridKey)
     }
     seenPaths.set(navigatePath, gridKey)
-    return { capability: 'READ_GRID', params: { gridKey, navigatePath } }
+    return {
+      capability: 'READ_GRID',
+      params: {
+        gridKey,
+        navigatePath,
+        ...(gridKey === 'COMMISSIONS_EARNING_REPORT' ? { mode: 'COMMISSION_DETAILS' as const } : {}),
+      },
+    }
   })
 }
 

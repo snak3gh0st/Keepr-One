@@ -545,7 +545,9 @@ model Policy {
   // The modal premium — what the client actually pays each time — kept with the
   // mode it is paid in. Annualising on write would destroy the distinction the
   // client chose: $250 monthly and $250 annual are different policies.
-  premium          Decimal
+  // Null means the carrier has not supplied a premium in a structured source.
+  // It must not be rendered or aggregated as zero.
+  premium          Decimal?
   premiumMode      String?
   status           PolicyStatus
   effectiveDate    DateTime?
