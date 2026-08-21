@@ -4,6 +4,10 @@ import {
   getNationalLifeLocalConnectorConfig,
 } from '@/lib/national-life/local-connector/config'
 import { CANONICAL_NATIONAL_LIFE_SYNC } from '@/lib/national-life/sync-engine'
+import {
+  NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
+  NATIONAL_LIFE_READ_COVERAGE,
+} from '@/lib/national-life/read-coverage'
 import { prisma } from '@/lib/prisma'
 import { ContextPanel } from '@/components/ContextPanel'
 import { ErrorBanner } from '@/components/ErrorBanner'
@@ -16,6 +20,7 @@ import {
 } from '@/lib/national-life/client-intelligence'
 import {
   NationalLifeDataTabs,
+  NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS,
   type CaseRow,
   type PortalReportRow,
   type InforceRow,
@@ -28,6 +33,7 @@ import {
 export const dynamic = 'force-dynamic'
 
 const CANONICAL_SCOPE = CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope
+const DISCOVERY_PAGE_KEYS = new Set<string>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
 
 /// Only what the tabs render. The staging rows also carry the untouched carrier
 /// payload in `raw`, which is deliberately not shipped to the browser.
@@ -104,8 +110,8 @@ export default async function NationalLifeDataPage() {
   let reports: PortalReportRow[] = []
   let actions: NationalLifeActionRow[] = []
   let lastSyncedAt: Date | null = null
-  let verifiedStageCount = 0
-  let totalStageCount = 0
+  let structuredSourceCount = 0
+  let rawPageSourceCount = 0
   let loadError = false
 
   try {
@@ -130,7 +136,7 @@ export default async function NationalLifeDataPage() {
         where: {
           agentId: agent.id,
           deploymentScope: CANONICAL_SCOPE,
-          gridKey: { not: 'CLIENT_INTELLIGENCE' },
+          gridKey: { in: [...NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS] },
         },
         select: reportSelect,
         orderBy: [{ gridKey: 'asc' }, { primaryDate: 'desc' }],
@@ -147,8 +153,7 @@ export default async function NationalLifeDataPage() {
         select: {
           completedAt: true,
           updatedAt: true,
-          completedStages: true,
-          totalStages: true,
+          stageCompletions: { select: { gridKey: true } },
         },
         where: {
           agentId: agent.id,
@@ -165,8 +170,9 @@ export default async function NationalLifeDataPage() {
     inforce = inforceRows
     reports = reportRows.map(toPortalReportRow)
     lastSyncedAt = localRun?.completedAt ?? localRun?.updatedAt ?? null
-    verifiedStageCount = localRun?.completedStages ?? 0
-    totalStageCount = localRun?.totalStages ?? 0
+    const completedKeys = localRun?.stageCompletions.map((row) => row.gridKey) ?? []
+    rawPageSourceCount = completedKeys.filter((key) => DISCOVERY_PAGE_KEYS.has(key)).length
+    structuredSourceCount = completedKeys.length - rawPageSourceCount
 
     const actionQueue = buildClientActionQueue(toClientServiceEvents(intelligenceRows), {
       asOf: lastSyncedAt ?? new Date(),
@@ -210,7 +216,7 @@ export default async function NationalLifeDataPage() {
       <PageHeader
         title="National Life"
         eyebrow="Carteira conectada"
-        description="Dados atuais da carteira e sinais concretos para orientar o próximo contato com cada cliente."
+        description="Sua área diária de clientes, apólices, casos e oportunidades, espelhada na National Life."
       >
         <Link
           href="/agent/integrations/national-life"
@@ -231,9 +237,9 @@ export default async function NationalLifeDataPage() {
           label="Resumo da National Life"
           items={[
             {
-              label: 'Carteira em vigor',
+              label: 'Ativas em All Clients',
               value: activeInforce,
-              detail: `${inforce.length} apólices observadas no portal`,
+              detail: `${inforce.length} apólices no escopo completo da grade; o resumo pessoal da National usa outro denominador`,
               tone: 'green',
             },
             {
@@ -249,11 +255,13 @@ export default async function NationalLifeDataPage() {
               tone: opportunityActions > 0 ? 'gold' : 'neutral',
             },
             {
-              label: 'Fontes verificadas',
-              value: totalStageCount > 0 ? `${verifiedStageCount}/${totalStageCount}` : '—',
-              detail: syncDetail,
+              label: 'Fontes estruturadas',
+              value: structuredSourceCount > 0
+                ? `${structuredSourceCount}/${NATIONAL_LIFE_READ_COVERAGE.length}`
+                : '—',
+              detail: `${rawPageSourceCount} fontes adicionais preservadas somente como página bruta · ${syncDetail}`,
               tone:
-                totalStageCount > 0 && verifiedStageCount === totalStageCount ? 'green' : 'gold',
+                structuredSourceCount === NATIONAL_LIFE_READ_COVERAGE.length ? 'green' : 'gold',
             },
           ]}
         />
@@ -263,20 +271,19 @@ export default async function NationalLifeDataPage() {
         <section className="module-main-surface">
           {!loadError && <NationalLifeActionQueue rows={actions} />}
         </section>
-        <ContextPanel eyebrow="Confiança dos dados" title="Atual e rastreável">
+        <ContextPanel eyebrow="Confiança dos dados" title="National como espelho">
           <p>
-            A carteira, os casos e os sinais abaixo vêm da última leitura concluída da National Life.
-            A data da atualização e o número de fontes verificadas ficam sempre visíveis.
+            A KeeprOne é a área operacional diária. A National Life permanece como fonte de origem,
+            e cada informação precisa carregar escopo, atualização e trilha até o registro do carrier.
           </p>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">
               Limite conhecido
             </p>
             <p className="mt-2">
-              A grade atual não fornece e-mail, telefone, prêmio anual ou valor em dinheiro. O
-              relatório oficial de carteira com contatos fornece endereços, parte dos contatos e
-              prêmio anual; essa fonte será importada pelo novo canal de downloads. Até ela entrar,
-              o Keepr One mostra os campos como ausentes, nunca como zero.
+              Páginas capturadas para descoberta não são mais contadas como relatórios. Até existir
+              um parser específico e reconciliação, elas ficam somente no raw e aparecem como fonte
+              ainda não estruturada — nunca como zero ou como linha operacional.
             </p>
           </div>
           <div className="mt-5 border-t border-white/10 pt-4">
@@ -294,9 +301,9 @@ export default async function NationalLifeDataPage() {
       <section className="mt-8 module-main-surface">
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold text-ink">Dados recebidos do portal</h2>
+            <h2 className="text-xl font-semibold text-ink">Área operacional espelhada</h2>
             <p className="mt-1 text-sm text-ink-muted">
-              Consulte casos, carteira e relatórios exatamente como foram recebidos.
+              Trabalhe com casos, carteira e registros estruturados; o bruto fica reservado à auditoria.
             </p>
           </div>
           <p className="text-sm text-ink-muted">

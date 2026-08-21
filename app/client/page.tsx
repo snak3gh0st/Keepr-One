@@ -40,7 +40,7 @@ export default async function ClientPortalPage() {
                 </p>
               </div>
               <span className="shrink-0 font-mono font-medium tabular-nums text-ink">
-                ${policy.premium.toString()}
+                {policy.premium === null ? '—' : `$${policy.premium.toString()}`}
               </span>
               <PolicyStatusPill status={policy.status} />
             </EntityCard>

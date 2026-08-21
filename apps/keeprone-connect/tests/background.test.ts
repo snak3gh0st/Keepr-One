@@ -21,6 +21,12 @@ const NEW_BUSINESS_PATH = '/agent/book-of-business/new-business/all-new-business
 const INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients/all-clients-agent'
 const LEGACY_INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients'
 const COMMISSIONS_PATH = '/agent/compensation/commissions/paid-commissions'
+const COMMISSIONS_EARNING_REPORT_PATH =
+  '/agent/compensation/commissions/paid-commissions/commissions-earning-report'
+const COMMISSION_DETAIL_PATH =
+  `${COMMISSIONS_EARNING_REPORT_PATH}/nld-commission-earning?id=aaa1`
+const COMMISSION_DETAIL_PATH_2 =
+  `${COMMISSIONS_EARNING_REPORT_PATH}/nld-commission-earning?id=bbb2`
 const PROJECTED_COMMISSIONS_PATH = '/agent/compensation/commissions/projected-commissions'
 const PAYABLE_PERSONAL_PATH =
   '/agent/compensation/commissions/projected-commissions/payable-gross-commissions/personal'
@@ -48,6 +54,20 @@ const PAID_COMMISSIONS_REDIRECT_PLAN = [
     params: {
       gridKey: 'PAID_COMMISSIONS',
       navigatePath: COMMISSIONS_PATH,
+    },
+  },
+]
+const COMMISSION_DETAIL_PLAN = [
+  {
+    capability: 'READ_GRID',
+    params: { gridKey: 'PAID_COMMISSIONS', navigatePath: COMMISSIONS_PATH },
+  },
+  {
+    capability: 'READ_GRID',
+    params: {
+      gridKey: 'COMMISSIONS_EARNING_REPORT',
+      navigatePath: COMMISSIONS_EARNING_REPORT_PATH,
+      mode: 'COMMISSION_DETAILS',
     },
   },
 ]
@@ -709,6 +729,144 @@ describe('background plan executor', () => {
     )
     expect(tabs.update).not.toHaveBeenCalled()
     expect(readSync()).toMatchObject({ stageIndex: 0, status: 'EXTRACTING' })
+  })
+
+  it('opens every stored earning link and persists its statement id across one stage', async () => {
+    storage.sync = {
+      runId: 'run-commission-detail',
+      carrierTabId: 11,
+      plan: COMMISSION_DETAIL_PLAN,
+      stageIndex: 1,
+      status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{
+      id: 11,
+      active: false,
+      url: `${NLG}${COMMISSIONS_EARNING_REPORT_PATH}`,
+    }])
+    vi.mocked(signedJsonRequest).mockImplementation(async (input) => {
+      if (input.pathname.endsWith('/details')) {
+        return {
+          parentRows: 2,
+          links: [
+            { path: COMMISSION_DETAIL_PATH, statementId: 'aaa1' },
+            { path: COMMISSION_DETAIL_PATH_2, statementId: 'bbb2' },
+          ],
+        } as never
+      }
+      if (input.pathname.endsWith('/complete')) return { terminal: true } as never
+      return { duplicate: false } as never
+    })
+
+    await bootBackground()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST',
+      pathname:
+        '/api/agent/integrations/national-life/local-connector/runs/run-commission-detail/stages/COMMISSIONS_EARNING_REPORT/details',
+    }))
+    expect(tabs.update).toHaveBeenCalledWith(11, { url: `${NLG}${COMMISSION_DETAIL_PATH}` })
+
+    emit('tabs.onUpdated', 11, { status: 'complete' }, { url: `${NLG}${COMMISSION_DETAIL_PATH}` })
+    await flush()
+    const firstBegin = beginGridMessage()
+    expect(firstBegin).toMatchObject({
+      type: 'BEGIN_GRID',
+      gridKey: 'COMMISSIONS_EARNING_REPORT',
+    })
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'COMMISSIONS_EARNING_REPORT',
+        token: firstBegin.token,
+        correlationId: firstBegin.correlationId,
+        sequence: 0,
+        recordsTotal: 1,
+        truncated: false,
+        sourceOffset: 0,
+        nextOffset: 1,
+        records: [{ PolicyNumber: 'P1', GrossCommEarned: '$10.00' }],
+      },
+      { tab: { id: 11 }, url: `${NLG}${COMMISSION_DETAIL_PATH}` },
+      vi.fn(),
+    )
+    await flush()
+    const firstUpload = vi.mocked(signedJsonRequest).mock.calls.find((call) =>
+      call[0].method === 'PUT' && call[0].pathname.endsWith('/COMMISSIONS_EARNING_REPORT'),
+    )?.[0]
+    expect(firstUpload?.body).toMatchObject({
+      records: [{ PolicyNumber: 'P1', CommissionStatementId: 'aaa1' }],
+      sourceOffset: 0,
+      nextOffset: 1,
+    })
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_DONE',
+        gridKey: 'COMMISSIONS_EARNING_REPORT',
+        token: firstBegin.token,
+        correlationId: firstBegin.correlationId,
+      },
+      { tab: { id: 11 }, url: `${NLG}${COMMISSION_DETAIL_PATH}` },
+      vi.fn(),
+    )
+    await flush()
+    expect(tabs.update).toHaveBeenLastCalledWith(11, { url: `${NLG}${COMMISSION_DETAIL_PATH_2}` })
+    expect(readSync()).toMatchObject({
+      commissionDetailIndex: 1,
+      commissionDetailOffset: 1,
+      resumeSequence: 1,
+    })
+
+    emit('tabs.onUpdated', 11, { status: 'complete' }, { url: `${NLG}${COMMISSION_DETAIL_PATH_2}` })
+    await flush()
+    const secondBegin = beginGridMessage()
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'COMMISSIONS_EARNING_REPORT',
+        token: secondBegin.token,
+        correlationId: secondBegin.correlationId,
+        sequence: 1,
+        recordsTotal: 1,
+        truncated: false,
+        sourceOffset: 0,
+        nextOffset: 1,
+        records: [{ PolicyNumber: 'P1', GrossCommEarned: '$20.00' }],
+      },
+      { tab: { id: 11 }, url: `${NLG}${COMMISSION_DETAIL_PATH_2}` },
+      vi.fn(),
+    )
+    await flush()
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_DONE',
+        gridKey: 'COMMISSIONS_EARNING_REPORT',
+        token: secondBegin.token,
+        correlationId: secondBegin.correlationId,
+      },
+      { tab: { id: 11 }, url: `${NLG}${COMMISSION_DETAIL_PATH_2}` },
+      vi.fn(),
+    )
+    await flush()
+
+    const detailUploads = vi.mocked(signedJsonRequest).mock.calls
+      .filter((call) => call[0].method === 'PUT' && call[0].pathname.endsWith('/COMMISSIONS_EARNING_REPORT'))
+      .map((call) => call[0].body as { records: Array<Record<string, unknown>>; sourceOffset: number })
+    expect(detailUploads.map((upload) => upload.records[0]?.CommissionStatementId)).toEqual(['aaa1', 'bbb2'])
+    expect(detailUploads[1]?.sourceOffset).toBe(1)
+    expect(vi.mocked(signedJsonRequest)).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST',
+      pathname:
+        '/api/agent/integrations/national-life/local-connector/runs/run-commission-detail/stages/COMMISSIONS_EARNING_REPORT/complete',
+      body: expect.objectContaining({ expectedRecordCount: 2, finalSequence: 1 }),
+    }))
+    expect(readSync()).toMatchObject({ status: 'COMPLETED' })
   })
 
   it('starts a legacy projected stage on the payable personal report', async () => {

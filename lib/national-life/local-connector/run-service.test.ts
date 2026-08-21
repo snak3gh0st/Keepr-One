@@ -399,7 +399,7 @@ describe('local connector runs', () => {
       runId: 'run-checkpoint',
       duplicate: true,
       completedStages: 1,
-      resume: { sequence: 4, offset: 800 },
+      resume: { sequence: 4, offset: 800, recordCount: 600 },
     })
     expect(resumed.stages[1]?.capability).toBe('READ_GRID')
     expect(receiptFindMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -760,7 +760,7 @@ describe('local connector runs', () => {
     expect(written.create.raw).toMatchObject({ GlobalId: 'G1' })
   })
 
-  it('routes a captured server-rendered page to raw report rows', async () => {
+  it('persists a captured server-rendered page only in the raw landing zone', async () => {
     const reportUpsert = vi.fn().mockResolvedValue({})
     const tx = {
       nationalLifeSyncRun: {
@@ -778,7 +778,7 @@ describe('local connector runs', () => {
           sequence: 0,
           contentHash: 'f'.repeat(64),
           recordCount: 1,
-          writtenCount: 1,
+          writtenCount: 0,
           createdAt: now,
         }),
         findMany: vi.fn().mockResolvedValue([]),
@@ -813,12 +813,16 @@ describe('local connector runs', () => {
         },
       }),
     ).resolves.toMatchObject({ duplicate: false })
-    expect(reportUpsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(reportUpsert).not.toHaveBeenCalled()
+    expect(tx.nationalLifeRawGridPage.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         gridKey: 'COMMISSIONS_OVERVIEW',
-        raw: { RecordType: 'PAGE_META', Title: 'Commission Overview' },
+        records: [{ RecordType: 'PAGE_META', Title: 'Commission Overview' }],
       }),
     }))
+    expect(tx.nationalLifeConnectorStageReceipt.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ writtenCount: 0 }) }),
+    )
   })
 
   it('rejects a stage for a grid the run never planned and does not complete it', async () => {

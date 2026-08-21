@@ -39,6 +39,13 @@ export type SyncState = {
   /// persisted because Chrome can evict the worker between redirects.
   navigationGridKey?: string
   navigationAttempts?: number
+  /// A commission-detail stage is one server stage backed by several carrier
+  /// pages. These fields are the durable cursor for that child-page loop.
+  commissionDetailLinks?: Array<{ path: string; statementId: string }>
+  commissionDetailIndex?: number
+  commissionDetailOffset?: number
+  commissionDetailCurrentOffset?: number
+  commissionDetailReceivedRecords?: number
   status: SyncStatus
   errorCode?: string
   /// Contador monotônico de lotes enviados neste run. Existe porque `status` e

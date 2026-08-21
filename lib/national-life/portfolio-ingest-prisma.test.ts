@@ -64,4 +64,14 @@ describe('prismaIngestDeps', () => {
 
     expect(upsert.mock.calls[0]?.[0].update.sourceStatus).toBe('Pending Lapse')
   })
+
+  it('keeps an unknown carrier premium null instead of inventing zero', async () => {
+    const upsert = upsertMock()
+    const deps = prismaIngestDeps({ policy: { upsert } } as never)
+
+    await deps.upsertPolicy({ ...planned, premium: null })
+
+    expect(upsert.mock.calls[0]?.[0].create).toHaveProperty('premium', null)
+    expect(upsert.mock.calls[0]?.[0].update).toHaveProperty('premium', null)
+  })
 })

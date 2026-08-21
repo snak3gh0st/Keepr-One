@@ -5,7 +5,10 @@ import { parseConnectorCommand, type ConnectorCommand } from './command-contract
 export type Capability = 'READ_GRID' | 'READ_PAGE' | 'READ_EXPORT'
 
 export type StagePlan =
-  | { capability: 'READ_GRID'; params: { gridKey: string; navigatePath: string } }
+  | {
+      capability: 'READ_GRID'
+      params: { gridKey: string; navigatePath: string; mode?: 'COMMISSION_DETAILS' }
+    }
   | { capability: 'READ_PAGE'; params: { sourceKey: string; navigatePath: string } }
   | { capability: 'READ_EXPORT'; params: { sourceKey: string; navigatePath: string; includeContactInformation: true } }
 
@@ -93,9 +96,15 @@ export function parseStagePlan(value: unknown): StagePlan[] {
       throw new Error('UNSAFE_NAVIGATE_PATH')
     }
     if (capability === 'READ_GRID') {
-      if (!hasExactKeys(params, ['gridKey', 'navigatePath'])) throw new Error('INVALID_RUN_RESPONSE')
       const gridKey = 'gridKey' in params ? params.gridKey : undefined
       if (!isGridKeyLabel(gridKey)) throw new Error('INVALID_RUN_RESPONSE')
+      if (gridKey === 'COMMISSIONS_EARNING_REPORT' && hasExactKeys(params, ['gridKey', 'navigatePath', 'mode'])) {
+        if ((params as { mode?: unknown }).mode !== 'COMMISSION_DETAILS') {
+          throw new Error('INVALID_RUN_RESPONSE')
+        }
+        return { capability, params: { gridKey, navigatePath, mode: 'COMMISSION_DETAILS' } }
+      }
+      if (!hasExactKeys(params, ['gridKey', 'navigatePath'])) throw new Error('INVALID_RUN_RESPONSE')
       return { capability, params: { gridKey, navigatePath } }
     }
     if (capability === 'READ_EXPORT') {

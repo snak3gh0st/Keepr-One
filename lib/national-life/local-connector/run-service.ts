@@ -176,7 +176,7 @@ export async function startLocalConnectorRun(
   duplicate: boolean
   completedStages: number
   nextStageIndex: number
-  resume?: { sequence: number; offset: number }
+  resume?: { sequence: number; offset: number; recordCount: number }
 }> {
   const now = input.now ?? new Date()
   const requestedGridKeys = options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS
@@ -357,7 +357,7 @@ export async function startLocalConnectorRun(
         })
       }
     }
-    let resume: { sequence: number; offset: number } | undefined
+    let resume: { sequence: number; offset: number; recordCount: number } | undefined
     const currentGridKey = activePlan[nextStageIndex]
     const inForceRetriedAfterFailure =
       active.state === 'FAILED' || failedKeys.includes('INFORCE_CLIENTS')
@@ -375,12 +375,14 @@ export async function startLocalConnectorRun(
         (receipt.sequence > 0 || receipt.recordCount > 0))) {
         let sequence = 0
         let offset = 0
+        let recordCount = 0
         for (const receipt of receipts) {
           if (receipt.sequence !== sequence || receipt.nextOffset < offset) break
           sequence += 1
           offset = receipt.nextOffset
+          recordCount += receipt.recordCount
         }
-        if (sequence > 0 || offset > 0) resume = { sequence, offset }
+        if (sequence > 0 || offset > 0) resume = { sequence, offset, recordCount }
       }
     }
     const inForceExportExhausted =
@@ -684,6 +686,10 @@ async function persistRecords(
       duplicateCount: plan.stats.duplicateCount,
       rejectedCount: plan.stats.rejectedCount,
     }
+  }
+
+  if (plan.target === 'RAW_PAGE_ONLY') {
+    return { writtenCount: 0, duplicateCount: 0, rejectedCount: 0 }
   }
 
   await inChunks(plan.rows, (chunk) =>

@@ -14,9 +14,11 @@ import {
   type ReportRow,
 } from '@/lib/national-life/report-row-service'
 import type { NationalLifeGridKey } from '@/lib/national-life/portal-grid-client'
+import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from '@/lib/national-life/read-coverage'
 
 const CASE_SNAPSHOT_GRIDS = new Set<NationalLifeGridKey>(['NEW_BUSINESS', 'RECENTLY_CLOSED'])
 const INFORCE_GRIDS = new Set<NationalLifeGridKey>(['INFORCE_CLIENTS'])
+const DISCOVERY_PAGE_GRIDS = new Set<NationalLifeGridKey>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
 const REPORT_ROW_GRIDS = new Set<NationalLifeGridKey>([
   'PAID_COMMISSIONS',
   'PROJECTED_COMMISSIONS',
@@ -31,23 +33,6 @@ const REPORT_ROW_GRIDS = new Set<NationalLifeGridKey>([
   'LIFE_PENDING_LAPSE',
   'COMMISSIONS_EARNING_REPORT',
   'PAYABLE_GROSS_COMMISSIONS',
-  // Structured snapshots of server-rendered and form-driven pages. Each row
-  // carries a record type (page metadata, visible text, table row, form, link)
-  // and is kept verbatim in addition to the faithful raw-page landing zone.
-  'AGENT_DASHBOARD',
-  'PLACEMENT_REPORT',
-  'INFORMAL_REQUESTS',
-  'TRANSFER_COMPANY_INFORMATION',
-  'POLICY_PAYMENT_HISTORY',
-  'DAILY_UNIT_VALUES',
-  'PIP_CONTRIBUTION_INCREASE',
-  'ANNUITY_PAST_DUE_CONTRIBUTIONS',
-  'ANNUITY_PAYROLL_FLOW_CHANGES',
-  'PREMIUM_REPORT_AGENCY',
-  'LIFE_PERSISTENCY',
-  'COMMISSIONS_OVERVIEW',
-  'COMMISSIONS_POLICY_HISTORY',
-  'PENDING_GROSS_COMMISSIONS',
 ])
 
 /// The grids `planRawIngest` can actually land somewhere, derived from the three
@@ -57,6 +42,7 @@ const REPORT_ROW_GRIDS = new Set<NationalLifeGridKey>([
 export const LOCAL_CONNECTOR_ROUTED_GRIDS: ReadonlySet<NationalLifeGridKey> = new Set([
   ...CASE_SNAPSHOT_GRIDS,
   ...INFORCE_GRIDS,
+  ...DISCOVERY_PAGE_GRIDS,
   ...REPORT_ROW_GRIDS,
 ])
 
@@ -87,6 +73,11 @@ export type RawIngestPlan =
       target: 'REPORT_ROW'
       gridKey: NationalLifeGridKey
       rows: ReportRow[]
+      stats: RawIngestStats
+    }
+  | {
+      target: 'RAW_PAGE_ONLY'
+      gridKey: NationalLifeGridKey
       stats: RawIngestStats
     }
 
@@ -143,6 +134,13 @@ export function planRawIngest(
       gridKey,
       snapshots: toInforcePolicySnapshots(rows),
       stats: countMappedRows(rows, toInforcePolicySnapshot, (row) => row.policyNumber),
+    }
+  }
+  if (DISCOVERY_PAGE_GRIDS.has(gridKey)) {
+    return {
+      target: 'RAW_PAGE_ONLY',
+      gridKey,
+      stats: { receivedCount: rows.length, duplicateCount: 0, rejectedCount: 0 },
     }
   }
   if (REPORT_ROW_GRIDS.has(gridKey)) {

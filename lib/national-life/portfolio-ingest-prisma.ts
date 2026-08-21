@@ -43,11 +43,9 @@ export function prismaIngestDeps(prisma: PrismaClient): IngestDeps {
         product: input.product,
         status: input.status,
         sourceStatus: input.sourceStatus,
-        // `Policy.premium` is still a required column, so an unknown premium lands
-        // as 0 here. That is the same lie this change removed from `faceAmount`,
-        // and it needs the same fix — tracked as its own change, with its own
-        // migration, rather than smuggled into this one.
-        premium: input.premium ?? 0,
+        // Missing carrier money remains unknown. Zero is a business value and
+        // must never be manufactured to satisfy storage constraints.
+        premium: input.premium,
         effectiveDate: input.effectiveDate,
         sourceUpdatedAt: new Date(),
       }

@@ -156,6 +156,21 @@ describe('National Life report row identity stability', () => {
       'NL1',
     )
   })
+
+  it('keeps the same transaction identity separate for two statement links', () => {
+    const detail = { PolicyNumber: 'NL1', GrossCommEarned: '1.00', TransactionType: 'FYC' }
+    expect(
+      deriveRowKey('COMMISSIONS_EARNING_REPORT', {
+        ...detail,
+        CommissionStatementId: 'statement-a',
+      }),
+    ).not.toBe(
+      deriveRowKey('COMMISSIONS_EARNING_REPORT', {
+        ...detail,
+        CommissionStatementId: 'statement-b',
+      }),
+    )
+  })
 })
 
 describe('rowKey for the grids mapped on 2026-07-30', () => {
