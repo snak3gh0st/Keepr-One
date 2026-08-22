@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Shell } from "@/components/Shell";
 import { getCurrentAgent } from "@/lib/agent-context";
 import { getAgentPromotionSnapshot } from "@/lib/agent-promotion";
+import { getLocalPromotionPreview } from "@/lib/promotion-preview";
 import { prisma } from "@/lib/prisma";
 import {
   getPromotionIdentity,
@@ -13,20 +14,6 @@ import {
 import { PromotionJourney } from "./PromotionJourney";
 
 export const dynamic = "force-dynamic";
-
-function getLocalPromotionPreview(preview?: string) {
-  if (process.env.NODE_ENV !== "development") return null;
-
-  if (preview === "blue-jacket") {
-    return { personalPc: 60_000, agencyPc: 120_000 };
-  }
-
-  if (preview === "black-jacket") {
-    return { personalPc: 156_000, agencyPc: 600_000 };
-  }
-
-  return null;
-}
 
 export default async function JourneyPage({
   searchParams,
@@ -47,16 +34,25 @@ export default async function JourneyPage({
   const displayedAgencyPc = localPreview
     ? localPreview.agencyPc
     : promotion.agencyPc;
-  const hasAgencyStructure =
-    Boolean(localPreview) || promotion.hasAgencyStructure;
-  const initialMode: PromotionMode = hasAgencyStructure ? "agency" : "individual";
-  const promotionIdentity = getPromotionIdentity(
+  const canViewAgencyJourney = localPreview
+    ? localPreview.canViewAgencyJourney
+    : promotion.canViewAgencyJourney;
+  const hasAgencyStructure = localPreview
+    ? localPreview.hasAgencyStructure
+    : promotion.hasAgencyStructure;
+  const initialMode: PromotionMode = localPreview
+    ? localPreview.mode
+    : promotion.mode;
+  const currentPromotionIdentity = getPromotionIdentity(
     getPromotionJourney({
       personalPc: displayedPersonalPc,
       agencyPc: displayedAgencyPc,
       mode: initialMode,
     }),
   );
+  const promotionIdentity = localPreview
+    ? currentPromotionIdentity
+    : promotion.identity;
   const isBlackJacket = promotionIdentity.tone === "black";
 
   return (
@@ -75,7 +71,7 @@ export default async function JourneyPage({
         description={
           isBlackJacket
             ? "Você concluiu a jornada e alcançou o último nível. A Black Jacket agora representa a sua maior conquista."
-            : "Transforme cada dólar registrado em um avanço visível — da primeira meta à conquista do Black Jacket."
+            : "Acompanhe os PC reconhecidos pelo Target Premium — da primeira meta à conquista do Black Jacket."
         }
         variant={isBlackJacket ? "black-achievement" : undefined}
       >
@@ -96,7 +92,18 @@ export default async function JourneyPage({
           <PromotionJourney
             personalPc={displayedPersonalPc}
             agencyPc={displayedAgencyPc}
+            canViewAgencyJourney={canViewAgencyJourney}
             hasAgencyStructure={hasAgencyStructure}
+            estimatedPersonalPc={localPreview ? 0 : promotion.estimatedPersonalPc}
+            estimatedAgencyPc={localPreview ? 0 : promotion.estimatedAgencyPc}
+            pendingPersonalPc={localPreview ? 0 : promotion.pendingPersonalPc}
+            pendingAgencyPc={localPreview ? 0 : promotion.pendingAgencyPc}
+            hasPromotionData={Boolean(localPreview) || promotion.hasPromotionData}
+            windowStart={promotion.windowStart}
+            windowEnd={promotion.windowEnd}
+            highestAchievementRankId={
+              localPreview ? null : promotion.highestAchievement?.rankId ?? null
+            }
           />
         </div>
       )}

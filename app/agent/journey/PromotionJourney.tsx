@@ -14,6 +14,12 @@ gsap.registerPlugin(useGSAP, ScrollTrigger);
 const PC = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
+const WINDOW_DATE = new Intl.DateTimeFormat("pt-BR", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
 
 const JACKET_SEQUENCE = [
   { name: "Blue Jacket", tone: "blue" },
@@ -24,7 +30,7 @@ const JACKET_SEQUENCE = [
 ] as const;
 
 const JOURNEY_INTRO =
-  "Cada US$ 1 registrado equivale a 1 PC. Acompanhe sua produção e veja, com clareza, o que falta para a próxima conquista.";
+  "Cada apólice avança pela produção reconhecida no Target Premium. A Jornada soma os PC confirmados dos últimos 12 meses.";
 
 const BLACK_JACKET_SILHOUETTE =
   "M74 38 116 18 143 50 177 50 204 18 246 38 294 125 260 145 238 108 246 326 160 348 74 326 82 108 60 145 26 125Z";
@@ -37,22 +43,50 @@ function progressLabel(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
+function ratio(value: number, target: number) {
+  if (target <= 0) return 1;
+  return Math.min(Math.max(value / target, 0), 1);
+}
+
+function formatWindow(windowStart: string, windowEnd: string) {
+  return `${WINDOW_DATE.format(new Date(windowStart))} — ${WINDOW_DATE.format(new Date(windowEnd))}`;
+}
+
 export function PromotionJourney({
   personalPc,
   agencyPc,
+  canViewAgencyJourney,
   hasAgencyStructure,
+  estimatedPersonalPc,
+  estimatedAgencyPc,
+  pendingPersonalPc,
+  pendingAgencyPc,
+  hasPromotionData,
+  windowStart,
+  windowEnd,
+  highestAchievementRankId,
 }: {
   personalPc: number;
   agencyPc: number;
+  canViewAgencyJourney: boolean;
   hasAgencyStructure: boolean;
+  estimatedPersonalPc: number;
+  estimatedAgencyPc: number;
+  pendingPersonalPc: number;
+  pendingAgencyPc: number;
+  hasPromotionData: boolean;
+  windowStart: string;
+  windowEnd: string;
+  highestAchievementRankId: string | null;
 }) {
   const root = useRef<HTMLElement>(null);
   const marquee = useRef<HTMLDivElement>(null);
   const jacketId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const previousBlackProgress = useRef(0);
-  const [mode, setMode] = useState<PromotionMode>(
-    hasAgencyStructure ? "agency" : "individual",
+  const [requestedMode, setRequestedMode] = useState<PromotionMode>(
+    canViewAgencyJourney ? "agency" : "individual",
   );
+  const mode = canViewAgencyJourney ? requestedMode : "individual";
   const journey = useMemo(
     () => getPromotionJourney({ personalPc, agencyPc, mode }),
     [agencyPc, mode, personalPc],
@@ -69,27 +103,54 @@ export function PromotionJourney({
   const currentName = journey.currentRank?.title ?? "Agente";
   const nextName = journey.nextRank?.title ?? "Black Jacket conquistada";
   const rankSignature = journey.currentRank?.jacket ?? currentName;
+  const highestAchievement = highestAchievementRankId
+    ? journey.stages.find((stage) => stage.id === highestAchievementRankId)
+    : undefined;
+  const historicalAchievementIsAhead = Boolean(
+    highestAchievement &&
+      highestAchievement.step > (journey.currentRank?.step ?? 0),
+  );
+  const historicalAchievementLabel =
+    highestAchievement?.jacket ?? highestAchievement?.title ?? null;
   const blackStage = journey.stages.at(-1);
   const blackProgress = blackStage?.progress ?? 0;
   const blackPercent = Math.round(blackProgress * 100);
   const blackReached = blackStage?.qualifies ?? false;
-  const blackPersonalTarget =
-    mode === "individual"
-      ? (blackStage?.personalTarget ?? 156_000)
-      : (blackStage?.agencyPersonalMinimum ?? 10_000);
+  const blackPersonalTarget = blackStage?.personalTarget ?? 156_000;
+  const blackAgencyPersonalTarget =
+    blackStage?.agencyPersonalMinimum ?? 10_000;
   const blackPersonalRemaining = blackStage?.personalRemaining ?? 0;
+  const blackAgencyPersonalRemaining =
+    blackStage?.agencyPersonalRemaining ?? 0;
   const blackPersonalProgress = blackStage?.personalProgress ?? 0;
   const blackAgencyTarget = blackStage?.agencyTarget ?? 600_000;
   const blackAgencyRemaining = blackStage?.agencyRemaining ?? 0;
   const blackAgencyProgress = blackStage?.agencyProgress ?? 0;
+  const blackAgencyProductionProgress = ratio(
+    journey.agencyPc,
+    blackAgencyTarget,
+  );
+  const strongestBlackRoute =
+    mode === "agency" && blackAgencyProgress > blackPersonalProgress
+      ? "agency"
+      : "personal";
   const blackDisplayedTarget =
-    mode === "agency" ? blackAgencyTarget : blackPersonalTarget;
-  const blackDisplayedPc =
-    mode === "agency" ? journey.agencyPc : journey.personalPc;
+    strongestBlackRoute === "agency"
+      ? blackAgencyTarget
+      : blackPersonalTarget;
+  const displayedEstimatedPc =
+    strongestBlackRoute === "agency"
+      ? estimatedAgencyPc
+      : estimatedPersonalPc;
+  const displayedPendingPc =
+    strongestBlackRoute === "agency" ? pendingAgencyPc : pendingPersonalPc;
+  const productionWindow = formatWindow(windowStart, windowEnd);
   const blackMilestones = journey.stages.flatMap((stage, index) => {
     if (!stage.jacketTone) return [];
     const stageTarget =
-      mode === "agency" ? stage.agencyTarget : stage.personalTarget;
+      strongestBlackRoute === "agency"
+        ? stage.agencyTarget
+        : stage.personalTarget;
     return [
       {
         index,
@@ -100,13 +161,13 @@ export function PromotionJourney({
   });
   const blackProgressMessage = blackReached
     ? "Meta final validada. A Black Jacket está conquistada."
-    : mode === "individual"
-      ? `${formatPc(blackPersonalRemaining)} restantes na produção pessoal.`
-      : blackAgencyRemaining > 0 && blackPersonalRemaining > 0
-        ? `${formatPc(blackAgencyRemaining)} na agência e ${formatPc(blackPersonalRemaining)} pessoais.`
+    : strongestBlackRoute === "personal"
+      ? `${formatPc(blackPersonalRemaining)} restantes pela rota pessoal.`
+      : blackAgencyRemaining > 0 && blackAgencyPersonalRemaining > 0
+        ? `${formatPc(blackAgencyRemaining)} na agência e ${formatPc(blackAgencyPersonalRemaining)} pessoais.`
         : blackAgencyRemaining > 0
           ? `${formatPc(blackAgencyRemaining)} restantes na produção da agência.`
-          : `${formatPc(blackPersonalRemaining)} restantes no mínimo pessoal.`;
+          : `${formatPc(blackAgencyPersonalRemaining)} restantes no mínimo pessoal.`;
 
   useGSAP(
     () => {
@@ -349,7 +410,7 @@ export function PromotionJourney({
       agencyPc,
       mode: nextMode,
     });
-    setMode(nextMode);
+    setRequestedMode(nextMode);
     setSelectedIndex(
       Math.min(nextJourney.currentIndex + 1, nextJourney.stages.length - 1),
     );
@@ -381,7 +442,7 @@ export function PromotionJourney({
         <div className="promotion-journey-copy" data-promotion-intro>
           <span>Jornada de promoção</span>
           <h2 id="promotion-journey-title">
-            Da primeira comissão ao <em>Black Jacket.</em>
+            Sua jornada ao <em>Black Jacket.</em>
           </h2>
           <p aria-label={JOURNEY_INTRO}>
             {JOURNEY_INTRO.split(" ").map((word, index) => (
@@ -394,10 +455,14 @@ export function PromotionJourney({
 
         <div className="promotion-scope" data-promotion-intro>
           <header className="promotion-scope-heading">
-            <span>Escolha sua visão</span>
+            <span>{canViewAgencyJourney ? "Escolha sua visão" : "Sua visão"}</span>
             <strong>{rankSignature}</strong>
           </header>
-          <div role="group" aria-label="Visão da jornada de promoção">
+          <div
+            role="group"
+            aria-label="Visão da jornada de promoção"
+            data-single={!canViewAgencyJourney || undefined}
+          >
             <button
               type="button"
               aria-pressed={mode === "individual"}
@@ -406,21 +471,25 @@ export function PromotionJourney({
             >
               Minha produção
             </button>
-            <button
-              type="button"
-              aria-pressed={mode === "agency"}
-              data-active={mode === "agency" || undefined}
-              onClick={() => selectMode("agency")}
-            >
-              Minha agência
-            </button>
+            {canViewAgencyJourney ? (
+              <button
+                type="button"
+                aria-pressed={mode === "agency"}
+                data-active={mode === "agency" || undefined}
+                onClick={() => selectMode("agency")}
+              >
+                Minha agência
+              </button>
+            ) : null}
           </div>
           <p>
-            {mode === "agency"
-              ? hasAgencyStructure
-                ? "Produção pessoal e da estrutura na mesma qualificação."
-                : "Uma projeção para quando sua estrutura estiver conectada."
-              : "Seu avanço considera somente a produção pessoal registrada."}
+            {historicalAchievementIsAhead && historicalAchievementLabel
+              ? `Maior conquista histórica: ${historicalAchievementLabel}. Qualificação da janela atual: ${currentName}.`
+              : mode === "agency"
+                ? hasAgencyStructure
+                  ? "Você avança pela melhor rota: produção pessoal ou agência com mínimo pessoal."
+                  : "Uma projeção para quando sua estrutura estiver conectada."
+                : "Seu avanço considera somente PC pessoais confirmados."}
           </p>
         </div>
       </header>
@@ -428,7 +497,7 @@ export function PromotionJourney({
       <div className="promotion-pc-summary" data-promotion-dynamic>
         <article data-promotion-summary data-tone="personal">
           <header>
-            <span>PC pessoais</span>
+            <span>PC pessoais confirmados</span>
             <i aria-hidden="true" />
           </header>
           <strong>{PC.format(journey.personalPc)}</strong>
@@ -446,9 +515,19 @@ export function PromotionJourney({
               </div>
             </div>
           ) : null}
+          <div className="promotion-pc-evidence" aria-label="Qualidade dos créditos de promoção">
+            <span>
+              Previstos
+              <strong>{PC.format(estimatedPersonalPc)}</strong>
+            </span>
+            <span>
+              Em validação
+              <strong>{PC.format(pendingPersonalPc)}</strong>
+            </span>
+          </div>
           <footer>
-            <span>Produção própria registrada</span>
-            <small>1 PC = US$ 1</small>
+            <span>Target Premium reconhecido</span>
+            <small>Dias inclusivos em UTC · {productionWindow}</small>
           </footer>
         </article>
         <article
@@ -461,7 +540,9 @@ export function PromotionJourney({
           <div className="promotion-black-quest-copy">
             <header>
               <span>
-                {mode === "agency" ? "Rota da agência" : "Rota individual"}
+                {mode === "agency"
+                  ? `Melhor rota: ${strongestBlackRoute === "agency" ? "agência" : "pessoal"}`
+                  : "Rota individual"}
               </span>
               <span
                 className="promotion-black-target"
@@ -476,9 +557,17 @@ export function PromotionJourney({
               <strong data-black-progress-number>{blackPercent}%</strong>
               <div>
                 <h3>
-                  {blackReached ? "Conquista desbloqueada" : "Complete a jaqueta"}
+                  {blackReached
+                    ? "Conquista desbloqueada"
+                    : hasPromotionData
+                      ? "Complete a jaqueta"
+                      : "Aguardando o primeiro PC"}
                 </h3>
-                <p>{blackProgressMessage}</p>
+                <p>
+                  {hasPromotionData
+                    ? blackProgressMessage
+                    : "A promoção começa quando o Target Premium for reconhecido pela seguradora."}
+                </p>
               </div>
             </div>
 
@@ -530,30 +619,33 @@ export function PromotionJourney({
 
             <dl className="promotion-black-requirements">
               <div>
-                <dt>
-                  {mode === "agency" ? "Produção da agência" : "Produção pessoal"}
-                </dt>
+                <dt>{mode === "agency" ? "Rota pessoal" : "Produção pessoal"}</dt>
                 <dd>
-                  <strong>{PC.format(blackDisplayedPc)}</strong>
-                  <span>/ {formatPc(blackDisplayedTarget)}</span>
+                  <strong>{PC.format(journey.personalPc)}</strong>
+                  <span>/ {formatPc(blackPersonalTarget)}</span>
                 </dd>
+                <small className="promotion-requirement-note">
+                  {blackPersonalRemaining > 0
+                    ? `Faltam ${formatPc(blackPersonalRemaining)}`
+                    : "Rota pessoal concluída"}
+                </small>
                 <span aria-hidden="true">
-                  <i
-                    style={{
-                      width: `${(mode === "agency" ? blackAgencyProgress : blackPersonalProgress) * 100}%`,
-                    }}
-                  />
+                  <i style={{ width: `${blackPersonalProgress * 100}%` }} />
                 </span>
               </div>
               {mode === "agency" ? (
                 <div>
-                  <dt>Mínimo pessoal</dt>
+                  <dt>Rota da agência</dt>
                   <dd>
-                    <strong>{PC.format(journey.personalPc)}</strong>
-                    <span>/ {formatPc(blackPersonalTarget)}</span>
+                    <strong>{PC.format(journey.agencyPc)}</strong>
+                    <span>/ {formatPc(blackAgencyTarget)}</span>
                   </dd>
+                  <small className="promotion-requirement-note">
+                    Produção {progressLabel(blackAgencyProductionProgress)} · mínimo
+                    pessoal {PC.format(journey.personalPc)} / {PC.format(blackAgencyPersonalTarget)} PC
+                  </small>
                   <span aria-hidden="true">
-                    <i style={{ width: `${blackPersonalProgress * 100}%` }} />
+                    <i style={{ width: `${blackAgencyProgress * 100}%` }} />
                   </span>
                 </div>
               ) : (
@@ -672,7 +764,9 @@ export function PromotionJourney({
             <header>
               <span>
                 {selected.status === "achieved"
-                  ? "Conquista alcançada"
+                  ? selected.achievement === "inherited"
+                    ? "Marco reconhecido pelo nível superior"
+                    : "Conquista alcançada pelos próprios requisitos"
                   : selected.status === "current"
                     ? "Próxima conquista"
                     : "Marco futuro"}
@@ -688,7 +782,7 @@ export function PromotionJourney({
             <div className="promotion-preview-progress">
               <span>
                 <strong>{progressLabel(selected.progress)}</strong>
-                do requisito atual
+                pela rota mais avançada
               </span>
               <progress
                 max={1}
@@ -700,29 +794,31 @@ export function PromotionJourney({
             <dl>
               <div>
                 <dt>Meta pessoal</dt>
-                <dd>
-                  {formatPc(
-                    mode === "individual"
-                      ? selected.personalTarget
-                      : selected.agencyPersonalMinimum,
-                  )}
-                </dd>
+                <dd>{formatPc(selected.personalTarget)}</dd>
               </div>
-              {mode === "agency" ? (
-                <div>
-                  <dt>Meta da agência</dt>
-                  <dd>{formatPc(selected.agencyTarget)}</dd>
-                </div>
-              ) : null}
               <div>
-                <dt>Falta na produção</dt>
+                <dt>Falta na rota pessoal</dt>
                 <dd>{formatPc(selected.personalRemaining)}</dd>
               </div>
               {mode === "agency" ? (
-                <div>
-                  <dt>Falta na agência</dt>
-                  <dd>{formatPc(selected.agencyRemaining ?? 0)}</dd>
-                </div>
+                <>
+                  <div>
+                    <dt>Meta da agência</dt>
+                    <dd>
+                      {formatPc(selected.agencyTarget)}
+                      <small>Faltam {formatPc(selected.agencyRemaining ?? 0)}</small>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Mínimo pessoal da agência</dt>
+                    <dd>
+                      {formatPc(selected.agencyPersonalMinimum)}
+                      <small>
+                        Faltam {formatPc(selected.agencyPersonalRemaining ?? 0)}
+                      </small>
+                    </dd>
+                  </div>
+                </>
               ) : null}
             </dl>
 
@@ -789,7 +885,9 @@ export function PromotionJourney({
                   <span className="promotion-stage-meta">
                     <small>
                       {stage.status === "achieved"
-                        ? "Concluído"
+                        ? stage.achievement === "inherited"
+                          ? "Reconhecido pelo nível superior"
+                          : "Requisitos concluídos"
                         : stage.status === "current"
                           ? "Em progresso"
                           : "Próximo marco"}
@@ -812,9 +910,12 @@ export function PromotionJourney({
       <footer className="promotion-method-note">
         <span>Como calculamos</span>
         <p>
-          Esta é uma projeção sobre os lançamentos disponíveis no extrato. Na
-          visão da agência, a meta total e o mínimo de produção pessoal precisam
-          ser atingidos juntos. Chargebacks reduzem o saldo considerado.
+          PC confirmado usa o menor valor entre o Commissionable Target Premium
+          e o AAP, multiplicado pelo peso aplicável do produto. A janela é móvel
+          de 12 meses e inclui integralmente, em UTC, as duas datas exibidas
+          ({productionWindow}). {formatPc(displayedEstimatedPc)} estão previstos e{" "}
+          {formatPc(displayedPendingPc)} aguardam validação nessa mesma rota;
+          nenhum deles concede promoção antes do reconhecimento da seguradora.
         </p>
       </footer>
     </section>

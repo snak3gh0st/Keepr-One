@@ -1,6 +1,10 @@
 import { Prisma, type ApplicationStatus, type Prisma as PrismaNamespace, type RequirementStatus, type SyncStatus } from '@prisma/client'
 import { buildExternalEventKey } from '@/lib/integrations/idempotency'
 import { prisma } from '@/lib/prisma'
+import {
+  advanceCaseCrmToSystemStage,
+  crmSystemStageForApplicationStatus,
+} from '@/lib/crm'
 import type { NationalLifeCaseObservation } from '@/workers/national-life/types'
 import { NATIONAL_LIFE_PROVIDER } from './constants'
 import { mapApplicationStatus, mapRequirementStatus, type MappedStatus } from './status-map'
@@ -139,6 +143,10 @@ export type NationalLifeSyncTransaction = {
   findIntegrationConnectionByProvider(provider: string): Promise<IntegrationConnectionRecord | null>
   upsertExternalReference(input: ExternalReferenceUpsertInput): Promise<ExternalReferenceRecord>
   saveApplication(input: ApplicationUpdateInput): Promise<ApplicationRecord>
+  advanceCaseCrmStage(input: {
+    caseId: string
+    status: ApplicationStatus
+  }): Promise<void>
   upsertRequirementByExternalId(input: RequirementUpsertInput): Promise<RequirementRecord>
   listTimelineEvents(caseId: string): Promise<TimelineEventRecord[]>
   createTimelineEvent(input: TimelineEventCreateInput): Promise<TimelineEventRecord>
@@ -518,6 +526,13 @@ const prismaSyncRepository: NationalLifeSyncRepository = {
           })
         },
 
+        async advanceCaseCrmStage(input) {
+          await advanceCaseCrmToSystemStage(tx, {
+            caseId: input.caseId,
+            systemKey: crmSystemStageForApplicationStatus(input.status),
+          })
+        },
+
         async upsertRequirementByExternalId(input) {
           const existing = await tx.applicationRequirement.findUnique({
             where: {
@@ -778,6 +793,14 @@ export async function applyCaseObservation(
     if (applicationChanged) {
       await tx.saveApplication(nextApplication)
     }
+    // The carrier observation and the CRM board advance together. The helper
+    // is monotonic and leaves custom user stages untouched, so replaying an
+    // already-seen observation is safe and also heals older unsynchronised
+    // cases after deployment.
+    await tx.advanceCaseCrmStage({
+      caseId: locked.application.caseId,
+      status: nextApplication.status,
+    })
 
     let requirementChanges = 0
     const requirementsByExternalId = new Map(

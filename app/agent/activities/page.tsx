@@ -9,7 +9,9 @@ import { ModuleSummary } from "@/components/ModuleSummary";
 import { ContextPanel } from "@/components/ContextPanel";
 import { EmptyState } from "@/components/Table";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import { CaseStagePill, PolicyStatusPill } from "@/components/StatusPill";
+import { CrmStagePill, PolicyStatusPill } from "@/components/StatusPill";
+import { FollowUpActionCard } from "@/components/crm/FollowUpActionCard";
+import { getOpenFollowUpsForScope, type DueFollowUpView } from "@/lib/crm";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +19,7 @@ const DUE_DATE = new Intl.DateTimeFormat("pt-BR", {
   day: "2-digit",
   month: "short",
   year: "numeric",
-  timeZone: "UTC",
+  timeZone: "America/New_York",
 });
 
 const EVENT_DATE = new Intl.DateTimeFormat("pt-BR", {
@@ -45,7 +47,7 @@ function dateKeyInNewYork(date: Date) {
 
 function dueState(dueAt: Date | null, todayKey: string) {
   if (!dueAt) return { label: "Sem prazo", tone: "neutral" as const };
-  const dueKey = dueAt.toISOString().slice(0, 10);
+  const dueKey = dateKeyInNewYork(dueAt);
   if (dueKey < todayKey) return { label: "Atrasado", tone: "danger" as const };
   if (dueKey === todayKey) return { label: "Hoje", tone: "gold" as const };
   return { label: DUE_DATE.format(dueAt), tone: "neutral" as const };
@@ -71,27 +73,30 @@ export default async function ActivitiesPage() {
   const scopeAgentIds = [agent.id, ...getDownlineIds(allAgents, agent.id)];
 
   let data: Awaited<ReturnType<typeof loadActivities>> | null = null;
+  let followUps: DueFollowUpView[] = [];
   let loadError = false;
 
   try {
-    data = await loadActivities(scopeAgentIds);
+    [data, followUps] = await Promise.all([
+      loadActivities(scopeAgentIds),
+      getOpenFollowUpsForScope(scopeAgentIds),
+    ]);
   } catch (error) {
     console.error("CRM activities query error", error);
     loadError = true;
   }
 
-  const followUps = data?.followUps ?? [];
   const requirements = data?.requirements ?? [];
   const reviews = data?.reviews ?? [];
   const recentEvents = data?.recentEvents ?? [];
   const todayKey = dateKeyInNewYork(new Date());
   const overdueCount = [
-    ...followUps.map((item) => item.dueAt),
+    ...followUps.map((item) => item.scheduledAt),
     ...requirements.map((item) => item.dueAt),
     ...reviews.map((item) => item.dueAt),
-  ].filter((dueAt) => dueAt && dueAt.toISOString().slice(0, 10) < todayKey).length;
+  ].filter((dueAt) => dueAt && dateKeyInNewYork(dueAt) < todayKey).length;
   const openCount =
-    (data?.followUpCount ?? 0) +
+    followUps.length +
     (data?.requirementCount ?? 0) +
     (data?.reviewCount ?? 0);
 
@@ -130,7 +135,7 @@ export default async function ActivitiesPage() {
             items={[
               {
                 label: "Retornos",
-                value: data?.followUpCount ?? 0,
+                value: followUps.length,
                 detail: "Contatos ainda não concluídos",
                 tone: "green",
               },
@@ -181,25 +186,11 @@ export default async function ActivitiesPage() {
                   description="Contatos combinados com clientes e novos contatos."
                   empty="Nenhum retorno aberto. Sua agenda de contatos está em dia."
                 >
-                  {followUps.map((item) => {
-                    const status = dueState(item.dueAt, todayKey);
-                    return (
-                      <ActivityLink
-                        key={item.id}
-                        href={`/agent/cases/${item.caseId}`}
-                        type="Retorno"
-                        title={item.title}
-                        subject={personName(
-                          item.insuranceCase.prospect.firstName,
-                          item.insuranceCase.prospect.lastName,
-                        )}
-                        owner={item.insuranceCase.assignedAgent.user.name}
-                        status={status}
-                      >
-                        <CaseStagePill stage={item.insuranceCase.stage} />
-                      </ActivityLink>
-                    );
-                  })}
+                  {followUps.map((item) => (
+                    <li key={item.id}>
+                      <FollowUpActionCard item={item} />
+                    </li>
+                  ))}
                 </ActivitySection>
 
                 <ActivitySection
@@ -225,7 +216,7 @@ export default async function ActivitiesPage() {
                         owner={insuranceCase.assignedAgent.user.name}
                         status={status}
                       >
-                        <CaseStagePill stage={insuranceCase.stage} />
+                        <CrmStagePill stage={insuranceCase.crmStage} />
                       </ActivityLink>
                     );
                   })}
@@ -311,7 +302,7 @@ export default async function ActivitiesPage() {
                     >
                       <span className="min-w-0">
                         <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.13em] text-teal">
-                          {event.type === "FOLLOW_UP" ? "Retorno" : "Movimentação"}
+                          {event.type.startsWith("FOLLOW_UP") ? "Retorno" : "Movimentação"}
                         </span>
                         <strong className="mt-1.5 block truncate text-sm font-medium text-ink">
                           {activityTitle(event.type, event.title)}
@@ -425,11 +416,6 @@ function ActivityLink({
 }
 
 function loadActivities(scopeAgentIds: string[]) {
-  const followUpWhere = {
-    type: "FOLLOW_UP",
-    doneAt: null,
-    insuranceCase: { assignedAgentId: { in: scopeAgentIds } },
-  } as const;
   const requirementWhere = {
     status: "OPEN" as const,
     application: {
@@ -442,30 +428,6 @@ function loadActivities(scopeAgentIds: string[]) {
   } as const;
 
   return Promise.all([
-    prisma.caseTimelineEvent.findMany({
-      where: followUpWhere,
-      select: {
-        id: true,
-        caseId: true,
-        title: true,
-        dueAt: true,
-        createdAt: true,
-        insuranceCase: {
-          select: {
-            stage: true,
-            prospect: { select: { firstName: true, lastName: true } },
-            assignedAgent: {
-              select: { user: { select: { name: true } } },
-            },
-          },
-        },
-      },
-      orderBy: [
-        { dueAt: { sort: "asc", nulls: "last" } },
-        { createdAt: "desc" },
-      ],
-      take: 100,
-    }),
     prisma.applicationRequirement.findMany({
       where: requirementWhere,
       select: {
@@ -478,7 +440,7 @@ function loadActivities(scopeAgentIds: string[]) {
             caseId: true,
             insuranceCase: {
               select: {
-                stage: true,
+                crmStage: { select: { name: true, systemKey: true } },
                 prospect: { select: { firstName: true, lastName: true } },
                 assignedAgent: {
                   select: { user: { select: { name: true } } },
@@ -531,24 +493,19 @@ function loadActivities(scopeAgentIds: string[]) {
       orderBy: { createdAt: "desc" },
       take: 20,
     }),
-    prisma.caseTimelineEvent.count({ where: followUpWhere }),
     prisma.applicationRequirement.count({ where: requirementWhere }),
     prisma.policyReview.count({ where: reviewWhere }),
   ]).then(
     ([
-      followUps,
       requirements,
       reviews,
       recentEvents,
-      followUpCount,
       requirementCount,
       reviewCount,
     ]) => ({
-      followUps,
       requirements,
       reviews,
       recentEvents,
-      followUpCount,
       requirementCount,
       reviewCount,
     }),

@@ -208,6 +208,11 @@ export type RapidSolveQuote = {
   faceAmount: number
   annualPremium: number
   monthlyPremium: number
+  /// Rapid Solve is an illustration, so even an explicitly named carrier CTP
+  /// is only an estimate here. Confirmation comes from policy/case data.
+  /// Optional for compatibility with queued results written before this field
+  /// existed; newly parsed responses always set it to a number or null.
+  targetPremium?: number | null
   lapseYear: LapseYear
 }
 
@@ -235,6 +240,25 @@ function lapseYearFrom(value: unknown): LapseYear {
   const parsed = numberFrom(value)
   if (parsed === null) return null
   return parsed === 0 ? 'NEVER' : parsed
+}
+
+const TARGET_PREMIUM_RESPONSE_KEYS = [
+  'TargetPremium',
+  'CommissionableTargetPremium',
+  'CTP',
+  'TargetPremiumAmount',
+] as const
+
+/// Carrier payloads have used several explicit names for CTP. Deliberately do
+/// not fall back to AnnualPremium, MonthlyPremium, PremiumAmt, or commission:
+/// those figures can be numerically similar while representing different
+/// concepts.
+function targetPremiumFrom(payload: Record<string, unknown>): number | null {
+  for (const key of TARGET_PREMIUM_RESPONSE_KEYS) {
+    const parsed = numberFrom(payload[key])
+    if (parsed !== null) return parsed
+  }
+  return null
 }
 
 export function parseRapidSolveResponse(raw: unknown): RapidSolveQuote | RapidSolveFailure {
@@ -268,6 +292,7 @@ export function parseRapidSolveResponse(raw: unknown): RapidSolveQuote | RapidSo
     faceAmount: faceAmount ?? 0,
     annualPremium: annualPremium ?? 0,
     monthlyPremium: monthlyPremium ?? 0,
+    targetPremium: targetPremiumFrom(payload),
     lapseYear: lapseYearFrom(payload.LapseYear),
   }
 }
