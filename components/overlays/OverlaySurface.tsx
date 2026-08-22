@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, type ReactNode } from "react";
 
 type HiddenOutsideElement = {
   element: Element;
@@ -68,6 +68,7 @@ export function OverlaySurface({
 }: OverlaySurfaceProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const close = useEffectEvent(onClose);
 
   useEffect(() => {
     if (!open) return;
@@ -88,7 +89,7 @@ export function OverlaySurface({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        close();
         return;
       }
 
@@ -131,7 +132,7 @@ export function OverlaySurface({
       restoreOutsideContent();
       if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [onClose, open]);
+  }, [open]);
 
   if (!open) return null;
 

@@ -75,11 +75,13 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
   const overlayRoot = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLElement>(null)
+  const latestLoadRequest = useRef(0)
   const router = useRouter()
   const pathname = usePathname()
   const reducedMotion = useReducedMotion() ?? false
 
   const load = useCallback(async () => {
+    const requestId = ++latestLoadRequest.current
     try {
       const response = await fetch('/api/agent/notifications?limit=20', {
         cache: 'no-store',
@@ -87,6 +89,7 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
       })
       if (!response.ok) return
       const body = (await response.json()) as Partial<NotificationInbox>
+      if (requestId !== latestLoadRequest.current) return
       setInbox({
         notifications: Array.isArray(body.notifications) ? body.notifications : [],
         unreadCount:
@@ -95,7 +98,7 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
     } catch {
       // A transient inbox failure must not disrupt the rest of the shell.
     } finally {
-      setLoading(false)
+      if (requestId === latestLoadRequest.current) setLoading(false)
     }
   }, [])
 
@@ -190,6 +193,7 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
         cache: 'no-store',
       })
       if (!response.ok) return
+      latestLoadRequest.current += 1
       const readAt = new Date().toISOString()
       setInbox((current) => ({
         unreadCount: 0,
@@ -208,25 +212,18 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
     setOpeningId(item.id)
     try {
       if (!item.readAt) {
-        try {
-          const response = await fetch(`/api/agent/notifications/${encodeURIComponent(item.id)}`, {
+        latestLoadRequest.current += 1
+        const readAt = new Date().toISOString()
+        setInbox((current) => ({
+          unreadCount: Math.max(0, current.unreadCount - 1),
+          notifications: current.notifications.map((candidate) =>
+            candidate.id === item.id ? { ...candidate, readAt } : candidate,
+          ),
+        }))
+        void fetch(`/api/agent/notifications/${encodeURIComponent(item.id)}`, {
             method: 'PATCH',
             cache: 'no-store',
-          })
-          if (response.ok) {
-            const body = (await response.json()) as { readAt?: string }
-            setInbox((current) => ({
-              unreadCount: Math.max(0, current.unreadCount - 1),
-              notifications: current.notifications.map((candidate) =>
-                candidate.id === item.id
-                  ? { ...candidate, readAt: body.readAt ?? new Date().toISOString() }
-                  : candidate,
-              ),
-            }))
-          }
-        } catch {
-          // Reading state is best-effort; opening the lead remains the priority.
-        }
+          }).catch(() => undefined)
       }
       setOpen(false)
       router.push(item.href)

@@ -83,9 +83,10 @@ export function PromotionJourney({
   const marquee = useRef<HTMLDivElement>(null);
   const jacketId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const previousBlackProgress = useRef(0);
-  const [mode, setMode] = useState<PromotionMode>(
+  const [requestedMode, setRequestedMode] = useState<PromotionMode>(
     canViewAgencyJourney ? "agency" : "individual",
   );
+  const mode = canViewAgencyJourney ? requestedMode : "individual";
   const journey = useMemo(
     () => getPromotionJourney({ personalPc, agencyPc, mode }),
     [agencyPc, mode, personalPc],
@@ -409,7 +410,7 @@ export function PromotionJourney({
       agencyPc,
       mode: nextMode,
     });
-    setMode(nextMode);
+    setRequestedMode(nextMode);
     setSelectedIndex(
       Math.min(nextJourney.currentIndex + 1, nextJourney.stages.length - 1),
     );

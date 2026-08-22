@@ -52,9 +52,13 @@ export function GoogleCalendarSettings({
     if (!window.confirm("Desconectar o Google Calendar? Seus eventos importados deixarão de ser atualizados.")) return;
     startTransition(async () => {
       setError(null);
-      const response = await fetch("/api/agent/integrations/google-calendar/disconnect", { method: "POST" });
-      if (response.ok) window.location.assign("/agent/integrations/google-calendar?googleCalendar=disconnected");
-      else setError("Não foi possível desconectar agora.");
+      try {
+        const response = await fetch("/api/agent/integrations/google-calendar/disconnect", { method: "POST" });
+        if (response.ok) window.location.assign("/agent/integrations/google-calendar?googleCalendar=disconnected");
+        else setError("Não foi possível desconectar agora.");
+      } catch {
+        setError("Não foi possível desconectar agora.");
+      }
     });
   }
 
