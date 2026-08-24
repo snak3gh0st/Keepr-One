@@ -40,6 +40,20 @@ type Tab = "cases" | "inforce" | "reports";
 
 const PAGE_SIZE = 12;
 
+export const NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS = [
+  "PAID_COMMISSIONS",
+  "PROJECTED_COMMISSIONS",
+  "CORRESPONDENCE",
+  "COMMISSIONS_PAYMENT_PORTAL",
+  "PIP_PENDING",
+  "TRANSFERS_EXCHANGES",
+  "LIFE_PENDING_LAPSE",
+  "COMMISSIONS_EARNING_REPORT",
+  "PAYABLE_GROSS_COMMISSIONS",
+] as const;
+
+const OPERATIONAL_REPORT_KEYS = new Set<string>(NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS);
+
 /// The carrier sends every figure as a display string, sometimes already
 /// containing "$" or thousands separators. Parse defensively and fall back to
 /// showing the carrier's own text rather than a wrong number.
@@ -124,6 +138,11 @@ export function NationalLifeDataTabs({
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
 
+  const operationalReports = useMemo(
+    () => reports.filter((row) => OPERATIONAL_REPORT_KEYS.has(row.gridKey)),
+    [reports],
+  );
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const matches = (values: Array<string | null>) =>
@@ -135,9 +154,9 @@ export function NationalLifeDataTabs({
       inforce: inforce.filter((row) =>
         matches([row.policyNumber, row.insuredClientName, row.ownerClientName, row.productName, row.policyStatus]),
       ),
-      reports: reports.filter((row) => matches([row.label, row.primaryDate, row.gridKey])),
+      reports: operationalReports.filter((row) => matches([row.label, row.primaryDate, row.gridKey])),
     };
-  }, [cases, inforce, reports, query]);
+  }, [cases, inforce, operationalReports, query]);
 
   const active = filtered[tab];
   const pageCount = Math.max(1, Math.ceil(active.length / PAGE_SIZE));

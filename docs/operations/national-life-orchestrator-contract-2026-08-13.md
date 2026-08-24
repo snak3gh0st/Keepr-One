@@ -14,6 +14,23 @@ O **Keepr One é o orquestrador** e o **KeeproneConnect é o canal autenticado**
 - National Life continua sendo a origem e a superfície final de qualquer ação
   comercial que altere a conta.
 
+Para o sync de carteira, este contrato é obrigatório em todos os passos:
+
+```text
+Keeprone Sync
+  -> KeeproneConnect solicita a fonte planejada
+  -> navegador autenticado da National Life
+  -> KeeproneConnect recebe lotes raw e envia recibos
+  -> Keepr One valida, deduplica e elimina redundância
+  -> banco Keepr One
+  -> Keepr One App renderiza o snapshot verificado
+```
+
+O caminho remoto legado não pode criar a fonte exibida no app. Sessões, jobs ou
+dados antigos desse caminho só podem ser tratados como compatibilidade/migração;
+qualquer nova leitura de carteira precisa entrar pelo `LOCAL_CONNECTOR` e ter
+`executionSource=LOCAL`.
+
 A extensão não recebe URL, seletor ou JavaScript arbitrário do servidor. Cada
 operação tem nome, parâmetros, limite, efeito e política de confirmação conhecidos
 pela extensão publicada.

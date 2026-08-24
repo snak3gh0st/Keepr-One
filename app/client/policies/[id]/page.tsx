@@ -66,7 +66,9 @@ export default async function ClientPolicyDetailPage({ params }: { params: Promi
         </div>
         <div className="bg-panel px-4 py-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Prêmio</p>
-          <p className="font-mono text-sm text-ink">${policy.premium.toString()}</p>
+          <p className="font-mono text-sm text-ink">
+            {policy.premium === null ? 'Não informado pela seguradora' : `$${policy.premium.toString()}`}
+          </p>
         </div>
         <div className="bg-panel px-4 py-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Status</p>

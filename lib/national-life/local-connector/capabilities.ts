@@ -1,4 +1,3 @@
-import 'server-only'
 import {
   NATIONAL_LIFE_GRIDS,
   type NationalLifeGridKey,
@@ -45,6 +44,7 @@ export class LocalConnectorPlanError extends Error {
 export type ReadGridParams = {
   gridKey: NationalLifeGridKey
   navigatePath: string
+  mode?: 'COMMISSION_DETAILS'
 }
 
 export type ReadGridStagePlan = {
@@ -85,6 +85,30 @@ export function isSafeNavigatePath(path: string): boolean {
   if (path.includes('..')) return false
   if (path.includes('?') || path.includes('#')) return false
   return /^[A-Za-z0-9/_-]+$/.test(path)
+}
+
+/// READ_POLICY_DETAIL's target is not a static catalogue entry: the page is fixed but
+/// the portal assigns an opaque id per policy (`policy-details?id=<32-hex>`, captured
+/// live against the portal 2026-08-17). `isSafeNavigatePath` above stays a closed
+/// catalogue check that rejects every `?` on purpose — loosening it to allow query
+/// strings generally would let a compromised plan attach `?` to any static route, not
+/// just this one page. This is a narrow, separate allowlist instead: exactly the known
+/// policy-details path, exactly one `id` param, exactly 32 lowercase hex characters —
+/// the shape the portal's own links use, nothing looser.
+const POLICY_DETAIL_ROUTE = '/agent/book-of-business/inforce-book/all-clients/policy-details'
+const POLICY_DETAIL_ID_PATTERN = /^[0-9a-f]{32}$/
+
+export function policyDetailNavigatePath(id: string): string {
+  if (!POLICY_DETAIL_ID_PATTERN.test(id)) throw new Error('UNSAFE_ENTITY_ID')
+  return `${POLICY_DETAIL_ROUTE}?id=${id}`
+}
+
+export function isSafePolicyDetailPath(path: string): boolean {
+  const [base, ...rest] = path.split('?')
+  if (base !== POLICY_DETAIL_ROUTE || rest.length !== 1) return false
+  const query = rest[0]
+  const match = /^id=([^&#]*)$/.exec(query)
+  return match !== null && POLICY_DETAIL_ID_PATTERN.test(match[1])
 }
 
 /// Two stages must never share a `navigatePath`, and the plan must not repeat a grid.
@@ -133,7 +157,14 @@ export function planReadGridStages(
       throw new LocalConnectorPlanError('GRID_NOT_ROUTED', gridKey)
     }
     seenPaths.set(navigatePath, gridKey)
-    return { capability: 'READ_GRID', params: { gridKey, navigatePath } }
+    return {
+      capability: 'READ_GRID',
+      params: {
+        gridKey,
+        navigatePath,
+        ...(gridKey === 'COMMISSIONS_EARNING_REPORT' ? { mode: 'COMMISSION_DETAILS' as const } : {}),
+      },
+    }
   })
 }
 

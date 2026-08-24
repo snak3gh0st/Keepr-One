@@ -48,6 +48,29 @@ function outcomeLine(status: NationalLifeSyncStatus): string | null {
   return `${status.writtenRecords.toLocaleString('en-US')} ${plural} saved to Keepr One.`
 }
 
+/// The gap between what arrived and what was saved has two causes that mean
+/// opposite things. Repeats are how the portal lists a policy once per coverage
+/// — merging them loses nothing. Rows without a policy number cannot be keyed
+/// and are the only real loss. Printing the difference alone would read as 165
+/// missing policies and send the agent to support over routine housekeeping.
+function discardLine(status: NationalLifeSyncStatus): string | null {
+  const repeated = status.duplicateRecords ?? 0
+  const dropped = status.rejectedRecords ?? 0
+  if (repeated === 0 && dropped === 0) return null
+  const sentences: string[] = []
+  if (repeated > 0) {
+    sentences.push(
+      `${repeated.toLocaleString('en-US')} repeated a policy already listed and were merged.`,
+    )
+  }
+  if (dropped > 0) {
+    sentences.push(
+      `${dropped.toLocaleString('en-US')} could not be saved because they arrived without a policy number.`,
+    )
+  }
+  return sentences.join(' ')
+}
+
 function formatCount(value: number | null): string {
   return value === null ? '—' : value.toLocaleString('en-US')
 }
@@ -157,6 +180,7 @@ export function NationalLifeSyncProgress({
   // Só depois do fim. No meio do run, "nada novo desta vez" ou "120 gravados"
   // seriam a mesma mentira do "concluído" eterno, apontada para o outro lado.
   const outcome = terminal ? outcomeLine(status) : null
+  const discards = terminal ? discardLine(status) : null
 
   return (
     <section
@@ -199,7 +223,10 @@ export function NationalLifeSyncProgress({
       />
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-ink-muted">
-        <span>{outcome ?? activeLine(status, reused)}</span>
+        <span>
+          {outcome ?? activeLine(status, reused)}
+          {discards && <span className="block text-xs text-ink-muted">{discards}</span>}
+        </span>
         {message && (
           <span className="font-semibold text-gold">
             {message}

@@ -1,14 +1,24 @@
-import 'server-only'
-import { toCaseSnapshots, type CaseSnapshot } from '@/lib/national-life/case-snapshot-service'
 import {
+  toCaseSnapshot,
+  toCaseSnapshots,
+  type CaseSnapshot,
+} from '@/lib/national-life/case-snapshot-service'
+import {
+  toInforcePolicySnapshot,
   toInforcePolicySnapshots,
   type InforcePolicySnapshot,
 } from '@/lib/national-life/inforce-policy-service'
-import { toReportRows, type ReportRow } from '@/lib/national-life/report-row-service'
+import {
+  toReportRow,
+  toReportRows,
+  type ReportRow,
+} from '@/lib/national-life/report-row-service'
 import type { NationalLifeGridKey } from '@/lib/national-life/portal-grid-client'
+import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from '@/lib/national-life/read-coverage'
 
 const CASE_SNAPSHOT_GRIDS = new Set<NationalLifeGridKey>(['NEW_BUSINESS', 'RECENTLY_CLOSED'])
 const INFORCE_GRIDS = new Set<NationalLifeGridKey>(['INFORCE_CLIENTS'])
+const DISCOVERY_PAGE_GRIDS = new Set<NationalLifeGridKey>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
 const REPORT_ROW_GRIDS = new Set<NationalLifeGridKey>([
   'PAID_COMMISSIONS',
   'PROJECTED_COMMISSIONS',
@@ -23,23 +33,6 @@ const REPORT_ROW_GRIDS = new Set<NationalLifeGridKey>([
   'LIFE_PENDING_LAPSE',
   'COMMISSIONS_EARNING_REPORT',
   'PAYABLE_GROSS_COMMISSIONS',
-  // Structured snapshots of server-rendered and form-driven pages. Each row
-  // carries a record type (page metadata, visible text, table row, form, link)
-  // and is kept verbatim in addition to the faithful raw-page landing zone.
-  'AGENT_DASHBOARD',
-  'PLACEMENT_REPORT',
-  'INFORMAL_REQUESTS',
-  'TRANSFER_COMPANY_INFORMATION',
-  'POLICY_PAYMENT_HISTORY',
-  'DAILY_UNIT_VALUES',
-  'PIP_CONTRIBUTION_INCREASE',
-  'ANNUITY_PAST_DUE_CONTRIBUTIONS',
-  'ANNUITY_PAYROLL_FLOW_CHANGES',
-  'PREMIUM_REPORT_AGENCY',
-  'LIFE_PERSISTENCY',
-  'COMMISSIONS_OVERVIEW',
-  'COMMISSIONS_POLICY_HISTORY',
-  'PENDING_GROSS_COMMISSIONS',
 ])
 
 /// The grids `planRawIngest` can actually land somewhere, derived from the three
@@ -49,6 +42,7 @@ const REPORT_ROW_GRIDS = new Set<NationalLifeGridKey>([
 export const LOCAL_CONNECTOR_ROUTED_GRIDS: ReadonlySet<NationalLifeGridKey> = new Set([
   ...CASE_SNAPSHOT_GRIDS,
   ...INFORCE_GRIDS,
+  ...DISCOVERY_PAGE_GRIDS,
   ...REPORT_ROW_GRIDS,
 ])
 
@@ -63,9 +57,61 @@ export class LocalConnectorRawIngestError extends Error {
 }
 
 export type RawIngestPlan =
-  | { target: 'CASE_SNAPSHOT'; gridKey: NationalLifeGridKey; snapshots: CaseSnapshot[] }
-  | { target: 'INFORCE_POLICY'; gridKey: NationalLifeGridKey; snapshots: InforcePolicySnapshot[] }
-  | { target: 'REPORT_ROW'; gridKey: NationalLifeGridKey; rows: ReportRow[] }
+  | {
+      target: 'CASE_SNAPSHOT'
+      gridKey: NationalLifeGridKey
+      snapshots: CaseSnapshot[]
+      stats: RawIngestStats
+    }
+  | {
+      target: 'INFORCE_POLICY'
+      gridKey: NationalLifeGridKey
+      snapshots: InforcePolicySnapshot[]
+      stats: RawIngestStats
+    }
+  | {
+      target: 'REPORT_ROW'
+      gridKey: NationalLifeGridKey
+      rows: ReportRow[]
+      stats: RawIngestStats
+    }
+  | {
+      target: 'RAW_PAGE_ONLY'
+      gridKey: NationalLifeGridKey
+      stats: RawIngestStats
+    }
+
+export type RawIngestStats = {
+  receivedCount: number
+  duplicateCount: number
+  rejectedCount: number
+}
+
+function countMappedRows<T>(
+  rows: Record<string, unknown>[],
+  map: (row: Record<string, unknown>) => T | null,
+  key: (row: T) => string,
+): RawIngestStats {
+  const seen = new Set<string>()
+  let duplicateCount = 0
+  let rejectedCount = 0
+
+  for (const row of rows) {
+    const mapped = map(row)
+    if (!mapped) {
+      rejectedCount += 1
+      continue
+    }
+    const identity = key(mapped)
+    if (seen.has(identity)) {
+      duplicateCount += 1
+    } else {
+      seen.add(identity)
+    }
+  }
+
+  return { receivedCount: rows.length, duplicateCount, rejectedCount }
+}
 
 /// Mirrors the routing in sync-grid.ts so the local and remote paths cannot drift.
 /// Pure: the caller owns the write, because the persist helpers bind the module-level
@@ -75,13 +121,35 @@ export function planRawIngest(
   rows: Record<string, unknown>[],
 ): RawIngestPlan {
   if (CASE_SNAPSHOT_GRIDS.has(gridKey)) {
-    return { target: 'CASE_SNAPSHOT', gridKey, snapshots: toCaseSnapshots(rows) }
+    return {
+      target: 'CASE_SNAPSHOT',
+      gridKey,
+      snapshots: toCaseSnapshots(rows),
+      stats: countMappedRows(rows, toCaseSnapshot, (row) => row.policyNo),
+    }
   }
   if (INFORCE_GRIDS.has(gridKey)) {
-    return { target: 'INFORCE_POLICY', gridKey, snapshots: toInforcePolicySnapshots(rows) }
+    return {
+      target: 'INFORCE_POLICY',
+      gridKey,
+      snapshots: toInforcePolicySnapshots(rows),
+      stats: countMappedRows(rows, toInforcePolicySnapshot, (row) => row.policyNumber),
+    }
+  }
+  if (DISCOVERY_PAGE_GRIDS.has(gridKey)) {
+    return {
+      target: 'RAW_PAGE_ONLY',
+      gridKey,
+      stats: { receivedCount: rows.length, duplicateCount: 0, rejectedCount: 0 },
+    }
   }
   if (REPORT_ROW_GRIDS.has(gridKey)) {
-    return { target: 'REPORT_ROW', gridKey, rows: toReportRows(gridKey, rows) }
+    return {
+      target: 'REPORT_ROW',
+      gridKey,
+      rows: toReportRows(gridKey, rows),
+      stats: countMappedRows(rows, (row) => toReportRow(gridKey, row), (row) => row.rowKey),
+    }
   }
   throw new LocalConnectorRawIngestError('GRID_NOT_ROUTED', gridKey)
 }

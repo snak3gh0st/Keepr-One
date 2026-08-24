@@ -1,35 +1,39 @@
 import Link from 'next/link'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { chooseMostRecentNationalLifeScope } from '@/lib/national-life/data-source'
-import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
 import {
   getNationalLifeLocalConnectorConfig,
-  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
+import { CANONICAL_NATIONAL_LIFE_SYNC } from '@/lib/national-life/sync-engine'
+import {
+  NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
+  NATIONAL_LIFE_READ_COVERAGE,
+} from '@/lib/national-life/read-coverage'
 import { prisma } from '@/lib/prisma'
 import { ContextPanel } from '@/components/ContextPanel'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { ModuleSummary } from '@/components/ModuleSummary'
 import { PageHeader } from '@/components/PageHeader'
 import { Shell } from '@/components/Shell'
-import { foresightRunStore } from '@/lib/national-life/foresight-run-service'
 import {
   buildClientActionQueue,
   toClientServiceEvents,
 } from '@/lib/national-life/client-intelligence'
 import {
   NationalLifeDataTabs,
+  NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS,
   type CaseRow,
   type PortalReportRow,
   type InforceRow,
 } from './NationalLifeDataTabs'
-import { ForesightCaseTabs, type ForesightCaseRow } from './ForesightCaseTabs'
 import {
   NationalLifeActionQueue,
   type NationalLifeActionRow,
 } from './NationalLifeActionQueue'
 
 export const dynamic = 'force-dynamic'
+
+const CANONICAL_SCOPE = CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope
+const DISCOVERY_PAGE_KEYS = new Set<string>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
 
 /// Only what the tabs render. The staging rows also carry the untouched carrier
 /// payload in `raw`, which is deliberately not shipped to the browser.
@@ -87,9 +91,8 @@ export default async function NationalLifeDataPage() {
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
   const localEnabled = getNationalLifeLocalConnectorConfig().enabled
-  const remoteConfigured = isNationalLifeConfigured()
 
-  if (!localEnabled && !remoteConfigured) {
+  if (!localEnabled) {
     return (
       <Shell role="AGENT" userName={user?.name ?? ''}>
         <PageHeader
@@ -102,69 +105,38 @@ export default async function NationalLifeDataPage() {
     )
   }
 
-  const remoteScope = remoteConfigured ? getNationalLifeEnv().sessionScopeId : null
-  const allowedScopes = [
-    ...(localEnabled ? [LOCAL_CONNECTOR_DEPLOYMENT_SCOPE] : []),
-    ...(remoteScope ? [remoteScope] : []),
-  ]
-
   let cases: CaseRow[] = []
   let inforce: InforceRow[] = []
   let reports: PortalReportRow[] = []
   let actions: NationalLifeActionRow[] = []
   let lastSyncedAt: Date | null = null
-  let verifiedStageCount = 0
-  let totalStageCount = 0
+  let structuredSourceCount = 0
+  let rawPageSourceCount = 0
   let loadError = false
-  let foresightCases: ForesightCaseRow[] = []
-  let foresightRun: Awaited<ReturnType<typeof foresightRunStore.getStatus>> = null
 
   try {
-    const [latestCase, latestInforce] = await Promise.all([
-      prisma.nationalLifeCaseSnapshot.findFirst({
-        where: { agentId: agent.id, deploymentScope: { in: allowedScopes } },
-        select: { deploymentScope: true, fetchedAt: true },
-        orderBy: { fetchedAt: 'desc' },
-      }),
-      prisma.nationalLifeInforcePolicy.findFirst({
-        where: { agentId: agent.id, deploymentScope: { in: allowedScopes } },
-        select: { deploymentScope: true, fetchedAt: true },
-        orderBy: { fetchedAt: 'desc' },
-      }),
-    ])
-    const deploymentScope = chooseMostRecentNationalLifeScope(allowedScopes, [
-      latestCase && { deploymentScope: latestCase.deploymentScope, observedAt: latestCase.fetchedAt },
-      latestInforce && {
-        deploymentScope: latestInforce.deploymentScope,
-        observedAt: latestInforce.fetchedAt,
-      },
-    ])
-
     const [
       caseRows,
       inforceRows,
       reportRows,
       intelligenceRows,
-      session,
       localRun,
-      foresightRows,
-      currentForesightRun,
     ] = await Promise.all([
       prisma.nationalLifeCaseSnapshot.findMany({
-        where: { agentId: agent.id, deploymentScope },
+        where: { agentId: agent.id, deploymentScope: CANONICAL_SCOPE },
         select: caseSelect,
         orderBy: [{ submitDate: 'desc' }, { policyNo: 'asc' }],
       }),
       prisma.nationalLifeInforcePolicy.findMany({
-        where: { agentId: agent.id, deploymentScope },
+        where: { agentId: agent.id, deploymentScope: CANONICAL_SCOPE },
         select: inforceSelect,
         orderBy: [{ policyStatus: 'asc' }, { policyNumber: 'asc' }],
       }),
       prisma.nationalLifeReportRow.findMany({
         where: {
           agentId: agent.id,
-          deploymentScope,
-          gridKey: { not: 'CLIENT_INTELLIGENCE' },
+          deploymentScope: CANONICAL_SCOPE,
+          gridKey: { in: [...NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS] },
         },
         select: reportSelect,
         orderBy: [{ gridKey: 'asc' }, { primaryDate: 'desc' }],
@@ -172,68 +144,35 @@ export default async function NationalLifeDataPage() {
       prisma.nationalLifeReportRow.findMany({
         where: {
           agentId: agent.id,
-          deploymentScope,
+          deploymentScope: CANONICAL_SCOPE,
           gridKey: 'CLIENT_INTELLIGENCE',
         },
         select: { id: true, raw: true },
       }),
-      remoteScope && deploymentScope === remoteScope
-        ? prisma.agentIntegrationSession.findFirst({
-            where: {
-              agentId: agent.id,
-              deploymentScope: remoteScope,
-              provider: 'NATIONAL_LIFE',
-              purpose: 'CARRIER_SESSION',
-            },
-            select: { lastConnectedAt: true, lastUsedAt: true },
-          })
-        : Promise.resolve(null),
-      deploymentScope === LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
-        ? prisma.nationalLifeSyncRun.findFirst({
-            select: {
-              completedAt: true,
-              updatedAt: true,
-              completedStages: true,
-              totalStages: true,
-            },
-            where: {
-              agentId: agent.id,
-              deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-              executionSource: 'LOCAL',
-              provider: 'NATIONAL_LIFE',
-              state: 'COMPLETED',
-            },
-            orderBy: { createdAt: 'desc' },
-          })
-        : Promise.resolve(null),
-      remoteScope
-        ? prisma.nationalLifeForesightCaseSnapshot.findMany({
-            where: { agentId: agent.id, deploymentScope: remoteScope, provider: 'NATIONAL_LIFE' },
-            select: {
-              id: true,
-              displayName: true,
-              caseKind: true,
-              product: true,
-              status: true,
-              state: true,
-              observedAt: true,
-              _count: { select: { services: true } },
-            },
-            orderBy: [{ observedAt: 'desc' }, { displayName: 'asc' }],
-          })
-        : Promise.resolve([]),
-      remoteScope ? foresightRunStore.getStatus(agent.id, remoteScope) : Promise.resolve(null),
+      prisma.nationalLifeSyncRun.findFirst({
+        select: {
+          completedAt: true,
+          updatedAt: true,
+          stageCompletions: { select: { gridKey: true } },
+        },
+        where: {
+          agentId: agent.id,
+          deploymentScope: CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope,
+          executionSource: CANONICAL_NATIONAL_LIFE_SYNC.executionSource,
+          provider: CANONICAL_NATIONAL_LIFE_SYNC.provider,
+          state: 'COMPLETED',
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
     ])
 
     cases = caseRows
     inforce = inforceRows
     reports = reportRows.map(toPortalReportRow)
-    lastSyncedAt =
-      deploymentScope === LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
-        ? localRun?.completedAt ?? localRun?.updatedAt ?? null
-        : session?.lastUsedAt ?? session?.lastConnectedAt ?? null
-    verifiedStageCount = localRun?.completedStages ?? 0
-    totalStageCount = localRun?.totalStages ?? 0
+    lastSyncedAt = localRun?.completedAt ?? localRun?.updatedAt ?? null
+    const completedKeys = localRun?.stageCompletions.map((row) => row.gridKey) ?? []
+    rawPageSourceCount = completedKeys.filter((key) => DISCOVERY_PAGE_KEYS.has(key)).length
+    structuredSourceCount = completedKeys.length - rawPageSourceCount
 
     const actionQueue = buildClientActionQueue(toClientServiceEvents(intelligenceRows), {
       asOf: lastSyncedAt ?? new Date(),
@@ -254,8 +193,6 @@ export default async function NationalLifeDataPage() {
       occurredAt: item.occurredAt.toISOString(),
       policyId: policyIds.get(item.policyNumber) ?? null,
     }))
-    foresightCases = foresightRows.map(({ _count, ...row }) => ({ ...row, serviceCount: _count.services }))
-    foresightRun = currentForesightRun
   } catch (error) {
     console.error('National Life data query error', error)
     loadError = true
@@ -279,7 +216,7 @@ export default async function NationalLifeDataPage() {
       <PageHeader
         title="National Life"
         eyebrow="Carteira conectada"
-        description="Dados atuais da carteira e sinais concretos para orientar o próximo contato com cada cliente."
+        description="Sua área diária de clientes, apólices, casos e oportunidades, espelhada na National Life."
       >
         <Link
           href="/agent/integrations/national-life"
@@ -300,9 +237,9 @@ export default async function NationalLifeDataPage() {
           label="Resumo da National Life"
           items={[
             {
-              label: 'Carteira em vigor',
+              label: 'Ativas em All Clients',
               value: activeInforce,
-              detail: `${inforce.length} apólices observadas no portal`,
+              detail: `${inforce.length} apólices no escopo completo da grade; o resumo pessoal da National usa outro denominador`,
               tone: 'green',
             },
             {
@@ -318,11 +255,13 @@ export default async function NationalLifeDataPage() {
               tone: opportunityActions > 0 ? 'gold' : 'neutral',
             },
             {
-              label: 'Fontes verificadas',
-              value: totalStageCount > 0 ? `${verifiedStageCount}/${totalStageCount}` : '—',
-              detail: syncDetail,
+              label: 'Fontes estruturadas',
+              value: structuredSourceCount > 0
+                ? `${structuredSourceCount}/${NATIONAL_LIFE_READ_COVERAGE.length}`
+                : '—',
+              detail: `${rawPageSourceCount} fontes adicionais preservadas somente como página bruta · ${syncDetail}`,
               tone:
-                totalStageCount > 0 && verifiedStageCount === totalStageCount ? 'green' : 'gold',
+                structuredSourceCount === NATIONAL_LIFE_READ_COVERAGE.length ? 'green' : 'gold',
             },
           ]}
         />
@@ -332,20 +271,19 @@ export default async function NationalLifeDataPage() {
         <section className="module-main-surface">
           {!loadError && <NationalLifeActionQueue rows={actions} />}
         </section>
-        <ContextPanel eyebrow="Confiança dos dados" title="Atual e rastreável">
+        <ContextPanel eyebrow="Confiança dos dados" title="National como espelho">
           <p>
-            A carteira, os casos e os sinais abaixo vêm da última leitura concluída da National Life.
-            A data da atualização e o número de fontes verificadas ficam sempre visíveis.
+            A KeeprOne é a área operacional diária. A National Life permanece como fonte de origem,
+            e cada informação precisa carregar escopo, atualização e trilha até o registro do carrier.
           </p>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">
               Limite conhecido
             </p>
             <p className="mt-2">
-              A grade atual não fornece e-mail, telefone, prêmio anual ou valor em dinheiro. O
-              relatório oficial de carteira com contatos fornece endereços, parte dos contatos e
-              prêmio anual; essa fonte será importada pelo novo canal de downloads. Até ela entrar,
-              o Keepr One mostra os campos como ausentes, nunca como zero.
+              Páginas capturadas para descoberta não são mais contadas como relatórios. Até existir
+              um parser específico e reconciliação, elas ficam somente no raw e aparecem como fonte
+              ainda não estruturada — nunca como zero ou como linha operacional.
             </p>
           </div>
           <div className="mt-5 border-t border-white/10 pt-4">
@@ -363,9 +301,9 @@ export default async function NationalLifeDataPage() {
       <section className="mt-8 module-main-surface">
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold text-ink">Dados recebidos do portal</h2>
+            <h2 className="text-xl font-semibold text-ink">Área operacional espelhada</h2>
             <p className="mt-1 text-sm text-ink-muted">
-              Consulte casos, carteira e relatórios exatamente como foram recebidos.
+              Trabalhe com casos, carteira e registros estruturados; o bruto fica reservado à auditoria.
             </p>
           </div>
           <p className="text-sm text-ink-muted">
@@ -375,18 +313,6 @@ export default async function NationalLifeDataPage() {
         {!loadError && (
           <NationalLifeDataTabs cases={cases} inforce={inforce} reports={reports} />
         )}
-      </section>
-      <section className="mt-8 module-main-surface">
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">
-              Leitura detalhada
-            </p>
-            <h2 className="mt-1 text-xl font-semibold text-ink">Casos identificados no portal</h2>
-          </div>
-          <p className="text-sm text-ink-muted">Somente leitura · {foresightCases.length} casos</p>
-        </div>
-        <ForesightCaseTabs cases={foresightCases} run={foresightRun} />
       </section>
     </Shell>
   )

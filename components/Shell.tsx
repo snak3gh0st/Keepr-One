@@ -66,6 +66,12 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
       group: "Operação",
       matches: ["/agent/cases", "/agent/clients", "/agent/activities"],
     },
+    {
+      href: "/agent/mensagens",
+      label: "Mensagens",
+      icon: "chat",
+      group: "Operação",
+    },
     { href: "/agent/policies", label: "Apólices", icon: "document", group: "Carteira" },
     // The quotes were being written to the database and shown nowhere: the
     // screen that asked for one displayed it until the page reloaded, and
@@ -103,6 +109,7 @@ const PAGE_NAMES: Record<string, string> = {
   "/agent/illustrations/new": "Nova ilustração",
   "/agent/hierarchy": "Minha equipe",
   "/agent/clients": "CRM · Clientes",
+  "/agent/mensagens": "Mensagens",
   "/agent/policies": "Apólices",
   "/agent/policies/new": "Sobre apólices",
   "/agent/commissions": "Extrato de comissões",

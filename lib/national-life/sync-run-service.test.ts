@@ -5,74 +5,22 @@ import {
   nationalLifeSyncGridLabel,
   localStageCoverage,
   reconcileNationalLifeSync,
+  getNationalLifeSyncStatus,
   startNationalLifeSync,
   summarizeStageReceipts,
 } from './sync-run-service'
 
 const now = new Date('2026-08-03T17:00:00.000Z')
 
-function createFakeTransaction() {
-  const fake = {
-    activeRun: null as { id: string; state: string } | null,
-    createdRun: null as Record<string, unknown> | null,
-    jobs: [] as Array<Record<string, unknown>>,
-    nationalLifeSyncRun: {
-      findFirst: async () => fake.activeRun,
-      create: async ({ data }: { data: Record<string, unknown> }) => {
-        fake.createdRun = { id: 'run-1', ...data }
-        return { id: 'run-1' }
-      },
-    },
-    browserAutomationJob: {
-      createMany: async ({ data }: { data: Array<Record<string, unknown>> }) => {
-        fake.jobs.push(...data)
-        return { count: data.length }
-      },
-    },
-  }
-  return fake
-}
-
 describe('startNationalLifeSync', () => {
-  it('creates one run and one ordered job for each fixed grid', async () => {
-    const tx = createFakeTransaction()
-
-    const result = await startNationalLifeSync(tx as never, {
-      agentId: 'agent-1',
-      deploymentScope: 'scope-1',
-      now,
-    })
-
-    expect(result).toEqual({ runId: 'run-1', duplicate: false })
-    expect(tx.jobs.map((job) => [job.syncStageIndex, job.syncGridKey])).toEqual([
-      [0, 'NEW_BUSINESS'],
-      [1, 'RECENTLY_CLOSED'],
-      [2, 'INFORCE_CLIENTS'],
-      [3, 'PAID_COMMISSIONS'],
-      [4, 'CLIENT_INTELLIGENCE'],
-      [5, 'CORRESPONDENCE'],
-      [6, 'COMMISSIONS_PAYMENT_PORTAL'],
-      [7, 'PIP_PENDING'],
-      [8, 'TRANSFERS_EXCHANGES'],
-      [9, 'LIFE_PENDING_LAPSE'],
-      [10, 'COMMISSIONS_EARNING_REPORT'],
-      [11, 'PAYABLE_GROSS_COMMISSIONS'],
-    ])
-    expect(tx.jobs.every((job) => job.operation === 'SYNC_NATIONAL_LIFE_GRID')).toBe(true)
-  })
-
-  it('does not create a second active run for the same agent and scope', async () => {
-    const tx = createFakeTransaction()
-    tx.activeRun = { id: 'run-existing', state: 'RUNNING' }
-
+  it('hard-fails stale callers instead of creating a remote run', async () => {
     await expect(
-      startNationalLifeSync(tx as never, {
+      startNationalLifeSync({} as never, {
         agentId: 'agent-1',
         deploymentScope: 'scope-1',
         now,
       }),
-    ).resolves.toEqual({ runId: 'run-existing', duplicate: true })
-    expect(tx.jobs).toHaveLength(0)
+    ).rejects.toMatchObject({ code: 'LOCAL_CONNECTOR_REQUIRED' })
   })
 
   it('reconciles child jobs into a partial run without exposing row data', async () => {
@@ -111,7 +59,7 @@ describe('startNationalLifeSync', () => {
     expect(nationalLifeSyncGridLabel('INFORCE_CLIENTS')).toBe('in-force policies')
   })
 
-  it('is wired into both login completion transactions', () => {
+  it('does not enqueue the retired remote sync from login completion', () => {
     const runtime = readFileSync(
       resolve(process.cwd(), 'workers/national-life/runtime.ts'),
       'utf8',
@@ -121,8 +69,8 @@ describe('startNationalLifeSync', () => {
       'utf8',
     )
 
-    expect(runtime).toContain('startNationalLifeSync(transaction')
-    expect(interactive).toContain('startNationalLifeSync(transaction')
+    expect(runtime).not.toContain('startNationalLifeSync(transaction')
+    expect(interactive).not.toContain('startNationalLifeSync(transaction')
   })
 })
 
@@ -133,34 +81,78 @@ describe('summarizeStageReceipts', () => {
     expect(summarizeStageReceipts([])).toEqual({
       receivedRecords: null,
       writtenRecords: null,
+      duplicateRecords: null,
+      rejectedRecords: null,
     })
   })
 
   it('exposes received-but-not-written instead of hiding it behind a success', () => {
     expect(
       summarizeStageReceipts([
-        { recordCount: 200, writtenCount: 0 },
-        { recordCount: 0, writtenCount: 0 },
+        { recordCount: 200, writtenCount: 0, duplicateCount: 0, rejectedCount: 200 },
+        { recordCount: 0, writtenCount: 0, duplicateCount: 0, rejectedCount: 0 },
       ]),
-    ).toEqual({ receivedRecords: 200, writtenRecords: 0 })
+    ).toEqual({
+      receivedRecords: 200,
+      writtenRecords: 0,
+      duplicateRecords: 0,
+      rejectedRecords: 200,
+    })
   })
 
   it('adds up what was received and what survived normalization', () => {
     expect(
       summarizeStageReceipts([
-        { recordCount: 120, writtenCount: 118 },
-        { recordCount: 80, writtenCount: 80 },
+        { recordCount: 120, writtenCount: 118, duplicateCount: 2, rejectedCount: 0 },
+        { recordCount: 80, writtenCount: 80, duplicateCount: 0, rejectedCount: 0 },
       ]),
-    ).toEqual({ receivedRecords: 200, writtenRecords: 198 })
+    ).toEqual({
+      receivedRecords: 200,
+      writtenRecords: 198,
+      duplicateRecords: 2,
+      rejectedRecords: 0,
+    })
   })
+
+  /// "988 received, 823 saved" is unreadable without knowing which half is
+  /// which: a row collapsed as a duplicate is benign — new business repeats a
+  /// policy per coverage — while a row dropped for having no policy number is
+  /// real loss. Both are already counted per receipt and neither reached the
+  /// screen, so the agent saw a 165-row gap with no way to tell harm from
+  /// housekeeping.
+  it('separates rows collapsed as duplicates from rows dropped outright', () => {
+    expect(
+      summarizeStageReceipts([
+        { recordCount: 870, writtenCount: 720, duplicateCount: 140, rejectedCount: 10 },
+        { recordCount: 118, writtenCount: 103, duplicateCount: 15, rejectedCount: 0 },
+      ]),
+    ).toMatchObject({
+      receivedRecords: 988,
+      writtenRecords: 823,
+      duplicateRecords: 155,
+      rejectedRecords: 10,
+    })
+  })
+
 
   it('keeps written unknown when every receipt predates the column', () => {
     expect(
       summarizeStageReceipts([
-        { recordCount: 10, writtenCount: null },
-        { recordCount: 5, writtenCount: null },
+        { recordCount: 10, writtenCount: null, duplicateCount: 0, rejectedCount: 0 },
+        { recordCount: 5, writtenCount: null, duplicateCount: 0, rejectedCount: 0 },
       ]),
-    ).toEqual({ receivedRecords: 15, writtenRecords: null })
+    ).toEqual({
+      receivedRecords: 15,
+      writtenRecords: null,
+      duplicateRecords: 0,
+      rejectedRecords: 0,
+    })
+  })
+})
+
+describe('getNationalLifeSyncStatus', () => {
+  it('does not expose a remote deployment scope as book-sync status', async () => {
+    await expect(getNationalLifeSyncStatus('agent-1', 'SINGLE_DEPLOYMENT')).resolves.toBeNull()
   })
 })
 
@@ -252,4 +244,23 @@ describe('local stage coverage', () => {
       expect.objectContaining({ gridKey: 'INFORCE_CLIENTS', state: 'READING' }),
     ])
   })
+
+  /// A run reopened onto a stage that already failed is both the current stage
+  /// and a failed one. READING won that tie, so the screen showed a source
+  /// quietly being read while its recorded failure went unmentioned — the state
+  /// most likely to need the agent's attention was the one it hid.
+  it('reports a failed stage as failed even while it is the current one', () => {
+    expect(localStageCoverage({
+      plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+      totalStages: 2,
+      currentGridKey: 'INFORCE_CLIENTS',
+      failedGridKeys: ['INFORCE_CLIENTS'],
+      resumedAt: null,
+      completions: [],
+    })).toEqual([
+      expect.objectContaining({ gridKey: 'NEW_BUSINESS', state: 'PENDING' }),
+      expect.objectContaining({ gridKey: 'INFORCE_CLIENTS', state: 'FAILED' }),
+    ])
+  })
+
 })

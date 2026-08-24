@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
   LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
+  LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS,
   LOCAL_CONNECTOR_RUN_TTL_MS,
   completeLocalConnectorStage,
   failLocalConnectorStage,
@@ -11,6 +12,7 @@ import {
   startLocalConnectorRun,
 } from './run-service'
 import { planReadGridStages } from './capabilities'
+import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from '../read-coverage'
 
 const now = new Date('2026-08-04T18:00:00.000Z')
 
@@ -285,6 +287,44 @@ describe('local connector runs', () => {
     }))
   })
 
+  /// Reopening writes `failedStages: 0` for FAILED and PARTIAL alike, but only
+  /// PARTIAL resolved the failure rows. A reopened FAILED run therefore reported
+  /// zero failures while its unresolved rows still fed `failedKeys` on the next
+  /// pass — the counter and the rows disagreeing about the same run.
+  it('resolves stage failures when reopening a failed run', async () => {
+    const failureUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const runUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: runUpdateMany,
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            id: 'run-failed',
+            state: 'FAILED',
+            plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+            completedStages: 1,
+            currentGridKey: null,
+            stageCompletions: [{ gridKey: 'NEW_BUSINESS' }],
+            stageFailures: [{ gridKey: 'INFORCE_CLIENTS' }],
+          }),
+      },
+      nationalLifeConnectorStageFailure: { updateMany: failureUpdateMany },
+      nationalLifeConnectorStageReceipt: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never
+
+    await startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now })
+
+    expect(runUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ failedStages: 0 }),
+    }))
+    expect(failureUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { runId: 'run-failed', deviceId: 'device-1', resolvedAt: null },
+    }))
+  })
+
+
   it('resolves failures for a deprecated source when migrating a running plan', async () => {
     const failureUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
     const db = {
@@ -359,7 +399,7 @@ describe('local connector runs', () => {
       runId: 'run-checkpoint',
       duplicate: true,
       completedStages: 1,
-      resume: { sequence: 4, offset: 800 },
+      resume: { sequence: 4, offset: 800, recordCount: 600 },
     })
     expect(resumed.stages[1]?.capability).toBe('READ_GRID')
     expect(receiptFindMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -368,6 +408,78 @@ describe('local connector runs', () => {
     }))
   })
 
+  /// The TTL kills a run whose in-force export never answered, leaving
+  /// `currentGridKey` on INFORCE_CLIENTS with no receipts at all. Resuming with
+  /// the export still enabled replays the identical hang, so stages after it are
+  /// unreachable forever. Fall back to the paginated grid: the policies still
+  /// land, only the contact columns are lost.
+  it('falls back to the paginated grid when an in-force export left no receipts', async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-hung-export',
+        state: 'FAILED',
+        plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        completedStages: 1,
+        currentGridKey: 'INFORCE_CLIENTS',
+      })
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst,
+      },
+      nationalLifeConnectorStageReceipt: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never
+
+    const resumed = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { exportEnabled: true },
+    )
+
+    expect(resumed.nextStageIndex).toBe(1)
+    expect(resumed.stages[1]?.capability).toBe('READ_GRID')
+  })
+
+  /// Once the export stage reports its own timeout the run settles PARTIAL, not
+  /// FAILED, and resume re-enters through `firstFailedIndex`. The downgrade has
+  /// to key on the in-force stage having already been tried and not completed —
+  /// not on which of the two terminal states the run happened to land in.
+  it('falls back to the paginated grid when an in-force export already failed', async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-export-failed',
+        state: 'PARTIAL',
+        plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        completedStages: 1,
+        currentGridKey: null,
+        stageCompletions: [{ gridKey: 'NEW_BUSINESS' }],
+        stageFailures: [{ gridKey: 'INFORCE_CLIENTS' }],
+      })
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst,
+      },
+      nationalLifeConnectorStageFailure: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      nationalLifeConnectorStageReceipt: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never
+
+    const resumed = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { exportEnabled: true },
+    )
+
+    expect(resumed.nextStageIndex).toBe(1)
+    expect(resumed.stages[1]?.capability).toBe('READ_GRID')
+  })
+
+
+
   it('does not reopen a recently verified run and reread every source', async () => {
     const findFirst = vi.fn()
       .mockResolvedValueOnce(null)
@@ -375,8 +487,8 @@ describe('local connector runs', () => {
       .mockResolvedValueOnce({
         id: 'run-complete',
         state: 'COMPLETED',
-        plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
-        completedStages: 2,
+        plannedGridKeys: [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS],
+        completedStages: LOCAL_CONNECTOR_DEFAULT_GRID_KEYS.length,
         currentGridKey: null,
       })
     const create = vi.fn()
@@ -389,12 +501,117 @@ describe('local connector runs', () => {
     ).resolves.toMatchObject({
       runId: 'run-complete',
       duplicate: true,
-      completedStages: 2,
+      completedStages: LOCAL_CONNECTOR_DEFAULT_GRID_KEYS.length,
     })
     expect(create).not.toHaveBeenCalled()
     expect(findFirst).toHaveBeenNthCalledWith(3, expect.objectContaining({
       where: expect.objectContaining({ state: 'COMPLETED' }),
     }))
+  })
+
+  /// Turning on page discovery or the official export widens the plan the server
+  /// asks for. A terminal run that never planned those sources says nothing about
+  /// them, so serving it as a fresh answer would make the new flag look inert for
+  /// a whole freshness window — the sync would report "verified" while 14 sources
+  /// had never been opened. Only terminal runs are superseded; an in-flight one
+  /// still owns its plan, because swapping stages under a navigating device is
+  /// exactly what the plan-authority rule exists to prevent.
+  it('supersedes a verified run whose plan predates the requested sources', async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-complete',
+        state: 'COMPLETED',
+        plannedGridKeys: [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS],
+        completedStages: LOCAL_CONNECTOR_DEFAULT_GRID_KEYS.length,
+        currentGridKey: null,
+      })
+    const create = vi.fn().mockResolvedValue({ id: 'run-wide' })
+    const db = {
+      nationalLifeSyncRun: { create, updateMany: vi.fn().mockResolvedValue({ count: 0 }), findFirst },
+    } as never
+
+    // Both flags on at once is what the rollout actually turns on, and the
+    // superseding path plans from scratch instead of reusing the active run's
+    // stages — so the export stage has to survive that path, not just this one.
+    const run = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS, exportEnabled: true },
+    )
+
+    expect(run).toMatchObject({ runId: 'run-wide', duplicate: false, completedStages: 0 })
+    expect(run.stages.map(planStageKey)).toEqual([...LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS])
+    expect(create).toHaveBeenCalledTimes(1)
+
+    const byKey = new Map(run.stages.map((stage) => [planStageKey(stage), stage.capability]))
+    expect(byKey.get('INFORCE_CLIENTS')).toBe('READ_EXPORT')
+    expect(byKey.get('NEW_BUSINESS')).toBe('READ_GRID')
+    for (const sourceKey of NATIONAL_LIFE_DISCOVERY_PAGE_KEYS) {
+      expect(byKey.get(sourceKey)).toBe('READ_PAGE')
+    }
+  })
+
+  /// A failed run owns a durable cursor, so it keeps its narrower plan and
+  /// resumes rather than being discarded. The widened plan reaches it one cycle
+  /// later, when it completes and the branch above supersedes it.
+  it('resumes a failed run on its own plan even when the request adds sources', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-failed',
+        state: 'FAILED',
+        plannedGridKeys: ['NEW_BUSINESS', 'RECENTLY_CLOSED'],
+        completedStages: 1,
+        currentGridKey: null,
+        stageCompletions: [{ gridKey: 'NEW_BUSINESS' }],
+        stageFailures: [],
+      })
+      .mockResolvedValueOnce(null)
+    const create = vi.fn()
+    const db = {
+      nationalLifeSyncRun: { create, updateMany, findFirst },
+    } as never
+
+    const run = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS },
+    )
+
+    expect(create).not.toHaveBeenCalled()
+    expect(run).toMatchObject({ runId: 'run-failed', duplicate: true, completedStages: 1 })
+    expect(run.stages.map(planStageKey)).toEqual(['NEW_BUSINESS', 'RECENTLY_CLOSED'])
+    expect(run.nextStageIndex).toBe(1)
+  })
+
+  it('never swaps the plan under an in-flight run, even when sources were added', async () => {
+    const create = vi.fn()
+    const db = {
+      nationalLifeSyncRun: {
+        create,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run-live',
+          state: 'RUNNING',
+          plannedGridKeys: [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS],
+          completedStages: 2,
+          currentGridKey: 'INFORCE_CLIENTS',
+        }),
+      },
+    } as never
+
+    const run = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS },
+    )
+
+    expect(run.duplicate).toBe(true)
+    expect(run.stages.map(planStageKey)).toEqual([...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS])
+    expect(create).not.toHaveBeenCalled()
   })
 
   it('accepts a grid beyond the original two', async () => {
@@ -608,7 +825,7 @@ describe('local connector runs', () => {
     expect(written.create.raw).toMatchObject({ GlobalId: 'G1' })
   })
 
-  it('routes a captured server-rendered page to raw report rows', async () => {
+  it('persists a captured server-rendered page only in the raw landing zone', async () => {
     const reportUpsert = vi.fn().mockResolvedValue({})
     const tx = {
       nationalLifeSyncRun: {
@@ -626,7 +843,7 @@ describe('local connector runs', () => {
           sequence: 0,
           contentHash: 'f'.repeat(64),
           recordCount: 1,
-          writtenCount: 1,
+          writtenCount: 0,
           createdAt: now,
         }),
         findMany: vi.fn().mockResolvedValue([]),
@@ -661,12 +878,16 @@ describe('local connector runs', () => {
         },
       }),
     ).resolves.toMatchObject({ duplicate: false })
-    expect(reportUpsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(reportUpsert).not.toHaveBeenCalled()
+    expect(tx.nationalLifeRawGridPage.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         gridKey: 'COMMISSIONS_OVERVIEW',
-        raw: { RecordType: 'PAGE_META', Title: 'Commission Overview' },
+        records: [{ RecordType: 'PAGE_META', Title: 'Commission Overview' }],
       }),
     }))
+    expect(tx.nationalLifeConnectorStageReceipt.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ writtenCount: 0 }) }),
+    )
   })
 
   it('rejects a stage for a grid the run never planned and does not complete it', async () => {

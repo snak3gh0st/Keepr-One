@@ -196,13 +196,11 @@ export function NationalLifeLocalConnectorCard({
   storeUrl = null,
   installMode = 'store',
   baseUrl,
-  remoteAvailable = false,
 }: {
   extensionId: string
   storeUrl?: string | null
   installMode?: 'pilot' | 'store'
   baseUrl: string
-  remoteAvailable?: boolean
 }) {
   const router = useRouter()
   const installedFlowStarted = useRef(false)
@@ -591,11 +589,6 @@ export function NationalLifeLocalConnectorCard({
                     : liveProgressCopy(state, liveSync) ?? stateCopy[state]}
             </p>
           </div>
-          {remoteAvailable && !browserCapabilityResolved && (
-            <Link href="#national-life-remote" className="mt-3 ml-5 inline-flex text-sm font-semibold text-teal underline-offset-4 hover:underline">
-              Use the automatic option instead
-            </Link>
-          )}
         </div>
 
         <div className="flex flex-wrap gap-2 lg:justify-end">

@@ -3,6 +3,8 @@ import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '@/lib/national-li
 import {
   PLANNED_LOCAL_CONNECTOR_CAPABILITIES,
   isSafeNavigatePath,
+  isSafePolicyDetailPath,
+  policyDetailNavigatePath,
   planReadGridStages,
   planReadPageStages,
   planReadExportStages,
@@ -41,6 +43,64 @@ describe('isSafeNavigatePath', () => {
   })
 })
 
+// READ_POLICY_DETAIL is the first per-entity capability: the navigate target is not
+// one of a closed catalogue of static paths, it is one fixed page plus an opaque id
+// the portal assigns per policy. `isSafeNavigatePath` stays a closed-catalogue check
+// (it rejects every `?`) on purpose — loosening it would let a compromised plan point
+// the connector's `?` allowance at any future static route too. Entity-detail paths
+// get their own narrow validator instead: exactly the known policy-details page, exactly
+// one `id` param, exactly 32 lowercase hex characters — the shape the portal's own
+// `all-clients` links produce (see `policy-details?id=<32-hex>` captured live 2026-08-17).
+describe('policyDetailNavigatePath / isSafePolicyDetailPath', () => {
+  const VALID_ID = 'a73f1af893a94906b965e68d11db807b'
+
+  it('builds the navigate path for a valid 32-hex id', () => {
+    expect(policyDetailNavigatePath(VALID_ID)).toBe(
+      `/agent/book-of-business/inforce-book/all-clients/policy-details?id=${VALID_ID}`,
+    )
+  })
+
+  it('round-trips: every path it builds is accepted by the validator', () => {
+    expect(isSafePolicyDetailPath(policyDetailNavigatePath(VALID_ID))).toBe(true)
+  })
+
+  it('rejects an id that is not exactly 32 lowercase hex characters', () => {
+    expect(() => policyDetailNavigatePath('')).toThrow('UNSAFE_ENTITY_ID')
+    expect(() => policyDetailNavigatePath(VALID_ID.slice(0, 31))).toThrow('UNSAFE_ENTITY_ID')
+    expect(() => policyDetailNavigatePath(`${VALID_ID}f`)).toThrow('UNSAFE_ENTITY_ID')
+    expect(() => policyDetailNavigatePath(VALID_ID.toUpperCase())).toThrow('UNSAFE_ENTITY_ID')
+    expect(() => policyDetailNavigatePath(`${VALID_ID.slice(0, 31)}g`)).toThrow('UNSAFE_ENTITY_ID')
+    expect(() => policyDetailNavigatePath(`${VALID_ID};DROP`)).toThrow('UNSAFE_ENTITY_ID')
+  })
+
+  it('rejects any path other than exactly the known policy-details route', () => {
+    expect(isSafePolicyDetailPath(`/agent/x?id=${VALID_ID}`)).toBe(false)
+    expect(isSafePolicyDetailPath(
+      `/agent/book-of-business/inforce-book/all-clients/policy-details/extra?id=${VALID_ID}`,
+    )).toBe(false)
+    expect(isSafePolicyDetailPath(
+      `/agent/book-of-business/inforce-book/all-clients/client-information-details?id=${VALID_ID}`,
+    )).toBe(false)
+  })
+
+  it('rejects a malformed or extra query string', () => {
+    const base = '/agent/book-of-business/inforce-book/all-clients/policy-details'
+    expect(isSafePolicyDetailPath(base)).toBe(false)
+    expect(isSafePolicyDetailPath(`${base}?id=`)).toBe(false)
+    expect(isSafePolicyDetailPath(`${base}?id=${VALID_ID.slice(0, 31)}`)).toBe(false)
+    expect(isSafePolicyDetailPath(`${base}?id=${VALID_ID}&next=/agent/x`)).toBe(false)
+    expect(isSafePolicyDetailPath(`${base}?other=1&id=${VALID_ID}`)).toBe(false)
+    expect(isSafePolicyDetailPath(`${base}?id=${VALID_ID}#frag`)).toBe(false)
+  })
+
+  it('rejects scheme smuggling and traversal in the id position', () => {
+    const base = '/agent/book-of-business/inforce-book/all-clients/policy-details'
+    expect(isSafePolicyDetailPath(`${base}?id=../../admin`)).toBe(false)
+    expect(isSafePolicyDetailPath(`${base}?id=javascript:alert(1)`)).toBe(false)
+    expect(isSafePolicyDetailPath(`//evil.example${base}?id=${VALID_ID}`)).toBe(false)
+  })
+})
+
 describe('planReadGridStages', () => {
   it('maps each grid key to its portal path', () => {
     expect(planReadGridStages(['NEW_BUSINESS'])).toEqual([
@@ -61,6 +121,18 @@ describe('planReadGridStages', () => {
         gridKey: 'INFORCE_CLIENTS',
         navigatePath:
           '/agent/book-of-business/inforce-book/all-clients/all-clients-agent',
+      },
+    }])
+  })
+
+  it('marks the earning-report stage as a per-statement detail collector', () => {
+    expect(planReadGridStages(['COMMISSIONS_EARNING_REPORT'])).toEqual([{
+      capability: 'READ_GRID',
+      params: {
+        gridKey: 'COMMISSIONS_EARNING_REPORT',
+        navigatePath:
+          '/agent/compensation/commissions/paid-commissions/commissions-earning-report',
+        mode: 'COMMISSION_DETAILS',
       },
     }])
   })

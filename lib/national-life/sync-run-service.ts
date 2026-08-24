@@ -9,12 +9,7 @@ import {
 } from './sync-progress'
 import { expireStaleLocalConnectorRuns } from './local-connector/run-service'
 import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from './read-coverage'
-
-const ACTIVE_RUN_STATES: readonly NationalLifeSyncRunState[] = [
-  'QUEUED',
-  'RUNNING',
-  'PAUSED',
-]
+import { CANONICAL_NATIONAL_LIFE_SYNC } from './sync-engine'
 
 export type StartNationalLifeSyncInput = {
   agentId: string
@@ -46,6 +41,12 @@ export type NationalLifeSyncStatus = {
   /// escrevi 0.
   receivedRecords: number | null
   writtenRecords: number | null
+  /// Why received and written disagree, split by what the difference means. A
+  /// duplicate is the source listing one policy once per coverage, merged at no
+  /// cost; a rejected row had no policy number to key on and is gone. Reporting
+  /// only the gap would leave the agent unable to tell the two apart.
+  duplicateRecords: number | null
+  rejectedRecords: number | null
   /// The per-area truth behind the headline counter. A local run only becomes
   /// VERIFIED after the connector reconciles all its pages with recordsTotal.
   stageCoverage?: NationalLifeStageCoverage[]
@@ -119,10 +120,13 @@ export function localStageCoverage(input: {
           completed.get(gridKey)!.completedAt.getTime() < input.resumedAt.getTime()
         ? 'REUSED'
         : DISCOVERY_PAGE_KEYS.has(gridKey) ? 'CAPTURED' : 'VERIFIED'
-      : gridKey === input.currentGridKey
-        ? 'READING'
-        : input.failedGridKeys.includes(gridKey)
-          ? 'FAILED'
+      // Failure outranks currency. A run reopened onto a stage that already
+      // failed is both, and letting READING win hid the recorded failure behind
+      // a source that looked like it was simply being read.
+      : input.failedGridKeys.includes(gridKey)
+        ? 'FAILED'
+        : gridKey === input.currentGridKey
+          ? 'READING'
           : 'PENDING',
     verifiedRecords: completed.get(gridKey)?.expectedRecordCount ?? null,
   }))
@@ -131,16 +135,37 @@ export function localStageCoverage(input: {
 export type StageReceiptTotals = {
   receivedRecords: number | null
   writtenRecords: number | null
+  duplicateRecords: number | null
+  rejectedRecords: number | null
 }
 
 /// `writtenCount` é opcional no schema: recibos anteriores à coluna são nulos.
 /// Somá-los como zero transformaria "não sei" em "não escrevi nada", que é a
 /// mentira oposta à que a coluna existe para evitar.
+/// The gap between received and written has two causes that mean opposite
+/// things, and reporting only the gap forces the reader to guess which. A
+/// duplicate is a row the source repeated — new business lists a policy once per
+/// coverage — and collapsing it costs nothing. A rejected row had no policy
+/// number to key on and is simply gone. Both are counted per receipt already;
+/// summing them here is what carries that distinction to the screen.
+///
+/// Unlike `writtenCount`, both columns are non-null with a zero default, so a
+/// sum of zero means zero rather than "no receipt knew".
 export function summarizeStageReceipts(
-  receipts: ReadonlyArray<{ recordCount: number; writtenCount: number | null }>,
+  receipts: ReadonlyArray<{
+    recordCount: number
+    writtenCount: number | null
+    duplicateCount: number
+    rejectedCount: number
+  }>,
 ): StageReceiptTotals {
   if (receipts.length === 0) {
-    return { receivedRecords: null, writtenRecords: null }
+    return {
+      receivedRecords: null,
+      writtenRecords: null,
+      duplicateRecords: null,
+      rejectedRecords: null,
+    }
   }
   const known = receipts.filter((receipt) => typeof receipt.writtenCount === 'number')
   return {
@@ -149,57 +174,26 @@ export function summarizeStageReceipts(
       known.length === 0
         ? null
         : known.reduce((total, receipt) => total + (receipt.writtenCount ?? 0), 0),
+    duplicateRecords: receipts.reduce((total, receipt) => total + receipt.duplicateCount, 0),
+    rejectedRecords: receipts.reduce((total, receipt) => total + receipt.rejectedCount, 0),
   }
 }
 
+/**
+ * @deprecated The remote grid engine is retired. National Life book syncs are
+ * started by the local connector run service, after KeeproneConnect is paired.
+ * Keep this symbol as a hard failure for stale callers instead of allowing a
+ * login flow or an operator script to enqueue a second source of truth.
+ */
 export async function startNationalLifeSync(
   tx: NationalLifeSyncRunTransaction,
   input: StartNationalLifeSyncInput,
-): Promise<{ runId: string; duplicate: boolean }> {
-  const active = await tx.nationalLifeSyncRun.findFirst({
-    where: {
-      agentId: input.agentId,
-      deploymentScope: input.deploymentScope,
-      provider: NATIONAL_LIFE_PROVIDER,
-      executionSource: 'REMOTE',
-      state: { in: [...ACTIVE_RUN_STATES] },
-    },
-    orderBy: { createdAt: 'desc' },
-    select: { id: true },
+): Promise<never> {
+  void tx
+  void input
+  throw Object.assign(new Error('National Life book sync requires KeeproneConnect'), {
+    code: 'LOCAL_CONNECTOR_REQUIRED',
   })
-  if (active) {
-    return { runId: active.id, duplicate: true }
-  }
-
-  const run = await tx.nationalLifeSyncRun.create({
-    data: {
-      agentId: input.agentId,
-      deploymentScope: input.deploymentScope,
-      provider: NATIONAL_LIFE_PROVIDER,
-      executionSource: 'REMOTE',
-      totalStages: NATIONAL_LIFE_SYNC_STAGES.length,
-      createdAt: input.now,
-      updatedAt: input.now,
-    },
-    select: { id: true },
-  })
-
-  await tx.browserAutomationJob.createMany({
-    data: NATIONAL_LIFE_SYNC_STAGES.map((gridKey, syncStageIndex) => ({
-      agentId: input.agentId,
-      provider: NATIONAL_LIFE_PROVIDER,
-      operation: 'SYNC_NATIONAL_LIFE_GRID' as const,
-      syncRunId: run.id,
-      syncStageIndex,
-      syncGridKey: gridKey,
-      state: 'QUEUED' as const,
-      idempotencyKey: `national-life:sync:${input.agentId}:${run.id}:${syncStageIndex}`,
-      input: { syncRunId: run.id, gridKey },
-      availableAt: input.now,
-    })),
-  })
-
-  return { runId: run.id, duplicate: false }
 }
 
 type ReconcileInput = StartNationalLifeSyncInput & { runId: string }
@@ -258,12 +252,16 @@ export async function getNationalLifeSyncStatus(
   agentId: string,
   deploymentScope: string,
 ): Promise<NationalLifeSyncStatus | null> {
+  if (deploymentScope !== CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope) {
+    return null
+  }
   await expireStaleLocalConnectorRuns(prisma, { agentId })
   const run = await prisma.nationalLifeSyncRun.findFirst({
     where: {
       agentId,
       deploymentScope,
       provider: NATIONAL_LIFE_PROVIDER,
+      executionSource: CANONICAL_NATIONAL_LIFE_SYNC.executionSource,
     },
     orderBy: { createdAt: 'desc' },
     select: {
@@ -282,7 +280,14 @@ export async function getNationalLifeSyncStatus(
         select: { state: true, syncStageIndex: true, syncGridKey: true },
         orderBy: { syncStageIndex: 'asc' },
       },
-      stageReceipts: { select: { recordCount: true, writtenCount: true } },
+      stageReceipts: {
+        select: {
+          recordCount: true,
+          writtenCount: true,
+          duplicateCount: true,
+          rejectedCount: true,
+        },
+      },
       stageCompletions: {
         select: { gridKey: true, expectedRecordCount: true, completedAt: true },
       },

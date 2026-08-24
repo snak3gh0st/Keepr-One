@@ -14,6 +14,12 @@ export type NavIconName =
   | "link";
 
 const ICON_PATHS: Record<NavIconName, ReactNode> = {
+  chat: (
+    <>
+      <path d="M20 12a7 7 0 0 1-7 7H8l-4 3v-5.2A7 7 0 0 1 4 12a7 7 0 0 1 7-7h2a7 7 0 0 1 7 7Z" />
+      <path d="M8.5 11.5h7M8.5 14.5h4" />
+    </>
+  ),
   grid: (
     <>
       <rect x="3" y="3" width="7" height="7" rx="1" />

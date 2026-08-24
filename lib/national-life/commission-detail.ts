@@ -11,6 +11,16 @@ export type CommissionDetailLink = {
   statementId: string
 }
 
+export type NationalLifeCommissionEarningLink = {
+  path: string
+  statementId: string
+}
+
+const NLG_ORIGIN = 'https://www.nationallife.com'
+const NLD_EARNING_PATH =
+  '/agent/compensation/commissions/paid-commissions/commissions-earning-report/nld-commission-earning'
+const NLD_ID_PATTERN = /^[A-Za-z0-9]+$/
+
 const DETAIL_PATTERNS = [
   {
     kind: 'NLD_COMMISSION_EARNING' as const,
@@ -60,4 +70,39 @@ export function extractCommissionDetailLinks(row: GridRow): CommissionDetailLink
   }
 
   return [...links.values()]
+}
+
+/// The parent grid is stored before the extension opens the child report. Keep
+/// only the National Life earning links and normalize them to a path so the
+/// server never hands the extension an arbitrary origin from raw carrier HTML.
+export function extractNationalLifeCommissionEarningLinks(
+  rows: readonly GridRow[],
+): NationalLifeCommissionEarningLink[] {
+  const links = new Map<string, NationalLifeCommissionEarningLink>()
+
+  for (const row of rows) {
+    for (const link of extractCommissionDetailLinks(row)) {
+      if (link.kind !== 'NLD_COMMISSION_EARNING') continue
+      const normalized = normalizeNationalLifeCommissionEarningPath(link.path)
+      if (!normalized) continue
+      links.set(link.statementId, { path: normalized, statementId: link.statementId })
+    }
+  }
+
+  return [...links.values()]
+}
+
+export function normalizeNationalLifeCommissionEarningPath(value: string): string | null {
+  let url: URL
+  try {
+    url = new URL(value, NLG_ORIGIN)
+  } catch {
+    return null
+  }
+  if (url.origin !== NLG_ORIGIN || url.pathname !== NLD_EARNING_PATH) return null
+  const entries = [...url.searchParams.entries()]
+  if (entries.length !== 1 || entries[0]?.[0] !== 'id') return null
+  const statementId = entries[0][1]
+  if (!NLD_ID_PATTERN.test(statementId)) return null
+  return `${NLD_EARNING_PATH}?id=${encodeURIComponent(statementId)}`
 }

@@ -1,5 +1,59 @@
 import { describe, expect, it } from 'vitest'
-import { parseExecutableConnectorCommand, parseStagePlan } from './capabilities'
+import {
+  isSafePolicyDetailPath,
+  parseExecutableConnectorCommand,
+  parseStagePlan,
+  policyDetailNavigatePath,
+} from './capabilities'
+
+// READ_POLICY_DETAIL is the first per-entity capability: the navigate target is not
+// one of the closed catalogue of static paths every other capability uses, it is one
+// fixed page plus an opaque id the portal assigns per policy. The two functions below
+// mirror `policyDetailNavigatePath` / `isSafePolicyDetailPath` in
+// `lib/national-life/local-connector/capabilities.ts` on the server — intentionally a
+// near-duplicate rather than a shared import, for the same reason `isSafeNavigatePath`
+// is duplicated: this is a trust boundary, and each side validates independently.
+describe('policyDetailNavigatePath / isSafePolicyDetailPath', () => {
+  const VALID_ID = 'a73f1af893a94906b965e68d11db807b'
+
+  it('builds the navigate path for a valid 32-hex id', () => {
+    expect(policyDetailNavigatePath(VALID_ID)).toBe(
+      `/agent/book-of-business/inforce-book/all-clients/policy-details?id=${VALID_ID}`,
+    )
+  })
+
+  it('round-trips: every path it builds is accepted by the validator', () => {
+    expect(isSafePolicyDetailPath(policyDetailNavigatePath(VALID_ID))).toBe(true)
+  })
+
+  it('rejects an id that is not exactly 32 lowercase hex characters', () => {
+    expect(() => policyDetailNavigatePath('')).toThrow('UNSAFE_ENTITY_ID')
+    expect(() => policyDetailNavigatePath(VALID_ID.slice(0, 31))).toThrow('UNSAFE_ENTITY_ID')
+    expect(() => policyDetailNavigatePath(`${VALID_ID}f`)).toThrow('UNSAFE_ENTITY_ID')
+    expect(() => policyDetailNavigatePath(VALID_ID.toUpperCase())).toThrow('UNSAFE_ENTITY_ID')
+  })
+
+  it('rejects any path other than exactly the known policy-details route', () => {
+    expect(isSafePolicyDetailPath(`/agent/x?id=${VALID_ID}`)).toBe(false)
+    expect(isSafePolicyDetailPath(
+      `/agent/book-of-business/inforce-book/all-clients/client-information-details?id=${VALID_ID}`,
+    )).toBe(false)
+  })
+
+  it('rejects a malformed or extra query string', () => {
+    const base = '/agent/book-of-business/inforce-book/all-clients/policy-details'
+    expect(isSafePolicyDetailPath(base)).toBe(false)
+    expect(isSafePolicyDetailPath(`${base}?id=`)).toBe(false)
+    expect(isSafePolicyDetailPath(`${base}?id=${VALID_ID}&next=/agent/x`)).toBe(false)
+    expect(isSafePolicyDetailPath(`${base}?id=${VALID_ID}#frag`)).toBe(false)
+  })
+
+  it('rejects scheme smuggling and traversal in the id position', () => {
+    const base = '/agent/book-of-business/inforce-book/all-clients/policy-details'
+    expect(isSafePolicyDetailPath(`${base}?id=../../admin`)).toBe(false)
+    expect(isSafePolicyDetailPath(`//evil.example${base}?id=${VALID_ID}`)).toBe(false)
+  })
+})
 
 describe('parseStagePlan', () => {
   it('accepts a READ_GRID stage from the server', () => {
@@ -29,6 +83,22 @@ describe('parseStagePlan', () => {
     expect(stage).toEqual({
       capability: 'READ_PAGE',
       params: { sourceKey: 'AGENT_DASHBOARD', navigatePath: '/agent/' },
+    })
+  })
+
+  it('accepts the explicit commission-detail mode', () => {
+    const [stage] = parseStagePlan([{
+      capability: 'READ_GRID',
+      params: {
+        gridKey: 'COMMISSIONS_EARNING_REPORT',
+        navigatePath:
+          '/agent/compensation/commissions/paid-commissions/commissions-earning-report',
+        mode: 'COMMISSION_DETAILS',
+      },
+    }])
+    expect(stage).toMatchObject({
+      capability: 'READ_GRID',
+      params: { mode: 'COMMISSION_DETAILS' },
     })
   })
 

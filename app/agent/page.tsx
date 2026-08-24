@@ -12,7 +12,10 @@ import {
   totalForPeriod,
   totalOf,
 } from '@/lib/national-life/commission-records'
-import { getNationalLifeEnv, isNationalLifeConfigured } from '@/lib/national-life/env'
+import {
+  getNationalLifeLocalConnectorConfig,
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+} from '@/lib/national-life/local-connector/config'
 import { Shell } from '@/components/Shell'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { policyStatusLabel } from '@/components/StatusPill'
@@ -220,6 +223,7 @@ export default async function AgentDashboard({
     : '/agent/journey'
 
   const now = new Date()
+  const localConnectorEnabled = getNationalLifeLocalConnectorConfig().enabled
   const currentP = periodFromDate(now)
   const previousP = shiftPeriod(currentP, -1)
   const trendStartP = shiftPeriod(currentP, -5)
@@ -394,12 +398,12 @@ export default async function AgentDashboard({
     // always read it directly; this dashboard summed only CommissionRecord,
     // which is empty, so the same agent saw real commission on one page and
     // zero here. Both read the same source now.
-    if (isNationalLifeConfigured()) {
+    if (localConnectorEnabled) {
       const carrierRows = await prisma.nationalLifeReportRow.findMany({
         where: {
           agentId: agent.id,
-          deploymentScope: getNationalLifeEnv().sessionScopeId,
-          gridKey: 'COMMISSION_DETAIL_NLD_COMMISSION_EARNING',
+          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+          gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
         },
         select: { id: true, raw: true, amounts: true },
       })

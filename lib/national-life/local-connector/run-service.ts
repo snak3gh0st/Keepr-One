@@ -1,5 +1,8 @@
-import 'server-only'
-
+/**
+ * Shared by Next server routes and the standalone National Life TSX worker.
+ * Keep this dependency graph free of `server-only`: that package intentionally
+ * throws when the worker imports the shared run service outside Next.
+ */
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { NATIONAL_LIFE_PROVIDER } from '../constants'
 import type { NationalLifeGridKey } from '../portal-grid-client'
@@ -179,15 +182,15 @@ export async function startLocalConnectorRun(
   duplicate: boolean
   completedStages: number
   nextStageIndex: number
-  resume?: { sequence: number; offset: number }
+  resume?: { sequence: number; offset: number; recordCount: number }
 }> {
   const now = input.now ?? new Date()
+  const requestedGridKeys = options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS
   // Planned before any write: an unknown grid key must fail the request rather
   // than leave a RUNNING run behind that no device can ever finish.
-  const stages = planLocalConnectorStages(
-    options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
-    { exportEnabled: options?.exportEnabled },
-  )
+  const stages = planLocalConnectorStages(requestedGridKeys, {
+    exportEnabled: options?.exportEnabled,
+  })
   await failStaleLocalRuns(db, { agentId: input.agentId, deviceId: input.deviceId, now })
 
   const runSelect = {
@@ -244,7 +247,29 @@ export async function startLocalConnectorRun(
         orderBy: { completedAt: 'desc' },
         select: runSelect,
       })
-  const active = running ?? (options?.forceRefresh ? null : failed) ?? completed
+  // Turning on page discovery or the official export widens the plan the server
+  // asks for, and a run that predates the new sources says nothing about them.
+  // Reusing one would report "verified" for a whole freshness window while those
+  // sources had never been opened — the flag would read as inert.
+  //
+  // Only COMPLETED is superseded, and the asymmetry is deliberate:
+  //
+  // - RUNNING keeps its plan. Swapping stages under a device that is already
+  //   navigating is exactly what the plan-authority rule below exists to prevent.
+  // - FAILED/PARTIAL keeps its plan too, because it owns a durable cursor worth
+  //   resuming. It costs at most one cycle: when it finishes on the narrow plan
+  //   it becomes COMPLETED, and the next start supersedes it here.
+  // - COMPLETED has nothing left to resume and no reopen path — `reopening` does
+  //   not include it, and its `nextStageIndex` is the end of the plan — so it can
+  //   only be replaced. Widening it in place would leave a finished run holding
+  //   12 of 26 stages with nothing to hand the device.
+  const missesRequestedSources = (run: { plannedGridKeys?: string[] } | null) => {
+    if (!run) return false
+    const stored = plannedGridKeys({ plannedGridKeys: run.plannedGridKeys ?? [] })
+    return requestedGridKeys.some((gridKey) => !stored.includes(gridKey))
+  }
+  const reusableCompleted = missesRequestedSources(completed) ? null : completed
+  const active = running ?? (options?.forceRefresh ? null : failed) ?? reusableCompleted
   if (active) {
     const storedPlan = plannedGridKeys(active)
     const activePlan = storedPlan.filter((gridKey) => !DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS.has(gridKey))
@@ -315,7 +340,10 @@ export async function startLocalConnectorRun(
           updatedAt: now,
         },
       })
-      if (active.state === 'PARTIAL') {
+      // Whatever writes `failedStages: 0` owes the same answer to the rows.
+      // Resolving only PARTIAL left a reopened FAILED run reporting zero
+      // failures while its unresolved rows still fed `failedKeys` next pass.
+      if (reopening && db.nationalLifeConnectorStageFailure) {
         await db.nationalLifeConnectorStageFailure.updateMany({
           where: { runId: active.id, deviceId: input.deviceId, resolvedAt: null },
           data: { resolvedAt: now, updatedAt: now },
@@ -335,8 +363,10 @@ export async function startLocalConnectorRun(
         })
       }
     }
-    let resume: { sequence: number; offset: number } | undefined
+    let resume: { sequence: number; offset: number; recordCount: number } | undefined
     const currentGridKey = activePlan[nextStageIndex]
+    const inForceRetriedAfterFailure =
+      active.state === 'FAILED' || failedKeys.includes('INFORCE_CLIENTS')
     let currentStageHasReceipts = false
     if (currentGridKey && db.nationalLifeConnectorStageReceipt) {
       const receipts = await db.nationalLifeConnectorStageReceipt.findMany({
@@ -351,27 +381,43 @@ export async function startLocalConnectorRun(
         (receipt.sequence > 0 || receipt.recordCount > 0))) {
         let sequence = 0
         let offset = 0
+        let recordCount = 0
         for (const receipt of receipts) {
           if (receipt.sequence !== sequence || receipt.nextOffset < offset) break
           sequence += 1
           offset = receipt.nextOffset
+          recordCount += receipt.recordCount
         }
-        if (sequence > 0 || offset > 0) resume = { sequence, offset }
+        if (sequence > 0 || offset > 0) resume = { sequence, offset, recordCount }
       }
     }
+    const inForceExportExhausted =
+      currentGridKey === 'INFORCE_CLIENTS' &&
+      (currentStageHasReceipts || inForceRetriedAfterFailure)
     // The plan comes from the run that already exists, not from what this call
     // asked for: returning the requested grids would hand the device a plan whose
     // stages the run can never account for, and it would never complete.
     return {
       runId: active.id,
       schemaVersion: LOCAL_CONNECTOR_SCHEMA_VERSION,
-      // Never switch an in-flight in-force stage from paginated receipts to an
-      // XLSX export. Both use the same durable receipt coordinates, so mixing
-      // them would correctly trip idempotency conflicts instead of completing.
+      // The in-force export gets one attempt per run. Past that, the retry goes
+      // through the paginated grid.
+      //
+      // Three ways the attempt is spent, and the terminal state does not
+      // distinguish them: partial receipts exist (mixing strategies would trip
+      // idempotency, since both share the same durable coordinates), the stage
+      // reported its own failure (run settles PARTIAL), or the export answered
+      // nothing at all and the TTL killed the run parked on it (run settles
+      // FAILED, no failure row). Keying on the state would cover one and miss
+      // the others.
+      //
+      // Replaying the export replays the same silent hang, and INFORCE_CLIENTS
+      // is index 2 of 26 — every source after it, all seven commission ones
+      // included, stays unreachable. The grid shares this parser, so the
+      // policies still land and only the export-only contact columns are lost.
+      // Degrading beats blocking, and neither skips the source.
       stages: planLocalConnectorStages(activePlan, {
-        exportEnabled: options?.exportEnabled && !(
-          currentGridKey === 'INFORCE_CLIENTS' && currentStageHasReceipts
-        ),
+        exportEnabled: options?.exportEnabled && !inForceExportExhausted,
       }),
       duplicate: true as const,
       completedStages,
@@ -565,15 +611,15 @@ async function inChunks<T>(items: T[], write: (chunk: T[]) => Promise<unknown>) 
   }
 }
 
-/// Returns rows actually written. It can be below `envelope.records.length`: the
-/// mappers drop rows with no natural key and dedupe on it, so a whole page can
-/// normalize to nothing. The receipt records both numbers so a run that ingested
-/// zero rows is visible instead of looking like a clean empty grid.
+/// Returns the quality counters alongside rows actually written. It can be below
+/// `envelope.records.length`: the mappers drop rows with no natural key and dedupe
+/// on it, so a whole page can normalize to nothing. The receipt records all three
+/// numbers so a run that ingested zero rows is visible instead of looking clean.
 async function persistRecords(
   tx: Prisma.TransactionClient,
   input: IngestInput,
   observedAt: Date,
-): Promise<number> {
+): Promise<{ writtenCount: number; duplicateCount: number; rejectedCount: number }> {
   const plan = planRawIngest(input.gridKey, input.envelope.records)
 
   if (plan.target === 'CASE_SNAPSHOT') {
@@ -606,7 +652,11 @@ async function persistRecords(
         }),
       ),
     )
-    return plan.snapshots.length
+    return {
+      writtenCount: plan.snapshots.length,
+      duplicateCount: plan.stats.duplicateCount,
+      rejectedCount: plan.stats.rejectedCount,
+    }
   }
 
   if (plan.target === 'INFORCE_POLICY') {
@@ -637,7 +687,15 @@ async function persistRecords(
         }),
       ),
     )
-    return plan.snapshots.length
+    return {
+      writtenCount: plan.snapshots.length,
+      duplicateCount: plan.stats.duplicateCount,
+      rejectedCount: plan.stats.rejectedCount,
+    }
+  }
+
+  if (plan.target === 'RAW_PAGE_ONLY') {
+    return { writtenCount: 0, duplicateCount: 0, rejectedCount: 0 }
   }
 
   await inChunks(plan.rows, (chunk) =>
@@ -671,7 +729,11 @@ async function persistRecords(
       }),
     ),
   )
-  return plan.rows.length
+  return {
+    writtenCount: plan.rows.length,
+    duplicateCount: plan.stats.duplicateCount,
+    rejectedCount: plan.stats.rejectedCount,
+  }
 }
 
 /// Removes rows that disappeared from a newly verified carrier snapshot.
@@ -720,6 +782,8 @@ function publicReceipt(receipt: {
   contentHash: string
   recordCount: number
   writtenCount: number | null
+  duplicateCount?: number | null
+  rejectedCount?: number | null
   sourceOffset?: number
   nextOffset?: number
   createdAt: Date
@@ -732,6 +796,8 @@ function publicReceipt(receipt: {
     contentHash: receipt.contentHash,
     recordCount: receipt.recordCount,
     writtenCount: receipt.writtenCount,
+    duplicateCount: receipt.duplicateCount ?? 0,
+    rejectedCount: receipt.rejectedCount ?? 0,
     sourceOffset: receipt.sourceOffset ?? 0,
     nextOffset: receipt.nextOffset ?? 0,
     createdAt: receipt.createdAt.toISOString(),
@@ -858,7 +924,7 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
         throw new LocalConnectorRunError('IDEMPOTENCY_CONFLICT')
       }
 
-      const writtenCount = await persistRecords(tx, input, observedAt)
+      const ingest = await persistRecords(tx, input, observedAt)
       // Preserve the carrier payload before normalization. Business models may
       // collapse duplicate policies or reject a row without a natural key; the
       // faithful page snapshot guarantees that this never becomes silent data
@@ -905,7 +971,9 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
           // that it is a public receipt field, and that paired with writtenCount
           // it makes "received 200, wrote 0" visible instead of clean.
           recordCount: input.envelope.records.length,
-          writtenCount,
+          writtenCount: ingest.writtenCount,
+          duplicateCount: ingest.duplicateCount,
+          rejectedCount: ingest.rejectedCount,
           idempotencyKey: input.idempotencyKey,
           createdAt: now,
           updatedAt: now,
