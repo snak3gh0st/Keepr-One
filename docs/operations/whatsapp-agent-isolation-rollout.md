@@ -3,16 +3,30 @@
 ## Contrato permanente
 
 - Cada agente Keepr One possui uma conta Chatwoot própria.
-- Cada conta possui exatamente uma caixa WhatsApp e exatamente um número.
+- Cada conta pode possuir canais de tipos diferentes, mas somente uma identidade
+  de cada tipo: um WhatsApp, um e-mail e assim por diante.
 - O mesmo número, identificador externo ou caixa não pode pertencer a dois agentes.
-- O Chatwoot é a interface e o registro das conversas; a Meta Cloud API é o
-  transporte oficial. Evolution é somente a ponte temporária de migração.
+- O Keepr One é a única interface diária do agente. O Chatwoot permanece como
+  registro e motor invisível; a Meta Cloud API é o transporte oficial. Evolution
+  é somente a ponte temporária de migração.
 - Grupos, histórico anterior e sessões sem telefone confirmado não entram no
   Chatwoot.
 
 O banco reforça esse contrato em `AgentMessagingAccount` e
 `AgentMessagingChannel`. As restrições são globais, não dependem de filtros de
 interface ou da disciplina de um operador.
+
+## Caixa omnichannel nativa
+
+O portal consulta as APIs Chatwoot somente pelo backend do Keepr, usando o token
+restrito à conta isolada do agente. O navegador recebe apenas inboxes, contatos,
+conversas, mensagens, anexos e estados de entrega normalizados. Campos de equipe,
+atribuição e administração nunca fazem parte do contrato da UI.
+
+WhatsApp e e-mail aparecem na mesma lista, identificados por canal. Leitura,
+busca, histórico e resposta acontecem dentro do Keepr One. O iframe do produto
+Chatwoot não é usado na operação diária; ele pode aparecer dentro do painel de
+conexão somente durante a configuração inicial de um provedor.
 
 ## Estado temporário: Evolution
 

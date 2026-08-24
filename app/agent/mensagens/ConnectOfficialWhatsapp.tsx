@@ -3,8 +3,11 @@
 import { useState } from 'react'
 import { Button } from '@/components/Button'
 
-export function ConnectOfficialWhatsapp({ setupUrl }: { setupUrl: string }) {
+export function ConnectOfficialWhatsapp() {
   const [checking, setChecking] = useState(false)
+  const [showSetup, setShowSetup] = useState(false)
+  const [setupUrl, setSetupUrl] = useState<string | null>(null)
+  const [loadingSetup, setLoadingSetup] = useState(false)
   const [errorCode, setErrorCode] = useState<string | null>(null)
 
   async function verify() {
@@ -20,6 +23,25 @@ export function ConnectOfficialWhatsapp({ setupUrl }: { setupUrl: string }) {
     setChecking(false)
   }
 
+  async function toggleSetup() {
+    if (showSetup) {
+      setShowSetup(false)
+      return
+    }
+    if (!setupUrl) {
+      setLoadingSetup(true)
+      const response = await fetch('/api/agent/messaging/setup-session', { method: 'POST' })
+      const body = await response.json().catch(() => ({})) as { url?: string }
+      setLoadingSetup(false)
+      if (!response.ok || !body.url) {
+        setErrorCode('SETUP_SESSION_FAILED')
+        return
+      }
+      setSetupUrl(body.url)
+    }
+    setShowSetup(true)
+  }
+
   return (
     <div className="mx-auto w-full max-w-xl">
       <div className="keepr-card rounded-2xl p-8">
@@ -30,21 +52,20 @@ export function ConnectOfficialWhatsapp({ setupUrl }: { setupUrl: string }) {
         </p>
 
         <ol className="mt-5 space-y-1.5 text-sm leading-6 text-ink-muted">
-          <li>1. Abra a configuração segura em uma nova aba</li>
+          <li>1. Abra a configuração segura dentro do Keepr One</li>
           <li>2. Vá em Configurações → Caixas de entrada → Adicionar caixa</li>
           <li>3. Escolha WhatsApp Cloud e conclua o acesso com a Meta</li>
-          <li>4. Volte aqui e valide a conexão</li>
+          <li>4. Feche a configuração e valide a conexão</li>
         </ol>
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <a
-            href={setupUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex min-h-10 items-center justify-center rounded-lg bg-rail-strong px-4 py-2 text-sm font-medium text-paper"
+          <Button
+            variant="primary"
+            onClick={() => void toggleSetup()}
+            disabled={loadingSetup}
           >
-            Abrir configuração oficial
-          </a>
+            {loadingSetup ? 'Abrindo…' : showSetup ? 'Fechar configuração' : 'Abrir configuração oficial'}
+          </Button>
           <Button variant="secondary" onClick={() => void verify()} disabled={checking}>
             {checking ? 'Validando…' : 'Já conectei, validar'}
           </Button>
@@ -62,6 +83,20 @@ export function ConnectOfficialWhatsapp({ setupUrl }: { setupUrl: string }) {
                     ? 'A Meta ainda não devolveu um telefone verificado para esta caixa.'
                     : 'Não consegui validar a caixa oficial agora. Tente novamente em alguns instantes.'}
           </p>
+        )}
+
+        {showSetup && setupUrl && (
+          <div className="mt-6 overflow-hidden rounded-2xl border border-border-steel bg-paper">
+            <div className="border-b border-border-steel bg-panel px-4 py-3 text-xs font-medium text-ink-muted">
+              Ambiente seguro de conexão · exibido dentro do Keepr One
+            </div>
+            <iframe
+              src={setupUrl}
+              title="Configuração oficial do WhatsApp"
+              className="h-[min(68vh,720px)] w-full border-0"
+              allow="clipboard-write; camera; microphone"
+            />
+          </div>
         )}
       </div>
     </div>

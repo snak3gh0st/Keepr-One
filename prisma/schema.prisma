@@ -26,6 +26,16 @@ enum AgentStatus {
 enum MessagingChannelProvider {
   EVOLUTION
   META_CLOUD
+  CHATWOOT_EMAIL
+  OTHER
+}
+
+enum MessagingChannelKind {
+  WHATSAPP
+  EMAIL
+  SMS
+  INSTAGRAM
+  OTHER
 }
 
 enum MessagingChannelStatus {
@@ -364,7 +374,7 @@ model Agent {
   nationalLifeConnectorCommands         NationalLifeConnectorCommand[]
   nationalLifeExportUploads             NationalLifeExportUpload[]
   messagingAccount                      AgentMessagingAccount?
-  messagingChannel                      AgentMessagingChannel?
+  messagingChannels                     AgentMessagingChannel[]
   producedPromotionCredits              PromotionCredit[]                      @relation("PromotionCreditProducer")
   promotionCreditAttributions           PromotionCreditAttribution[]           @relation("PromotionCreditAttributedAgent")
   ledPromotionCreditAttributions        PromotionCreditAttribution[]           @relation("PromotionCreditAttributionLeader")
@@ -787,13 +797,14 @@ model AgentMessagingAccount {
   @@unique([provider, externalAccountId])
 }
 
-/// One agent owns one WhatsApp transport identity. Provider identifiers and the
-/// normalized number are globally unique so reconnecting a number can never move
-/// another agent's inbox by accident.
+/// An agent can own one identity of each channel kind (WhatsApp, email, etc.).
+/// Provider identifiers, addresses and inboxes remain globally unique so a
+/// reconnect can never move another agent's conversations by accident.
 model AgentMessagingChannel {
   id                    String                   @id @default(cuid())
-  agentId               String                   @unique
+  agentId               String
   agent                 Agent                    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  kind                  MessagingChannelKind
   provider              MessagingChannelProvider
   status                MessagingChannelStatus   @default(PROVISIONING)
   normalizedPhoneE164   String?                  @unique
@@ -809,6 +820,7 @@ model AgentMessagingChannel {
   createdAt             DateTime                 @default(now()) @db.Timestamptz(3)
   updatedAt             DateTime                 @updatedAt @db.Timestamptz(3)
 
+  @@unique([agentId, kind])
   @@index([provider, status])
 }
 
