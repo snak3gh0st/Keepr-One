@@ -179,6 +179,7 @@ class InMemoryNationalLifeSyncRepository implements NationalLifeSyncRepository {
         this.applications.set(updated.id, updated)
         return structuredClone(updated)
       },
+      advanceCaseCrmStage: async () => undefined,
 
       upsertRequirementByExternalId: async (input) => {
         const existing = Array.from(this.requirements.values()).find(

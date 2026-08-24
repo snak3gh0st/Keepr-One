@@ -157,6 +157,7 @@ describe('parseRapidSolveResponse', () => {
       faceAmount: 250000,
       annualPremium: 3600,
       monthlyPremium: 300,
+      targetPremium: null,
       lapseYear: 'NEVER',
     })
   })
@@ -190,6 +191,47 @@ describe('parseRapidSolveResponse', () => {
       ok: false,
       message: 'Idade fora do produto',
     })
+  })
+
+  it.each([
+    'TargetPremium',
+    'CommissionableTargetPremium',
+    'CTP',
+    'TargetPremiumAmount',
+  ])('normalises the explicit response alias %s as an illustration estimate', (alias) => {
+    const result = parseRapidSolveResponse({
+      Success: true,
+      FaceAmount: 250000,
+      AnnualPremium: 3600,
+      MonthlyPremium: 300,
+      [alias]: '$3,000.00',
+    })
+
+    expect(result).toMatchObject({ ok: true, targetPremium: 3000 })
+  })
+
+  it('falls through an unusable Target Premium alias to the next explicit alias', () => {
+    const result = parseRapidSolveResponse({
+      Success: true,
+      FaceAmount: 250000,
+      TargetPremium: 'N/A',
+      CTP: '3,000.00',
+    })
+
+    expect(result).toMatchObject({ ok: true, targetPremium: 3000 })
+  })
+
+  it('does not derive Target Premium from generic premium or commission fields', () => {
+    const result = parseRapidSolveResponse({
+      Success: true,
+      FaceAmount: 250000,
+      AnnualPremium: 3600,
+      MonthlyPremium: 300,
+      PremiumAmt: 3600,
+      Commission: 2880,
+    })
+
+    expect(result).toMatchObject({ ok: true, targetPremium: null })
   })
 
   it('falls back to a readable message when the carrier gives none', () => {
@@ -238,6 +280,7 @@ describe('parseRapidSolveResponse', () => {
       faceAmount: 250000,
       annualPremium: 3600,
       monthlyPremium: 300,
+      targetPremium: null,
       lapseYear: 2061,
     })
   })

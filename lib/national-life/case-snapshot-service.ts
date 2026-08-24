@@ -1,6 +1,10 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../prisma'
 import type { GridRow, NationalLifeGridKey } from './portal-grid-client'
+import {
+  syncConfirmedCasePromotionCreditsSafely,
+  type PromotionCreditSyncResult,
+} from './promotion-credit-sync'
 
 /// Normalised view of one carrier grid row. Every carrier field arrives as a
 /// string (including premiums and dates), so nothing is coerced here beyond
@@ -18,6 +22,7 @@ export type CaseSnapshot = {
   sentDate: string | null
   modalPremium: string | null
   anticipatedAnnualPremium: string | null
+  targetPremium: string | null
   submitMethod: string | null
   caseManager: string | null
   agency: string | null
@@ -82,6 +87,16 @@ export function toCaseSnapshot(row: GridRow): CaseSnapshot | null {
       'AnticipatedAnnualPremium',
       'AnticipatedAnnualPremiumDollarValue',
     ),
+    // CTP is a carrier-owned policy value. Keep this allowlist explicit so a
+    // modal premium, generic premium amount, or commission can never be
+    // promoted into Target Premium merely because it looks monetary.
+    targetPremium: text(
+      row,
+      'TargetPremium',
+      'CommissionableTargetPremium',
+      'CTP',
+      'TargetPremiumAmount',
+    ),
     submitMethod: text(row, 'SubmitMethod'),
     caseManager: text(row, 'CaseManager'),
     agency: text(row, 'Agency'),
@@ -118,7 +133,7 @@ const UPSERT_CHUNK_SIZE = 500
 
 export async function persistCaseSnapshots(
   input: PersistSnapshotsInput,
-): Promise<{ written: number }> {
+): Promise<{ written: number; promotionCredits?: PromotionCreditSyncResult }> {
   let written = 0
 
   for (let offset = 0; offset < input.snapshots.length; offset += UPSERT_CHUNK_SIZE) {
@@ -127,7 +142,9 @@ export async function persistCaseSnapshots(
     written += chunk.length
   }
 
-  return { written }
+  const promotionCredits = await syncConfirmedCasePromotionCreditsSafely(input)
+
+  return { written, promotionCredits }
 }
 
 function buildCaseSnapshotUpsert(input: PersistSnapshotsInput, snapshot: CaseSnapshot) {
@@ -143,6 +160,7 @@ function buildCaseSnapshotUpsert(input: PersistSnapshotsInput, snapshot: CaseSna
     sentDate: snapshot.sentDate,
     modalPremium: snapshot.modalPremium,
     anticipatedAnnualPremium: snapshot.anticipatedAnnualPremium,
+    targetPremium: snapshot.targetPremium,
     submitMethod: snapshot.submitMethod,
     caseManager: snapshot.caseManager,
     agency: snapshot.agency,

@@ -9,11 +9,18 @@ import {
   getPromotionJourney,
   type JacketTone,
   type PromotionMode,
+  type PromotionStage,
 } from "@/lib/promotion-journey";
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
 
 const PC = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const WINDOW_DATE = new Intl.DateTimeFormat("pt-BR", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
 
 const BLACK_JACKET_SILHOUETTE =
   "M74 38 116 18 143 50 177 50 204 18 246 38 294 125 260 145 238 108 246 326 160 348 74 326 82 108 60 145 26 125Z";
@@ -53,64 +60,119 @@ function formatPc(value: number) {
   return `${PC.format(Math.max(0, value))} PC`;
 }
 
+function formatWindow(windowStart: string, windowEnd: string) {
+  return `${WINDOW_DATE.format(new Date(windowStart))} — ${WINDOW_DATE.format(new Date(windowEnd))}`;
+}
+
 function getRemainingLabel({
   loadError,
+  hasPromotionData,
   mode,
-  personalRemaining,
-  agencyRemaining,
+  stage,
 }: {
   loadError: boolean;
+  hasPromotionData: boolean;
   mode: PromotionMode;
-  personalRemaining: number;
-  agencyRemaining: number | null;
+  stage: PromotionStage | undefined;
 }) {
   if (loadError) return "Progresso indisponível";
+  if (!hasPromotionData) return "Aguardando Target Premium reconhecido";
+  if (!stage) return "Requisitos atingidos";
 
   if (mode === "individual") {
-    return `${formatPc(personalRemaining)} para avançar`;
+    return `${formatPc(stage.personalRemaining)} para avançar pela produção pessoal`;
   }
 
-  const agency = agencyRemaining ?? 0;
-  if (agency > 0 && personalRemaining > 0) {
-    return `${formatPc(agency)} na agência + ${formatPc(personalRemaining)} pessoais`;
+  const agencyProgress = stage.agencyProgress ?? 0;
+  if (stage.personalProgress >= agencyProgress) {
+    return `${formatPc(stage.personalRemaining)} para avançar pela rota pessoal`;
+  }
+
+  const agency = stage.agencyRemaining ?? 0;
+  const agencyPersonal = stage.agencyPersonalRemaining ?? 0;
+  if (agency > 0 && agencyPersonal > 0) {
+    return `${formatPc(agency)} na agência + ${formatPc(agencyPersonal)} pessoais`;
   }
   if (agency > 0) return `${formatPc(agency)} na agência para avançar`;
-  if (personalRemaining > 0) return `${formatPc(personalRemaining)} pessoais para avançar`;
+  if (agencyPersonal > 0) {
+    return `${formatPc(agencyPersonal)} pessoais para validar a rota da agência`;
+  }
   return "Requisitos atingidos";
 }
 
 export function JourneyDashboardPreview({
   personalPc,
   agencyPc,
+  estimatedPersonalPc,
+  estimatedAgencyPc,
+  pendingPersonalPc,
+  pendingAgencyPc,
+  hasPromotionData,
+  windowStart,
+  windowEnd,
+  highestAchievementRankId,
   mode,
   loadError,
+  journeyHref = "/agent/journey",
 }: {
   personalPc: number;
   agencyPc: number;
+  estimatedPersonalPc: number;
+  estimatedAgencyPc: number;
+  pendingPersonalPc: number;
+  pendingAgencyPc: number;
+  hasPromotionData: boolean;
+  windowStart: string;
+  windowEnd: string;
+  highestAchievementRankId: string | null;
   mode: PromotionMode;
   loadError: boolean;
+  journeyHref?: string;
 }) {
   const root = useRef<HTMLElement>(null);
   const journey = getPromotionJourney({ personalPc, agencyPc, mode });
   const nextStage = journey.stages.find((stage) => stage.status === "current");
   const jacketStages = journey.stages.filter((stage) => stage.jacketTone);
   const finalStage = journey.stages.at(-1);
+  const highestAchievement = highestAchievementRankId
+    ? journey.stages.find((stage) => stage.id === highestAchievementRankId)
+    : undefined;
+  const historicalAchievementIsAhead = Boolean(
+    highestAchievement &&
+      highestAchievement.step > (journey.currentRank?.step ?? 0),
+  );
+  const historicalAchievementLabel =
+    highestAchievement?.jacket ?? highestAchievement?.title ?? null;
+  const strongestRoute =
+    mode === "agency" &&
+    (journey.agencyProgress ?? 0) >= journey.personalProgress
+      ? "agency"
+      : "personal";
   const finalTarget =
-    mode === "agency"
+    strongestRoute === "agency"
       ? (finalStage?.agencyTarget ?? 600_000)
       : (finalStage?.personalTarget ?? 156_000);
-  const displayedPc = mode === "agency" ? journey.agencyPc : journey.personalPc;
-  const currentPosition = journey.currentRank?.jacket ?? journey.currentRank?.title ?? "Início da jornada";
+  const displayedPc =
+    strongestRoute === "agency" ? journey.agencyPc : journey.personalPc;
+  const displayedEstimatedPc =
+    strongestRoute === "agency" ? estimatedAgencyPc : estimatedPersonalPc;
+  const displayedPendingPc =
+    strongestRoute === "agency" ? pendingAgencyPc : pendingPersonalPc;
+  const currentPosition =
+    journey.currentRank?.jacket ??
+    journey.currentRank?.title ??
+    (hasPromotionData ? "Início da jornada" : "Aguardando produção reconhecida");
   const nextPromotion = journey.nextRank?.title ?? "Black Jacket conquistada";
-  const progress = loadError ? 0 : journey.overallProgress;
-  const progressPercent = loadError ? null : Math.round(progress * 100);
+  const progress = loadError || !hasPromotionData ? 0 : journey.overallProgress;
+  const progressPercent =
+    loadError || !hasPromotionData ? null : Math.round(progress * 100);
   const remainingLabel = journey.finalReached
     ? "Conquista máxima validada"
     : getRemainingLabel({
         loadError,
+        hasPromotionData,
         mode,
-        personalRemaining: nextStage?.personalRemaining ?? 0,
-        agencyRemaining: nextStage?.agencyRemaining ?? null,
+        stage: nextStage,
       });
 
   useGSAP(
@@ -171,17 +233,13 @@ export function JourneyDashboardPreview({
     <section
       ref={root}
       aria-labelledby="dashboard-journey-title"
-      className={`keepr-noise relative mt-7 grid min-h-[238px] grid-flow-dense grid-cols-1 overflow-hidden rounded-[28px] border text-paper shadow-[var(--shadow-overlay)] lg:grid-cols-12 ${
-        journey.finalReached && !loadError
-          ? "border-white/15 bg-black"
-          : "border-white/10 bg-[#06100a]"
-      }`}
+      className="keepr-noise relative mt-7 grid min-h-[238px] grid-flow-dense grid-cols-1 overflow-hidden rounded-[28px] border border-white/15 bg-black text-paper shadow-[var(--shadow-overlay)] lg:grid-cols-12"
       data-black-reached={journey.finalReached && !loadError ? "true" : undefined}
       data-stack-card
     >
       <div
         aria-hidden="true"
-        className="absolute -left-24 -top-40 h-96 w-96 rounded-full bg-mint/10 blur-3xl"
+        className="absolute -left-24 -top-40 h-96 w-96 rounded-full bg-white/[0.025] blur-3xl"
       />
       <div
         aria-hidden="true"
@@ -205,6 +263,8 @@ export function JourneyDashboardPreview({
           >
             {loadError
               ? "Sua rota continua aqui."
+              : !hasPromotionData
+                ? "Sua jornada para o Black Jacket começa aqui."
               : journey.finalReached
                 ? "Black Jacket conquistada."
                 : `Próxima conquista: ${nextPromotion}.`}
@@ -213,6 +273,8 @@ export function JourneyDashboardPreview({
           <p data-dashboard-journey-copy className="mt-4 max-w-xl text-sm leading-6 text-paper/55">
             {loadError
               ? "Os dados de produção estão temporariamente indisponíveis. Abra a Jornada para tentar novamente."
+              : !hasPromotionData
+                ? "Quando a seguradora reconhecer o Target Premium de uma apólice, os PC entram aqui sem usar comissão como atalho."
               : journey.finalReached
                 ? "O último nível foi alcançado. Reveja a rota que transformou produção em conquista."
                 : remainingLabel}
@@ -221,7 +283,7 @@ export function JourneyDashboardPreview({
 
         <div data-dashboard-journey-copy className="mt-7 flex flex-wrap items-center gap-4">
           <Link
-            href="/agent/journey"
+            href={journeyHref}
             className="group inline-flex min-h-11 items-center justify-center gap-3 rounded-full bg-paper px-5 py-3 text-sm font-semibold text-rail-strong transition-transform duration-300 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
           >
             {journey.finalReached && !loadError ? "Ver conquista" : "Abrir Jornada"}
@@ -234,6 +296,8 @@ export function JourneyDashboardPreview({
           </Link>
           <p className="text-xs text-paper/42">
             {mode === "agency" ? "Visão da agência" : "Minha produção"}
+            {" · "}
+            {formatWindow(windowStart, windowEnd)}
           </p>
         </div>
       </div>
@@ -246,12 +310,27 @@ export function JourneyDashboardPreview({
             </p>
             <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <strong className="font-mono text-3xl font-medium tracking-[-0.055em] tabular-nums sm:text-4xl">
-                {loadError ? "—" : `${progressPercent}%`}
+                {progressPercent === null ? "—" : `${progressPercent}%`}
               </strong>
               <span className="text-xs text-paper/48">
-                {loadError ? "cálculo indisponível" : `${formatPc(displayedPc)} registrados`}
+                {loadError
+                  ? "cálculo indisponível"
+                  : !hasPromotionData
+                    ? "sem PC confirmados"
+                    : `${formatPc(displayedPc)} confirmados`}
               </span>
             </div>
+            {!loadError ? (
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-paper/42">
+                <span>{formatPc(displayedEstimatedPc)} previstos</span>
+                <span>{formatPc(displayedPendingPc)} em validação</span>
+                {mode === "agency" && hasPromotionData ? (
+                  <span>
+                    Melhor rota: {strongestRoute === "agency" ? "agência" : "pessoal"}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <span
@@ -288,11 +367,21 @@ export function JourneyDashboardPreview({
             <ol className="absolute inset-0 m-0 list-none p-0">
               {jacketStages.map((stage) => {
                 const tone = stage.jacketTone as JacketTone;
-                const target = mode === "agency" ? stage.agencyTarget : stage.personalTarget;
+                const target =
+                  strongestRoute === "agency"
+                    ? stage.agencyTarget
+                    : stage.personalTarget;
                 const position = Math.min((target / finalTarget) * 100, 100);
                 const isReached = stage.status === "achieved";
                 const isCurrent = stage.status === "current";
                 const nodeTone = JACKET_NODE_TONES[tone];
+                const stageState = isReached
+                  ? stage.achievement === "inherited"
+                    ? "reconhecida pelo nível superior"
+                    : "conquistada pelos próprios requisitos"
+                  : isCurrent
+                    ? "em progresso"
+                    : "marco futuro";
 
                 return (
                   <li
@@ -300,7 +389,7 @@ export function JourneyDashboardPreview({
                     data-dashboard-journey-node
                     className="group absolute top-0 w-0"
                     style={{ left: `${position}%` }}
-                    aria-label={`${stage.jacket}: ${isReached ? "conquistada" : isCurrent ? "em progresso" : "marco futuro"}`}
+                    aria-label={`${stage.jacket}: ${stageState}`}
                   >
                     <span
                       aria-hidden="true"
@@ -328,7 +417,11 @@ export function JourneyDashboardPreview({
           </div>
 
           <div className="flex flex-col gap-2 border-t border-white/10 pt-4 text-xs sm:flex-row sm:items-center sm:justify-between">
-            <span className="text-paper/42">Posição atual: {currentPosition}</span>
+            <span className="text-paper/42">
+              {historicalAchievementIsAhead && historicalAchievementLabel
+                ? `Maior conquista: ${historicalAchievementLabel} · janela atual: ${currentPosition}`
+                : "PC confirmados · qualificação da janela atual"}
+            </span>
             <span className="font-medium text-paper/74">
               {journey.finalReached && !loadError ? "Conquista concluída" : remainingLabel}
             </span>

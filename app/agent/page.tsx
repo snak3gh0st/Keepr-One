@@ -25,8 +25,20 @@ import {
 } from '@/components/KeeprDashboardMotion'
 import { OperationSignals, type OperationSignal } from '@/components/OperationSignals'
 import { getAgentPromotionSnapshot } from '@/lib/agent-promotion'
+import { getLocalPromotionPreview } from '@/lib/promotion-preview'
+import { getPromotionIdentity, getPromotionJourney } from '@/lib/promotion-journey'
 import { JourneyDashboardPreview } from './JourneyDashboardPreview'
-import { COMMISSION_EARNING_GRID_KEYS } from '@/lib/national-life/commission-grid-keys'
+import { FollowUpActionCard } from '@/components/crm/FollowUpActionCard'
+import { getDueFollowUpsForScope, nyDayBounds, type DueFollowUpView } from '@/lib/crm'
+import {
+  getCalendarConnectionForUser,
+  getTodayCalendarSummary,
+  getUpcomingCalendarEvents,
+} from '@/lib/calendar'
+import { mapDomainCalendarConnectionToUi, mapDomainCalendarEventToUi } from '@/components/calendar/server-adapter'
+import { TodayMeetingsSection } from '@/components/calendar/TodayMeetingsSection'
+import { UpcomingMeetingsSection } from '@/components/calendar/UpcomingMeetingsSection'
+import type { CalendarConnectionView, CalendarEventView, CalendarSourceView } from '@/components/calendar/types'
 
 function BreakdownList({
   title,
@@ -148,12 +160,6 @@ function Delta({ value }: { value: number | null }) {
   )
 }
 
-function endOfToday(now: Date): Date {
-  const d = new Date(now)
-  d.setHours(23, 59, 59, 999)
-  return d
-}
-
 function safeGroupCount(groupCount: unknown): number {
   if (groupCount && typeof groupCount === 'object' && '_all' in groupCount) {
     const countObj = groupCount as { _all?: number }
@@ -162,7 +168,13 @@ function safeGroupCount(groupCount: unknown): number {
   return 0
 }
 
-export default async function AgentDashboard() {
+export default async function AgentDashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ preview?: string }>
+}) {
+  const { preview } = await searchParams
+  const localPromotionPreview = getLocalPromotionPreview(preview)
   const agent = await getCurrentAgent()
   const [user, allAgents, promotion] = await Promise.all([
     prisma.user.findUnique({ where: { id: agent.userId } }),
@@ -171,6 +183,44 @@ export default async function AgentDashboard() {
   ])
   const downlineIds = getDownlineIds(allAgents, agent.id)
   const scope = [agent.id, ...downlineIds]
+
+  const displayedPromotion = localPromotionPreview
+    ? {
+        personalPc: localPromotionPreview.personalPc,
+        agencyPc: localPromotionPreview.agencyPc,
+        estimatedPersonalPc: 0,
+        estimatedAgencyPc: 0,
+        pendingPersonalPc: 0,
+        pendingAgencyPc: 0,
+        hasPromotionData: true,
+        highestAchievementRankId: 'executive-vice-president',
+        mode: localPromotionPreview.mode,
+        loadError: false,
+      }
+    : {
+        personalPc: promotion.personalPc,
+        agencyPc: promotion.agencyPc,
+        estimatedPersonalPc: promotion.estimatedPersonalPc,
+        estimatedAgencyPc: promotion.estimatedAgencyPc,
+        pendingPersonalPc: promotion.pendingPersonalPc,
+        pendingAgencyPc: promotion.pendingAgencyPc,
+        hasPromotionData: promotion.hasPromotionData,
+        highestAchievementRankId: promotion.highestAchievement?.rankId ?? null,
+        mode: promotion.mode,
+        loadError: promotion.loadError,
+      }
+  const previewPromotionIdentity = localPromotionPreview
+    ? getPromotionIdentity(
+        getPromotionJourney({
+          personalPc: localPromotionPreview.personalPc,
+          agencyPc: localPromotionPreview.agencyPc,
+          mode: localPromotionPreview.mode,
+        }),
+      )
+    : undefined
+  const journeyHref = localPromotionPreview
+    ? `/agent/journey?preview=${encodeURIComponent(preview ?? '')}`
+    : '/agent/journey'
 
   const now = new Date()
   const localConnectorEnabled = getNationalLifeLocalConnectorConfig().enabled
@@ -185,11 +235,18 @@ export default async function AgentDashboard() {
   let awaitingIllustration = 0
   let openRequirements = 0
   let dueFollowUps = 0
+  let dueFollowUpItems: DueFollowUpView[] = []
   let dueReviews = 0
   let atRiskPolicies = 0
   let txnExpected = 0
   let txnPaid = 0
   let txnChargeback = 0
+  let calendarConnection: CalendarConnectionView = {
+    status: 'DISCONNECTED', email: null, displayName: null, lastSyncAt: null, errorMessage: null,
+  }
+  let calendarSources: CalendarSourceView[] = []
+  let todayMeetings: CalendarEventView[] = []
+  let upcomingMeetings: CalendarEventView[] = []
 
   let policyCount = 0
   let commissionTotalAmount = 0
@@ -216,8 +273,11 @@ export default async function AgentDashboard() {
       openRequirementsCount,
       atRiskCount,
       txnByType,
-      dueFollowUpCount,
+      dueFollowUpsResult,
       dueReviewCount,
+      calendarConnectionResult,
+      todayCalendarResult,
+      upcomingCalendarResult,
     ] = await Promise.all([
       prisma.policy.count({ where: { agentId: agent.id } }),
       prisma.commissionRecord.aggregate({ where: { agentId: agent.id }, _sum: { amount: true } }),
@@ -248,7 +308,12 @@ export default async function AgentDashboard() {
         orderBy: { product: 'asc' },
       }),
       prisma.insuranceCase.count({ where: { assignedAgentId: { in: scope }, status: 'OPEN' } }),
-      prisma.insuranceCase.count({ where: { assignedAgentId: { in: scope }, stage: { in: ['DISCOVERY', 'DESIGN'] } } }),
+      prisma.insuranceCase.count({
+        where: {
+          assignedAgentId: { in: scope },
+          crmStage: { systemKey: { in: ['QUALIFIED', 'CREATE_ILLUSTRATION', 'RESCHEDULE_ILLUSTRATION'] } },
+        },
+      }),
       prisma.applicationRequirement.count({
         where: { status: 'OPEN', application: { insuranceCase: { assignedAgentId: { in: scope } } } },
       }),
@@ -261,29 +326,56 @@ export default async function AgentDashboard() {
         },
         _sum: { amount: true },
       }),
-      prisma.caseTimelineEvent.count({
-        where: {
-          type: 'FOLLOW_UP',
-          doneAt: null,
-          dueAt: { lte: endOfToday(now) },
-          insuranceCase: { assignedAgentId: { in: scope } },
-        },
-      }),
+      getDueFollowUpsForScope(scope, now),
       prisma.policyReview.count({
         where: {
           completedAt: null,
-          dueAt: { lte: endOfToday(now) },
+          dueAt: { lt: nyDayBounds(now).end },
           policy: { agentId: { in: scope } },
         },
       }),
+      getCalendarConnectionForUser(agent.userId),
+      getTodayCalendarSummary({ ownerUserId: agent.userId, now, timeZone: user?.timeZone ?? 'America/New_York' }),
+      getUpcomingCalendarEvents({ ownerUserId: agent.userId, now, timeZone: user?.timeZone ?? 'America/New_York' }),
     ])
 
     openCases = openCasesCount
     awaitingIllustration = awaitingIllustrationCount
     openRequirements = openRequirementsCount
     atRiskPolicies = atRiskCount
-    dueFollowUps = dueFollowUpCount
+    dueFollowUpItems = dueFollowUpsResult
+    dueFollowUps = dueFollowUpsResult.length
     dueReviews = dueReviewCount
+    const mappedCalendar = mapDomainCalendarConnectionToUi(calendarConnectionResult)
+    calendarConnection = mappedCalendar.connection
+    calendarSources = mappedCalendar.calendars
+    const calendarById = new Map(calendarSources.map((calendar) => [calendar.id, calendar]))
+    const calendarEvents = [...todayCalendarResult.upcoming, ...upcomingCalendarResult]
+    const meetingCaseIds = [...new Set(calendarEvents.map((event) => event.caseId).filter((caseId): caseId is string => Boolean(caseId)))]
+    const meetingCases = meetingCaseIds.length ? await prisma.insuranceCase.findMany({
+      where: { id: { in: meetingCaseIds }, assignedAgentId: agent.id },
+      select: {
+        id: true,
+        prospect: { select: { firstName: true, lastName: true, email: true } },
+        crmStage: { select: { name: true } },
+      },
+    }) : []
+    const meetingCaseById = new Map(meetingCases.map((item) => [item.id, {
+      id: item.id,
+      name: `${item.prospect.firstName} ${item.prospect.lastName}`.trim(),
+      email: item.prospect.email,
+      stage: item.crmStage?.name ?? null,
+    }]))
+    todayMeetings = todayCalendarResult.upcoming.map((event) => mapDomainCalendarEventToUi(event, {
+      timeZone: user?.timeZone ?? 'America/New_York',
+      case: event.caseId ? meetingCaseById.get(event.caseId) ?? null : null,
+      canWrite: calendarById.get(event.calendar.id)?.canWrite ?? false,
+    }))
+    upcomingMeetings = upcomingCalendarResult.map((event) => mapDomainCalendarEventToUi(event, {
+      timeZone: user?.timeZone ?? 'America/New_York',
+      case: event.caseId ? meetingCaseById.get(event.caseId) ?? null : null,
+      canWrite: calendarById.get(event.calendar.id)?.canWrite ?? false,
+    }))
     for (const t of txnByType) {
       const sum = decimalToNumber(t._sum.amount)
       if (t.type === 'EXPECTED') txnExpected = sum
@@ -360,6 +452,8 @@ export default async function AgentDashboard() {
   })
   const moneyValue = (value: number) => loadError ? '—' : formatCurrency(value)
   const countValue = (value: number) => loadError ? '—' : String(value)
+  const followUpsOverdue = dueFollowUpItems.filter((item) => item.overdue)
+  const followUpsToday = dueFollowUpItems.filter((item) => !item.overdue)
   const pulseMetrics = [
     { label: 'Oportunidades ativas', value: countValue(openCases) },
     { label: 'Comissão esperada', value: moneyValue(txnExpected) },
@@ -398,7 +492,12 @@ export default async function AgentDashboard() {
   ]
 
   return (
-    <Shell role="AGENT" userName={user?.name ?? ''}>
+    <Shell
+      role="AGENT"
+      userName={user?.name ?? ''}
+      promotionIdentity={previewPromotionIdentity}
+      journeyHref={journeyHref}
+    >
       <KeeprDashboardMotion>
         {loadError && (
           <div className="mb-5">
@@ -528,6 +627,77 @@ export default async function AgentDashboard() {
           </aside>
         </section>
 
+        {!loadError && (
+          <TodayMeetingsSection
+            connection={calendarConnection}
+            calendars={calendarSources}
+            events={todayMeetings}
+            timeZone={user?.timeZone ?? 'America/New_York'}
+          />
+        )}
+
+        {!loadError && (
+          <UpcomingMeetingsSection
+            calendars={calendarSources}
+            events={upcomingMeetings}
+            timeZone={user?.timeZone ?? 'America/New_York'}
+          />
+        )}
+
+        {!loadError && dueFollowUpItems.length > 0 && (
+          <section
+            aria-labelledby="today-follow-ups-title"
+            className="mt-6 overflow-hidden rounded-[28px] border border-border-steel bg-paper/68 p-5 shadow-[var(--shadow-soft)] sm:p-7"
+            data-stack-card
+          >
+            <div className="flex flex-col gap-3 border-b border-border-steel/75 pb-5 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-deep">Agenda acionável</p>
+                <h2 id="today-follow-ups-title" className="mt-2 max-w-4xl text-2xl font-medium tracking-[-0.04em] text-ink sm:text-3xl">
+                  Seus contatos de hoje, prontos para avançar.
+                </h2>
+              </div>
+              <Link href="/agent/activities#follow-ups" className="inline-flex min-h-10 w-fit items-center rounded-full border border-border-steel bg-paper px-4 text-xs font-semibold text-ink transition-colors hover:border-teal/35 hover:bg-teal-pale">
+                Ver agenda completa <span aria-hidden className="ml-1.5">↗</span>
+              </Link>
+            </div>
+
+            <div className="mt-5 grid grid-flow-dense gap-5 lg:grid-cols-2">
+              {followUpsOverdue.length > 0 && (
+                <div>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-ink">Follow-ups atrasados</h3>
+                    <span className="rounded-full bg-danger-pale px-2.5 py-1 font-mono text-[10px] font-semibold text-danger">
+                      {followUpsOverdue.length}
+                    </span>
+                  </div>
+                  <div className="grid gap-2.5">
+                    {followUpsOverdue.slice(0, 3).map((item) => (
+                      <FollowUpActionCard key={item.id} item={item} compact />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {followUpsToday.length > 0 && (
+                <div className={followUpsOverdue.length === 0 ? "lg:col-span-2" : undefined}>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-ink">Follow-ups de hoje</h3>
+                    <span className="rounded-full bg-teal-pale px-2.5 py-1 font-mono text-[10px] font-semibold text-teal-deep">
+                      {followUpsToday.length}
+                    </span>
+                  </div>
+                  <div className={`grid gap-2.5 ${followUpsOverdue.length === 0 ? "md:grid-cols-2" : ""}`}>
+                    {followUpsToday.slice(0, followUpsOverdue.length === 0 ? 4 : 3).map((item) => (
+                      <FollowUpActionCard key={item.id} item={item} compact />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
         <div className="keepr-marquee-mask mt-6 overflow-hidden border-y border-border-steel/70 bg-paper/56 py-3.5">
           <div className="keepr-marquee-track flex items-center">
             {[...pulseMetrics, ...pulseMetrics].map((metric, index) => (
@@ -541,10 +711,19 @@ export default async function AgentDashboard() {
         </div>
 
         <JourneyDashboardPreview
-          personalPc={promotion.personalPc}
-          agencyPc={promotion.agencyPc}
-          mode={promotion.mode}
-          loadError={promotion.loadError}
+          personalPc={displayedPromotion.personalPc}
+          agencyPc={displayedPromotion.agencyPc}
+          estimatedPersonalPc={displayedPromotion.estimatedPersonalPc}
+          estimatedAgencyPc={displayedPromotion.estimatedAgencyPc}
+          pendingPersonalPc={displayedPromotion.pendingPersonalPc}
+          pendingAgencyPc={displayedPromotion.pendingAgencyPc}
+          hasPromotionData={displayedPromotion.hasPromotionData}
+          windowStart={promotion.windowStart}
+          windowEnd={promotion.windowEnd}
+          highestAchievementRankId={displayedPromotion.highestAchievementRankId}
+          mode={displayedPromotion.mode}
+          loadError={displayedPromotion.loadError}
+          journeyHref={journeyHref}
         />
 
         <section aria-label="Resumo da operação" className="mt-12 grid grid-flow-dense grid-cols-1 gap-4 lg:grid-cols-12">

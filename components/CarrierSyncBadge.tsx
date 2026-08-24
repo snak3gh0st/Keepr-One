@@ -29,7 +29,7 @@ type CompactSyncStatus = {
 /// This is still not polling: nothing here re-fires on a timer or while the
 /// agent sits still on one screen, which is what the plan's "sem polling
 /// contínuo, sem notificação" ruled out. It only re-fires on navigation.
-export function CarrierSyncBadge() {
+export function CarrierSyncBadge({ separated = false }: { separated?: boolean }) {
   const [state, setState] = useState<CarrierSyncState | null>(null)
   const [sync, setSync] = useState<CompactSyncStatus | null>(null)
   const pathname = usePathname()
@@ -80,7 +80,7 @@ export function CarrierSyncBadge() {
 
   if (sync) {
     return (
-      <span className="shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs text-ink-muted">
+      <span className={`shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs text-ink-muted ${separated ? 'shell-carrier-separated' : ''}`}>
         <span className="h-1.5 w-1.5 rounded-full bg-teal" />
         Atualizando {sync.completed}/{sync.total}
       </span>
@@ -100,7 +100,7 @@ export function CarrierSyncBadge() {
       <Link
         href="/agent/integrations/national-life"
         role="button"
-        className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-gold"
+        className={`inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-gold ${separated ? 'shell-carrier-separated' : ''}`}
       >
         <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
         {label}
@@ -109,7 +109,7 @@ export function CarrierSyncBadge() {
   }
 
   return (
-    <span className="shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs text-ink-muted">
+    <span className={`shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs text-ink-muted ${separated ? 'shell-carrier-separated' : ''}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
       {label}
     </span>

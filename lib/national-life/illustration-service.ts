@@ -6,7 +6,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { NATIONAL_LIFE_PROVIDER } from './constants'
 import { flexLifeProductLabel } from './flex-life'
-import type { RapidSolveQuote } from './rapid-solve'
+import { SOLVE_TYPES, type RapidSolveQuote } from './rapid-solve'
 
 export type SaveRapidSolveIllustrationInput = {
   agentId: string
@@ -21,6 +21,69 @@ export type SaveRapidSolveIllustrationInput = {
 }
 
 type IllustrationWriter = Pick<PrismaClient, 'illustration'>
+
+const TARGET_PREMIUM_SOURCE = 'ILLUSTRATION_ESTIMATE'
+
+type TargetPremiumEstimate = {
+  amount: number
+  status: 'ESTIMATED'
+  source: 'RAPID_SOLVE_RESPONSE' | 'RAPID_SOLVE_INPUT'
+  unit: 'UNKNOWN' | 'MONTHLY_INPUT'
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+/// Rapid Solve cannot confirm production credit. An explicitly named Target
+/// Premium in the carrier response may populate the illustration field, but it
+/// remains an estimate. When the request itself solves `Based_on_Target_Premium`,
+/// Amount is labelled monthly by the current UI; preserve it for traceability
+/// without annualising it or treating it as confirmed CTP.
+function targetPremiumEstimate(input: SaveRapidSolveIllustrationInput): {
+  targetPremium: number | null
+  metadata: TargetPremiumEstimate | null
+} {
+  const explicitResponseValue = finiteNumber(input.quote.targetPremium)
+  if (explicitResponseValue !== null) {
+    return {
+      targetPremium: explicitResponseValue,
+      metadata: {
+        amount: explicitResponseValue,
+        status: 'ESTIMATED',
+        source: 'RAPID_SOLVE_RESPONSE',
+        unit: 'UNKNOWN',
+      },
+    }
+  }
+
+  const request = asRecord(input.request)
+  if (request.SolveType === SOLVE_TYPES.PREMIUM_DEATH_BENEFIT_FOCUS) {
+    const amount = finiteNumber(request.Amount)
+    if (amount !== null) {
+      return {
+        targetPremium: null,
+        metadata: {
+          amount,
+          status: 'ESTIMATED',
+          source: 'RAPID_SOLVE_INPUT',
+          unit: 'MONTHLY_INPUT',
+        },
+      }
+    }
+  }
+
+  return { targetPremium: null, metadata: null }
+}
 
 function parseCarrierDate(value: string): Date | null {
   const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
@@ -38,6 +101,13 @@ export async function saveRapidSolveIllustration(
   input: SaveRapidSolveIllustrationInput,
   client: IllustrationWriter,
 ): Promise<{ illustrationId: string }> {
+  const estimate = targetPremiumEstimate(input)
+  const rawPayload = {
+    request: input.request,
+    response: input.quote,
+    ...(estimate.metadata ? { targetPremiumEstimate: estimate.metadata } : {}),
+  } as Prisma.InputJsonValue
+
   const illustration = await client.illustration.upsert({
     // The job id, so a worker that retries after a crash updates the quote it
     // already wrote instead of leaving two.
@@ -58,23 +128,23 @@ export async function saveRapidSolveIllustration(
       faceAmount: input.quote.faceAmount,
       // The carrier quotes monthly, which is what `PremiumMode` asks for.
       premium: input.quote.monthlyPremium,
+      targetPremium: estimate.targetPremium,
+      targetPremiumSource:
+        estimate.targetPremium !== null ? TARGET_PREMIUM_SOURCE : null,
       insuredName: input.insuredName,
       insuredDateOfBirth: parseCarrierDate(input.insuredDateOfBirth),
       // Both sides of the exchange, so a number on screen can always be traced
       // to the question that produced it.
-      rawPayload: {
-        request: input.request,
-        response: input.quote,
-      } as Prisma.InputJsonValue,
+      rawPayload,
     },
     update: {
       productName: flexLifeProductLabel(input.productCode),
       faceAmount: input.quote.faceAmount,
       premium: input.quote.monthlyPremium,
-      rawPayload: {
-        request: input.request,
-        response: input.quote,
-      } as Prisma.InputJsonValue,
+      targetPremium: estimate.targetPremium,
+      targetPremiumSource:
+        estimate.targetPremium !== null ? TARGET_PREMIUM_SOURCE : null,
+      rawPayload,
     },
     select: { id: true },
   })

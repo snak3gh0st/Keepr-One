@@ -2,16 +2,32 @@
 
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { CrmNavigation } from "@/components/CrmNavigation";
-import { CaseStagePill } from "@/components/StatusPill";
 import { Pagination, clampPage } from "@/components/Pagination";
-import type { CaseStage } from "@/lib/case-workflow";
+import type { CrmStageView } from "@/lib/crm";
+import {
+  PipelineRail,
+  pipelineTabId,
+} from "@/components/crm/PipelineRail";
+import { CrmStageSelect } from "@/components/crm/CrmStageSelect";
+import { FollowUpModal } from "@/components/crm/FollowUpModal";
+import { StageManagerDrawer } from "@/components/crm/StageManagerDrawer";
+import {
+  archiveStageAction,
+  createStageAction,
+  moveCaseAndScheduleAction,
+  moveCaseStageAction,
+  renameStageAction,
+  reorderStagesAction,
+} from "./actions";
 
 type Case = {
   id: string;
-  stage: CaseStage;
+  assignedAgentId: string;
+  crmStage: Pick<CrmStageView, "id" | "name" | "systemKey"> | null;
   prospectName: string;
   agentName: string;
   productType: string;
@@ -21,34 +37,7 @@ type Case = {
   updatedAt: string;
 };
 
-type Filter = {
-  key: string;
-  label: string;
-  stages: CaseStage[] | null;
-};
-
 type SortMode = "recent" | "oldest" | "name";
-
-const FILTERS: Filter[] = [
-  { key: "all", label: "Todas", stages: null },
-  {
-    key: "presale",
-    label: "Pré-venda",
-    stages: ["LEAD", "DISCOVERY", "DESIGN", "ILLUSTRATION_READY"],
-  },
-  {
-    key: "application",
-    label: "Aplicação",
-    stages: ["APPLICATION_STARTED", "SUBMITTED"],
-  },
-  {
-    key: "underwriting",
-    label: "Em análise",
-    stages: ["UNDERWRITING", "APPROVED"],
-  },
-  { key: "issued", label: "Emitidas", stages: ["ISSUED", "PLACED"] },
-  { key: "closed", label: "Encerradas", stages: ["DECLINED", "WITHDRAWN"] },
-];
 
 const PRODUCT_LABEL: Record<string, string> = {
   TERM: "Term",
@@ -73,7 +62,6 @@ const PIPELINE_SIGNALS = [
   "Relacionamento",
 ];
 
-const TERMINAL_STAGES: CaseStage[] = ["PLACED", "DECLINED", "WITHDRAWN"];
 const PAGE_SIZE = 10;
 
 const USD = new Intl.NumberFormat("en-US", {
@@ -120,35 +108,37 @@ function PipelineSignalGroup({ hidden = false }: { hidden?: boolean }) {
   );
 }
 
-export function CasesBoard({ cases }: { cases: Case[] }) {
+export function CasesBoard({
+  cases,
+  stages,
+  stageOptionsByAgent,
+}: {
+  cases: Case[];
+  stages: CrmStageView[];
+  stageOptionsByAgent: Record<string, CrmStageView[]>;
+}) {
+  const router = useRouter();
   const root = useRef<HTMLDivElement>(null);
-  const filterRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const [filter, setFilter] = useState("all");
+  const [activeStageKey, setActiveStageKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("recent");
   const [page, setPage] = useState(1);
-
-  const counts = useMemo(
-    () =>
-      Object.fromEntries(
-        FILTERS.map((item) => [
-          item.key,
-          item.stages
-            ? cases.filter((caseItem) => item.stages?.includes(caseItem.stage))
-                .length
-            : cases.length,
-        ]),
-      ),
-    [cases],
-  );
+  const [managerOpen, setManagerOpen] = useState(false);
+  const [followUpTarget, setFollowUpTarget] = useState<{
+    caseId: string;
+    prospectName: string;
+    stageId: string;
+  } | null>(null);
 
   const filtered = useMemo(() => {
-    const selectedStages = FILTERS.find((item) => item.key === filter)?.stages;
     const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
 
     const result = cases.filter((caseItem) => {
       const belongsToStage =
-        !selectedStages || selectedStages.includes(caseItem.stage);
+        !activeStageKey ||
+        (activeStageKey.startsWith("system:")
+          ? caseItem.crmStage?.systemKey === activeStageKey.slice(7)
+          : caseItem.crmStage?.id === activeStageKey.slice(6));
       if (!belongsToStage) return false;
       if (!normalizedQuery) return true;
 
@@ -173,16 +163,27 @@ export function CasesBoard({ cases }: { cases: Case[] }) {
       }
       return right.updatedAt.localeCompare(left.updatedAt);
     });
-  }, [cases, filter, query, sortMode]);
+  }, [activeStageKey, cases, query, sortMode]);
+
+  const railStages = useMemo(
+    () =>
+      stages.map((stage) => ({
+        ...stage,
+        caseCount: cases.filter((caseItem) =>
+          stage.systemKey
+            ? caseItem.crmStage?.systemKey === stage.systemKey
+            : caseItem.crmStage?.id === stage.id,
+        ).length,
+      })),
+    [cases, stages],
+  );
 
   const activeCases = cases.filter(
-    (caseItem) => !TERMINAL_STAGES.includes(caseItem.stage),
+    (caseItem) => !["ACTIVE_CLIENT", "LOST"].includes(caseItem.crmStage?.systemKey ?? ""),
   ).length;
-  const analysisCases = cases.filter((caseItem) =>
-    ["UNDERWRITING", "APPROVED"].includes(caseItem.stage),
-  ).length;
-  const issuedCases = cases.filter((caseItem) =>
-    ["ISSUED", "PLACED"].includes(caseItem.stage),
+  const followUpCases = cases.filter((caseItem) => caseItem.crmStage?.systemKey === "FOLLOW_UP").length;
+  const convertedCases = cases.filter((caseItem) =>
+    ["CONTRACT_CLOSED", "POLICY_ISSUED", "ACTIVE_CLIENT"].includes(caseItem.crmStage?.systemKey ?? ""),
   ).length;
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -192,30 +193,8 @@ export function CasesBoard({ cases }: { cases: Case[] }) {
     currentPage * PAGE_SIZE,
   );
 
-  function chooseFilter(nextFilter: string) {
-    setFilter(nextFilter);
-    setPage(1);
-  }
-
-  function handleFilterKeyDown(
-    event: React.KeyboardEvent<HTMLButtonElement>,
-    index: number,
-  ) {
-    let nextIndex: number | null = null;
-    if (event.key === "ArrowRight") nextIndex = (index + 1) % FILTERS.length;
-    if (event.key === "ArrowLeft")
-      nextIndex = (index - 1 + FILTERS.length) % FILTERS.length;
-    if (event.key === "Home") nextIndex = 0;
-    if (event.key === "End") nextIndex = FILTERS.length - 1;
-    if (nextIndex === null) return;
-
-    event.preventDefault();
-    chooseFilter(FILTERS[nextIndex].key);
-    filterRefs.current[nextIndex]?.focus();
-  }
-
   function resetFilters() {
-    setFilter("all");
+    setActiveStageKey(null);
     setQuery("");
     setSortMode("recent");
     setPage(1);
@@ -329,7 +308,7 @@ export function CasesBoard({ cases }: { cases: Case[] }) {
     },
     {
       scope: root,
-      dependencies: [filter, sortMode, currentPage],
+      dependencies: [activeStageKey, sortMode, currentPage],
       revertOnUpdate: true,
     },
   );
@@ -387,14 +366,14 @@ export function CasesBoard({ cases }: { cases: Case[] }) {
             detail: "Oportunidades que ainda pedem ação",
           },
           {
-            label: "Em análise",
-            value: analysisCases,
-            detail: "Aguardando decisão ou retorno",
+            label: "Em follow-up",
+            value: followUpCases,
+            detail: "Leads com próximo contato definido",
           },
           {
-            label: "Emitidas",
-            value: issuedCases,
-            detail: "Atendimentos que chegaram à apólice",
+            label: "Convertidos",
+            value: convertedCases,
+            detail: "Contratos, apólices e clientes ativos",
           },
         ].map((metric) => (
           <div className="cases-summary-card" data-cases-metric key={metric.label}>
@@ -428,7 +407,7 @@ export function CasesBoard({ cases }: { cases: Case[] }) {
               <span>Buscar</span>
               <input
                 type="search"
-                aria-controls="cases-results"
+                aria-controls="crm-pipeline-results"
                 value={query}
                 onChange={(event) => {
                   setQuery(event.target.value);
@@ -441,7 +420,7 @@ export function CasesBoard({ cases }: { cases: Case[] }) {
             <label className="cases-sort">
               <span>Ordenar</span>
               <select
-                aria-controls="cases-results"
+                aria-controls="crm-pipeline-results"
                 value={sortMode}
                 onChange={(event) => {
                   setSortMode(event.target.value as SortMode);
@@ -455,42 +434,22 @@ export function CasesBoard({ cases }: { cases: Case[] }) {
             </label>
           </div>
 
-          <div
-            className="cases-stage-nav"
-            role="tablist"
-            aria-label="Filtrar oportunidades por etapa"
-          >
-            {FILTERS.map((item, index) => {
-              const active = item.key === filter;
-              return (
-                <button
-                  ref={(node) => {
-                    filterRefs.current[index] = node;
-                  }}
-                  key={item.key}
-                  type="button"
-                  id={`cases-filter-${item.key}`}
-                  role="tab"
-                  aria-selected={active}
-                  aria-controls="cases-results"
-                  tabIndex={active ? 0 : -1}
-                  data-active={active || undefined}
-                  onClick={() => chooseFilter(item.key)}
-                  onKeyDown={(event) => handleFilterKeyDown(event, index)}
-                  className="cases-stage-tab"
-                >
-                  <span>{item.label}</span>
-                  <b>{counts[item.key] ?? 0}</b>
-                </button>
-              );
-            })}
-          </div>
+          <PipelineRail
+            stages={railStages}
+            allCount={cases.length}
+            activeStageKey={activeStageKey}
+            panelId="crm-pipeline-results"
+            onStageChange={(stageKey) => {
+              setActiveStageKey(stageKey);
+              setPage(1);
+            }}
+            onManage={() => setManagerOpen(true)}
+          />
 
           <div
-            id="cases-results"
+            id="crm-pipeline-results"
             role="tabpanel"
-            aria-labelledby={`cases-filter-${filter}`}
-            aria-label={`Oportunidades na visão ${FILTERS.find((item) => item.key === filter)?.label ?? "Todas"}`}
+            aria-labelledby={pipelineTabId(activeStageKey)}
             className="cases-results"
           >
             {filtered.length === 0 ? (
@@ -548,12 +507,8 @@ export function CasesBoard({ cases }: { cases: Case[] }) {
 
                 <ul className="cases-list">
                   {pageCases.map((caseItem) => (
-                    <li key={caseItem.id}>
-                      <Link
-                        href={`/agent/cases/${caseItem.id}`}
-                        className="cases-row"
-                        data-case-row
-                      >
+                    <li key={caseItem.id} className="cases-row" data-case-row>
+                      <Link href={`/agent/cases/${caseItem.id}`} className="cases-row-link" aria-label={`Abrir lead ${caseItem.prospectName}`}>
                         <div className="cases-row-person">
                           <span aria-hidden="true">
                             {initials(caseItem.prospectName) || "CL"}
@@ -593,12 +548,28 @@ export function CasesBoard({ cases }: { cases: Case[] }) {
                           </small>
                         </div>
 
-                        <span className="sr-only">Etapa: </span>
-                        <CaseStagePill stage={caseItem.stage} />
-                        <span className="cases-row-arrow" aria-hidden="true">
-                          →
-                        </span>
                       </Link>
+                      <div className="cases-row-stage">
+                        <CrmStageSelect
+                          caseId={caseItem.id}
+                          stage={caseItem.crmStage}
+                          stages={stageOptionsByAgent[caseItem.assignedAgentId] ?? []}
+                          onChange={async (caseId, stageId) => {
+                            const result = await moveCaseStageAction(caseId, stageId);
+                            if (result.ok) router.refresh();
+                            return result;
+                          }}
+                          onFollowUpRequired={(stageId) =>
+                            setFollowUpTarget({
+                              caseId: caseItem.id,
+                              prospectName: caseItem.prospectName,
+                              stageId,
+                            })
+                          }
+                          compact
+                        />
+                      </div>
+                      <Link href={`/agent/cases/${caseItem.id}`} className="cases-row-arrow" aria-hidden="true" tabIndex={-1}>→</Link>
                     </li>
                   ))}
                 </ul>
@@ -665,6 +636,38 @@ export function CasesBoard({ cases }: { cases: Case[] }) {
           </div>
         </aside>
       </div>
+
+      <StageManagerDrawer
+        key={stages.map((stage) => `${stage.id}:${stage.name}:${stage.position}:${stage.caseCount}`).join("|")}
+        open={managerOpen}
+        onClose={() => setManagerOpen(false)}
+        stages={stages}
+        actions={{
+          create: createStageAction,
+          rename: renameStageAction,
+          reorder: reorderStagesAction,
+          archive: archiveStageAction,
+        }}
+        onChanged={() => router.refresh()}
+      />
+
+      <FollowUpModal
+        key={followUpTarget?.caseId ?? "closed"}
+        open={Boolean(followUpTarget)}
+        onClose={() => setFollowUpTarget(null)}
+        prospectName={followUpTarget?.prospectName ?? "este lead"}
+        onSubmit={async ({ title, scheduledAt }) => {
+          if (!followUpTarget) return { ok: false, message: "Lead não encontrado." };
+          const result = await moveCaseAndScheduleAction({
+            caseId: followUpTarget.caseId,
+            stageId: followUpTarget.stageId,
+            title,
+            scheduledAt,
+          });
+          if (result.ok) router.refresh();
+          return result;
+        }}
+      />
     </div>
   );
 }

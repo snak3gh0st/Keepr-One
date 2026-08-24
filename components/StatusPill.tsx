@@ -1,4 +1,5 @@
 import { caseStageLabel } from "@/lib/case-workflow";
+import type { CrmStageView } from "@/lib/crm";
 
 type Tone = "success" | "warning" | "danger" | "neutral";
 
@@ -86,6 +87,28 @@ export function CaseStagePill({ stage }: { stage: string }) {
       {caseStageLabel[stage as keyof typeof caseStageLabel] ?? stage}
     </Pill>
   );
+}
+
+const crmStageTone: Record<string, Tone> = {
+  NEW_LEAD: "neutral",
+  FOLLOW_UP: "warning",
+  IN_CONTACT: "warning",
+  QUALIFIED: "success",
+  FIRST_MEETING_SCHEDULED: "success",
+  ILLUSTRATION_SCHEDULED: "success",
+  CONTRACT_CLOSED: "success",
+  POLICY_ISSUED: "success",
+  ACTIVE_CLIENT: "success",
+  LOST: "danger",
+};
+
+export function CrmStagePill({
+  stage,
+}: {
+  stage: Pick<CrmStageView, "name" | "systemKey"> | null;
+}) {
+  if (!stage) return <Pill tone="neutral">Sem etapa</Pill>;
+  return <Pill tone={crmStageTone[stage.systemKey ?? ""] ?? "neutral"}>{stage.name}</Pill>;
 }
 
 export function RolePill({ role }: { role: string }) {

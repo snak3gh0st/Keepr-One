@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { saveRapidSolveIllustration } from './illustration-service'
 
 function createWriter() {
-  // Typed argument so the assertions below can read what was written.
-  const upsert = vi.fn(async (_args: unknown) => ({ id: 'illustration-1' }))
+  // Typed argument lets assertions inspect the recorded Prisma input below.
+  const upsert = vi.fn(async (args: unknown) => {
+    void args
+    return { id: 'illustration-1' }
+  })
   return { writer: { illustration: { upsert } } as never, upsert }
 }
 
@@ -20,7 +23,7 @@ const input = {
     monthlyPremium: 312.4,
     lapseYear: null,
   },
-  request: { Amount: 250_000 },
+  request: { SolveType: 'Specify_Amount', Amount: 250_000 },
 }
 
 describe('saveRapidSolveIllustration', () => {
@@ -42,7 +45,12 @@ describe('saveRapidSolveIllustration', () => {
           faceAmount: 250_000,
           premium: 312.4,
           insuredName: 'Ana Souza',
-          rawPayload: { request: { Amount: 250_000 }, response: input.quote },
+          targetPremium: null,
+          targetPremiumSource: null,
+          rawPayload: {
+            request: { SolveType: 'Specify_Amount', Amount: 250_000 },
+            response: input.quote,
+          },
         }),
       }),
     )
@@ -55,6 +63,88 @@ describe('saveRapidSolveIllustration', () => {
     const call = upsert.mock.calls[0][0] as { create: { premium: number } }
     expect(call.create.premium).toBe(312.4)
     expect(call.create.premium).not.toBe(3_748.8)
+  })
+
+  it('stores an explicitly named response CTP only as an illustration estimate', async () => {
+    const { writer, upsert } = createWriter()
+    await saveRapidSolveIllustration(
+      { ...input, quote: { ...input.quote, targetPremium: 3_000 } },
+      writer,
+    )
+
+    const call = upsert.mock.calls[0][0] as {
+      create: {
+        targetPremium: number | null
+        targetPremiumSource: string | null
+        rawPayload: { targetPremiumEstimate?: unknown }
+      }
+      update: { targetPremium: number | null; targetPremiumSource: string | null }
+    }
+    expect(call.create.targetPremium).toBe(3_000)
+    expect(call.create.targetPremiumSource).toBe('ILLUSTRATION_ESTIMATE')
+    expect(call.update.targetPremium).toBe(3_000)
+    expect(call.update.targetPremiumSource).toBe('ILLUSTRATION_ESTIMATE')
+    expect(call.create.rawPayload.targetPremiumEstimate).toEqual({
+      amount: 3_000,
+      status: 'ESTIMATED',
+      source: 'RAPID_SOLVE_RESPONSE',
+      unit: 'UNKNOWN',
+    })
+  })
+
+  it('keeps Based_on_Target_Premium monthly input only as raw estimate metadata', async () => {
+    const { writer, upsert } = createWriter()
+    await saveRapidSolveIllustration(
+      {
+        ...input,
+        request: { SolveType: 'Based_on_Target_Premium', Amount: 300 },
+      },
+      writer,
+    )
+
+    const call = upsert.mock.calls[0][0] as {
+      create: {
+        targetPremium: number | null
+        targetPremiumSource: string | null
+        rawPayload: { targetPremiumEstimate?: unknown }
+      }
+    }
+    expect(call.create.targetPremium).toBeNull()
+    expect(call.create.targetPremiumSource).toBeNull()
+    expect(call.create.rawPayload.targetPremiumEstimate).toEqual({
+      amount: 300,
+      status: 'ESTIMATED',
+      source: 'RAPID_SOLVE_INPUT',
+      unit: 'MONTHLY_INPUT',
+    })
+    expect(call.create.rawPayload.targetPremiumEstimate).not.toMatchObject({ amount: 3_600 })
+  })
+
+  it('does not derive Target Premium from quote premiums, PremiumAmt, or commission', async () => {
+    const { writer, upsert } = createWriter()
+    await saveRapidSolveIllustration(
+      {
+        ...input,
+        request: {
+          SolveType: 'Specify_Amount',
+          Amount: 250_000,
+          PremiumAmt: 3_748.8,
+          Commission: 3_000,
+        },
+      },
+      writer,
+    )
+
+    const call = upsert.mock.calls[0][0] as {
+      create: {
+        targetPremium: number | null
+        targetPremiumSource: string | null
+        rawPayload: { targetPremiumEstimate?: unknown }
+      }
+    }
+    expect(call.create.targetPremium).toBeNull()
+    expect(call.create.targetPremiumSource).toBeNull()
+    expect(call.create.rawPayload.targetPremiumEstimate).toBeUndefined()
   })
 
   it('reads the date of birth out of the carrier format', async () => {
