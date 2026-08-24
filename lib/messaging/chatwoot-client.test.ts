@@ -71,6 +71,30 @@ describe('createChatwootClient', () => {
     expect(calls[0]?.url).toBe('https://chat.example.com/platform/api/v1/users/12/login')
   })
 
+  it('lists only WhatsApp inboxes with the account-scoped user token', async () => {
+    const { http, calls } = recorder([{
+      payload: [
+        { id: 31, name: 'Meu WhatsApp', channel_type: 'Channel::Whatsapp', phone_number: '+14075550123', provider: 'whatsapp_cloud' },
+        { id: 32, name: 'Site', channel_type: 'Channel::WebWidget' },
+      ],
+    }])
+    const client = createChatwootClient(config(http))
+
+    const inboxes = await client.listWhatsappInboxes({
+      accountId: '7',
+      userAccessToken: 'agent-token',
+    })
+
+    expect(inboxes).toEqual([{
+      id: '31',
+      name: 'Meu WhatsApp',
+      phoneNumber: '+14075550123',
+      provider: 'whatsapp_cloud',
+    }])
+    expect(calls[0]?.url).toBe('https://chat.example.com/api/v1/accounts/7/inboxes')
+    expect((calls[0]?.init.headers as Record<string, string>).api_access_token).toBe('agent-token')
+  })
+
   it('raises a typed error when Chatwoot refuses, instead of returning junk', async () => {
     const http: ChatwootHttp = async () => ({ ok: false, status: 422, json: async () => ({ message: 'taken' }) })
     const client = createChatwootClient(config(http))

@@ -6,10 +6,24 @@
 export type WhatsappResponse = { ok: boolean; status: number; json: () => Promise<unknown> }
 export type WhatsappHttp = (url: string, init: RequestInit) => Promise<WhatsappResponse>
 
+export class WhatsappRequestError extends Error {
+  constructor(readonly status: number) {
+    super('WHATSAPP_REQUEST_FAILED')
+    this.name = 'WhatsappRequestError'
+  }
+}
+
+export type WhatsappIdentity = {
+  externalPhoneNumberId: string
+  normalizedPhoneE164: string
+}
+
 export type WhatsappClient = {
   createInstance: (input: { agentId: string }) => Promise<void>
   fetchQrCode: (input: { agentId: string }) => Promise<{ image: string } | null>
   connectionState: (input: { agentId: string }) => Promise<string>
+  connectionIdentity: (input: { agentId: string }) => Promise<WhatsappIdentity | null>
+  enforcePrivateChatSettings: (input: { agentId: string }) => Promise<void>
   linkToInbox: (input: {
     agentId: string
     chatwootAccountId: string
@@ -33,14 +47,16 @@ export function createWhatsappClient(config: {
   apiKey: string
   http: WhatsappHttp
 }): WhatsappClient {
-  const call = async (path: string, init: RequestInit): Promise<Record<string, unknown>> => {
+  const callRaw = async (path: string, init: RequestInit): Promise<unknown> => {
     const response = await config.http(`${config.baseUrl}${path}`, {
       ...init,
       headers: { 'content-type': 'application/json', apikey: config.apiKey, ...(init.headers ?? {}) },
     })
-    if (!response.ok) throw new Error('WHATSAPP_REQUEST_FAILED')
-    return asRecord(await response.json())
+    if (!response.ok) throw new WhatsappRequestError(response.status)
+    return response.json()
   }
+  const call = async (path: string, init: RequestInit): Promise<Record<string, unknown>> =>
+    asRecord(await callRaw(path, init))
 
   return {
     createInstance: async ({ agentId }) => {
@@ -66,6 +82,37 @@ export function createWhatsappClient(config: {
       const body = await call(`/instance/connectionState/${instanceNameFor(agentId)}`, { method: 'GET' })
       const instance = asRecord(body.instance)
       return typeof instance.state === 'string' ? instance.state : 'close'
+    },
+
+    connectionIdentity: async ({ agentId }) => {
+      const body = await callRaw(
+        `/instance/fetchInstances?instanceName=${encodeURIComponent(instanceNameFor(agentId))}`,
+        { method: 'GET' },
+      )
+      const row = asRecord(Array.isArray(body) ? body[0] : body)
+      const ownerJid = row.ownerJid
+      if (typeof ownerJid !== 'string') return null
+      const match = /^(\d+)@s\.whatsapp\.net$/.exec(ownerJid)
+      if (!match) return null
+      return {
+        externalPhoneNumberId: ownerJid,
+        normalizedPhoneE164: `+${match[1]}`,
+      }
+    },
+
+    enforcePrivateChatSettings: async ({ agentId }) => {
+      await call(`/settings/set/${instanceNameFor(agentId)}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          rejectCall: false,
+          msgCall: '',
+          groupsIgnore: true,
+          alwaysOnline: false,
+          readMessages: false,
+          readStatus: false,
+          syncFullHistory: false,
+        }),
+      })
     },
 
     linkToInbox: async ({ agentId, chatwootAccountId, chatwootUserToken, chatwootUrl }) => {

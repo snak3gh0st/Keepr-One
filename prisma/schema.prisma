@@ -23,6 +23,20 @@ enum AgentStatus {
   INACTIVE
 }
 
+enum MessagingChannelProvider {
+  EVOLUTION
+  META_CLOUD
+}
+
+enum MessagingChannelStatus {
+  PROVISIONING
+  WAITING_FOR_USER
+  CONNECTED
+  DEGRADED
+  DISCONNECTED
+  FAILED
+}
+
 enum PolicyStatus {
   PENDING
   APPROVED
@@ -350,6 +364,7 @@ model Agent {
   nationalLifeConnectorCommands         NationalLifeConnectorCommand[]
   nationalLifeExportUploads             NationalLifeExportUpload[]
   messagingAccount                      AgentMessagingAccount?
+  messagingChannel                      AgentMessagingChannel?
   producedPromotionCredits              PromotionCredit[]                      @relation("PromotionCreditProducer")
   promotionCreditAttributions           PromotionCreditAttribution[]           @relation("PromotionCreditAttributedAgent")
   ledPromotionCreditAttributions        PromotionCreditAttribution[]           @relation("PromotionCreditAttributionLeader")
@@ -770,6 +785,31 @@ model AgentMessagingAccount {
   updatedAt         DateTime @updatedAt
 
   @@unique([provider, externalAccountId])
+}
+
+/// One agent owns one WhatsApp transport identity. Provider identifiers and the
+/// normalized number are globally unique so reconnecting a number can never move
+/// another agent's inbox by accident.
+model AgentMessagingChannel {
+  id                    String                   @id @default(cuid())
+  agentId               String                   @unique
+  agent                 Agent                    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  provider              MessagingChannelProvider
+  status                MessagingChannelStatus   @default(PROVISIONING)
+  normalizedPhoneE164   String?                  @unique
+  externalPhoneNumberId String?                  @unique
+  externalWabaId        String?
+  externalInboxId       String?                  @unique
+  evolutionInstanceName String?                  @unique
+  verifiedAt            DateTime?                @db.Timestamptz(3)
+  lastInboundAt         DateTime?                @db.Timestamptz(3)
+  lastOutboundAt        DateTime?                @db.Timestamptz(3)
+  lastHealthCheckAt     DateTime?                @db.Timestamptz(3)
+  lastErrorCode         String?
+  createdAt             DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime                 @updatedAt @db.Timestamptz(3)
+
+  @@index([provider, status])
 }
 
 /// One independently configurable CRM pipeline per agent account. "Todos" is

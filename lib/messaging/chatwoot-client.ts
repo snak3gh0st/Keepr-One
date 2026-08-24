@@ -24,6 +24,17 @@ export type ChatwootClient = {
   linkUserToAccount: (input: { accountId: string; userId: string }) => Promise<void>
   createSsoUrl: (input: { userId: string }) => Promise<string>
   simplifyAccount: (input: { accountId: string }) => Promise<void>
+  listWhatsappInboxes: (input: {
+    accountId: string
+    userAccessToken: string
+  }) => Promise<ChatwootWhatsappInbox[]>
+}
+
+export type ChatwootWhatsappInbox = {
+  id: string
+  name: string
+  phoneNumber: string | null
+  provider: string | null
 }
 
 /// A solo insurance agent connects a channel and talks to clients. Everything
@@ -50,6 +61,10 @@ const FEATURES_A_SOLO_AGENT_NEVER_USES = [
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
 }
 
 export function createChatwootClient(config: {
@@ -106,6 +121,24 @@ export function createChatwootClient(config: {
     createSsoUrl: async ({ userId }) => {
       const body = await call(`/platform/api/v1/users/${userId}/login`, { method: 'GET' })
       return String(body.url)
+    },
+
+    listWhatsappInboxes: async ({ accountId, userAccessToken }) => {
+      const body = await call(`/api/v1/accounts/${accountId}/inboxes`, {
+        method: 'GET',
+        // This is an account API, not a platform API. The scoped user token can
+        // only see this agent's structurally isolated Chatwoot account.
+        headers: { api_access_token: userAccessToken },
+      })
+      return asArray(body.payload)
+        .map(asRecord)
+        .filter((inbox) => inbox.channel_type === 'Channel::Whatsapp')
+        .map((inbox) => ({
+          id: String(inbox.id),
+          name: typeof inbox.name === 'string' ? inbox.name : 'WhatsApp',
+          phoneNumber: typeof inbox.phone_number === 'string' ? inbox.phone_number : null,
+          provider: typeof inbox.provider === 'string' ? inbox.provider : null,
+        }))
     },
   }
 }

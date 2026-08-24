@@ -11,6 +11,8 @@ import { InboxFrame } from './InboxFrame'
 import { ConnectWhatsapp } from './ConnectWhatsapp'
 import { whatsappConfigFromEnv } from '@/lib/messaging/whatsapp-config'
 import { createWhatsappClient } from '@/lib/messaging/whatsapp-client'
+import { whatsappChannelModeFromEnv } from '@/lib/messaging/channel-mode'
+import { ConnectOfficialWhatsapp } from './ConnectOfficialWhatsapp'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,27 +28,60 @@ export default async function MensagensPage() {
   // The inbox is only worth showing once a channel reaches it. Before that the page
   // is the connect screen, not an empty Chatwoot asking the agent to configure it.
   let whatsappConnected = false
+  const channelMode = whatsappChannelModeFromEnv(process.env)
 
   if (config) {
     try {
-      const { userId } = await provisionAgentInbox(prismaProvisionDeps(prisma, config), {
+      const { accountId, userId } = await provisionAgentInbox(prismaProvisionDeps(prisma, config), {
         agentId: agent.id,
         agentName: user?.name ?? 'Agente',
         agentEmail: user?.email ?? `agent-${agent.id}@keeprone.com`,
       })
       // Minted per page load and short-lived by design: it is a login, and a login
       // that survives in history is a login someone else can replay.
-      inboxUrl = await createChatwootClient({
+      const chatwoot = createChatwootClient({
         baseUrl: config.baseUrl,
         platformToken: config.platformToken,
         http: (url, init) => fetch(url, init),
-      }).createSsoUrl({ userId })
-      const whatsapp = whatsappConfigFromEnv(process.env)
-      if (whatsapp) {
-        whatsappConnected =
-          (await createWhatsappClient({ ...whatsapp, http: (url, init) => fetch(url, init) })
+      })
+      inboxUrl = await chatwoot.createSsoUrl({ userId })
+      const channel = await prisma.agentMessagingChannel.findUnique({
+        where: { agentId: agent.id },
+        select: { provider: true, status: true, externalPhoneNumberId: true, externalInboxId: true },
+      })
+      if (channelMode === 'META_CLOUD') {
+        const account = await prisma.agentMessagingAccount.findUnique({
+          where: { agentId: agent.id },
+          select: { externalUserToken: true },
+        })
+        const officialInboxes = account?.externalUserToken
+          ? await chatwoot.listWhatsappInboxes({
+              accountId,
+              userAccessToken: account.externalUserToken,
+            }).catch((error) => {
+              console.error('[mensagens] WhatsApp Cloud health check failed', error)
+              return []
+            })
+          : []
+        whatsappConnected = channel?.provider === 'META_CLOUD'
+          && channel.status === 'CONNECTED'
+          && Boolean(channel.externalInboxId)
+          && officialInboxes.length === 1
+          && channel.externalInboxId === `${accountId}:${officialInboxes[0]?.id}`
+      } else {
+        const whatsapp = whatsappConfigFromEnv(process.env)
+        if (whatsapp) {
+          const providerState = await createWhatsappClient({
+            ...whatsapp,
+            http: (url, init) => fetch(url, init),
+          })
             .connectionState({ agentId: agent.id })
-            .catch(() => 'close')) === 'open'
+            .catch(() => 'close')
+          whatsappConnected = providerState === 'open'
+            && channel?.provider === 'EVOLUTION'
+            && channel.status === 'CONNECTED'
+            && Boolean(channel.externalPhoneNumberId)
+        }
       }
     } catch (error) {
       // Reported, never swallowed. The first version hid a 422 from Chatwoot's
@@ -58,31 +93,43 @@ export default async function MensagensPage() {
     }
   }
 
+  return renderPage({ userName: user?.name ?? '', failed, inboxUrl, whatsappConnected, channelMode })
+}
+
+function renderPage(input: {
+  userName: string
+  failed: boolean
+  inboxUrl: string | null
+  whatsappConnected: boolean
+  channelMode: 'EVOLUTION' | 'META_CLOUD'
+}) {
   return (
-    <Shell role="AGENT" userName={user?.name ?? ''}>
-      {inboxUrl && whatsappConnected ? (
-        <InboxFrame src={inboxUrl} />
-      ) : inboxUrl ? (
+    <Shell role="AGENT" userName={input.userName}>
+      {input.inboxUrl && input.whatsappConnected ? (
+        <InboxFrame src={input.inboxUrl} />
+      ) : input.inboxUrl ? (
         <>
           <PageHeader
             title="Mensagens"
             eyebrow="Conversa com seus clientes"
             description="Fale com quem já está na sua carteira, sem sair do Keepr One."
           />
-          <ConnectWhatsapp />
+          {input.channelMode === 'META_CLOUD'
+            ? <ConnectOfficialWhatsapp setupUrl={input.inboxUrl} />
+            : <ConnectWhatsapp />}
         </>
       ) : (
         <>
-        <PageHeader
-          title="Mensagens"
-          eyebrow="Conversa com seus clientes"
-          description="Fale com quem já está na sua carteira, sem sair do Keepr One."
-        />
-        <EmptyState>
-          {failed
-            ? 'Não foi possível abrir suas mensagens agora. Tente de novo em alguns instantes — nada do que você enviou foi perdido.'
-            : 'Assim que a conversa com clientes for liberada para a sua conta, ela aparece aqui.'}
-        </EmptyState>
+          <PageHeader
+            title="Mensagens"
+            eyebrow="Conversa com seus clientes"
+            description="Fale com quem já está na sua carteira, sem sair do Keepr One."
+          />
+          <EmptyState>
+            {input.failed
+              ? 'Não foi possível abrir suas mensagens agora. Tente de novo em alguns instantes — nada do que você enviou foi perdido.'
+              : 'Assim que a conversa com clientes for liberada para a sua conta, ela aparece aqui.'}
+          </EmptyState>
         </>
       )}
     </Shell>

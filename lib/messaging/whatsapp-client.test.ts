@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { createWhatsappClient, type WhatsappHttp } from './whatsapp-client'
+import {
+  createWhatsappClient,
+  WhatsappRequestError,
+  type WhatsappHttp,
+} from './whatsapp-client'
 
 function recorder(responses: unknown[], ok = true) {
   const calls: { url: string; init: RequestInit }[] = []
@@ -58,11 +62,65 @@ describe('createWhatsappClient', () => {
     expect(state).toBe('open')
   })
 
+  it('reads and normalizes the exact connected phone identity', async () => {
+    const { http, calls } = recorder([[{
+      name: 'agent-a1',
+      connectionStatus: 'open',
+      ownerJid: '15617260051@s.whatsapp.net',
+    }]])
+    const identity = await createWhatsappClient(config(http)).connectionIdentity({ agentId: 'a1' })
+
+    expect(calls[0]?.url).toBe('http://evo:8080/instance/fetchInstances?instanceName=agent-a1')
+    expect(identity).toEqual({
+      externalPhoneNumberId: '15617260051@s.whatsapp.net',
+      normalizedPhoneE164: '+15617260051',
+    })
+  })
+
+  it('does not mistake a group owner id for a phone identity', async () => {
+    const { http } = recorder([[{ ownerJid: '12345@g.us' }]])
+
+    await expect(
+      createWhatsappClient(config(http)).connectionIdentity({ agentId: 'a1' }),
+    ).resolves.toBeNull()
+  })
+
+  it('excludes group chats and full history from the agent inbox', async () => {
+    const { http, calls } = recorder([{}])
+
+    await createWhatsappClient(config(http)).enforcePrivateChatSettings({ agentId: 'a1' })
+
+    expect(calls[0]?.url).toBe('http://evo:8080/settings/set/agent-a1')
+    expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({
+      groupsIgnore: true,
+      syncFullHistory: false,
+    })
+  })
+
+  it('configures one private Chatwoot inbox without history import', async () => {
+    const { http, calls } = recorder([{}])
+    await createWhatsappClient(config(http)).linkToInbox({
+      agentId: 'a1',
+      chatwootAccountId: '15',
+      chatwootUserToken: 'user-token',
+      chatwootUrl: 'https://chat.example.com',
+    })
+
+    expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({
+      accountId: '15',
+      token: 'user-token',
+      url: 'https://chat.example.com',
+      importContacts: false,
+      importMessages: false,
+      autoCreate: true,
+    })
+  })
+
   it('raises a typed error when the provider refuses', async () => {
     const { http } = recorder([{}], false)
 
     await expect(
       createWhatsappClient(config(http)).createInstance({ agentId: 'a1' }),
-    ).rejects.toThrow('WHATSAPP_REQUEST_FAILED')
+    ).rejects.toEqual(new WhatsappRequestError(500))
   })
 })
