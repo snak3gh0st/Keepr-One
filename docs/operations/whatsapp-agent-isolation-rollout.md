@@ -44,6 +44,19 @@ Nesse modo, o endpoint de conexão:
 4. lê o `ownerJid` do provedor e grava o telefone normalizado;
 5. só libera a caixa quando Evolution, Chatwoot e identidade concordam.
 
+Na Evolution 2.3.7, desative explicitamente a importação direta do banco do
+Chatwoot quando ela não for usada:
+
+```dotenv
+CHATWOOT_IMPORT_DATABASE_CONNECTION_URI=
+```
+
+Não deixe a URI de exemplo da imagem (`...@host:5432/chatwoot`). Qualquer valor
+não vazio ativa o caminho de importação e faz a Evolution aguardar um hostname
+inexistente depois do envio. O Chatwoot pode então registrar timeout e marcar a
+mensagem como falha mesmo após o WhatsApp confirmar a entrega. Antes de repetir
+uma mensagem com esse erro, confira o identificador e o ACK no provedor.
+
 Nunca considere QR lido, conexão `open`, resposta HTTP 2xx ou mensagem criada no
 Chatwoot como prova isolada de entrega.
 
