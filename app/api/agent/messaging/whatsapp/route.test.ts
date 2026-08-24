@@ -89,7 +89,7 @@ describe('agent WhatsApp ownership boundary', () => {
     })
     expect(mocks.linkToInbox).toHaveBeenCalledBefore(mocks.connectionIdentity)
     expect(mocks.channelUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { agentId: 'agent-1' },
+      where: { agentId_kind: { agentId: 'agent-1', kind: 'WHATSAPP' } },
       create: expect.objectContaining({
         agentId: 'agent-1',
         normalizedPhoneE164: '+15617260051',

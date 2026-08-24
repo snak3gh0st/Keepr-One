@@ -14,9 +14,10 @@ const NO_STORE = { 'Cache-Control': 'no-store' }
 
 async function recordChannelFailure(agentId: string, errorCode: string) {
   await prisma.agentMessagingChannel.upsert({
-    where: { agentId },
+    where: { agentId_kind: { agentId, kind: 'WHATSAPP' } },
     create: {
       agentId,
+      kind: 'WHATSAPP',
       provider: 'EVOLUTION',
       status: 'FAILED',
       evolutionInstanceName: instanceNameFor(agentId),
@@ -88,9 +89,10 @@ export async function POST(request: Request) {
     const connected = state === 'open' && identity !== null
     const now = new Date()
     await prisma.agentMessagingChannel.upsert({
-      where: { agentId: agent.id },
+      where: { agentId_kind: { agentId: agent.id, kind: 'WHATSAPP' } },
       create: {
         agentId: agent.id,
+        kind: 'WHATSAPP',
         provider: 'EVOLUTION',
         status: connected ? 'CONNECTED' : 'WAITING_FOR_USER',
         evolutionInstanceName: instanceNameFor(agent.id),

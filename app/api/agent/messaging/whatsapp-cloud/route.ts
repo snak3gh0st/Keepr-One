@@ -71,9 +71,10 @@ export async function POST(request: Request) {
 
     const now = new Date()
     await prisma.agentMessagingChannel.upsert({
-      where: { agentId: agent.id },
+      where: { agentId_kind: { agentId: agent.id, kind: 'WHATSAPP' } },
       create: {
         agentId: agent.id,
+        kind: 'WHATSAPP',
         provider: 'META_CLOUD',
         status: 'CONNECTED',
         normalizedPhoneE164: phone,
