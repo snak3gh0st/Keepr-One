@@ -1,0 +1,88 @@
+# WhatsApp por agente: isolamento e migração oficial
+
+## Contrato permanente
+
+- Cada agente Keepr One possui uma conta Chatwoot própria.
+- Cada conta possui exatamente uma caixa WhatsApp e exatamente um número.
+- O mesmo número, identificador externo ou caixa não pode pertencer a dois agentes.
+- O Chatwoot é a interface e o registro das conversas; a Meta Cloud API é o
+  transporte oficial. Evolution é somente a ponte temporária de migração.
+- Grupos, histórico anterior e sessões sem telefone confirmado não entram no
+  Chatwoot.
+
+O banco reforça esse contrato em `AgentMessagingAccount` e
+`AgentMessagingChannel`. As restrições são globais, não dependem de filtros de
+interface ou da disciplina de um operador.
+
+## Estado temporário: Evolution
+
+Configure o Keepr One com:
+
+```dotenv
+WHATSAPP_CHANNEL_MODE=EVOLUTION
+```
+
+Nesse modo, o endpoint de conexão:
+
+1. cria/reusa somente a instância `agent-{agentId}`;
+2. força `groupsIgnore=true` e `syncFullHistory=false`;
+3. vincula a instância somente à conta Chatwoot daquele agente;
+4. lê o `ownerJid` do provedor e grava o telefone normalizado;
+5. só libera a caixa quando Evolution, Chatwoot e identidade concordam.
+
+Nunca considere QR lido, conexão `open`, resposta HTTP 2xx ou mensagem criada no
+Chatwoot como prova isolada de entrega.
+
+## Destino: Meta WhatsApp Cloud com Embedded Signup
+
+No serviço **Chatwoot self-hosted** (não no container do Keepr One), configure:
+
+```dotenv
+WHATSAPP_APP_ID=...
+WHATSAPP_CONFIGURATION_ID=...
+WHATSAPP_APP_SECRET=...
+```
+
+Antes de liberar agentes:
+
+1. Configure no Meta Developer Portal o WhatsApp Embedded Signup.
+2. Garanta as permissões `whatsapp_business_management`,
+   `whatsapp_business_messaging` e `business_management`.
+3. Confirme que o Chatwoot mostra “Connect with WhatsApp Business” em
+   Configurações → Caixas de entrada → Adicionar caixa → WhatsApp Cloud.
+4. Valide o fluxo completo em uma conta de agente piloto e um número Business de
+   teste.
+5. Troque o Keepr One para `WHATSAPP_CHANNEL_MODE=META_CLOUD`.
+
+Nesse modo, o Keepr One bloqueia o endpoint Evolution. O agente conclui a
+autorização da Meta na sua própria conta Chatwoot e volta ao Keepr para validar.
+O Keepr consulta a API da conta com o token restrito do próprio agente e aceita
+somente uma caixa `Channel::Whatsapp` com provider `whatsapp_cloud` e telefone
+verificado.
+
+## Coexistence e número já usado no celular
+
+Quando o número permanece no WhatsApp Business App, use exclusivamente o fluxo
+Embedded Signup/Coexistence indicado pela Meta e pelo Chatwoot. Não remova nem
+registre manualmente esse número na Cloud API durante a migração. Faça primeiro
+um piloto com backup e teste explícito do aplicativo móvel.
+
+## Prova de funcionamento
+
+Para cada agente piloto, registre separadamente:
+
+- conta Keepr e conta Chatwoot correspondentes;
+- única caixa e telefone exibidos pela API de inboxes;
+- mensagem recebida de um contato privado real;
+- resposta entregue ao aparelho do contato;
+- template aprovado enviado fora da janela de atendimento;
+- inexistência de grupos e conversas de outro agente;
+- funcionamento do WhatsApp Business App, quando Coexistence for exigido;
+- logs sem retry/dead jobs do webhook Chatwoot → provedor.
+
+## Rollback
+
+Não apague a caixa oficial nem a instância Evolution durante o piloto. Para voltar
+temporariamente, restaure `WHATSAPP_CHANNEL_MODE=EVOLUTION`, confirme que o
+telefone pertence ao mesmo agente e execute novamente a validação. Nunca mantenha
+os dois transportes ativos para o mesmo número ao mesmo tempo.

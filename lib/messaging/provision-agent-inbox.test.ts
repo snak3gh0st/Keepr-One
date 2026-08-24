@@ -19,6 +19,7 @@ function harness(existing: { externalAccountId: string; externalUserId: string }
       linkUserToAccount: vi.fn(async () => {}),
       createSsoUrl: vi.fn(async () => 'https://chat.example.com/app/login?sso_auth_token=abc'),
       simplifyAccount: vi.fn(async () => {}),
+      listWhatsappInboxes: vi.fn(async () => []),
     },
     randomPassword: () => 'p'.repeat(24),
   }

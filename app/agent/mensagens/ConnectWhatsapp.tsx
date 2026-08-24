@@ -11,16 +11,23 @@ type State = 'idle' | 'starting' | 'waiting' | 'connected' | 'failed'
 export function ConnectWhatsapp() {
   const [state, setState] = useState<State>('idle')
   const [qr, setQr] = useState<string | null>(null)
+  const [errorCode, setErrorCode] = useState<string | null>(null)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const poll = useCallback(async () => {
     const response = await fetch('/api/agent/messaging/whatsapp', { method: 'POST' })
     if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as { error?: string }
+      setErrorCode(body.error ?? 'CONNECT_FAILED')
       setState('failed')
       return
     }
-    const body = (await response.json()) as { qr: string | null; state: string }
-    if (body.state === 'open') {
+    const body = (await response.json()) as {
+      qr: string | null
+      state: string
+      status: string
+    }
+    if (body.state === 'open' && body.status === 'CONNECTED') {
       setState('connected')
       window.location.reload()
       return
@@ -76,6 +83,7 @@ export function ConnectWhatsapp() {
             className="mt-6 w-full sm:w-auto"
             onClick={() => {
               setState('starting')
+              setErrorCode(null)
               void poll()
             }}
           >
@@ -117,7 +125,11 @@ export function ConnectWhatsapp() {
             role="alert"
             className="mt-6 rounded-xl border border-danger/20 bg-danger-pale px-4 py-3 text-sm leading-6 text-danger"
           >
-            Não consegui preparar a conexão agora. Tente de novo em alguns instantes.
+            {errorCode === 'PHONE_ALREADY_CONNECTED'
+              ? 'Este número já pertence a outra conta Keepr One. Desconecte-o da conta anterior antes de tentar novamente.'
+              : errorCode === 'CHATWOOT_ACCOUNT_NOT_READY'
+                ? 'Sua caixa de mensagens ainda não ficou pronta. Tente novamente em alguns instantes.'
+                : 'Não consegui validar a conexão completa entre WhatsApp e caixa de mensagens. Tente novamente em alguns instantes.'}
           </p>
         )}
       </div>
