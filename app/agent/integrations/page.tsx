@@ -7,6 +7,8 @@ import { isGoogleCalendarConfigured } from "@/lib/calendar/google/env";
 
 export const dynamic = "force-dynamic";
 
+const calcomUrl = process.env.CALCOM_URL?.trim() || "https://cal.keeprone.com";
+
 export default async function IntegrationsPage() {
   const agent = await getCurrentAgent();
   const [user, calendar] = await Promise.all([
@@ -42,6 +44,12 @@ export default async function IntegrationsPage() {
             <div><span>Produção</span><h2>National Life</h2><p>Apólices, ilustrações e produção sincronizadas com a operação.</p></div>
             <div className="integration-product-state"><i /><span>Integração da carteira</span></div>
             <Link href="/agent/integrations/national-life">Abrir integração<span aria-hidden="true">↗</span></Link>
+          </article>
+          <article className="integration-product-card">
+            <div className="integration-product-icon integration-cal-icon" aria-hidden="true">cal</div>
+            <div><span>Agenda de reservas</span><h2>Cal.com</h2><p>Disponibilidade, páginas de agendamento e reuniões em uma agenda própria para cada agente.</p></div>
+            <div className="integration-product-state"><i /><span>Cal.com self-hosted disponível</span></div>
+            <a href={calcomUrl} target="_blank" rel="noreferrer">Conectar Cal.com<span aria-hidden="true">↗</span></a>
           </article>
         </div>
       </div>

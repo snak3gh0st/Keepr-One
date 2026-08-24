@@ -17962,6 +17962,7 @@ table {
 .integration-product-card::after { position: absolute; right: -5rem; bottom: -7rem; width: 14rem; height: 14rem; border: 1px solid rgba(14, 109, 61, 0.1); border-radius: 50%; content: ""; }
 .integration-product-icon { display: grid; width: 3.25rem; height: 3.25rem; place-items: center; border-radius: 0.9rem; background: #f3f6f0; color: #18884e; font: 650 0.95rem/1 var(--font-geist-mono), monospace; }
 .integration-nl-icon { background: #0a100c; color: #f7faf5; }
+.integration-cal-icon { background: #fff1ec; color: #e45a3a; font-size: 0.72rem; letter-spacing: -0.06em; }
 .integration-product-card h2 { margin: 0.35rem 0 0.45rem; color: #0a100c; font-size: clamp(1.45rem, 2.6vw, 2rem); font-weight: 550; letter-spacing: -0.045em; }
 .integration-product-card p { max-width: 30rem; margin: 0; color: #69726b; font-size: 0.76rem; line-height: 1.6; }
 .integration-product-state { grid-column: 1 / -1; display: flex; min-height: 2.9rem; align-items: center; gap: 0.55rem; padding: 0.7rem 0.8rem; border: 1px solid var(--integration-line); border-radius: 0.8rem; background: rgba(248, 250, 246, 0.72); color: #626c65; font-size: 0.68rem; }
