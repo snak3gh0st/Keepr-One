@@ -130,15 +130,25 @@ export function CasesBoard({
     stageId: string;
   } | null>(null);
 
+  const effectiveStageKey = useMemo(() => {
+    if (!activeStageKey) return null;
+    const validStageKeys = new Set(
+      stages.map((stage) =>
+        stage.systemKey ? `system:${stage.systemKey}` : `stage:${stage.id}`,
+      ),
+    );
+    return validStageKeys.has(activeStageKey) ? activeStageKey : null;
+  }, [activeStageKey, stages]);
+
   const filtered = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
 
     const result = cases.filter((caseItem) => {
       const belongsToStage =
-        !activeStageKey ||
-        (activeStageKey.startsWith("system:")
-          ? caseItem.crmStage?.systemKey === activeStageKey.slice(7)
-          : caseItem.crmStage?.id === activeStageKey.slice(6));
+        !effectiveStageKey ||
+        (effectiveStageKey.startsWith("system:")
+          ? caseItem.crmStage?.systemKey === effectiveStageKey.slice(7)
+          : caseItem.crmStage?.id === effectiveStageKey.slice(6));
       if (!belongsToStage) return false;
       if (!normalizedQuery) return true;
 
@@ -163,7 +173,7 @@ export function CasesBoard({
       }
       return right.updatedAt.localeCompare(left.updatedAt);
     });
-  }, [activeStageKey, cases, query, sortMode]);
+  }, [cases, effectiveStageKey, query, sortMode]);
 
   const railStages = useMemo(
     () =>
@@ -308,7 +318,7 @@ export function CasesBoard({
     },
     {
       scope: root,
-      dependencies: [activeStageKey, sortMode, currentPage],
+      dependencies: [effectiveStageKey, sortMode, currentPage],
       revertOnUpdate: true,
     },
   );
@@ -437,7 +447,7 @@ export function CasesBoard({
           <PipelineRail
             stages={railStages}
             allCount={cases.length}
-            activeStageKey={activeStageKey}
+            activeStageKey={effectiveStageKey}
             panelId="crm-pipeline-results"
             onStageChange={(stageKey) => {
               setActiveStageKey(stageKey);
@@ -449,7 +459,7 @@ export function CasesBoard({
           <div
             id="crm-pipeline-results"
             role="tabpanel"
-            aria-labelledby={pipelineTabId(activeStageKey)}
+            aria-labelledby={pipelineTabId(effectiveStageKey)}
             className="cases-results"
           >
             {filtered.length === 0 ? (

@@ -28,6 +28,7 @@ import { getAgentPromotionSnapshot } from '@/lib/agent-promotion'
 import { getLocalPromotionPreview } from '@/lib/promotion-preview'
 import { getPromotionIdentity, getPromotionJourney } from '@/lib/promotion-journey'
 import { JourneyDashboardPreview } from './JourneyDashboardPreview'
+import { COMMISSION_EARNING_GRID_KEYS } from '@/lib/national-life/commission-grid-keys'
 import { FollowUpActionCard } from '@/components/crm/FollowUpActionCard'
 import { getDueFollowUpsForScope, nyDayBounds, type DueFollowUpView } from '@/lib/crm'
 import {
@@ -275,9 +276,6 @@ export default async function AgentDashboard({
       txnByType,
       dueFollowUpsResult,
       dueReviewCount,
-      calendarConnectionResult,
-      todayCalendarResult,
-      upcomingCalendarResult,
     ] = await Promise.all([
       prisma.policy.count({ where: { agentId: agent.id } }),
       prisma.commissionRecord.aggregate({ where: { agentId: agent.id }, _sum: { amount: true } }),
@@ -334,9 +332,6 @@ export default async function AgentDashboard({
           policy: { agentId: { in: scope } },
         },
       }),
-      getCalendarConnectionForUser(agent.userId),
-      getTodayCalendarSummary({ ownerUserId: agent.userId, now, timeZone: user?.timeZone ?? 'America/New_York' }),
-      getUpcomingCalendarEvents({ ownerUserId: agent.userId, now, timeZone: user?.timeZone ?? 'America/New_York' }),
     ])
 
     openCases = openCasesCount
@@ -346,36 +341,6 @@ export default async function AgentDashboard({
     dueFollowUpItems = dueFollowUpsResult
     dueFollowUps = dueFollowUpsResult.length
     dueReviews = dueReviewCount
-    const mappedCalendar = mapDomainCalendarConnectionToUi(calendarConnectionResult)
-    calendarConnection = mappedCalendar.connection
-    calendarSources = mappedCalendar.calendars
-    const calendarById = new Map(calendarSources.map((calendar) => [calendar.id, calendar]))
-    const calendarEvents = [...todayCalendarResult.upcoming, ...upcomingCalendarResult]
-    const meetingCaseIds = [...new Set(calendarEvents.map((event) => event.caseId).filter((caseId): caseId is string => Boolean(caseId)))]
-    const meetingCases = meetingCaseIds.length ? await prisma.insuranceCase.findMany({
-      where: { id: { in: meetingCaseIds }, assignedAgentId: agent.id },
-      select: {
-        id: true,
-        prospect: { select: { firstName: true, lastName: true, email: true } },
-        crmStage: { select: { name: true } },
-      },
-    }) : []
-    const meetingCaseById = new Map(meetingCases.map((item) => [item.id, {
-      id: item.id,
-      name: `${item.prospect.firstName} ${item.prospect.lastName}`.trim(),
-      email: item.prospect.email,
-      stage: item.crmStage?.name ?? null,
-    }]))
-    todayMeetings = todayCalendarResult.upcoming.map((event) => mapDomainCalendarEventToUi(event, {
-      timeZone: user?.timeZone ?? 'America/New_York',
-      case: event.caseId ? meetingCaseById.get(event.caseId) ?? null : null,
-      canWrite: calendarById.get(event.calendar.id)?.canWrite ?? false,
-    }))
-    upcomingMeetings = upcomingCalendarResult.map((event) => mapDomainCalendarEventToUi(event, {
-      timeZone: user?.timeZone ?? 'America/New_York',
-      case: event.caseId ? meetingCaseById.get(event.caseId) ?? null : null,
-      canWrite: calendarById.get(event.calendar.id)?.canWrite ?? false,
-    }))
     for (const t of txnByType) {
       const sum = decimalToNumber(t._sum.amount)
       if (t.type === 'EXPECTED') txnExpected = sum
@@ -427,6 +392,46 @@ export default async function AgentDashboard({
   } catch (error) {
     console.error('AgentDashboard query error', error)
     loadError = true
+  }
+
+  try {
+    const [calendarConnectionResult, todayCalendarResult, upcomingCalendarResult] = await Promise.all([
+      getCalendarConnectionForUser(agent.userId),
+      getTodayCalendarSummary({ ownerUserId: agent.userId, now, timeZone: user?.timeZone ?? 'America/New_York' }),
+      getUpcomingCalendarEvents({ ownerUserId: agent.userId, now, timeZone: user?.timeZone ?? 'America/New_York' }),
+    ])
+    const mappedCalendar = mapDomainCalendarConnectionToUi(calendarConnectionResult)
+    calendarConnection = mappedCalendar.connection
+    calendarSources = mappedCalendar.calendars
+    const calendarById = new Map(calendarSources.map((calendar) => [calendar.id, calendar]))
+    const calendarEvents = [...todayCalendarResult.upcoming, ...upcomingCalendarResult]
+    const meetingCaseIds = [...new Set(calendarEvents.map((event) => event.caseId).filter((caseId): caseId is string => Boolean(caseId)))]
+    const meetingCases = meetingCaseIds.length ? await prisma.insuranceCase.findMany({
+      where: { id: { in: meetingCaseIds }, assignedAgentId: agent.id },
+      select: {
+        id: true,
+        prospect: { select: { firstName: true, lastName: true, email: true } },
+        crmStage: { select: { name: true } },
+      },
+    }) : []
+    const meetingCaseById = new Map(meetingCases.map((item) => [item.id, {
+      id: item.id,
+      name: `${item.prospect.firstName} ${item.prospect.lastName}`.trim(),
+      email: item.prospect.email,
+      stage: item.crmStage?.name ?? null,
+    }]))
+    todayMeetings = todayCalendarResult.upcoming.map((event) => mapDomainCalendarEventToUi(event, {
+      timeZone: user?.timeZone ?? 'America/New_York',
+      case: event.caseId ? meetingCaseById.get(event.caseId) ?? null : null,
+      canWrite: calendarById.get(event.calendar.id)?.canWrite ?? false,
+    }))
+    upcomingMeetings = upcomingCalendarResult.map((event) => mapDomainCalendarEventToUi(event, {
+      timeZone: user?.timeZone ?? 'America/New_York',
+      case: event.caseId ? meetingCaseById.get(event.caseId) ?? null : null,
+      canWrite: calendarById.get(event.calendar.id)?.canWrite ?? false,
+    }))
+  } catch (error) {
+    console.error('AgentDashboard calendar query error', error)
   }
 
   const firstName = ((user?.name ?? '').trim() || 'Agente').split(/\s+/)[0]

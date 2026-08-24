@@ -349,6 +349,7 @@ model Agent {
   nationalLifeConnectorDevices          NationalLifeConnectorDevice[]
   nationalLifeConnectorCommands         NationalLifeConnectorCommand[]
   nationalLifeExportUploads             NationalLifeExportUpload[]
+  messagingAccount                      AgentMessagingAccount?
   producedPromotionCredits              PromotionCredit[]                      @relation("PromotionCreditProducer")
   promotionCreditAttributions           PromotionCreditAttribution[]           @relation("PromotionCreditAttributedAgent")
   ledPromotionCreditAttributions        PromotionCreditAttribution[]           @relation("PromotionCreditAttributionLeader")
@@ -769,6 +770,319 @@ model AgentMessagingAccount {
   updatedAt         DateTime @updatedAt
 
   @@unique([provider, externalAccountId])
+}
+
+/// One independently configurable CRM pipeline per agent account. "Todos" is
+/// intentionally not stored here: it is a virtual filter in the CRM query.
+model CrmPipeline {
+  id        String     @id @default(cuid())
+  agentId   String     @unique
+  agent     Agent      @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  stages    CrmStage[]
+}
+
+model CrmStage {
+  id         String          @id @default(cuid())
+  pipelineId String
+  pipeline   CrmPipeline     @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name       String
+  position   Int
+  /// Stable meaning for product-owned stages (for example FOLLOW_UP). Custom
+  /// stages leave this null and remain fully renameable/reorderable.
+  systemKey  String?
+  active     Boolean         @default(true)
+  archivedAt DateTime?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  cases      InsuranceCase[]
+
+  @@unique([pipelineId, systemKey])
+  @@index([pipelineId, active, position])
+}
+
+model FollowUp {
+  id                    String             @id @default(cuid())
+  caseId                String
+  insuranceCase         InsuranceCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  ownerAgentId          String
+  ownerAgent            Agent              @relation("FollowUpOwner", fields: [ownerAgentId], references: [id], onDelete: Cascade)
+  createdByUserId       String
+  createdByUser         User               @relation("FollowUpCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  title                 String             @default("Follow-up")
+  scheduledAt           DateTime           @db.Timestamptz(3)
+  status                FollowUpStatus     @default(SCHEDULED)
+  completedAt           DateTime?          @db.Timestamptz(3)
+  cancelledAt           DateTime?          @db.Timestamptz(3)
+  sourceTimelineEventId String?            @unique
+  sourceTimelineEvent   CaseTimelineEvent? @relation(fields: [sourceTimelineEventId], references: [id], onDelete: SetNull)
+  createdAt             DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime           @updatedAt @db.Timestamptz(3)
+  notifications         Notification[]
+  // Partial unique (one SCHEDULED row per case) lives in SQL migration because
+  // Prisma schema syntax cannot represent a PostgreSQL WHERE predicate.
+
+  @@index([ownerAgentId, status, scheduledAt])
+  @@index([caseId, status, scheduledAt])
+  @@index([status, scheduledAt])
+}
+
+model Notification {
+  id              String         @id @default(cuid())
+  recipientUserId String
+  recipient       User           @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  followUpId      String?
+  followUp        FollowUp?      @relation(fields: [followUpId], references: [id], onDelete: Cascade)
+  caseId          String?
+  insuranceCase   InsuranceCase? @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  calendarEventId String?
+  calendarEvent   CalendarEvent? @relation(fields: [calendarEventId], references: [id], onDelete: Cascade)
+  type            String
+  title           String
+  message         String
+  href            String
+  dedupeKey       String         @unique
+  readAt          DateTime?      @db.Timestamptz(3)
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@index([recipientUserId, readAt, createdAt])
+  @@index([followUpId])
+  @@index([caseId])
+  @@index([calendarEventId])
+}
+
+/// One Google account connection owned by exactly one authenticated user. It is
+/// intentionally independent from Better Auth's Account table: Calendar OAuth
+/// grants are product integrations and their tokens are encrypted at rest.
+model CalendarIntegration {
+  id                String                    @id @default(cuid())
+  userId            String
+  user              User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          CalendarProvider          @default(GOOGLE)
+  providerAccountId String
+  providerEmail     String
+  displayName       String?
+  status            CalendarIntegrationStatus @default(CONNECTED)
+  grantedScopes     String[]                  @default([])
+
+  accessKeyVersion  String?
+  accessAlgorithm   String?
+  accessIv          String?
+  accessCiphertext  String?
+  accessAuthTag     String?
+  refreshKeyVersion String?
+  refreshAlgorithm  String?
+  refreshIv         String?
+  refreshCiphertext String?
+  refreshAuthTag    String?
+  tokenExpiresAt    DateTime? @db.Timestamptz(3)
+
+  connectedAt    DateTime  @default(now()) @db.Timestamptz(3)
+  lastSyncAt     DateTime? @db.Timestamptz(3)
+  lastErrorCode  String?
+  disconnectedAt DateTime? @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+
+  calendars     CalendarSource[]
+  events        CalendarEvent[]
+  watchChannels CalendarWatchChannel[]
+  syncJobs      CalendarSyncJob[]
+
+  @@unique([userId, provider])
+  @@index([userId, status])
+  @@index([provider, status])
+}
+
+/// A calendar returned by Google CalendarList. Visibility and CRM default are
+/// user preferences; syncToken belongs to this exact event collection.
+model CalendarSource {
+  id                    String              @id @default(cuid())
+  integrationId         String
+  integration           CalendarIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  providerCalendarId    String
+  name                  String
+  description           String?
+  colorId               String?
+  backgroundColor       String?
+  foregroundColor       String?
+  isPrimary             Boolean             @default(false)
+  visible               Boolean             @default(true)
+  crmDefault            Boolean             @default(false)
+  accessRole            String?
+  timeZone              String?
+  syncToken             String?
+  syncStatus            CalendarSyncStatus  @default(PENDING)
+  lastIncrementalSyncAt DateTime?           @db.Timestamptz(3)
+  lastFullSyncAt        DateTime?           @db.Timestamptz(3)
+  lastErrorCode         String?
+  createdAt             DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime            @updatedAt @db.Timestamptz(3)
+
+  events        CalendarEvent[]
+  watchChannels CalendarWatchChannel[]
+  syncJobs      CalendarSyncJob[]
+
+  @@unique([integrationId, providerCalendarId])
+  @@index([integrationId, visible])
+  @@index([integrationId, crmDefault])
+}
+
+/// Local projection of one provider event. External events remain owned by the
+/// connected user and are never promoted into CRM activity without an explicit
+/// insuranceCaseId association.
+model CalendarEvent {
+  id              String              @id @default(cuid())
+  ownerUserId     String
+  ownerUser       User                @relation("CalendarEventOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  integrationId   String
+  integration     CalendarIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  calendarId      String
+  calendar        CalendarSource      @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  insuranceCaseId String?
+  insuranceCase   InsuranceCase?      @relation(fields: [insuranceCaseId], references: [id], onDelete: SetNull)
+
+  providerEventId           String?
+  providerRecurringEventId  String?
+  providerOriginalStartAt   DateTime? @db.Timestamptz(3)
+  providerOriginalStartDate DateTime? @db.Date
+  recurrence                String[]  @default([])
+  iCalUid                   String?
+  etag                      String?
+  sequence                  Int?
+
+  title          String
+  description    String?
+  startsAt       DateTime? @db.Timestamptz(3)
+  endsAt         DateTime? @db.Timestamptz(3)
+  startDate      DateTime? @db.Date
+  endDate        DateTime? @db.Date
+  timeZone       String?
+  allDay         Boolean   @default(false)
+  location       String?
+  meetingUrl     String?
+  conferenceData Json?
+  reminders      Json?
+  colorId        String?
+  visibility     String?
+  transparency   String?
+
+  status            CalendarEventStatus @default(CONFIRMED)
+  source            CalendarEventSource @default(GOOGLE)
+  syncStatus        CalendarSyncStatus  @default(PENDING)
+  syncErrorCode     String?
+  providerUpdatedAt DateTime?           @db.Timestamptz(3)
+  deletedAt         DateTime?           @db.Timestamptz(3)
+  lastSyncedAt      DateTime?           @db.Timestamptz(3)
+  localRevision     Int                 @default(1)
+  createdAt         DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
+
+  attendees     CalendarEventAttendee[]
+  syncJobs      CalendarSyncJob[]
+  notifications Notification[]
+
+  @@unique([calendarId, providerEventId])
+  @@index([ownerUserId, startsAt, status])
+  @@index([ownerUserId, startDate, status])
+  @@index([insuranceCaseId, startsAt])
+  @@index([integrationId, syncStatus])
+  @@index([providerRecurringEventId, providerOriginalStartAt])
+}
+
+model CalendarEventAttendee {
+  id             String                         @id @default(cuid())
+  eventId        String
+  event          CalendarEvent                  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  email          String
+  name           String?
+  responseStatus CalendarAttendeeResponseStatus @default(NEEDS_ACTION)
+  isSelf         Boolean                        @default(false)
+  isOrganizer    Boolean                        @default(false)
+  createdAt      DateTime                       @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime                       @updatedAt @db.Timestamptz(3)
+
+  @@unique([eventId, email])
+  @@index([email])
+}
+
+/// Google push notifications contain no event body. A channel only identifies
+/// which CalendarSource needs an incremental sync.
+model CalendarWatchChannel {
+  id                String              @id @default(cuid())
+  integrationId     String
+  integration       CalendarIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  calendarId        String
+  calendar          CalendarSource      @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  providerChannelId String              @unique
+  resourceId        String
+  resourceUri       String?
+  channelTokenHash  String
+  expiresAt         DateTime            @db.Timestamptz(3)
+  lastMessageNumber BigInt?
+  status            CalendarWatchStatus @default(ACTIVE)
+  lastReceivedAt    DateTime?           @db.Timestamptz(3)
+  createdAt         DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
+
+  @@index([calendarId, status, expiresAt])
+  @@index([integrationId, status])
+}
+
+/// Durable outbox and background work queue. Local event mutations enqueue a
+/// job in the same transaction; workers lease rows with SKIP LOCKED.
+model CalendarSyncJob {
+  id              String                @id @default(cuid())
+  integrationId   String
+  integration     CalendarIntegration   @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  calendarId      String?
+  calendar        CalendarSource?       @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  eventId         String?
+  event           CalendarEvent?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  direction       CalendarSyncDirection
+  operation       CalendarSyncOperation
+  status          CalendarSyncJobStatus @default(PENDING)
+  desiredRevision Int?
+  sendInvites     Boolean               @default(false)
+  payload         Json?
+  attempts        Int                   @default(0)
+  availableAt     DateTime              @default(now()) @db.Timestamptz(3)
+  leaseOwner      String?
+  leaseExpiresAt  DateTime?             @db.Timestamptz(3)
+  idempotencyKey  String                @unique
+  lastErrorCode   String?
+  createdAt       DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime              @updatedAt @db.Timestamptz(3)
+
+  @@index([status, availableAt])
+  @@index([integrationId, status])
+  @@index([calendarId, status])
+  @@index([eventId, status])
+  @@index([leaseExpiresAt])
+}
+
+/// One-use, short-lived OAuth transaction. The raw state and PKCE verifier are
+/// never persisted in plaintext; callbacks consume this row atomically.
+model CalendarOAuthState {
+  id                 String           @id @default(cuid())
+  userId             String
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider           CalendarProvider @default(GOOGLE)
+  stateHash          String           @unique
+  sessionTokenHash   String
+  verifierKeyVersion String
+  verifierAlgorithm  String
+  verifierIv         String
+  verifierCiphertext String
+  verifierAuthTag    String
+  returnTo           String?
+  expiresAt          DateTime         @db.Timestamptz(3)
+  consumedAt         DateTime?        @db.Timestamptz(3)
+  createdAt          DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt, consumedAt])
 }
 
 model AgentIntegrationCredential {

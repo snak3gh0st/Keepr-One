@@ -11,7 +11,8 @@ export type NavIconName =
   | "document"
   | "money"
   | "calendar"
-  | "link";
+  | "link"
+  | "chat";
 
 const ICON_PATHS: Record<NavIconName, ReactNode> = {
   chat: (

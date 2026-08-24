@@ -288,6 +288,7 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
     const adapt = () => {
       if (mobile.matches) setView("list");
       else if (tablet.matches) changeView("day");
+      else changeView("week");
     };
     const timeout = window.setTimeout(adapt, 0);
     tablet.addEventListener("change", adapt);
@@ -619,7 +620,11 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
         </aside>
 
         <main className="calendar-main-surface">
-          <div className={`calendar-grid-host ${view === "list" ? "calendar-grid-hidden" : ""}`} aria-hidden={view === "list" || undefined}>
+          <div
+            className={`calendar-grid-host ${view === "list" ? "calendar-grid-hidden" : ""}`}
+            aria-hidden={view === "list" || undefined}
+            inert={view === "list" ? true : undefined}
+          >
             <FullCalendar
               ref={calendarRef}
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, luxonPlugin]}

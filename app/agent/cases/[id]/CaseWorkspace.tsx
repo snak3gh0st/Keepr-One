@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CrmNavigation } from "@/components/CrmNavigation";
@@ -14,7 +15,6 @@ import type { CrmStageView } from "@/lib/crm";
 import { CrmStageSelect } from "@/components/crm/CrmStageSelect";
 import { FollowUpModal } from "@/components/crm/FollowUpModal";
 import { FollowUpPanel } from "@/components/crm/FollowUpPanel";
-import { CalendarEventModal } from "@/components/calendar/CalendarEventModal";
 import { CaseMeetingsSection, caseMeetingCopy } from "@/components/calendar/CaseMeetingsSection";
 import type {
   CalendarConnectionView,
@@ -41,6 +41,14 @@ import {
   rescheduleCaseFollowUp,
   scheduleCaseFollowUp,
 } from "./actions";
+
+const CalendarEventModal = dynamic(
+  () =>
+    import("@/components/calendar/CalendarEventModal").then(
+      (module) => module.CalendarEventModal,
+    ),
+  { ssr: false },
+);
 
 type Requirement = { id: string; title: string; status: string };
 type Application = { id: string; status: string; requirements: Requirement[] };
@@ -550,30 +558,36 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         }}
       />
 
-      <CalendarEventModal
-        key={calendarModal?.mode === "create" ? "create" : `${calendarModal?.mode ?? "closed"}:${calendarModal && "event" in calendarModal ? calendarModal.event.id : "none"}`}
-        open={calendarModal !== null}
-        mode={calendarModal?.mode ?? "create"}
-        event={calendarModal && "event" in calendarModal ? calendarModal.event : null}
-        initialCase={{ id: c.id, name: c.prospect.name, email: c.prospect.email, stage: c.crmStage?.name ?? null }}
-        initialTitle={meetingCopy.defaultTitle}
-        timeZone={c.calendar.timeZone}
-        calendars={c.calendar.calendars}
-        cases={[{ id: c.id, name: c.prospect.name, email: c.prospect.email, stage: c.crmStage?.name ?? null }]}
-        onClose={() => setCalendarModal(null)}
-        onSubmit={(input) => mutateCalendar(
-          calendarModal?.mode === "edit" ? updateCalendarEventAction : createCalendarEventAction,
-          input,
-        )}
-        onRequestEdit={(event) => setCalendarModal({ mode: "edit", event })}
-        onCancelEvent={cancelCalendar}
-        onRetrySync={async (event) => {
-          const result = await retryCalendarEventSyncAction({ id: event.id });
-          if (result.ok) router.refresh();
-          return result;
-        }}
-        onCheckAvailability={checkCalendarAvailabilityAction}
-      />
+      {calendarModal ? (
+        <CalendarEventModal
+          key={
+            calendarModal.mode === "create"
+              ? "create"
+              : `${calendarModal.mode}:${calendarModal.event.id}`
+          }
+          open
+          mode={calendarModal.mode}
+          event={"event" in calendarModal ? calendarModal.event : null}
+          initialCase={{ id: c.id, name: c.prospect.name, email: c.prospect.email, stage: c.crmStage?.name ?? null }}
+          initialTitle={meetingCopy.defaultTitle}
+          timeZone={c.calendar.timeZone}
+          calendars={c.calendar.calendars}
+          cases={[{ id: c.id, name: c.prospect.name, email: c.prospect.email, stage: c.crmStage?.name ?? null }]}
+          onClose={() => setCalendarModal(null)}
+          onSubmit={(input) => mutateCalendar(
+            calendarModal.mode === "edit" ? updateCalendarEventAction : createCalendarEventAction,
+            input,
+          )}
+          onRequestEdit={(event) => setCalendarModal({ mode: "edit", event })}
+          onCancelEvent={cancelCalendar}
+          onRetrySync={async (event) => {
+            const result = await retryCalendarEventSyncAction({ id: event.id });
+            if (result.ok) router.refresh();
+            return result;
+          }}
+          onCheckAvailability={checkCalendarAvailabilityAction}
+        />
+      ) : null}
     </div>
   );
 }
