@@ -96,7 +96,7 @@ describe('NationalLifeSyncProgress', () => {
     })
 
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(screen.getByText('Your National Life data is up to date')).toBeTruthy()
+    expect(screen.getByText('Your priority National Life data is up to date')).toBeTruthy()
   })
 
   it('explains a paused run without exposing its internal error code', async () => {
@@ -221,7 +221,43 @@ describe('NationalLifeSyncProgress', () => {
       />,
     )
 
-    expect(screen.getByText('12 of 30 known sources automated')).toBeTruthy()
+    expect(screen.getByText('Connector supports 12 of 30 known sources')).toBeTruthy()
+  })
+
+  it('separates raw snapshots from operational rows in the final totals', () => {
+    render(
+      <NationalLifeSyncProgress
+        initialStatus={status({
+          state: 'COMPLETED',
+          shouldPoll: false,
+          completed: 13,
+          receivedRecords: 20_536,
+          writtenRecords: 18_696,
+          duplicateRecords: 837,
+          rejectedRecords: 0,
+          stageCoverage: [
+            {
+              gridKey: 'NEW_BUSINESS',
+              label: 'new business',
+              state: 'VERIFIED',
+              verifiedRecords: 858,
+            },
+            {
+              gridKey: 'AGENT_DASHBOARD',
+              label: 'agent dashboard',
+              state: 'CAPTURED',
+              verifiedRecords: 1_003,
+            },
+          ],
+        })}
+      />,
+    )
+
+    expect(screen.getByText('Structured in Keepr One')).toBeTruthy()
+    expect(screen.getByText('Source snapshots preserved')).toBeTruthy()
+    expect(screen.getByText('1,003')).toBeTruthy()
+    expect(document.body.textContent).toMatch(/not counted as operational rows/i)
+    expect(document.body.textContent).toContain('Current plan: 1 structured + 1 snapshot sources')
   })
 
   it('shows an isolated failure as non-blocking while the remaining areas continue', () => {

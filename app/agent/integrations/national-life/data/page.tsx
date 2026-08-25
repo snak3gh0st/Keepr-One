@@ -66,6 +66,7 @@ const reportSelect = {
   label: true,
   primaryDate: true,
   amounts: true,
+  fetchedAt: true,
 } as const
 
 function toPortalReportRow(row: {
@@ -74,6 +75,7 @@ function toPortalReportRow(row: {
   label: string | null
   primaryDate: string | null
   amounts: unknown
+  fetchedAt: Date
 }): PortalReportRow {
   const amounts =
     row.amounts && typeof row.amounts === 'object' && !Array.isArray(row.amounts)
@@ -84,7 +86,14 @@ function toPortalReportRow(row: {
         )
       : {}
 
-  return { id: row.id, gridKey: row.gridKey, label: row.label, primaryDate: row.primaryDate, amounts }
+  return {
+    id: row.id,
+    gridKey: row.gridKey,
+    label: row.label,
+    primaryDate: row.primaryDate,
+    amounts,
+    fetchedAt: row.fetchedAt.toISOString(),
+  }
 }
 
 export default async function NationalLifeDataPage() {
@@ -112,6 +121,7 @@ export default async function NationalLifeDataPage() {
   let lastSyncedAt: Date | null = null
   let structuredSourceCount = 0
   let rawPageSourceCount = 0
+  let actionSourceUpdatedAt: Date | null = null
   let loadError = false
 
   try {
@@ -147,7 +157,7 @@ export default async function NationalLifeDataPage() {
           deploymentScope: CANONICAL_SCOPE,
           gridKey: 'CLIENT_INTELLIGENCE',
         },
-        select: { id: true, raw: true },
+        select: { id: true, raw: true, fetchedAt: true },
       }),
       prisma.nationalLifeSyncRun.findFirst({
         select: {
@@ -173,6 +183,10 @@ export default async function NationalLifeDataPage() {
     const completedKeys = localRun?.stageCompletions.map((row) => row.gridKey) ?? []
     rawPageSourceCount = completedKeys.filter((key) => DISCOVERY_PAGE_KEYS.has(key)).length
     structuredSourceCount = completedKeys.length - rawPageSourceCount
+    actionSourceUpdatedAt = intelligenceRows.reduce<Date | null>(
+      (latest, row) => !latest || row.fetchedAt > latest ? row.fetchedAt : latest,
+      null,
+    )
 
     const actionQueue = buildClientActionQueue(toClientServiceEvents(intelligenceRows), {
       asOf: lastSyncedAt ?? new Date(),
@@ -269,7 +283,12 @@ export default async function NationalLifeDataPage() {
 
       <div className="module-content-grid">
         <section className="module-main-surface">
-          {!loadError && <NationalLifeActionQueue rows={actions} />}
+          {!loadError && (
+            <NationalLifeActionQueue
+              rows={actions}
+              sourceUpdatedAt={actionSourceUpdatedAt?.toISOString() ?? null}
+            />
+          )}
         </section>
         <ContextPanel eyebrow="Confiança dos dados" title="National como espelho">
           <p>

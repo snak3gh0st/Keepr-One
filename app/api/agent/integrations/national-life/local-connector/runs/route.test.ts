@@ -28,7 +28,21 @@ vi.mock('@/lib/national-life/local-connector/device-signature', async () => {
   }
 })
 vi.mock('@/lib/national-life/local-connector/run-service', () => ({
-  LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS: ['NEW_BUSINESS', 'AGENT_DASHBOARD'],
+  LOCAL_CONNECTOR_PRIORITY_GRID_KEYS: [
+    'NEW_BUSINESS',
+    'RECENTLY_CLOSED',
+    'INFORCE_CLIENTS',
+    'PAID_COMMISSIONS',
+    'COMMISSIONS_EARNING_REPORT',
+    'COMMISSIONS_PAYMENT_PORTAL',
+    'CORRESPONDENCE',
+    'PIP_PENDING',
+    'PENDING_GROSS_COMMISSIONS',
+    'PAYABLE_GROSS_COMMISSIONS',
+    'COMMISSIONS_OVERVIEW',
+    'COMMISSIONS_POLICY_HISTORY',
+    'AGENT_DASHBOARD',
+  ],
   startLocalConnectorRun: mocks.mockStartRun,
 }))
 vi.mock('@/lib/prisma', () => ({ prisma: {} }))
@@ -42,7 +56,10 @@ const mockStartRun = mocks.mockStartRun
 function signedRequest() {
   return new Request('https://app.keepr.one/api/agent/integrations/national-life/local-connector/runs', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'x-fyntra-connector-version': '0.1.18',
+    },
     body: '{}',
   })
 }
@@ -105,7 +122,11 @@ describe('local connector runs route', () => {
         'https://app.keepr.one/api/agent/integrations/national-life/local-connector/runs',
         {
           method: 'POST',
-          headers: { 'content-type': 'application/json', 'content-length': '999999' },
+          headers: {
+            'content-type': 'application/json',
+            'content-length': '999999',
+            'x-fyntra-connector-version': '0.1.18',
+          },
           body: '{}',
         },
       ),
@@ -124,6 +145,18 @@ describe('local connector runs route', () => {
     expect(await response.json()).toEqual({ error: 'CLIENT_TOO_OLD', minVersion: '0.2.0' })
     // Antes da assinatura: um cliente abaixo do piso não deve nem consumir o
     // registro de replay, e a recusa não depende de ele estar pareado.
+    expect(mockVerify).not.toHaveBeenCalled()
+    expect(mockStartRun).not.toHaveBeenCalled()
+  })
+
+  it('refuses a client that cannot execute the required commission-detail stage', async () => {
+    const request = signedRequest()
+    request.headers.set('x-fyntra-connector-version', '0.1.17')
+
+    const response = await POST(request)
+
+    expect(response.status).toBe(426)
+    expect(await response.json()).toEqual({ error: 'CLIENT_TOO_OLD', minVersion: '0.1.18' })
     expect(mockVerify).not.toHaveBeenCalled()
     expect(mockStartRun).not.toHaveBeenCalled()
   })
@@ -160,7 +193,7 @@ describe('local connector runs route', () => {
     expect((await POST(signedRequest())).status).toBe(503)
   })
 
-  it('requires READ_PAGE and sends the expanded plan only when discovery is enabled', async () => {
+  it('requires READ_PAGE and sends only the selected priority plan when page reads are enabled', async () => {
     mocks.pageDiscoveryEnabled.mockReturnValue(true)
     mockVerify.mockResolvedValueOnce({ deviceId: 'dev_1', agentId: 'agent_1' })
     mockStartRun.mockResolvedValueOnce({
@@ -173,7 +206,23 @@ describe('local connector runs route', () => {
     expect(mockStartRun).toHaveBeenCalledWith(
       {},
       { deviceId: 'dev_1', agentId: 'agent_1' },
-      { gridKeys: ['NEW_BUSINESS', 'AGENT_DASHBOARD'] },
+      {
+        gridKeys: [
+          'NEW_BUSINESS',
+          'RECENTLY_CLOSED',
+          'INFORCE_CLIENTS',
+          'PAID_COMMISSIONS',
+          'COMMISSIONS_EARNING_REPORT',
+          'COMMISSIONS_PAYMENT_PORTAL',
+          'CORRESPONDENCE',
+          'PIP_PENDING',
+          'PENDING_GROSS_COMMISSIONS',
+          'PAYABLE_GROSS_COMMISSIONS',
+          'COMMISSIONS_OVERVIEW',
+          'COMMISSIONS_POLICY_HISTORY',
+          'AGENT_DASHBOARD',
+        ],
+      },
     )
   })
 
@@ -188,16 +237,28 @@ describe('local connector runs route', () => {
     expect(mockStartRun).toHaveBeenCalledWith(
       {},
       { deviceId: 'dev_1', agentId: 'agent_1' },
-      undefined,
+      {
+        gridKeys: [
+          'NEW_BUSINESS',
+          'RECENTLY_CLOSED',
+          'INFORCE_CLIENTS',
+          'PAID_COMMISSIONS',
+          'COMMISSIONS_EARNING_REPORT',
+          'COMMISSIONS_PAYMENT_PORTAL',
+          'CORRESPONDENCE',
+          'PIP_PENDING',
+          'PAYABLE_GROSS_COMMISSIONS',
+        ],
+      },
     )
   })
 
-  it('enables the official export only for extension 0.1.15 or newer', async () => {
+  it('enables the official export for a priority-compatible extension', async () => {
     mocks.exportEnabled.mockReturnValue(true)
     mockVerify.mockResolvedValue({ agentId: 'agent-1', deviceId: 'device-1' })
     mockStartRun.mockResolvedValue({ runId: 'run-export' })
     const request = signedRequest()
-    request.headers.set('x-fyntra-connector-version', '0.1.15')
+    request.headers.set('x-fyntra-connector-version', '0.1.18')
 
     expect((await POST(request)).status).toBe(201)
     expect(mockStartRun).toHaveBeenCalledWith(
@@ -207,15 +268,16 @@ describe('local connector runs route', () => {
     )
   })
 
-  it('keeps the paginated fallback for older extension versions', async () => {
+  it('does not fall back to a narrower plan for a client that cannot execute commission detail', async () => {
     mocks.exportEnabled.mockReturnValue(true)
     mockVerify.mockResolvedValue({ agentId: 'agent-1', deviceId: 'device-1' })
     mockStartRun.mockResolvedValue({ runId: 'run-grid' })
     const request = signedRequest()
     request.headers.set('x-fyntra-connector-version', '0.1.14')
 
-    expect((await POST(request)).status).toBe(201)
-    expect(mockStartRun).toHaveBeenCalledWith(expect.anything(), expect.anything(), undefined)
+    const response = await POST(request)
+    expect(response.status).toBe(426)
+    expect(mockStartRun).not.toHaveBeenCalled()
   })
 
   it('forwards an explicit full-refresh request without changing the default', async () => {
@@ -227,7 +289,10 @@ describe('local connector runs route', () => {
       'https://app.keepr.one/api/agent/integrations/national-life/local-connector/runs',
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          'x-fyntra-connector-version': '0.1.18',
+        },
         body: JSON.stringify({ forceRefresh: true }),
       },
     )
@@ -236,7 +301,10 @@ describe('local connector runs route', () => {
     expect(mockStartRun).toHaveBeenCalledWith(
       {},
       { deviceId: 'dev_1', agentId: 'agent_1' },
-      { forceRefresh: true },
+      {
+        forceRefresh: true,
+        gridKeys: expect.any(Array),
+      },
     )
   })
 

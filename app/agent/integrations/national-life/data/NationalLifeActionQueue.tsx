@@ -70,7 +70,13 @@ function QueueButton({
   );
 }
 
-export function NationalLifeActionQueue({ rows }: { rows: NationalLifeActionRow[] }) {
+export function NationalLifeActionQueue({
+  rows,
+  sourceUpdatedAt,
+}: {
+  rows: NationalLifeActionRow[];
+  sourceUpdatedAt: string | null;
+}) {
   const [filter, setFilter] = useState<QueueFilter>("AT_RISK");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -109,6 +115,15 @@ export function NationalLifeActionQueue({ rows }: { rows: NationalLifeActionRow[
           <h2 className="text-xl font-semibold text-ink">Ações recomendadas</h2>
           <p className="mt-1 max-w-2xl text-sm text-ink-muted">
             Uma ação por apólice, baseada nas interações registradas nos últimos 30 dias.
+          </p>
+          <p className="mt-1 text-xs text-ink-muted">
+            {sourceUpdatedAt
+              ? `Fonte atualizada em ${new Date(sourceUpdatedAt).toLocaleString("pt-BR", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                  timeZone: "America/New_York",
+                })}.`
+              : "A fonte de interações ainda não foi atualizada neste escopo."}
           </p>
         </div>
         <p className="text-sm text-ink-muted">{rows.length} apólices com sinal recente</p>

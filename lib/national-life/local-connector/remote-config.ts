@@ -35,6 +35,8 @@ const MAX_HEARTBEAT_SECONDS = 3600
 /// narrowly-scoped compatibility path until the release is fully installed.
 const STAGE_COMPLETION_PROTOCOL_VERSION = [0, 1, 2, 0]
 const EXPORT_PROTOCOL_VERSION = [0, 1, 15, 0]
+export const COMMISSION_DETAIL_PROTOCOL_MIN_VERSION = '0.1.18'
+const COMMISSION_DETAIL_PROTOCOL_VERSION = [0, 1, 18, 0]
 
 export type LocalConnectorRemoteConfig = {
   /// `false` derruba o conector inteiro sem tocar na extensão. É o botão vermelho.
@@ -76,6 +78,15 @@ export function supportsStageCompletionProtocol(headers: Pick<Headers, 'get'>): 
 export function supportsExportProtocol(headers: Pick<Headers, 'get'>): boolean {
   const reported = parseConnectorVersion(headers.get(LOCAL_CONNECTOR_VERSION_HEADER))
   return reported !== null && compareConnectorVersions(reported, EXPORT_PROTOCOL_VERSION) >= 0
+}
+
+/// Version 0.1.18 added the per-statement commission-detail plan and its durable
+/// cursor. Every priority run includes that stage, even when READ_PAGE is off,
+/// so accepting an older client would create a run it cannot parse or finish.
+export function supportsCommissionDetailProtocol(headers: Pick<Headers, 'get'>): boolean {
+  const reported = parseConnectorVersion(headers.get(LOCAL_CONNECTOR_VERSION_HEADER))
+  return reported !== null &&
+    compareConnectorVersions(reported, COMMISSION_DETAIL_PROTOCOL_VERSION) >= 0
 }
 
 /// Auto-declarada e não confiável: qualquer cliente pode mentir o número. Serve

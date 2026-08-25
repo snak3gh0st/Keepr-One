@@ -9,10 +9,12 @@ import {
   planReadPageStages,
   planReadExportStages,
 } from './capabilities'
+import { NATIONAL_LIFE_AUTOMATIC_GRID_KEYS } from '../read-coverage'
 import { LOCAL_CONNECTOR_ROUTED_GRIDS, planRawIngest } from './raw-ingest'
 import {
   LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
   LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS,
+  LOCAL_CONNECTOR_PRIORITY_GRID_KEYS,
 } from './run-service'
 
 describe('isSafeNavigatePath', () => {
@@ -138,14 +140,31 @@ describe('planReadGridStages', () => {
   })
 
   it('produces a plan every routed grid key can reach', () => {
-    const keys = [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS]
+    const keys = [...NATIONAL_LIFE_AUTOMATIC_GRID_KEYS]
     const plan = planReadGridStages(keys)
     expect(plan).toHaveLength(keys.length)
     expect(plan.every((stage) => isSafeNavigatePath(stage.params.navigatePath))).toBe(true)
   })
 
-  it('plans the default operational sync set', () => {
-    expect(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS).toEqual([
+  it('plans the selected priority sources and keeps discovery as a separate superset', () => {
+    const expectedPriority = [
+      'NEW_BUSINESS',
+      'RECENTLY_CLOSED',
+      'INFORCE_CLIENTS',
+      'PAID_COMMISSIONS',
+      'COMMISSIONS_EARNING_REPORT',
+      'COMMISSIONS_PAYMENT_PORTAL',
+      'CORRESPONDENCE',
+      'PIP_PENDING',
+      'PENDING_GROSS_COMMISSIONS',
+      'PAYABLE_GROSS_COMMISSIONS',
+      'COMMISSIONS_OVERVIEW',
+      'COMMISSIONS_POLICY_HISTORY',
+      'AGENT_DASHBOARD',
+    ] as const
+    expect(LOCAL_CONNECTOR_PRIORITY_GRID_KEYS).toEqual(expectedPriority)
+    expect(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS).toEqual(expectedPriority)
+    expect(LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS).toEqual([
       'NEW_BUSINESS',
       'RECENTLY_CLOSED',
       'INFORCE_CLIENTS',
@@ -158,9 +177,6 @@ describe('planReadGridStages', () => {
       'LIFE_PENDING_LAPSE',
       'COMMISSIONS_EARNING_REPORT',
       'PAYABLE_GROSS_COMMISSIONS',
-    ])
-    expect(LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS).toEqual([
-      ...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
       'AGENT_DASHBOARD',
       'PREMIUM_REPORT_AGENCY',
       'POLICY_PAYMENT_HISTORY',

@@ -2,11 +2,15 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { nationalLifeReadCoverageSummary } from '@/lib/national-life/read-coverage'
+import {
+  NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
+  nationalLifeReadCoverageSummary,
+} from '@/lib/national-life/read-coverage'
 import type { NationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
 
 const POLL_INTERVAL_MS = 1_500
 const PORTAL_COVERAGE = nationalLifeReadCoverageSummary()
+const DISCOVERY_PAGE_KEYS = new Set<string>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
 export const NATIONAL_LIFE_SYNC_STARTED_EVENT = 'national-life-sync-started'
 
 function safeStatus(value: unknown): NationalLifeSyncStatus | null {
@@ -37,9 +41,12 @@ function formatMoment(value: NationalLifeSyncStatus['completedAt']): string | nu
 /// O que realmente entrou. `writtenRecords` nulo é "não sei" (um run remoto não
 /// gera recibo), e nesse caso não se afirma nada. Zero, sim, é uma afirmação: o
 /// sync terminou sem trazer nada, e chamar isso de sucesso seria mentir.
-function outcomeLine(status: NationalLifeSyncStatus): string | null {
+function outcomeLine(status: NationalLifeSyncStatus, snapshotRecords: number): string | null {
   if (status.writtenRecords === null) return null
   if (status.writtenRecords === 0) {
+    if (snapshotRecords > 0) {
+      return `${snapshotRecords.toLocaleString('en-US')} snapshot records were preserved for source mapping.`
+    }
     return status.receivedRecords && status.receivedRecords > 0
       ? 'National Life returned records, but none of them could be saved. Try syncing again; if it repeats, contact support.'
       : 'National Life had nothing new to send this time.'
@@ -53,10 +60,10 @@ function outcomeLine(status: NationalLifeSyncStatus): string | null {
 /// — merging them loses nothing. Rows without a policy number cannot be keyed
 /// and are the only real loss. Printing the difference alone would read as 165
 /// missing policies and send the agent to support over routine housekeeping.
-function discardLine(status: NationalLifeSyncStatus): string | null {
+function discardLine(status: NationalLifeSyncStatus, snapshotRecords: number): string | null {
   const repeated = status.duplicateRecords ?? 0
   const dropped = status.rejectedRecords ?? 0
-  if (repeated === 0 && dropped === 0) return null
+  if (repeated === 0 && dropped === 0 && snapshotRecords === 0) return null
   const sentences: string[] = []
   if (repeated > 0) {
     sentences.push(
@@ -68,7 +75,18 @@ function discardLine(status: NationalLifeSyncStatus): string | null {
       `${dropped.toLocaleString('en-US')} could not be saved because they arrived without a policy number.`,
     )
   }
+  if (snapshotRecords > 0) {
+    sentences.push(
+      `${snapshotRecords.toLocaleString('en-US')} snapshot records were preserved separately and are not counted as operational rows.`,
+    )
+  }
   return sentences.join(' ')
+}
+
+function snapshotRecordCount(status: NationalLifeSyncStatus): number {
+  return status.stageCoverage?.reduce((total, stage) => (
+    DISCOVERY_PAGE_KEYS.has(stage.gridKey) ? total + (stage.verifiedRecords ?? 0) : total
+  ), 0) ?? 0
 }
 
 function formatCount(value: number | null): string {
@@ -176,11 +194,16 @@ export function NationalLifeSyncProgress({
   const active = status.shouldPoll
   const checked = Math.min(status.total, status.completed + status.failed)
   const reused = status.stageCoverage?.filter((stage) => stage.state === 'REUSED').length ?? 0
+  const snapshotRecords = snapshotRecordCount(status)
+  const plannedSnapshotSources = status.stageCoverage?.filter((stage) =>
+    DISCOVERY_PAGE_KEYS.has(stage.gridKey),
+  ).length ?? 0
+  const plannedStructuredSources = Math.max(0, (status.stageCoverage?.length ?? 0) - plannedSnapshotSources)
   const lastSynced = formatMoment(status.completedAt)
   // Só depois do fim. No meio do run, "nada novo desta vez" ou "120 gravados"
   // seriam a mesma mentira do "concluído" eterno, apontada para o outro lado.
-  const outcome = terminal ? outcomeLine(status) : null
-  const discards = terminal ? discardLine(status) : null
+  const outcome = terminal ? outcomeLine(status, snapshotRecords) : null
+  const discards = terminal ? discardLine(status, snapshotRecords) : null
 
   return (
     <section
@@ -201,7 +224,7 @@ export function NationalLifeSyncProgress({
           </div>
           <h2 className="mt-1 text-lg font-semibold text-ink">
             {status.state === 'COMPLETED'
-              ? 'Your National Life data is up to date'
+              ? 'Your priority National Life data is up to date'
               : terminal
                 ? 'Sync finished with areas to retry'
                 : 'Updating your National Life data'}
@@ -245,17 +268,26 @@ export function NationalLifeSyncProgress({
         </div>
       )}
 
-      <div className="mt-5 grid overflow-hidden rounded-lg border border-border-steel bg-panel/55 divide-y divide-border-steel sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+      <div className={`mt-5 grid overflow-hidden rounded-lg border border-border-steel bg-panel/55 divide-y divide-border-steel sm:divide-x sm:divide-y-0 ${snapshotRecords > 0 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
         <div className="p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">Received from National Life</p>
           <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">{formatCount(status.receivedRecords)}</p>
           <p className="mt-1 text-xs text-ink-muted">Rows delivered by the portal</p>
         </div>
         <div className="bg-teal-pale/45 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">Saved in Keepr One</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">Structured in Keepr One</p>
           <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">{formatCount(status.writtenRecords)}</p>
           <p className="mt-1 text-xs text-ink-muted">Rows written to your National Life data</p>
         </div>
+        {snapshotRecords > 0 && (
+          <div className="bg-blue-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-blue-800">Source snapshots preserved</p>
+            <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">
+              {snapshotRecords.toLocaleString('en-US')}
+            </p>
+            <p className="mt-1 text-xs text-ink-muted">Kept for mapping, not shown as operational rows</p>
+          </div>
+        )}
       </div>
 
       {status.stageCoverage && status.stageCoverage.length > 0 && (
@@ -283,9 +315,12 @@ export function NationalLifeSyncProgress({
             ))}
           </ul>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-steel bg-panel/45 px-3 py-2 text-xs text-ink-muted">
-            <span>Automated coverage today</span>
+            <span>
+              Current plan: {plannedStructuredSources} structured
+              {plannedSnapshotSources > 0 ? ` + ${plannedSnapshotSources} snapshot sources` : ''}
+            </span>
             <span className="font-mono font-semibold tabular-nums text-ink">
-              {PORTAL_COVERAGE.automatic} of {PORTAL_COVERAGE.required} known sources automated
+              Connector supports {PORTAL_COVERAGE.automatic} of {PORTAL_COVERAGE.required} known sources
             </span>
           </div>
         </div>

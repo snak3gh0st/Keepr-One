@@ -1,56 +1,69 @@
-# Runbook — ligar a cobertura completa do sync National Life
+# Runbook — operar o escopo prioritário do sync National Life
 
-Data: 2026-08-17
+Data: 2026-08-25
 Para: quem opera o piloto. Cada passo tem um resultado observável; se o
 resultado não bater, **pare** — o passo seguinte não conserta o anterior.
 
-O que este runbook fecha: sair de **12 fontes** lidas para **26 planejadas**, e
-trocar a leitura paginada do in-force pelo **export oficial do carrier** com
-contato de insured/owner.
+O sync diário agora abre apenas o escopo prioritário escolhido para o Keepr One:
+**13 áreas** quando a leitura de páginas está habilitada, ou **9 áreas
+estruturadas** durante a compatibilidade com clientes antigos. O detalhe de
+comissão é uma dependência de `Paid Commissions`, porque é de lá que vêm os
+links para `CommissionStatementId` e `GrossCommEarned`.
+
+O export oficial do carrier para o in-force continua sendo opcional e troca a
+forma de leitura dessa área; ele não amplia o escopo do sync.
 
 O que ele **não** fecha, e ninguém pode fechar por código: a execução contra o
 portal vivo. É um humano por credencial.
 
 ---
 
-## Passo 0 — a extensão instalada precisa ser ≥ 0.1.15
+## Passo 0 — a extensão instalada precisa ser ≥ 0.1.18
 
-`EXPORT_PROTOCOL_VERSION = [0,1,15,0]` (`lib/national-life/local-connector/remote-config.ts:37`).
-Abaixo disso o servidor **ignora a flag em silêncio** e continua planejando
-leitura paginada — não dá erro, só não faz.
+O export existe desde 0.1.15, mas o plano prioritário exige o detalhe de comissão
+por statement, que entrou em 0.1.18. Como essa etapa faz parte tanto do plano de
+13 quanto do de 9 fontes, o endpoint de criação do run recusa versões anteriores
+com `426 CLIENT_TOO_OLD`; ele não cria um run que o cliente não consegue terminar.
 
 ```bash
-cd apps/keeprone-connect && npm run build
+pnpm --filter @fyntra/keeprone-connect build
 ```
 
 Saída em `apps/keeprone-connect/.output/chrome-mv3/`. No Chrome do agente:
 `chrome://extensions` → Developer mode → **Load unpacked** (ou **Reload**, se já
 estava carregada) apontando para essa pasta.
 
-**Verificar:** `chrome://extensions` mostra KeeproneConnect **0.1.15**.
+**Verificar:** `chrome://extensions` mostra KeeproneConnect **0.1.18** ou superior.
 
-## Passo 1 — ligar as duas flags
+## Passo 1 — ligar as flags necessárias
 
 No ambiente do app (Coolify), acrescentar:
 
 ```
 NATIONAL_LIFE_LOCAL_CONNECTOR_PAGE_DISCOVERY_ENABLED="true"
 NATIONAL_LIFE_LOCAL_CONNECTOR_EXPORT_ENABLED="true"
+NATIONAL_LIFE_LOCAL_CONNECTOR_MIN_VERSION="0.1.18"
 ```
 
-Ambas aceitam apenas `true` ou `false` — qualquer outro valor derruba o boot com
-mensagem explícita, de propósito.
+As duas flags `...PAGE_DISCOVERY_ENABLED` e `...EXPORT_ENABLED` aceitam apenas
+`true` ou `false` — qualquer outro valor derruba o boot com mensagem explícita,
+de propósito. `...MIN_VERSION` recebe uma versão pontuada, como `0.1.18`.
+
+`NATIONAL_LIFE_LOCAL_CONNECTOR_PAGE_DISCOVERY_ENABLED=true` habilita somente as
+quatro fontes de página que
+fazem parte do escopo prioritário (`AGENT_DASHBOARD`, `PENDING_GROSS_COMMISSIONS`,
+`COMMISSIONS_OVERVIEW` e `COMMISSIONS_POLICY_HISTORY`). Não transforma o sync
+diário em uma varredura das 26 áreas.
 
 **Verificar:** após o redeploy, o app sobe. Se não subir, o valor da variável
 está errado.
 
 ## Passo 2 — um agente piloto, não a frota
 
-9 das 14 páginas novas são `NEEDS_PROBE`: nunca foram abertas por um coletor.
-Uma página que exija submeter filtro ou data antes de renderizar linhas vai
-falhar ou capturar só o menu, e o run termina `PARTIAL` /
-`SOURCE_PARTIAL_FAILURE`. Isso é a medição funcionando — mas para um agente não
-técnico, "PARTIAL" lê-se como quebrado.
+As páginas prioritárias ainda são snapshots de portal e podem exigir filtro ou
+data antes de renderizar dados. Se isso ocorrer, a área pode capturar somente o
+menu ou terminar `PARTIAL` / `SOURCE_PARTIAL_FAILURE`. Isso é uma medição
+honesta; não converteremos snapshot em linhas operacionais sem parser seguro.
 
 Rodar com **um** agente antes de expor a qualquer outro.
 
@@ -58,42 +71,64 @@ Rodar com **um** agente antes de expor a qualquer outro.
 
 Clicar **Sync** na página de integração do National Life.
 
-O plano novo entra automaticamente: um run `COMPLETED` das últimas 24 h que não
-cobria as fontes novas é substituído por um run novo
-(`startLocalConnectorRun`, ramo `missesRequestedSources`). Um run `FAILED`
-retoma no plano antigo primeiro e só adota o plano largo no ciclo seguinte —
-se quiser o plano largo imediatamente nesse caso, use **Full refresh**.
+O plano prioritário entra automaticamente. Um run `COMPLETED` das últimas 24 h
+só é reutilizado quando seu plano bate exatamente com o escopo solicitado; um
+run histórico mais largo, como o de 26 áreas, não mascara o novo denominador e
+é substituído por um run prioritário. O Sync comum preserva o plano de runs
+`RUNNING`, `FAILED` ou `PARTIAL` para não quebrar o cursor durável. **Full
+refresh** nunca cria outro run enquanto existe um `RUNNING`, mas substitui um
+`FAILED` ou `PARTIAL` pelo plano prioritário atual.
 
-**Verificar:** a barra de progresso mostra **26** etapas, não 12.
+**Verificar:** com a flag de páginas ligada, a barra mostra **13** etapas; sem
+ela, mostra **9**. Nenhuma das duas contagens significa “todas as áreas do
+portal”.
 
 ## Passo 4 — ler o resultado como evidência, não como sucesso/fracasso
 
-O objetivo deste primeiro run **não** é ficar verde. É descobrir quais das 14
-páginas rendem dado.
+O objetivo do run prioritário é salvar as fontes diárias e manter a evidência
+separada entre linhas estruturadas e snapshots de página.
 
 Consultas úteis depois do run:
 
 ```sql
--- o que cada fonte entregou
+\set agent_id '<agent-id-exato>'
+\set run_id '<run-id-exato>'
+
+-- linhas operacionais atuais do agente; "escritas" são upserts, então a
+-- cardinalidade final é conferida diretamente aqui
 SELECT "gridKey", COUNT(*) AS linhas
 FROM "NationalLifeReportRow"
-WHERE "agentId" = '<agent>'
+WHERE "agentId" = :'agent_id'
+  AND "deploymentScope" = 'LOCAL_CONNECTOR'
 GROUP BY 1 ORDER BY 2 DESC;
 
--- fontes que falharam, com o código
+-- fontes que falharam no run exato, com o código
 SELECT "gridKey", "safeErrorCode", "retryable"
 FROM "NationalLifeConnectorStageFailure"
-WHERE "resolvedAt" IS NULL;
+WHERE "runId" = :'run_id'
+  AND "resolvedAt" IS NULL;
 
--- recebido x escrito x rejeitado por página
+-- recebido x escrito x duplicado x rejeitado no run exato
 SELECT "gridKey", SUM("recordCount") recebido, SUM("writtenCount") escrito,
-       SUM("rejectedCount") rejeitado
+       SUM("duplicateCount") duplicado, SUM("rejectedCount") rejeitado
 FROM "NationalLifeConnectorStageReceipt"
+WHERE "runId" = :'run_id'
+GROUP BY 1;
+
+-- snapshots de página preservados separadamente, nunca promovidos como linha
+-- operacional sem parser específico
+SELECT "gridKey", SUM("recordCount") registros_snapshot
+FROM "NationalLifeRawGridPage"
+WHERE "agentId" = :'agent_id'
+  AND "deploymentScope" = 'LOCAL_CONNECTOR'
+  AND "runId" = :'run_id'
 GROUP BY 1;
 ```
 
-Uma fonte com `recebido > 0` e `escrito = 0` significa que o mapper não achou
-chave natural — é trabalho de mapeamento, não falha de coleta.
+Nas quatro fontes `READ_PAGE`, `recebido > 0` e `escrito = 0` é esperado: o
+snapshot foi preservado em `NationalLifeRawGridPage`, mas não virou linha
+operacional. Nas nove fontes estruturadas, a mesma combinação indica mapper sem
+chave natural e precisa ser investigada.
 
 ## Passo 5 — o export do in-force trouxe contato?
 
@@ -133,8 +168,8 @@ guarda a contradição em aberto.
 
 | Sintoma | Causa provável |
 | --- | --- |
-| Progresso mostra 12, não 26 | Run `FAILED`/`PARTIAL` sendo retomado no plano antigo — use Full refresh. (Um run `COMPLETED` já não causa isso: é substituído automaticamente.) |
-| Export não roda, sem erro | Extensão carregada é < 0.1.15 (passo 0) |
+| Progresso mostra 12 ou 26, não 9/13 | Run `FAILED`/`PARTIAL` sendo retomado no plano antigo — use Full refresh. (Um run `COMPLETED` já não causa isso: é substituído automaticamente.) |
+| Endpoint responde `426 CLIENT_TOO_OLD` | Extensão carregada é < 0.1.18 (passo 0) |
 | Run termina `PARTIAL` | Uma ou mais páginas `NEEDS_PROBE` não renderam — é a medição, veja passo 4 |
 | App não sobe após a flag | Valor diferente de `true`/`false` |
 | `BRIDGE_UNAVAILABLE` em loop | Registro acima do limite de 16 KiB; ver `page-upload-parity.test.ts` |
