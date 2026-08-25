@@ -1,6 +1,11 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render } from '@testing-library/react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { NationalLifeDataTabs } from './NationalLifeDataTabs'
+
+afterEach(cleanup)
 
 describe('NationalLifeDataTabs', () => {
   it('does not count a discovery-page artifact as an operational report', () => {
@@ -34,7 +39,7 @@ describe('NationalLifeDataTabs', () => {
   })
 
   it('does not present historical sources outside the current daily plan as fresh reports', () => {
-    const html = renderToStaticMarkup(
+    const view = render(
       <NationalLifeDataTabs
         cases={[]}
         inforce={[]}
@@ -67,8 +72,10 @@ describe('NationalLifeDataTabs', () => {
       />,
     )
 
-    expect(html).toMatch(/Relatórios[\s\S]*?>1<\/span>/)
-    expect(html).not.toContain('projected-old')
-    expect(html).not.toContain('lapse-old')
+    fireEvent.click(view.getByRole('button', { name: /Relatórios/ }))
+
+    expect(view.getByText('Paid commissions')).toBeTruthy()
+    expect(view.queryByText('Projected commissions')).toBeNull()
+    expect(view.queryByText('Pending lapse')).toBeNull()
   })
 })
