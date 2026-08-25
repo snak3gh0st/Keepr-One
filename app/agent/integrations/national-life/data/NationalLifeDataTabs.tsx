@@ -34,6 +34,7 @@ export type PortalReportRow = {
   label: string | null;
   primaryDate: string | null;
   amounts: Record<string, string>;
+  fetchedAt: string;
 };
 
 type Tab = "cases" | "inforce" | "reports";
@@ -42,12 +43,9 @@ const PAGE_SIZE = 12;
 
 export const NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS = [
   "PAID_COMMISSIONS",
-  "PROJECTED_COMMISSIONS",
   "CORRESPONDENCE",
   "COMMISSIONS_PAYMENT_PORTAL",
   "PIP_PENDING",
-  "TRANSFERS_EXCHANGES",
-  "LIFE_PENDING_LAPSE",
   "COMMISSIONS_EARNING_REPORT",
   "PAYABLE_GROSS_COMMISSIONS",
 ] as const;
@@ -74,6 +72,18 @@ const USD = new Intl.NumberFormat("en-US", {
 function formatAmount(value: string | undefined) {
   const parsed = parseAmount(value);
   return parsed === null ? (value ?? "—") : USD.format(parsed);
+}
+
+function formatFetchedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Source update unavailable";
+  return `Updated ${date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/New_York",
+  })}`;
 }
 
 function statusTone(status: string | null) {
@@ -259,6 +269,7 @@ export function NationalLifeDataTabs({
                   <p className="mt-1 text-xs uppercase tracking-[0.08em] text-ink-muted">
                     {row.gridKey.replace(/_/g, " ").toLowerCase()}
                   </p>
+                  <p className="mt-1 text-xs text-ink-muted">{formatFetchedAt(row.fetchedAt)}</p>
                   {entries.length > 0 && (
                     <div className="mt-3 grid gap-3 sm:grid-cols-4">
                       {entries.map(([field, value]) => (

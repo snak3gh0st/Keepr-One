@@ -43,6 +43,26 @@ export const NATIONAL_LIFE_AUTOMATIC_GRID_KEYS = [
   'PAYABLE_GROSS_COMMISSIONS',
 ] as const satisfies readonly NationalLifeGridKey[]
 
+/// The operational sync scope selected for Keepr One. These are the areas the
+/// agent uses daily; the earning-detail grid is deliberately adjacent to paid
+/// commissions because it is the only source that supplies CommissionStatementId
+/// and GrossCommEarned for the commission records.
+export const NATIONAL_LIFE_PRIORITY_GRID_KEYS = [
+  'NEW_BUSINESS',
+  'RECENTLY_CLOSED',
+  'INFORCE_CLIENTS',
+  'PAID_COMMISSIONS',
+  'COMMISSIONS_EARNING_REPORT',
+  'COMMISSIONS_PAYMENT_PORTAL',
+  'CORRESPONDENCE',
+  'PIP_PENDING',
+  'PENDING_GROSS_COMMISSIONS',
+  'PAYABLE_GROSS_COMMISSIONS',
+  'COMMISSIONS_OVERVIEW',
+  'COMMISSIONS_POLICY_HISTORY',
+  'AGENT_DASHBOARD',
+] as const satisfies readonly NationalLifeGridKey[]
+
 /// Sources that require a server-rendered page/form snapshot before their
 /// business-specific collectors can be finalized. They are deliberately not
 /// counted as automatic coverage merely because the extension can observe the

@@ -25,7 +25,10 @@ import {
 import { planRawIngest } from './raw-ingest'
 import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 import { NATIONAL_LIFE_SYNC_STAGES } from '../sync-progress'
-import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from '../read-coverage'
+import {
+  NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
+  NATIONAL_LIFE_PRIORITY_GRID_KEYS,
+} from '../read-coverage'
 
 export { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 
@@ -46,11 +49,17 @@ export const LOCAL_CONNECTOR_LEGACY_GRID_KEYS = [
   'NEW_BUSINESS',
   'INFORCE_CLIENTS',
 ] as const satisfies readonly NationalLifeGridKey[]
-export const LOCAL_CONNECTOR_DEFAULT_GRID_KEYS = [
+export const LOCAL_CONNECTOR_FULL_GRID_KEYS = [
   ...NATIONAL_LIFE_SYNC_STAGES,
 ] as const
+export const LOCAL_CONNECTOR_PRIORITY_GRID_KEYS = [
+  ...NATIONAL_LIFE_PRIORITY_GRID_KEYS,
+] as const
+export const LOCAL_CONNECTOR_DEFAULT_GRID_KEYS = [
+  ...LOCAL_CONNECTOR_PRIORITY_GRID_KEYS,
+] as const
 export const LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS = [
-  ...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
+  ...LOCAL_CONNECTOR_FULL_GRID_KEYS,
   ...NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
 ] as const
 const DISCOVERY_PAGE_KEYS = new Set<NationalLifeGridKey>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
@@ -247,10 +256,10 @@ export async function startLocalConnectorRun(
         orderBy: { completedAt: 'desc' },
         select: runSelect,
       })
-  // Turning on page discovery or the official export widens the plan the server
-  // asks for, and a run that predates the new sources says nothing about them.
-  // Reusing one would report "verified" for a whole freshness window while those
-  // sources had never been opened — the flag would read as inert.
+  // A completed run is fresh only for the exact source plan it executed. Reusing
+  // a broader or narrower denominator would make the new request appear verified
+  // while either skipping requested sources or presenting historical ones as
+  // part of the current daily scope.
   //
   // Only COMPLETED is superseded, and the asymmetry is deliberate:
   //
@@ -261,14 +270,22 @@ export async function startLocalConnectorRun(
   //   it becomes COMPLETED, and the next start supersedes it here.
   // - COMPLETED has nothing left to resume and no reopen path — `reopening` does
   //   not include it, and its `nextStageIndex` is the end of the plan — so it can
-  //   only be replaced. Widening it in place would leave a finished run holding
-  //   12 of 26 stages with nothing to hand the device.
-  const missesRequestedSources = (run: { plannedGridKeys?: string[] } | null) => {
+  //   only be replaced. Changing it in place would leave a finished run holding
+  //   an old cursor and no stages to hand the device.
+  const completedPlanMatchesExactly = (run: { plannedGridKeys?: string[] } | null) => {
     if (!run) return false
     const stored = plannedGridKeys({ plannedGridKeys: run.plannedGridKeys ?? [] })
-    return requestedGridKeys.some((gridKey) => !stored.includes(gridKey))
+      .filter((gridKey) => !DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS.has(gridKey))
+    const requested = [...new Set(requestedGridKeys)]
+      .filter((gridKey) => !DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS.has(gridKey))
+    return stored.length === requested.length && stored.every((gridKey, index) => gridKey === requested[index])
   }
-  const reusableCompleted = missesRequestedSources(completed) ? null : completed
+  // A completed run is a statement about the exact source scope it opened. A
+  // broader run is not reusable for a narrower priority request: doing so would
+  // keep the old denominator, reopen no portal pages, and make the performance
+  // improvement look like it did nothing. RUNNING/FAILED remain authoritative
+  // below because their durable cursor must not be rewritten under a device.
+  const reusableCompleted = completedPlanMatchesExactly(completed) ? completed : null
   const active = running ?? (options?.forceRefresh ? null : failed) ?? reusableCompleted
   if (active) {
     const storedPlan = plannedGridKeys(active)
@@ -412,8 +429,8 @@ export async function startLocalConnectorRun(
       // the others.
       //
       // Replaying the export replays the same silent hang, and INFORCE_CLIENTS
-      // is index 2 of 26 — every source after it, all seven commission ones
-      // included, stays unreachable. The grid shares this parser, so the
+      // is early in every operational plan, so all later sources stay
+      // unreachable. The grid shares this parser, so the
       // policies still land and only the export-only contact columns are lost.
       // Degrading beats blocking, and neither skips the source.
       stages: planLocalConnectorStages(activePlan, {

@@ -64,6 +64,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   }> = []
   let carrierDocuments: Array<{ id: string; date: string; type: string }> = []
   let serviceEvents: ClientServiceEvent[] = []
+  let serviceSourceUpdatedAt: Date | null = null
 
   // Every policy in the book is National Life today, so this reads as a
   // formality. It is not: the carrier rows are matched on policy number alone,
@@ -76,6 +77,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     const [commissionRows, documentRows, serviceRows] = await Promise.all([
       prisma.nationalLifeReportRow.findMany({
         where: {
+          agentId: policy.agentId,
           deploymentScope: scopeId,
           gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
           raw: { path: ['PolicyNumber'], equals: policy.policyNumber },
@@ -84,6 +86,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       }),
       prisma.nationalLifeReportRow.findMany({
         where: {
+          agentId: policy.agentId,
           deploymentScope: scopeId,
           gridKey: 'CORRESPONDENCE',
           // Correspondence pads the number with a leading `00` and no other
@@ -94,18 +97,19 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             raw: { path: ['RefPolicyNumber'], equals: value },
           })),
         },
-        select: { id: true, raw: true },
+        select: { id: true, raw: true, fetchedAt: true },
       }),
       // Every time this client touched the carrier. It is also the only grid
       // that carries an email or a phone number — the inforce book returns
       // those columns null for every policy it has.
       prisma.nationalLifeReportRow.findMany({
         where: {
+          agentId: policy.agentId,
           deploymentScope: scopeId,
           gridKey: 'CLIENT_INTELLIGENCE',
           raw: { path: ['PolicyNumber'], equals: policy.policyNumber },
         },
-        select: { id: true, raw: true },
+        select: { id: true, raw: true, fetchedAt: true },
       }),
     ])
 
@@ -134,6 +138,10 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     })
 
     serviceEvents = toClientServiceEvents(serviceRows)
+    serviceSourceUpdatedAt = serviceRows.reduce<Date | null>(
+      (latest, row) => !latest || row.fetchedAt > latest ? row.fetchedAt : latest,
+      null,
+    )
   }
 
   const atRiskEvents = serviceEvents.filter((event) => event.signal === 'AT_RISK')
@@ -210,6 +218,15 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               ? 'A seguradora registrou um sinal de risco nesta apólice'
               : `A seguradora registrou ${atRiskEvents.length} sinais de risco nesta apólice`}
           </h2>
+          {serviceSourceUpdatedAt && (
+            <p className="mb-4 text-xs text-ink-muted">
+              Fonte atualizada em {serviceSourceUpdatedAt.toLocaleString('pt-BR', {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+                timeZone: 'America/New_York',
+              })}.
+            </p>
+          )}
           <ul className="space-y-3">
             {atRiskEvents.slice(0, 5).map((event) => (
               <li key={event.id} className="border-t border-border-steel pt-3 first:border-t-0 first:pt-0">
@@ -284,6 +301,15 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               <h2 className="mb-5 mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">
                 Histórico de atendimento
               </h2>
+              {serviceSourceUpdatedAt && (
+                <p className="mb-4 text-xs text-ink-muted">
+                  Fonte atualizada em {serviceSourceUpdatedAt.toLocaleString('pt-BR', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                    timeZone: 'America/New_York',
+                  })}.
+                </p>
+              )}
               <Table>
                 <Thead>
                   <tr>

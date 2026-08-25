@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   LOCAL_CONNECTOR_STATE_HEADER,
   LOCAL_CONNECTOR_VERSION_HEADER,
+  COMMISSION_DETAIL_PROTOCOL_MIN_VERSION,
   compareConnectorVersions,
   enforceLocalConnectorClientFloor,
   getLocalConnectorRemoteConfig,
@@ -12,6 +13,7 @@ import {
   readReportedClientVersion,
   refuseLocalConnectorRequest,
   supportsStageCompletionProtocol,
+  supportsCommissionDetailProtocol,
 } from './remote-config'
 
 const ENV_KEYS = [
@@ -54,6 +56,14 @@ describe('versão reportada pelo cliente', () => {
     expect(supportsStageCompletionProtocol(headers('0.1.1'))).toBe(false)
     expect(supportsStageCompletionProtocol(headers('0.1.2'))).toBe(true)
     expect(supportsStageCompletionProtocol(headers('0.2.0'))).toBe(true)
+  })
+
+  it('only enables priority commission detail in version 0.1.18 and later', () => {
+    expect(COMMISSION_DETAIL_PROTOCOL_MIN_VERSION).toBe('0.1.18')
+    expect(supportsCommissionDetailProtocol(headers())).toBe(false)
+    expect(supportsCommissionDetailProtocol(headers('0.1.17'))).toBe(false)
+    expect(supportsCommissionDetailProtocol(headers('0.1.18'))).toBe(true)
+    expect(supportsCommissionDetailProtocol(headers('0.2.0'))).toBe(true)
   })
 })
 

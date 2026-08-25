@@ -11,13 +11,24 @@ import {
   ingestLocalConnectorStage,
   startLocalConnectorRun,
 } from './run-service'
-import { planReadGridStages } from './capabilities'
-import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from '../read-coverage'
+import { planReadGridStages, planReadPageStages } from './capabilities'
+import {
+  NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
+  NATIONAL_LIFE_PRIORITY_GRID_KEYS,
+} from '../read-coverage'
 
 const now = new Date('2026-08-04T18:00:00.000Z')
 
 function planStageKey(stage: ReturnType<typeof planReadGridStages>[number] | { capability: 'READ_PAGE' | 'READ_EXPORT'; params: { sourceKey: string } }) {
   return stage.capability === 'READ_GRID' ? stage.params.gridKey : stage.params.sourceKey
+}
+
+function expectedDefaultStages() {
+  return NATIONAL_LIFE_PRIORITY_GRID_KEYS.map((gridKey) =>
+    NATIONAL_LIFE_DISCOVERY_PAGE_KEYS.includes(gridKey as (typeof NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)[number])
+      ? planReadPageStages([gridKey])[0]!
+      : planReadGridStages([gridKey])[0]!,
+  )
 }
 
 describe('local connector runs', () => {
@@ -71,7 +82,7 @@ describe('local connector runs', () => {
     ).resolves.toEqual({
       runId: 'run-1',
       schemaVersion: 3,
-      stages: planReadGridStages(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS),
+      stages: expectedDefaultStages(),
       duplicate: false,
       completedStages: 0,
       nextStageIndex: 0,
@@ -509,11 +520,32 @@ describe('local connector runs', () => {
     }))
   })
 
-  /// Turning on page discovery or the official export widens the plan the server
-  /// asks for. A terminal run that never planned those sources says nothing about
-  /// them, so serving it as a fresh answer would make the new flag look inert for
-  /// a whole freshness window — the sync would report "verified" while 14 sources
-  /// had never been opened. Only terminal runs are superseded; an in-flight one
+  it('does not reuse a completed broader run for the selected priority scope', async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-full',
+        state: 'COMPLETED',
+        plannedGridKeys: [...LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS],
+        completedStages: LOCAL_CONNECTOR_DISCOVERY_GRID_KEYS.length,
+        currentGridKey: null,
+      })
+    const create = vi.fn().mockResolvedValue({ id: 'run-priority' })
+    const db = {
+      nationalLifeSyncRun: { create, updateMany: vi.fn(), findFirst },
+    } as never
+
+    await expect(
+      startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now }),
+    ).resolves.toMatchObject({ runId: 'run-priority', duplicate: false, completedStages: 0 })
+    expect(create).toHaveBeenCalledOnce()
+  })
+
+  /// A completed run is fresh only for the exact requested plan. Serving a
+  /// broader or narrower run under another denominator would either skip newly
+  /// requested sources or present historical ones as part of today's scope.
+  /// Only terminal runs are superseded; an in-flight one
   /// still owns its plan, because swapping stages under a navigating device is
   /// exactly what the plan-authority rule exists to prevent.
   it('supersedes a verified run whose plan predates the requested sources', async () => {
