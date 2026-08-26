@@ -557,7 +557,7 @@ describe('background plan executor', () => {
         ok: false, type: 'FLEXLIFE_QUOTE_FAILED', token: message.token,
         correlationId: message.correlationId, inputHash: message.inputHash,
         code: 'PORTAL_REQUEST_FAILED',
-      }
+      } as never
       return defaultTabMessageResponse(_tabId, value)
     })
     await bootBackground()
