@@ -1,6 +1,6 @@
 # Runbook — operar o escopo prioritário do sync National Life
 
-Data: 2026-08-25
+Data: 2026-08-26
 Para: quem opera o piloto. Cada passo tem um resultado observável; se o
 resultado não bater, **pare** — o passo seguinte não conserta o anterior.
 
@@ -87,6 +87,18 @@ refresh** nunca cria outro run enquanto existe um `RUNNING`, mas substitui um
 **Verificar:** com a flag de páginas ligada, a barra mostra **13** etapas; sem
 ela, mostra **9**. Nenhuma das duas contagens significa “todas as áreas do
 portal”.
+
+### Execução diária em segundo plano (extensão 0.1.20+)
+
+Depois do primeiro pareamento, a extensão verifica a cada 15 minutos se a
+última execução terminou há pelo menos 24 horas. Quando estiver vencida, ela
+inicia o mesmo plano prioritário sem depender da página de Integrações e usa uma
+aba inativa da National Life. Não cria um segundo run enquanto outro está ativo.
+
+O Chrome precisa estar aberto e o computador acordado. Se a sessão da National
+Life exigir login ou MFA, a aba é trazida para frente e o run aguarda o agente;
+nenhuma credencial é armazenada ou contornada. Fechar a aba vinculada ao
+conector continua sendo um cancelamento explícito e não é desfeito em silêncio.
 
 ## Passo 4 — ler o resultado como evidência, não como sucesso/fracasso
 
