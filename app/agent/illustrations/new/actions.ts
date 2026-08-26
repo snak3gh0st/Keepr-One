@@ -6,6 +6,7 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { prisma } from '@/lib/prisma'
 import {
   approveConnectorCommand,
+  ConnectorCommandError,
   createPrismaConnectorCommandRepository,
   issueConnectorCommand,
 } from '@/lib/national-life/connector-command-service'
@@ -192,7 +193,19 @@ export async function requestCarrierQuote(
       commandId: issued.command.commandId,
       illustrationId: issued.illustrationId,
     }
-  } catch {
+  } catch (error) {
+    const rawCode = error instanceof ConnectorCommandError
+      ? error.code
+      : error && typeof error === 'object' && 'code' in error &&
+          typeof error.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(error.code)
+        ? error.code
+        : error instanceof Error && /^[A-Z0-9_]{1,80}$/.test(error.message)
+          ? error.message
+          : 'UNCLASSIFIED'
+    console.error('NATIONAL_LIFE_QUOTE_COMMAND_FAILED', {
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorCode: rawCode,
+    })
     // The reason is either a validation detail already checked above or an
     // infrastructure fault. Neither is something to put in front of an agent.
     return {
