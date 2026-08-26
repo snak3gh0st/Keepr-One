@@ -117,9 +117,12 @@ persistência no banco ou a renderização pelo fluxo completo do Keepr One.
 
 ## iGO: estado observado
 
-A navegação isolada para `/agent/sso/igo-eapp` chegou ao Auth0, mesmo com o
-portal e o Foresight acessíveis na sessão atual. A observação parou ali: nenhum
-login adicional foi feito e nenhum application foi aberto ou preparado.
+A primeira navegação isolada para `/agent/sso/igo-eapp` chegou ao Auth0, mesmo
+com o portal e o Foresight acessíveis. Depois da renovação manual do login, a
+mesma rota atravessou `federate.ipipeline.com/sp/ACS.saml2` e chegou a
+`igoforms2.ipipeline.com/CossEnterpriseSuite/SilentSignIn.aspx`. Nesse ponto o
+Chrome controlado bloqueou a página com `ERR_BLOCKED_BY_CLIENT`, antes da
+landing. Nenhum application foi aberto ou preparado.
 
 `Remember this device` reduz desafios enquanto a National Life confiar no
 dispositivo, mas não autoriza o Keepr One a tratar portal, Foresight e iPipeline
@@ -140,8 +143,9 @@ rota oficial, classifica Auth0/MFA/gateway/origem inesperada e, se chegar a
 `IGO_UNKNOWN`. Ele não lê valores, não clica, não abre `Start New Case` e não
 salva. Os hosts iPipeline são allowlists exatas; não existe wildcard.
 
-Como a tentativa atual parou em `AUTH_REQUIRED`, a cadeia downstream e o
-contrato dos campos não foram revalidados nessa sessão. Por isso
+Como a tentativa atual confirmou federação e destino, mas parou em
+`GATEWAY_BLOCKED_BY_CLIENT`, a landing e o contrato dos campos não foram
+revalidados nessa sessão. Por isso
 `PREPARE_APPLICATION_DRAFT` e `SUBMIT_APPLICATION` continuam localmente
 desabilitados. `SetupEAppLauncher` também não é chamado pelo probe.
 
@@ -155,7 +159,9 @@ desabilitados. `SetupEAppLauncher` também não é chamado pelo probe.
    campos materiais, geração do NAIC PDF, hash e upload assinado.
 4. Pendente: smoke ponta a ponta com a extensão 0.1.27 carregada, artefato único
    persistido e aberto pelo Keepr One; depois, deploy controlado e PR.
-5. iGO probe: código e testes somente-leitura prontos; sessão real atual está em
-   `AUTH_REQUIRED` e exige renovação do agente.
-6. iGO draft: bloqueado por decisão de segurança até validar a cadeia autenticada
-   e mapear/read-back os campos reais. Submit continua fora do primeiro release.
+5. iGO probe: código e testes somente-leitura prontos; autenticação renovada e
+   cadeia real confirmada até `igoforms2`, onde o Chrome controlado devolveu
+   `GATEWAY_BLOCKED_BY_CLIENT`.
+6. iGO draft: bloqueado por decisão de segurança até alcançar a landing num
+   browser sem esse bloqueio e mapear/read-back os campos reais. Submit continua
+   fora do primeiro release.

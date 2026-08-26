@@ -83,9 +83,11 @@ após o login.~~ **Resolvido, e a causa era outra:** o keep-alive que cruzava o
 `/authorize` a cada 10 min é que matava a sessão em ~7 min. Com
 `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP` desligado ela vive; o job de PDF cruza uma
 vez, faz o que precisa, persiste o contexto e sai. O e-App pode usar o mesmo
-desenho. A cadeia iPipeline já alcançou `igoforms2` no Chrome normal, mas a
-sonda isolada mais recente voltou a parar no Auth0. Sessão do portal, Foresight
-e iPipeline continua sendo comprovada por perna, nunca inferida.
+desenho. A cadeia iPipeline já alcançou `igoforms2` no Chrome normal. Depois de
+renovar o login, a sonda controlada também comprovou `federate` ->
+`igoforms2/SilentSignIn.aspx`, mas o próprio Chrome interrompeu a landing com
+`ERR_BLOCKED_BY_CLIENT`. Sessão do portal, Foresight e iPipeline continua sendo
+comprovada por perna, nunca inferida.
 
 **2. A allowlist precisou crescer.** O manifest local autoriza individualmente
 `pipepasstoigo`, `federate` e `igoforms2`, todos observados em evidências da
