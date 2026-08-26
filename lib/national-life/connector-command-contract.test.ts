@@ -116,6 +116,28 @@ describe('National Life connector command contract', () => {
     expect(requiresExplicitConfirmation('SUBMIT_APPLICATION')).toBe(true)
   })
 
+  it('binds generated illustrations to the exact reviewed input hash', () => {
+    const command = {
+      protocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,
+      commandId: 'cmd_illustration_1',
+      runId: 'run_illustration_1',
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_1' },
+      params: { illustrationId: 'illustration_1', inputHash: 'a'.repeat(64) },
+      idempotencyKey: 'illustration_1:generate:hash',
+      issuedAt,
+      expiresAt,
+      requiresConfirmation: true,
+    }
+    expect(parseConnectorCommand(command)).toMatchObject({
+      params: { illustrationId: 'illustration_1', inputHash: 'a'.repeat(64) },
+    })
+    expect(parseConnectorCommand({
+      ...command,
+      params: { illustrationId: 'illustration_1' },
+    })).toBeNull()
+  })
+
   it('accepts sealed open commands without accepting a URL from the server', () => {
     expect(parseConnectorCommand({
       protocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,

@@ -260,6 +260,28 @@ describe('parseStagePlan', () => {
 })
 
 describe('parseExecutableConnectorCommand', () => {
+  it('accepts a confirmed illustration only with a sealed input hash', () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_illustration_1',
+      runId: 'run_illustration_1',
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_1' },
+      params: { illustrationId: 'illustration_1', inputHash: 'a'.repeat(64) },
+      idempotencyKey: 'illustration_1:generate:1',
+      issuedAt: '2026-08-10T20:00:00.000Z',
+      expiresAt: '2026-08-10T20:30:00.000Z',
+      requiresConfirmation: true,
+    }
+    expect(parseExecutableConnectorCommand(command)).toMatchObject({
+      capability: 'GENERATE_ILLUSTRATION',
+    })
+    expect(() => parseExecutableConnectorCommand({
+      ...command,
+      params: { illustrationId: 'illustration_1' },
+    })).toThrow('INVALID_COMMAND')
+  })
+
   it('accepts the current READ_GRID command and refuses an unshipped capability', () => {
     expect(() => parseExecutableConnectorCommand({
       protocolVersion: 1,

@@ -78,6 +78,7 @@ export type ConnectorCommandParams =
   | { policyNumber: string }
   | { policyNumber: string; navigatePath: string }
   | { illustrationId: string }
+  | { illustrationId: string; inputHash: string }
   | { applicationId: string }
   | { applicationId: string; documentId: string; contentHash: string }
   | { applicationId: string; payloadHash: string }
@@ -265,6 +266,10 @@ function parseParams(
     case 'OPEN_ILLUSTRATION':
       return has(['caseKey']) && isIdentifier(value.caseKey) ? { caseKey: value.caseKey } : undefined
     case 'GENERATE_ILLUSTRATION':
+      return has(['illustrationId', 'inputHash']) && isIdentifier(value.illustrationId) &&
+        isHash(value.inputHash)
+        ? { illustrationId: value.illustrationId, inputHash: value.inputHash }
+        : undefined
     case 'FLEXLIFE_QUOTE':
       return has(['illustrationId']) && isIdentifier(value.illustrationId)
         ? { illustrationId: value.illustrationId }

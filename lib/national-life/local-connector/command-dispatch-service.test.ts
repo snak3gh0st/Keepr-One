@@ -98,7 +98,7 @@ describe('local connector command dispatch', () => {
     const repo = repository(candidate({
       capability: 'GENERATE_ILLUSTRATION',
       target: { kind: 'ILLUSTRATION', id: 'illustration_1' },
-      params: { illustrationId: 'illustration_1' },
+      params: { illustrationId: 'illustration_1', inputHash: 'a'.repeat(64) },
       requiresConfirmation: true,
       confirmationState: 'PENDING',
     }))

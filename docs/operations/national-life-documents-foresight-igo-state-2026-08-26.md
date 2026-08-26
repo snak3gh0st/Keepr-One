@@ -74,6 +74,33 @@ leituras e não entram no background sync. Um executor futuro precisa confirmar
 que o caso visível no Foresight é o mesmo caso local antes de qualquer chamada,
 mostrar as opções ao agente e exigir confirmação explícita.
 
+### Correção por observação autenticada em 2026-08-26
+
+A afirmação histórica de que a `StartPage.aspx` não oferecia criação estava
+incompleta: ela considerou apenas o painel central. O menu lateral `Activities`
+expõe `New Illustration`, cujo contrato atual é:
+
+1. `SetupLaunchProduct()` chama
+   `PageService.asmx/SetupLaunchProduct` com o session token corrente;
+2. abre `/NWI/Main/ProductSelectionDialog.aspx`;
+3. o diálogo permite escolher estado, tipo e conceito e lista `FlexLife` como
+   `2025 Indexed Universal Life`;
+4. selecionar FlexLife abre `/NWI/ProductWorkflow/ModuleLandingPage.aspx` e o
+   workflow `/NWI/IUL2025/*`.
+
+O formulário atual foi inspecionado sem salvar nem executar relatório. Ele
+separa os dados em `client.aspx`, `ledger.aspx`, `product.aspx`,
+`InterestRates.aspx`, `quickview.aspx` e `reportselection.aspx`. Os campos de
+cliente, risco, capital, opção de benefício, prêmio e riders têm IDs estáveis
+sob `ctl00_mobilityPH_*`. A release carregada permaneceu
+`ForeSight.Release-5.3.65.31.js`.
+
+O formulário abre com valores de demonstração/default. Portanto o executor não
+pode considerar o estado inicial como entrada confirmada: ele precisa escrever
+o snapshot aprovado, reler todos os campos materiais e comparar o fingerprint
+antes de `Save`. A página de Reports não ficou operacional antes de um Save;
+isso vira uma precondição explícita, não uma tentativa a repetir.
+
 ## iGO: estado observado
 
 A navegação isolada para `/agent/sso/igo-eapp` chegou ao Auth0, mesmo com o
@@ -83,6 +110,15 @@ login adicional foi feito e nenhum application foi aberto ou preparado.
 `Remember this device` reduz desafios enquanto a National Life confiar no
 dispositivo, mas não autoriza o Keepr One a tratar portal, Foresight e iPipeline
 como uma sessão ilimitada. Cada perna SSO pode pedir autenticação novamente.
+
+Em uma segunda observação no Chrome normal, o tile `iGo eApp` chegou com sucesso
+à origem exata `https://igoforms2.ipipeline.com` e abriu o iPipeline Velocity.
+A landing oferece `Start New Case` e `View My Cases`. A primeira tela do wizard
+contém Proposed Insured, Case Description, Solicitation State, Product Type e
+Product; nenhum campo foi preenchido e nenhum Save/Next foi acionado. Isso
+confirma que `Start New Case` pertence ao fluxo application/iGO, enquanto `New
+Illustration` pertence ao Foresight. Identificadores temporários de sessão não
+foram persistidos nem entram na allowlist.
 
 Como o destino do launcher vem apenas na resposta de `SetupEAppLauncher`, os
 assets estáticos não provam ainda a origem final nem os campos do formulário

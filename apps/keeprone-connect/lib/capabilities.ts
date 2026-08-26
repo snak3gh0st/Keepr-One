@@ -2,7 +2,8 @@ import { isGridKeyLabel } from './constants'
 import { hasExactKeys } from './messages'
 import { parseConnectorCommand, type ConnectorCommand } from './command-contract'
 
-export type Capability = 'READ_GRID' | 'READ_PAGE' | 'READ_EXPORT' | 'READ_POLICY_DETAIL'
+export type Capability = 'READ_GRID' | 'READ_PAGE' | 'READ_EXPORT' | 'READ_POLICY_DETAIL' |
+  'GENERATE_ILLUSTRATION'
 
 export type ConnectorCommandDispatch = {
   command: ConnectorCommand
@@ -19,7 +20,9 @@ export type StagePlan =
   | { capability: 'READ_PAGE'; params: { sourceKey: string; navigatePath: string } }
   | { capability: 'READ_EXPORT'; params: { sourceKey: string; navigatePath: string; includeContactInformation: true } }
 
-const IMPLEMENTED_CAPABILITIES = ['READ_GRID', 'READ_PAGE', 'READ_EXPORT', 'READ_POLICY_DETAIL'] as const
+const IMPLEMENTED_CAPABILITIES = [
+  'READ_GRID', 'READ_PAGE', 'READ_EXPORT', 'READ_POLICY_DETAIL', 'GENERATE_ILLUSTRATION',
+] as const
 // A plan is server-authorized and each stage is independently bounded. Leave
 // room for the source inventory to grow without making the 33rd source a hard
 // client-side rollout failure.
@@ -152,6 +155,16 @@ export function parseExecutableConnectorCommand(value: unknown): ConnectorComman
     ) {
       throw new Error('INVALID_COMMAND')
     }
+    return command
+  }
+  if (command.capability === 'GENERATE_ILLUSTRATION') {
+    if (
+      command.target?.kind !== 'ILLUSTRATION' ||
+      !('illustrationId' in command.params) ||
+      !('inputHash' in command.params) ||
+      command.params.illustrationId !== command.target.id ||
+      !/^[a-f0-9]{64}$/.test(command.params.inputHash)
+    ) throw new Error('INVALID_COMMAND')
     return command
   }
   if (command.capability !== 'READ_GRID' && command.capability !== 'READ_PAGE' && command.capability !== 'READ_EXPORT') {
