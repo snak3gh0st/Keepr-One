@@ -10,6 +10,7 @@ import { canAccessPolicy } from '@/lib/policy-access'
 import { AnnualReviewCard } from './AnnualReviewCard'
 import { NationalLifeDocumentButton } from './NationalLifeDocumentButton'
 import { PolicyUploadForm } from './PolicyUploadForm'
+import { NationalLifePolicyDetailCard } from './NationalLifePolicyDetailCard'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { policyStatusLabel } from '@/components/StatusPill'
@@ -38,6 +39,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       commissionRecords: { include: { agent: { include: { user: true } } }, orderBy: { createdAt: 'desc' } },
       documents: true,
       reviews: { orderBy: { dueAt: 'desc' } },
+      nationalLifeDetail: true,
     },
   })
   if (!policy) notFound()
@@ -169,10 +171,21 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     (doc) => !doc.storedPath.includes('/illustrations/') && doc.provider !== 'NATIONAL_LIFE',
   )
   const illustrationDocuments = policy.documents.filter((doc) => doc.storedPath.includes('/illustrations/'))
-  const premium = new Intl.NumberFormat('en-US', {
+  const money = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
-  }).format(Number(policy.premium))
+  })
+  const premium = policy.premium === null ? '—' : money.format(Number(policy.premium))
+  const carrierDetail = policy.nationalLifeDetail
+    ? {
+        totalFaceAmount: policy.nationalLifeDetail.totalFaceAmount?.toString() ?? null,
+        netDeathBenefit: policy.nationalLifeDetail.netDeathBenefit?.toString() ?? null,
+        plannedPeriodicPayment: policy.nationalLifeDetail.plannedPeriodicPayment?.toString() ?? null,
+        paymentFrequency: policy.nationalLifeDetail.paymentFrequency,
+        anticipatedAnnualPremium: policy.nationalLifeDetail.anticipatedAnnualPremium?.toString() ?? null,
+        observedAt: policy.nationalLifeDetail.observedAt.toISOString(),
+      }
+    : null
 
   const rawIllustrationRequestUrl = process.env.ILLUSTRATION_REQUEST_URL
   let illustrationRequestUrl: string | null = null
@@ -378,25 +391,11 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             )}
           </section>
 
-          {/* An empty premium field reads as a bug the agent should report. The
-              inforce book returns these columns null for all 9,614 policies, in
-              every status and product class, so the screen says so instead of
-              leaving a blank.
-
-              Gated on this being a National Life policy: on anyone else's it
-              would be a claim about an insurer we never asked. */}
-          {isCarrierNationalLife && (
-            <section className="module-main-surface">
-              <h2 className="text-base font-semibold text-ink">
-                O que a National Life não fornece
-              </h2>
-              <p className="mt-2 text-sm text-ink-muted">
-                Capital segurado e prêmio por apólice não vêm do portal — as colunas existem no
-                relatório da seguradora e chegam vazias. O prêmio no resumo acima é o registrado
-                aqui, não o da seguradora.
-              </p>
-            </section>
-          )}
+          {/* The bulk book and the per-policy detail are different carrier
+              sources. Only the latter proves coverage/payment values, so the
+              screen shows its own freshness instead of making a carrier-wide
+              claim from an empty bulk column. */}
+          {isCarrierNationalLife && <NationalLifePolicyDetailCard detail={carrierDetail} />}
           <AnnualReviewCard
             policyId={policy.id}
             reviews={policy.reviews.map((r) => ({
