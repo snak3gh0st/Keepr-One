@@ -8,6 +8,7 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getDownlineIds } from '@/lib/hierarchy'
 import { canAccessPolicy } from '@/lib/policy-access'
 import { AnnualReviewCard } from './AnnualReviewCard'
+import { NationalLifeDocumentButton } from './NationalLifeDocumentButton'
 import { PolicyUploadForm } from './PolicyUploadForm'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
@@ -62,7 +63,12 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     period: string
     amount: number
   }> = []
-  let carrierDocuments: Array<{ id: string; date: string; type: string }> = []
+  let carrierDocuments: Array<{
+    id: string
+    date: string
+    type: string
+    storedDocumentId: string | null
+  }> = []
   let serviceEvents: ClientServiceEvent[] = []
   let serviceSourceUpdatedAt: Date | null = null
 
@@ -72,7 +78,8 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   // client's service calls on this screen.
   const isCarrierNationalLife = /national life/i.test(policy.carrier ?? '')
 
-  if (getNationalLifeLocalConnectorConfig().enabled && isCarrierNationalLife && policy.policyNumber) {
+  const localConnector = getNationalLifeLocalConnectorConfig()
+  if (localConnector.enabled && isCarrierNationalLife && policy.policyNumber) {
     const scopeId = LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
     const [commissionRows, documentRows, serviceRows] = await Promise.all([
       prisma.nationalLifeReportRow.findMany({
@@ -124,6 +131,11 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       }))
       .sort((left, right) => right.period.localeCompare(left.period))
 
+    const storedBySourceRow = new Map(
+      policy.documents
+        .filter((document) => document.sourceRowId)
+        .map((document) => [document.sourceRowId as string, document.id]),
+    )
     carrierDocuments = documentRows.map((row) => {
       const raw = (row.raw ?? {}) as Record<string, unknown>
       // These fields arrive as rendered anchors, so the label has to be pulled
@@ -134,6 +146,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         id: row.id,
         date: text(raw.DocumentDate) || '—',
         type: text(raw.DocumentType) || text(raw.DocumentCategory) || 'Documento',
+        storedDocumentId: storedBySourceRow.get(row.id) ?? null,
       }
     })
 
@@ -152,7 +165,9 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     phone: serviceEvents.find((event) => event.phone)?.phone ?? null,
   }
 
-  const policyDocuments = policy.documents.filter((doc) => !doc.storedPath.includes('/illustrations/'))
+  const policyDocuments = policy.documents.filter(
+    (doc) => !doc.storedPath.includes('/illustrations/') && doc.provider !== 'NATIONAL_LIFE',
+  )
   const illustrationDocuments = policy.documents.filter((doc) => doc.storedPath.includes('/illustrations/'))
   const premium = new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -410,18 +425,31 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                 </p>
                 <ul className="mt-2 divide-y divide-border-steel rounded-md border border-border-steel bg-panel">
                   {carrierDocuments.map((doc) => (
-                    <li key={doc.id} className="px-4 py-2.5 text-sm">
-                      <span className="text-ink">{doc.type}</span>
-                      <span className="ml-2 text-xs text-ink-muted">{doc.date}</span>
+                    <li key={doc.id} className="flex flex-col gap-3 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                      <span>
+                        <span className="block text-ink">{doc.type}</span>
+                        <span className="text-xs text-ink-muted">{doc.date}</span>
+                      </span>
+                      {doc.storedDocumentId ? (
+                        <a
+                          href={`/api/documents/${doc.storedDocumentId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold text-teal hover:text-teal-deep"
+                        >
+                          Abrir no Keepr One
+                        </a>
+                      ) : localConnector.enabled ? (
+                        <NationalLifeDocumentButton
+                          extensionId={localConnector.extensionId}
+                          reportRowId={doc.id}
+                        />
+                      ) : null}
                     </li>
                   ))}
                 </ul>
-                {/* Listed, not downloadable: the file lives at the carrier behind
-                    an EncryptedDocumentHandle and fetching it is a separate
-                    decision about volume and storage. Showing that it exists is
-                    still better than claiming there is nothing. */}
                 <p className="mt-2 text-xs text-ink-muted">
-                  Disponíveis no portal da seguradora. Ainda não baixados para cá.
+                  Os arquivos ficam na National Life até você pedir. Depois de validados, ficam disponíveis no Keepr One.
                 </p>
               </>
             )}

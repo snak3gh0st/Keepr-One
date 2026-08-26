@@ -76,6 +76,7 @@ type Listener = (...args: unknown[]) => unknown
 
 const storage: Record<string, unknown> = {}
 const listeners: Record<string, Listener[]> = {}
+const alarms = new Map<string, Record<string, unknown>>()
 
 function register(name: string) {
   return {
@@ -157,8 +158,11 @@ const chromeStub = {
     onMessageExternal: register('runtime.onMessageExternal'),
   },
   alarms: {
-    create: vi.fn(),
-    clear: vi.fn(async () => true),
+    create: vi.fn((name: string, options: Record<string, unknown>) => {
+      alarms.set(name, { name, ...options })
+    }),
+    get: vi.fn(async (name: string) => alarms.get(name)),
+    clear: vi.fn(async (name: string) => alarms.delete(name)),
     onAlarm: register('alarms.onAlarm'),
   },
   tabs,
@@ -200,6 +204,7 @@ function beginGridMessage() {
 
 beforeEach(() => {
   for (const key of Object.keys(storage)) delete storage[key]
+  alarms.clear()
   vi.clearAllMocks()
   tabs.sendMessage.mockImplementation(defaultTabMessageResponse)
   vi.mocked(signedJsonRequest).mockResolvedValue({})
@@ -376,6 +381,50 @@ describe('empurrão de atualização no caminho real', () => {
 })
 
 describe('background plan executor', () => {
+  it('starts a due daily sync from the extension alarm without the Keepr One page', async () => {
+    storage.sync = {
+      status: 'COMPLETED',
+      completedAt: new Date(Date.now() - 25 * 60 * 60_000).toISOString(),
+    }
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      runId: 'run-scheduled',
+      stages: TWO_STAGE_PLAN,
+      completedStages: 0,
+      nextStageIndex: 0,
+    } as never)
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-scheduled-sync' })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST',
+      pathname: '/api/agent/integrations/national-life/local-connector/runs',
+      body: {},
+    }))
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
+      url: `${NLG}${NEW_BUSINESS_PATH}`,
+    })
+    expect(readSync()).toMatchObject({ runId: 'run-scheduled', status: 'NAVIGATING' })
+  })
+
+  it('does not start another scheduled sync while the last completion is fresh', async () => {
+    storage.sync = {
+      status: 'COMPLETED',
+      completedAt: new Date(Date.now() - 23 * 60 * 60_000).toISOString(),
+    }
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-scheduled-sync' })
+    await flush()
+
+    expect(signedJsonRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs',
+    }))
+    expect(tabs.create).not.toHaveBeenCalled()
+  })
+
   it('forwards an explicit full refresh to the run endpoint', async () => {
     vi.mocked(signedJsonRequest).mockResolvedValue({
       runId: 'run-full',
@@ -1007,17 +1056,40 @@ describe('background plan executor', () => {
     await flush()
 
     expect(tabs.sendMessage).not.toHaveBeenCalled()
-    expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED' })
+    expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED', authRenewalPending: true })
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs/run-1/auth-state',
+      body: { state: 'REQUIRED' },
+    }))
   })
 
   it('resumes the pending grid when login returns to the authenticated agent shell', async () => {
-    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'AUTH_REQUIRED' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'AUTH_REQUIRED', authRenewalPending: true }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}/agent/` }])
     await bootBackground()
 
     expect(tabs.create).not.toHaveBeenCalled()
     expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
     expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
+  })
+
+  it('resolves the Keepr One login warning after a verified carrier session returns', async () => {
+    storage.sync = {
+      runId: 'run-1',
+      carrierTabId: 7,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 0,
+      status: 'NAVIGATING',
+      authRenewalPending: true,
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs/run-1/auth-state',
+      body: { state: 'RESTORED' },
+    }))
+    expect(readSync()).toMatchObject({ status: 'EXTRACTING', authRenewalPending: false })
   })
 
   it('stops cleanly when the carrier tab is closed instead of reopening it', async () => {

@@ -19,7 +19,12 @@ export type LocalConnectorCapabilityName = ConnectorCapability
 
 /// The Chrome extension ships this closed subset. The larger protocol catalogue
 /// is deliberately not executable until a released browser executor validates it.
-export const EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES = ['READ_GRID', 'READ_PAGE', 'READ_EXPORT'] as const satisfies readonly LocalConnectorCapabilityName[]
+export const EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES = [
+  'READ_GRID',
+  'READ_PAGE',
+  'READ_EXPORT',
+  'READ_DOCUMENT',
+] as const satisfies readonly LocalConnectorCapabilityName[]
 
 /// Named for planning and UI copy only. The extension's IMPLEMENTED_CAPABILITIES
 /// must stay the closed set of what the device can actually run — do not add these

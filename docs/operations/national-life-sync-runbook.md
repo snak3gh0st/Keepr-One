@@ -1,6 +1,6 @@
 # Runbook — operar o escopo prioritário do sync National Life
 
-Data: 2026-08-25
+Data: 2026-08-26
 Para: quem opera o piloto. Cada passo tem um resultado observável; se o
 resultado não bater, **pare** — o passo seguinte não conserta o anterior.
 
@@ -12,6 +12,11 @@ links para `CommissionStatementId` e `GrossCommEarned`.
 
 O export oficial do carrier para o in-force continua sendo opcional e troca a
 forma de leitura dessa área; ele não amplia o escopo do sync.
+
+Na extensão 0.1.20+, `Commission Earning Detail` pede até 1.000 linhas por
+resposta do carrier e continua transportando lotes assinados de no máximo 200
+linhas. Isso reduz viagens HTTP sem alterar `CommissionStatementId`,
+`GrossCommEarned`, os limites do endpoint ou o cursor de retomada.
 
 O que ele **não** fecha, e ninguém pode fechar por código: a execução contra o
 portal vivo. É um humano por credencial.
@@ -34,6 +39,12 @@ Saída em `apps/keeprone-connect/.output/chrome-mv3/`. No Chrome do agente:
 estava carregada) apontando para essa pasta.
 
 **Verificar:** `chrome://extensions` mostra KeeproneConnect **0.1.18** ou superior.
+
+Para usar a captura sob demanda dos PDFs de Correspondence, a extensão precisa
+ser **0.1.21+** e a migration
+`20260826134000_national_life_correspondence_documents` precisa estar aplicada.
+Versões anteriores continuam aptas ao sync prioritário, mas não entendem o
+comando `FETCH_NATIONAL_LIFE_DOCUMENT`.
 
 ## Passo 1 — ligar as flags necessárias
 
@@ -82,6 +93,30 @@ refresh** nunca cria outro run enquanto existe um `RUNNING`, mas substitui um
 **Verificar:** com a flag de páginas ligada, a barra mostra **13** etapas; sem
 ela, mostra **9**. Nenhuma das duas contagens significa “todas as áreas do
 portal”.
+
+### Execução diária em segundo plano (extensão 0.1.20+)
+
+Depois do primeiro pareamento, a extensão verifica a cada 15 minutos se a
+última execução terminou há pelo menos 24 horas. Quando estiver vencida, ela
+inicia o mesmo plano prioritário sem depender da página de Integrações e usa uma
+aba inativa da National Life. Não cria um segundo run enquanto outro está ativo.
+
+O Chrome precisa estar aberto e o computador acordado. Se a sessão da National
+Life exigir login ou MFA, a aba é trazida para frente e o run aguarda o agente;
+o Keepr One também cria um aviso no sino de notificações e o resolve quando a
+sessão volta. Nenhuma credencial, resposta de MFA, cookie ou sessão é armazenada
+pelo Keepr One. O `Remember this device`, quando o agente o escolher no portal,
+continua pertencendo exclusivamente à National Life e ao perfil do Chrome.
+Fechar a aba vinculada ao conector continua sendo um cancelamento explícito e
+não é desfeito em silêncio.
+
+### PDFs de Correspondence sob demanda (extensão 0.1.21+)
+
+O sync diário salva o índice; ele não baixa arquivos em massa. Na apólice, o
+botão **Trazer para o Keepr One** solicita um único PDF. O sucesso visual só
+aparece depois de validar MIME, tamanho, `%PDF-`, SHA-256 e persistir o
+`PolicyDocument`. Se a National Life pedir login/MFA, a extensão abre a aba
+oficial e o agente repete o clique após entrar.
 
 ## Passo 4 — ler o resultado como evidência, não como sucesso/fracasso
 

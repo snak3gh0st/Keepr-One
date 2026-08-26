@@ -1,4 +1,10 @@
-import { buildPageBody, nextPageStart, PAGE_SIZE, parsePortalPage } from './paging'
+import {
+  buildPageBody,
+  MAX_PORTAL_PAGE_SIZE,
+  nextPageStart,
+  PAGE_SIZE,
+  parsePortalPage,
+} from './paging'
 import type { AbortGridMessage, BeginGridMessage } from './messages'
 
 /// O laço que pagina uma grade do portal.
@@ -23,6 +29,7 @@ export type GridExtractionDeps = {
 }
 
 const KNOWN_CODES = ['TEMPLATE_UNAVAILABLE', 'PORTAL_REQUEST_FAILED', 'INVALID_PORTAL_RESPONSE']
+const LARGE_PAGE_GRID_KEYS = new Set(['COMMISSIONS_EARNING_REPORT'])
 
 export async function runGridExtraction(
   message: BeginGridMessage,
@@ -34,6 +41,9 @@ export async function runGridExtraction(
     let draw = 1
     let sequence = message.sequenceStart ?? 0
     let sentAny = false
+    const portalPageSize = LARGE_PAGE_GRID_KEYS.has(message.gridKey)
+      ? MAX_PORTAL_PAGE_SIZE
+      : PAGE_SIZE
 
     while (true) {
       // Antes de bater no portal de novo. É o ponto que faz a pausa do servidor
@@ -44,7 +54,7 @@ export async function runGridExtraction(
       // verdadeiro por "resposta inválida".
       if (deps.aborted()) return
 
-      const body = buildPageBody(requestTemplate.body, start, PAGE_SIZE, draw)
+      const body = buildPageBody(requestTemplate.body, start, portalPageSize, draw)
       const response = await deps.fetchPage(requestTemplate, body)
       if (!response.ok) throw new Error('PORTAL_REQUEST_FAILED')
       const page = parsePortalPage(await response.json())
@@ -65,17 +75,21 @@ export async function runGridExtraction(
       // A carrier that ignores `length` can hand back more rows than a page, so
       // slice to the cap the envelope accepts rather than losing the whole chunk.
       for (let offset = 0; offset < records.length; offset += PAGE_SIZE) {
+        const chunk = records.slice(offset, offset + PAGE_SIZE)
         deps.post({
           type: 'GRID_CHUNK',
           gridKey: message.gridKey,
           token: message.token,
           correlationId: message.correlationId,
           sequence,
-          sourceOffset: start,
-          nextOffset: start + page.rows.length,
+          // Each bridge chunk owns its exact carrier range. If Chrome is evicted
+          // after the first chunk of a 1,000-row response, the server resumes at
+          // 200 rather than skipping the other 800 rows.
+          sourceOffset: start + offset,
+          nextOffset: start + offset + chunk.length,
           recordsTotal: page.recordsTotal,
           truncated: page.truncated,
-          records: records.slice(offset, offset + PAGE_SIZE),
+          records: chunk,
         })
         sequence += 1
         sentAny = true

@@ -6,6 +6,10 @@ export const MAX_PORTAL_RECORDS = 200_000
 /// Raw carrier rows are fatter than the normalized ones we used to send, so a page
 /// carries fewer of them. Mirrors LOCAL_CONNECTOR_MAX_RECORDS on the server.
 export const PAGE_SIZE = 200
+/// The carrier can return more rows in one HTTP response than the signed bridge
+/// accepts in one message. The extractor splits that response back into
+/// PAGE_SIZE chunks before crossing the extension boundary.
+export const MAX_PORTAL_PAGE_SIZE = 1_000
 
 type JsonMap = Record<string, unknown>
 
@@ -16,7 +20,7 @@ function objectValue(value: unknown): JsonMap | null {
 }
 
 function updateModel(model: JsonMap, start: number, length: number, draw: number): JsonMap {
-  return { ...model, start, length: Math.min(length, PAGE_SIZE), draw }
+  return { ...model, start, length: Math.min(length, MAX_PORTAL_PAGE_SIZE), draw }
 }
 
 export function buildPageBody(template: string, start: number, length = PAGE_SIZE, draw = 1): string {

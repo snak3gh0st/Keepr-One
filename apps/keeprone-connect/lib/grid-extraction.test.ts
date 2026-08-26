@@ -93,6 +93,30 @@ describe('grid extraction', () => {
     expect(h.posts.at(-1)).toMatchObject({ type: 'GRID_DONE' })
   })
 
+  it('reads commission detail in larger carrier pages but emits resumable 200-row chunks', async () => {
+    const h = harness([{ data: rows(450), recordsTotal: 450 }])
+
+    await runGridExtraction(
+      { ...MESSAGE, gridKey: 'COMMISSIONS_EARNING_REPORT' },
+      deps(h),
+    )
+
+    expect(h.fetchPage).toHaveBeenCalledTimes(1)
+    const request = JSON.parse(h.fetchPage.mock.calls[0]![1] as string) as {
+      objJsonModel: { length: number }
+    }
+    expect(request.objJsonModel.length).toBe(1_000)
+    expect(h.posts.slice(0, 3)).toMatchObject([
+      { type: 'GRID_CHUNK', sequence: 0, sourceOffset: 0, nextOffset: 200 },
+      { type: 'GRID_CHUNK', sequence: 1, sourceOffset: 200, nextOffset: 400 },
+      { type: 'GRID_CHUNK', sequence: 2, sourceOffset: 400, nextOffset: 450 },
+    ])
+    expect((h.posts[0]!.records as unknown[])).toHaveLength(200)
+    expect((h.posts[1]!.records as unknown[])).toHaveLength(200)
+    expect((h.posts[2]!.records as unknown[])).toHaveLength(50)
+    expect(h.posts[3]).toMatchObject({ type: 'GRID_DONE' })
+  })
+
   it('sends one empty chunk for a grid with no rows', async () => {
     const h = harness([{ data: [], recordsTotal: 0 }])
 

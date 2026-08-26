@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { buildPageBody, MAX_PORTAL_RECORDS, nextPageStart, PAGE_SIZE, parsePortalPage } from './paging'
+import {
+  buildPageBody,
+  MAX_PORTAL_PAGE_SIZE,
+  MAX_PORTAL_RECORDS,
+  nextPageStart,
+  PAGE_SIZE,
+  parsePortalPage,
+} from './paging'
 
 describe('portal paging helpers', () => {
   it('updates a form-encoded DataTables model while preserving its identity', () => {
@@ -11,24 +18,24 @@ describe('portal paging helpers', () => {
     expect(result.get('DatatableId')).toBe('AllClients')
     expect(JSON.parse(result.get('objJsonModel')!)).toEqual({
       start: 500,
-      length: 200,
+      length: 700,
       draw: 9,
       search: { value: '' },
     })
   })
 
-  it('never asks the carrier for more rows than one envelope may carry', () => {
-    // 200 is the server's per-envelope record cap (LOCAL_CONNECTOR_MAX_RECORDS). A page
-    // request above it would produce chunks the ingest endpoint rejects.
+  it('caps carrier pages separately from the smaller signed upload chunks', () => {
     const template = new URLSearchParams({
       objJsonModel: JSON.stringify({ start: 0, length: 25 }),
     })
     for (const requested of [PAGE_SIZE, 500, 10_000]) {
       const body = new URLSearchParams(buildPageBody(template.toString(), 0, requested))
-      expect(JSON.parse(body.get('objJsonModel')!).length).toBeLessThanOrEqual(200)
+      expect(JSON.parse(body.get('objJsonModel')!).length).toBeLessThanOrEqual(MAX_PORTAL_PAGE_SIZE)
     }
     const byDefault = new URLSearchParams(buildPageBody(template.toString(), 0))
     expect(JSON.parse(byDefault.get('objJsonModel')!).length).toBe(200)
+    const capped = new URLSearchParams(buildPageBody(template.toString(), 0, 10_000))
+    expect(JSON.parse(capped.get('objJsonModel')!).length).toBe(1_000)
   })
 
   it('does not truncate a grid that only the old ceiling would have clamped', () => {

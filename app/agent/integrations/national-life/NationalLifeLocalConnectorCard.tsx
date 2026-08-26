@@ -9,38 +9,11 @@ import {
   connectorFailure,
 } from '@/lib/national-life/local-connector/connector-failure'
 import { NATIONAL_LIFE_SYNC_STARTED_EVENT } from './NationalLifeSyncProgress'
-
-type ConnectorResponse = {
-  ok: boolean
-  error?: string
-  status?: string
-  deviceId?: string
-  device?: { status?: string; deviceId?: string }
-  sync?: {
-    runId?: string
-    status?: string
-    errorCode?: string
-    uploads?: number
-    stageIndex?: number
-    stageKey?: string
-    totalStages?: number
-  }
-}
-
-type ConnectorMessage =
-  | { type: 'START_NATIONAL_LIFE_SYNC'; forceRefresh?: true }
-  | { type: 'GET_CONNECTOR_STATUS' }
-  | { type: 'UNPAIR_CONNECTOR' }
-  | { type: 'PAIR_CONNECTOR'; code: string; label: string; baseUrl: string }
-
-type ChromeRuntime = {
-  lastError?: { message?: string }
-  sendMessage: (
-    extensionId: string,
-    message: ConnectorMessage,
-    callback: (response?: ConnectorResponse) => void,
-  ) => void
-}
+import {
+  hasConnectorRuntime,
+  sendConnectorMessage,
+  type ConnectorResponse,
+} from './NationalLifeConnectorClient'
 
 type ConnectorState =
   | 'idle'
@@ -54,48 +27,6 @@ type ConnectorState =
   | 'success'
   | 'error'
 
-function chromeRuntime(): ChromeRuntime | null {
-  if (typeof window === 'undefined') return null
-  const candidate = (window as typeof window & { chrome?: { runtime?: ChromeRuntime } }).chrome
-    ?.runtime
-  return candidate && typeof candidate.sendMessage === 'function' ? candidate : null
-}
-
-export function sendConnectorMessage(
-  extensionId: string,
-  message: ConnectorMessage,
-  timeoutMs = 5_000,
-): Promise<ConnectorResponse> {
-  return new Promise((resolve, reject) => {
-    const runtime = chromeRuntime()
-    if (!runtime) {
-      reject(new Error('CONNECTOR_UNAVAILABLE'))
-      return
-    }
-    let settled = false
-    const timer = window.setTimeout(() => {
-      settled = true
-      reject(new Error('CONNECTOR_TIMEOUT'))
-    }, timeoutMs)
-
-    try {
-      runtime.sendMessage(extensionId, message, (response) => {
-        if (settled) return
-        settled = true
-        window.clearTimeout(timer)
-        if (runtime.lastError || !response || typeof response.ok !== 'boolean') {
-          reject(new Error('CONNECTOR_UNAVAILABLE'))
-          return
-        }
-        resolve(response)
-      })
-    } catch {
-      window.clearTimeout(timer)
-      reject(new Error('CONNECTOR_UNAVAILABLE'))
-    }
-  })
-}
-
 function openStore(storeUrl: string) {
   const link = document.createElement('a')
   link.href = storeUrl
@@ -107,7 +38,7 @@ function openStore(storeUrl: string) {
 function browserSupportsConnector(): boolean {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
   const userAgent = navigator.userAgent
-  return /(?:Chrome|Chromium|Edg)\//.test(userAgent) || chromeRuntime() !== null
+  return /(?:Chrome|Chromium|Edg)\//.test(userAgent) || hasConnectorRuntime()
 }
 
 function sleep(ms: number) {
@@ -140,8 +71,8 @@ const storeStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
   installing: 'Opening the secure install page…',
   connecting: 'Connecting to Keepr One…',
   'login-required': 'Sign in to the National Life portal to continue. Your sync picks up from there on its own.',
-  syncing: 'Reading National Life and saving each completed area to Keepr One.',
-  slow: 'Waiting for National Life to finish the current area. Completed areas remain saved.',
+  syncing: 'Reading National Life and saving each completed area to Keepr One. You can leave this page; the sync continues in the background.',
+  slow: 'Waiting for National Life to finish the current area. You can leave this page; completed areas remain saved.',
   partial: 'The available areas were saved. Sync again to retry only the areas National Life did not return.',
   success: 'Your National Life data is up to date.',
 }
@@ -160,6 +91,7 @@ const pilotStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
 /// um lote *termina* de subir, então um único PUT lento já parece parado, e a
 /// margem aqui é o que evita chamar de demorado um sync saudável.
 const STALL_LIMIT = 45
+const ACTIVE_SYNC_STATUSES = new Set(['STARTING', 'NAVIGATING', 'EXTRACTING', 'UPLOADING'])
 
 /// O que prova que o run andou desde a última consulta. `uploads` é o único
 /// campo que se move dentro de uma única grade grande.
@@ -329,6 +261,11 @@ export function NationalLifeLocalConnectorCard({
       if (idle >= STALL_LIMIT) setState('slow')
     }
   }
+  const watchSyncProgressRef = useRef(watchSyncProgress)
+
+  useEffect(() => {
+    watchSyncProgressRef.current = watchSyncProgress
+  })
 
   async function createPairingAndStart(): Promise<void> {
     setState('connecting')
@@ -421,6 +358,18 @@ export function NationalLifeLocalConnectorCard({
     void sendConnectorMessage(extensionId, { type: 'GET_CONNECTOR_STATUS' })
       .then(async (status) => {
         if (status.device?.deviceId) setPairedDeviceId(status.device.deviceId)
+        if (
+          status.sync?.runId &&
+          status.sync.status &&
+          ACTIVE_SYNC_STATUSES.has(status.sync.status)
+        ) {
+          // Returning to this page must observe the run already owned by the
+          // extension, not render a second Sync button beside a live progress
+          // panel. The watcher only reads status; it never starts another run.
+          setLiveSync(status.sync)
+          void watchSyncProgressRef.current()
+          return
+        }
         // The database is authoritative once a run reaches a terminal state.
         // A service worker can retain the last transient portal error after the
         // server has already accepted and completed every stage; surfacing that
@@ -580,6 +529,9 @@ export function NationalLifeLocalConnectorCard({
           {installMode === 'pilot'
             ? ' In this pilot, load the unpacked extension using the ID configured for this environment.'
             : null}
+        </p>
+        <p className="mt-2 max-w-2xl text-xs leading-5 text-ink-muted">
+          On a private, trusted computer, selecting “Remember this device” on National Life can reduce repeated MFA prompts. National Life controls how long that trusted session lasts; Keepr One never bypasses MFA and pauses safely when sign-in is required again.
         </p>
         {pairedDeviceId && state === 'idle' && (
           <div className="mt-5 inline-flex items-center gap-2 rounded-xl border border-teal/25 bg-paper/80 px-3 py-2 text-sm font-semibold text-teal-deep">

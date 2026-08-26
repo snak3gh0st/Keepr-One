@@ -7,6 +7,7 @@ import {
   parseProbeAuthAck,
   parseProbeAuthMessage,
   parseBeginExportMessage,
+  parseBeginDocumentMessage,
 } from './messages'
 
 describe('message validation', () => {
@@ -36,6 +37,14 @@ describe('message validation', () => {
     expect(parseExternalMessage({ type: 'UNPAIR_CONNECTOR' })).toEqual({
       type: 'UNPAIR_CONNECTOR',
     })
+    expect(parseExternalMessage({
+      type: 'FETCH_NATIONAL_LIFE_DOCUMENT',
+      reportRowId: 'report_row-1',
+    })).toEqual({ type: 'FETCH_NATIONAL_LIFE_DOCUMENT', reportRowId: 'report_row-1' })
+    expect(parseExternalMessage({
+      type: 'FETCH_NATIONAL_LIFE_DOCUMENT',
+      reportRowId: '../other-agent-row',
+    })).toBeNull()
   })
 
   const rawChunk = {
@@ -92,6 +101,62 @@ describe('message validation', () => {
       }),
     ).toBeNull()
     expect(parseBridgeMessage({ type: 'OTHER' })).toBeNull()
+  })
+})
+
+describe('official correspondence document messages', () => {
+  const identity = {
+    transferId: 'transfer_1',
+    token: 't'.repeat(32),
+    correlationId: 'c'.repeat(16),
+  }
+  const encryptedHandle = 'ZW5jcnlwdGVkLWNhcnJpZXItaGFuZGxlLTEyMw=='
+
+  it('accepts the sealed carrier handle and bounded PDF transfer', () => {
+    expect(parseBeginDocumentMessage({
+      type: 'BEGIN_DOCUMENT',
+      ...identity,
+      encryptedHandle,
+    })).not.toBeNull()
+    expect(parseBridgeMessage({
+      type: 'DOCUMENT_BEGIN',
+      ...identity,
+      contentType: 'application/pdf',
+      expectedBytes: 5,
+      expectedSha256: 'a'.repeat(64),
+    })).not.toBeNull()
+    expect(parseBridgeMessage({
+      type: 'DOCUMENT_CHUNK',
+      ...identity,
+      sequence: 0,
+      bytes: [37, 80, 68, 70, 45],
+    })).not.toBeNull()
+    expect(parseBridgeMessage({ type: 'DOCUMENT_DONE', ...identity })).not.toBeNull()
+  })
+
+  it('rejects loose handles, executable payloads and extra fields', () => {
+    expect(parseBeginDocumentMessage({
+      type: 'BEGIN_DOCUMENT',
+      ...identity,
+      encryptedHandle: '../document.pdf',
+    })).toBeNull()
+    expect(parseBeginDocumentMessage({
+      type: 'BEGIN_DOCUMENT',
+      ...identity,
+      encryptedHandle: 'a'.repeat(2_052),
+    })).toBeNull()
+    expect(parseBridgeMessage({
+      type: 'DOCUMENT_BEGIN',
+      ...identity,
+      contentType: 'application/octet-stream',
+      expectedBytes: 5,
+      expectedSha256: 'a'.repeat(64),
+    })).toBeNull()
+    expect(parseBridgeMessage({
+      type: 'DOCUMENT_DONE',
+      ...identity,
+      downloadUrl: 'https://attacker.example/file',
+    })).toBeNull()
   })
 })
 

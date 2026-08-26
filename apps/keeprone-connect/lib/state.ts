@@ -46,6 +46,9 @@ export type SyncState = {
   commissionDetailOffset?: number
   commissionDetailCurrentOffset?: number
   commissionDetailReceivedRecords?: number
+  /// True only while the carrier asks the agent to renew the browser session.
+  /// No credential, cookie or MFA material is ever stored here.
+  authRenewalPending?: boolean
   status: SyncStatus
   errorCode?: string
   /// Contador monotônico de lotes enviados neste run. Existe porque `status` e

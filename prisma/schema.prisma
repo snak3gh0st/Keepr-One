@@ -373,6 +373,7 @@ model Agent {
   nationalLifeConnectorDevices          NationalLifeConnectorDevice[]
   nationalLifeConnectorCommands         NationalLifeConnectorCommand[]
   nationalLifeExportUploads             NationalLifeExportUpload[]
+  nationalLifeDocumentTransfers         NationalLifeDocumentTransfer[]
   messagingAccount                      AgentMessagingAccount?
   messagingChannels                     AgentMessagingChannel[]
   producedPromotionCredits              PromotionCredit[]                      @relation("PromotionCreditProducer")
@@ -499,20 +500,22 @@ model NationalLifeInforcePolicy {
 /// `raw` holds the carrier row verbatim and `amounts` the numeric fields pulled
 /// out of it, which is what a front end needs without a migration per report.
 model NationalLifeReportRow {
-  id              String   @id @default(cuid())
-  agentId         String
-  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  deploymentScope String
-  gridKey         String
+  id                String                         @id @default(cuid())
+  agentId           String
+  agent             Agent                          @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope   String
+  gridKey           String
   /// Deterministic per-report identity, so a re-sync updates instead of duplicating.
-  rowKey          String
-  primaryDate     String?
-  label           String?
-  amounts         Json
-  raw             Json
-  fetchedAt       DateTime
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  rowKey            String
+  primaryDate       String?
+  label             String?
+  amounts           Json
+  raw               Json
+  fetchedAt         DateTime
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
+  policyDocuments   PolicyDocument[]
+  documentTransfers NationalLifeDocumentTransfer[]
 
   @@unique([agentId, deploymentScope, gridKey, rowKey])
   @@index([agentId, gridKey])
@@ -712,12 +715,13 @@ model Policy {
   sourceUpdatedAt  DateTime?
   createdAt        DateTime       @default(now())
 
-  commissionRecords      CommissionRecord[]
-  documents              PolicyDocument[]
-  snapshots              PolicySnapshot[]
-  transactions           PolicyTransaction[]
-  commissionTransactions CommissionTransaction[]
-  reviews                PolicyReview[]
+  commissionRecords             CommissionRecord[]
+  documents                     PolicyDocument[]
+  nationalLifeDocumentTransfers NationalLifeDocumentTransfer[]
+  snapshots                     PolicySnapshot[]
+  transactions                  PolicyTransaction[]
+  commissionTransactions        CommissionTransaction[]
+  reviews                       PolicyReview[]
 
   @@unique([sourceProvider, sourceExternalId])
   @@index([agentId])
@@ -1370,6 +1374,7 @@ model NationalLifeConnectorDevice {
   syncRuns            NationalLifeSyncRun[]
   commands            NationalLifeConnectorCommand[]
   exportUploads       NationalLifeExportUpload[]
+  documentTransfers   NationalLifeDocumentTransfer[]
 
   @@index([agentId, status])
 }
@@ -1477,10 +1482,10 @@ model NationalLifeConnectorStageReceipt {
   /// Linhas repetidas dentro do lote, removidas pela chave estável antes do
   /// upsert. Repetições entre lotes continuam protegidas pela chave única do
   /// modelo normalizado e pelo idempotency key do recibo.
-  duplicateCount Int                      @default(0)
+  duplicateCount Int                         @default(0)
   /// Linhas sem uma chave mínima para a entidade normalizada. A cópia raw da
   /// página continua preservada para auditoria e remapeamento futuro.
-  rejectedCount  Int                      @default(0)
+  rejectedCount  Int                         @default(0)
   idempotencyKey String                      @unique
   createdAt      DateTime                    @default(now())
   updatedAt      DateTime                    @updatedAt
@@ -1577,6 +1582,55 @@ model NationalLifeExportChunk {
 
   @@unique([uploadId, sequence])
   @@index([uploadId, byteOffset])
+}
+
+/// Resumable, device-scoped transfer of one official correspondence PDF.
+/// The carrier handle remains in the already-protected source row; this table
+/// stores only the bounded transfer and its integrity proof.
+model NationalLifeDocumentTransfer {
+  id             String                      @id @default(cuid())
+  agentId        String
+  agent          Agent                       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deviceId       String
+  device         NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  reportRowId    String
+  reportRow      NationalLifeReportRow       @relation(fields: [reportRowId], references: [id], onDelete: Cascade)
+  policyId       String
+  policy         Policy                      @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  documentId     String?                     @unique
+  document       PolicyDocument?             @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  fileName       String
+  contentType    String?
+  expectedBytes  Int?
+  expectedSha256 String?
+  totalChunks    Int?
+  state          String                      @default("REQUESTED")
+  receivedBytes  Int                         @default(0)
+  receivedChunks Int                         @default(0)
+  safeErrorCode  String?
+  completedAt    DateTime?
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+  chunks         NationalLifeDocumentChunk[]
+
+  @@unique([agentId, reportRowId])
+  @@index([deviceId, state])
+  @@index([state, updatedAt])
+}
+
+model NationalLifeDocumentChunk {
+  id          String                       @id @default(cuid())
+  transferId  String
+  transfer    NationalLifeDocumentTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  sequence    Int
+  byteOffset  Int
+  byteLength  Int
+  contentHash String
+  bytes       Bytes
+  createdAt   DateTime                     @default(now())
+
+  @@unique([transferId, sequence])
+  @@index([transferId, byteOffset])
 }
 
 model Illustration {
@@ -1939,17 +1993,25 @@ model ImportBatch {
 }
 
 model PolicyDocument {
-  id           String   @id @default(cuid())
-  policyId     String
-  policy       Policy   @relation(fields: [policyId], references: [id])
-  filename     String
-  storedPath   String
-  mimeType     String
-  sizeBytes    Int
-  uploadedById String
-  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
-  createdAt    DateTime @default(now())
+  id                   String                        @id @default(cuid())
+  policyId             String
+  policy               Policy                        @relation(fields: [policyId], references: [id])
+  filename             String
+  storedPath           String
+  mimeType             String
+  sizeBytes            Int
+  uploadedById         String?
+  uploadedBy           User?                         @relation(fields: [uploadedById], references: [id])
+  provider             String?
+  externalId           String?
+  sourceRowId          String?                       @unique
+  sourceRow            NationalLifeReportRow?        @relation(fields: [sourceRowId], references: [id], onDelete: SetNull)
+  contentHash          String?
+  fetchedAt            DateTime?
+  createdAt            DateTime                      @default(now())
+  nationalLifeTransfer NationalLifeDocumentTransfer?
 
+  @@unique([provider, externalId])
   @@index([policyId])
 }
 

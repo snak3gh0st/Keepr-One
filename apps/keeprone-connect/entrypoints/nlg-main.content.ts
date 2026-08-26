@@ -1,11 +1,13 @@
 import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
 import { createGridExtractionRunner, type RequestTemplate } from '../lib/grid-extraction'
-import { parseAbortGridMessage, parseBeginExportMessage, parseBeginGridMessage } from '../lib/messages'
+import { parseAbortGridMessage, parseBeginDocumentMessage, parseBeginExportMessage, parseBeginGridMessage } from '../lib/messages'
 import { buildOfficialExportRequest } from '../lib/official-export-request'
 import { fetchWithinBudget } from '../lib/fetch-budget'
 
 const DATATABLE_PATH = '/agent/Datatable/GetJsonResult'
 const DOWNLOAD_EXCEL_PATH = '/agent/Datatable/DownloadExcel'
+const DOCUMENT_VIEWER_URL_PATH = '/agent/Document/GetDocumentViewerUrl'
+const DOCUMENT_VIEWER_PATH = '/agent/correspondence/documentviewer'
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
 const EXPORT_CHUNK_BYTES = 1024 * 1024
 /// Generous for an export that works — the portal builds the whole workbook
@@ -14,6 +16,8 @@ const EXPORT_CHUNK_BYTES = 1024 * 1024
 /// entire sync. Every source after in-force depends on this giving up.
 const EXPORT_BUDGET_MS = 3 * 60_000
 const EXPORT_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+const DOCUMENT_CONTENT_TYPE = 'application/pdf'
+const DOCUMENT_BUDGET_MS = 2 * 60_000
 const ALLOWED_HEADERS = new Set(['content-type', 'x-requested-with'])
 
 type DatatableConfig = {
@@ -247,6 +251,94 @@ export default defineContentScript({
       }
     }
 
+    function safeDocumentViewerUrl(value: unknown): URL | null {
+      if (typeof value !== 'string' || value.length > 512) return null
+      try {
+        const url = new URL(value, NLG_ORIGIN)
+        if (url.origin !== NLG_ORIGIN || url.pathname !== DOCUMENT_VIEWER_PATH || url.hash) return null
+        const keys = [...url.searchParams.keys()]
+        const id = url.searchParams.get('id')
+        if (keys.length !== 1 || keys[0] !== 'id' || !id || !/^[0-9a-f]{32}$/.test(id)) return null
+        return url
+      } catch {
+        return null
+      }
+    }
+
+    async function beginDocument(message: NonNullable<ReturnType<typeof parseBeginDocumentMessage>>) {
+      const base = {
+        transferId: message.transferId,
+        token: message.token,
+        correlationId: message.correlationId,
+      }
+      try {
+        const viewerResponse = await fetchWithinBudget(
+          originalFetch,
+          `${NLG_ORIGIN}${DOCUMENT_VIEWER_URL_PATH}`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json; charset=utf-8' },
+            body: JSON.stringify({
+              requestParams: [message.encryptedHandle],
+              isMergePdf: true,
+              isClientTab: true,
+              SubAgentNumber: '',
+            }),
+            credentials: 'include',
+            cache: 'no-store',
+          },
+          DOCUMENT_BUDGET_MS,
+        )
+        if (!viewerResponse.ok) throw new Error('PORTAL_REQUEST_FAILED')
+        const viewerPayload = await viewerResponse.json() as { redirectUrl?: unknown }
+        const viewerUrl = safeDocumentViewerUrl(viewerPayload.redirectUrl)
+        if (!viewerUrl) throw new Error('INVALID_DOCUMENT_RESPONSE')
+
+        const response = await fetchWithinBudget(
+          originalFetch,
+          viewerUrl.toString(),
+          { method: 'GET', credentials: 'include', cache: 'no-store', redirect: 'error' },
+          DOCUMENT_BUDGET_MS,
+        )
+        if (!response.ok || (response.url && !safeDocumentViewerUrl(response.url))) {
+          throw new Error('PORTAL_REQUEST_FAILED')
+        }
+        const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+        if (contentType !== DOCUMENT_CONTENT_TYPE) throw new Error('INVALID_DOCUMENT_RESPONSE')
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        if (
+          bytes.length === 0 ||
+          bytes.length > 25 * 1024 * 1024 ||
+          new TextDecoder('ascii').decode(bytes.slice(0, 5)) !== '%PDF-'
+        ) throw new Error('INVALID_DOCUMENT_RESPONSE')
+
+        post({
+          type: 'DOCUMENT_BEGIN',
+          ...base,
+          contentType: DOCUMENT_CONTENT_TYPE,
+          expectedBytes: bytes.length,
+          expectedSha256: await sha256Hex(bytes),
+        })
+        for (let offset = 0, sequence = 0; offset < bytes.length; offset += EXPORT_CHUNK_BYTES, sequence += 1) {
+          post({
+            type: 'DOCUMENT_CHUNK',
+            ...base,
+            sequence,
+            bytes: Array.from(bytes.slice(offset, offset + EXPORT_CHUNK_BYTES)),
+          })
+        }
+        post({ type: 'DOCUMENT_DONE', ...base })
+      } catch (error) {
+        post({
+          type: 'DOCUMENT_ERROR',
+          ...base,
+          code: error instanceof Error && error.message === 'PORTAL_REQUEST_FAILED'
+            ? 'PORTAL_REQUEST_FAILED'
+            : 'INVALID_DOCUMENT_RESPONSE',
+        })
+      }
+    }
+
     window.addEventListener('message', (event) => {
       if (event.source !== window || event.origin !== location.origin) return
       if (typeof event.data !== 'object' || event.data === null || event.data.channel !== CHANNEL) return
@@ -258,6 +350,11 @@ export default defineContentScript({
       const beginExport = parseBeginExportMessage(event.data.payload)
       if (beginExport) {
         void beginOfficialExport(beginExport)
+        return
+      }
+      const document = parseBeginDocumentMessage(event.data.payload)
+      if (document) {
+        void beginDocument(document)
         return
       }
       const abort = parseAbortGridMessage(event.data.payload)

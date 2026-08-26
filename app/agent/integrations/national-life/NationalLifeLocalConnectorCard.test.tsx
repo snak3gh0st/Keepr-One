@@ -288,6 +288,49 @@ describe('NationalLifeLocalConnectorCard', () => {
     await waitFor(() => expect(refreshModes).toEqual([undefined, true]))
   })
 
+  it('reattaches to an active background run when the agent returns to the page', async () => {
+    let checks = 0
+    installChromeMock((message, callback) => {
+      if (message.type !== 'GET_CONNECTOR_STATUS') {
+        callback({ ok: true })
+        return
+      }
+      checks += 1
+      callback({
+        ok: true,
+        device: { status: 'READY', deviceId: 'device-1' },
+        sync: checks === 1
+          ? {
+              runId: 'run-background',
+              status: 'UPLOADING',
+              stageIndex: 2,
+              stageKey: 'INFORCE_CLIENTS',
+              totalStages: 13,
+              uploads: 6,
+            }
+          : { runId: 'run-background', status: 'COMPLETED' },
+      })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Area 3 of 13')
+    })
+    expect(screen.getByRole('button', { name: 'Syncing…' })).toBeDisabled()
+    await waitFor(
+      () => expect(screen.getByRole('status')).toHaveTextContent('up to date'),
+      { timeout: 3_000 },
+    )
+  })
+
   it('surfaces AUTH_REQUIRED while the agent logs into National Life', async () => {
     let syncStatus = 'NAVIGATING'
     installChromeMock((message, callback) => {

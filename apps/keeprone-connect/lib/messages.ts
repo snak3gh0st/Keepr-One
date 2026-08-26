@@ -32,11 +32,17 @@ export type UnpairConnectorMessage = {
   type: 'UNPAIR_CONNECTOR'
 }
 
+export type FetchDocumentMessage = {
+  type: 'FETCH_NATIONAL_LIFE_DOCUMENT'
+  reportRowId: string
+}
+
 export type ExternalMessage =
   | PairConnectorMessage
   | StartSyncMessage
   | GetConnectorStatusMessage
   | UnpairConnectorMessage
+  | FetchDocumentMessage
 
 export type BeginGridMessage = {
   type: 'BEGIN_GRID'
@@ -57,6 +63,14 @@ export type CapturePageMessage = {
 export type BeginExportMessage = {
   type: 'BEGIN_EXPORT'
   sourceKey: 'INFORCE_CLIENTS'
+  token: string
+  correlationId: string
+}
+
+export type BeginDocumentMessage = {
+  type: 'BEGIN_DOCUMENT'
+  transferId: string
+  encryptedHandle: string
   token: string
   correlationId: string
 }
@@ -162,14 +176,57 @@ export type ExportErrorMessage = {
   code: 'TEMPLATE_UNAVAILABLE' | 'PORTAL_REQUEST_FAILED' | 'INVALID_EXPORT_RESPONSE'
 }
 
+export type DocumentBeginMessage = {
+  type: 'DOCUMENT_BEGIN'
+  transferId: string
+  token: string
+  correlationId: string
+  contentType: 'application/pdf'
+  expectedBytes: number
+  expectedSha256: string
+}
+
+export type DocumentChunkMessage = {
+  type: 'DOCUMENT_CHUNK'
+  transferId: string
+  token: string
+  correlationId: string
+  sequence: number
+  bytes: number[]
+}
+
+export type DocumentDoneMessage = {
+  type: 'DOCUMENT_DONE'
+  transferId: string
+  token: string
+  correlationId: string
+}
+
+export type DocumentErrorMessage = {
+  type: 'DOCUMENT_ERROR'
+  transferId: string
+  token: string
+  correlationId: string
+  code: 'PORTAL_REQUEST_FAILED' | 'INVALID_DOCUMENT_RESPONSE'
+}
+
 export type BridgeMessage =
   | GridChunkMessage | GridDoneMessage | GridErrorMessage
   | ExportBeginMessage | ExportChunkMessage | ExportDoneMessage | ExportErrorMessage
+  | DocumentBeginMessage | DocumentChunkMessage | DocumentDoneMessage | DocumentErrorMessage
 
 export type BridgeControlAck = {
   ok: true
   type: 'BEGIN_GRID_ACK' | 'BEGIN_EXPORT_ACK' | 'ABORT_GRID_ACK'
   gridKey: string
+  token: string
+  correlationId: string
+}
+
+export type DocumentControlAck = {
+  ok: true
+  type: 'BEGIN_DOCUMENT_ACK'
+  transferId: string
   token: string
   correlationId: string
 }
@@ -215,6 +272,12 @@ export function parseExternalMessage(value: unknown): ExternalMessage | null {
   }
   if (value.type === 'GET_CONNECTOR_STATUS' || value.type === 'UNPAIR_CONNECTOR') {
     return hasExactKeys(value, ['type']) ? { type: value.type } : null
+  }
+  if (value.type === 'FETCH_NATIONAL_LIFE_DOCUMENT') {
+    return hasExactKeys(value, ['type', 'reportRowId']) &&
+      isShortString(value.reportRowId, 128) && /^[A-Za-z0-9_-]+$/.test(value.reportRowId)
+      ? { type: value.type, reportRowId: value.reportRowId }
+      : null
   }
   if (value.type !== 'PAIR_CONNECTOR' || !hasExactKeys(value, ['type', 'code', 'label', 'baseUrl'])) {
     return null
@@ -287,6 +350,20 @@ export function parseBeginExportMessage(value: unknown): BeginExportMessage | nu
   return value as BeginExportMessage
 }
 
+export function parseBeginDocumentMessage(value: unknown): BeginDocumentMessage | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ['type', 'transferId', 'encryptedHandle', 'token', 'correlationId']) ||
+    value.type !== 'BEGIN_DOCUMENT' ||
+    !isShortString(value.transferId, 128) || !/^[A-Za-z0-9_-]+$/.test(value.transferId) ||
+    !isShortString(value.encryptedHandle, 2_048, 16) ||
+    value.encryptedHandle.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value.encryptedHandle) ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16)
+  ) return null
+  return value as BeginDocumentMessage
+}
+
 export function parseProbeAuthMessage(value: unknown): ProbeAuthMessage | null {
   if (
     !isObject(value) ||
@@ -334,10 +411,40 @@ export function parsePageCaptureAck(value: unknown): PageCaptureAck | null {
 }
 
 export function parseBridgeMessage(value: unknown): BridgeMessage | null {
-  if (!isObject(value) || !isGridKeyLabel(value.gridKey) || !isShortString(value.token, 128, 32)) {
+  if (!isObject(value) || !isShortString(value.token, 128, 32)) {
     return null
   }
   if (!isShortString(value.correlationId, 128, 16) || typeof value.type !== 'string') return null
+
+  if (value.type.startsWith('DOCUMENT_')) {
+    if (!isShortString(value.transferId, 128) || !/^[A-Za-z0-9_-]+$/.test(value.transferId)) return null
+    if (value.type === 'DOCUMENT_DONE') {
+      return hasExactKeys(value, ['type', 'transferId', 'token', 'correlationId'])
+        ? value as DocumentDoneMessage : null
+    }
+    if (value.type === 'DOCUMENT_ERROR') {
+      return hasExactKeys(value, ['type', 'transferId', 'token', 'correlationId', 'code']) &&
+        (value.code === 'PORTAL_REQUEST_FAILED' || value.code === 'INVALID_DOCUMENT_RESPONSE')
+        ? value as DocumentErrorMessage : null
+    }
+    if (value.type === 'DOCUMENT_BEGIN') {
+      return hasExactKeys(value, ['type', 'transferId', 'token', 'correlationId', 'contentType', 'expectedBytes', 'expectedSha256']) &&
+        value.contentType === 'application/pdf' &&
+        Number.isSafeInteger(value.expectedBytes) && (value.expectedBytes as number) > 0 && (value.expectedBytes as number) <= 25 * 1024 * 1024 &&
+        typeof value.expectedSha256 === 'string' && /^[a-f0-9]{64}$/.test(value.expectedSha256)
+        ? value as DocumentBeginMessage : null
+    }
+    if (value.type === 'DOCUMENT_CHUNK') {
+      return hasExactKeys(value, ['type', 'transferId', 'token', 'correlationId', 'sequence', 'bytes']) &&
+        Number.isSafeInteger(value.sequence) && (value.sequence as number) >= 0 && (value.sequence as number) <= 25 &&
+        Array.isArray(value.bytes) && value.bytes.length > 0 && value.bytes.length <= 1024 * 1024 &&
+        value.bytes.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+        ? value as DocumentChunkMessage : null
+    }
+    return null
+  }
+
+  if (!isGridKeyLabel(value.gridKey)) return null
 
   if (value.type === 'EXPORT_DONE') {
     return value.gridKey === 'INFORCE_CLIENTS' &&

@@ -10,6 +10,7 @@ export const CONNECTOR_CAPABILITIES = [
   'READ_GRID',
   'READ_PAGE',
   'READ_EXPORT',
+  'READ_DOCUMENT',
   'FORESIGHT_INVENTORY',
   'FORESIGHT_CASE_DETAIL',
   'FORESIGHT_REPORT',
@@ -230,6 +231,8 @@ function parseParams(
         value.exportKey === 'DOWNLOAD_ALL'
         ? { sourceKey: value.sourceKey, navigatePath: value.navigatePath, exportKey: 'DOWNLOAD_ALL' }
         : undefined
+    case 'READ_DOCUMENT':
+      return has([]) ? {} : undefined
     case 'FORESIGHT_INVENTORY':
     case 'OPEN_EAPP':
       return has([]) ? {} : undefined
