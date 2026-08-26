@@ -351,7 +351,7 @@ export function NationalLifeSyncProgress({
               {plannedSnapshotSources > 0 ? ` + ${plannedSnapshotSources} snapshot sources` : ''}
             </span>
             <span className="font-mono font-semibold tabular-nums text-ink">
-              Connector supports {PORTAL_COVERAGE.automatic} of {PORTAL_COVERAGE.required} known sources
+              {PORTAL_COVERAGE.automatic} of {PORTAL_COVERAGE.required} known sources are operationally structured
             </span>
           </div>
         </div>
