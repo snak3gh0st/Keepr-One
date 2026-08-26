@@ -8,6 +8,8 @@ import {
   parseProbeAuthMessage,
   parseBeginExportMessage,
   parseBeginDocumentMessage,
+  parseCapturePolicyDetailAck,
+  parseCapturePolicyDetailMessage,
 } from './messages'
 
 describe('message validation', () => {
@@ -44,6 +46,14 @@ describe('message validation', () => {
     expect(parseExternalMessage({
       type: 'FETCH_NATIONAL_LIFE_DOCUMENT',
       reportRowId: '../other-agent-row',
+    })).toBeNull()
+    expect(parseExternalMessage({
+      type: 'START_NATIONAL_LIFE_COMMAND',
+      commandId: 'cmd_policy_1',
+    })).toEqual({ type: 'START_NATIONAL_LIFE_COMMAND', commandId: 'cmd_policy_1' })
+    expect(parseExternalMessage({
+      type: 'START_NATIONAL_LIFE_COMMAND',
+      commandId: '../cmd',
     })).toBeNull()
   })
 
@@ -228,6 +238,44 @@ describe('authentication probe messages', () => {
       token: probe.token,
       correlationId: probe.correlationId,
       authenticated: 'yes',
+    })).toBeNull()
+  })
+})
+
+describe('policy detail messages', () => {
+  const navigatePath = `/agent/book-of-business/inforce-book/all-clients/policy-details?id=${'a'.repeat(32)}`
+  const identity = { token: 't'.repeat(32), correlationId: 'c'.repeat(16) }
+
+  it('accepts only an exact, server-authorized policy detail capture', () => {
+    const message = {
+      type: 'CAPTURE_POLICY_DETAIL',
+      expectedPolicyNumber: 'LS1473219',
+      navigatePath,
+      ...identity,
+    }
+    expect(parseCapturePolicyDetailMessage(message)).toEqual(message)
+    expect(parseCapturePolicyDetailMessage({
+      ...message, navigatePath: `${navigatePath}&next=/agent/x`,
+    })).toBeNull()
+    expect(parseCapturePolicyDetailMessage({ ...message, password: 'no' })).toBeNull()
+  })
+
+  it('accepts only approved fields in a bounded correlated response', () => {
+    const detail = {
+      navigatePath,
+      expectedPolicyNumber: 'LS1473219',
+      visiblePolicyNumber: 'LS1473219',
+      observedAt: '2026-08-26T17:00:00.000Z',
+      fields: [
+        { section: 'COVERAGE', label: 'Total Face Amount', value: '$100,000.00' },
+        { section: 'PAYMENTS', label: 'Anticipated Annual Premium', value: '$5,100.00' },
+      ],
+    }
+    const response = { ok: true, type: 'POLICY_DETAIL_CAPTURED', ...identity, detail }
+    expect(parseCapturePolicyDetailAck(response)).toEqual(response)
+    expect(parseCapturePolicyDetailAck({
+      ...response,
+      detail: { ...detail, fields: [{ section: 'COVERAGE', label: 'Insured Name', value: 'Private' }] },
     })).toBeNull()
   })
 })

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/national-life/local-connector/config', () => ({
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE: 'national-life-local-connector',
   isNationalLifeLocalConnectorEnabled: mocks.enabled,
   localConnectorUnavailableResponse: () => Response.json({ error: 'NOT_AVAILABLE' }, { status: 404 }),
 }))
@@ -26,6 +27,9 @@ vi.mock('@/lib/national-life/local-connector/command-dispatch-prisma', () => ({
   prismaLocalConnectorCommandDispatchRepository: {},
 }))
 vi.mock('@/lib/prisma', () => ({ prisma: {} }))
+vi.mock('@/lib/national-life/policy-detail-prisma', () => ({
+  createPrismaPolicyDetailRepository: () => ({ kind: 'policy-detail-repository' }),
+}))
 
 import { ConnectorCommandError } from '@/lib/national-life/connector-command-service'
 import { POST } from './route'
@@ -70,6 +74,8 @@ describe('local connector command event route', () => {
       commandId,
       event,
       now: expect.any(Date),
+      policyDetailRepository: { kind: 'policy-detail-repository' },
+      deploymentScope: 'national-life-local-connector',
     })
   })
 

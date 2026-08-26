@@ -9,8 +9,14 @@ import {
 } from '../connector-command-service'
 import {
   parseConnectorCommand,
+  parseConnectorCommandEvent,
   type ConnectorCommand,
 } from '../connector-command-contract'
+import { parseNationalLifePolicyDetail } from '../policy-detail'
+import {
+  persistNationalLifePolicyDetail,
+  type PolicyDetailRepository,
+} from '../policy-detail-service'
 
 export type LocalConnectorCommandCandidate = {
   id: string
@@ -28,7 +34,7 @@ export type LocalConnectorCommandCandidate = {
   state: string
   expiresAt: Date
   createdAt: Date
-  events: Array<{ sequence: number }>
+  events: Array<{ sequence: number; type?: string }>
 }
 
 export type LocalConnectorCommandDispatchRepository = ConnectorCommandRepository & {
@@ -36,6 +42,7 @@ export type LocalConnectorCommandDispatchRepository = ConnectorCommandRepository
     agentId: string
     deviceId: string
     now: Date
+    commandId?: string
   }): Promise<LocalConnectorCommandCandidate | null>
   findDeviceOwned(input: {
     agentId: string
@@ -63,13 +70,19 @@ function toPublicCommand(candidate: LocalConnectorCommandCandidate): ConnectorCo
 
 export async function claimNextConnectorCommand(
   repository: LocalConnectorCommandDispatchRepository,
-  input: { agentId: string; deviceId: string; now?: Date },
-): Promise<ConnectorCommand | null> {
+  input: { agentId: string; deviceId: string; commandId?: string; now?: Date },
+): Promise<{
+  command: ConnectorCommand
+  state: 'QUEUED' | 'RUNNING' | 'AUTH_REQUIRED'
+  nextEventSequence: number
+  lastEventType: string | null
+} | null> {
   const now = input.now ?? new Date()
   const candidate = await repository.claimNext({
     agentId: input.agentId,
     deviceId: input.deviceId,
     now,
+    ...(input.commandId ? { commandId: input.commandId } : {}),
   })
   if (!candidate) return null
 
@@ -79,13 +92,21 @@ export async function claimNextConnectorCommand(
     throw new ConnectorCommandError('COMMAND_NOT_FOUND')
   }
   if (candidate.expiresAt <= now) throw new ConnectorCommandError('COMMAND_EXPIRED')
-  if (candidate.state !== 'QUEUED') throw new ConnectorCommandError('COMMAND_NOT_FOUND')
+  if (!['QUEUED', 'RUNNING', 'AUTH_REQUIRED'].includes(candidate.state)) {
+    throw new ConnectorCommandError('COMMAND_NOT_FOUND')
+  }
 
   const command = toPublicCommand(candidate)
   if (!commandMayExecute(command, candidate.confirmationState)) {
     throw new ConnectorCommandError('CONFIRMATION_REQUIRED')
   }
-  return command
+  const state = candidate.state as 'QUEUED' | 'RUNNING' | 'AUTH_REQUIRED'
+  return {
+    command,
+    state,
+    nextEventSequence: candidate.events.length,
+    lastEventType: candidate.events.at(-1)?.type ?? null,
+  }
 }
 
 export async function recordDeviceConnectorCommandEvent(
@@ -96,6 +117,8 @@ export async function recordDeviceConnectorCommandEvent(
     commandId: string
     event: unknown
     now?: Date
+    policyDetailRepository?: PolicyDetailRepository
+    deploymentScope?: string
   },
 ): Promise<void> {
   const command = await repository.findDeviceOwned({
@@ -105,9 +128,38 @@ export async function recordDeviceConnectorCommandEvent(
   })
   if (!command) throw new ConnectorCommandError('COMMAND_NOT_FOUND')
 
+  const event = parseConnectorCommandEvent(input.event)
+  if (!event || event.commandId !== input.commandId || event.runId !== command.runId) {
+    throw new ConnectorCommandError('EVENT_INVALID')
+  }
+  if (event.type === 'DATA_BATCH' && command.capability === 'READ_POLICY_DETAIL') {
+    const publicCommand = toPublicCommand(command)
+    const payload = event.payload
+    if (
+      publicCommand.target?.kind !== 'POLICY' ||
+      !payload ||
+      Object.keys(payload).length !== 1 ||
+      !Object.hasOwn(payload, 'policyDetail') ||
+      !input.policyDetailRepository ||
+      !input.deploymentScope
+    ) throw new ConnectorCommandError('EVENT_INVALID')
+    let detail
+    try {
+      detail = parseNationalLifePolicyDetail(payload.policyDetail as never)
+    } catch {
+      throw new ConnectorCommandError('EVENT_INVALID')
+    }
+    await persistNationalLifePolicyDetail(input.policyDetailRepository, {
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      policyId: publicCommand.target.id,
+      detail,
+    })
+  }
+
   await recordConnectorCommandEvent(repository, {
     agentId: input.agentId,
-    event: input.event,
+    event,
     now: input.now,
   })
 }

@@ -30,6 +30,8 @@ const COMMISSION_DETAIL_PATH_2 =
 const PROJECTED_COMMISSIONS_PATH = '/agent/compensation/commissions/projected-commissions'
 const PAYABLE_PERSONAL_PATH =
   '/agent/compensation/commissions/projected-commissions/payable-gross-commissions/personal'
+const POLICY_DETAIL_PATH =
+  `/agent/book-of-business/inforce-book/all-clients/policy-details?id=${'a'.repeat(32)}`
 
 const TWO_STAGE_PLAN = [
   { capability: 'READ_GRID', params: { gridKey: 'NEW_BUSINESS', navigatePath: NEW_BUSINESS_PATH } },
@@ -112,6 +114,24 @@ async function defaultTabMessageResponse(tabId: number, message: unknown) {
       token: value.token,
       correlationId: value.correlationId,
       authenticated: true,
+    }
+  }
+  if (value.type === 'CAPTURE_POLICY_DETAIL') {
+    return {
+      ok: true,
+      type: 'POLICY_DETAIL_CAPTURED',
+      token: value.token,
+      correlationId: value.correlationId,
+      detail: {
+        navigatePath: POLICY_DETAIL_PATH,
+        expectedPolicyNumber: 'LS1473219',
+        visiblePolicyNumber: 'LS1473219',
+        observedAt: '2026-08-26T17:00:00.000Z',
+        fields: [
+          { section: 'COVERAGE', label: 'Total Face Amount', value: '$100,000.00' },
+          { section: 'PAYMENTS', label: 'Anticipated Annual Premium', value: '$5,100.00' },
+        ],
+      },
     }
   }
   if (value.type === 'BEGIN_GRID' || value.type === 'ABORT_GRID') {
@@ -381,6 +401,119 @@ describe('empurrão de atualização no caminho real', () => {
 })
 
 describe('background plan executor', () => {
+  it('executes an on-demand policy detail command in its own inactive tab', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_policy_1',
+      runId: 'run_policy_1',
+      capability: 'READ_POLICY_DETAIL',
+      target: { kind: 'POLICY', id: 'policy_1', carrierExternalId: 'LS1473219' },
+      params: { policyNumber: 'LS1473219', navigatePath: POLICY_DETAIL_PATH },
+      idempotencyKey: 'policy_1:detail:1',
+      issuedAt: '2026-08-26T17:00:00.000Z',
+      expiresAt: '2026-08-26T17:30:00.000Z',
+      requiresConfirmation: false,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (input) => {
+      if (input.pathname.endsWith('/commands/next')) {
+        return {
+          command,
+          state: 'QUEUED',
+          nextEventSequence: 1,
+          lastEventType: 'COMMAND_ACCEPTED',
+        } as never
+      }
+      return undefined as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    expect(tabs.create).toHaveBeenCalledWith({ active: false, url: `${NLG}${POLICY_DETAIL_PATH}` })
+    expect(storage.command).toMatchObject({
+      commandId: 'cmd_policy_1', carrierTabId: 4, status: 'NAVIGATING',
+    })
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: false, url: `${NLG}${POLICY_DETAIL_PATH}`,
+    })
+    await flush()
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(4, expect.objectContaining({
+      type: 'CAPTURE_POLICY_DETAIL', expectedPolicyNumber: 'LS1473219',
+    }))
+    const events = vi.mocked(signedJsonRequest).mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.pathname.endsWith('/commands/cmd_policy_1/events'))
+      .map((input) => input.body as { type?: string; payload?: unknown })
+    expect(events.map((event) => event.type)).toEqual([
+      'COMMAND_STARTED', 'DATA_BATCH', 'COMMAND_COMPLETED',
+    ])
+    expect(events[1]?.payload).toEqual(expect.objectContaining({
+      policyDetail: expect.objectContaining({ visiblePolicyNumber: 'LS1473219' }),
+    }))
+    expect(storage.command).toMatchObject({ status: 'COMPLETED', nextEventSequence: 4 })
+  })
+
+  it('pauses for National Life login and resumes the same command after authentication', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_policy_auth',
+      runId: 'run_policy_auth',
+      capability: 'READ_POLICY_DETAIL',
+      target: { kind: 'POLICY', id: 'policy_1' },
+      params: { policyNumber: 'LS1473219', navigatePath: POLICY_DETAIL_PATH },
+      idempotencyKey: 'policy_1:detail:auth',
+      issuedAt: '2026-08-26T17:00:00.000Z',
+      expiresAt: '2026-08-26T17:30:00.000Z',
+      requiresConfirmation: false,
+    }
+    let cursor = 1
+    let state = 'QUEUED'
+    let lastEventType: string | null = 'COMMAND_ACCEPTED'
+    vi.mocked(signedJsonRequest).mockImplementation(async (input) => {
+      if (input.pathname.endsWith('/commands/next')) {
+        return { command, state, nextEventSequence: cursor, lastEventType } as never
+      }
+      if (input.pathname.endsWith('/commands/cmd_policy_auth/events')) {
+        const event = input.body as { sequence: number; type: string }
+        cursor = event.sequence + 1
+        lastEventType = event.type
+        state = event.type === 'AUTH_REQUIRED' ? 'AUTH_REQUIRED' : 'RUNNING'
+      }
+      return undefined as never
+    })
+    storage.command = {
+      commandId: 'cmd_policy_auth', runId: 'run_policy_auth', carrierTabId: 4,
+      nextEventSequence: 1, status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{ id: 4, active: false, url: `${NLG_AUTH0}/authorize` }])
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+    expect(storage.command).toMatchObject({
+      commandId: 'cmd_policy_auth', carrierTabId: 4, status: 'AUTH_REQUIRED', nextEventSequence: 2,
+    })
+    expect(tabs.update).toHaveBeenCalledWith(4, { active: true })
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: true, url: `${NLG}${POLICY_DETAIL_PATH}`,
+    })
+    await flush()
+    expect(storage.command).toMatchObject({
+      commandId: 'cmd_policy_auth', status: 'COMPLETED', nextEventSequence: 5,
+    })
+    const eventTypes = vi.mocked(signedJsonRequest).mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.pathname.endsWith('/commands/cmd_policy_auth/events'))
+      .map((input) => (input.body as { type: string }).type)
+    expect(eventTypes).toEqual([
+      'AUTH_REQUIRED', 'COMMAND_STARTED', 'DATA_BATCH', 'COMMAND_COMPLETED',
+    ])
+  })
+
   it('starts a due daily sync from the extension alarm without the Keepr One page', async () => {
     storage.sync = {
       status: 'COMPLETED',

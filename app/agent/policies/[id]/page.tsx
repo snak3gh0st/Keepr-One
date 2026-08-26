@@ -395,7 +395,14 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               sources. Only the latter proves coverage/payment values, so the
               screen shows its own freshness instead of making a carrier-wide
               claim from an empty bulk column. */}
-          {isCarrierNationalLife && <NationalLifePolicyDetailCard detail={carrierDetail} />}
+          {isCarrierNationalLife && (
+            <NationalLifePolicyDetailCard
+              detail={carrierDetail}
+              refresh={localConnector.enabled
+                ? { policyId: policy.id, extensionId: localConnector.extensionId }
+                : undefined}
+            />
+          )}
           <AnnualReviewCard
             policyId={policy.id}
             reviews={policy.reviews.map((r) => ({

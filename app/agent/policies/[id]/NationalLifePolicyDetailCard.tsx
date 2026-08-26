@@ -18,8 +18,10 @@ function money(value: string | null): string {
 
 export function NationalLifePolicyDetailCard({
   detail,
+  refresh,
 }: {
   detail: NationalLifePolicyDetailCardValue | null
+  refresh?: { policyId: string; extensionId: string }
 }) {
   if (!detail) {
     return (
@@ -29,6 +31,7 @@ export function NationalLifePolicyDetailCard({
           A National Life disponibiliza cobertura e pagamentos no detalhe da apólice.
           Esses campos ainda não foram sincronizados para esta apólice.
         </p>
+        {refresh && <NationalLifePolicyRefreshButton {...refresh} />}
       </section>
     )
   }
@@ -65,6 +68,8 @@ export function NationalLifePolicyDetailCard({
           timeZone: 'America/New_York',
         })}.
       </p>
+      {refresh && <NationalLifePolicyRefreshButton {...refresh} />}
     </section>
   )
 }
+import { NationalLifePolicyRefreshButton } from './NationalLifePolicyRefreshButton'

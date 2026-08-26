@@ -6,6 +6,7 @@ export type ConnectorResponse = {
   status?: string
   deviceId?: string
   documentId?: string
+  commandId?: string
   device?: { status?: string; deviceId?: string }
   sync?: {
     runId?: string
@@ -16,11 +17,18 @@ export type ConnectorResponse = {
     stageKey?: string
     totalStages?: number
   }
+  command?: {
+    commandId?: string
+    status?: string
+    errorCode?: string
+    updatedAt?: string
+  }
 }
 
 type ConnectorMessage =
   | { type: 'START_NATIONAL_LIFE_SYNC'; forceRefresh?: true }
   | { type: 'FETCH_NATIONAL_LIFE_DOCUMENT'; reportRowId: string }
+  | { type: 'START_NATIONAL_LIFE_COMMAND'; commandId: string }
   | { type: 'GET_CONNECTOR_STATUS' }
   | { type: 'UNPAIR_CONNECTOR' }
   | { type: 'PAIR_CONNECTOR'; code: string; label: string; baseUrl: string }

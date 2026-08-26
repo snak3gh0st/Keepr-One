@@ -10,6 +10,7 @@ import {
   recordDeviceConnectorCommandEvent,
 } from '@/lib/national-life/local-connector/command-dispatch-service'
 import {
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
   isNationalLifeLocalConnectorEnabled,
   localConnectorUnavailableResponse,
 } from '@/lib/national-life/local-connector/config'
@@ -23,12 +24,14 @@ import {
   readLimitedBody,
 } from '@/lib/national-life/local-connector/request'
 import { prisma } from '@/lib/prisma'
+import { createPrismaPolicyDetailRepository } from '@/lib/national-life/policy-detail-prisma'
 
 const MAX_BODY_BYTES = 64 * 1024
 const NO_STORE = { 'Cache-Control': 'no-store' }
 const paramsSchema = z.strictObject({
   commandId: z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/),
 })
+const policyDetailRepository = createPrismaPolicyDetailRepository(prisma)
 
 function commandErrorResponse(error: ConnectorCommandError): Response {
   const status = error.code === 'COMMAND_NOT_FOUND' ? 404
@@ -65,6 +68,8 @@ export async function POST(
         commandId: params.commandId,
         event,
         now: new Date(),
+        policyDetailRepository,
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
       },
     )
     return new Response(null, { status: 204, headers: NO_STORE })

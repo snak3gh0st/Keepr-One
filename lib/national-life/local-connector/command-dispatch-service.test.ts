@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ConnectorCommandRepository } from '../connector-command-service'
+import type { PolicyDetailRepository } from '../policy-detail-service'
 import type { LocalConnectorCommandDispatchRepository } from './command-dispatch-service'
 import {
   claimNextConnectorCommand,
@@ -17,7 +18,10 @@ function candidate(overrides: Record<string, unknown> = {}) {
     runId: 'run_1',
     capability: 'READ_POLICY_DETAIL',
     target: { kind: 'POLICY', id: 'policy_1', carrierExternalId: 'LS1473219' },
-    params: { policyNumber: 'LS1473219' },
+    params: {
+      policyNumber: 'LS1473219',
+      navigatePath: '/agent/book-of-business/inforce-book/all-clients/policy-details?id=a73f1af893a94906b965e68d11db807b',
+    },
     payloadHash: 'a'.repeat(64),
     idempotencyKey: 'policy_1:detail:1',
     requiresConfirmation: false,
@@ -49,19 +53,45 @@ describe('local connector command dispatch', () => {
   it('returns a sealed device-owned command without exposing the payload hash ledger', async () => {
     const repo = repository()
 
-    const command = await claimNextConnectorCommand(repo, {
+    const dispatch = await claimNextConnectorCommand(repo, {
       agentId: 'agent_1',
       deviceId: 'device_1',
       now,
     })
 
-    expect(command).toMatchObject({
-      commandId: 'cmd_1',
-      capability: 'READ_POLICY_DETAIL',
-      target: { kind: 'POLICY', id: 'policy_1' },
-      params: { policyNumber: 'LS1473219' },
+    expect(dispatch).toMatchObject({
+      nextEventSequence: 1,
+      state: 'QUEUED',
+      lastEventType: null,
+      command: {
+        commandId: 'cmd_1',
+        capability: 'READ_POLICY_DETAIL',
+        target: { kind: 'POLICY', id: 'policy_1' },
+        params: { policyNumber: 'LS1473219' },
+      },
     })
-    expect(command).not.toHaveProperty('payloadHash')
+    expect(dispatch).not.toHaveProperty('payloadHash')
+    expect(dispatch?.command).not.toHaveProperty('payloadHash')
+  })
+
+  it('redelivers a device-owned in-flight command with its durable event cursor', async () => {
+    const repo = repository(candidate({
+      state: 'AUTH_REQUIRED',
+      events: [
+        { sequence: 0, type: 'COMMAND_ACCEPTED' },
+        { sequence: 1, type: 'COMMAND_STARTED' },
+        { sequence: 2, type: 'AUTH_REQUIRED' },
+      ],
+    }))
+
+    await expect(claimNextConnectorCommand(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', now,
+    })).resolves.toMatchObject({
+      state: 'AUTH_REQUIRED',
+      nextEventSequence: 3,
+      lastEventType: 'AUTH_REQUIRED',
+      command: { commandId: 'cmd_1' },
+    })
   })
 
   it('defensively refuses an unapproved carrier write', async () => {
@@ -134,5 +164,54 @@ describe('local connector command dispatch', () => {
     })).rejects.toThrowError('COMMAND_NOT_FOUND')
 
     expect(repo.appendEvent).not.toHaveBeenCalled()
+  })
+
+  it('normalizes and persists a typed policy detail batch before accepting the event', async () => {
+    const repo = repository(candidate({ events: [{ sequence: 0 }, { sequence: 1 }] }))
+    const policyDetailRepository = {
+      findOwnedPolicy: vi.fn(async () => ({ id: 'policy_1', policyNumber: 'LS1473219' })),
+      persist: vi.fn(async () => undefined),
+    } satisfies PolicyDetailRepository
+    const event = {
+      protocolVersion: 1,
+      eventId: 'event_detail_1',
+      commandId: 'cmd_1',
+      runId: 'run_1',
+      sequence: 2,
+      type: 'DATA_BATCH',
+      emittedAt: now.toISOString(),
+      payload: {
+        policyDetail: {
+          navigatePath: '/agent/book-of-business/inforce-book/all-clients/policy-details?id=a73f1af893a94906b965e68d11db807b',
+          expectedPolicyNumber: 'LS1473219',
+          visiblePolicyNumber: 'LS1473219',
+          observedAt: now.toISOString(),
+          fields: [
+            { section: 'COVERAGE', label: 'Total Face Amount', value: '$100,000.00' },
+            { section: 'PAYMENTS', label: 'Anticipated Annual Premium', value: '$5,100.00' },
+          ],
+        },
+      },
+      error: null,
+    }
+
+    await recordDeviceConnectorCommandEvent(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', event, now,
+      policyDetailRepository,
+      deploymentScope: 'national-life-local-connector',
+    })
+
+    expect(policyDetailRepository.persist).toHaveBeenCalledWith(expect.objectContaining({
+      agentId: 'agent_1',
+      policyId: 'policy_1',
+      detail: expect.objectContaining({
+        policyNumber: 'LS1473219',
+        totalFaceAmount: '100000.00',
+        anticipatedAnnualPremium: '5100.00',
+      }),
+    }))
+    expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      sequence: 2, type: 'DATA_BATCH',
+    }))
   })
 })

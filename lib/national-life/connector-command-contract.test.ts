@@ -58,6 +58,33 @@ describe('National Life connector command contract', () => {
     ).toMatchObject({ capability: 'FORESIGHT_CASE_DETAIL', params: { caseKey: 'RP-SMITH-QQ-081026' } })
   })
 
+  it('seals policy detail reads to the exact carrier detail path', () => {
+    const navigatePath = '/agent/book-of-business/inforce-book/all-clients/policy-details?id=a73f1af893a94906b965e68d11db807b'
+    const base = {
+      protocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,
+      commandId: 'cmd_policy_1',
+      runId: 'run_policy_1',
+      capability: 'READ_POLICY_DETAIL',
+      target: { kind: 'POLICY', id: 'policy_1', carrierExternalId: 'LS1473219' },
+      idempotencyKey: 'policy_1:detail:1',
+      issuedAt,
+      expiresAt,
+      requiresConfirmation: false,
+    }
+
+    expect(parseConnectorCommand({
+      ...base,
+      params: { policyNumber: 'LS1473219', navigatePath },
+    })).toMatchObject({
+      capability: 'READ_POLICY_DETAIL',
+      params: { policyNumber: 'LS1473219', navigatePath },
+    })
+    expect(parseConnectorCommand({
+      ...base,
+      params: { policyNumber: 'LS1473219', navigatePath: `${navigatePath}&next=/agent/x` },
+    })).toBeNull()
+  })
+
   it('refuses an application submission that tries to bypass confirmation', () => {
     expect(
       parseConnectorCommand({

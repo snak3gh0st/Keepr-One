@@ -24,7 +24,9 @@ import { prisma } from '@/lib/prisma'
 
 const MAX_BODY_BYTES = 256
 const NO_STORE = { 'Cache-Control': 'no-store' }
-const bodySchema = z.strictObject({})
+const bodySchema = z.strictObject({
+  commandId: z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/).optional(),
+})
 
 function commandErrorResponse(error: ConnectorCommandError): Response {
   const status = error.code === 'COMMAND_NOT_FOUND' ? 404
@@ -45,17 +47,17 @@ export async function POST(request: Request) {
       headers: request.headers,
       body,
     })
-    bodySchema.parse(parseJsonBody(body))
+    const payload = bodySchema.parse(parseJsonBody(body))
 
-    const command = await claimNextConnectorCommand(
+    const dispatch = await claimNextConnectorCommand(
       prismaLocalConnectorCommandDispatchRepository,
-      { ...device, now: new Date() },
+      { ...device, ...payload, now: new Date() },
     )
-    if (!command) return new Response(null, { status: 204, headers: NO_STORE })
+    if (!dispatch) return new Response(null, { status: 204, headers: NO_STORE })
 
-    const refusal = refuseLocalConnectorCapability(command.capability, request.headers)
+    const refusal = refuseLocalConnectorCapability(dispatch.command.capability, request.headers)
     if (refusal) return refusal
-    return Response.json(command, { status: 200, headers: NO_STORE })
+    return Response.json(dispatch, { status: 200, headers: NO_STORE })
   } catch (error) {
     if (error instanceof LocalConnectorSignatureError) {
       return Response.json(

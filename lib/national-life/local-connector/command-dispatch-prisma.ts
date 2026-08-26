@@ -1,5 +1,6 @@
 import 'server-only'
 
+import type { NationalLifeConnectorCommandState } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { prismaConnectorCommandRepository } from '../connector-command-service'
 import type {
@@ -8,13 +9,28 @@ import type {
 } from './command-dispatch-service'
 
 const commandWithEvents = {
-  events: { select: { sequence: true }, orderBy: { sequence: 'asc' as const } },
+  events: { select: { sequence: true, type: true }, orderBy: { sequence: 'asc' as const } },
 }
 
-function eligibleWhere(agentId: string, now: Date) {
+function eligibleWhere(agentId: string, now: Date, commandId?: string) {
   return {
     agentId,
+    ...(commandId ? { id: commandId } : {}),
     state: 'QUEUED' as const,
+    expiresAt: { gt: now },
+    OR: [
+      { requiresConfirmation: false },
+      { requiresConfirmation: true, confirmationState: 'APPROVED' as const },
+    ],
+  }
+}
+
+function resumableWhere(agentId: string, deviceId: string, now: Date, commandId?: string) {
+  return {
+    agentId,
+    deviceId,
+    ...(commandId ? { id: commandId } : {}),
+    state: { in: ['QUEUED', 'RUNNING', 'AUTH_REQUIRED'] as NationalLifeConnectorCommandState[] },
     expiresAt: { gt: now },
     OR: [
       { requiresConfirmation: false },
@@ -33,14 +49,14 @@ export function createPrismaLocalConnectorCommandDispatchRepository(
     async claimNext(input) {
       return db.$transaction(async (tx) => {
         const owned = await tx.nationalLifeConnectorCommand.findFirst({
-          where: { ...eligibleWhere(input.agentId, input.now), deviceId: input.deviceId },
+          where: resumableWhere(input.agentId, input.deviceId, input.now, input.commandId),
           include: commandWithEvents,
           orderBy: { createdAt: 'asc' },
         })
         if (owned) return owned as unknown as LocalConnectorCommandCandidate
 
         const unbound = await tx.nationalLifeConnectorCommand.findFirst({
-          where: { ...eligibleWhere(input.agentId, input.now), deviceId: null },
+          where: { ...eligibleWhere(input.agentId, input.now, input.commandId), deviceId: null },
           include: commandWithEvents,
           orderBy: { createdAt: 'asc' },
         })

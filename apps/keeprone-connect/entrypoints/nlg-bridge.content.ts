@@ -3,6 +3,7 @@ import {
   parseBeginGridMessage,
   parseBridgeMessage,
   parseCapturePageMessage,
+  parseCapturePolicyDetailMessage,
   parseBeginDocumentMessage,
   parseBeginExportMessage,
   parseProbeAuthMessage,
@@ -12,6 +13,7 @@ import {
 import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
 import { isAuthenticatedAgentResponse } from '../lib/auth-probe'
 import { capturePageSnapshot } from '../lib/page-snapshot'
+import { captureNationalLifePolicyDetail } from '../lib/policy-detail'
 
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
 
@@ -64,6 +66,46 @@ export default defineContentScript({
           records: capturePageSnapshot(document, new URL(location.href)),
         })
         return false
+      }
+      const policyDetail = parseCapturePolicyDetailMessage(value)
+      if (policyDetail) {
+        const currentUrl = new URL(location.href)
+        const currentPath = `${currentUrl.pathname}${currentUrl.search}`
+        if (currentPath !== policyDetail.navigatePath) {
+          sendResponse({
+            ok: false,
+            type: 'POLICY_DETAIL_CAPTURE_FAILED',
+            token: policyDetail.token,
+            correlationId: policyDetail.correlationId,
+            code: 'POLICY_DETAIL_PATH_MISMATCH',
+          })
+          return false
+        }
+        void captureNationalLifePolicyDetail(document, {
+          navigatePath: policyDetail.navigatePath,
+          expectedPolicyNumber: policyDetail.expectedPolicyNumber,
+        }).then(
+          (detail) => sendResponse({
+            ok: true,
+            type: 'POLICY_DETAIL_CAPTURED',
+            token: policyDetail.token,
+            correlationId: policyDetail.correlationId,
+            detail,
+          }),
+          (error: unknown) => sendResponse({
+            ok: false,
+            type: 'POLICY_DETAIL_CAPTURE_FAILED',
+            token: policyDetail.token,
+            correlationId: policyDetail.correlationId,
+            code: error instanceof Error && [
+              'POLICY_DETAIL_TARGET_MISMATCH',
+              'POLICY_DETAIL_SECTION_UNAVAILABLE',
+            ].includes(error.message)
+              ? error.message
+              : 'POLICY_DETAIL_CAPTURE_FAILED',
+          }),
+        )
+        return true
       }
       const begin = parseBeginGridMessage(value)
       if (begin) {

@@ -12,7 +12,10 @@ function command(deviceId: string | null) {
     runId: 'run_1',
     capability: 'READ_POLICY_DETAIL',
     target: { kind: 'POLICY', id: 'policy_1' },
-    params: { policyNumber: 'LS1473219' },
+    params: {
+      policyNumber: 'LS1473219',
+      navigatePath: '/agent/book-of-business/inforce-book/all-clients/policy-details?id=a73f1af893a94906b965e68d11db807b',
+    },
     payloadHash: 'a'.repeat(64),
     idempotencyKey: 'policy_1:detail:1',
     requiresConfirmation: false,

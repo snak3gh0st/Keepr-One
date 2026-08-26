@@ -41,7 +41,10 @@ const command = {
   runId: 'run_1',
   capability: 'READ_POLICY_DETAIL',
   target: { kind: 'POLICY', id: 'policy_1' },
-  params: { policyNumber: 'LS1473219' },
+  params: {
+    policyNumber: 'LS1473219',
+    navigatePath: '/agent/book-of-business/inforce-book/all-clients/policy-details?id=a73f1af893a94906b965e68d11db807b',
+  },
   idempotencyKey: 'policy_1:detail:1',
   issuedAt: '2026-08-26T17:00:00.000Z',
   expiresAt: '2026-08-26T17:10:00.000Z',
@@ -57,7 +60,9 @@ describe('local connector next command route', () => {
     vi.clearAllMocks()
     mocks.enabled.mockReturnValue(true)
     mocks.verify.mockResolvedValue({ agentId: 'agent_1', deviceId: 'device_1' })
-    mocks.claim.mockResolvedValue(command)
+    mocks.claim.mockResolvedValue({
+      command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+    })
     mocks.refuse.mockReturnValue(null)
   })
 
@@ -66,7 +71,9 @@ describe('local connector next command route', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
-    await expect(response.json()).resolves.toEqual(command)
+    await expect(response.json()).resolves.toEqual({
+      command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+    })
     expect(mocks.claim).toHaveBeenCalledWith(expect.anything(), {
       agentId: 'agent_1', deviceId: 'device_1', now: expect.any(Date),
     })

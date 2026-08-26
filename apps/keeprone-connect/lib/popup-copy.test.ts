@@ -42,6 +42,15 @@ describe('popupStatusText', () => {
     expect(outdated).not.toBe(portal)
     expect(outdated).toMatch(/update/i)
   })
+
+  it('shows resumable command authentication independently from daily sync', () => {
+    expect(popupStatusText(ready, { status: 'IDLE' }, {
+      commandId: 'cmd_1', status: 'MFA_REQUIRED',
+    })).toMatch(/verification.*resume automatically/i)
+    expect(popupStatusText(ready, { status: 'COMPLETED' }, {
+      commandId: 'cmd_1', status: 'RUNNING',
+    })).toMatch(/requested National Life data/i)
+  })
 })
 
 describe('popupCanRetry', () => {

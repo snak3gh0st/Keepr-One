@@ -13,5 +13,6 @@ export {
   type ConnectorCapability,
   type ConnectorCommand,
   type ConnectorCommandEvent,
+  type ConnectorCommandEventType,
   type ConnectorCommandState,
 } from '../../../lib/national-life/connector-command-contract'
