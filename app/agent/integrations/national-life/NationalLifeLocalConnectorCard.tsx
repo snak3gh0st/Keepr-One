@@ -160,6 +160,7 @@ const pilotStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
 /// um lote *termina* de subir, então um único PUT lento já parece parado, e a
 /// margem aqui é o que evita chamar de demorado um sync saudável.
 const STALL_LIMIT = 45
+const ACTIVE_SYNC_STATUSES = new Set(['STARTING', 'NAVIGATING', 'EXTRACTING', 'UPLOADING'])
 
 /// O que prova que o run andou desde a última consulta. `uploads` é o único
 /// campo que se move dentro de uma única grade grande.
@@ -329,6 +330,11 @@ export function NationalLifeLocalConnectorCard({
       if (idle >= STALL_LIMIT) setState('slow')
     }
   }
+  const watchSyncProgressRef = useRef(watchSyncProgress)
+
+  useEffect(() => {
+    watchSyncProgressRef.current = watchSyncProgress
+  })
 
   async function createPairingAndStart(): Promise<void> {
     setState('connecting')
@@ -421,6 +427,18 @@ export function NationalLifeLocalConnectorCard({
     void sendConnectorMessage(extensionId, { type: 'GET_CONNECTOR_STATUS' })
       .then(async (status) => {
         if (status.device?.deviceId) setPairedDeviceId(status.device.deviceId)
+        if (
+          status.sync?.runId &&
+          status.sync.status &&
+          ACTIVE_SYNC_STATUSES.has(status.sync.status)
+        ) {
+          // Returning to this page must observe the run already owned by the
+          // extension, not render a second Sync button beside a live progress
+          // panel. The watcher only reads status; it never starts another run.
+          setLiveSync(status.sync)
+          void watchSyncProgressRef.current()
+          return
+        }
         // The database is authoritative once a run reaches a terminal state.
         // A service worker can retain the last transient portal error after the
         // server has already accepted and completed every stage; surfacing that
@@ -580,6 +598,9 @@ export function NationalLifeLocalConnectorCard({
           {installMode === 'pilot'
             ? ' In this pilot, load the unpacked extension using the ID configured for this environment.'
             : null}
+        </p>
+        <p className="mt-2 max-w-2xl text-xs leading-5 text-ink-muted">
+          On a private, trusted computer, selecting “Remember this device” on National Life can reduce repeated MFA prompts. National Life controls how long that trusted session lasts; Keepr One never bypasses MFA and pauses safely when sign-in is required again.
         </p>
         {pairedDeviceId && state === 'idle' && (
           <div className="mt-5 inline-flex items-center gap-2 rounded-xl border border-teal/25 bg-paper/80 px-3 py-2 text-sm font-semibold text-teal-deep">
