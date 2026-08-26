@@ -55,4 +55,38 @@ describe('local connector devices', () => {
       }),
     )
   })
+
+  it('returns success when the same agent already revoked the device', async () => {
+    const revokedAt = new Date('2026-08-04T17:55:00.000Z')
+    const deviceUpdateMany = vi.fn().mockResolvedValue({ count: 0 })
+    const deviceFindFirst = vi.fn().mockResolvedValue({ revokedAt })
+    const runUpdateMany = vi.fn()
+    const tx = {
+      nationalLifeConnectorDevice: {
+        updateMany: deviceUpdateMany,
+        findFirst: deviceFindFirst,
+      },
+      nationalLifeSyncRun: { updateMany: runUpdateMany },
+    }
+    const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
+
+    await expect(
+      revokeLocalConnectorDevice(db, {
+        agentId: 'agent-1',
+        deviceId: 'device-1',
+        now,
+      }),
+    ).resolves.toEqual({ deviceId: 'device-1', revokedAt: revokedAt.toISOString() })
+
+    expect(deviceFindFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'device-1',
+        agentId: 'agent-1',
+        status: 'REVOKED',
+        revokedAt: { not: null },
+      },
+      select: { revokedAt: true },
+    })
+    expect(runUpdateMany).not.toHaveBeenCalled()
+  })
 })

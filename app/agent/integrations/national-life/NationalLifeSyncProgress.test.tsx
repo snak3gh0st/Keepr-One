@@ -99,6 +99,54 @@ describe('NationalLifeSyncProgress', () => {
     expect(screen.getByText('Your priority National Life data is up to date')).toBeTruthy()
   })
 
+  it('does not present a historical broad run as current priority freshness', () => {
+    render(<NationalLifeSyncProgress initialStatus={status({
+      state: 'COMPLETED',
+      shouldPoll: false,
+      completed: 26,
+      total: 26,
+      percent: 100,
+      stageCoverage: [
+        {
+          gridKey: 'NEW_BUSINESS',
+          label: 'new business',
+          state: 'VERIFIED',
+          verifiedRecords: 862,
+        },
+        {
+          gridKey: 'POLICY_PAYMENT_HISTORY',
+          label: 'policy payment history',
+          state: 'CAPTURED',
+          verifiedRecords: 229,
+        },
+      ],
+    })} />)
+
+    expect(screen.getByText('Your previous National Life sync is available')).toBeTruthy()
+    expect(screen.getByText(/broader portal run/i)).toBeTruthy()
+    expect(document.body.textContent).toContain('Previous run plan: 1 structured + 1 snapshot sources')
+    expect(screen.queryByText('Your priority National Life data is up to date')).toBeNull()
+  })
+
+  it('does not accept an arbitrary 13-source plan as the current priority plan', () => {
+    render(<NationalLifeSyncProgress initialStatus={status({
+      state: 'COMPLETED',
+      shouldPoll: false,
+      completed: 13,
+      total: 13,
+      percent: 100,
+      stageCoverage: Array.from({ length: 13 }, (_, index) => ({
+        gridKey: index === 12 ? 'POLICY_PAYMENT_HISTORY' : `UNKNOWN_${index}`,
+        label: `source ${index}`,
+        state: 'VERIFIED' as const,
+        verifiedRecords: 0,
+      })),
+    })} />)
+
+    expect(screen.getByText('Your previous National Life sync is available')).toBeTruthy()
+    expect(screen.queryByText('Your priority National Life data is up to date')).toBeNull()
+  })
+
   it('explains a paused run without exposing its internal error code', async () => {
     answerWith(status({ state: 'PAUSED', safeErrorCode: 'AUTHENTICATION_STATE_INVALID' }))
     render(
@@ -257,7 +305,7 @@ describe('NationalLifeSyncProgress', () => {
     expect(screen.getByText('Source snapshots preserved')).toBeTruthy()
     expect(screen.getByText('1,003')).toBeTruthy()
     expect(document.body.textContent).toMatch(/not counted as operational rows/i)
-    expect(document.body.textContent).toContain('Current plan: 1 structured + 1 snapshot sources')
+    expect(document.body.textContent).toContain('Previous run plan: 1 structured + 1 snapshot sources')
   })
 
   it('shows an isolated failure as non-blocking while the remaining areas continue', () => {

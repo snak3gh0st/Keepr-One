@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import {
   NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
+  NATIONAL_LIFE_PRIORITY_GRID_KEYS,
   nationalLifeReadCoverageSummary,
 } from '@/lib/national-life/read-coverage'
 import type { NationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
@@ -11,6 +12,9 @@ import type { NationalLifeSyncStatus } from '@/lib/national-life/sync-run-servic
 const POLL_INTERVAL_MS = 1_500
 const PORTAL_COVERAGE = nationalLifeReadCoverageSummary()
 const DISCOVERY_PAGE_KEYS = new Set<string>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
+const STRUCTURED_PRIORITY_GRID_KEYS = NATIONAL_LIFE_PRIORITY_GRID_KEYS.filter(
+  (gridKey) => !DISCOVERY_PAGE_KEYS.has(gridKey),
+)
 export const NATIONAL_LIFE_SYNC_STARTED_EVENT = 'national-life-sync-started'
 
 function safeStatus(value: unknown): NationalLifeSyncStatus | null {
@@ -87,6 +91,22 @@ function snapshotRecordCount(status: NationalLifeSyncStatus): number {
   return status.stageCoverage?.reduce((total, stage) => (
     DISCOVERY_PAGE_KEYS.has(stage.gridKey) ? total + (stage.verifiedRecords ?? 0) : total
   ), 0) ?? 0
+}
+
+function isCurrentPriorityPlan(status: NationalLifeSyncStatus): boolean {
+  const coverageKeys = status.stageCoverage?.map((stage) => stage.gridKey) ?? []
+  const expected = status.total === NATIONAL_LIFE_PRIORITY_GRID_KEYS.length
+    ? NATIONAL_LIFE_PRIORITY_GRID_KEYS
+    : status.total === STRUCTURED_PRIORITY_GRID_KEYS.length
+      ? STRUCTURED_PRIORITY_GRID_KEYS
+      : null
+  if (!expected) return false
+  // Older non-local status payloads may not include coverage. For current local
+  // runs, require the same exact ordered plan used by run reuse.
+  if (coverageKeys.length === 0) return true
+  return coverageKeys.length === expected.length && coverageKeys.every(
+    (gridKey, index) => gridKey === expected[index],
+  )
 }
 
 function formatCount(value: number | null): string {
@@ -199,6 +219,8 @@ export function NationalLifeSyncProgress({
     DISCOVERY_PAGE_KEYS.has(stage.gridKey),
   ).length ?? 0
   const plannedStructuredSources = Math.max(0, (status.stageCoverage?.length ?? 0) - plannedSnapshotSources)
+  const currentPriorityPlan = isCurrentPriorityPlan(status)
+  const historicalCompletedPlan = status.state === 'COMPLETED' && !currentPriorityPlan
   const lastSynced = formatMoment(status.completedAt)
   // Só depois do fim. No meio do run, "nada novo desta vez" ou "120 gravados"
   // seriam a mesma mentira do "concluído" eterno, apontada para o outro lado.
@@ -224,13 +246,20 @@ export function NationalLifeSyncProgress({
           </div>
           <h2 className="mt-1 text-lg font-semibold text-ink">
             {status.state === 'COMPLETED'
-              ? 'Your priority National Life data is up to date'
+              ? currentPriorityPlan
+                ? 'Your priority National Life data is up to date'
+                : 'Your previous National Life sync is available'
               : terminal
                 ? 'Sync finished with areas to retry'
                 : 'Updating your National Life data'}
           </h2>
           {terminal && lastSynced && (
             <p className="mt-1 text-sm text-ink-muted">Last synced {lastSynced}</p>
+          )}
+          {historicalCompletedPlan && (
+            <p className="mt-1 max-w-2xl text-sm text-ink-muted">
+              This was a broader portal run. Start a sync to refresh the current priority sources.
+            </p>
           )}
         </div>
         <span className="font-mono text-sm font-semibold tabular-nums text-teal">
@@ -316,7 +345,7 @@ export function NationalLifeSyncProgress({
           </ul>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-steel bg-panel/45 px-3 py-2 text-xs text-ink-muted">
             <span>
-              Current plan: {plannedStructuredSources} structured
+              {currentPriorityPlan ? 'Current plan' : 'Previous run plan'}: {plannedStructuredSources} structured
               {plannedSnapshotSources > 0 ? ` + ${plannedSnapshotSources} snapshot sources` : ''}
             </span>
             <span className="font-mono font-semibold tabular-nums text-ink">

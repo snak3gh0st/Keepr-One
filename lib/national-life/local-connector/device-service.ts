@@ -55,7 +55,24 @@ export async function revokeLocalConnectorDevice(
         updatedAt: now,
       },
     })
-    if (updated.count !== 1) throw new LocalConnectorDeviceError('DEVICE_NOT_FOUND')
+    if (updated.count !== 1) {
+      // Revocation is intentionally idempotent. The browser may retry after a
+      // lost response, or an operator may revoke the server record before the
+      // page asks the extension to erase its local key. Returning the original
+      // result lets the UI finish UNPAIR_CONNECTOR instead of getting stuck on
+      // a harmless second request.
+      const revoked = await tx.nationalLifeConnectorDevice.findFirst({
+        where: {
+          id: input.deviceId,
+          agentId: input.agentId,
+          status: 'REVOKED',
+          revokedAt: { not: null },
+        },
+        select: { revokedAt: true },
+      })
+      if (!revoked?.revokedAt) throw new LocalConnectorDeviceError('DEVICE_NOT_FOUND')
+      return { deviceId: input.deviceId, revokedAt: revoked.revokedAt.toISOString() }
+    }
 
     await tx.nationalLifeSyncRun.updateMany({
       where: {
