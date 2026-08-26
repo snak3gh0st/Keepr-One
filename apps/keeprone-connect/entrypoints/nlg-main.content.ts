@@ -280,7 +280,7 @@ export default defineContentScript({
             headers: { 'content-type': 'application/json; charset=utf-8' },
             body: JSON.stringify({
               requestParams: [message.encryptedHandle],
-              isMergePdf: true,
+              isMergePdf: false,
               isClientTab: true,
               SubAgentNumber: '',
             }),
