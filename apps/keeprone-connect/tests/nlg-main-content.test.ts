@@ -9,6 +9,18 @@ const NLG = 'https://www.nationallife.com'
 const listeners = new Map<string, Array<(event: Record<string, unknown>) => void>>()
 const portalFetch = vi.fn()
 const posted: Array<{ channel: string; payload: Record<string, unknown> }> = []
+type JQueryAjaxOptions = {
+  type: string
+  timeout: number
+  url: string
+  data: string
+  cache: boolean
+  contentType: string
+  dataType: string
+  success: (response: { redirectUrl: string }) => void
+  error: () => void
+}
+const jqueryRequests: JQueryAjaxOptions[] = []
 const xhrRequests: Array<{
   method: string
   url: string
@@ -50,6 +62,7 @@ beforeEach(() => {
   vi.resetModules()
   listeners.clear()
   posted.length = 0
+  jqueryRequests.length = 0
   xhrRequests.length = 0
   portalFetch.mockReset()
 
@@ -57,6 +70,15 @@ beforeEach(() => {
     fetch: portalFetch,
     setTimeout,
     clearTimeout,
+    jQuery: {
+      ajax: (options: JQueryAjaxOptions) => {
+        jqueryRequests.push(options)
+        queueMicrotask(() => options.success({
+          redirectUrl: `/agent/correspondence/documentviewer?id=${'a'.repeat(32)}`,
+        }))
+        return { abort: vi.fn() }
+      },
+    },
     addEventListener: (type: string, listener: (event: Record<string, unknown>) => void) => {
       const registered = listeners.get(type) ?? []
       registered.push(listener)
@@ -119,21 +141,22 @@ describe('National Life document viewer request', () => {
       expect(posted.some(({ payload }) => payload.type === 'DOCUMENT_DONE')).toBe(true)
     })
 
-    expect(xhrRequests).toHaveLength(1)
-    expect(xhrRequests[0]).toMatchObject({
-      method: 'POST',
-      url: `${NLG}/agent/Document/GetDocumentViewerUrl`,
-      headers: {
-        'content-type': 'application/json; charset=utf-8',
-        'x-requested-with': 'XMLHttpRequest',
-      },
+    expect(jqueryRequests).toHaveLength(1)
+    expect(jqueryRequests[0]).toMatchObject({
+      type: 'POST',
+      url: '/agent/Document/GetDocumentViewerUrl',
+      timeout: 120_000,
+      cache: false,
+      contentType: 'application/json; charset=utf-8',
+      dataType: 'json',
     })
-    expect(JSON.parse(String(xhrRequests[0]?.body))).toEqual({
+    expect(JSON.parse(String(jqueryRequests[0]?.data))).toEqual({
       requestParams: ['RU5DUllQVEVEX0hBTkRMRQ=='],
       isMergePdf: false,
       isClientTab: true,
       SubAgentNumber: '',
     })
+    expect(xhrRequests).toHaveLength(0)
     expect(portalFetch).toHaveBeenCalledTimes(1)
     expect(portalFetch.mock.calls[0]?.[1]).toMatchObject({
       method: 'GET',
