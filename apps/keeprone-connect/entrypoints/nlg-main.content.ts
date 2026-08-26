@@ -10,6 +10,7 @@ const DOCUMENT_VIEWER_URL_PATH = '/agent/Document/GetDocumentViewerUrl'
 const DOCUMENT_VIEWER_PATH = '/agent/correspondence/documentviewer'
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
 const EXPORT_CHUNK_BYTES = 1024 * 1024
+const GRID_PAGE_BUDGET_MS = 60_000
 /// Generous for an export that works — the portal builds the whole workbook
 /// server-side — while staying far short of both the 30-minute run TTL and the
 /// ~20-minute carrier session, so a hung request costs one stage instead of the
@@ -177,13 +178,18 @@ export default defineContentScript({
     const runner = createGridExtractionRunner({
       waitForTemplate,
       fetchPage: (requestTemplate, body) =>
-        originalFetch(`${NLG_ORIGIN}${DATATABLE_PATH}`, {
-          method: 'POST',
-          headers: requestTemplate.headers,
-          body,
-          credentials: 'include',
-          cache: 'no-store',
-        }),
+        fetchWithinBudget(
+          originalFetch,
+          `${NLG_ORIGIN}${DATATABLE_PATH}`,
+          {
+            method: 'POST',
+            headers: requestTemplate.headers,
+            body,
+            credentials: 'include',
+            cache: 'no-store',
+          },
+          GRID_PAGE_BUDGET_MS,
+        ),
       post,
     })
 

@@ -1,8 +1,22 @@
 import { webcrypto } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const gridRunnerHarness = vi.hoisted(() => ({
+  deps: undefined as undefined | {
+    fetchPage: (template: { body: string; headers: Record<string, string> }, body: string) => Promise<Response>
+  },
+}))
+const fetchWithinBudgetSpy = vi.hoisted(() => vi.fn())
+
 vi.mock('../lib/grid-extraction', () => ({
-  createGridExtractionRunner: () => ({ begin: vi.fn() }),
+  createGridExtractionRunner: (deps: typeof gridRunnerHarness.deps) => {
+    gridRunnerHarness.deps = deps
+    return { begin: vi.fn() }
+  },
+}))
+
+vi.mock('../lib/fetch-budget', () => ({
+  fetchWithinBudget: fetchWithinBudgetSpy,
 }))
 
 const NLG = 'https://www.nationallife.com'
@@ -65,6 +79,11 @@ beforeEach(() => {
   jqueryRequests.length = 0
   xhrRequests.length = 0
   portalFetch.mockReset()
+  gridRunnerHarness.deps = undefined
+  fetchWithinBudgetSpy.mockReset()
+  fetchWithinBudgetSpy.mockImplementation(
+    (fetchImpl: typeof fetch, url: string, init: RequestInit) => fetchImpl(url, init),
+  )
 
   const fakeWindow = {
     fetch: portalFetch,
@@ -98,6 +117,34 @@ beforeEach(() => {
   vi.stubGlobal('XMLHttpRequest', FakeXMLHttpRequest)
   vi.stubGlobal('crypto', webcrypto)
   vi.stubGlobal('defineContentScript', (config: unknown) => config)
+})
+
+describe('National Life grid request budget', () => {
+  it('bounds every DataTables page request so a silent carrier response cannot freeze the run', async () => {
+    portalFetch.mockResolvedValue(new Response('{}', { status: 200 }))
+
+    const contentScript = (await import('../entrypoints/nlg-main.content')).default as unknown as {
+      main: () => void
+    }
+    contentScript.main()
+
+    await gridRunnerHarness.deps?.fetchPage(
+      { body: 'draw=1', headers: { 'content-type': 'application/x-www-form-urlencoded' } },
+      'draw=2',
+    )
+
+    expect(fetchWithinBudgetSpy).toHaveBeenCalledWith(
+      expect.any(Function),
+      `${NLG}/agent/Datatable/GetJsonResult`,
+      expect.objectContaining({
+        method: 'POST',
+        body: 'draw=2',
+        credentials: 'include',
+        cache: 'no-store',
+      }),
+      60_000,
+    )
+  })
 })
 
 describe('National Life document viewer request', () => {
