@@ -3,7 +3,7 @@
 Estado: captura sob demanda de documentos validada em produção e publicada em
 `main` pelo PR #73 (`eb3be78`). A branch isolada
 `feat/national-life-illustration-igo` implementa a geração local de Illustration
-e o probe somente-leitura do iGO; ainda não foi publicada nem validada ponta a
+e mantém o iGO fora do release; ainda não foi publicada nem validada ponta a
 ponta no Keepr One. Um único caso sintético autorizado foi salvo manualmente no
 Foresight e gerou o relatório NAIC. Nenhum rascunho/application iGO foi criado,
 salvo ou submetido.
@@ -137,17 +137,10 @@ confirma que `Start New Case` pertence ao fluxo application/iGO, enquanto `New
 Illustration` pertence ao Foresight. Identificadores temporários de sessão não
 foram persistidos nem entram na allowlist.
 
-O KeeproneConnect 0.1.27 da branch permite somente o comando `OPEN_EAPP`: abre a
-rota oficial, classifica Auth0/MFA/gateway/origem inesperada e, se chegar a
-`igoforms2`, devolve apenas `IGO_HOME`, `IGO_CASE_LIST`, `IGO_FORM` ou
-`IGO_UNKNOWN`. Ele não lê valores, não clica, não abre `Start New Case` e não
-salva. Os hosts iPipeline são allowlists exatas; não existe wildcard.
-
-Como a tentativa atual confirmou federação e destino, mas parou em
-`GATEWAY_BLOCKED_BY_CLIENT`, a landing e o contrato dos campos não foram
-revalidados nessa sessão. Por isso
-`PREPARE_APPLICATION_DRAFT` e `SUBMIT_APPLICATION` continuam localmente
-desabilitados. `SetupEAppLauncher` também não é chamado pelo probe.
+Por decisão de escopo, o KeeproneConnect 0.1.26 não inclui `OPEN_EAPP`, content
+script iGO ou permissões iPipeline. A evidência da cadeia fica documentada para
+uma fase futura, mas `PREPARE_APPLICATION_DRAFT`, `SUBMIT_APPLICATION` e
+`SetupEAppLauncher` permanecem localmente desabilitados.
 
 ## Estado dos portões
 
@@ -157,11 +150,7 @@ desabilitados. `SetupEAppLauncher` também não é chamado pelo probe.
    chunks -> `PolicyDocument` -> abertura autorizada na apólice.
 3. Concluído na branch: executor Foresight com snapshot selado, releitura dos
    campos materiais, geração do NAIC PDF, hash e upload assinado.
-4. Pendente: smoke ponta a ponta com a extensão 0.1.27 carregada, artefato único
+4. Pendente: smoke ponta a ponta com a extensão 0.1.26 carregada, artefato único
    persistido e aberto pelo Keepr One; depois, deploy controlado e PR.
-5. iGO probe: código e testes somente-leitura prontos; autenticação renovada e
-   cadeia real confirmada até `igoforms2`, onde o Chrome controlado devolveu
-   `GATEWAY_BLOCKED_BY_CLIENT`.
-6. iGO draft: bloqueado por decisão de segurança até alcançar a landing num
-   browser sem esse bloqueio e mapear/read-back os campos reais. Submit continua
-   fora do primeiro release.
+5. iGO: fora do release atual; cadeia observada preservada somente como
+   documentação para retomada futura.

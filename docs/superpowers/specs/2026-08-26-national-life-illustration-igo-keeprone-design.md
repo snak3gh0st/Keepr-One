@@ -1,5 +1,10 @@
 # National Life Illustration + iGO via Keepr One
 
+> Release scope update (2026-08-26): iGO is deferred. The current branch ships
+> the priority sync and official Foresight Illustration only; application draft
+> and submit remain protocol concepts with no local executor or iPipeline host
+> permission.
+
 Status: approved design, pending implementation plan  
 Date: 2026-08-26  
 Base: `origin/main` at `925d3f07925cd50ab51c6c1beb34f62d98793092`

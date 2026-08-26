@@ -1,5 +1,9 @@
 # National Life Policy Detail, Illustration and iGO Implementation Plan
 
+> Release scope update (2026-08-26): Tasks 7 and 8 (iGO) are deferred. The
+> current release closes the priority sync, policy detail and official Foresight
+> Illustration only. No iPipeline permission or executable iGO capability ships.
+
 **Goal:** Make Keepr One the truthful control surface for National Life policy
 detail, official Foresight Illustration and a reviewable iGO draft, executed by
 KeeproneConnect in the agent's authenticated Chrome session.

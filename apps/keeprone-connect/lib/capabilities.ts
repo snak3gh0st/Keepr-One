@@ -3,7 +3,7 @@ import { hasExactKeys } from './messages'
 import { parseConnectorCommand, type ConnectorCommand } from './command-contract'
 
 export type Capability = 'READ_GRID' | 'READ_PAGE' | 'READ_EXPORT' | 'READ_POLICY_DETAIL' |
-  'GENERATE_ILLUSTRATION' | 'OPEN_EAPP'
+  'GENERATE_ILLUSTRATION'
 
 export type ConnectorCommandDispatch = {
   command: ConnectorCommand
@@ -22,7 +22,6 @@ export type StagePlan =
 
 const IMPLEMENTED_CAPABILITIES = [
   'READ_GRID', 'READ_PAGE', 'READ_EXPORT', 'READ_POLICY_DETAIL', 'GENERATE_ILLUSTRATION',
-  'OPEN_EAPP',
 ] as const
 // A plan is server-authorized and each stage is independently bounded. Leave
 // room for the source inventory to grow without making the 33rd source a hard
@@ -166,12 +165,6 @@ export function parseExecutableConnectorCommand(value: unknown): ConnectorComman
       command.params.illustrationId !== command.target.id ||
       !/^[a-f0-9]{64}$/.test(command.params.inputHash)
     ) throw new Error('INVALID_COMMAND')
-    return command
-  }
-  if (command.capability === 'OPEN_EAPP') {
-    if (command.target !== null || Object.keys(command.params).length !== 0) {
-      throw new Error('INVALID_COMMAND')
-    }
     return command
   }
   if (command.capability !== 'READ_GRID' && command.capability !== 'READ_PAGE' && command.capability !== 'READ_EXPORT') {

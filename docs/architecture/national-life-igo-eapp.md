@@ -1,8 +1,8 @@
 # iGo e-App: o que seria preciso para propor pelo app
 
-Estado: **probe somente-leitura implementado na branch; draft desabilitado**.
-Nada foi submetido. O KeeproneConnect 0.1.27 reconhece a landing do iGO sem ler
-valores ou acionar controles; preparar/salvar uma proposta continua bloqueado.
+Estado: **fase futura; fora do release de sync + Illustration**. Nada foi
+submetido. O KeeproneConnect 0.1.26 não executa iGO, não possui permissões
+iPipeline e não prepara/salva propostas.
 
 Revisto em 2026-07-31 depois de mapear o Foresight: o iGo continua sendo
 terceiro, mas **provavelmente não precisa do salto SSO próprio** — a ferramenta
@@ -21,7 +21,7 @@ A diferença que decide tudo:
 | --- | --- | --- |
 | dono | National Life, **mesma origem** do portal | **iPipeline**, terceiro de verdade |
 | natureza | gera/salva artefato após confirmação | navegação é leitura; draft e submit são escritas distintas |
-| allowlist | National Life | três origens iPipeline exatas, sem wildcard |
+| allowlist | National Life | futura, somente origens iPipeline exatas e observadas |
 | erro possível | nenhuma ilustração | **um documento vinculante na conta do agente** |
 
 O executor de Illustration agora gera e salva um artefato após confirmação. No
@@ -89,15 +89,14 @@ renovar o login, a sonda controlada também comprovou `federate` ->
 `ERR_BLOCKED_BY_CLIENT`. Sessão do portal, Foresight e iPipeline continua sendo
 comprovada por perna, nunca inferida.
 
-**2. A allowlist precisou crescer.** O manifest local autoriza individualmente
-`pipepasstoigo`, `federate` e `igoforms2`, todos observados em evidências da
-cadeia; não autoriza `*.ipipeline.com`. Isso permite medir o salto e sondar a
-landing, não autoriza preparar, salvar ou submeter nada. Uma nova origem só
-entra depois de observação explícita.
+**2. A allowlist futura precisará crescer.** `pipepasstoigo`, `federate` e
+`igoforms2` foram observados na cadeia, mas permanecem fora do manifest do
+release atual. Quando o iGO voltar ao escopo, cada origem entra explicitamente;
+`*.ipipeline.com` continua proibido.
 
-**3. Escrever exige portões que o probe não exige.** O contrato já distingue
-draft e submit, mas o executor de draft permanece fora da allowlist executável
-até a cadeia atual e o read-back dos campos reais serem comprovados.
+**3. Escrever exige portões próprios.** O contrato já distingue draft e submit,
+mas ambos permanecem fora da allowlist executável até o iGO voltar ao escopo e
+o read-back dos campos reais ser comprovado.
 
 ## O que o app precisaria ter
 

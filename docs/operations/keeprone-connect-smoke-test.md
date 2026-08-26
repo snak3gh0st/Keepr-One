@@ -44,9 +44,8 @@ Em ordem, e a ordem importa.
 
    Confirme no manifest gerado que as permissões são exatamente
    `["storage","tabs","alarms"]` e os hosts permanecem restritos ao Keepr One
-   configurado, National Life e às três origens iPipeline individualmente
-   observadas (`pipepasstoigo`, `federate` e `igoforms2`). Wildcard iPipeline é
-   proibido. `alarms` sustenta o sync diário em background.
+   configurado e à National Life. O release atual não deve conter permissões
+   iPipeline/iGO. `alarms` sustenta o sync diário em background.
 
    Para o smoke de documentos, confirme também KeeproneConnect **0.1.25+** e a
    migration `20260826134000_national_life_correspondence_documents` aplicada.

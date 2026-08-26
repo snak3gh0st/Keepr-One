@@ -260,30 +260,6 @@ describe('parseStagePlan', () => {
 })
 
 describe('parseExecutableConnectorCommand', () => {
-  it('accepts only the value-free read/navigation-only iGO probe', () => {
-    const command = {
-      protocolVersion: 1,
-      commandId: 'cmd_igo_probe_1',
-      runId: 'run_igo_probe_1',
-      capability: 'OPEN_EAPP',
-      target: null,
-      params: {},
-      idempotencyKey: 'igo-probe-1',
-      issuedAt: '2026-08-26T20:00:00.000Z',
-      expiresAt: '2026-08-26T20:30:00.000Z',
-      requiresConfirmation: false,
-    }
-    expect(parseExecutableConnectorCommand(command)).toMatchObject({ capability: 'OPEN_EAPP' })
-    expect(() => parseExecutableConnectorCommand({
-      ...command,
-      params: { applicationId: 'application_1' },
-    })).toThrow('INVALID_COMMAND')
-    expect(() => parseExecutableConnectorCommand({
-      ...command,
-      target: { kind: 'APPLICATION', id: 'application_1' },
-    })).toThrow('INVALID_COMMAND')
-  })
-
   it('accepts a confirmed illustration only with a sealed input hash', () => {
     const command = {
       protocolVersion: 1,
