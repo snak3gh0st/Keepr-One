@@ -4,6 +4,7 @@ import type { PolicyDetailRepository } from '../policy-detail-service'
 import type { LocalConnectorCommandDispatchRepository } from './command-dispatch-service'
 import {
   claimNextConnectorCommand,
+  readDeviceConnectorCommandInput,
   recordDeviceConnectorCommandEvent,
 } from './command-dispatch-service'
 
@@ -108,6 +109,50 @@ describe('local connector command dispatch', () => {
       deviceId: 'device_1',
       now,
     })).rejects.toThrowError('CONFIRMATION_REQUIRED')
+  })
+
+  it('returns the exact approved illustration snapshot only to its assigned device', async () => {
+    const inputHash = 'placeholder'
+    const illustration = {
+      id: 'illustration_1',
+      caseId: null,
+      createdAt: new Date('2026-08-26T17:00:00.000Z'),
+      productName: 'FlexLife',
+      rawPayload: {
+        request: {
+          IssueState: 'FL', FirstName: 'KeeprOne', LastName: 'Test',
+          DateOfBirth: '01/01/1990', Gender: 'Male', RateClass: 'Standard_NT',
+          SolveType: 'Specify_Amount', Amount: 100_000,
+          DeathBenefitOption: 'A_Level', Strategy: 'SP500PointToPointCapFocus',
+          Allocation: 100, ProductCode: '956',
+        },
+        response: { ok: true, faceAmount: 100_000, monthlyPremium: 250 },
+      },
+    }
+    const { foresightIllustrationInputHash, buildForesightIllustrationSnapshot } = await import(
+      '../foresight-illustration-contract'
+    )
+    const hash = foresightIllustrationInputHash(buildForesightIllustrationSnapshot(illustration))
+    const repo = repository(candidate({
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: illustration.id },
+      params: { illustrationId: illustration.id, inputHash: hash },
+      payloadHash: inputHash,
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+    }))
+    const illustrationRepository = { findOwnedIllustration: vi.fn().mockResolvedValue(illustration) }
+
+    await expect(readDeviceConnectorCommandInput(repo, illustrationRepository, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
+    })).resolves.toMatchObject({ inputHash: hash, snapshot: { illustrationId: illustration.id } })
+    expect(illustrationRepository.findOwnedIllustration).toHaveBeenCalledWith({
+      agentId: 'agent_1', illustrationId: illustration.id,
+    })
+
+    await expect(readDeviceConnectorCommandInput(repo, illustrationRepository, {
+      agentId: 'agent_1', deviceId: 'device_2', commandId: 'cmd_1', now,
+    })).rejects.toThrow('COMMAND_NOT_FOUND')
   })
 
   it('refuses an expired or cross-device candidate even if a repository returns it', async () => {

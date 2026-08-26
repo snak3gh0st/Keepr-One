@@ -16,6 +16,8 @@ export type ForesightIllustrationExecutionSnapshot = {
     method: 'Specify_Amount' | 'Based_on_Target_Premium' | 'Min_DB_Max_Cash_Value'
     amount: number
   }
+  faceAmount: number
+  premium: { mode: 'Monthly'; amount: number }
   underwriting: {
     gender: 'Male' | 'Female'
     rateClass: 'Standard_NT' | 'Standard_Tobacco'
@@ -91,6 +93,7 @@ export function buildForesightIllustrationSnapshot(
   if (!source.id || source.productName !== 'FlexLife') throw new Error('INVALID_FORESIGHT_INPUT')
   const payload = record(source.rawPayload)
   const request = record(payload.request)
+  const response = record(payload.response)
   if (request.ProductCode !== '956' || request.Allocation !== 100) {
     throw new Error('INVALID_FORESIGHT_INPUT')
   }
@@ -116,6 +119,8 @@ export function buildForesightIllustrationSnapshot(
       ] as const),
       amount: positiveNumber(request.Amount),
     },
+    faceAmount: positiveNumber(response.faceAmount),
+    premium: { mode: 'Monthly', amount: positiveNumber(response.monthlyPremium) },
     underwriting: {
       gender: oneOf(request.Gender, ['Male', 'Female'] as const),
       rateClass: oneOf(request.RateClass, ['Standard_NT', 'Standard_Tobacco'] as const),

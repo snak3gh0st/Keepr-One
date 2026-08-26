@@ -17,6 +17,11 @@ import {
   persistNationalLifePolicyDetail,
   type PolicyDetailRepository,
 } from '../policy-detail-service'
+import {
+  buildForesightIllustrationSnapshot,
+  foresightIllustrationInputHash,
+  type ForesightIllustrationExecutionSnapshot,
+} from '../foresight-illustration-contract'
 
 export type LocalConnectorCommandCandidate = {
   id: string
@@ -49,6 +54,19 @@ export type LocalConnectorCommandDispatchRepository = ConnectorCommandRepository
     deviceId: string
     commandId: string
   }): Promise<LocalConnectorCommandCandidate | null>
+}
+
+export type ForesightIllustrationInputRepository = {
+  findOwnedIllustration(input: {
+    agentId: string
+    illustrationId: string
+  }): Promise<{
+    id: string
+    caseId: string | null
+    createdAt: Date
+    productName: string | null
+    rawPayload: unknown
+  } | null>
 }
 
 function toPublicCommand(candidate: LocalConnectorCommandCandidate): ConnectorCommand {
@@ -107,6 +125,50 @@ export async function claimNextConnectorCommand(
     nextEventSequence: candidate.events.length,
     lastEventType: candidate.events.at(-1)?.type ?? null,
   }
+}
+
+export async function readDeviceConnectorCommandInput(
+  repository: LocalConnectorCommandDispatchRepository,
+  illustrationRepository: ForesightIllustrationInputRepository,
+  input: { agentId: string; deviceId: string; commandId: string; now?: Date },
+): Promise<{
+  inputHash: string
+  snapshot: ForesightIllustrationExecutionSnapshot
+}> {
+  const command = await repository.findDeviceOwned(input)
+  const now = input.now ?? new Date()
+  if (!command || command.agentId !== input.agentId || command.deviceId !== input.deviceId) {
+    throw new ConnectorCommandError('COMMAND_NOT_FOUND')
+  }
+  if (command.expiresAt <= now) throw new ConnectorCommandError('COMMAND_EXPIRED')
+  if (
+    command.capability !== 'GENERATE_ILLUSTRATION' ||
+    command.confirmationState !== 'APPROVED' ||
+    !['QUEUED', 'RUNNING', 'AUTH_REQUIRED'].includes(command.state)
+  ) throw new ConnectorCommandError('COMMAND_NOT_FOUND')
+  const publicCommand = toPublicCommand(command)
+  if (
+    publicCommand.target?.kind !== 'ILLUSTRATION' ||
+    !('illustrationId' in publicCommand.params) ||
+    !('inputHash' in publicCommand.params) ||
+    publicCommand.params.illustrationId !== publicCommand.target.id
+  ) throw new ConnectorCommandError('COMMAND_INVALID')
+  const illustration = await illustrationRepository.findOwnedIllustration({
+    agentId: input.agentId,
+    illustrationId: publicCommand.target.id,
+  })
+  if (!illustration) throw new ConnectorCommandError('COMMAND_NOT_FOUND')
+  let snapshot: ForesightIllustrationExecutionSnapshot
+  try {
+    snapshot = buildForesightIllustrationSnapshot(illustration)
+  } catch {
+    throw new ConnectorCommandError('COMMAND_INVALID')
+  }
+  const inputHash = foresightIllustrationInputHash(snapshot)
+  if (inputHash !== publicCommand.params.inputHash) {
+    throw new ConnectorCommandError('COMMAND_INVALID')
+  }
+  return { inputHash, snapshot }
 }
 
 export async function recordDeviceConnectorCommandEvent(

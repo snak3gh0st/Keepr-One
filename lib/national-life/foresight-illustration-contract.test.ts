@@ -24,6 +24,7 @@ const input = {
       Allocation: 100,
       ProductCode: '956',
     },
+    response: { ok: true, faceAmount: 100_000, monthlyPremium: 250 },
   },
 }
 
@@ -42,6 +43,8 @@ describe('server-owned Foresight illustration snapshot', () => {
       },
       product: { name: 'FlexLife', code: '956' },
       solve: { method: 'Specify_Amount', amount: 100_000 },
+      faceAmount: 100_000,
+      premium: { mode: 'Monthly', amount: 250 },
       underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
       deathBenefitOption: 'A_Level',
       allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 100 }],
@@ -56,6 +59,7 @@ describe('server-owned Foresight illustration snapshot', () => {
       ...input,
       rawPayload: {
         request: { ...(input.rawPayload.request), Amount: 200_000 },
+        response: { ...input.rawPayload.response, faceAmount: 200_000 },
       },
     })
     expect(foresightIllustrationInputHash(first)).toMatch(/^[a-f0-9]{64}$/)

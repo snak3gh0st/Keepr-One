@@ -62,6 +62,9 @@ export type ForesightMaterialTarget = {
   productCode: string
   solveMethod: string
   solveAmount: number
+  faceAmount: number
+  premiumMode: 'Monthly'
+  premiumAmount: number
   gender: string
   rateClass: string
   deathBenefitOption: string
@@ -70,8 +73,10 @@ export type ForesightMaterialTarget = {
   reports: string[]
 }
 
-export type ForesightMaterialReadback = Omit<ForesightMaterialTarget, 'solveAmount'> & {
+export type ForesightMaterialReadback = Omit<ForesightMaterialTarget, 'solveAmount' | 'faceAmount' | 'premiumAmount'> & {
   solveAmount: number | string
+  faceAmount: number | string
+  premiumAmount: number | string
 }
 
 function carrierDate(iso: string): string {
@@ -91,6 +96,9 @@ export function buildForesightTarget(
     productCode: snapshot.product.code,
     solveMethod: snapshot.solve.method,
     solveAmount: snapshot.solve.amount,
+    faceAmount: snapshot.faceAmount,
+    premiumMode: snapshot.premium.mode,
+    premiumAmount: snapshot.premium.amount,
     gender: snapshot.underwriting.gender,
     rateClass: snapshot.underwriting.rateClass,
     deathBenefitOption: snapshot.deathBenefitOption,
@@ -124,12 +132,14 @@ export function compareForesightTarget(
   const mismatches: string[] = []
   const strings = [
     'carrierCaseName', 'firstName', 'lastName', 'dateOfBirth', 'issueState',
-    'productCode', 'solveMethod', 'gender', 'rateClass', 'deathBenefitOption',
+    'productCode', 'solveMethod', 'premiumMode', 'gender', 'rateClass', 'deathBenefitOption',
   ] as const
   for (const key of strings) {
     if (normalizeText(observed[key]) !== normalizeText(expected[key])) mismatches.push(key)
   }
   if (normalizeAmount(observed.solveAmount) !== expected.solveAmount) mismatches.push('solveAmount')
+  if (normalizeAmount(observed.faceAmount) !== expected.faceAmount) mismatches.push('faceAmount')
+  if (normalizeAmount(observed.premiumAmount) !== expected.premiumAmount) mismatches.push('premiumAmount')
   if (!sameStructured(observed.allocations, expected.allocations)) mismatches.push('allocations')
   if (!sameStructured(observed.riders, expected.riders)) mismatches.push('riders')
   if (!sameStructured(observed.reports, expected.reports)) mismatches.push('reports')

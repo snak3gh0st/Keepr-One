@@ -26,6 +26,8 @@ export type ForesightIllustrationSnapshotV1 = {
     method: 'Specify_Amount' | 'Based_on_Target_Premium' | 'Min_DB_Max_Cash_Value'
     amount: number
   }
+  faceAmount: number
+  premium: { mode: 'Monthly'; amount: number }
   underwriting: {
     gender: 'Male' | 'Female'
     rateClass: 'Standard_NT' | 'Standard_Tobacco'
@@ -87,7 +89,7 @@ export function parseForesightIllustrationSnapshot(
 ): ForesightIllustrationSnapshotV1 | null {
   if (!isObject(value) || !hasExactKeys(value, [
     'schemaVersion', 'illustrationId', 'caseId', 'carrierCaseName', 'insured',
-    'product', 'solve', 'underwriting', 'deathBenefitOption', 'allocations',
+    'product', 'solve', 'faceAmount', 'premium', 'underwriting', 'deathBenefitOption', 'allocations',
     'riders', 'reports',
   ])) return null
   if (value.schemaVersion !== 1 || !isIdentifier(value.illustrationId) ||
@@ -110,6 +112,12 @@ export function parseForesightIllustrationSnapshot(
     !['Specify_Amount', 'Based_on_Target_Premium', 'Min_DB_Max_Cash_Value'].includes(String(solve.method)) ||
     typeof solve.amount !== 'number' || !Number.isFinite(solve.amount) ||
     solve.amount <= 0 || solve.amount > 1_000_000_000) return null
+  if (typeof value.faceAmount !== 'number' || !Number.isFinite(value.faceAmount) ||
+    value.faceAmount <= 0 || value.faceAmount > 1_000_000_000 ||
+    !isObject(value.premium) || !hasExactKeys(value.premium, ['mode', 'amount']) ||
+    value.premium.mode !== 'Monthly' || typeof value.premium.amount !== 'number' ||
+    !Number.isFinite(value.premium.amount) || value.premium.amount <= 0 ||
+    value.premium.amount > 100_000_000) return null
 
   const underwriting = value.underwriting
   if (!isObject(underwriting) || !hasExactKeys(underwriting, ['gender', 'rateClass']) ||
@@ -138,6 +146,8 @@ export function parseForesightIllustrationSnapshot(
       method: solve.method as ForesightIllustrationSnapshotV1['solve']['method'],
       amount: solve.amount,
     },
+    faceAmount: value.faceAmount,
+    premium: { mode: 'Monthly', amount: value.premium.amount },
     underwriting: {
       gender: underwriting.gender as ForesightIllustrationSnapshotV1['underwriting']['gender'],
       rateClass: underwriting.rateClass as ForesightIllustrationSnapshotV1['underwriting']['rateClass'],
