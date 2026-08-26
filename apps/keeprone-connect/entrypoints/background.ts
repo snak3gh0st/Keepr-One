@@ -59,6 +59,15 @@ import {
 } from '../lib/update-nudge'
 import { SignedRequestError, signedBinaryRequest, signedJsonRequest } from '../lib/signed-client'
 import {
+  parseForesightIllustrationSnapshot,
+  sha256ForesightSnapshot,
+} from '../lib/foresight-contract'
+import {
+  parseForesightExecutionResponse,
+  type ExecuteForesightIllustrationMessage,
+  type ForesightExecutionResponse,
+} from '../lib/foresight-messages'
+import {
   currentStage,
   readCommandState,
   readDeviceState,
@@ -681,6 +690,209 @@ async function executePolicyDetailCommand(
   })
 }
 
+function parseForesightCommandInput(value: unknown): {
+  inputHash: string
+  snapshot: NonNullable<ReturnType<typeof parseForesightIllustrationSnapshot>>
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('FORESIGHT_INPUT_INVALID')
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).length !== 2 || typeof record.inputHash !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(record.inputHash)) throw new Error('FORESIGHT_INPUT_INVALID')
+  const snapshot = parseForesightIllustrationSnapshot(record.snapshot)
+  if (!snapshot) throw new Error('FORESIGHT_INPUT_INVALID')
+  return { inputHash: record.inputHash, snapshot }
+}
+
+async function decodeForesightPdf(response: Extract<ForesightExecutionResponse, { ok: true }>): Promise<Uint8Array> {
+  let binary: string
+  try {
+    binary = atob(response.document.pdfBase64)
+  } catch {
+    throw new Error('FORESIGHT_REPORT_RESPONSE_INVALID')
+  }
+  if (binary.length !== response.receipt.documentBytes || !binary.startsWith('%PDF-')) {
+    throw new Error('FORESIGHT_REPORT_RESPONSE_INVALID')
+  }
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  const hash = [...digest].map((value) => value.toString(16).padStart(2, '0')).join('')
+  if (hash !== response.receipt.documentSha256) throw new Error('FORESIGHT_REPORT_HASH_MISMATCH')
+  return bytes
+}
+
+async function uploadForesightArtifact(input: {
+  dispatch: ConnectorCommandDispatch
+  device: { deviceId: string; baseUrl: string }
+  response: Extract<ForesightExecutionResponse, { ok: true }>
+}): Promise<void> {
+  const bytes = await decodeForesightPdf(input.response)
+  let lastError: unknown
+  for (const delay of [0, 500, 1_500]) {
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
+    try {
+      const stored = await signedBinaryRequest<{ documentSha256?: unknown; documentBytes?: unknown }>({
+        baseUrl: input.device.baseUrl,
+        deviceId: input.device.deviceId,
+        method: 'PUT',
+        pathname: `/api/agent/integrations/national-life/local-connector/commands/${encodeURIComponent(input.dispatch.command.commandId)}/artifact`,
+        contentType: 'application/pdf',
+        body: bytes,
+      })
+      if (stored.documentSha256 !== input.response.receipt.documentSha256 ||
+        stored.documentBytes !== input.response.receipt.documentBytes) {
+        throw new Error('FORESIGHT_ARTIFACT_RECEIPT_MISMATCH')
+      }
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError ?? new Error('FORESIGHT_ARTIFACT_UPLOAD_FAILED')
+}
+
+async function sendForesightExecution(
+  tabId: number,
+  message: ExecuteForesightIllustrationMessage,
+): Promise<ForesightExecutionResponse> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, message)
+      return parseForesightExecutionResponse(response, message)
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError ?? new Error('FORESIGHT_BRIDGE_UNAVAILABLE')
+}
+
+async function executeForesightCommand(
+  dispatch: ConnectorCommandDispatch,
+  device: { deviceId: string; baseUrl: string },
+  hint?: chrome.tabs.Tab,
+) {
+  if (dispatch.command.capability !== 'GENERATE_ILLUSTRATION') throw new Error('UNKNOWN_CAPABILITY')
+  const params = dispatch.command.params
+  if (!('illustrationId' in params) || !('inputHash' in params)) throw new Error('INVALID_COMMAND')
+
+  const previous = await readCommandState()
+  const sameCommand = previous.commandId === dispatch.command.commandId
+  let carrierTabId = sameCommand ? previous.carrierTabId : undefined
+  let sequence = dispatch.nextEventSequence
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId,
+    nextEventSequence: sequence,
+    status: 'NAVIGATING',
+    updatedAt: new Date().toISOString(),
+  })
+
+  const targetUrl = `${NLG_ORIGIN}/agent/sso/foresight`
+  const tab = await findBoundCommandTab(carrierTabId, hint)
+  if (!tab?.id) {
+    const created = await chrome.tabs.create({ active: false, url: targetUrl })
+    if (created.id === undefined) throw new Error('COMMAND_TAB_UNAVAILABLE')
+    await writeCommandState({
+      ...(await readCommandState()),
+      carrierTabId: created.id,
+      status: 'NAVIGATING',
+      updatedAt: new Date().toISOString(),
+    })
+    return
+  }
+  carrierTabId = tab.id
+  let currentUrl: URL
+  try {
+    currentUrl = new URL(tab.url ?? '')
+  } catch {
+    await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+  if (!sameCommand && currentUrl.origin === NLG_ORIGIN && currentUrl.pathname === '/NWI/Main/Layout.aspx') {
+    await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+  if (currentUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(currentUrl.pathname) ||
+    currentUrl.pathname.startsWith('/NWI/Unsecure/')) {
+    const requirement = currentUrl.pathname.includes('/mfa') || currentUrl.pathname.includes('/challenge')
+      ? 'MFA_REQUIRED' as const
+      : 'AUTH_REQUIRED' as const
+    if (dispatch.lastEventType !== requirement) {
+      sequence = await postCommandEvent({
+        dispatch, device, sequence, type: requirement,
+        payload: { action: 'SIGN_IN_TO_CONTINUE' },
+      })
+    }
+    await writeCommandState({
+      ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
+      status: requirement, updatedAt: new Date().toISOString(),
+    })
+    if (!tab.active) await updateTab(tab.id, { active: true })
+    return
+  }
+  if (currentUrl.origin !== NLG_ORIGIN || currentUrl.pathname !== '/NWI/Main/Layout.aspx') {
+    if (currentUrl.href !== targetUrl) await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+
+  const rawInput = await signedJsonRequest<unknown>({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname: `/api/agent/integrations/national-life/local-connector/commands/${encodeURIComponent(dispatch.command.commandId)}/input`,
+    body: {},
+  })
+  const approved = parseForesightCommandInput(rawInput)
+  if (approved.inputHash !== params.inputHash || approved.snapshot.illustrationId !== params.illustrationId ||
+    await sha256ForesightSnapshot(approved.snapshot) !== approved.inputHash) {
+    throw new Error('FORESIGHT_INPUT_HASH_MISMATCH')
+  }
+  await writeCommandState({
+    ...(await readCommandState()), carrierTabId: tab.id, status: 'RUNNING',
+    updatedAt: new Date().toISOString(),
+  })
+  if (dispatch.lastEventType !== 'COMMAND_STARTED' && dispatch.lastEventType !== 'DATA_BATCH') {
+    sequence = await postCommandEvent({ dispatch, device, sequence, type: 'COMMAND_STARTED' })
+  }
+  const token = randomToken()
+  const correlationId = crypto.randomUUID()
+  const response = await sendForesightExecution(tab.id, {
+    type: 'EXECUTE_FORESIGHT_ILLUSTRATION',
+    token,
+    correlationId,
+    inputHash: approved.inputHash,
+    snapshot: approved.snapshot,
+  })
+  if (!response.ok) throw new Error(response.code)
+  await uploadForesightArtifact({ dispatch, device, response })
+  sequence = await postCommandEvent({
+    dispatch,
+    device,
+    sequence,
+    type: 'DATA_BATCH',
+    payload: { illustration: response.receipt },
+  })
+  sequence = await postCommandEvent({
+    dispatch,
+    device,
+    sequence,
+    type: 'COMMAND_COMPLETED',
+    payload: { result: 'FORESIGHT_NAIC_ILLUSTRATION_READY', receipt: response.receipt },
+  })
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId: tab.id,
+    nextEventSequence: sequence,
+    status: 'COMPLETED',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
 async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?: string): Promise<void> {
   if (commandPollLock) return commandPollLock as Promise<void>
   const operation = (async () => {
@@ -701,7 +913,10 @@ async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?
         return
       }
       const dispatch = parseConnectorCommandDispatch(raw)
-      await executePolicyDetailCommand(dispatch, {
+      const executor = dispatch.command.capability === 'GENERATE_ILLUSTRATION'
+        ? executeForesightCommand
+        : executePolicyDetailCommand
+      await executor(dispatch, {
         deviceId: device.deviceId,
         baseUrl: device.baseUrl,
       }, hint)

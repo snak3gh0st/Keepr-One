@@ -13,7 +13,7 @@ export type ForesightIllustrationExecutionSnapshot = {
   }
   product: { name: 'FlexLife'; code: '956' }
   solve: {
-    method: 'Specify_Amount' | 'Based_on_Target_Premium' | 'Min_DB_Max_Cash_Value'
+    method: 'Specify_Amount'
     amount: number
   }
   faceAmount: number
@@ -27,6 +27,15 @@ export type ForesightIllustrationExecutionSnapshot = {
   riders: string[]
   reports: string[]
 }
+
+export const FORESIGHT_FLEXLIFE_INCLUDED_RIDERS = [
+  'DeathBenefitProtection',
+  'ABRTerminalIllness',
+  'ABRChronicIllness',
+  'ABRCriticalIllness',
+  'ABRCriticalInjury',
+  'ABRAlzheimersDisease',
+] as const
 
 type IllustrationSnapshotSource = {
   id: string
@@ -100,6 +109,10 @@ export function buildForesightIllustrationSnapshot(
   const issueState = text(request.IssueState, 2)
   if (!/^[A-Z]{2}$/.test(issueState)) throw new Error('INVALID_FORESIGHT_INPUT')
   const strategy = text(request.Strategy)
+  const solveMethod = oneOf(request.SolveType, ['Specify_Amount'] as const)
+  const solveAmount = positiveNumber(request.Amount)
+  const faceAmount = positiveNumber(response.faceAmount)
+  if (solveAmount !== faceAmount) throw new Error('INVALID_FORESIGHT_INPUT')
 
   return {
     schemaVersion: 1,
@@ -114,12 +127,10 @@ export function buildForesightIllustrationSnapshot(
     },
     product: { name: 'FlexLife', code: '956' },
     solve: {
-      method: oneOf(request.SolveType, [
-        'Specify_Amount', 'Based_on_Target_Premium', 'Min_DB_Max_Cash_Value',
-      ] as const),
-      amount: positiveNumber(request.Amount),
+      method: solveMethod,
+      amount: solveAmount,
     },
-    faceAmount: positiveNumber(response.faceAmount),
+    faceAmount,
     premium: { mode: 'Monthly', amount: positiveNumber(response.monthlyPremium) },
     underwriting: {
       gender: oneOf(request.Gender, ['Male', 'Female'] as const),
@@ -127,8 +138,8 @@ export function buildForesightIllustrationSnapshot(
     },
     deathBenefitOption: oneOf(request.DeathBenefitOption, ['A_Level', 'B_Increasing'] as const),
     allocations: [{ strategy, percentage: 100 }],
-    riders: [],
-    reports: ['CLIENT_ILLUSTRATION'],
+    riders: [...FORESIGHT_FLEXLIFE_INCLUDED_RIDERS],
+    reports: ['NAIC_ILLUSTRATION'],
   }
 }
 
@@ -144,4 +155,36 @@ export function foresightIllustrationInputHash(
   snapshot: ForesightIllustrationExecutionSnapshot,
 ): string {
   return createHash('sha256').update(canonicalize(snapshot)).digest('hex')
+}
+
+export type ForesightIllustrationReceipt = {
+  inputHash: string
+  caseFingerprint: string
+  carrierCaseName: string
+  productCode: '956'
+  release: string
+  reportCode: 'NAIC_ILLUSTRATION'
+  documentSha256: string
+  documentBytes: number
+  saved: true
+}
+
+export function parseForesightIllustrationReceipt(value: unknown): ForesightIllustrationReceipt | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const receipt = value as Record<string, unknown>
+  const expected = [
+    'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'release', 'reportCode',
+    'documentSha256', 'documentBytes', 'saved',
+  ].sort()
+  const keys = Object.keys(receipt).sort()
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index]) ||
+    typeof receipt.inputHash !== 'string' || !/^[a-f0-9]{64}$/.test(receipt.inputHash) ||
+    typeof receipt.caseFingerprint !== 'string' || !/^case_[a-f0-9]{64}$/.test(receipt.caseFingerprint) ||
+    typeof receipt.carrierCaseName !== 'string' || !/^[A-Z0-9][A-Z0-9_-]{5,79}$/.test(receipt.carrierCaseName) ||
+    receipt.productCode !== '956' || typeof receipt.release !== 'string' || receipt.release.length > 32 ||
+    receipt.reportCode !== 'NAIC_ILLUSTRATION' || typeof receipt.documentSha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(receipt.documentSha256) || !Number.isSafeInteger(receipt.documentBytes) ||
+    (receipt.documentBytes as number) < 5 || (receipt.documentBytes as number) > 25 * 1024 * 1024 ||
+    receipt.saved !== true) return null
+  return receipt as ForesightIllustrationReceipt
 }

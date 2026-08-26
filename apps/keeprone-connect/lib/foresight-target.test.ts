@@ -27,8 +27,15 @@ const snapshot = parseForesightIllustrationSnapshot({
   underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
   deathBenefitOption: 'A_Level',
   allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 100 }],
-  riders: [],
-  reports: ['CLIENT_ILLUSTRATION'],
+  riders: [
+    'DeathBenefitProtection',
+    'ABRTerminalIllness',
+    'ABRChronicIllness',
+    'ABRCriticalIllness',
+    'ABRCriticalInjury',
+    'ABRAlzheimersDisease',
+  ],
+  reports: ['NAIC_ILLUSTRATION'],
 })!
 
 describe('Foresight target verification', () => {
@@ -65,8 +72,15 @@ describe('Foresight target verification', () => {
       rateClass: 'Standard_NT',
       deathBenefitOption: 'A_Level',
       allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 100 }],
-      riders: [],
-      reports: ['CLIENT_ILLUSTRATION'],
+      riders: [
+        'DeathBenefitProtection',
+        'ABRTerminalIllness',
+        'ABRChronicIllness',
+        'ABRCriticalIllness',
+        'ABRCriticalInjury',
+        'ABRAlzheimersDisease',
+      ],
+      reports: ['NAIC_ILLUSTRATION'],
     })
   })
 
@@ -74,6 +88,7 @@ describe('Foresight target verification', () => {
     const observed: ForesightMaterialReadback = {
       ...buildForesightTarget(snapshot),
       solveAmount: '$100,000.00',
+      dateOfBirth: '1/1/1990',
     }
     expect(compareForesightTarget(snapshot, observed)).toEqual({ ok: true })
     expect(compareForesightTarget(snapshot, { ...observed, issueState: 'GA' })).toEqual({

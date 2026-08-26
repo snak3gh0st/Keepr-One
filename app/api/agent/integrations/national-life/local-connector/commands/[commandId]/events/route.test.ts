@@ -26,7 +26,7 @@ vi.mock('@/lib/national-life/local-connector/command-dispatch-service', async ()
 vi.mock('@/lib/national-life/local-connector/command-dispatch-prisma', () => ({
   prismaLocalConnectorCommandDispatchRepository: {},
 }))
-vi.mock('@/lib/prisma', () => ({ prisma: {} }))
+vi.mock('@/lib/prisma', () => ({ prisma: { illustration: { findFirst: vi.fn() } } }))
 vi.mock('@/lib/national-life/policy-detail-prisma', () => ({
   createPrismaPolicyDetailRepository: () => ({ kind: 'policy-detail-repository' }),
 }))
@@ -75,6 +75,7 @@ describe('local connector command event route', () => {
       event,
       now: expect.any(Date),
       policyDetailRepository: { kind: 'policy-detail-repository' },
+      foresightArtifactRepository: expect.objectContaining({ findOwnedArtifact: expect.any(Function) }),
       deploymentScope: 'national-life-local-connector',
     })
   })

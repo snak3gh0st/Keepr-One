@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildForesightIllustrationSnapshot,
   foresightIllustrationInputHash,
+  parseForesightIllustrationReceipt,
 } from './foresight-illustration-contract'
 
 const input = {
@@ -48,8 +49,15 @@ describe('server-owned Foresight illustration snapshot', () => {
       underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
       deathBenefitOption: 'A_Level',
       allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 100 }],
-      riders: [],
-      reports: ['CLIENT_ILLUSTRATION'],
+      riders: [
+        'DeathBenefitProtection',
+        'ABRTerminalIllness',
+        'ABRChronicIllness',
+        'ABRCriticalIllness',
+        'ABRCriticalInjury',
+        'ABRAlzheimersDisease',
+      ],
+      reports: ['NAIC_ILLUSTRATION'],
     })
   })
 
@@ -64,6 +72,23 @@ describe('server-owned Foresight illustration snapshot', () => {
     })
     expect(foresightIllustrationInputHash(first)).toMatch(/^[a-f0-9]{64}$/)
     expect(foresightIllustrationInputHash(changed)).not.toBe(foresightIllustrationInputHash(first))
+  })
+
+  it('accepts only an exact NAIC PDF receipt', () => {
+    const receipt = {
+      inputHash: 'a'.repeat(64),
+      caseFingerprint: `case_${'b'.repeat(64)}`,
+      carrierCaseName: 'KEEPRONE-20260826-CM123ILLUSTRATION',
+      productCode: '956',
+      release: '5.3.65.31',
+      reportCode: 'NAIC_ILLUSTRATION',
+      documentSha256: 'c'.repeat(64),
+      documentBytes: 1_500_000,
+      saved: true,
+    }
+    expect(parseForesightIllustrationReceipt(receipt)).toEqual(receipt)
+    expect(parseForesightIllustrationReceipt({ ...receipt, reportCode: 'CLIENT_ILLUSTRATION' })).toBeNull()
+    expect(parseForesightIllustrationReceipt({ ...receipt, extra: true })).toBeNull()
   })
 
   it.each([

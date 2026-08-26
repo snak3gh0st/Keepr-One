@@ -2,6 +2,14 @@ const NLG_ORIGIN = 'https://www.nationallife.com'
 const AUTH0_ORIGIN = 'https://nlg-prod.auth0.com'
 
 export const FORESIGHT_APPROVED_RELEASES = ['5.3.65.31', '26.0.1'] as const
+export const FORESIGHT_FLEXLIFE_INCLUDED_RIDERS = [
+  'DeathBenefitProtection',
+  'ABRTerminalIllness',
+  'ABRChronicIllness',
+  'ABRCriticalIllness',
+  'ABRCriticalInjury',
+  'ABRAlzheimersDisease',
+] as const
 
 export type ForesightLandingState =
   | 'FORESIGHT'
@@ -23,7 +31,7 @@ export type ForesightIllustrationSnapshotV1 = {
   }
   product: { name: 'FlexLife'; code: '956' }
   solve: {
-    method: 'Specify_Amount' | 'Based_on_Target_Premium' | 'Min_DB_Max_Cash_Value'
+    method: 'Specify_Amount'
     amount: number
   }
   faceAmount: number
@@ -109,7 +117,7 @@ export function parseForesightIllustrationSnapshot(
 
   const solve = value.solve
   if (!isObject(solve) || !hasExactKeys(solve, ['method', 'amount']) ||
-    !['Specify_Amount', 'Based_on_Target_Premium', 'Min_DB_Max_Cash_Value'].includes(String(solve.method)) ||
+    solve.method !== 'Specify_Amount' ||
     typeof solve.amount !== 'number' || !Number.isFinite(solve.amount) ||
     solve.amount <= 0 || solve.amount > 1_000_000_000) return null
   if (typeof value.faceAmount !== 'number' || !Number.isFinite(value.faceAmount) ||
@@ -128,7 +136,12 @@ export function parseForesightIllustrationSnapshot(
   const allocations = parseAllocations(value.allocations)
   const riders = parseIdentifierList(value.riders, 20)
   const reports = parseIdentifierList(value.reports, 10)
-  if (!allocations || !riders || !reports || reports.length === 0) return null
+  if (!allocations || !riders || !reports || reports.length === 0 ||
+    allocations.length !== 1 ||
+    allocations[0]?.strategy !== 'SP500PointToPointCapFocus' ||
+    allocations[0]?.percentage !== 100 ||
+    JSON.stringify(riders) !== JSON.stringify(FORESIGHT_FLEXLIFE_INCLUDED_RIDERS) ||
+    reports.length !== 1 || reports[0] !== 'NAIC_ILLUSTRATION') return null
 
   return {
     schemaVersion: 1,

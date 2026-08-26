@@ -26,8 +26,15 @@ const snapshot = {
   underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
   deathBenefitOption: 'A_Level',
   allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 100 }],
-  riders: [],
-  reports: ['CLIENT_ILLUSTRATION'],
+  riders: [
+    'DeathBenefitProtection',
+    'ABRTerminalIllness',
+    'ABRChronicIllness',
+    'ABRCriticalIllness',
+    'ABRCriticalInjury',
+    'ABRAlzheimersDisease',
+  ],
+  reports: ['NAIC_ILLUSTRATION'],
 } as const
 
 describe('Foresight illustration execution snapshot', () => {
@@ -46,6 +53,9 @@ describe('Foresight illustration execution snapshot', () => {
     { ...snapshot, solve: { ...snapshot.solve, amount: 0 } },
     { ...snapshot, premium: { ...snapshot.premium, amount: 0 } },
     { ...snapshot, allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 99 }] },
+    { ...snapshot, allocations: [{ strategy: 'FixedTermStrategy', percentage: 100 }] },
+    { ...snapshot, riders: [] },
+    { ...snapshot, reports: ['OTHER_REPORT'] },
     { ...snapshot, unexpected: true },
   ])('rejects malformed or open-ended snapshots', (candidate) => {
     expect(parseForesightIllustrationSnapshot(candidate)).toBeNull()

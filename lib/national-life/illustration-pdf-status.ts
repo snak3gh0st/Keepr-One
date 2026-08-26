@@ -90,6 +90,12 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
       return 'A seguradora estava ocupada. Pode pedir de novo.'
     case 'FORESIGHT_REPORT_FAILED':
       return 'A seguradora não terminou de gerar. Pode pedir de novo.'
+    case 'FORESIGHT_REPORT_TIMEOUT':
+      return 'A seguradora demorou além do esperado. Pode pedir de novo.'
+    case 'FORESIGHT_ARTIFACT_MISSING':
+      return 'O caso foi concluído sem o PDF verificável. Gere novamente.'
+    case 'COMMAND_EXPIRED':
+      return 'A tentativa expirou antes de terminar. Pode pedir de novo.'
     case null:
       return 'Não foi possível gerar.'
     default:

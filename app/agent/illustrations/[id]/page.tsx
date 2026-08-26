@@ -11,6 +11,9 @@ import { formatCarrierInstant } from '@/lib/national-life/carrier-instant'
 import { flexLifeProductLabel } from '@/lib/national-life/flex-life'
 import type { LapseYear } from '@/lib/national-life/rapid-solve'
 import { IllustrationPdfButton } from '../IllustrationPdfButton'
+import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
+import { getIllustrationCommandStatuses } from '@/lib/national-life/illustration-command-status'
+import { illustrationPdfMessage } from '@/lib/national-life/illustration-pdf-status'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 
@@ -51,6 +54,7 @@ function lapseLabel(value: LapseYear): string | null {
 export default async function QuoteSummaryPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const agent = await getCurrentAgent()
+  const localConnector = getNationalLifeLocalConnectorConfig()
   const user = await prisma.user.findUnique({
     where: { id: agent.userId },
     select: { name: true },
@@ -71,6 +75,7 @@ export default async function QuoteSummaryPage({ params }: { params: Promise<{ i
     },
   })
   if (!illustration) notFound()
+  const commandStatus = (await getIllustrationCommandStatuses(agent.id)).get(illustration.id)
 
   const facts = summarizeQuotePayload(illustration.rawPayload)
 
@@ -186,7 +191,17 @@ export default async function QuoteSummaryPage({ params }: { params: Promise<{ i
               Abrir PDF da seguradora
             </a>
           ) : (
-            <IllustrationPdfButton illustrationId={illustration.id} />
+            <IllustrationPdfButton
+              illustrationId={illustration.id}
+              extensionId={localConnector.enabled ? localConnector.extensionId : undefined}
+              disabled={commandStatus?.state === 'WORKING'}
+              status={commandStatus?.state}
+            />
+          )}
+          {!illustration.documentFetchedAt && commandStatus && (
+            <p className="mt-1 text-xs text-ink-muted">
+              {illustrationPdfMessage(commandStatus)}
+            </p>
           )}
         </div>
       </section>

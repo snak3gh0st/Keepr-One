@@ -32,6 +32,16 @@ const paramsSchema = z.strictObject({
   commandId: z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/),
 })
 const policyDetailRepository = createPrismaPolicyDetailRepository(prisma)
+const foresightArtifactRepository = {
+  async findOwnedArtifact(input: { agentId: string; illustrationId: string }) {
+    return prisma.illustration.findFirst({
+      where: { id: input.illustrationId, agentId: input.agentId },
+      select: {
+        provider: true, externalId: true, documentBytes: true, documentMimeType: true,
+      },
+    })
+  },
+}
 
 function commandErrorResponse(error: ConnectorCommandError): Response {
   const status = error.code === 'COMMAND_NOT_FOUND' ? 404
@@ -69,6 +79,7 @@ export async function POST(
         event,
         now: new Date(),
         policyDetailRepository,
+        foresightArtifactRepository,
         deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
       },
     )

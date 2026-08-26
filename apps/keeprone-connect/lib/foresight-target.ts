@@ -120,6 +120,11 @@ function normalizeAmount(value: number | string): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function normalizeCarrierDate(value: string): string {
+  const match = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  return match ? `${match[1]!.padStart(2, '0')}/${match[2]!.padStart(2, '0')}/${match[3]}` : value
+}
+
 function sameStructured(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
@@ -135,7 +140,9 @@ export function compareForesightTarget(
     'productCode', 'solveMethod', 'premiumMode', 'gender', 'rateClass', 'deathBenefitOption',
   ] as const
   for (const key of strings) {
-    if (normalizeText(observed[key]) !== normalizeText(expected[key])) mismatches.push(key)
+    const left = key === 'dateOfBirth' ? normalizeCarrierDate(observed[key]) : normalizeText(observed[key])
+    const right = key === 'dateOfBirth' ? normalizeCarrierDate(expected[key]) : normalizeText(expected[key])
+    if (left !== right) mismatches.push(key)
   }
   if (normalizeAmount(observed.solveAmount) !== expected.solveAmount) mismatches.push('solveAmount')
   if (normalizeAmount(observed.faceAmount) !== expected.faceAmount) mismatches.push('faceAmount')

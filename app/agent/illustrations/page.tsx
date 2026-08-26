@@ -4,20 +4,14 @@ import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
-import { getIllustrationPdfStatuses } from '@/lib/national-life/job-service'
+import { getIllustrationCommandStatuses } from '@/lib/national-life/illustration-command-status'
 import { illustrationPdfMessage } from '@/lib/national-life/illustration-pdf-status'
 import { QUOTE_DISCLAIMER } from '@/lib/national-life/quote-disclaimer'
 import { formatCarrierInstant } from '@/lib/national-life/carrier-instant'
 import { IllustrationPdfButton } from './IllustrationPdfButton'
+import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
-import {
-  IllustrationsWorkspace,
-  type IllustrationWorkspaceItem,
-} from './IllustrationsWorkspace'
-// Restored to unbreak the build: the workspace migration landed half done —
-// the new component is imported but never rendered, and the table it was meant
-// to replace is still here without its import. See the note in the commit.
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
 
 const currency = (value: number) =>
@@ -29,6 +23,7 @@ const currency = (value: number) =>
 
 export default async function IllustrationsPage() {
   const agent = await getCurrentAgent()
+  const localConnector = getNationalLifeLocalConnectorConfig()
   const [user, illustrations, pdfStatus] = await Promise.all([
     prisma.user.findUnique({ where: { id: agent.userId } }),
     // Scoped to the agent who asked for them. A quote names an insured and a
@@ -53,7 +48,7 @@ export default async function IllustrationsPage() {
       },
     }),
     // One query for the whole list, so every item can say where its render stands.
-    getIllustrationPdfStatuses(agent.id),
+    getIllustrationCommandStatuses(agent.id),
   ])
 
   return (
@@ -166,7 +161,12 @@ export default async function IllustrationsPage() {
                     </a>
                   ) : (
                     <>
-                      <IllustrationPdfButton illustrationId={illustration.id} />
+                      <IllustrationPdfButton
+                        illustrationId={illustration.id}
+                        extensionId={localConnector.enabled ? localConnector.extensionId : undefined}
+                        disabled={pdfStatus.get(illustration.id)?.state === 'WORKING'}
+                        status={pdfStatus.get(illustration.id)?.state}
+                      />
                       {/* Without this the row went silent after "pedido
                           enviado": a render that failed looked exactly like one
                           still running. The carrier's illustration tool has its

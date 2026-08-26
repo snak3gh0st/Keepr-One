@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { createHash } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import {
   commandMayExecute,
@@ -20,6 +21,7 @@ import {
 import {
   buildForesightIllustrationSnapshot,
   foresightIllustrationInputHash,
+  parseForesightIllustrationReceipt,
   type ForesightIllustrationExecutionSnapshot,
 } from '../foresight-illustration-contract'
 
@@ -66,6 +68,15 @@ export type ForesightIllustrationInputRepository = {
     createdAt: Date
     productName: string | null
     rawPayload: unknown
+  } | null>
+}
+
+export type ForesightArtifactRepository = {
+  findOwnedArtifact(input: { agentId: string; illustrationId: string }): Promise<{
+    provider: string | null
+    externalId: string | null
+    documentBytes: Uint8Array | null
+    documentMimeType: string | null
   } | null>
 }
 
@@ -180,6 +191,7 @@ export async function recordDeviceConnectorCommandEvent(
     event: unknown
     now?: Date
     policyDetailRepository?: PolicyDetailRepository
+    foresightArtifactRepository?: ForesightArtifactRepository
     deploymentScope?: string
   },
 ): Promise<void> {
@@ -217,6 +229,28 @@ export async function recordDeviceConnectorCommandEvent(
       policyId: publicCommand.target.id,
       detail,
     })
+  }
+  if (event.type === 'DATA_BATCH' && command.capability === 'GENERATE_ILLUSTRATION') {
+    const publicCommand = toPublicCommand(command)
+    const payload = event.payload
+    if (publicCommand.target?.kind !== 'ILLUSTRATION' || !('inputHash' in publicCommand.params) ||
+      !payload || Object.keys(payload).length !== 1 || !Object.hasOwn(payload, 'illustration') ||
+      !input.foresightArtifactRepository) throw new ConnectorCommandError('EVENT_INVALID')
+    const receipt = parseForesightIllustrationReceipt(payload.illustration)
+    if (!receipt || receipt.inputHash !== publicCommand.params.inputHash) {
+      throw new ConnectorCommandError('EVENT_INVALID')
+    }
+    const artifact = await input.foresightArtifactRepository.findOwnedArtifact({
+      agentId: input.agentId,
+      illustrationId: publicCommand.target.id,
+    })
+    if (!artifact || artifact.provider !== 'NATIONAL_LIFE_FORESIGHT' ||
+      artifact.externalId !== `${input.agentId}:${receipt.carrierCaseName}` ||
+      artifact.documentMimeType !== 'application/pdf' || !artifact.documentBytes ||
+      artifact.documentBytes.byteLength !== receipt.documentBytes ||
+      createHash('sha256').update(artifact.documentBytes).digest('hex') !== receipt.documentSha256) {
+      throw new ConnectorCommandError('EVENT_INVALID')
+    }
   }
 
   await recordConnectorCommandEvent(repository, {

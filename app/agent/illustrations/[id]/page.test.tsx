@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   findUniqueUser: vi.fn(),
   findFirstIllustration: vi.fn(),
   notFound: vi.fn(),
+  getCommandStatuses: vi.fn(),
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
@@ -18,6 +19,9 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 vi.mock('next/navigation', () => ({ notFound: mocks.notFound }))
+vi.mock('@/lib/national-life/illustration-command-status', () => ({
+  getIllustrationCommandStatuses: mocks.getCommandStatuses,
+}))
 vi.mock('@/components/Shell', () => ({
   Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
@@ -48,6 +52,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1' })
   mocks.findUniqueUser.mockResolvedValue({ name: 'Ana Corretora' })
+  mocks.getCommandStatuses.mockResolvedValue(new Map())
   // Mirrors what next/navigation's real notFound() does: it throws rather
   // than returning, which is what lets the page function short-circuit.
   mocks.notFound.mockImplementation(() => {

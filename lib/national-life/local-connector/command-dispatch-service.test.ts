@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import type { ConnectorCommandRepository } from '../connector-command-service'
 import type { PolicyDetailRepository } from '../policy-detail-service'
 import type { LocalConnectorCommandDispatchRepository } from './command-dispatch-service'
@@ -258,5 +259,80 @@ describe('local connector command dispatch', () => {
     expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
       sequence: 2, type: 'DATA_BATCH',
     }))
+  })
+
+  it('accepts an illustration receipt only after the exact PDF artifact is stored', async () => {
+    const bytes = new TextEncoder().encode('%PDF-1.7\nverified')
+    const documentSha256 = createHash('sha256').update(bytes).digest('hex')
+    const inputHash = 'a'.repeat(64)
+    const carrierCaseName = 'KEEPRONE-20260826-ILLUSTRATION1'
+    const repo = repository(candidate({
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_1' },
+      params: { illustrationId: 'illustration_1', inputHash },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+      events: [{ sequence: 0 }, { sequence: 1 }],
+    }))
+    const receipt = {
+      inputHash,
+      caseFingerprint: `case_${'b'.repeat(64)}`,
+      carrierCaseName,
+      productCode: '956',
+      release: '5.3.65.31',
+      reportCode: 'NAIC_ILLUSTRATION',
+      documentSha256,
+      documentBytes: bytes.byteLength,
+      saved: true,
+    }
+    const event = {
+      protocolVersion: 1, eventId: 'event_illustration_1', commandId: 'cmd_1', runId: 'run_1',
+      sequence: 2, type: 'DATA_BATCH', emittedAt: now.toISOString(),
+      payload: { illustration: receipt }, error: null,
+    }
+    const foresightArtifactRepository = {
+      findOwnedArtifact: vi.fn().mockResolvedValue({
+        provider: 'NATIONAL_LIFE_FORESIGHT',
+        externalId: `agent_1:${carrierCaseName}`,
+        documentBytes: bytes,
+        documentMimeType: 'application/pdf',
+      }),
+    }
+
+    await recordDeviceConnectorCommandEvent(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', event, now,
+      foresightArtifactRepository,
+    })
+    expect(foresightArtifactRepository.findOwnedArtifact).toHaveBeenCalledWith({
+      agentId: 'agent_1', illustrationId: 'illustration_1',
+    })
+    expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      sequence: 2, type: 'DATA_BATCH', payload: { illustration: receipt },
+    }))
+  })
+
+  it('refuses an illustration receipt when its PDF is absent', async () => {
+    const repo = repository(candidate({
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_1' },
+      params: { illustrationId: 'illustration_1', inputHash: 'a'.repeat(64) },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+      events: [{ sequence: 0 }, { sequence: 1 }],
+    }))
+    const event = {
+      protocolVersion: 1, eventId: 'event_illustration_2', commandId: 'cmd_1', runId: 'run_1',
+      sequence: 2, type: 'DATA_BATCH', emittedAt: now.toISOString(),
+      payload: { illustration: {
+        inputHash: 'a'.repeat(64), caseFingerprint: `case_${'b'.repeat(64)}`,
+        carrierCaseName: 'KEEPRONE-20260826-ILLUSTRATION1', productCode: '956', release: '5.3.65.31',
+        reportCode: 'NAIC_ILLUSTRATION', documentSha256: 'c'.repeat(64), documentBytes: 100, saved: true,
+      } }, error: null,
+    }
+    await expect(recordDeviceConnectorCommandEvent(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', event, now,
+      foresightArtifactRepository: { findOwnedArtifact: vi.fn().mockResolvedValue(null) },
+    })).rejects.toThrow('EVENT_INVALID')
+    expect(repo.appendEvent).not.toHaveBeenCalled()
   })
 })
