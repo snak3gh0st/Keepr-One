@@ -323,9 +323,11 @@ export function NationalLifeSyncProgress({
         <div className="mt-5 border-t border-border-steel pt-4">
           <div className="flex items-baseline justify-between gap-3">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">Portal source coverage</p>
-            <p className="text-xs text-ink-muted">
-              Reused areas were already verified in the previous attempt.
-            </p>
+            {reused > 0 && (
+              <p className="text-xs text-ink-muted">
+                Reused areas were already verified in the previous attempt.
+              </p>
+            )}
           </div>
           <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {status.stageCoverage.map((stage) => (

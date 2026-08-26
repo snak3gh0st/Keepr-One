@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { EmptyState } from "@/components/Table";
 import { EntityCard, EntityCardList } from "@/components/EntityCard";
 import { Pagination, clampPage } from "@/components/Pagination";
+import { NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS } from "@/lib/national-life/operational-report-keys";
 
 export type CaseRow = {
   id: string;
@@ -40,15 +41,6 @@ export type PortalReportRow = {
 type Tab = "cases" | "inforce" | "reports";
 
 const PAGE_SIZE = 12;
-
-export const NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS = [
-  "PAID_COMMISSIONS",
-  "CORRESPONDENCE",
-  "COMMISSIONS_PAYMENT_PORTAL",
-  "PIP_PENDING",
-  "COMMISSIONS_EARNING_REPORT",
-  "PAYABLE_GROSS_COMMISSIONS",
-] as const;
 
 const OPERATIONAL_REPORT_KEYS = new Set<string>(NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS);
 
