@@ -25,6 +25,7 @@ export const EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES = [
   'READ_EXPORT',
   'READ_DOCUMENT',
   'READ_POLICY_DETAIL',
+  'FLEXLIFE_QUOTE',
   'GENERATE_ILLUSTRATION',
 ] as const satisfies readonly LocalConnectorCapabilityName[]
 

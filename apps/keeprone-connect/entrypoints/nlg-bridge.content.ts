@@ -7,6 +7,8 @@ import {
   parseBeginDocumentMessage,
   parseBeginExportMessage,
   parseProbeAuthMessage,
+  parseExecuteFlexLifeQuoteMessage,
+  parseFlexLifeQuoteMainResult,
   type BeginGridMessage,
   type BeginDocumentMessage,
 } from '../lib/messages'
@@ -26,6 +28,11 @@ export default defineContentScript({
       { type: 'BEGIN_EXPORT'; sourceKey: 'INFORCE_CLIENTS'; token: string; correlationId: string } |
       BeginDocumentMessage |
       null = null
+    const quoteResponses = new Map<string, {
+      inputHash: string
+      timer: ReturnType<typeof setTimeout>
+      sendResponse: (value: unknown) => void
+    }>()
 
     chrome.runtime.onMessage.addListener((value, _sender, sendResponse) => {
       const probe = parseProbeAuthMessage(value)
@@ -66,6 +73,27 @@ export default defineContentScript({
           records: capturePageSnapshot(document, new URL(location.href)),
         })
         return false
+      }
+      const quote = parseExecuteFlexLifeQuoteMessage(value)
+      if (quote) {
+        const key = `${quote.token}:${quote.correlationId}`
+        if (quoteResponses.has(key)) return false
+        const timer = setTimeout(() => {
+          const pending = quoteResponses.get(key)
+          if (!pending) return
+          quoteResponses.delete(key)
+          pending.sendResponse({
+            ok: false,
+            type: 'FLEXLIFE_QUOTE_FAILED',
+            token: quote.token,
+            correlationId: quote.correlationId,
+            inputHash: quote.inputHash,
+            code: 'PORTAL_REQUEST_FAILED',
+          })
+        }, 65_000)
+        quoteResponses.set(key, { inputHash: quote.inputHash, timer, sendResponse })
+        window.postMessage({ channel: CHANNEL, payload: quote }, location.origin)
+        return true
       }
       const policyDetail = parseCapturePolicyDetailMessage(value)
       if (policyDetail) {
@@ -178,6 +206,32 @@ export default defineContentScript({
     window.addEventListener('message', (event) => {
       if (event.source !== window || event.origin !== location.origin) return
       if (typeof event.data !== 'object' || event.data === null || event.data.channel !== CHANNEL) return
+      const quote = parseFlexLifeQuoteMainResult(event.data.payload)
+      if (quote) {
+        const key = `${quote.token}:${quote.correlationId}`
+        const pending = quoteResponses.get(key)
+        if (!pending || pending.inputHash !== quote.inputHash) return
+        clearTimeout(pending.timer)
+        quoteResponses.delete(key)
+        pending.sendResponse(quote.type === 'FLEXLIFE_QUOTE_DONE'
+          ? {
+              ok: true,
+              type: 'FLEXLIFE_QUOTE_RECEIVED',
+              token: quote.token,
+              correlationId: quote.correlationId,
+              inputHash: quote.inputHash,
+              response: quote.response,
+            }
+          : {
+              ok: false,
+              type: 'FLEXLIFE_QUOTE_FAILED',
+              token: quote.token,
+              correlationId: quote.correlationId,
+              inputHash: quote.inputHash,
+              code: quote.code,
+            })
+        return
+      }
       const message = parseBridgeMessage(event.data.payload)
       if (!message || !active || message.token !== active.token || message.correlationId !== active.correlationId) {
         return

@@ -13,10 +13,14 @@ type MessageListener = (
 ) => boolean | void
 
 let listener: MessageListener | undefined
+let windowMessageListener: ((event: Record<string, unknown>) => void) | undefined
+const postMessage = vi.fn()
 
 beforeEach(() => {
   vi.resetModules()
   listener = undefined
+  windowMessageListener = undefined
+  postMessage.mockReset()
   mocks.capture.mockReset()
   vi.stubGlobal('defineContentScript', (config: unknown) => config)
   vi.stubGlobal('location', {
@@ -26,8 +30,10 @@ beforeEach(() => {
   })
   vi.stubGlobal('document', {})
   vi.stubGlobal('window', {
-    addEventListener: vi.fn(),
-    postMessage: vi.fn(),
+    addEventListener: (type: string, value: (event: Record<string, unknown>) => void) => {
+      if (type === 'message') windowMessageListener = value
+    },
+    postMessage,
   })
   vi.stubGlobal('chrome', {
     runtime: {
@@ -38,6 +44,51 @@ beforeEach(() => {
 })
 
 describe('National Life isolated-world bridge', () => {
+  it('relays one correlated FlexLife quote between the extension and page worlds', async () => {
+    const content = (await import('../entrypoints/nlg-bridge.content')).default as unknown as {
+      main: () => void
+    }
+    content.main()
+    const snapshot = {
+      schemaVersion: 1,
+      illustrationId: 'ill_quote_1',
+      request: {
+        IssueState: 'FL', FirstName: 'KeeprOne', LastName: 'Test', DateOfBirth: '08/26/1981',
+        IssueAge: 45, Gender: 'Male', RateClass: 'Standard_NT', SolveType: 'Specify_Amount',
+        Amount: 250000, DeathBenefitOption: 'A_Level', Strategy: 'SP500PointToPointCapFocus',
+        Allocation: 100, ProductCode: '956', PremiumMode: 'Monthly',
+      },
+    }
+    const request = {
+      type: 'EXECUTE_FLEXLIFE_QUOTE', token: 't'.repeat(32), correlationId: 'c'.repeat(16),
+      inputHash: 'a'.repeat(64), snapshot,
+    }
+    const responsePromise = new Promise<unknown>((resolve) => {
+      expect(listener?.(request, {}, resolve)).toBe(true)
+    })
+    expect(postMessage).toHaveBeenCalledWith(
+      { channel: 'FYNTRA_NL_CONNECTOR_V1', payload: request },
+      'https://www.nationallife.com',
+    )
+    windowMessageListener?.({
+      source: window,
+      origin: 'https://www.nationallife.com',
+      data: {
+        channel: 'FYNTRA_NL_CONNECTOR_V1',
+        payload: {
+          type: 'FLEXLIFE_QUOTE_DONE', token: request.token,
+          correlationId: request.correlationId, inputHash: request.inputHash,
+          response: { Success: true, AnnualPremium: 5100 },
+        },
+      },
+    })
+    await expect(responsePromise).resolves.toEqual({
+      ok: true, type: 'FLEXLIFE_QUOTE_RECEIVED', token: request.token,
+      correlationId: request.correlationId, inputHash: request.inputHash,
+      response: { Success: true, AnnualPremium: 5100 },
+    })
+  })
+
   it('returns only the typed policy detail observation for a correlated capture', async () => {
     const detail = {
       navigatePath: `/agent/book-of-business/inforce-book/all-clients/policy-details?id=${'a'.repeat(32)}`,

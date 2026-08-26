@@ -5,12 +5,14 @@ import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { ContextPanel } from '@/components/ContextPanel'
 import { NewIllustrationForm } from '../NewIllustrationForm'
+import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
 
 export const dynamic = 'force-dynamic'
 
 export default async function NewIllustrationPage() {
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
+  const localConnector = getNationalLifeLocalConnectorConfig()
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
@@ -29,7 +31,9 @@ export default async function NewIllustrationPage() {
 
       <div className="module-content-grid">
         <div className="min-w-0">
-          <NewIllustrationForm />
+          <NewIllustrationForm
+            extensionId={localConnector.enabled ? localConnector.extensionId : undefined}
+          />
         </div>
         <ContextPanel eyebrow="Dica rápida" title="O que enviar">
           <p>

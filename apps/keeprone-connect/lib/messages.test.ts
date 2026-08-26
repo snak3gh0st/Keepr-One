@@ -10,7 +10,20 @@ import {
   parseBeginDocumentMessage,
   parseCapturePolicyDetailAck,
   parseCapturePolicyDetailMessage,
+  parseExecuteFlexLifeQuoteMessage,
+  parseFlexLifeQuoteMainResult,
 } from './messages'
+
+const flexLifeQuoteSnapshot = {
+  schemaVersion: 1,
+  illustrationId: 'ill_quote_1',
+  request: {
+    IssueState: 'FL', FirstName: 'KeeprOne', LastName: 'Test', DateOfBirth: '08/26/1981',
+    IssueAge: 45, Gender: 'Male', RateClass: 'Standard_NT', SolveType: 'Specify_Amount',
+    Amount: 250000, DeathBenefitOption: 'A_Level', Strategy: 'SP500PointToPointCapFocus',
+    Allocation: 100, ProductCode: '956', PremiumMode: 'Monthly',
+  },
+} as const
 
 describe('message validation', () => {
   it('accepts exact external messages and rejects extra properties', () => {
@@ -318,6 +331,41 @@ describe('official export messages', () => {
     expect(parseBridgeMessage({
       type: 'EXPORT_CHUNK', ...identity, sequence: 0,
       bytes: Array.from({ length: 1024 * 1024 + 1 }, () => 0),
+    })).toBeNull()
+  })
+})
+
+describe('FlexLife quote page messages', () => {
+  const identity = {
+    token: 't'.repeat(32),
+    correlationId: 'c'.repeat(16),
+    inputHash: 'a'.repeat(64),
+  }
+
+  it('accepts only an exact, hashed quote order', () => {
+    const message = {
+      type: 'EXECUTE_FLEXLIFE_QUOTE',
+      ...identity,
+      snapshot: flexLifeQuoteSnapshot,
+    }
+    expect(parseExecuteFlexLifeQuoteMessage(message)).toEqual(message)
+    expect(parseExecuteFlexLifeQuoteMessage({ ...message, endpoint: 'https://evil.example' })).toBeNull()
+    expect(parseExecuteFlexLifeQuoteMessage({ ...message, inputHash: 'short' })).toBeNull()
+  })
+
+  it('accepts bounded correlated carrier results and safe failures', () => {
+    const response = { Success: true, AnnualPremium: 5100 }
+    expect(parseFlexLifeQuoteMainResult({
+      type: 'FLEXLIFE_QUOTE_DONE', ...identity, response,
+    })).toEqual({ type: 'FLEXLIFE_QUOTE_DONE', ...identity, response })
+    expect(parseFlexLifeQuoteMainResult({
+      type: 'FLEXLIFE_QUOTE_ERROR', ...identity, code: 'PORTAL_REQUEST_FAILED',
+    })).not.toBeNull()
+    expect(parseFlexLifeQuoteMainResult({
+      type: 'FLEXLIFE_QUOTE_DONE', ...identity, response: { blob: 'x'.repeat(17_000) },
+    })).toBeNull()
+    expect(parseFlexLifeQuoteMainResult({
+      type: 'FLEXLIFE_QUOTE_ERROR', ...identity, code: 'RAW_NETWORK_ERROR',
     })).toBeNull()
   })
 })

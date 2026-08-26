@@ -62,6 +62,9 @@ export async function PUT(
       },
       { ...device, commandId: params.commandId, now: new Date() },
     )
+    if (!('carrierCaseName' in approved.snapshot)) {
+      throw new ConnectorCommandError('COMMAND_INVALID')
+    }
     const now = new Date()
     const documentSha256 = createHash('sha256').update(body).digest('hex')
     const updated = await prisma.illustration.updateMany({

@@ -1,6 +1,7 @@
 import { isGridKeyLabel } from './constants'
 import { MAX_PORTAL_RECORDS, PAGE_SIZE } from './paging'
 import type { PolicyDetailObservation } from './policy-detail'
+import { parseFlexLifeQuoteSnapshot, type FlexLifeQuoteSnapshotV1 } from './flexlife-quote-contract'
 
 type JsonObject = Record<string, unknown>
 
@@ -94,6 +95,29 @@ export type ProbeAuthAck = {
   token: string
   correlationId: string
   authenticated: boolean
+}
+
+export type ExecuteFlexLifeQuoteMessage = {
+  type: 'EXECUTE_FLEXLIFE_QUOTE'
+  token: string
+  correlationId: string
+  inputHash: string
+  snapshot: FlexLifeQuoteSnapshotV1
+}
+
+export type FlexLifeQuoteMainResult = {
+  type: 'FLEXLIFE_QUOTE_DONE'
+  token: string
+  correlationId: string
+  inputHash: string
+  response: Record<string, unknown>
+} | {
+  type: 'FLEXLIFE_QUOTE_ERROR'
+  token: string
+  correlationId: string
+  inputHash: string
+  code: 'PORTAL_PATH_MISMATCH' | 'INPUT_HASH_MISMATCH' |
+    'PORTAL_REQUEST_FAILED' | 'INVALID_PORTAL_RESPONSE'
 }
 
 export type CapturePolicyDetailMessage = {
@@ -419,6 +443,49 @@ export function parseProbeAuthAck(value: unknown): ProbeAuthAck | null {
     return null
   }
   return value as ProbeAuthAck
+}
+
+export function parseExecuteFlexLifeQuoteMessage(value: unknown): ExecuteFlexLifeQuoteMessage | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ['type', 'token', 'correlationId', 'inputHash', 'snapshot']) ||
+    value.type !== 'EXECUTE_FLEXLIFE_QUOTE' ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16) ||
+    typeof value.inputHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.inputHash)
+  ) return null
+  const snapshot = parseFlexLifeQuoteSnapshot(value.snapshot)
+  return snapshot ? { ...value, snapshot } as ExecuteFlexLifeQuoteMessage : null
+}
+
+export function parseFlexLifeQuoteMainResult(value: unknown): FlexLifeQuoteMainResult | null {
+  if (
+    !isObject(value) || typeof value.type !== 'string' ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16) ||
+    typeof value.inputHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.inputHash)
+  ) return null
+  if (value.type === 'FLEXLIFE_QUOTE_ERROR') {
+    const codes = [
+      'PORTAL_PATH_MISMATCH', 'INPUT_HASH_MISMATCH',
+      'PORTAL_REQUEST_FAILED', 'INVALID_PORTAL_RESPONSE',
+    ]
+    return hasExactKeys(value, ['type', 'token', 'correlationId', 'inputHash', 'code']) &&
+      typeof value.code === 'string' && codes.includes(value.code)
+      ? value as FlexLifeQuoteMainResult
+      : null
+  }
+  if (
+    value.type !== 'FLEXLIFE_QUOTE_DONE' ||
+    !hasExactKeys(value, ['type', 'token', 'correlationId', 'inputHash', 'response']) ||
+    !isObject(value.response)
+  ) return null
+  try {
+    if (JSON.stringify(value.response).length > MAX_RAW_ROW_BYTES) return null
+  } catch {
+    return null
+  }
+  return value as FlexLifeQuoteMainResult
 }
 
 export function parsePageCaptureAck(value: unknown): PageCaptureAck | null {

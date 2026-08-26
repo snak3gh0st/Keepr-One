@@ -260,6 +260,27 @@ describe('parseStagePlan', () => {
 })
 
 describe('parseExecutableConnectorCommand', () => {
+  it('accepts a sealed FlexLife quote and rejects a mutable request', () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_quote_1',
+      runId: 'run_quote_1',
+      capability: 'FLEXLIFE_QUOTE',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_1' },
+      params: { illustrationId: 'illustration_1', inputHash: 'a'.repeat(64) },
+      idempotencyKey: 'illustration_1:quote:1',
+      issuedAt: '2026-08-26T20:00:00.000Z',
+      expiresAt: '2026-08-26T21:00:00.000Z',
+      requiresConfirmation: true,
+    }
+
+    expect(parseExecutableConnectorCommand(command)).toMatchObject({ capability: 'FLEXLIFE_QUOTE' })
+    expect(() => parseExecutableConnectorCommand({
+      ...command,
+      params: { illustrationId: 'illustration_1' },
+    })).toThrow('INVALID_COMMAND')
+  })
+
   it('accepts a confirmed illustration only with a sealed input hash', () => {
     const command = {
       protocolVersion: 1,

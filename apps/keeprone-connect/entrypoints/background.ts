@@ -69,6 +69,11 @@ import {
   type ForesightExecutionResponse,
 } from '../lib/foresight-messages'
 import {
+  parseFlexLifeQuoteSnapshot,
+  sha256FlexLifeQuoteSnapshot,
+  type FlexLifeQuoteSnapshotV1,
+} from '../lib/flexlife-quote-contract'
+import {
   currentStage,
   readCommandState,
   readDeviceState,
@@ -697,6 +702,195 @@ async function executePolicyDetailCommand(
   })
 }
 
+function parseFlexLifeQuoteCommandInput(value: unknown): {
+  inputHash: string
+  snapshot: FlexLifeQuoteSnapshotV1
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('FLEXLIFE_QUOTE_INPUT_INVALID')
+  }
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).sort().join(',') !== 'inputHash,snapshot' ||
+    typeof record.inputHash !== 'string' || !/^[a-f0-9]{64}$/.test(record.inputHash)) {
+    throw new Error('FLEXLIFE_QUOTE_INPUT_INVALID')
+  }
+  const snapshot = parseFlexLifeQuoteSnapshot(record.snapshot)
+  if (!snapshot) throw new Error('FLEXLIFE_QUOTE_INPUT_INVALID')
+  return { inputHash: record.inputHash, snapshot }
+}
+
+function parseFlexLifeQuoteExecutionResponse(value: unknown, expected: {
+  token: string
+  correlationId: string
+  inputHash: string
+}): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('FLEXLIFE_QUOTE_RESPONSE_INVALID')
+  }
+  const record = value as Record<string, unknown>
+  if (
+    Object.keys(record).sort().join(',') === 'code,correlationId,inputHash,ok,token,type' &&
+    record.ok === false && record.type === 'FLEXLIFE_QUOTE_FAILED' &&
+    record.token === expected.token && record.correlationId === expected.correlationId &&
+    record.inputHash === expected.inputHash && typeof record.code === 'string' &&
+    ['PORTAL_PATH_MISMATCH', 'INPUT_HASH_MISMATCH',
+      'PORTAL_REQUEST_FAILED', 'INVALID_PORTAL_RESPONSE'].includes(record.code)
+  ) {
+    throw new Error(record.code)
+  }
+  if (Object.keys(record).sort().join(',') !== 'correlationId,inputHash,ok,response,token,type' ||
+    record.ok !== true || record.type !== 'FLEXLIFE_QUOTE_RECEIVED' ||
+    record.token !== expected.token || record.correlationId !== expected.correlationId ||
+    record.inputHash !== expected.inputHash || !record.response ||
+    typeof record.response !== 'object' || Array.isArray(record.response)) {
+    throw new Error('FLEXLIFE_QUOTE_RESPONSE_INVALID')
+  }
+  try {
+    if (JSON.stringify(record.response).length > 16_384) {
+      throw new Error('FLEXLIFE_QUOTE_RESPONSE_INVALID')
+    }
+  } catch {
+    throw new Error('FLEXLIFE_QUOTE_RESPONSE_INVALID')
+  }
+  return record.response as Record<string, unknown>
+}
+
+async function executeFlexLifeQuoteCommand(
+  dispatch: ConnectorCommandDispatch,
+  device: { deviceId: string; baseUrl: string },
+  hint?: chrome.tabs.Tab,
+) {
+  if (dispatch.command.capability !== 'FLEXLIFE_QUOTE') throw new Error('UNKNOWN_CAPABILITY')
+  const params = dispatch.command.params
+  if (!('illustrationId' in params) || !('inputHash' in params)) throw new Error('INVALID_COMMAND')
+
+  const previous = await readCommandState()
+  const sameCommand = previous.commandId === dispatch.command.commandId
+  let carrierTabId = sameCommand ? previous.carrierTabId : undefined
+  let sequence = dispatch.nextEventSequence
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId,
+    nextEventSequence: sequence,
+    status: 'NAVIGATING',
+    updatedAt: new Date().toISOString(),
+  })
+
+  const targetPath = '/agent/tools/business-tools/illustrations'
+  const targetUrl = `${NLG_ORIGIN}${targetPath}`
+  const tab = await findBoundCommandTab(carrierTabId, hint)
+  if (!tab?.id) {
+    const created = await chrome.tabs.create({ active: false, url: targetUrl })
+    if (created.id === undefined) throw new Error('COMMAND_TAB_UNAVAILABLE')
+    await writeCommandState({
+      ...(await readCommandState()),
+      carrierTabId: created.id,
+      status: 'NAVIGATING',
+      updatedAt: new Date().toISOString(),
+    })
+    return
+  }
+  carrierTabId = tab.id
+  let currentUrl: URL
+  try {
+    currentUrl = new URL(tab.url ?? '')
+  } catch {
+    await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+  if (currentUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(currentUrl.pathname)) {
+    const requirement = currentUrl.pathname.includes('/mfa') || currentUrl.pathname.includes('/challenge')
+      ? 'MFA_REQUIRED' as const
+      : 'AUTH_REQUIRED' as const
+    if (dispatch.lastEventType !== requirement) {
+      sequence = await postCommandEvent({
+        dispatch, device, sequence, type: requirement, payload: { action: 'SIGN_IN_TO_CONTINUE' },
+      })
+    }
+    await writeCommandState({
+      ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
+      status: requirement, updatedAt: new Date().toISOString(),
+    })
+    if (!tab.active) await updateTab(tab.id, { active: true })
+    return
+  }
+  if (currentUrl.origin !== NLG_ORIGIN || currentUrl.pathname !== targetPath) {
+    await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+  if (!(await hasAuthenticatedPortalSession(tab.id))) {
+    if (dispatch.lastEventType !== 'AUTH_REQUIRED') {
+      sequence = await postCommandEvent({
+        dispatch, device, sequence, type: 'AUTH_REQUIRED',
+        payload: { action: 'SIGN_IN_TO_CONTINUE' },
+      })
+    }
+    await writeCommandState({
+      ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
+      status: 'AUTH_REQUIRED', updatedAt: new Date().toISOString(),
+    })
+    await updateTab(tab.id, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+    return
+  }
+
+  const rawInput = await signedJsonRequest<unknown>({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname: `/api/agent/integrations/national-life/local-connector/commands/${encodeURIComponent(dispatch.command.commandId)}/input`,
+    body: {},
+  })
+  const approved = parseFlexLifeQuoteCommandInput(rawInput)
+  if (approved.inputHash !== params.inputHash || approved.snapshot.illustrationId !== params.illustrationId ||
+    await sha256FlexLifeQuoteSnapshot(approved.snapshot) !== approved.inputHash) {
+    throw new Error('FLEXLIFE_QUOTE_INPUT_HASH_MISMATCH')
+  }
+  await writeCommandState({
+    ...(await readCommandState()), carrierTabId: tab.id, status: 'RUNNING',
+    updatedAt: new Date().toISOString(),
+  })
+  if (dispatch.lastEventType !== 'COMMAND_STARTED' && dispatch.lastEventType !== 'DATA_BATCH') {
+    sequence = await postCommandEvent({ dispatch, device, sequence, type: 'COMMAND_STARTED' })
+  }
+  if (dispatch.lastEventType !== 'DATA_BATCH') {
+    const token = randomToken()
+    const correlationId = crypto.randomUUID()
+    const rawResponse = await chrome.tabs.sendMessage(tab.id, {
+      type: 'EXECUTE_FLEXLIFE_QUOTE',
+      token,
+      correlationId,
+      inputHash: approved.inputHash,
+      snapshot: approved.snapshot,
+    })
+    const response = parseFlexLifeQuoteExecutionResponse(rawResponse, {
+      token, correlationId, inputHash: approved.inputHash,
+    })
+    sequence = await postCommandEvent({
+      dispatch,
+      device,
+      sequence,
+      type: 'DATA_BATCH',
+      payload: { flexLifeQuote: { inputHash: approved.inputHash, response } },
+    })
+  }
+  sequence = await postCommandEvent({
+    dispatch,
+    device,
+    sequence,
+    type: 'COMMAND_COMPLETED',
+    payload: { result: 'FLEXLIFE_QUOTE_READY' },
+  })
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId: tab.id,
+    nextEventSequence: sequence,
+    status: 'COMPLETED',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
 function parseForesightCommandInput(value: unknown): {
   inputHash: string
   snapshot: NonNullable<ReturnType<typeof parseForesightIllustrationSnapshot>>
@@ -906,6 +1100,7 @@ async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?
     const device = await readDeviceState()
     if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) return
     await writeCommandState({ ...(await readCommandState()), status: 'POLLING' })
+    let dispatch: ConnectorCommandDispatch | null = null
     try {
       const raw = await signedJsonRequest<unknown>({
         baseUrl: device.baseUrl,
@@ -919,19 +1114,39 @@ async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?
         if (current.status === 'POLLING') await writeCommandState({ status: 'IDLE' })
         return
       }
-      const dispatch = parseConnectorCommandDispatch(raw)
+      dispatch = parseConnectorCommandDispatch(raw)
       const executor = dispatch.command.capability === 'GENERATE_ILLUSTRATION'
         ? executeForesightCommand
-        : executePolicyDetailCommand
+        : dispatch.command.capability === 'FLEXLIFE_QUOTE'
+          ? executeFlexLifeQuoteCommand
+          : executePolicyDetailCommand
       await executor(dispatch, {
         deviceId: device.deviceId,
         baseUrl: device.baseUrl,
       }, hint)
     } catch (error) {
+      const code = errorCode(error, 'COMMAND_FAILED')
+        .replace(/[^A-Z0-9_]/g, '_').slice(0, 80) || 'COMMAND_FAILED'
+      if (dispatch) {
+        try {
+          const current = await readCommandState()
+          await postCommandEvent({
+            dispatch,
+            device: { deviceId: device.deviceId, baseUrl: device.baseUrl },
+            sequence: typeof current.nextEventSequence === 'number'
+              ? current.nextEventSequence
+              : dispatch.nextEventSequence,
+            type: 'COMMAND_FAILED',
+            error: { code, safeMessage: 'A National Life não concluiu este pedido.' },
+          })
+        } catch {
+          // Keep the local failure visible when the server event cannot land.
+        }
+      }
       await writeCommandState({
         ...(await readCommandState()),
         status: 'ERROR',
-        errorCode: errorCode(error, 'COMMAND_FAILED'),
+        errorCode: code,
         updatedAt: new Date().toISOString(),
       })
     }

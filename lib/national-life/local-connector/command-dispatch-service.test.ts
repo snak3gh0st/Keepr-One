@@ -156,6 +156,41 @@ describe('local connector command dispatch', () => {
     })).rejects.toThrow('COMMAND_NOT_FOUND')
   })
 
+  it('returns the sealed FlexLife quote request to the assigned device', async () => {
+    const illustration = {
+      id: 'illustration_quote_1',
+      caseId: null,
+      createdAt: now,
+      productName: 'FlexLife',
+      rawPayload: {
+        request: {
+          IssueState: 'FL', FirstName: 'KeeprOne', LastName: 'Test',
+          DateOfBirth: '08/26/1981', IssueAge: 45, Gender: 'Male', RateClass: 'Standard_NT',
+          SolveType: 'Specify_Amount', Amount: 250_000, DeathBenefitOption: 'A_Level',
+          Strategy: 'SP500PointToPointCapFocus', Allocation: 100, ProductCode: '956',
+          PremiumMode: 'Monthly',
+        },
+      },
+    }
+    const { buildFlexLifeQuoteSnapshot, flexLifeQuoteInputHash } = await import(
+      '../flexlife-quote-contract'
+    )
+    const snapshot = buildFlexLifeQuoteSnapshot(illustration)
+    const inputHash = flexLifeQuoteInputHash(snapshot)
+    const repo = repository(candidate({
+      capability: 'FLEXLIFE_QUOTE',
+      target: { kind: 'ILLUSTRATION', id: illustration.id },
+      params: { illustrationId: illustration.id, inputHash },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+    }))
+    const illustrationRepository = { findOwnedIllustration: vi.fn().mockResolvedValue(illustration) }
+
+    await expect(readDeviceConnectorCommandInput(repo, illustrationRepository, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
+    })).resolves.toEqual({ inputHash, snapshot })
+  })
+
   it('refuses an expired or cross-device candidate even if a repository returns it', async () => {
     const expired = repository(candidate({ expiresAt: new Date(now.getTime() - 1) }))
     await expect(claimNextConnectorCommand(expired, {
@@ -308,6 +343,46 @@ describe('local connector command dispatch', () => {
     })
     expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
       sequence: 2, type: 'DATA_BATCH', payload: { illustration: receipt },
+    }))
+  })
+
+  it('persists a carrier quote only after its sealed input hash matches', async () => {
+    const inputHash = 'd'.repeat(64)
+    const repo = repository(candidate({
+      capability: 'FLEXLIFE_QUOTE',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_quote_1' },
+      params: { illustrationId: 'illustration_quote_1', inputHash },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+      events: [{ sequence: 0 }, { sequence: 1 }],
+    }))
+    const rawResponse = {
+      Success: true,
+      FaceAmount: '$250,000.00',
+      AnnualPremium: '$4,200.00',
+      MonthlyPremium: '$350.00',
+      LapseYear: 0,
+    }
+    const event = {
+      protocolVersion: 1, eventId: 'event_quote_1', commandId: 'cmd_1', runId: 'run_1',
+      sequence: 2, type: 'DATA_BATCH', emittedAt: now.toISOString(),
+      payload: { flexLifeQuote: { inputHash, response: rawResponse } }, error: null,
+    }
+    const flexLifeQuoteRepository = { persistOwnedQuoteResult: vi.fn().mockResolvedValue(undefined) }
+
+    await recordDeviceConnectorCommandEvent(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', event, now,
+      flexLifeQuoteRepository,
+    })
+
+    expect(flexLifeQuoteRepository.persistOwnedQuoteResult).toHaveBeenCalledWith({
+      agentId: 'agent_1',
+      illustrationId: 'illustration_quote_1',
+      inputHash,
+      response: rawResponse,
+    })
+    expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      sequence: 2, type: 'DATA_BATCH',
     }))
   })
 

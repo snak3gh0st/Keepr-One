@@ -1,8 +1,17 @@
 "use server";
 
+import { randomUUID } from 'node:crypto'
+import { Prisma } from '@prisma/client'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { enqueueRapidSolveQuote } from '@/lib/national-life/job-service'
+import { prisma } from '@/lib/prisma'
 import {
+  approveConnectorCommand,
+  createPrismaConnectorCommandRepository,
+  issueConnectorCommand,
+} from '@/lib/national-life/connector-command-service'
+import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
+import {
+  buildRapidSolveRequest,
   DEATH_BENEFIT_OPTIONS,
   GENDERS,
   ISSUE_STATES,
@@ -11,15 +20,19 @@ import {
   RATE_CLASSES,
   SOLVE_TYPES,
   STRATEGIES,
-  toCarrierDate,
 } from '@/lib/national-life/rapid-solve'
+import {
+  buildFlexLifeQuoteSnapshot,
+  flexLifeQuoteInputHash,
+} from '@/lib/national-life/flexlife-quote-contract'
+import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
 
 function normalizeText(value: string | null | undefined): string {
   return (value ?? '').trim()
 }
 
 type RequestCarrierQuoteResult =
-  | { ok: true; jobId: string }
+  | { ok: true; jobId: string; commandId: string; illustrationId: string }
   | { ok: false; message: string }
 
 const SOLVE_TYPE_VALUES = new Set<string>(Object.values(SOLVE_TYPES))
@@ -31,9 +44,9 @@ const STRATEGY_VALUES = new Set<string>(Object.values(STRATEGIES))
 
 /// Asks National Life to price the illustration, instead of estimating it here.
 ///
-/// Returns a job id rather than a quote. The app reaches neither the carrier
-/// nor the browser that holds the agent's session — both live in the runtime —
-/// so the question is queued and the screen polls for the answer.
+/// Returns a durable command id rather than a quote. KeeproneConnect executes
+/// that exact approved request in the agent's authenticated National Life tab,
+/// and the screen polls the persisted carrier answer.
 ///
 /// The carrier's own fields are taken from the form rather than derived from
 /// the ones already there. A tobacco answer is not a rate class, and guessing
@@ -41,6 +54,9 @@ const STRATEGY_VALUES = new Set<string>(Object.values(STRATEGIES))
 export async function requestCarrierQuote(
   formData: FormData,
 ): Promise<RequestCarrierQuoteResult> {
+  if (!isNationalLifeLocalConnectorEnabled()) {
+    return { ok: false, message: 'Conecte o KeeproneConnect para cotar na National Life.' }
+  }
   const agent = await getCurrentAgent()
 
   const firstName = normalizeText(formData.get('firstName') as string | null)
@@ -81,8 +97,20 @@ export async function requestCarrierQuote(
   if (!SOLVE_TYPE_VALUES.has(solveType)) {
     return { ok: false, message: 'Escolha o que a seguradora deve calcular.' }
   }
+  if (solveType !== SOLVE_TYPES.SPECIFY_AMOUNT) {
+    return {
+      ok: false,
+      message: 'Por enquanto, informe o capital segurado para gerar a ilustração oficial.',
+    }
+  }
   if (!STRATEGY_VALUES.has(strategy)) {
     return { ok: false, message: 'Escolha a estratégia de índice.' }
+  }
+  if (strategy !== STRATEGIES.CAP_FOCUS) {
+    return {
+      ok: false,
+      message: 'Por enquanto, a ilustração oficial usa S&P 500 — foco em teto.',
+    }
   }
 
   // The same field carries face amount or premium depending on the solve type,
@@ -103,32 +131,67 @@ export async function requestCarrierQuote(
   }
 
   try {
-    const { jobId } = await enqueueRapidSolveQuote({
-      agentId: agent.id,
-      quote: {
-        issueState,
-        firstName,
-        lastName,
-        // The carrier's format, written once here so the queue never carries a
-        // date that has to be guessed at on the way out.
-        dateOfBirth: toCarrierDate(dateOfBirth),
-        gender,
-        rateClass,
-        solveType,
-        amount,
-        deathBenefitOption,
-        strategy,
-        // Not a choice: the request carries one strategy, and the carrier's
-        // script fills allocation with 100% the moment one is picked.
-        allocation: RAPID_SOLVE_ALLOCATION,
-        productCode: RAPID_SOLVE_PRODUCT_CODE,
-        // Present only when the agent quoted for someone already in the book.
-        // A prospect has none, which is the ordinary pre-sale case.
-        ...(clientId ? { clientId } : {}),
-      },
+    const request = buildRapidSolveRequest({
+      issueState,
+      firstName,
+      lastName,
+      dateOfBirth,
+      gender,
+      rateClass,
+      solveType: solveType as (typeof SOLVE_TYPES)[keyof typeof SOLVE_TYPES],
+      amount,
+      deathBenefitOption,
+      strategy,
+      allocation: RAPID_SOLVE_ALLOCATION,
+      productCode: RAPID_SOLVE_PRODUCT_CODE,
+    }, new Date())
+    const illustrationId = `ill_${randomUUID()}`
+    const rawPayload = { request } as Prisma.InputJsonValue
+    const issued = await prisma.$transaction(async (tx) => {
+      const repository = createPrismaConnectorCommandRepository(tx)
+      const created = await tx.illustration.create({
+        data: {
+          id: illustrationId,
+          agentId: agent.id,
+          clientId: clientId || null,
+          kind: 'PRELIMINARY',
+          productName: 'FlexLife',
+          provider: NATIONAL_LIFE_PROVIDER,
+          externalId: illustrationId,
+          faceAmount: solveType === SOLVE_TYPES.SPECIFY_AMOUNT ? amount : null,
+          insuredName: `${firstName} ${lastName}`,
+          insuredDateOfBirth: dateOfBirth,
+          rawPayload,
+        },
+        select: { id: true },
+      })
+      const inputHash = flexLifeQuoteInputHash(buildFlexLifeQuoteSnapshot({
+        id: created.id,
+        rawPayload,
+      }))
+      const command = await issueConnectorCommand(repository, {
+        agentId: agent.id,
+        capability: 'FLEXLIFE_QUOTE',
+        target: { kind: 'ILLUSTRATION', id: created.id },
+        params: { illustrationId: created.id, inputHash },
+        idempotencyKey: `flexlife-quote:${created.id}:${inputHash}`,
+        expiresAt: new Date(Date.now() + 60 * 60_000),
+      })
+      await approveConnectorCommand(repository, {
+        agentId: agent.id,
+        commandId: command.command.commandId,
+        payloadHash: command.payloadHash,
+        confirmedByUserId: agent.userId,
+      })
+      return { ...command, illustrationId: created.id }
     })
 
-    return { ok: true, jobId }
+    return {
+      ok: true,
+      jobId: issued.command.commandId,
+      commandId: issued.command.commandId,
+      illustrationId: issued.illustrationId,
+    }
   } catch {
     // The reason is either a validation detail already checked above or an
     // infrastructure fault. Neither is something to put in front of an agent.

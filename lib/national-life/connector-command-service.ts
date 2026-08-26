@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { createHash, randomUUID } from 'node:crypto'
-import { Prisma } from '@prisma/client'
+import { Prisma, type PrismaClient } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import {
   CONNECTOR_COMMAND_PROTOCOL_VERSION,
@@ -307,43 +307,51 @@ export function commandMayExecute(command: Pick<ConnectorCommand, 'capability' |
     (!command.requiresConfirmation || confirmationState === 'APPROVED')
 }
 
-export const prismaConnectorCommandRepository: ConnectorCommandRepository = {
+type ConnectorCommandPrisma = Pick<PrismaClient,
+  'nationalLifeConnectorCommand' |
+  'nationalLifeConnectorCommandConfirmation' |
+  'nationalLifeConnectorCommandEvent'>
+
+export function createPrismaConnectorCommandRepository(
+  db: ConnectorCommandPrisma,
+): ConnectorCommandRepository {
+  return {
   async findByAgentIdempotencyKey(input) {
-    return (await prisma.nationalLifeConnectorCommand.findUnique({
+    return (await db.nationalLifeConnectorCommand.findUnique({
       where: { agentId_idempotencyKey: input },
       include: { events: { select: { sequence: true }, orderBy: { sequence: 'asc' } } },
     })) as CommandRecord | null
   },
   async findById(input) {
-    return (await prisma.nationalLifeConnectorCommand.findFirst({
+    return (await db.nationalLifeConnectorCommand.findFirst({
       where: { id: input.commandId, agentId: input.agentId },
       include: { events: { select: { sequence: true }, orderBy: { sequence: 'asc' } } },
     })) as CommandRecord | null
   },
   async createCommand(input) {
     const { target, ...data } = input
-    return (await prisma.nationalLifeConnectorCommand.create({
+    return (await db.nationalLifeConnectorCommand.create({
       data: { ...data, target: target === null ? Prisma.JsonNull : target },
       include: { events: { select: { sequence: true } } },
     })) as unknown as CommandRecord
   },
   async updateCommand(input) {
-    await prisma.nationalLifeConnectorCommand.updateMany({
+    await db.nationalLifeConnectorCommand.updateMany({
       where: { id: input.commandId, agentId: input.agentId },
       data: input.patch,
     })
   },
   async createConfirmation(input) {
-    await prisma.nationalLifeConnectorCommandConfirmation.create({ data: input })
+    await db.nationalLifeConnectorCommandConfirmation.create({ data: input })
   },
   async approveConfirmation(input) {
-    await prisma.nationalLifeConnectorCommandConfirmation.updateMany({
+    await db.nationalLifeConnectorCommandConfirmation.updateMany({
       where: { commandId: input.commandId, payloadHash: input.payloadHash, state: 'PENDING' },
       data: { state: 'APPROVED', confirmedByUserId: input.confirmedByUserId, confirmedAt: input.now },
     })
   },
   async appendEvent(input) {
-    await prisma.nationalLifeConnectorCommandEvent.create({
+    await db.nationalLifeConnectorCommandEvent.create({
       data: {
         commandId: input.commandId,
         sequence: input.sequence,
@@ -354,4 +362,7 @@ export const prismaConnectorCommandRepository: ConnectorCommandRepository = {
       },
     })
   },
+  }
 }
+
+export const prismaConnectorCommandRepository = createPrismaConnectorCommandRepository(prisma)
