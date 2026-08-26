@@ -1056,17 +1056,40 @@ describe('background plan executor', () => {
     await flush()
 
     expect(tabs.sendMessage).not.toHaveBeenCalled()
-    expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED' })
+    expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED', authRenewalPending: true })
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs/run-1/auth-state',
+      body: { state: 'REQUIRED' },
+    }))
   })
 
   it('resumes the pending grid when login returns to the authenticated agent shell', async () => {
-    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'AUTH_REQUIRED' }
+    storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'AUTH_REQUIRED', authRenewalPending: true }
     tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}/agent/` }])
     await bootBackground()
 
     expect(tabs.create).not.toHaveBeenCalled()
     expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
     expect(readSync()).toMatchObject({ status: 'NAVIGATING', stageIndex: 0 })
+  })
+
+  it('resolves the Keepr One login warning after a verified carrier session returns', async () => {
+    storage.sync = {
+      runId: 'run-1',
+      carrierTabId: 7,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 0,
+      status: 'NAVIGATING',
+      authRenewalPending: true,
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs/run-1/auth-state',
+      body: { state: 'RESTORED' },
+    }))
+    expect(readSync()).toMatchObject({ status: 'EXTRACTING', authRenewalPending: false })
   })
 
   it('stops cleanly when the carrier tab is closed instead of reopening it', async () => {

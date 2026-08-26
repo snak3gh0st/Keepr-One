@@ -103,8 +103,12 @@ aba inativa da National Life. Não cria um segundo run enquanto outro está ativ
 
 O Chrome precisa estar aberto e o computador acordado. Se a sessão da National
 Life exigir login ou MFA, a aba é trazida para frente e o run aguarda o agente;
-nenhuma credencial é armazenada ou contornada. Fechar a aba vinculada ao
-conector continua sendo um cancelamento explícito e não é desfeito em silêncio.
+o Keepr One também cria um aviso no sino de notificações e o resolve quando a
+sessão volta. Nenhuma credencial, resposta de MFA, cookie ou sessão é armazenada
+pelo Keepr One. O `Remember this device`, quando o agente o escolher no portal,
+continua pertencendo exclusivamente à National Life e ao perfil do Chrome.
+Fechar a aba vinculada ao conector continua sendo um cancelamento explícito e
+não é desfeito em silêncio.
 
 ### PDFs de Correspondence sob demanda (extensão 0.1.21+)
 

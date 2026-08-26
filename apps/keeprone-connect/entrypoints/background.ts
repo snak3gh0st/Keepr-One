@@ -477,6 +477,55 @@ async function reportRunFailure(code: string) {
   }
 }
 
+async function reportRunAuthState(state: 'REQUIRED' | 'RESTORED') {
+  const device = await readDeviceState()
+  const sync = await readSyncState()
+  if (
+    device.status !== 'READY' ||
+    !device.deviceId ||
+    !device.baseUrl ||
+    !sync.runId ||
+    sync.runId.length > 128
+  ) {
+    return
+  }
+  try {
+    await signedJsonRequest({
+      baseUrl: device.baseUrl,
+      deviceId: device.deviceId,
+      method: 'POST',
+      pathname: `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(sync.runId)}/auth-state`,
+      body: { state },
+    })
+  } catch {
+    // The foreground carrier tab is the immediate hand-off. Keepr One's inbox
+    // is a durable second channel and must never block login or data capture.
+  }
+}
+
+async function requireCarrierAuthentication(
+  state: Awaited<ReturnType<typeof readSyncState>>,
+  tabId: number,
+  updateProperties?: chrome.tabs.UpdateProperties,
+) {
+  const firstNotice = !state.authRenewalPending
+  await writeSyncState({
+    ...state,
+    status: 'AUTH_REQUIRED',
+    errorCode: undefined,
+    authRenewalPending: true,
+  })
+  if (updateProperties) await updateTab(tabId, updateProperties)
+  if (firstNotice) await reportRunAuthState('REQUIRED')
+}
+
+async function resolveCarrierAuthenticationIfNeeded() {
+  const state = await readSyncState()
+  if (!state.authRenewalPending) return
+  await reportRunAuthState('RESTORED')
+  await writeSyncState({ ...(await readSyncState()), authRenewalPending: false })
+}
+
 /// Esquece o pareamento sem tocar no estado do sync. `unpairConnector` zera o
 /// sync para IDLE — correto quando o agente desconecta de propósito, errado aqui:
 /// o motivo da falha precisa sobreviver para a página poder explicá-lo.
@@ -743,12 +792,11 @@ async function navigatePendingGrid() {
         try {
           const existingUrl = new URL(existing.url)
           if (existingUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(existingUrl.pathname)) {
-            await writeSyncState({
-              ...(await readSyncState()),
-              status: 'AUTH_REQUIRED',
-              errorCode: undefined,
-            })
-            if (!existing.active) await updateTab(existing.id, { active: true })
+            await requireCarrierAuthentication(
+              await readSyncState(),
+              existing.id,
+              existing.active ? undefined : { active: true },
+            )
             return
           }
           const existingPath = `${existingUrl.pathname}${existingUrl.search}`
@@ -998,13 +1046,12 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
     return
   }
   if (url.origin === NLG_AUTH0_ORIGIN) {
-    await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
-    await updateTab(tabId, { active: true })
+    await requireCarrierAuthentication(state, tabId, { active: true })
     return
   }
   if (url.origin !== NLG_ORIGIN) return
   if (isAuthPath(url.pathname)) {
-    await writeSyncState({ ...state, status: 'AUTH_REQUIRED' })
+    await requireCarrierAuthentication(state, tabId)
     return
   }
   // The carrier may finish Auth0/MFA by redirecting to the authenticated agent
@@ -1032,10 +1079,13 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
       return
     }
     if (!(await hasAuthenticatedPortalSession(tabId))) {
-      await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
-      await updateTab(tabId, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+      await requireCarrierAuthentication(state, tabId, {
+        active: true,
+        url: `${NLG_ORIGIN}${LOGIN_PATH}`,
+      })
       return
     }
+    await resolveCarrierAuthenticationIfNeeded()
     if (!detail) {
       await beginCommissionDetailStage(tabId)
     } else {
@@ -1059,10 +1109,13 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
   // A redirect to Auth0 is then an explicit negative instead of a page-shape
   // guess, and no extraction begins until this succeeds.
   if (!(await hasAuthenticatedPortalSession(tabId))) {
-    await writeSyncState({ ...state, status: 'AUTH_REQUIRED', errorCode: undefined })
-    await updateTab(tabId, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+    await requireCarrierAuthentication(state, tabId, {
+      active: true,
+      url: `${NLG_ORIGIN}${LOGIN_PATH}`,
+    })
     return
   }
+  await resolveCarrierAuthenticationIfNeeded()
   await beginExtraction(tabId, stage)
 }
 
