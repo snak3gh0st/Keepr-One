@@ -37,6 +37,31 @@ export const FORESIGHT_FLEXLIFE_INCLUDED_RIDERS = [
   'ABRAlzheimersDisease',
 ] as const
 
+// Foresight, rather than Rapid Solve, is the carrier surface that creates the
+// official illustration. Keep its jurisdictions separate: Rapid Solve omits
+// New York, while Foresight presents it as a valid jurisdiction choice.
+export const FORESIGHT_ISSUE_STATES = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL',
+  'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME',
+  'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH',
+  'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI',
+  'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+] as const
+
+export type ForesightIllustrationDraftV1 = {
+  schemaVersion: 1
+  firstName: string
+  lastName: string
+  dateOfBirth: string
+  issueState: string
+  gender: 'Male' | 'Female'
+  rateClass: 'Standard_NT' | 'Standard_Tobacco'
+  faceAmount: number
+  monthlyPremium: number
+  deathBenefitOption: 'A_Level' | 'B_Increasing'
+  strategy: 'SP500PointToPointCapFocus'
+}
+
 type IllustrationSnapshotSource = {
   id: string
   caseId: string | null
@@ -96,11 +121,63 @@ function carrierCaseName(source: IllustrationSnapshotSource): string {
   return `KEEPRONE-${dateStamp(source.createdAt)}-${id}`
 }
 
+function parseForesightIllustrationDraft(value: unknown): ForesightIllustrationDraftV1 | null {
+  try {
+    const draft = record(value)
+    if (Object.keys(draft).sort().join(',') !==
+      'dateOfBirth,deathBenefitOption,faceAmount,firstName,gender,issueState,lastName,monthlyPremium,rateClass,schemaVersion,strategy' ||
+      draft.schemaVersion !== 1 || !text(draft.firstName, 80) || !text(draft.lastName, 80) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(String(draft.dateOfBirth)) ||
+      !isoDateFromCarrier(`${String(draft.dateOfBirth).slice(5, 7)}/${String(draft.dateOfBirth).slice(8, 10)}/${String(draft.dateOfBirth).slice(0, 4)}`) ||
+      !FORESIGHT_ISSUE_STATES.includes(draft.issueState as typeof FORESIGHT_ISSUE_STATES[number]) ||
+      !['Male', 'Female'].includes(String(draft.gender)) ||
+      !['Standard_NT', 'Standard_Tobacco'].includes(String(draft.rateClass)) ||
+      typeof draft.faceAmount !== 'number' || typeof draft.monthlyPremium !== 'number' ||
+      !Number.isFinite(draft.faceAmount) || !Number.isFinite(draft.monthlyPremium) ||
+      draft.faceAmount <= 0 || draft.faceAmount > 1_000_000_000 ||
+      draft.monthlyPremium <= 0 || draft.monthlyPremium > 100_000_000 ||
+      !['A_Level', 'B_Increasing'].includes(String(draft.deathBenefitOption)) ||
+      draft.strategy !== 'SP500PointToPointCapFocus') return null
+    return draft as ForesightIllustrationDraftV1
+  } catch {
+    return null
+  }
+}
+
+function snapshotFromForesightDraft(
+  source: IllustrationSnapshotSource,
+  draft: ForesightIllustrationDraftV1,
+): ForesightIllustrationExecutionSnapshot {
+  return {
+    schemaVersion: 1,
+    illustrationId: source.id,
+    caseId: source.caseId,
+    carrierCaseName: carrierCaseName(source),
+    insured: {
+      firstName: draft.firstName,
+      lastName: draft.lastName,
+      dateOfBirth: draft.dateOfBirth,
+      issueState: draft.issueState,
+    },
+    product: { name: 'FlexLife', code: '956' },
+    solve: { method: 'Specify_Amount', amount: draft.faceAmount },
+    faceAmount: draft.faceAmount,
+    premium: { mode: 'Monthly', amount: draft.monthlyPremium },
+    underwriting: { gender: draft.gender, rateClass: draft.rateClass },
+    deathBenefitOption: draft.deathBenefitOption,
+    allocations: [{ strategy: draft.strategy, percentage: 100 }],
+    riders: [...FORESIGHT_FLEXLIFE_INCLUDED_RIDERS],
+    reports: ['NAIC_ILLUSTRATION'],
+  }
+}
+
 export function buildForesightIllustrationSnapshot(
   source: IllustrationSnapshotSource,
 ): ForesightIllustrationExecutionSnapshot {
   if (!source.id || source.productName !== 'FlexLife') throw new Error('INVALID_FORESIGHT_INPUT')
   const payload = record(source.rawPayload)
+  const directDraft = parseForesightIllustrationDraft(payload.foresightDraft)
+  if (directDraft) return snapshotFromForesightDraft(source, directDraft)
   const request = record(payload.request)
   const response = record(payload.response)
   if (request.ProductCode !== '956' || request.Allocation !== 100) {

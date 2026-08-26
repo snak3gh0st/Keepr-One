@@ -19,7 +19,7 @@ export default async function NewIllustrationPage() {
       <PageHeader
         title="Nova ilustração"
         eyebrow="Carteira"
-        description="Cote FlexLife direto na National Life, com os números da própria seguradora."
+        description="Gere a ilustração oficial FlexLife no Foresight da National Life."
       >
         <Link
           href="/agent/illustrations"
@@ -37,29 +37,28 @@ export default async function NewIllustrationPage() {
         </div>
         <ContextPanel eyebrow="Dica rápida" title="O que enviar">
           <p>
-            A seguradora precisa do nome, da data de nascimento, do estado de emissão, do sexo,
-            da classe de risco, da opção de benefício por morte e da estratégia de índice.
-            A idade ela mesma calcula.
+            Informe os dados do segurado, o capital e o prêmio mensal. O KeeproneConnect cria
+            o caso FlexLife no Foresight, confere o que foi gravado e devolve o PDF oficial.
           </p>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Classe de risco</p>
             <p className="mt-2 text-sm text-ink-muted">
-              A National Life tem duas: Standard não-tabagista e Standard tabagista. Não existe classe
-              para ex-fumante — onde ele entra é decisão de subscrição sua.
+              Escolha Standard não-tabagista ou Standard tabagista. A classificação é uma decisão
+              de subscrição do agente, não uma inferência do KeeprOne.
             </p>
           </div>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Cobertura</p>
             <p className="mt-2 text-sm text-ink-muted">
-              Esta cotação é FlexLife. Term não entra neste fluxo, e Nova York não está entre
-              os estados de emissão.
+              Este fluxo é FlexLife no Foresight. O produto é selecionado e validado pela própria
+              tela da National Life antes de qualquer dado ser gravado.
             </p>
           </div>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Integração</p>
             <p className="mt-2 text-sm text-ink-muted">
-              A cotação é enviada à National Life e a resposta volta na tela. Se a seguradora
-              recusar, o motivo aparece com as palavras dela.
+              A geração acontece na sessão autenticada da National Life. Se a sessão expirar,
+              o KeeprOne pede login e retoma o comando aprovado.
             </p>
           </div>
         </ContextPanel>

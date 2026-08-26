@@ -46,7 +46,7 @@ vi.mock('../IllustrationPdfButton', () => ({
   IllustrationPdfButton: () => <button>Gerar PDF</button>,
 }))
 
-import QuoteSummaryPage from './page'
+import IllustrationDetailPage from './page'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -60,7 +60,7 @@ beforeEach(() => {
   })
 })
 
-describe('Quote summary page', () => {
+describe('Illustration detail page', () => {
   // Scoped in the query, not checked after it: an id that belongs to another
   // agent has to come back exactly like an id that never existed, so the
   // list of illustrations one agent can see never leaks into another's URL
@@ -69,7 +69,7 @@ describe('Quote summary page', () => {
     mocks.findFirstIllustration.mockResolvedValue(null)
 
     await expect(
-      QuoteSummaryPage({ params: Promise.resolve({ id: 'someone-elses-id' }) }),
+      IllustrationDetailPage({ params: Promise.resolve({ id: 'someone-elses-id' }) }),
     ).rejects.toThrow('NEXT_NOT_FOUND')
 
     expect(mocks.findFirstIllustration).toHaveBeenCalledWith(
@@ -78,33 +78,24 @@ describe('Quote summary page', () => {
     expect(mocks.notFound).toHaveBeenCalledTimes(1)
   })
 
-  // The page's whole promise is that a value either came from the carrier or
-  // renders as "—" — never as a zero, and never as a fact the carrier never
-  // stated. A payload with no response fields at all is the sharpest version
-  // of "carrier said nothing here": every carrier-sourced Fact must fall back
-  // to the dash, including Lapse, which is the field most at risk of reading
-  // a "not known" as a definite claim (see the LapseYear ripple in
-  // rapid-solve.ts and quote-summary.ts).
-  it('renders "—" for an absent field instead of a zero or a fabricated claim', async () => {
+  it('labels the premium as agent input until the official PDF exists', async () => {
     mocks.findFirstIllustration.mockResolvedValue({
       id: 'illustration-1',
       createdAt: new Date('2026-07-28T12:00:00.000Z'),
       insuredName: 'Cliente Teste',
       insuredDateOfBirth: null,
-      productName: null,
+      productName: 'FlexLife',
+      faceAmount: 250000,
+      targetPremium: 350,
+      targetPremiumSource: 'AGENT_INPUT_FOR_FORESIGHT',
       documentFetchedAt: null,
-      rawPayload: { request: {}, response: {} },
+      documentMimeType: null,
     })
 
-    render(await QuoteSummaryPage({ params: Promise.resolve({ id: 'illustration-1' }) }))
+    render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-1' }) }))
 
-    const capitalDd = screen.getByText('Capital segurado').nextElementSibling
-    expect(capitalDd?.textContent).toBe('—')
-    expect(capitalDd?.textContent).not.toBe('$0')
-
-    const lapseDd = screen.getByText('Lapse').nextElementSibling
-    expect(lapseDd?.textContent).toBe('—')
-    expect(lapseDd?.textContent).not.toBe('Não lapsa')
-    expect(lapseDd?.textContent).not.toBe('Ano 0')
+    expect(screen.getByText('Prêmio mensal informado')).toBeTruthy()
+    expect(screen.getByText('Informado pelo agente para a ilustração')).toBeTruthy()
+    expect(screen.queryByText('O que a seguradora respondeu')).toBeNull()
   })
 })

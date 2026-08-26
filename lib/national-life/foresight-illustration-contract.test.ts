@@ -30,6 +30,34 @@ const input = {
 }
 
 describe('server-owned Foresight illustration snapshot', () => {
+  it('builds the official request from explicit Foresight inputs, not a Rapid Solve response', () => {
+    const snapshot = buildForesightIllustrationSnapshot({
+      ...input,
+      rawPayload: {
+        foresightDraft: {
+          schemaVersion: 1,
+          firstName: 'KeeprOne',
+          lastName: 'Test',
+          dateOfBirth: '1990-01-01',
+          issueState: 'NY',
+          gender: 'Male',
+          rateClass: 'Standard_NT',
+          faceAmount: 100_000,
+          monthlyPremium: 250,
+          deathBenefitOption: 'A_Level',
+          strategy: 'SP500PointToPointCapFocus',
+        },
+      },
+    })
+
+    expect(snapshot).toMatchObject({
+      insured: { dateOfBirth: '1990-01-01', issueState: 'NY' },
+      solve: { method: 'Specify_Amount', amount: 100_000 },
+      faceAmount: 100_000,
+      premium: { mode: 'Monthly', amount: 250 },
+    })
+  })
+
   it('builds a versioned immutable FlexLife snapshot without an InsuranceCase', () => {
     expect(buildForesightIllustrationSnapshot(input)).toEqual({
       schemaVersion: 1,
@@ -97,6 +125,16 @@ describe('server-owned Foresight illustration snapshot', () => {
     { ...input, rawPayload: { request: { ...input.rawPayload.request, ProductCode: '999' } } },
     { ...input, rawPayload: { request: { ...input.rawPayload.request, Allocation: 99 } } },
     { ...input, rawPayload: { request: { ...input.rawPayload.request, FirstName: '' } } },
+    {
+      ...input,
+      rawPayload: {
+        foresightDraft: {
+          schemaVersion: 1, firstName: 'KeeprOne', lastName: 'Test', dateOfBirth: '1990-01-01',
+          issueState: 'FL', gender: 'Male', rateClass: 'Standard_NT', faceAmount: 100_000,
+          monthlyPremium: 0, deathBenefitOption: 'A_Level', strategy: 'SP500PointToPointCapFocus',
+        },
+      },
+    },
   ])('fails closed when the reviewed source is incomplete or unsupported', (candidate) => {
     expect(() => buildForesightIllustrationSnapshot(candidate)).toThrow('INVALID_FORESIGHT_INPUT')
   })

@@ -4,12 +4,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
-import { carrierLabel } from '@/lib/national-life/rapid-solve-labels'
-import { QUOTE_DISCLAIMER } from '@/lib/national-life/quote-disclaimer'
 import { formatCarrierInstant } from '@/lib/national-life/carrier-instant'
 import { flexLifeProductLabel } from '@/lib/national-life/flex-life'
-import type { LapseYear } from '@/lib/national-life/rapid-solve'
 import { IllustrationPdfButton } from '../IllustrationPdfButton'
 import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
 import { getIllustrationCommandStatuses } from '@/lib/national-life/illustration-command-status'
@@ -19,19 +15,12 @@ import { PageHeader } from '@/components/PageHeader'
 
 const currency = (value: number) =>
   new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
+    style: 'currency', currency: 'USD', maximumFractionDigits: 0,
   }).format(value)
 
-// insuredDateOfBirth is a UTC-midnight calendar date, not an instant — see
-// the comment on formatCarrierInstant for why it keeps its own UTC-pinned
-// formatter instead of that shared one.
 const day = (value: Date) =>
   new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeZone: 'UTC' }).format(value)
 
-/// Nothing here is computed. Every value either came from the carrier or is
-/// absent, and absent renders as an em dash rather than as a zero.
 function Fact({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="border-t border-white/10 py-3">
@@ -41,50 +30,30 @@ function Fact({ label, value }: { label: string; value: string | null }) {
   )
 }
 
-/// 'NEVER' is the carrier's confirmed answer ("this policy does not lapse"),
-/// a real fact and distinct from null, which means the carrier said nothing
-/// parseable. Only 'NEVER' may read as "Não lapsa" — null must fall through
-/// to Fact's own "—", never to this string.
-function lapseLabel(value: LapseYear): string | null {
-  if (value === 'NEVER') return 'Não lapsa'
-  if (value === null) return null
-  return `Ano ${value}`
-}
-
-export default async function QuoteSummaryPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function IllustrationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const agent = await getCurrentAgent()
   const localConnector = getNationalLifeLocalConnectorConfig()
   const user = await prisma.user.findUnique({
-    where: { id: agent.userId },
-    select: { name: true },
+    where: { id: agent.userId }, select: { name: true },
   })
-
-  // Scoped in the query, not checked after it: a quote names an insured and a
-  // premium, and someone else's id must be indistinguishable from a missing one.
   const illustration = await prisma.illustration.findFirst({
     where: { id, agentId: agent.id },
     select: {
-      id: true,
-      createdAt: true,
-      insuredName: true,
-      insuredDateOfBirth: true,
-      productName: true,
-      documentFetchedAt: true,
-      rawPayload: true,
+      id: true, createdAt: true, insuredName: true, insuredDateOfBirth: true,
+      productName: true, faceAmount: true, targetPremium: true, targetPremiumSource: true,
+      documentFetchedAt: true, documentMimeType: true,
     },
   })
   if (!illustration) notFound()
   const commandStatus = (await getIllustrationCommandStatuses(agent.id)).get(illustration.id)
 
-  const facts = summarizeQuotePayload(illustration.rawPayload)
-
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <PageHeader
-        title="Resumo da cotação"
+        title="Ilustração FlexLife"
         eyebrow="Carteira"
-        description="Os números que a seguradora devolveu, do jeito que ela devolveu."
+        description="Pedido oficial preparado para o Foresight da National Life."
       >
         <Link
           href="/agent/illustrations"
@@ -93,12 +62,6 @@ export default async function QuoteSummaryPage({ params }: { params: Promise<{ i
           Voltar
         </Link>
       </PageHeader>
-
-      {facts.ok === false && (
-        <p className="mb-6 border border-gold/30 px-4 py-3 text-sm text-gold">
-          A seguradora não cotou este pedido. Não há capital nem prêmio para mostrar.
-        </p>
-      )}
 
       <div className="grid gap-8 md:grid-cols-2">
         <section>
@@ -109,86 +72,43 @@ export default async function QuoteSummaryPage({ params }: { params: Promise<{ i
               label="Nascimento"
               value={illustration.insuredDateOfBirth ? day(illustration.insuredDateOfBirth) : null}
             />
-            {/* ANB, not current age: the two differ for half the year, and an
-                agent who confuses them misprices the conversation. */}
-            <Fact
-              label="Issue age (ANB)"
-              value={facts.issueAge !== null ? String(facts.issueAge) : null}
-            />
-            <Fact label="Sexo" value={facts.gender} />
-            <Fact label="Estado de emissão" value={facts.issueState} />
-            <Fact label="Rate class" value={carrierLabel('rateClass', facts.rateClass)} />
           </dl>
         </section>
-
         <section>
-          <h2 className="text-sm font-semibold text-paper">O que foi pedido</h2>
+          <h2 className="text-sm font-semibold text-paper">Instruções enviadas ao Foresight</h2>
           <dl>
-            <Fact label="Solve type" value={carrierLabel('solveType', facts.solveType)} />
-            <Fact
-              label="Death benefit option"
-              value={carrierLabel('deathBenefitOption', facts.deathBenefitOption)}
-            />
-            <Fact label="Strategy" value={carrierLabel('strategy', facts.strategy)} />
-            <Fact
-              label="Allocation"
-              value={facts.allocation !== null ? `${facts.allocation}%` : null}
-            />
-            <Fact label="Premium mode" value={facts.premiumMode} />
-            {/* FlexLife is the product this quote surface sells. The carrier may
-                still store a numeric code in the payload; the label maps the
-                known FlexLife code and leaves any other code untouched. */}
-            <Fact
-              label="Produto"
-              value={flexLifeProductLabel(facts.productCode ?? illustration.productName)}
-            />
-            <Fact label="Product code" value={facts.productCode} />
-          </dl>
-        </section>
-
-        <section className="md:col-span-2">
-          <h2 className="text-sm font-semibold text-paper">O que a seguradora respondeu</h2>
-          <dl className="grid gap-x-8 sm:grid-cols-2 lg:grid-cols-4">
+            <Fact label="Produto" value={flexLifeProductLabel(illustration.productName)} />
             <Fact
               label="Capital segurado"
-              value={facts.faceAmount !== null ? currency(facts.faceAmount) : null}
+              value={illustration.faceAmount ? currency(Number(illustration.faceAmount)) : null}
             />
             <Fact
-              label="Prêmio mensal"
-              value={facts.monthlyPremium !== null ? currency(facts.monthlyPremium) : null}
+              label="Prêmio mensal informado"
+              value={illustration.targetPremium ? currency(Number(illustration.targetPremium)) : null}
             />
             <Fact
-              label="Prêmio anual"
-              value={facts.annualPremium !== null ? currency(facts.annualPremium) : null}
+              label="Origem do prêmio"
+              value={illustration.targetPremiumSource === 'AGENT_INPUT_FOR_FORESIGHT'
+                ? 'Informado pelo agente para a ilustração' : null}
             />
-            {/* 'NEVER' is the carrier's confirmed "does not lapse"; null is
-                "not known" and renders as Fact's own "—", never as either
-                of those two. */}
-            <Fact label="Lapse" value={lapseLabel(facts.lapseYear)} />
           </dl>
         </section>
       </div>
 
       <section className="mt-10 border-t border-white/10 pt-6 text-sm text-ink-muted">
-        {/* Same shared condition as app/agent/illustrations/page.tsx — this page
-            shows the same carrier numbers, larger and alone, so it carries the
-            same condition word for word. One string, read from
-            lib/national-life/quote-disclaimer.ts, so the two screens cannot
-            drift apart. */}
         <p>
-          Números fornecidos por National Life (FlexLife) em{' '}
-          {formatCarrierInstant(illustration.createdAt)}.{' '}
-          {QUOTE_DISCLAIMER} O documento oficial é a ilustração em PDF da seguradora.
+          Pedido criado em {formatCarrierInstant(illustration.createdAt)}. O PDF é disponibilizado
+          somente depois que o Foresight salva o caso e a extensão confirma a integridade do arquivo.
         </p>
         <div className="mt-3">
-          {illustration.documentFetchedAt ? (
+          {illustration.documentFetchedAt && illustration.documentMimeType === 'application/pdf' ? (
             <a
               href={`/api/illustrations/${illustration.id}/document`}
               target="_blank"
               rel="noreferrer"
               className="text-teal hover:text-teal-deep"
             >
-              Abrir PDF da seguradora
+              Abrir PDF oficial da National Life
             </a>
           ) : (
             <IllustrationPdfButton
@@ -199,9 +119,7 @@ export default async function QuoteSummaryPage({ params }: { params: Promise<{ i
             />
           )}
           {!illustration.documentFetchedAt && commandStatus && (
-            <p className="mt-1 text-xs text-ink-muted">
-              {illustrationPdfMessage(commandStatus)}
-            </p>
+            <p className="mt-1 text-xs text-ink-muted">{illustrationPdfMessage(commandStatus)}</p>
           )}
         </div>
       </section>
