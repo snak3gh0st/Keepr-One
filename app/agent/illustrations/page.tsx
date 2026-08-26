@@ -3,10 +3,8 @@ export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
 import { getIllustrationCommandStatuses } from '@/lib/national-life/illustration-command-status'
 import { illustrationPdfMessage } from '@/lib/national-life/illustration-pdf-status'
-import { QUOTE_DISCLAIMER } from '@/lib/national-life/quote-disclaimer'
 import { formatCarrierInstant } from '@/lib/national-life/carrier-instant'
 import { IllustrationPdfButton } from './IllustrationPdfButton'
 import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
@@ -37,13 +35,10 @@ export default async function IllustrationsPage() {
         createdAt: true,
         insuredName: true,
         faceAmount: true,
-        premium: true,
+        targetPremium: true,
+        targetPremiumSource: true,
         productName: true,
         documentFetchedAt: true,
-        // Both sides of the carrier exchange were persisted; the question is what
-        // makes the answer mean anything. Two quotes at the same face amount are
-        // different quotes if the insured is not the same age or rate class.
-        rawPayload: true,
         client: { select: { id: true, name: true } },
       },
     }),
@@ -56,7 +51,7 @@ export default async function IllustrationsPage() {
       <PageHeader
         title="Ilustrações"
         eyebrow="Pré-venda"
-        description="Simule coberturas, compare prêmio e recupere cada documento sem perder o histórico do segurado."
+        description="Crie o cenário FlexLife, acompanhe o Foresight em segundo plano e guarde o PDF oficial no histórico do segurado."
       >
         <Link
           href="/agent/illustrations/new"
@@ -75,28 +70,14 @@ export default async function IllustrationsPage() {
               <Th>Cliente</Th>
               <Th>Produto</Th>
               <Th className="text-right">Capital segurado</Th>
-              <Th className="text-right">Prêmio mensal</Th>
+              <Th className="text-right">Prêmio mensal informado</Th>
               <Th>Documento</Th>
             </tr>
           </Thead>
           <tbody>
             {illustrations.map((illustration) => {
-              const quote = summarizeQuotePayload(illustration.rawPayload)
-              // Age, state and rate class in one line under the name: it is the
-              // question the carrier answered, and without it the premium below
-              // is a number with no meaning attached.
-              const asked = [
-                quote.issueAge === null ? null : `${quote.issueAge} anos`,
-                quote.gender,
-                quote.issueState,
-                quote.rateClass,
-              ].filter(Boolean)
-
               return (
               <Tr key={illustration.id}>
-                {/* createdAt is an instant, formatted the same way as on
-                    app/agent/illustrations/[id]/page.tsx — see
-                    formatCarrierInstant for why it is not UTC-pinned. */}
                 <Td>{formatCarrierInstant(illustration.createdAt)}</Td>
                 <Td>
                   <Link
@@ -105,11 +86,7 @@ export default async function IllustrationsPage() {
                   >
                     {illustration.insuredName ?? '—'}
                   </Link>
-                  {asked.length > 0 && (
-                    <span className="mt-0.5 block text-xs text-ink-muted">
-                      {asked.join(' · ')}
-                    </span>
-                  )}
+                  <span className="mt-0.5 block text-xs text-ink-muted">Foresight · FlexLife</span>
                 </Td>
                 <Td>
                   {illustration.client ? (
@@ -120,31 +97,20 @@ export default async function IllustrationsPage() {
                       {illustration.client.name}
                     </Link>
                   ) : (
-                    // Not a gap: a pre-sale quote is for someone who is not in
-                    // the book yet, which is the ordinary case.
                     <span className="text-ink-muted">Prospect</span>
                   )}
                 </Td>
                 <Td>
                   <span className="block">{illustration.productName ?? '—'}</span>
-                  {quote.strategy && (
-                    <span className="mt-0.5 block text-xs text-ink-muted">{quote.strategy}</span>
-                  )}
+                  <span className="mt-0.5 block text-xs text-ink-muted">S&P 500 · foco em teto</span>
                 </Td>
                 <TdNum>
                   {illustration.faceAmount ? currency(Number(illustration.faceAmount)) : '—'}
                 </TdNum>
                 <TdNum>
-                  <span className="block">
-                    {illustration.premium ? currency(Number(illustration.premium)) : '—'}
-                  </span>
-                  {/* The carrier returns both, and an agent quotes whichever the
-                      client asks for. Storing one and dropping the other made
-                      the annual figure a second round trip for no reason. */}
-                  {quote.annualPremium !== null && (
-                    <span className="mt-0.5 block text-xs font-normal text-ink-muted">
-                      {currency(quote.annualPremium)} /ano
-                    </span>
+                  {illustration.targetPremium ? currency(Number(illustration.targetPremium)) : '—'}
+                  {illustration.targetPremiumSource === 'AGENT_INPUT_FOR_FORESIGHT' && (
+                    <span className="mt-0.5 block text-xs font-normal text-ink-muted">para a ilustração</span>
                   )}
                 </TdNum>
                 <Td>
@@ -187,15 +153,7 @@ export default async function IllustrationsPage() {
         </Table>
 
         {illustrations.length === 0 && (
-          <EmptyState>Nenhuma cotação pedida ainda.</EmptyState>
-        )}
-
-        {illustrations.length > 0 && (
-          // The carrier's condition travels with the number, so it appears
-          // wherever the number does.
-          <p className="mt-4 border-l-2 border-border-steel pl-3 text-xs leading-5 text-ink-muted">
-            {QUOTE_DISCLAIMER}
-          </p>
+            <EmptyState>Nenhuma ilustração oficial pedida ainda.</EmptyState>
         )}
       </section>
     </Shell>
