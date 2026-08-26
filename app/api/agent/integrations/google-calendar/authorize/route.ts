@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'GOOGLE_CALENDAR_NOT_CONFIGURED' }, { status: 503 })
   }
   try {
-    const user = await requireCalendarUser()
+    const user = await requireCalendarUser({ allowOnboarding: true })
     const returnTo = safeCalendarReturnTo(new URL(request.url).searchParams.get('returnTo'))
     const env = getGoogleCalendarEnv()
     const transaction = await createGoogleOAuthState(

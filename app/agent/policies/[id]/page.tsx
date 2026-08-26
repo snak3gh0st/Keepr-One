@@ -5,7 +5,7 @@ import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/require-role'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getDownlineIds } from '@/lib/hierarchy'
+import { getAgentScopeIds } from '@/lib/agent-access'
 import { canAccessPolicy } from '@/lib/policy-access'
 import { AnnualReviewCard } from './AnnualReviewCard'
 import { NationalLifeDocumentButton } from './NationalLifeDocumentButton'
@@ -45,13 +45,17 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   if (!policy) notFound()
 
   let allowed = session.user.role === 'ADMIN'
+  let agentScopeIds: string[] | null = null
   if (session.user.role === 'AGENT') {
     const agent = await getCurrentAgent()
-    const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
-    const scopeIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
-    allowed = canAccessPolicy({ role: 'AGENT', agentScopeIds: scopeIds }, policy)
+    agentScopeIds = await getAgentScopeIds(agent.id)
+    allowed = canAccessPolicy({ role: 'AGENT', agentScopeIds }, policy)
   }
   if (!allowed) notFound()
+
+  const visibleCommissionRecords = agentScopeIds
+    ? policy.commissionRecords.filter((record) => agentScopeIds.includes(record.agentId))
+    : policy.commissionRecords
 
   // The carrier's own commission transactions and documents for this policy.
   // CommissionRecord requires a local policyId and covers fewer than half the
@@ -123,6 +127,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     ])
 
     carrierCommissions = toCarrierCommissionRecords(commissionRows)
+      .filter((record) => record.type === 'DIRECT')
       .map((record) => ({
         id: record.id,
         agentName: record.writingAgentName || '—',
@@ -297,7 +302,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               </tr>
             </Thead>
             <tbody>
-              {policy.commissionRecords.map((record, i) => (
+              {visibleCommissionRecords.map((record, i) => (
                 <Tr key={record.id} index={i}>
                   <Td>{record.agent.user.name}</Td>
                   <Td>{record.type === 'DIRECT' ? 'Direta' : 'Repasse da equipe'}</Td>
@@ -307,7 +312,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                 </Tr>
               ))}
               {carrierCommissions.map((record, i) => (
-                <Tr key={record.id} index={policy.commissionRecords.length + i}>
+                <Tr key={record.id} index={visibleCommissionRecords.length + i}>
                   <Td>{record.agentName}</Td>
                   <Td>{record.typeLabel}</Td>
                   <Td className="text-ink-muted">{record.level}</Td>
@@ -317,7 +322,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               ))}
             </tbody>
           </Table>
-          {policy.commissionRecords.length === 0 && carrierCommissions.length === 0 && (
+          {visibleCommissionRecords.length === 0 && carrierCommissions.length === 0 && (
             <EmptyState>Nenhuma comissão registrada ainda.</EmptyState>
           )}
 

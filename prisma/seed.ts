@@ -1,6 +1,12 @@
 import { PrismaClient } from '@prisma/client'
-import { auth } from '../lib/auth'
+import { randomUUID } from 'node:crypto'
+import { hashPassword } from 'better-auth/crypto'
 import { computeOverrides } from '../lib/commission'
+import {
+  AGENCY_MONTHLY_PRICE_CENTS,
+  INDIVIDUAL_AGENT_MONTHLY_PRICE_CENTS,
+  INVITED_AGENT_MONTHLY_PRICE_CENTS,
+} from '../lib/plans'
 
 const prisma = new PrismaClient()
 
@@ -9,26 +15,28 @@ const prisma = new PrismaClient()
 const SEED_PASSWORD = process.env.SEED_PASSWORD ?? 'password123'
 
 /**
- * Better Auth's emailAndPassword auth needs a matching `account` row with a
- * password hashed in Better Auth's own scheme (scrypt-based), not just a
- * `user` row. Raw `prisma.user.create()` alone produces a user nobody can
- * sign in as. The robust fix is to create users through Better Auth's own
- * sign-up API (`auth.api.signUpEmail`) so the account/password hash is
- * guaranteed to be in the format `signIn.email` expects — then patch the
- * `role` with a follow-up `prisma.user.update`, since `role` is only
- * reliably settable this way for a seed script that needs ADMIN/AGENT/CLIENT
- * distributed across specific users (the additionalFields default is
- * 'AGENT' for anyone signing up through the app UI).
+ * Better Auth's email/password login needs a matching credential Account with
+ * a password in its own scrypt format. The public generic signup endpoint is
+ * intentionally disabled, so the seed provisions this pair directly.
  */
 async function createUser(email: string, name: string, role: 'ADMIN' | 'AGENT' | 'CLIENT') {
-  const result = await auth.api.signUpEmail({
-    body: { email, name, password: SEED_PASSWORD, role },
+  const password = await hashPassword(SEED_PASSWORD)
+
+  return prisma.$transaction(async (transaction) => {
+    const user = await transaction.user.create({
+      data: { email, name, role },
+    })
+    await transaction.account.create({
+      data: {
+        id: randomUUID(),
+        accountId: user.id,
+        providerId: 'credential',
+        userId: user.id,
+        password,
+      },
+    })
+    return user
   })
-  const user = await prisma.user.update({
-    where: { id: result.user.id },
-    data: { role },
-  })
-  return user
 }
 
 async function main() {
@@ -37,7 +45,16 @@ async function main() {
 
   const topUser = await createUser('top@ricos.test', 'Agente Topo', 'AGENT')
   const top = await prisma.agent.create({
-    data: { userId: topUser.id, rank: 'DIRECTOR', npn: '1000001', status: 'ACTIVE' },
+    data: {
+      userId: topUser.id,
+      rank: 'DIRECTOR',
+      npn: '1000001',
+      phone: '+15550000001',
+      status: 'ACTIVE',
+      // Kept while the legacy promotion writer is migrated; portal access is
+      // authorized by the platform subscription created below.
+      promotionAccessScope: 'AGENCY',
+    },
   })
 
   const midUser = await createUser('mid@ricos.test', 'Agente Meio', 'AGENT')
@@ -47,6 +64,7 @@ async function main() {
       parentAgentId: top.id,
       rank: 'MANAGER',
       npn: '1000002',
+      phone: '+15550000002',
       status: 'ACTIVE',
     },
   })
@@ -58,8 +76,54 @@ async function main() {
       parentAgentId: mid.id,
       rank: 'AGENT',
       npn: '1000003',
+      phone: '+15550000003',
       status: 'ACTIVE',
     },
+  })
+
+  // Demo all three commercial access contexts without treating hierarchy as
+  // an entitlement: top owns the agency, mid is an invited subscriber, and
+  // leaf remains on the independent agent plan despite being in the tree.
+  const agency = await prisma.agency.create({
+    data: { name: 'Agência RICOS Demo' },
+  })
+  await prisma.agencyMembership.create({
+    data: {
+      agencyId: agency.id,
+      agentId: top.id,
+      role: 'OWNER',
+    },
+  })
+  const invitedMembership = await prisma.agencyMembership.create({
+    data: {
+      agencyId: agency.id,
+      agentId: mid.id,
+      role: 'MEMBER',
+      invitedByAgentId: top.id,
+    },
+  })
+
+  await prisma.platformSubscription.createMany({
+    data: [
+      {
+        plan: 'AGENCY',
+        status: 'ACTIVE',
+        agencyId: agency.id,
+        unitAmountCents: AGENCY_MONTHLY_PRICE_CENTS,
+      },
+      {
+        plan: 'AGENT_AGENCY_MEMBER',
+        status: 'ACTIVE',
+        agencyMembershipId: invitedMembership.id,
+        unitAmountCents: INVITED_AGENT_MONTHLY_PRICE_CENTS,
+      },
+      {
+        plan: 'AGENT_INDIVIDUAL',
+        status: 'ACTIVE',
+        agentId: leaf.id,
+        unitAmountCents: INDIVIDUAL_AGENT_MONTHLY_PRICE_CENTS,
+      },
+    ],
   })
 
   await prisma.commissionPlan.createMany({

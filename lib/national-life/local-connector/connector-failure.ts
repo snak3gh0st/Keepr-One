@@ -16,6 +16,7 @@ export type ConnectorFailureAction =
   | 'update'
   | 'retry'
   | 'paused'
+  | 'subscription'
   | 'disconnect'
   | 'support'
 
@@ -54,6 +55,8 @@ export const OUTDATED_CODES: readonly string[] = [
 export const PAUSED_CODES: readonly string[] = ['CONNECTOR_PAUSED']
 
 export const RATE_LIMIT_CODES: readonly string[] = ['RUN_START_RATE_LIMITED']
+
+export const SUBSCRIPTION_CODES: readonly string[] = ['FOUNDER_ACCESS_REQUIRED']
 
 export const RECONCILIATION_CODES: readonly string[] = [
   'STAGE_INCOMPLETE',
@@ -132,6 +135,14 @@ export function connectorFailure(code: string | null | undefined): ConnectorFail
       actionLabel: 'Try again in a few minutes',
       message:
         'Too many sync attempts were started in a short period. Your connection is still intact — wait a few minutes, then start the sync once.',
+    }
+  }
+  if (typeof code === 'string' && SUBSCRIPTION_CODES.includes(code)) {
+    return {
+      action: 'subscription',
+      actionLabel: 'Check subscription',
+      message:
+        'Your Keepr One access needs an active subscription. Activate a subscription for your plan to sync again — this computer remains linked.',
     }
   }
   if (typeof code === 'string' && RECONCILIATION_CODES.includes(code)) {

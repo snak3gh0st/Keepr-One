@@ -3,6 +3,7 @@ import {
   prepareConfirmedNationalLifePromotionCredit,
   syncConfirmedCasePromotionCredits,
   syncConfirmedCasePromotionCreditsSafely,
+  syncConfirmedInforcePromotionCredits,
 } from './promotion-credit-sync'
 import type { CaseSnapshot } from './case-snapshot-service'
 
@@ -138,6 +139,55 @@ describe('confirmed National Life promotion candidate', () => {
 })
 
 describe('promotion ledger sync', () => {
+  it('fails closed before the ledger when the carrier producer NPN is not the signed agent', async () => {
+    const findMany = vi.fn()
+    const database = {
+      agent: {
+        findUnique: vi.fn(async () => ({ npn: 'NPN-OWN', status: 'ACTIVE' })),
+        findMany,
+      },
+      $transaction: vi.fn(),
+    }
+
+    const caseResult = await syncConfirmedCasePromotionCredits(
+      {
+        agentId: 'leaf',
+        deploymentScope: 'test',
+        gridKey: 'RECENTLY_CLOSED',
+        snapshots: [
+          { policyNo: 'FOREIGN-CASE', writingAgentNumber: 'NPN-OTHER' } as CaseSnapshot,
+        ],
+        fetchedAt: FETCHED_AT,
+      },
+      database as never,
+    )
+    const inforceResult = await syncConfirmedInforcePromotionCredits(
+      {
+        agentId: 'leaf',
+        deploymentScope: 'test',
+        snapshots: [
+          { policyNumber: 'FOREIGN-INFORCE', agentNumber: null } as never,
+        ],
+        fetchedAt: FETCHED_AT,
+      },
+      database as never,
+    )
+
+    expect(caseResult).toMatchObject({
+      examined: 1,
+      eligible: 0,
+      inserted: 0,
+      skipped: { PRODUCER_IDENTITY_MISMATCH: 1 },
+    })
+    expect(inforceResult).toMatchObject({
+      examined: 1,
+      eligible: 0,
+      inserted: 0,
+      skipped: { PRODUCER_IDENTITY_MISMATCH: 1 },
+    })
+    expect(findMany).not.toHaveBeenCalled()
+  })
+
   it('is idempotent, freezes every upline, and records earned ranks once', async () => {
     type StoredCredit = Record<string, unknown> & {
       id: string
@@ -254,6 +304,7 @@ describe('promotion ledger sync', () => {
     }
     const database = {
       agent: {
+        findUnique: async () => ({ npn: 'NPN-LEAF', status: 'ACTIVE' }),
         findMany: async () => [
           { id: 'top', parentAgentId: null },
           { id: 'mid', parentAgentId: 'top' },
@@ -280,7 +331,7 @@ describe('promotion ledger sync', () => {
       caseManager: null,
       agency: null,
       writingAgentName: null,
-      writingAgentNumber: null,
+      writingAgentNumber: 'NPN-LEAF',
       companyCode: 'NLIC',
       raw: { PolicyNo: 'NL123', PaidDate: '07/15/2026', Commission: 999999 },
     }
@@ -368,7 +419,10 @@ describe('promotion ledger sync', () => {
       promotionCreditAttribution: { createMany: attributionCreate },
     }
     const database = {
-      agent: { findMany: vi.fn(async () => [{ id: 'leaf', parentAgentId: null }]) },
+      agent: {
+        findUnique: vi.fn(async () => ({ npn: 'NPN-LEAF', status: 'ACTIVE' })),
+        findMany: vi.fn(async () => [{ id: 'leaf', parentAgentId: null }]),
+      },
       $transaction: async (run: (client: typeof tx) => Promise<unknown>) => run(tx),
     }
     const snapshot: CaseSnapshot = {
@@ -389,7 +443,7 @@ describe('promotion ledger sync', () => {
       caseManager: null,
       agency: null,
       writingAgentName: null,
-      writingAgentNumber: null,
+      writingAgentNumber: 'NPN-LEAF',
       companyCode: 'NLIC',
       raw: { PaidDate: '07/15/2026' },
     }
@@ -456,7 +510,10 @@ describe('promotion ledger sync', () => {
       promotionCreditAttribution: { createMany: attributionCreate },
     }
     const database = {
-      agent: { findMany: vi.fn(async () => [{ id: 'leaf', parentAgentId: null }]) },
+      agent: {
+        findUnique: vi.fn(async () => ({ npn: 'NPN-LEAF', status: 'ACTIVE' })),
+        findMany: vi.fn(async () => [{ id: 'leaf', parentAgentId: null }]),
+      },
       $transaction: async (run: (client: typeof tx) => Promise<unknown>) => run(tx),
     }
     const snapshot: CaseSnapshot = {
@@ -477,7 +534,7 @@ describe('promotion ledger sync', () => {
       caseManager: null,
       agency: null,
       writingAgentName: null,
-      writingAgentNumber: null,
+      writingAgentNumber: 'NPN-LEAF',
       companyCode: 'NLIC',
       raw: { PolicyStatus: 'Cancelled' },
     }
@@ -540,7 +597,10 @@ describe('promotion ledger sync', () => {
       promotionCredit: { findMany: vi.fn(async () => [original, reversal]) },
     }
     const database = {
-      agent: { findMany: vi.fn(async () => [{ id: 'leaf', parentAgentId: null }]) },
+      agent: {
+        findUnique: vi.fn(async () => ({ npn: 'NPN-LEAF', status: 'ACTIVE' })),
+        findMany: vi.fn(async () => [{ id: 'leaf', parentAgentId: null }]),
+      },
       $transaction: async (run: (client: typeof tx) => Promise<unknown>) => run(tx),
     }
     const snapshot = {
@@ -561,7 +621,7 @@ describe('promotion ledger sync', () => {
       caseManager: null,
       agency: null,
       writingAgentName: null,
-      writingAgentNumber: null,
+      writingAgentNumber: 'NPN-LEAF',
       companyCode: 'NLIC',
       raw: { PolicyStatus: 'Not Taken' },
     } satisfies CaseSnapshot
@@ -605,12 +665,15 @@ describe('promotion ledger sync', () => {
       caseManager: null,
       agency: null,
       writingAgentName: null,
-      writingAgentNumber: null,
+      writingAgentNumber: 'NPN-LEAF',
       companyCode: 'NLIC',
       raw: { PaidDate: '07/15/2026' },
     } satisfies CaseSnapshot
     const database = {
-      agent: { findMany: vi.fn(async () => Promise.reject(new Error('ledger unavailable'))) },
+      agent: {
+        findUnique: vi.fn(async () => ({ npn: 'NPN-LEAF', status: 'ACTIVE' })),
+        findMany: vi.fn(async () => Promise.reject(new Error('ledger unavailable'))),
+      },
       $transaction: vi.fn(),
     }
 

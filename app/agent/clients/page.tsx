@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getDownlineIds } from '@/lib/hierarchy'
+import { getAgentScopeIds } from '@/lib/agent-access'
 import { Shell } from '@/components/Shell'
 import { CrmNavigation } from '@/components/CrmNavigation'
 import { PageHeader } from '@/components/PageHeader'
@@ -14,8 +14,7 @@ export const dynamic = 'force-dynamic'
 export default async function ClientsPage() {
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
-  const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
-  const scopeAgentIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
+  const scopeAgentIds = await getAgentScopeIds(agent.id)
 
   const clients = await prisma.client.findMany({
     where: { assignedAgentId: { in: scopeAgentIds } },
@@ -45,7 +44,7 @@ export default async function ClientsPage() {
         label="Resumo da base de clientes"
         items={[
           { label: 'Na base', value: clients.length, detail: 'Clientes dentro do seu escopo' },
-          { label: 'Agentes responsáveis', value: agentsWithClients, detail: 'Pessoas da equipe com clientes ativos', tone: 'green' },
+          { label: 'Agentes responsáveis', value: agentsWithClients, detail: 'Responsáveis pelos clientes no seu escopo', tone: 'green' },
           { label: 'Com contato', value: clientsWithEmail, detail: 'Cadastros com e-mail disponível' },
         ]}
       />
@@ -63,7 +62,7 @@ export default async function ClientsPage() {
           />
         </section>
         <ContextPanel eyebrow="Continue por aqui" title="Relacionamento organizado">
-          <p>Esta lista reúne seus clientes e os clientes dos agentes abaixo de você na hierarquia.</p>
+          <p>Esta lista reúne os clientes que fazem parte do seu acesso atual.</p>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Próximo passo</p>
             <p className="mt-2">Inicie um atendimento para conduzir uma oportunidade, ou consulte as apólices já emitidas do cliente.</p>

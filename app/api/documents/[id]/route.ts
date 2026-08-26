@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/require-role'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getDownlineIds } from '@/lib/hierarchy'
+import { getAgentScopeIds } from '@/lib/agent-access'
 import { canAccessPolicy } from '@/lib/policy-access'
 import { readStoredFile } from '@/lib/storage'
 
@@ -29,8 +29,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   } else if (role === 'AGENT') {
     try {
       const agent = await getCurrentAgent()
-      const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
-      const scopeIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
+      const scopeIds = await getAgentScopeIds(agent.id)
       allowed = canAccessPolicy({ role: 'AGENT', agentScopeIds: scopeIds }, document.policy)
     } catch {
       return new NextResponse('Forbidden', { status: 403 })

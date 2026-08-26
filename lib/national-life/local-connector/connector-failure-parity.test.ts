@@ -15,6 +15,7 @@ describe('classificação de falha do conector', () => {
     ['update', web.OUTDATED_CODES, extension.OUTDATED_CODES],
     ['paused', web.PAUSED_CODES, extension.PAUSED_CODES],
     ['rate-limit', web.RATE_LIMIT_CODES, extension.RATE_LIMIT_CODES],
+    ['subscription', web.SUBSCRIPTION_CODES, extension.SUBSCRIPTION_CODES],
     ['portal', web.PORTAL_CODES, extension.PORTAL_CODES],
   ] as const
 
@@ -31,6 +32,7 @@ describe('classificação de falha do conector', () => {
       ...web.OUTDATED_CODES,
       ...web.PAUSED_CODES,
       ...web.RATE_LIMIT_CODES,
+      ...web.SUBSCRIPTION_CODES,
       ...web.PORTAL_CODES,
     ]
     expect(new Set(all).size).toBe(all.length)
@@ -61,6 +63,7 @@ describe('classificação de falha do conector', () => {
     // chave por causa dele recria o laço: o desvio persiste depois de reparear.
     expect(extension.revokesDevice('DEVICE_REQUEST_REJECTED')).toBe(false)
     expect(extension.revokesDevice('DEVICE_KEY_UNAVAILABLE')).toBe(false)
+    expect(extension.revokesDevice('FOUNDER_ACCESS_REQUIRED')).toBe(false)
   })
 
   it('concorda em qual ação cada código pede', () => {
@@ -70,6 +73,7 @@ describe('classificação de falha do conector', () => {
       ...web.OUTDATED_CODES,
       ...web.PAUSED_CODES,
       ...web.RATE_LIMIT_CODES,
+      ...web.SUBSCRIPTION_CODES,
       ...web.PORTAL_CODES,
     ]) {
       expect(web.connectorFailure(code).action).toBe(extension.connectorFailure(code).action)

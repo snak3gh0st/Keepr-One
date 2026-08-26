@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getDownlineIds } from '@/lib/hierarchy'
+import { getAgentScopeIds } from '@/lib/agent-access'
 import { decimalToNumber } from '@/lib/decimal'
 import { Shell } from '@/components/Shell'
 import { ErrorBanner } from '@/components/ErrorBanner'
@@ -12,8 +12,7 @@ export const dynamic = 'force-dynamic'
 export default async function CasesPage() {
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
-  const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
-  const scopeAgentIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
+  const scopeAgentIds = await getAgentScopeIds(agent.id)
 
   let cases: Awaited<ReturnType<typeof loadCases>> = []
   let loadError = false

@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const user = await requireCalendarUser()
+    const user = await requireCalendarUser({ allowOnboarding: true })
     const env = getGoogleCalendarEnv()
     const integration = await prisma.calendarIntegration.findUnique({
       where: { userId_provider: { userId: user.userId, provider: 'GOOGLE' } },

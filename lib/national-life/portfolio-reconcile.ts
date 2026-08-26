@@ -7,6 +7,7 @@ const EXPORT_SCOPE = 'LOCAL_CONNECTOR'
 
 export type InforceRow = {
   deploymentScope: string
+  agentNumber: string | null
   policyNumber: string
   policyStatus: string | null
   policyIssueDate: string | null

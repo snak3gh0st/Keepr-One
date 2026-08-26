@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   exportEnabled: vi.fn(),
   mockVerify: vi.fn(),
   mockStartRun: vi.fn(),
+  mockFilterGridKeys: vi.fn(),
+  mockRateLimit: vi.fn(),
 }))
 
 vi.mock('@/lib/national-life/local-connector/config', () => ({
@@ -42,10 +44,17 @@ vi.mock('@/lib/national-life/local-connector/run-service', () => ({
     'COMMISSIONS_OVERVIEW',
     'COMMISSIONS_POLICY_HISTORY',
     'AGENT_DASHBOARD',
+    'PREMIUM_REPORT_AGENCY',
   ],
   startLocalConnectorRun: mocks.mockStartRun,
 }))
+vi.mock('@/lib/national-life/plan-access', () => ({
+  filterNationalLifeGridKeysForAgent: mocks.mockFilterGridKeys,
+}))
 vi.mock('@/lib/prisma', () => ({ prisma: {} }))
+vi.mock('@/lib/redis/rate-limit', () => ({
+  consumeRateLimit: mocks.mockRateLimit,
+}))
 
 import { LocalConnectorSignatureError } from '@/lib/national-life/local-connector/device-signature'
 import { POST } from './route'
@@ -75,6 +84,16 @@ beforeEach(() => {
   mocks.enabled.mockReturnValue(true)
   mocks.pageDiscoveryEnabled.mockReturnValue(false)
   mocks.exportEnabled.mockReturnValue(false)
+  mocks.mockFilterGridKeys.mockImplementation(
+    async (_agentId: string, gridKeys: readonly string[]) => [...gridKeys],
+  )
+  mocks.mockRateLimit.mockResolvedValue({
+    allowed: true,
+    limit: 10,
+    remaining: 9,
+    resetAt: Date.now() + 600_000,
+    retryAfterSeconds: 0,
+  })
   for (const key of REMOTE_ENV) delete process.env[key]
 })
 
@@ -105,6 +124,18 @@ describe('local connector runs route', () => {
 
     expect(response.status).toBe(401)
     expect(response.headers.get('x-fyntra-device-error')).toBe('DEVICE_REVOKED')
+  })
+
+  it('states an expired Founder separately without revoking the device', async () => {
+    mockVerify.mockRejectedValueOnce(
+      new LocalConnectorSignatureError('FOUNDER_ACCESS_REQUIRED'),
+    )
+    const response = await POST(signedRequest())
+
+    expect(response.status).toBe(401)
+    expect(response.headers.get('x-fyntra-device-error')).toBe('FOUNDER_ACCESS_REQUIRED')
+    expect(response.headers.get('x-fyntra-device-error')).not.toBe('DEVICE_REVOKED')
+    expect(mockStartRun).not.toHaveBeenCalled()
   })
 
   it('does not report a server failure as a rejected device', async () => {
@@ -221,6 +252,45 @@ describe('local connector runs route', () => {
           'COMMISSIONS_OVERVIEW',
           'COMMISSIONS_POLICY_HISTORY',
           'AGENT_DASHBOARD',
+          'PREMIUM_REPORT_AGENCY',
+        ],
+      },
+    )
+  })
+
+  it('starts an individual run with only the sources permitted by its plan', async () => {
+    mocks.pageDiscoveryEnabled.mockReturnValue(true)
+    mocks.mockFilterGridKeys.mockImplementationOnce(async (_agentId, gridKeys) =>
+      gridKeys.filter((gridKey: string) => [
+        'NEW_BUSINESS',
+        'RECENTLY_CLOSED',
+        'INFORCE_CLIENTS',
+        'COMMISSIONS_EARNING_REPORT',
+        'CORRESPONDENCE',
+      ].includes(gridKey)),
+    )
+    mockVerify.mockResolvedValueOnce({ deviceId: 'dev_1', agentId: 'individual_1' })
+    mockStartRun.mockResolvedValueOnce({
+      runId: 'run_1', schemaVersion: 2, stages: [], duplicate: false, completedStages: 0,
+    })
+
+    const response = await POST(signedRequest())
+
+    expect(response.status).toBe(201)
+    expect(mocks.mockFilterGridKeys).toHaveBeenCalledWith(
+      'individual_1',
+      expect.arrayContaining(['PREMIUM_REPORT_AGENCY']),
+    )
+    expect(mockStartRun).toHaveBeenCalledWith(
+      {},
+      { deviceId: 'dev_1', agentId: 'individual_1' },
+      {
+        gridKeys: [
+          'NEW_BUSINESS',
+          'RECENTLY_CLOSED',
+          'INFORCE_CLIENTS',
+          'COMMISSIONS_EARNING_REPORT',
+          'CORRESPONDENCE',
         ],
       },
     )

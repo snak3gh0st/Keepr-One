@@ -1,12 +1,17 @@
-import type { PrismaClient } from '@prisma/client'
+import { Prisma, type PrismaClient } from '@prisma/client'
 import { createChatwootClient } from './chatwoot-client'
 import { randomChatwootPassword } from './random-password'
-import type { ProvisionDeps } from './provision-agent-inbox'
+import type {
+  ProvisionDeps,
+  ProvisionOperationDeps,
+} from './provision-agent-inbox'
 
-export function prismaProvisionDeps(
-  prisma: PrismaClient,
+type ProvisionPrisma = Pick<PrismaClient, 'agentMessagingAccount'>
+
+function prismaProvisionOperationDeps(
+  prisma: ProvisionPrisma,
   config: { baseUrl: string; platformToken: string },
-): ProvisionDeps {
+): ProvisionOperationDeps {
   return {
     findAccount: async (agentId) =>
       prisma.agentMessagingAccount.findUnique({
@@ -27,5 +32,26 @@ export function prismaProvisionDeps(
     }),
 
     randomPassword: randomChatwootPassword,
+  }
+}
+
+export function prismaProvisionDeps(
+  prisma: PrismaClient,
+  config: { baseUrl: string; platformToken: string },
+): ProvisionDeps {
+  return {
+    ...prismaProvisionOperationDeps(prisma, config),
+    runExclusive: async (agentId, operation) => prisma.$transaction(
+      async (transaction) => {
+        // The transaction-scoped advisory lock serializes first-connect POSTs
+        // for this agent across server instances. Once the first request commits,
+        // the next request sees and reuses its unique local account link.
+        await transaction.$queryRaw(
+          Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`keepr-agent-inbox:${agentId}`}, 0))`,
+        )
+        return operation(prismaProvisionOperationDeps(transaction, config))
+      },
+      { maxWait: 10_000, timeout: 60_000 },
+    ),
   }
 }

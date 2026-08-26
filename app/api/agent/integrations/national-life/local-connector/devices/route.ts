@@ -1,4 +1,4 @@
-import { getCurrentAgent } from '@/lib/agent-context'
+import { getCurrentAgentWithoutOnboarding } from '@/lib/agent-context'
 import {
   isNationalLifeLocalConnectorEnabled,
   localConnectorUnavailableResponse,
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
       forwardedHost: request.headers.get('x-forwarded-host'),
       forwardedProto: request.headers.get('x-forwarded-proto'),
     })
-    const agent = await getCurrentAgent()
+    const agent = await getCurrentAgentWithoutOnboarding()
     const devices = await listLocalConnectorDevices(prisma, { agentId: agent.id })
     return Response.json({ devices }, { status: 200, headers: NO_STORE })
   } catch {

@@ -536,7 +536,15 @@ export function NationalLifeLocalConnectorCard({
         {pairedDeviceId && state === 'idle' && (
           <div className="mt-5 inline-flex items-center gap-2 rounded-xl border border-teal/25 bg-paper/80 px-3 py-2 text-sm font-semibold text-teal-deep">
             <span className="grid h-5 w-5 place-items-center rounded-full bg-teal text-[11px] text-paper" aria-hidden="true">
-              ✓
+              <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none">
+                <path
+                  d="m3.25 8.15 2.85 2.85 6.65-6.65"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.8"
+                />
+              </svg>
             </span>
             This computer is ready
           </div>

@@ -11,6 +11,7 @@ import {
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
 import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
+import { sanitizeNationalLifeSyncStatusForAgent } from '@/lib/national-life/plan-access'
 
 /// What the top bar asks once, on mount. Deliberately not a poll: the badge is
 /// a reassurance, not a live monitor, and a request per agent per few seconds
@@ -22,7 +23,7 @@ export async function GET() {
   }
   try {
     const agent = await getCurrentAgent()
-    const [working, blocked, sync] = await Promise.all([
+    const [working, blocked, rawSync] = await Promise.all([
       prisma.browserAutomationJob.count({
         where: {
           agentId: agent.id,
@@ -42,6 +43,7 @@ export async function GET() {
       }),
       getNationalLifeSyncStatus(agent.id, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE),
     ])
+    const sync = await sanitizeNationalLifeSyncStatusForAgent(agent.id, rawSync)
     return NextResponse.json({
       state: carrierSyncState({ working, blocked }),
       ...(sync ? { sync } : {}),

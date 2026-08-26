@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { getCurrentAgent } from '@/lib/agent-context'
+import { getCurrentAgentAccess } from '@/lib/agent-access'
 import {
   getNationalLifeLocalConnectorConfig,
 } from '@/lib/national-life/local-connector/config'
@@ -8,6 +9,8 @@ import {
   NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
   NATIONAL_LIFE_READ_COVERAGE,
 } from '@/lib/national-life/read-coverage'
+import { NATIONAL_LIFE_PERSONAL_GRID_KEYS } from '@/lib/national-life/plan-access-catalog'
+import { classifyCarrierCommissionLevel } from '@/lib/national-life/commission-records'
 import { prisma } from '@/lib/prisma'
 import { ContextPanel } from '@/components/ContextPanel'
 import { ErrorBanner } from '@/components/ErrorBanner'
@@ -67,6 +70,7 @@ const reportSelect = {
   primaryDate: true,
   amounts: true,
   fetchedAt: true,
+  raw: true,
 } as const
 
 function toPortalReportRow(row: {
@@ -98,8 +102,26 @@ function toPortalReportRow(row: {
 
 export default async function NationalLifeDataPage() {
   const agent = await getCurrentAgent()
-  const user = await prisma.user.findUnique({ where: { id: agent.userId } })
+  const [user, access] = await Promise.all([
+    prisma.user.findUnique({ where: { id: agent.userId } }),
+    getCurrentAgentAccess(),
+  ])
+  const scopedAgents = await prisma.agent.findMany({
+    where: { id: { in: access.scopeAgentIds }, status: 'ACTIVE' },
+    select: { npn: true },
+  })
+  const scopedNpns = scopedAgents
+    .map(({ npn }) => npn?.trim() ?? '')
+    .filter(Boolean)
   const localEnabled = getNationalLifeLocalConnectorConfig().enabled
+  const structuredSourceTarget = NATIONAL_LIFE_READ_COVERAGE.filter(
+    (source) =>
+      !DISCOVERY_PAGE_KEYS.has(source.key)
+      && (
+        access.canViewAgencyNationalLife
+        || (NATIONAL_LIFE_PERSONAL_GRID_KEYS as readonly string[]).includes(source.key)
+      ),
+  ).length
 
   if (!localEnabled) {
     return (
@@ -133,27 +155,35 @@ export default async function NationalLifeDataPage() {
       localRun,
     ] = await Promise.all([
       prisma.nationalLifeCaseSnapshot.findMany({
-        where: { agentId: agent.id, deploymentScope: CANONICAL_SCOPE },
+        where: {
+          agentId: { in: access.scopeAgentIds },
+          deploymentScope: CANONICAL_SCOPE,
+          writingAgentNumber: { in: scopedNpns },
+        },
         select: caseSelect,
         orderBy: [{ submitDate: 'desc' }, { policyNo: 'asc' }],
       }),
       prisma.nationalLifeInforcePolicy.findMany({
-        where: { agentId: agent.id, deploymentScope: CANONICAL_SCOPE },
+        where: {
+          agentId: { in: access.scopeAgentIds },
+          deploymentScope: CANONICAL_SCOPE,
+          agentNumber: { in: scopedNpns },
+        },
         select: inforceSelect,
         orderBy: [{ policyStatus: 'asc' }, { policyNumber: 'asc' }],
       }),
       prisma.nationalLifeReportRow.findMany({
         where: {
-          agentId: agent.id,
+          agentId: { in: access.scopeAgentIds },
           deploymentScope: CANONICAL_SCOPE,
-          gridKey: { in: [...NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS] },
+          gridKey: 'COMMISSIONS_EARNING_REPORT',
         },
         select: reportSelect,
         orderBy: [{ gridKey: 'asc' }, { primaryDate: 'desc' }],
       }),
       prisma.nationalLifeReportRow.findMany({
         where: {
-          agentId: agent.id,
+          agentId: { in: access.scopeAgentIds },
           deploymentScope: CANONICAL_SCOPE,
           gridKey: 'CLIENT_INTELLIGENCE',
         },
@@ -166,7 +196,7 @@ export default async function NationalLifeDataPage() {
           stageCompletions: { select: { gridKey: true } },
         },
         where: {
-          agentId: agent.id,
+          agentId: { in: access.scopeAgentIds },
           deploymentScope: CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope,
           executionSource: CANONICAL_NATIONAL_LIFE_SYNC.executionSource,
           provider: CANONICAL_NATIONAL_LIFE_SYNC.provider,
@@ -178,11 +208,23 @@ export default async function NationalLifeDataPage() {
 
     cases = caseRows
     inforce = inforceRows
-    reports = reportRows.map(toPortalReportRow)
+    reports = reportRows
+      .filter((row) => {
+        const raw = row.raw && typeof row.raw === 'object' && !Array.isArray(row.raw)
+          ? row.raw as Record<string, unknown>
+          : {}
+        return classifyCarrierCommissionLevel(raw.WritingAgtLevel) === 'DIRECT'
+      })
+      .map(toPortalReportRow)
     lastSyncedAt = localRun?.completedAt ?? localRun?.updatedAt ?? null
     const completedKeys = localRun?.stageCompletions.map((row) => row.gridKey) ?? []
-    rawPageSourceCount = completedKeys.filter((key) => DISCOVERY_PAGE_KEYS.has(key)).length
-    structuredSourceCount = completedKeys.length - rawPageSourceCount
+    const visibleCompletedKeys = access.canViewAgencyNationalLife
+      ? completedKeys
+      : completedKeys.filter((key) =>
+          (NATIONAL_LIFE_PERSONAL_GRID_KEYS as readonly string[]).includes(key),
+        )
+    rawPageSourceCount = visibleCompletedKeys.filter((key) => DISCOVERY_PAGE_KEYS.has(key)).length
+    structuredSourceCount = visibleCompletedKeys.length - rawPageSourceCount
     actionSourceUpdatedAt = intelligenceRows.reduce<Date | null>(
       (latest, row) => !latest || row.fetchedAt > latest ? row.fetchedAt : latest,
       null,
@@ -195,18 +237,19 @@ export default async function NationalLifeDataPage() {
     const linkedPolicies = actionQueue.length
       ? await prisma.policy.findMany({
           where: {
-            agentId: agent.id,
+            agentId: { in: access.scopeAgentIds },
             policyNumber: { in: actionQueue.map((item) => item.policyNumber) },
           },
           select: { id: true, policyNumber: true },
         })
       : []
     const policyIds = new Map(linkedPolicies.map((policy) => [policy.policyNumber, policy.id]))
-    actions = actionQueue.map((item) => ({
-      ...item,
-      occurredAt: item.occurredAt.toISOString(),
-      policyId: policyIds.get(item.policyNumber) ?? null,
-    }))
+    actions = actionQueue.flatMap((item) => {
+      const policyId = policyIds.get(item.policyNumber)
+      return policyId
+        ? [{ ...item, occurredAt: item.occurredAt.toISOString(), policyId }]
+        : []
+    })
   } catch (error) {
     console.error('National Life data query error', error)
     loadError = true
@@ -230,7 +273,9 @@ export default async function NationalLifeDataPage() {
       <PageHeader
         title="National Life"
         eyebrow="Carteira conectada"
-        description="Sua área diária de clientes, apólices, casos e oportunidades, espelhada na National Life."
+        description={access.canViewAgencyNationalLife
+          ? "Dados diretos dos agentes com assinatura ativa na agência, espelhados na National Life."
+          : "Seus clientes, apólices, casos e oportunidades pessoais, espelhados na National Life."}
       >
         <Link
           href="/agent/integrations/national-life"
@@ -271,11 +316,11 @@ export default async function NationalLifeDataPage() {
             {
               label: 'Fontes estruturadas',
               value: structuredSourceCount > 0
-                ? `${structuredSourceCount}/${NATIONAL_LIFE_READ_COVERAGE.length}`
+                ? `${structuredSourceCount}/${structuredSourceTarget}`
                 : '—',
               detail: `${rawPageSourceCount} fontes adicionais preservadas somente como página bruta · ${syncDetail}`,
               tone:
-                structuredSourceCount === NATIONAL_LIFE_READ_COVERAGE.length ? 'green' : 'gold',
+                structuredSourceCount === structuredSourceTarget ? 'green' : 'gold',
             },
           ]}
         />

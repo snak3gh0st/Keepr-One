@@ -25,10 +25,12 @@ import {
   supportsStageCompletionProtocol,
 } from '@/lib/national-life/local-connector/remote-config'
 import {
+  failLocalConnectorRun,
   ingestLocalConnectorStage,
   LocalConnectorRunError,
 } from '@/lib/national-life/local-connector/run-service'
 import { prisma } from '@/lib/prisma'
+import { canAgentReadNationalLifeGrid } from '@/lib/national-life/plan-access'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
 const idempotencyKeySchema = z.string().min(16).max(160).regex(/^[A-Za-z0-9._:-]+$/)
@@ -62,6 +64,24 @@ export async function PUT(
       body,
     })
     const params = routeParamsSchema.parse(await context.params)
+    if (!await canAgentReadNationalLifeGrid(device.agentId, params.gridKey)) {
+      try {
+        await failLocalConnectorRun(prisma, {
+          agentId: device.agentId,
+          deviceId: device.deviceId,
+          runId: params.runId,
+          safeErrorCode: 'PLAN_ACCESS_CHANGED',
+        })
+      } catch (error) {
+        if (!(error instanceof LocalConnectorRunError && error.code === 'RUN_NOT_ACTIVE')) {
+          throw error
+        }
+      }
+      return Response.json(
+        { error: 'AGENCY_PLAN_REQUIRED' },
+        { status: 403, headers: NO_STORE },
+      )
+    }
     const envelope = localConnectorRawStageEnvelopeSchema.parse(parseJsonBody(body))
     if (envelope.runId !== params.runId || envelope.gridKey !== params.gridKey) {
       return Response.json({ error: 'INVALID_ENVELOPE' }, { status: 400, headers: NO_STORE })

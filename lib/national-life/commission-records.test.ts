@@ -55,7 +55,7 @@ describe('toPeriod', () => {
 describe('toCarrierCommissionRecords', () => {
   it('reads the gross earned from the amounts payload', () => {
     const [record] = toCarrierCommissionRecords([
-      row({ PaymentDate: '7/9/2026', PolicyNumber: 'X1', WritingAgtName: 'Ana' },
+      row({ PaymentDate: '7/9/2026', PolicyNumber: 'X1', WritingAgtName: 'Ana', WritingAgtLevel: 'Personal' },
           { GrossCommEarned: '$120.50' }),
     ])
 
@@ -79,7 +79,14 @@ describe('toCarrierCommissionRecords', () => {
   })
 
   it('drops a row with no readable amount instead of counting it as zero', () => {
-    expect(toCarrierCommissionRecords([row({ PaymentDate: '7/9/2026' }, {})])).toEqual([])
+    expect(toCarrierCommissionRecords([row({ PaymentDate: '7/9/2026', WritingAgtLevel: 'Personal' }, {})])).toEqual([])
+  })
+
+  it('fails closed when the carrier role is missing or unfamiliar', () => {
+    expect(toCarrierCommissionRecords([
+      row({ PaymentDate: '7/9/2026' }, { GrossCommEarned: '$10' }),
+      row({ PaymentDate: '7/9/2026', WritingAgtLevel: 'Team' }, { GrossCommEarned: '$20' }),
+    ])).toEqual([])
   })
 
   it('survives rows whose payload is not an object', () => {
@@ -89,10 +96,10 @@ describe('toCarrierCommissionRecords', () => {
 
 describe('totals', () => {
   const records = toCarrierCommissionRecords([
-    row({ PaymentDate: '6/1/2026', PolicyNumber: 'A' }, { GrossCommEarned: '$100' }),
-    row({ PaymentDate: '7/1/2026', PolicyNumber: 'B' }, { GrossCommEarned: '$200' }),
-    row({ PaymentDate: '7/2/2026', PolicyNumber: 'C' }, { GrossCommEarned: '$50' }),
-    row({ PaymentDate: '', PolicyNumber: 'D' }, { GrossCommEarned: '$7' }),
+    row({ PaymentDate: '6/1/2026', PolicyNumber: 'A', WritingAgtLevel: 'Personal' }, { GrossCommEarned: '$100' }),
+    row({ PaymentDate: '7/1/2026', PolicyNumber: 'B', WritingAgtLevel: 'Personal' }, { GrossCommEarned: '$200' }),
+    row({ PaymentDate: '7/2/2026', PolicyNumber: 'C', WritingAgtLevel: 'Personal' }, { GrossCommEarned: '$50' }),
+    row({ PaymentDate: '', PolicyNumber: 'D', WritingAgtLevel: 'Personal' }, { GrossCommEarned: '$7' }),
   ])
 
   it('sums everything, including money with no usable date', () => {
@@ -123,8 +130,8 @@ describe('totals', () => {
 
   it('nets a chargeback against earnings rather than ignoring it', () => {
     const withChargeback = toCarrierCommissionRecords([
-      row({ PaymentDate: '7/1/2026' }, { GrossCommEarned: '$200' }),
-      row({ PaymentDate: '7/1/2026' }, { GrossCommEarned: '-$50' }),
+      row({ PaymentDate: '7/1/2026', WritingAgtLevel: 'Personal' }, { GrossCommEarned: '$200' }),
+      row({ PaymentDate: '7/1/2026', WritingAgtLevel: 'Personal' }, { GrossCommEarned: '-$50' }),
     ])
     expect(totalOf(withChargeback)).toBe(150)
   })

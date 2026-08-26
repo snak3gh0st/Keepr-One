@@ -1,5 +1,21 @@
 import { webcrypto } from 'node:crypto'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const founderAccessMocks = vi.hoisted(() => {
+  class MockFounderAccessRequiredError extends Error {
+    readonly code = 'FOUNDER_ACCESS_REQUIRED'
+  }
+
+  return {
+    FounderAccessRequiredError: MockFounderAccessRequiredError,
+    requireFounderAccessForAgent: vi.fn(),
+  }
+})
+
+vi.mock('@/lib/founder-access', () => ({
+  FounderAccessRequiredError: founderAccessMocks.FounderAccessRequiredError,
+  requireFounderAccessForAgent: founderAccessMocks.requireFounderAccessForAgent,
+}))
 import {
   LOCAL_CONNECTOR_SIGNATURE_HEADERS,
   canonicalDeviceMessage,
@@ -17,6 +33,14 @@ beforeAll(async () => {
     ['sign', 'verify'],
   )) as CryptoKeyPair
   publicKeyJwk = await webcrypto.subtle.exportKey('jwk', keyPair.publicKey)
+})
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  founderAccessMocks.requireFounderAccessForAgent.mockResolvedValue({
+    state: 'LEGACY',
+    hasAccess: true,
+  })
 })
 
 async function signedRequest(body: Uint8Array, pathname = '/api/local/runs') {
@@ -89,7 +113,45 @@ describe('local connector device signatures', () => {
       agentId: 'agent-1',
       jti: 'request-id-00000001',
     })
+    expect(founderAccessMocks.requireFounderAccessForAgent).toHaveBeenCalledWith('agent-1')
     expect(replayCreate).toHaveBeenCalledOnce()
+  })
+
+  it('preserves access for a legacy agent without a Founder enrollment', async () => {
+    const body = new TextEncoder().encode('{}')
+    const headers = await signedRequest(body)
+    const { db, replayCreate } = signatureDb()
+
+    await expect(
+      verifyLocalConnectorDeviceRequest(db, {
+        method: 'POST',
+        pathname: '/api/local/runs',
+        headers,
+        body,
+        now: new Date('2026-08-04T18:01:00.000Z'),
+      }),
+    ).resolves.toMatchObject({ agentId: 'agent-1' })
+    expect(replayCreate).toHaveBeenCalledOnce()
+  })
+
+  it('rejects an expired Founder without consuming replay state or revoking the device', async () => {
+    const body = new TextEncoder().encode('{}')
+    const headers = await signedRequest(body)
+    const { db, replayCreate } = signatureDb()
+    founderAccessMocks.requireFounderAccessForAgent.mockRejectedValue(
+      new founderAccessMocks.FounderAccessRequiredError('Founder access required'),
+    )
+
+    await expect(
+      verifyLocalConnectorDeviceRequest(db, {
+        method: 'POST',
+        pathname: '/api/local/runs',
+        headers,
+        body,
+        now: new Date('2026-08-04T18:01:00.000Z'),
+      }),
+    ).rejects.toMatchObject({ code: 'FOUNDER_ACCESS_REQUIRED' })
+    expect(replayCreate).not.toHaveBeenCalled()
   })
 
   it('rejects replayed jti values and body tampering', async () => {
@@ -114,5 +176,22 @@ describe('local connector device signatures', () => {
         body: new TextEncoder().encode('{"changed":true}'),
       }),
     ).rejects.toThrow('INVALID_DEVICE_SIGNATURE')
+  })
+
+  it('does not reveal Founder state before the request signature is valid', async () => {
+    const body = new TextEncoder().encode('{}')
+    const headers = await signedRequest(body)
+    const { db } = signatureDb()
+
+    await expect(
+      verifyLocalConnectorDeviceRequest(db, {
+        method: 'POST',
+        pathname: '/api/local/runs',
+        headers,
+        body: new TextEncoder().encode('{"tampered":true}'),
+        now: new Date('2026-08-04T18:01:00.000Z'),
+      }),
+    ).rejects.toThrow('INVALID_DEVICE_SIGNATURE')
+    expect(founderAccessMocks.requireFounderAccessForAgent).not.toHaveBeenCalled()
   })
 })

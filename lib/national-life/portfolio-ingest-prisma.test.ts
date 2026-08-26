@@ -2,15 +2,34 @@ import { describe, expect, it, vi } from 'vitest'
 import { prismaIngestDeps } from './portfolio-ingest-prisma'
 import type { PlannedPolicy } from './portfolio-plan'
 
-type UpsertArgs = {
-  where: { sourceProvider_sourceExternalId: { sourceProvider: string; sourceExternalId: string } }
-  update: Record<string, unknown>
-  create: Record<string, unknown>
+type UpdateManyArgs = {
+  where: { sourceProvider: string; sourceExternalId: string; agentId: string }
+  data: Record<string, unknown>
 }
 
-/// Typed so the assertions below can read `mock.calls[0][0]`: an untyped
-/// `vi.fn(async () => ({}))` declares no parameters, and its call tuple is empty.
-const upsertMock = () => vi.fn(async (_args: UpsertArgs) => ({}))
+type CreateArgs = { data: Record<string, unknown> }
+
+function policyDeps(input: {
+  updateCounts?: number[]
+  createError?: unknown
+} = {}) {
+  const counts = [...(input.updateCounts ?? [1])]
+  const updateMany = vi.fn(async (args: UpdateManyArgs) => {
+    void args
+    return { count: counts.shift() ?? 0 }
+  })
+  const create = vi.fn(async (args: CreateArgs) => {
+    void args
+    if (input.createError) throw input.createError
+    return {}
+  })
+
+  return {
+    updateMany,
+    create,
+    deps: prismaIngestDeps({ policy: { updateMany, create } } as never),
+  }
+}
 
 const planned: PlannedPolicy & { agentId: string; clientId: string } = {
   agentId: 'a1',
@@ -29,49 +48,82 @@ const planned: PlannedPolicy & { agentId: string; clientId: string } = {
 }
 
 describe('prismaIngestDeps', () => {
-  it('upserts on the provider and external id pair, so an existing row is corrected in place', async () => {
-    const upsert = upsertMock()
-    const deps = prismaIngestDeps({ policy: { upsert } } as never)
+  it('updates a carrier policy only when the global key and agent owner both match', async () => {
+    const { deps, updateMany, create } = policyDeps()
 
     await deps.upsertPolicy(planned)
 
-    expect(upsert).toHaveBeenCalledWith(
+    expect(updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          sourceProvider_sourceExternalId: { sourceProvider: 'NATIONAL_LIFE', sourceExternalId: 'LS1' },
+          sourceProvider: 'NATIONAL_LIFE',
+          sourceExternalId: 'LS1',
+          agentId: 'a1',
         },
       }),
     )
+    expect(create).not.toHaveBeenCalled()
   })
 
-  it('does not overwrite a known face amount with null on a later sync', async () => {
-    // Face amount arrives by backfill, after the row. A sync that runs in between
-    // must not undo it.
-    const upsert = upsertMock()
-    const deps = prismaIngestDeps({ policy: { upsert } } as never)
+  it('creates a new carrier policy when no owned row exists', async () => {
+    const { deps, create } = policyDeps({ updateCounts: [0] })
 
     await deps.upsertPolicy(planned)
 
-    expect(upsert.mock.calls[0]?.[0].update).not.toHaveProperty('faceAmount')
-    expect(upsert.mock.calls[0]?.[0].create).toHaveProperty('faceAmount', null)
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        agentId: 'a1',
+        sourceProvider: 'NATIONAL_LIFE',
+        sourceExternalId: 'LS1',
+        faceAmount: null,
+      }),
+    })
   })
 
-  it('carries the carrier status string through to the row', async () => {
-    const upsert = upsertMock()
-    const deps = prismaIngestDeps({ policy: { upsert } } as never)
+  it('does not overwrite a known face amount with null on a later sync', async () => {
+    const { deps, updateMany } = policyDeps()
+
+    await deps.upsertPolicy(planned)
+
+    expect(updateMany.mock.calls[0]?.[0].data).not.toHaveProperty('faceAmount')
+  })
+
+  it('carries the carrier status string through to an owned row', async () => {
+    const { deps, updateMany } = policyDeps()
 
     await deps.upsertPolicy({ ...planned, sourceStatus: 'Pending Lapse' })
 
-    expect(upsert.mock.calls[0]?.[0].update.sourceStatus).toBe('Pending Lapse')
+    expect(updateMany.mock.calls[0]?.[0].data.sourceStatus).toBe('Pending Lapse')
   })
 
   it('keeps an unknown carrier premium null instead of inventing zero', async () => {
-    const upsert = upsertMock()
-    const deps = prismaIngestDeps({ policy: { upsert } } as never)
+    const existing = policyDeps()
+    const fresh = policyDeps({ updateCounts: [0] })
 
-    await deps.upsertPolicy({ ...planned, premium: null })
+    await existing.deps.upsertPolicy({ ...planned, premium: null })
+    await fresh.deps.upsertPolicy({ ...planned, premium: null })
 
-    expect(upsert.mock.calls[0]?.[0].create).toHaveProperty('premium', null)
-    expect(upsert.mock.calls[0]?.[0].update).toHaveProperty('premium', null)
+    expect(existing.updateMany.mock.calls[0]?.[0].data).toHaveProperty('premium', null)
+    expect(fresh.create.mock.calls[0]?.[0].data).toHaveProperty('premium', null)
+  })
+
+  it('refuses to mutate a carrier policy that belongs to another agent', async () => {
+    const { deps, updateMany } = policyDeps({
+      updateCounts: [0, 0],
+      createError: { code: 'P2002' },
+    })
+
+    await expect(deps.upsertPolicy(planned)).rejects.toThrow('POLICY_OWNERSHIP_CONFLICT')
+    expect(updateMany).toHaveBeenCalledTimes(2)
+  })
+
+  it('recovers when a concurrent run creates the same policy for the same owner', async () => {
+    const { deps, updateMany } = policyDeps({
+      updateCounts: [0, 1],
+      createError: { code: 'P2002' },
+    })
+
+    await expect(deps.upsertPolicy(planned)).resolves.toBeUndefined()
+    expect(updateMany).toHaveBeenCalledTimes(2)
   })
 })

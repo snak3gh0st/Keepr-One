@@ -20,6 +20,7 @@ vi.mock('@/lib/auth-client', () => ({
 }))
 
 import { AgentPromotionProvider } from './AgentPromotionContext'
+import { AgentAccessProvider } from './AgentAccessContext'
 import { Shell } from './Shell'
 
 const BLUE_JACKET = {
@@ -38,6 +39,26 @@ const STANDARD_RANK = {
   tone: 'standard' as const,
   rankTitle: 'Regional Leader',
   jacket: null,
+}
+
+const AGENCY_OWNER_ACCESS = {
+  kind: 'AGENCY_OWNER' as const,
+  agencyName: 'Agência Aurora',
+  subscriptionStatus: 'ACTIVE',
+  canManageTeam: true,
+  canInviteAgents: true,
+  canViewTeamSubscriptions: true,
+  canViewAgencyNationalLife: true,
+}
+
+const FOUNDER_TRIAL_ACCESS = {
+  ...AGENCY_OWNER_ACCESS,
+  trial: {
+    source: 'FOUNDER' as const,
+    plan: 'AGENCY' as const,
+    endsAt: '2032-01-31T00:00:00.000Z',
+    initialRemainingSeconds: 30 * 24 * 60 * 60,
+  },
 }
 
 beforeEach(() => {
@@ -71,6 +92,76 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+})
+
+describe('Shell plan access', () => {
+  it('keeps an individual agent in a personal workspace without team navigation', () => {
+    render(
+      <Shell role="AGENT" userName="Ana">
+        <p>Conteúdo</p>
+      </Shell>,
+    )
+
+    expect(screen.getByText('Operação individual')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Equipe' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Plano e agência' })).toBeInTheDocument()
+    expect(screen.getAllByText('Plano Agente')).not.toHaveLength(0)
+    expect(screen.queryByRole('timer')).toBeNull()
+  })
+
+  it('shows the agency workspace and team navigation only to the agency owner', () => {
+    render(
+      <AgentAccessProvider access={AGENCY_OWNER_ACCESS}>
+        <Shell role="AGENT" userName="Ana">
+          <p>Conteúdo</p>
+        </Shell>
+      </AgentAccessProvider>,
+    )
+
+    expect(screen.getByText('Agência Aurora')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Equipe' })).toBeInTheDocument()
+    expect(screen.getAllByText('Plano Agência')).not.toHaveLength(0)
+  })
+
+  it('keeps account settings available in navigation and the account controls', () => {
+    mocks.pathname = '/agent/settings'
+
+    render(
+      <Shell role="AGENT" userName="Ana">
+        <p>Conteúdo</p>
+      </Shell>,
+    )
+
+    expect(screen.getByRole('link', { name: 'Configurações' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(screen.getByRole('link', { name: 'Abrir configurações da conta' })).toHaveAttribute(
+      'href',
+      '/agent/settings',
+    )
+    expect(screen.getByRole('link', { name: 'Abrir configurações de Ana' })).toHaveAttribute(
+      'href',
+      '/agent/settings',
+    )
+    expect(screen.getByText('Configurações da conta')).toBeInTheDocument()
+  })
+
+  it('shows the authenticated account trial globally with a plan action', () => {
+    render(
+      <AgentAccessProvider access={FOUNDER_TRIAL_ACCESS}>
+        <Shell role="AGENT" userName="Ana">
+          <p>Conteúdo</p>
+        </Shell>
+      </AgentAccessProvider>,
+    )
+
+    expect(screen.getByRole('timer')).toHaveAccessibleName(/30 dias/)
+    expect(screen.getByRole('link', { name: 'Ver plano' })).toHaveAttribute(
+      'href',
+      '/agent/agency',
+    )
+  })
 })
 
 describe('Shell sign-out ordering', () => {

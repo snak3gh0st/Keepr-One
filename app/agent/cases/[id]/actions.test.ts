@@ -26,7 +26,8 @@ const mocks = vi.hoisted(() => {
       return result
     }),
     getCurrentAgent: vi.fn(),
-    findAgents: vi.fn(),
+    getAgentScopeIds: vi.fn(),
+    canAccessCase: vi.fn(() => true),
     advanceCaseCrmToSystemStage: vi.fn(),
     revalidatePath: vi.fn(),
   }
@@ -34,12 +35,12 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    agent: { findMany: mocks.findAgents },
     $transaction: mocks.transaction,
   },
 }))
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
-vi.mock('@/lib/case-access', () => ({ canAccessCase: vi.fn(() => true) }))
+vi.mock('@/lib/agent-access', () => ({ getAgentScopeIds: mocks.getAgentScopeIds }))
+vi.mock('@/lib/case-access', () => ({ canAccessCase: mocks.canAccessCase }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 vi.mock('@/lib/crm', () => ({
   CrmDomainError: class CrmDomainError extends Error {},
@@ -58,7 +59,7 @@ beforeEach(() => {
   mocks.state.activeApplication = false
   mocks.resetTransactionTail()
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1' })
-  mocks.findAgents.mockResolvedValue([{ id: 'agent-1', parentAgentId: null }])
+  mocks.getAgentScopeIds.mockResolvedValue(['agent-1'])
 })
 
 describe('startApplication', () => {
@@ -78,5 +79,9 @@ describe('startApplication', () => {
     expect(mocks.tx.application.create).toHaveBeenCalledTimes(1)
     expect(mocks.tx.caseTimelineEvent.create).toHaveBeenCalledTimes(1)
     expect(mocks.advanceCaseCrmToSystemStage).toHaveBeenCalledTimes(1)
+    expect(mocks.canAccessCase).toHaveBeenCalledWith(
+      { role: 'AGENT', agentScopeIds: ['agent-1'] },
+      { id: 'case-1', assignedAgentId: 'agent-1' },
+    )
   })
 })

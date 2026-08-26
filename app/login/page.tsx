@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
@@ -80,6 +80,25 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [signalIndex, setSignalIndex] = useState(0)
+  const [founderCreated, setFounderCreated] = useState(false)
+  const [agencyInvitationLogin, setAgencyInvitationLogin] = useState(false)
+  const [postLoginPath, setPostLoginPath] = useState('/')
+
+  useEffect(() => {
+    const search = new URLSearchParams(window.location.search)
+    const invitedEmail = search.get('email')?.trim() ?? ''
+    const requestedPath = search.get('next')?.trim() ?? ''
+    const safePath = requestedPath.startsWith('/') && !requestedPath.startsWith('//')
+      ? requestedPath
+      : '/'
+    const frame = window.requestAnimationFrame(() => {
+      if (invitedEmail) setEmail((current) => current || invitedEmail)
+      setPostLoginPath(safePath)
+      setFounderCreated(search.get('founder') === 'created')
+      setAgencyInvitationLogin(search.get('invitation') === 'agency')
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [])
 
   useGSAP(
     () => {
@@ -182,7 +201,7 @@ export default function LoginPage() {
         return
       }
 
-      router.replace('/')
+      router.replace(postLoginPath)
       router.refresh()
     } catch {
       setError('A conexão falhou. Tente novamente em alguns instantes.')
@@ -220,6 +239,24 @@ export default function LoginPage() {
                   Entre para acessar uma visão clara da sua operação financeira.
                 </p>
               </div>
+
+              {founderCreated && (
+                <div
+                  role="status"
+                  className="mb-6 border-l-2 border-mint bg-mint/10 px-4 py-3 text-sm leading-6 text-white/76"
+                >
+                  Seu acesso Founder foi criado. Entre com a senha cadastrada para começar os 30 dias.
+                </div>
+              )}
+
+              {agencyInvitationLogin && (
+                <div
+                  role="status"
+                  className="mb-6 border-l-2 border-mint bg-mint/10 px-4 py-3 text-sm leading-6 text-white/76"
+                >
+                  Entre com o e-mail que recebeu o convite. Depois do acesso, você voltará à escolha do plano.
+                </div>
+              )}
 
               <form onSubmit={handleSubmit} aria-busy={submitting} className="space-y-5">
                 <label data-login-reveal htmlFor="login-email" className="block">

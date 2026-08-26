@@ -4,6 +4,7 @@ import { reconcileInforceRows, type InforceRow } from './portfolio-reconcile'
 function row(overrides: Partial<InforceRow>): InforceRow {
   return {
     deploymentScope: 'LOCAL_CONNECTOR',
+    agentNumber: null,
     policyNumber: 'LS1',
     policyStatus: 'Active',
     policyIssueDate: '06/02/2023',

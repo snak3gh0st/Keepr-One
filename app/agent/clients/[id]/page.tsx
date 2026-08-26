@@ -5,7 +5,7 @@ import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/require-role'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getDownlineIds } from '@/lib/hierarchy'
+import { getAgentScopeIds } from '@/lib/agent-access'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { ModuleSummary } from '@/components/ModuleSummary'
@@ -37,26 +37,50 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     where: { id },
     include: {
       assignedAgent: { include: { user: { select: { name: true } } } },
-      policies: { orderBy: { createdAt: 'desc' } },
-      insuranceCases: { orderBy: { createdAt: 'desc' } },
-      illustrations: { orderBy: { createdAt: 'desc' }, take: 50 },
     },
   })
   if (!client) notFound()
 
-  // Same scope rule the policy detail page uses: an agent sees their own book
-  // and their downline's, and nothing else. A 404 rather than a 403, so the
-  // page never confirms that a client exists to someone who may not see them.
+  // A 404 rather than a 403 keeps the route from confirming that a client
+  // exists to someone outside the subscription-authorized book.
   let allowed = session.user.role === 'ADMIN'
+  let scopeIds: string[] | null = null
   if (session.user.role === 'AGENT') {
     const agent = await getCurrentAgent()
-    const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
-    const scopeIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
+    scopeIds = await getAgentScopeIds(agent.id)
     allowed = scopeIds.includes(client.assignedAgentId)
   }
   if (!allowed) notFound()
 
-  const inforce = client.policies.filter((policy) => policy.status === 'INFORCE').length
+  // Child rows have their own agent ownership. Filtering only the Client would
+  // let an inconsistent import attach another agent's policy/case/illustration
+  // and leak it through this aggregate page.
+  const [policies, insuranceCases, illustrations] = await Promise.all([
+    prisma.policy.findMany({
+      where: {
+        clientId: client.id,
+        ...(scopeIds ? { agentId: { in: scopeIds } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.insuranceCase.findMany({
+      where: {
+        clientId: client.id,
+        ...(scopeIds ? { assignedAgentId: { in: scopeIds } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.illustration.findMany({
+      where: {
+        clientId: client.id,
+        ...(scopeIds ? { agentId: { in: scopeIds } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    }),
+  ])
+
+  const inforce = policies.filter((policy) => policy.status === 'INFORCE').length
 
   return (
     <Shell role={session.user.role === 'ADMIN' ? 'ADMIN' : 'AGENT'} userName={session.user.name ?? ''}>
@@ -68,9 +92,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
       <ModuleSummary
         items={[
-          { label: 'Apólices em vigor', value: `${inforce} / ${client.policies.length}`, detail: 'Proteções ativas' },
-          { label: 'Casos', value: String(client.insuranceCases.length), detail: 'Processos abertos' },
-          { label: 'Cotações', value: String(client.illustrations.length), detail: 'Pedidas à seguradora' },
+          { label: 'Apólices em vigor', value: `${inforce} / ${policies.length}`, detail: 'Proteções ativas' },
+          { label: 'Casos', value: String(insuranceCases.length), detail: 'Processos abertos' },
+          { label: 'Cotações', value: String(illustrations.length), detail: 'Pedidas à seguradora' },
           { label: 'Nascimento', value: date(client.dateOfBirth), detail: 'Data informada pela seguradora' },
         ]}
       />
@@ -89,7 +113,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             </tr>
           </Thead>
           <tbody>
-            {client.policies.map((policy) => (
+            {policies.map((policy) => (
               <Tr key={policy.id}>
                 <Td>
                   <Link
@@ -106,7 +130,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             ))}
           </tbody>
         </Table>
-        {client.policies.length === 0 && <EmptyState>Nenhuma apólice.</EmptyState>}
+        {policies.length === 0 && <EmptyState>Nenhuma apólice.</EmptyState>}
       </section>
 
       <section className="module-main-surface">
@@ -125,7 +149,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             </tr>
           </Thead>
           <tbody>
-            {client.illustrations.map((illustration) => {
+            {illustrations.map((illustration) => {
               const quote = summarizeQuotePayload(illustration.rawPayload)
               const asked = [
                 quote.issueAge === null ? null : `${quote.issueAge} anos`,
@@ -178,7 +202,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             })}
           </tbody>
         </Table>
-        {client.illustrations.length === 0 ? (
+        {illustrations.length === 0 ? (
           <EmptyState>Nenhuma cotação para este cliente.</EmptyState>
         ) : (
           // The carrier's condition travels with the number, wherever it shows.
@@ -200,7 +224,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             </tr>
           </Thead>
           <tbody>
-            {client.insuranceCases.map((insuranceCase) => (
+            {insuranceCases.map((insuranceCase) => (
               <Tr key={insuranceCase.id}>
                 <Td>
                   <Link
@@ -215,7 +239,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             ))}
           </tbody>
         </Table>
-        {client.insuranceCases.length === 0 && <EmptyState>Nenhum caso.</EmptyState>}
+        {insuranceCases.length === 0 && <EmptyState>Nenhum caso.</EmptyState>}
       </section>
     </Shell>
   )

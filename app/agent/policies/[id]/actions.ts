@@ -3,7 +3,7 @@
 import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/require-role'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getDownlineIds } from '@/lib/hierarchy'
+import { getAgentScopeIds } from '@/lib/agent-access'
 import { canAccessPolicy } from '@/lib/policy-access'
 import { buildStoredPath, saveUploadedFile } from '@/lib/storage'
 import { nextAnnualReview } from '@/lib/annual-review'
@@ -30,8 +30,7 @@ async function assertPolicyAccess(policyId: string): Promise<ActionResult | null
   if (!policy) return { ok: false, message: 'Apólice não encontrada.' }
 
   const agent = await getCurrentAgent()
-  const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
-  const scopeIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
+  const scopeIds = await getAgentScopeIds(agent.id)
   if (!canAccessPolicy({ role: 'AGENT', agentScopeIds: scopeIds }, policy)) {
     return { ok: false, message: 'Apólice fora da sua carteira.' }
   }
@@ -53,8 +52,7 @@ export async function uploadPolicyDocument(formData: FormData): Promise<void> {
 
   if (session.user.role === 'AGENT') {
     const agent = await getCurrentAgent()
-    const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
-    const scopeIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
+    const scopeIds = await getAgentScopeIds(agent.id)
     if (!canAccessPolicy({ role: 'AGENT', agentScopeIds: scopeIds }, policy)) {
       throw new Error('Forbidden: policy outside your scope')
     }

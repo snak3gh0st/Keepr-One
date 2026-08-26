@@ -1,8 +1,9 @@
-import { getCurrentAgent } from '@/lib/agent-context'
+import { getCurrentAgentWithoutOnboarding } from '@/lib/agent-context'
 import { prisma } from '@/lib/prisma'
 import { assertSameOriginAction } from '@/lib/security/same-origin-action'
 import { chatwootConfigFromEnv } from '@/lib/messaging/chatwoot-config'
 import { createChatwootClient } from '@/lib/messaging/chatwoot-client'
+import { ensureAgentInbox } from '@/lib/messaging/ensure-agent-inbox'
 
 const NO_STORE = { 'Cache-Control': 'private, no-store' }
 
@@ -22,7 +23,8 @@ export async function POST(request: Request) {
   if (!config) return Response.json({ error: 'UNAVAILABLE' }, { status: 503, headers: NO_STORE })
 
   try {
-    const agent = await getCurrentAgent()
+    const agent = await getCurrentAgentWithoutOnboarding()
+    await ensureAgentInbox({ agentId: agent.id, userId: agent.userId })
     const account = await prisma.agentMessagingAccount.findUnique({
       where: { agentId: agent.id },
       select: { externalUserId: true },

@@ -1,4 +1,6 @@
 import { auth } from '@/lib/auth'
+import { requireAgentOnboardingCompleteForUser } from '@/lib/agent-onboarding-gate'
+import { requireFounderAccessForUser } from '@/lib/founder-access'
 import { headers } from 'next/headers'
 
 export type Role = 'ADMIN' | 'AGENT' | 'CLIENT'
@@ -20,7 +22,10 @@ export type Role = 'ADMIN' | 'AGENT' | 'CLIENT'
  * Better Auth's additionalFields system doesn't support a literal string
  * union/enum type). We validate + cast it to our real `Role` union here.
  */
-export async function requireRole(...roles: Role[]) {
+async function readRequiredRole(
+  roles: Role[],
+  options: { enforceFounderAccess: boolean; enforceOnboarding: boolean },
+) {
   const session = await auth.api.getSession({ headers: await headers() })
   if (!session) throw new Error('Not authenticated')
 
@@ -29,5 +34,44 @@ export async function requireRole(...roles: Role[]) {
     throw new Error('Forbidden: insufficient role')
   }
 
+  // Founder accounts and agents created through accepted agency invitations
+  // enter the additive commercial gate. Existing agents with neither marker
+  // remain grandfathered, and ADMIN/CLIENT roles never enter this product gate.
+  if (options.enforceFounderAccess && role === 'AGENT') {
+    await requireFounderAccessForUser(session.user.id)
+  }
+  if (options.enforceOnboarding && role === 'AGENT') {
+    await requireAgentOnboardingCompleteForUser(session.user.id)
+  }
+
   return session
+}
+
+export async function requireRole(...roles: Role[]) {
+  return readRequiredRole(roles, {
+    enforceFounderAccess: true,
+    enforceOnboarding: true,
+  })
+}
+
+/**
+ * Restricted escape hatch for the onboarding page and the integration
+ * endpoints it invokes. Commercial trial/payment access is still enforced.
+ */
+export async function requireRoleWithoutOnboarding(...roles: Role[]) {
+  return readRequiredRole(roles, {
+    enforceFounderAccess: true,
+    enforceOnboarding: false,
+  })
+}
+
+/**
+ * Use only for routing users to the correct access-required screen. Product
+ * data must continue to call requireRole(), which enforces the commercial gate.
+ */
+export async function requireRoleWithoutFounderAccess(...roles: Role[]) {
+  return readRequiredRole(roles, {
+    enforceFounderAccess: false,
+    enforceOnboarding: false,
+  })
 }

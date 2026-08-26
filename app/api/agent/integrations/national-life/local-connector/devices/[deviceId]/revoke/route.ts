@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { getCurrentAgent } from '@/lib/agent-context'
+import { getCurrentAgentWithoutOnboarding } from '@/lib/agent-context'
 import {
   isNationalLifeLocalConnectorEnabled,
   localConnectorUnavailableResponse,
@@ -29,7 +29,7 @@ export async function POST(
       forwardedHost: request.headers.get('x-forwarded-host'),
       forwardedProto: request.headers.get('x-forwarded-proto'),
     })
-    const agent = await getCurrentAgent()
+    const agent = await getCurrentAgentWithoutOnboarding()
     const params = paramsSchema.parse(await context.params)
     const result = await revokeLocalConnectorDevice(prisma, {
       agentId: agent.id,

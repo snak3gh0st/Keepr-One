@@ -161,6 +161,7 @@ describe('planReadGridStages', () => {
       'COMMISSIONS_OVERVIEW',
       'COMMISSIONS_POLICY_HISTORY',
       'AGENT_DASHBOARD',
+      'PREMIUM_REPORT_AGENCY',
     ] as const
     expect(LOCAL_CONNECTOR_PRIORITY_GRID_KEYS).toEqual(expectedPriority)
     expect(LOCAL_CONNECTOR_DEFAULT_GRID_KEYS).toEqual(expectedPriority)

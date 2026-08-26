@@ -26,6 +26,7 @@ import {
   startLocalConnectorRun,
 } from '@/lib/national-life/local-connector/run-service'
 import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from '@/lib/national-life/read-coverage'
+import { filterNationalLifeGridKeysForAgent } from '@/lib/national-life/plan-access'
 import { prisma } from '@/lib/prisma'
 import { consumeRateLimit } from '@/lib/redis/rate-limit'
 
@@ -86,8 +87,12 @@ export async function POST(request: Request) {
       )
     }
 
+    const permittedGridKeys = await filterNationalLifeGridKeysForAgent(
+      device.agentId,
+      priorityGridKeys(pageDiscoveryEnabled),
+    )
     const runOptions = {
-      gridKeys: priorityGridKeys(pageDiscoveryEnabled),
+      gridKeys: permittedGridKeys,
       ...(payload.forceRefresh === true ? { forceRefresh: true } : {}),
       ...(exportEnabled ? { exportEnabled: true } : {}),
     }

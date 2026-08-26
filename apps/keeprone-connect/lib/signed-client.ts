@@ -52,6 +52,7 @@ export class SignedRequestError extends Error {
     readonly code:
       | 'DEVICE_KEY_UNAVAILABLE'
       | 'DEVICE_REVOKED'
+      | 'FOUNDER_ACCESS_REQUIRED'
       | 'DEVICE_REQUEST_REJECTED'
       | 'DEVICE_REQUEST_FAILED'
       | 'IDEMPOTENCY_CONFLICT'
@@ -78,6 +79,7 @@ export function classifyFailedResponse(
   headers: Pick<Headers, 'get'>,
 ):
   | 'DEVICE_REVOKED'
+  | 'FOUNDER_ACCESS_REQUIRED'
   | 'DEVICE_REQUEST_REJECTED'
   | 'DEVICE_REQUEST_FAILED'
   | 'CLIENT_TOO_OLD'
@@ -93,9 +95,10 @@ export function classifyFailedResponse(
     return 'CONNECTOR_PAUSED'
   }
   if (status !== 401) return 'DEVICE_REQUEST_FAILED'
-  return headers.get('x-fyntra-device-error') === 'DEVICE_REVOKED'
-    ? 'DEVICE_REVOKED'
-    : 'DEVICE_REQUEST_REJECTED'
+  const deviceError = headers.get('x-fyntra-device-error')
+  if (deviceError === 'DEVICE_REVOKED') return 'DEVICE_REVOKED'
+  if (deviceError === 'FOUNDER_ACCESS_REQUIRED') return 'FOUNDER_ACCESS_REQUIRED'
+  return 'DEVICE_REQUEST_REJECTED'
 }
 
 export async function signedJsonRequest<T>(input: {

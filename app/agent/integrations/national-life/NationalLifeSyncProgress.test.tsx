@@ -88,8 +88,8 @@ describe('NationalLifeSyncProgress', () => {
 
   it('stops polling after the run reaches a terminal state', async () => {
     vi.useFakeTimers()
-    const fetchMock = answerWith(status({ completed: 13, percent: 100, state: 'COMPLETED', shouldPoll: false }))
-    render(<NationalLifeSyncProgress initialStatus={status({ state: 'COMPLETED', completed: 13, percent: 100, shouldPoll: false })} />)
+    const fetchMock = answerWith(status({ completed: 14, total: 14, percent: 100, state: 'COMPLETED', shouldPoll: false }))
+    render(<NationalLifeSyncProgress initialStatus={status({ state: 'COMPLETED', completed: 14, total: 14, percent: 100, shouldPoll: false })} />)
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4_000)
@@ -97,6 +97,32 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(fetchMock).not.toHaveBeenCalled()
     expect(screen.getByText('Your priority National Life data is up to date')).toBeTruthy()
+  })
+
+  it('recognizes a completed personal-plan sync as current', () => {
+    const personalPlan = [
+      'NEW_BUSINESS',
+      'RECENTLY_CLOSED',
+      'INFORCE_CLIENTS',
+      'COMMISSIONS_EARNING_REPORT',
+      'CORRESPONDENCE',
+    ]
+    render(<NationalLifeSyncProgress initialStatus={status({
+      state: 'COMPLETED',
+      shouldPoll: false,
+      completed: personalPlan.length,
+      total: personalPlan.length,
+      percent: 100,
+      stageCoverage: personalPlan.map((gridKey) => ({
+        gridKey,
+        label: gridKey.toLowerCase(),
+        state: 'VERIFIED' as const,
+        verifiedRecords: 0,
+      })),
+    })} />)
+
+    expect(screen.getByText('Your priority National Life data is up to date')).toBeTruthy()
+    expect(screen.queryByText(/broader portal run/i)).toBeNull()
   })
 
   it('does not present a historical broad run as current priority freshness', () => {

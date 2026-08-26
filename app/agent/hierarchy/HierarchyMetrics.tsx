@@ -1,35 +1,26 @@
-"use client";
-
-import { useRef } from "react";
-import { useGSAP } from "@gsap/react";
-import gsap from "gsap";
-
 type HierarchyMetric = {
-  key: "upline" | "downline" | "depth";
+  key: "people" | "agencies" | "depth";
   label: string;
   value: number;
   detail: string;
-  unit: string;
 };
 
 function MetricIcon({ type }: { type: HierarchyMetric["key"] }) {
-  if (type === "upline") {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-        <circle cx="12" cy="5" r="2.25" />
-        <circle cx="12" cy="18.5" r="2.25" />
-        <path d="M12 16.25V8M8.5 11.5 12 8l3.5 3.5" />
-      </svg>
-    );
-  }
-
-  if (type === "downline") {
+  if (type === "people") {
     return (
       <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
         <circle cx="12" cy="5" r="2.25" />
         <circle cx="6" cy="18.5" r="2.25" />
         <circle cx="18" cy="18.5" r="2.25" />
         <path d="M12 7.25v4.5M6 16.25v-2.5h12v2.5" />
+      </svg>
+    );
+  }
+
+  if (type === "agencies") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+        <path d="M4.5 20V9.5L12 4l7.5 5.5V20M8 20v-6h8v6M3 20h18" />
       </svg>
     );
   }
@@ -43,112 +34,50 @@ function MetricIcon({ type }: { type: HierarchyMetric["key"] }) {
 }
 
 export function HierarchyMetrics({
-  uplineCount,
-  downlineCount,
+  peopleBelow,
+  agenciesBelow,
   depth,
 }: {
-  uplineCount: number;
-  downlineCount: number;
+  peopleBelow: number;
+  agenciesBelow: number;
   depth: number;
 }) {
-  const root = useRef<HTMLElement>(null);
   const metrics: HierarchyMetric[] = [
     {
-      key: "upline",
-      label: "Linha de liderança",
-      value: uplineCount,
-      detail:
-        uplineCount > 0
-          ? "Pessoas conectadas acima da sua posição"
-          : "Sua posição inicia esta linha",
-      unit: uplineCount === 1 ? "liderança" : "lideranças",
+      key: "people",
+      label: "Pessoas abaixo",
+      value: peopleBelow,
+      detail: peopleBelow === 1 ? "1 pessoa na sua linha" : `${peopleBelow} pessoas na sua linha`,
     },
     {
-      key: "downline",
-      label: "Equipe conectada",
-      value: downlineCount,
-      detail:
-        downlineCount > 0
-          ? "Agentes que fazem parte da sua estrutura"
-          : "Nenhum agente conectado abaixo de você",
-      unit: downlineCount === 1 ? "agente" : "agentes",
+      key: "agencies",
+      label: "Subagências",
+      value: agenciesBelow,
+      detail: agenciesBelow === 1 ? "1 agência descendente" : `${agenciesBelow} agências descendentes`,
     },
     {
       key: "depth",
-      label: "Camadas da equipe",
+      label: "Camadas",
       value: depth,
-      detail:
-        depth > 0
-          ? "Maior distância entre você e sua equipe"
-          : "Sua estrutura ainda não possui novas camadas",
-      unit: depth === 1 ? "nível" : "níveis",
+      detail: depth === 1 ? "1 nível depois de você" : `${depth} níveis depois de você`,
     },
   ];
 
-  useGSAP(
-    () => {
-      const media = gsap.matchMedia();
-
-      media.add("(prefers-reduced-motion: no-preference)", () => {
-        gsap.from("[data-hierarchy-metric]", {
-          y: 24,
-          scale: 0.965,
-          opacity: 0,
-          duration: 0.64,
-          stagger: 0.075,
-          ease: "power3.out",
-          clearProps: "transform,opacity",
-        });
-
-        gsap.from("[data-hierarchy-signal]", {
-          scaleX: 0,
-          transformOrigin: "left center",
-          duration: 0.72,
-          stagger: 0.07,
-          ease: "power3.out",
-          clearProps: "transform",
-        });
-      });
-
-      return () => media.revert();
-    },
-    { scope: root },
-  );
-
   return (
-    <section ref={root} className="hierarchy-metrics" aria-label="Resumo da estrutura">
+    <section className="hierarchy-metrics" aria-label="Resumo da estrutura descendente">
       {metrics.map((metric) => (
-        <article key={metric.key} data-hierarchy-metric data-tone={metric.key}>
-          <header>
-            <div>
-              <strong>{metric.label}</strong>
-              <p>{metric.detail}</p>
-            </div>
-            <span className="hierarchy-metric-icon">
-              <MetricIcon type={metric.key} />
-            </span>
-          </header>
-
-          <div className="hierarchy-metric-value">
-            <strong>{metric.value.toLocaleString("pt-BR")}</strong>
-            <span>{metric.unit}</span>
-          </div>
-
-          <footer>
-            <span className="hierarchy-metric-signal" aria-hidden="true">
-              <i data-hierarchy-signal />
-              <i data-hierarchy-signal />
-              <i data-hierarchy-signal />
-            </span>
-            <small>
-              {metric.key === "upline"
-                ? "Sua referência"
-                : metric.key === "downline"
-                  ? "Sua estrutura"
-                  : "Alcance atual"}
-            </small>
-          </footer>
-        </article>
+        <div key={metric.key} className="hierarchy-metric" data-tone={metric.key}>
+          <span className="hierarchy-metric-icon">
+            <MetricIcon type={metric.key} />
+          </span>
+          <span className="hierarchy-metric-copy">
+            <strong>{metric.label}</strong>
+            <small>{metric.detail}</small>
+          </span>
+          <span className="hierarchy-metric-value">
+            {metric.value.toLocaleString("pt-BR")}
+          </span>
+        </div>
       ))}
     </section>
   );

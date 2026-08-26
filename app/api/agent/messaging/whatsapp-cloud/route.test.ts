@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  getCurrentAgent: vi.fn(),
+  getCurrentAgentWithoutOnboarding: vi.fn(),
+  ensureAgentInbox: vi.fn(),
   accountFindUnique: vi.fn(),
   channelUpsert: vi.fn(),
   listWhatsappInboxes: vi.fn(),
@@ -9,7 +10,12 @@ const mocks = vi.hoisted(() => ({
   mode: vi.fn(),
 }))
 
-vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
+vi.mock('@/lib/agent-context', () => ({
+  getCurrentAgentWithoutOnboarding: mocks.getCurrentAgentWithoutOnboarding,
+}))
+vi.mock('@/lib/messaging/ensure-agent-inbox', () => ({
+  ensureAgentInbox: mocks.ensureAgentInbox,
+}))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     agentMessagingAccount: { findUnique: mocks.accountFindUnique },
@@ -38,7 +44,8 @@ describe('POST /api/agent/messaging/whatsapp-cloud', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.mode.mockReturnValue('META_CLOUD')
-    mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1' })
+    mocks.getCurrentAgentWithoutOnboarding.mockResolvedValue({ id: 'agent-1', userId: 'user-1' })
+    mocks.ensureAgentInbox.mockResolvedValue({ created: false })
     mocks.accountFindUnique.mockResolvedValue({ externalAccountId: '15', externalUserToken: 'user-token' })
     mocks.channelUpsert.mockResolvedValue({})
   })
@@ -59,6 +66,10 @@ describe('POST /api/agent/messaging/whatsapp-cloud', () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ status: 'CONNECTED', phone: '+4075550123' })
+    expect(mocks.ensureAgentInbox).toHaveBeenCalledWith({
+      agentId: 'agent-1',
+      userId: 'user-1',
+    })
     expect(mocks.channelUpsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         provider: 'META_CLOUD',

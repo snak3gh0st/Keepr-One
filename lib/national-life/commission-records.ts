@@ -60,6 +60,15 @@ export function toPeriod(paymentDate: unknown): string {
   return `${match[3]}-${match[1].padStart(2, '0')}`
 }
 
+export function classifyCarrierCommissionLevel(
+  value: unknown,
+): CarrierCommissionRecord['type'] | null {
+  const normalized = asString(value)?.trim().toLowerCase()
+  if (normalized === 'personal') return 'DIRECT'
+  if (normalized === 'override') return 'OVERRIDE'
+  return null
+}
+
 export function toCarrierCommissionRecords(
   rows: readonly CarrierCommissionRow[],
 ): CarrierCommissionRecord[] {
@@ -69,15 +78,18 @@ export function toCarrierCommissionRecords(
     const amount = parseCarrierAmount(amounts.GrossCommEarned ?? raw.GrossCommEarned)
     if (amount === null) return []
 
-    // The carrier labels the agent's role on the transaction, which is exactly
-    // the direct-versus-override split the app reports.
-    const isOverride = raw.WritingAgtLevel === 'Override'
+    // Fail closed on missing or novel carrier labels. Treating every value
+    // except "Override" as personal could expose a new team-level row after a
+    // carrier schema change.
+    const type = classifyCarrierCommissionLevel(raw.WritingAgtLevel)
+    if (type === null) return []
+    const isOverride = type === 'OVERRIDE'
 
     return [
       {
         id: row.id,
         period: toPeriod(raw.PaymentDate),
-        type: isOverride ? ('OVERRIDE' as const) : ('DIRECT' as const),
+        type,
         level: isOverride ? 1 : 0,
         amount,
         policyNumber: asString(raw.PolicyNumber) ?? '—',

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
+import { sanitizeNationalLifeSyncStatusForAgent } from '@/lib/national-life/plan-access'
 import {
   getNationalLifeLocalConnectorConfig,
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
@@ -18,7 +19,10 @@ export default async function NationalLifeConnectionPage() {
   const agent = await getCurrentAgent()
   const localConfig = getNationalLifeLocalConnectorConfig()
   const syncStatus = localConfig.enabled
-    ? await getNationalLifeSyncStatus(agent.id, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE)
+    ? await sanitizeNationalLifeSyncStatusForAgent(
+        agent.id,
+        await getNationalLifeSyncStatus(agent.id, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE),
+      )
     : null
   const [user] = await Promise.all([
     prisma.user.findUnique({

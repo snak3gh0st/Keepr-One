@@ -60,6 +60,7 @@ export type NationalLifePromotionSkipReason =
   | 'CARRIER_VALUE_CHANGED_REQUIRES_ADJUSTMENT'
   | 'REVERSAL_WITHOUT_CONFIRMED_CREDIT'
   | 'RECONCILIATION_CHAIN_NEEDS_REVIEW'
+  | 'PRODUCER_IDENTITY_MISMATCH'
   | 'PROMOTION_WRITER_FAILED'
 
 export type NationalLifePromotionCandidate = {
@@ -799,7 +800,40 @@ async function syncSources(
   }
 }
 
-export function syncConfirmedCasePromotionCredits(
+function canonicalCarrierAgentNumber(value: string | null | undefined) {
+  return value?.trim().toUpperCase().replace(/[^A-Z0-9]/g, '') || null
+}
+
+async function getActiveProducerNpn(
+  agentId: string,
+  database: PromotionDatabase,
+) {
+  const agent = await database.agent.findUnique({
+    where: { id: agentId },
+    select: { npn: true, status: true },
+  })
+  if (!agent || agent.status !== 'ACTIVE') return null
+  return canonicalCarrierAgentNumber(agent.npn)
+}
+
+function withOwnershipSkips(
+  result: PromotionCreditSyncResult,
+  examined: number,
+  rejected: number,
+): PromotionCreditSyncResult {
+  if (rejected === 0) return { ...result, examined }
+  return {
+    ...result,
+    examined,
+    skipped: {
+      ...result.skipped,
+      PRODUCER_IDENTITY_MISMATCH:
+        (result.skipped.PRODUCER_IDENTITY_MISMATCH ?? 0) + rejected,
+    },
+  }
+}
+
+export async function syncConfirmedCasePromotionCredits(
   input: {
     agentId: string
     deploymentScope: string
@@ -807,10 +841,17 @@ export function syncConfirmedCasePromotionCredits(
     snapshots: readonly CaseSnapshot[]
     fetchedAt: Date
   },
-  database?: PromotionDatabase,
+  database: PromotionDatabase = prisma,
 ) {
-  return syncSources(
-    input.snapshots.map((snapshot): PromotionSource => ({
+  const producerNpn = await getActiveProducerNpn(input.agentId, database)
+  const ownedSnapshots = producerNpn
+    ? input.snapshots.filter(
+        (snapshot) =>
+          canonicalCarrierAgentNumber(snapshot.writingAgentNumber) === producerNpn,
+      )
+    : []
+  const result = await syncSources(
+    ownedSnapshots.map((snapshot): PromotionSource => ({
       surface: 'CASE_SNAPSHOT',
       policyNumber: snapshot.policyNo,
       // Product contract: every invited producer connects their own carrier
@@ -829,19 +870,31 @@ export function syncConfirmedCasePromotionCredits(
     })),
     database,
   )
+  return withOwnershipSkips(
+    result,
+    input.snapshots.length,
+    input.snapshots.length - ownedSnapshots.length,
+  )
 }
 
-export function syncConfirmedInforcePromotionCredits(
+export async function syncConfirmedInforcePromotionCredits(
   input: {
     agentId: string
     deploymentScope: string
     snapshots: readonly InforcePolicySnapshot[]
     fetchedAt: Date
   },
-  database?: PromotionDatabase,
+  database: PromotionDatabase = prisma,
 ) {
-  return syncSources(
-    input.snapshots.map((snapshot): PromotionSource => ({
+  const producerNpn = await getActiveProducerNpn(input.agentId, database)
+  const ownedSnapshots = producerNpn
+    ? input.snapshots.filter(
+        (snapshot) =>
+          canonicalCarrierAgentNumber(snapshot.agentNumber) === producerNpn,
+      )
+    : []
+  const result = await syncSources(
+    ownedSnapshots.map((snapshot): PromotionSource => ({
       surface: 'INFORCE_POLICY',
       policyNumber: snapshot.policyNumber,
       // See the producer-identity contract documented in the case path above.
@@ -856,6 +909,11 @@ export function syncConfirmedInforcePromotionCredits(
       },
     })),
     database,
+  )
+  return withOwnershipSkips(
+    result,
+    input.snapshots.length,
+    input.snapshots.length - ownedSnapshots.length,
   )
 }
 

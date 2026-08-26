@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   count: vi.fn(),
   localConnectorConfig: vi.fn(),
   getStatus: vi.fn(),
+  sanitizeStatus: vi.fn(),
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
@@ -19,6 +20,9 @@ vi.mock('@/lib/national-life/local-connector/config', () => ({
 vi.mock('@/lib/national-life/sync-run-service', () => ({
   getNationalLifeSyncStatus: mocks.getStatus,
 }))
+vi.mock('@/lib/national-life/plan-access', () => ({
+  sanitizeNationalLifeSyncStatusForAgent: mocks.sanitizeStatus,
+}))
 
 import { GET } from './route'
 
@@ -27,6 +31,7 @@ beforeEach(() => {
   mocks.localConnectorConfig.mockReturnValue({ enabled: true })
   mocks.getStatus.mockResolvedValue(null)
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1' })
+  mocks.sanitizeStatus.mockImplementation(async (_agentId, status) => status)
 })
 
 describe('carrier sync badge route', () => {

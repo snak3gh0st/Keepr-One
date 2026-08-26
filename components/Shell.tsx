@@ -5,18 +5,21 @@ import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import {
   Fragment,
+  useCallback,
   useEffect,
   useRef,
   type CSSProperties,
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAgentPromotionContext } from "@/components/AgentPromotionContext";
+import { useAgentAccessContext } from "@/components/AgentAccessContext";
 import { authClient } from "@/lib/auth-client";
 import { Logo } from "@/components/Logo";
 import { Avatar } from "@/components/Avatar";
 import { NavIcon, type NavIconName } from "@/components/NavIcon";
 import { CarrierSyncBadge } from "@/components/CarrierSyncBadge";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
+import { TrialCountdown } from "@/components/trial";
 import type { JacketTone, PromotionIdentity } from "@/lib/promotion-journey";
 
 gsap.registerPlugin(useGSAP);
@@ -40,6 +43,7 @@ const JACKET_STEP: Record<JacketTone, number> = {
 type NavItem = {
   href: string;
   label: string;
+  mobileLabel?: string;
   icon: NavIconName;
   group?: string;
   matches?: string[];
@@ -79,6 +83,7 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
     { href: "/agent/illustrations", label: "Ilustrações", icon: "document", group: "Carteira" },
     { href: "/agent/commissions", label: "Comissões", icon: "money", group: "Carteira" },
     { href: "/agent/journey", label: "Jornada", icon: "chart", group: "Carteira" },
+    { href: "/agent/agency", label: "Plano e agência", mobileLabel: "Plano", icon: "users", group: "Gestão" },
     { href: "/agent/hierarchy", label: "Equipe", icon: "hierarchy", group: "Gestão" },
     {
       href: "/agent/integrations",
@@ -87,6 +92,7 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
       group: "Gestão",
       matches: ["/agent/integrations"],
     },
+    { href: "/agent/settings", label: "Configurações", mobileLabel: "Conta", icon: "settings", group: "Conta" },
   ],
   CLIENT: [{ href: "/client", label: "Minhas apólices", icon: "document" }],
 };
@@ -108,6 +114,7 @@ const PAGE_NAMES: Record<string, string> = {
   "/agent/illustrations": "Ilustrações",
   "/agent/illustrations/new": "Nova ilustração",
   "/agent/hierarchy": "Minha equipe",
+  "/agent/agency": "Plano e agência",
   "/agent/clients": "CRM · Clientes",
   "/agent/mensagens": "Mensagens",
   "/agent/policies": "Apólices",
@@ -117,6 +124,7 @@ const PAGE_NAMES: Record<string, string> = {
   "/agent/integrations/national-life": "Conexão National Life",
   "/agent/integrations": "Integrações",
   "/agent/integrations/google-calendar": "Google Calendar",
+  "/agent/settings": "Configurações da conta",
   "/client": "Minhas apólices",
 };
 
@@ -145,16 +153,41 @@ export function Shell({
   const router = useRouter();
   const isJourney = role === "AGENT" && pathname === "/agent/journey";
   const promotionContext = useAgentPromotionContext();
+  const agentAccess = useAgentAccessContext();
   const setGlobalPromotionIdentity = promotionContext?.setIdentity;
   const activePromotionIdentity =
     role === "AGENT"
       ? (promotionIdentity ?? promotionContext?.identity ?? null)
       : null;
-  const items = NAV[role];
+  const items = NAV[role].filter(
+    (item) =>
+      role !== "AGENT" ||
+      item.href !== "/agent/hierarchy" ||
+      agentAccess?.canManageTeam === true,
+  );
   const mobileItemWidth =
     role === "AGENT" ? "w-1/5 min-w-[68px]" : role === "CLIENT" ? "w-full" : "w-[78px]";
   const currentPage = resolvePageName(pathname, role);
-  const roleLabel = role === "ADMIN" ? "Administração" : role === "AGENT" ? "Área do agente" : "Portal do cliente";
+  const roleLabel =
+    role === "ADMIN"
+      ? "Administração"
+      : role === "CLIENT"
+        ? "Portal do cliente"
+        : agentAccess?.kind === "AGENCY_OWNER"
+          ? "Plano Agência"
+          : agentAccess?.kind === "AGENCY_MEMBER"
+            ? "Agente convidado"
+            : "Plano Agente";
+  const workspaceLabel =
+    role !== "AGENT"
+      ? role === "ADMIN"
+        ? "Operação da plataforma"
+        : "Conta individual"
+      : agentAccess?.kind === "AGENCY_OWNER"
+        ? agentAccess.agencyName ?? "Agência conectada"
+        : agentAccess?.kind === "AGENCY_MEMBER"
+          ? `Vinculado a ${agentAccess.agencyName ?? "uma agência"}`
+          : "Operação individual";
   const quickAction =
     role === "AGENT" && pathname === "/agent/calendar"
       ? { href: "/agent/calendar?create=1", label: "Novo compromisso" }
@@ -182,6 +215,13 @@ export function Shell({
   const achievementKey = hasAchievement
     ? `premium-v2:${achievementTone}:${rankTitle}`
     : null;
+  const trial = role === "AGENT" ? agentAccess?.trial ?? null : null;
+
+  const handleTrialExpire = useCallback(() => {
+    // The server remains authoritative. Refreshing the current route makes
+    // the agent layout apply the access gate and redirect to the billing page.
+    router.refresh();
+  }, [router]);
 
   useEffect(() => {
     if (role === "AGENT" && promotionIdentity) {
@@ -306,13 +346,24 @@ export function Shell({
         <span>
           <Logo size={28} className="text-base text-white" />
         </span>
-        <button
-          type="button"
-          onClick={handleSignOut}
-          className="shell-signout rounded-full border border-white/[0.12] px-3 py-1.5 text-xs font-semibold text-white/65 hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75"
-        >
-          Sair
-        </button>
+        <div className="flex items-center gap-2">
+          {role === "AGENT" ? (
+            <Link
+              href="/agent/settings"
+              aria-label="Abrir configurações da conta"
+              className="flex min-h-11 min-w-11 items-center justify-center rounded-full border border-white/[0.12] text-white/65 transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75"
+            >
+              <NavIcon name="settings" />
+            </Link>
+          ) : null}
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className="shell-signout min-h-11 rounded-full border border-white/[0.12] px-3 py-1.5 text-xs font-semibold text-white/65 hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75"
+          >
+            Sair
+          </button>
+        </div>
       </div>
 
       <nav
@@ -330,7 +381,7 @@ export function Shell({
           </span>
           <div className="mt-7 rounded-2xl border border-white/[0.11] bg-white/[0.035] px-4 py-3.5">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">Workspace</p>
-            <p className="mt-1.5 text-sm font-medium text-white/88">Agência conectada</p>
+            <p className="mt-1.5 text-sm font-medium text-white/88">{workspaceLabel}</p>
           </div>
         </div>
 
@@ -367,6 +418,7 @@ export function Shell({
                 <li className={`${mobileItemWidth} shrink-0 snap-start md:w-auto md:flex-none`}>
                   <Link
                     href={itemHref}
+                    aria-label={item.label}
                     aria-current={active ? "page" : undefined}
                     className={`shell-nav-link group flex flex-1 flex-col items-center gap-1.5 whitespace-nowrap px-1 py-2.5 text-center text-[10px] font-semibold transition-all duration-300 focus-visible:outline-white/75 md:flex-row md:rounded-xl md:px-3.5 md:py-3 md:text-left md:text-[13px] ${
                       active
@@ -377,7 +429,14 @@ export function Shell({
                     <span className="transition-transform duration-500 ease-out group-hover:scale-105">
                       <NavIcon name={item.icon} />
                     </span>
-                    <span>{item.label}</span>
+                    {item.mobileLabel ? (
+                      <>
+                        <span className="md:hidden">{item.mobileLabel}</span>
+                        <span className="hidden md:inline">{item.label}</span>
+                      </>
+                    ) : (
+                      <span>{item.label}</span>
+                    )}
                   </Link>
                 </li>
               </Fragment>
@@ -387,13 +446,27 @@ export function Shell({
 
         <div className="relative hidden px-3 pb-4 pt-3 md:block">
           <div className="rounded-2xl border border-white/[0.11] bg-white/[0.04] p-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <Avatar name={userName || "Conta"} />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-white">{userName || "Conta conectada"}</p>
-                <p className="mt-0.5 text-[11px] text-white/55">{roleLabel}</p>
+            {role === "AGENT" ? (
+              <Link
+                href="/agent/settings"
+                aria-label={`Abrir configurações de ${userName || "conta conectada"}`}
+                className="flex min-w-0 items-center gap-3 rounded-xl focus-visible:outline-white/75"
+              >
+                <Avatar name={userName || "Conta"} />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-white">{userName || "Conta conectada"}</p>
+                  <p className="mt-0.5 text-[11px] text-white/55">{roleLabel} · Configurações</p>
+                </div>
+              </Link>
+            ) : (
+              <div className="flex min-w-0 items-center gap-3">
+                <Avatar name={userName || "Conta"} />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-white">{userName || "Conta conectada"}</p>
+                  <p className="mt-0.5 text-[11px] text-white/55">{roleLabel}</p>
+                </div>
               </div>
-            </div>
+            )}
             <button
               type="button"
               onClick={handleSignOut}
@@ -536,7 +609,20 @@ export function Shell({
         </div>
 
         <div className="shell-canvas keepr-grid min-h-[calc(100vh-72px)] px-4 py-7 sm:px-6 md:px-9 md:py-10 lg:px-12">
-          <div className="mx-auto max-w-[1500px]">{children}</div>
+          <div className="mx-auto max-w-[1500px]">
+            {trial ? (
+              <div className="mb-6" data-trial-countdown-slot>
+                <TrialCountdown
+                  endsAt={trial.endsAt}
+                  initialRemainingSeconds={trial.initialRemainingSeconds}
+                  actionHref="/agent/agency"
+                  actionLabel="Ver plano"
+                  onExpire={handleTrialExpire}
+                />
+              </div>
+            ) : null}
+            {children}
+          </div>
         </div>
       </main>
     </div>

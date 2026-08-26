@@ -1,14 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  getCurrentAgent: vi.fn(),
+  getCurrentAgentWithoutOnboarding: vi.fn(),
   localConfig: vi.fn(),
   getStatus: vi.fn(),
+  sanitizeStatus: vi.fn(),
 }))
 
-vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
+vi.mock('@/lib/agent-context', () => ({
+  getCurrentAgentWithoutOnboarding: mocks.getCurrentAgentWithoutOnboarding,
+}))
 vi.mock('@/lib/national-life/sync-run-service', () => ({
   getNationalLifeSyncStatus: mocks.getStatus,
+}))
+vi.mock('@/lib/national-life/plan-access', () => ({
+  sanitizeNationalLifeSyncStatusForAgent: mocks.sanitizeStatus,
 }))
 vi.mock('@/lib/national-life/local-connector/config', () => ({
   getNationalLifeLocalConnectorConfig: mocks.localConfig,
@@ -26,7 +32,8 @@ beforeEach(() => {
     storeUrl: 'https://chromewebstore.google.com/detail/keepr/abcdefghijklmnopabcdefghijklmnop',
     baseUrl: 'https://app.keepr.one',
   })
-  mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1' })
+  mocks.getCurrentAgentWithoutOnboarding.mockResolvedValue({ id: 'agent-1' })
+  mocks.sanitizeStatus.mockImplementation(async (_agentId, status) => status)
 })
 
 describe('National Life sync status route', () => {
@@ -70,7 +77,7 @@ describe('National Life sync status route', () => {
 
     const response = await GET()
 
-    expect(mocks.getCurrentAgent).not.toHaveBeenCalled()
+    expect(mocks.getCurrentAgentWithoutOnboarding).not.toHaveBeenCalled()
     expect(mocks.getStatus).not.toHaveBeenCalled()
     await expect(response.json()).resolves.toMatchObject({
       engine: 'KEEPRONE_CONNECT',
