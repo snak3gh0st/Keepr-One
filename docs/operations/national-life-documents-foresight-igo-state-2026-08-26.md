@@ -1,7 +1,7 @@
 # National Life — documentos, Foresight e iGO em 2026-08-26
 
-Estado: implementação de documentos pronta na branch
-`feat/national-life-documents`; Foresight/iGO somente observados em leitura.
+Estado: captura sob demanda de documentos validada em produção e publicada em
+`main` pelo PR #73 (`eb3be78`); Foresight/iGO somente observados em leitura.
 Nenhum caso, relatório, rascunho ou application foi criado ou submetido.
 
 ## Correspondence: contrato confirmado e implementação
@@ -40,6 +40,21 @@ Migration aditiva:
 `PolicyDocument.uploadedById` opcional para artefatos do sistema, adiciona a
 proveniência National Life e cria as tabelas resumíveis de transferência/chunk.
 
+### Evidência de produção
+
+Em 2026-08-26, um único `ANNUAL STATEMENTS` percorreu o fluxo real completo:
+
+- botão `Trazer para o Keepr One` virou `Abrir no Keepr One`;
+- transferência `COMPLETED`, sem `safeErrorCode`, com 244.325 bytes recebidos;
+- `PolicyDocument` com provider, source row, data de captura e SHA-256;
+- arquivo iniciado por `%PDF-`, com tamanho e hash idênticos no banco e no
+  armazenamento;
+- rota autenticada `/api/documents/<id>` aberta pelo agente.
+
+`UPLOADS_DIR=/data/uploads` precisa permanecer montado no volume persistente
+Coolify `z135kw39vj61ph46j8fg6w1c-uploads`. Armazenar esses PDFs apenas na camada
+gravável do container perde os arquivos no próximo deploy.
+
 ## Foresight oficial: o que a leitura estática comprovou
 
 O SSO de Foresight abriu o app oficial no mesmo host da National Life. Os assets
@@ -74,11 +89,11 @@ assets estáticos não provam ainda a origem final nem os campos do formulário
 iGO. Chamar esse endpoint apenas para descobrir seria uma ação preparatória no
 caso corrente e permanece bloqueado.
 
-## Portões para as próximas entregas
+## Estado dos portões
 
-1. Deploy controlado da migration, app e KeeproneConnect 0.1.25.
-2. Smoke autenticado com um único documento: índice -> request -> chunks ->
-   `PolicyDocument` -> abertura autorizada na apólice.
+1. Concluído: migration, app e KeeproneConnect 0.1.25 no piloto unpacked.
+2. Concluído: smoke autenticado com um único documento: índice -> request ->
+   chunks -> `PolicyDocument` -> abertura autorizada na apólice.
 3. Foresight em leitura: inventário, detalhes, serviços e PDFs já existentes,
    sem `IllustrateCase`, `RenderReports`, save ou launcher.
 4. Illustration oficial: criação/execução somente como comando separado, alvo

@@ -269,7 +269,7 @@ describe('NationalLifeSyncProgress', () => {
       />,
     )
 
-    expect(screen.getByText('Connector supports 12 of 30 known sources')).toBeTruthy()
+    expect(screen.getByText('12 of 30 known sources are operationally structured')).toBeTruthy()
   })
 
   it('separates raw snapshots from operational rows in the final totals', () => {

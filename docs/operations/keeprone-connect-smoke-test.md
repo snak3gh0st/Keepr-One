@@ -46,8 +46,13 @@ Em ordem, e a ordem importa.
    `["storage","tabs","alarms"]` e os hosts permanecem restritos ao Keepr One
    configurado e à National Life. `alarms` sustenta o sync diário em background.
 
-   Para o smoke de documentos, confirme também KeeproneConnect **0.1.21+** e a
+   Para o smoke de documentos, confirme também KeeproneConnect **0.1.25+** e a
    migration `20260826134000_national_life_correspondence_documents` aplicada.
+
+4. **Confirmar armazenamento persistente.** `UPLOADS_DIR` não pode apontar
+   apenas para a camada gravável do container. No Coolify de produção,
+   `/data/uploads` deve estar montado no volume persistente da aplicação. Sem
+   isso, um PDF validado e registrado no banco desaparece no próximo deploy.
 
 ## O teste
 
