@@ -1,5 +1,5 @@
 import { popupCanRetry, popupStatusText } from '../../lib/popup-copy'
-import type { DeviceState, SyncState } from '../../lib/state'
+import type { CommandState, DeviceState, SyncState } from '../../lib/state'
 
 function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector)
@@ -13,8 +13,8 @@ const connectionElement = requiredElement<HTMLSpanElement>('#connection')
 const openButton = requiredElement<HTMLButtonElement>('#open')
 const retryButton = requiredElement<HTMLButtonElement>('#retry')
 
-function render(device: DeviceState, sync: SyncState) {
-  statusElement.textContent = popupStatusText(device, sync)
+function render(device: DeviceState, sync: SyncState, command?: CommandState) {
+  statusElement.textContent = popupStatusText(device, sync, command)
   retryButton.hidden = !popupCanRetry(device, sync)
   popupElement.dataset.device = device.status.toLowerCase()
   popupElement.dataset.sync = sync.status.toLowerCase()
@@ -26,15 +26,19 @@ function render(device: DeviceState, sync: SyncState) {
   }
 
   connectionElement.textContent = sync.status === 'ERROR' ? 'Needs attention' : 'Connected'
-  openButton.textContent = sync.status === 'AUTH_REQUIRED' ? 'Continue sign-in' : 'Open National Life'
+  openButton.textContent = sync.status === 'AUTH_REQUIRED' ||
+    command?.status === 'AUTH_REQUIRED' || command?.status === 'MFA_REQUIRED'
+    ? 'Continue sign-in'
+    : 'Open National Life'
 }
 
 async function refresh() {
   const response = (await chrome.runtime.sendMessage({ type: 'GET_STATUS' })) as {
     device: DeviceState
     sync: SyncState
+    command?: CommandState
   }
-  render(response.device, response.sync)
+  render(response.device, response.sync, response.command)
 }
 
 async function act(button: HTMLButtonElement, type: 'OPEN_NLG' | 'RETRY_SYNC') {

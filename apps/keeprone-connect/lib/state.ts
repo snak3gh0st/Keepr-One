@@ -61,6 +61,28 @@ export type SyncState = {
   completedAt?: string
 }
 
+export type CommandStatus =
+  | 'IDLE'
+  | 'POLLING'
+  | 'NAVIGATING'
+  | 'RUNNING'
+  | 'AUTH_REQUIRED'
+  | 'MFA_REQUIRED'
+  | 'COMPLETED'
+  | 'ERROR'
+
+/// Independent from the daily sync cursor. Only safe coordination metadata is
+/// durable here; command payloads, carrier cookies and credentials never are.
+export type CommandState = {
+  commandId?: string
+  runId?: string
+  carrierTabId?: number
+  nextEventSequence?: number
+  status: CommandStatus
+  errorCode?: string
+  updatedAt?: string
+}
+
 /// The plan round-trips through chrome.storage.local, which survives extension
 /// updates. Re-validating on read means a stale or half-written shape degrades into
 /// "no plan" instead of steering navigation with something we never checked.
@@ -75,6 +97,7 @@ export function currentStage(state: SyncState): StagePlan | undefined {
 
 const DEVICE_KEY = 'device'
 const SYNC_KEY = 'sync'
+const COMMAND_KEY = 'command'
 
 export async function readDeviceState(): Promise<DeviceState> {
   const result = await chrome.storage.local.get(DEVICE_KEY)
@@ -94,4 +117,14 @@ export async function readSyncState(): Promise<SyncState> {
 
 export async function writeSyncState(value: SyncState): Promise<void> {
   await chrome.storage.local.set({ [SYNC_KEY]: value })
+}
+
+export async function readCommandState(): Promise<CommandState> {
+  const result = await chrome.storage.local.get(COMMAND_KEY)
+  const value = result[COMMAND_KEY] as CommandState | undefined
+  return value ?? { status: 'IDLE' }
+}
+
+export async function writeCommandState(value: CommandState): Promise<void> {
+  await chrome.storage.local.set({ [COMMAND_KEY]: value })
 }

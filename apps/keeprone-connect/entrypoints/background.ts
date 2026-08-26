@@ -1,4 +1,13 @@
-import { parseStagePlan, type StagePlan } from '../lib/capabilities'
+import {
+  parseConnectorCommandDispatch,
+  parseStagePlan,
+  type ConnectorCommandDispatch,
+  type StagePlan,
+} from '../lib/capabilities'
+import {
+  CONNECTOR_COMMAND_PROTOCOL_VERSION,
+  type ConnectorCommandEventType,
+} from '../lib/command-contract'
 import {
   CONNECTOR_SCHEMA_VERSION,
   CONNECTOR_VERSION_HEADER,
@@ -17,6 +26,7 @@ import {
 import { clearDeviceKeys, getOrCreateDeviceKey } from '../lib/key-store'
 import {
   parseBridgeMessage,
+  parseCapturePolicyDetailAck,
   parsePageCaptureAck,
   parseProbeAuthAck,
   parseExternalMessage,
@@ -25,6 +35,7 @@ import {
   type BridgeControlAck,
   type BridgeMessage,
   type CapturePageMessage,
+  type CapturePolicyDetailMessage,
   type BeginExportMessage,
   type BeginDocumentMessage,
   type DocumentControlAck,
@@ -48,10 +59,21 @@ import {
 } from '../lib/update-nudge'
 import { SignedRequestError, signedBinaryRequest, signedJsonRequest } from '../lib/signed-client'
 import {
+  parseForesightIllustrationSnapshot,
+  sha256ForesightSnapshot,
+} from '../lib/foresight-contract'
+import {
+  parseForesightExecutionResponse,
+  type ExecuteForesightIllustrationMessage,
+  type ForesightExecutionResponse,
+} from '../lib/foresight-messages'
+import {
   currentStage,
+  readCommandState,
   readDeviceState,
   readSyncState,
   writeDeviceState,
+  writeCommandState,
   writeSyncState,
 } from '../lib/state'
 
@@ -89,6 +111,7 @@ const tabQueues = new Map<number, Promise<void>>()
 const pendingBridgeMessages = new Map<number, number>()
 let syncStartLock: Promise<unknown> | null = null
 let tabNavigationLock: Promise<unknown> | null = null
+let commandPollLock: Promise<unknown> | null = null
 const tabReadyLocks = new Map<number, Promise<void>>()
 
 const BRIDGE_RETRY_DELAYS_MS = [150, 300, 600, 1_000, 1_500]
@@ -99,6 +122,8 @@ const BRIDGE_RETRY_DELAYS_MS = [150, 300, 600, 1_000, 1_500]
 const TAB_EDIT_RETRY_DELAYS_MS = [50, 100, 200, 400, 800]
 const SYNC_WATCHDOG_ALARM = 'keeprone-national-life-sync-watchdog'
 const SCHEDULED_SYNC_ALARM = 'keeprone-national-life-scheduled-sync'
+const COMMAND_POLL_ALARM = 'keeprone-national-life-command-poll'
+const COMMAND_POLL_PERIOD_MINUTES = 1
 const SCHEDULED_SYNC_PERIOD_MINUTES = 15
 const SCHEDULED_SYNC_FRESH_MS = 24 * 60 * 60_000
 // One navigation can legitimately start from the previous grid. A second
@@ -181,6 +206,32 @@ async function capturePageWithRetry(tabId: number, message: CapturePageMessage) 
       await new Promise((resolve) => setTimeout(resolve, delay))
       const active = activeNavigations.get(tabId)
       if (!active || active.token !== message.token) break
+    }
+  }
+  throw lastError ?? new Error('BRIDGE_UNAVAILABLE')
+}
+
+async function capturePolicyDetailWithRetry(
+  tabId: number,
+  message: CapturePolicyDetailMessage,
+) {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = parseCapturePolicyDetailAck(await chrome.tabs.sendMessage(tabId, message))
+      if (
+        !response ||
+        response.token !== message.token ||
+        response.correlationId !== message.correlationId ||
+        response.detail.navigatePath !== message.navigatePath ||
+        response.detail.expectedPolicyNumber !== message.expectedPolicyNumber
+      ) throw new Error('BRIDGE_UNAVAILABLE')
+      return response.detail
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
     }
   }
   throw lastError ?? new Error('BRIDGE_UNAVAILABLE')
@@ -396,6 +447,7 @@ async function pairConnector(
     // Scheduling is best-effort. The device is already paired at this point;
     // an unavailable alarms API must not turn a valid pairing into ERROR.
     void ensureScheduledSyncAlarm().catch(() => {})
+    void ensureCommandPollAlarm().catch(() => {})
     return { ok: true as const, deviceId: result.deviceId }
   } catch {
     await writeDeviceState({ baseUrl, status: 'ERROR' })
@@ -408,6 +460,7 @@ async function unpairConnector() {
   await clearDeviceKeys()
   await writeDeviceState({ status: 'UNPAIRED' })
   await writeSyncState({ status: 'IDLE' })
+  await writeCommandState({ status: 'IDLE' })
   activeNavigations.clear()
   for (const active of activeDocuments.values()) {
     clearTimeout(active.timer)
@@ -417,6 +470,7 @@ async function unpairConnector() {
   tabQueues.clear()
   await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
   await chrome.alarms.clear(SCHEDULED_SYNC_ALARM)
+  await chrome.alarms.clear(COMMAND_POLL_ALARM)
   return { ok: true as const, deviceId: device.deviceId }
 }
 
@@ -450,6 +504,436 @@ async function startScheduledSyncIfDue() {
   const [device, sync] = await Promise.all([readDeviceState(), readSyncState()])
   if (!scheduledSyncIsDue(device, sync)) return
   await startNewSync()
+}
+
+async function ensureCommandPollAlarm() {
+  const device = await readDeviceState()
+  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
+    await chrome.alarms.clear(COMMAND_POLL_ALARM)
+    return
+  }
+  const existing = await chrome.alarms.get(COMMAND_POLL_ALARM)
+  if (existing) return
+  chrome.alarms.create(COMMAND_POLL_ALARM, {
+    delayInMinutes: 1,
+    periodInMinutes: COMMAND_POLL_PERIOD_MINUTES,
+  })
+}
+
+async function findBoundCommandTab(
+  carrierTabId: number | undefined,
+  hint?: chrome.tabs.Tab,
+): Promise<chrome.tabs.Tab | undefined> {
+  if (typeof carrierTabId !== 'number') return undefined
+  if (hint?.id === carrierTabId) return hint
+  const tabs = await chrome.tabs.query({
+    url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
+  })
+  return tabs.find((tab) => tab.id === carrierTabId)
+}
+
+async function postCommandEvent(input: {
+  dispatch: ConnectorCommandDispatch
+  device: { deviceId: string; baseUrl: string }
+  sequence: number
+  type: ConnectorCommandEventType
+  payload?: Record<string, unknown> | null
+  error?: { code: string; safeMessage: string } | null
+}): Promise<number> {
+  const event = {
+    protocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,
+    eventId: crypto.randomUUID(),
+    commandId: input.dispatch.command.commandId,
+    runId: input.dispatch.command.runId,
+    sequence: input.sequence,
+    type: input.type,
+    emittedAt: new Date().toISOString(),
+    payload: input.payload ?? null,
+    error: input.error ?? null,
+  }
+  await signedJsonRequest({
+    baseUrl: input.device.baseUrl,
+    deviceId: input.device.deviceId,
+    method: 'POST',
+    pathname: `/api/agent/integrations/national-life/local-connector/commands/${encodeURIComponent(input.dispatch.command.commandId)}/events`,
+    body: event,
+  })
+  const nextEventSequence = input.sequence + 1
+  await writeCommandState({
+    ...(await readCommandState()),
+    nextEventSequence,
+    updatedAt: new Date().toISOString(),
+  })
+  return nextEventSequence
+}
+
+async function executePolicyDetailCommand(
+  dispatch: ConnectorCommandDispatch,
+  device: { deviceId: string; baseUrl: string },
+  hint?: chrome.tabs.Tab,
+) {
+  if (dispatch.command.capability !== 'READ_POLICY_DETAIL') throw new Error('UNKNOWN_CAPABILITY')
+  const params = dispatch.command.params
+  if (!('navigatePath' in params) || !('policyNumber' in params)) throw new Error('INVALID_COMMAND')
+
+  const previous = await readCommandState()
+  const sameCommand = previous.commandId === dispatch.command.commandId
+  let carrierTabId = sameCommand ? previous.carrierTabId : undefined
+  let sequence = dispatch.nextEventSequence
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId,
+    nextEventSequence: sequence,
+    status: 'NAVIGATING',
+    updatedAt: new Date().toISOString(),
+  })
+
+  const targetUrl = `${NLG_ORIGIN}${params.navigatePath}`
+  const tab = await findBoundCommandTab(carrierTabId, hint)
+  if (!tab?.id) {
+    const created = await chrome.tabs.create({ active: false, url: targetUrl })
+    if (created.id === undefined) throw new Error('COMMAND_TAB_UNAVAILABLE')
+    carrierTabId = created.id
+    await writeCommandState({
+      ...(await readCommandState()),
+      carrierTabId,
+      status: 'NAVIGATING',
+      updatedAt: new Date().toISOString(),
+    })
+    return
+  }
+  carrierTabId = tab.id
+
+  let currentUrl: URL
+  try {
+    currentUrl = new URL(tab.url ?? '')
+  } catch {
+    await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+  if (currentUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(currentUrl.pathname)) {
+    const requirement = currentUrl.pathname.includes('/mfa') || currentUrl.pathname.includes('/challenge')
+      ? 'MFA_REQUIRED' as const
+      : 'AUTH_REQUIRED' as const
+    if (dispatch.lastEventType !== requirement) {
+      sequence = await postCommandEvent({
+        dispatch, device, sequence, type: requirement,
+        payload: { action: 'SIGN_IN_TO_CONTINUE' },
+      })
+    }
+    await writeCommandState({
+      ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
+      status: requirement, updatedAt: new Date().toISOString(),
+    })
+    if (!tab.active) await updateTab(tab.id, { active: true })
+    return
+  }
+  if (`${currentUrl.pathname}${currentUrl.search}` !== params.navigatePath) {
+    await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+  if (!(await hasAuthenticatedPortalSession(tab.id))) {
+    if (dispatch.lastEventType !== 'AUTH_REQUIRED') {
+      sequence = await postCommandEvent({
+        dispatch, device, sequence, type: 'AUTH_REQUIRED',
+        payload: { action: 'SIGN_IN_TO_CONTINUE' },
+      })
+    }
+    await writeCommandState({
+      ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
+      status: 'AUTH_REQUIRED', updatedAt: new Date().toISOString(),
+    })
+    await updateTab(tab.id, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+    return
+  }
+
+  await writeCommandState({
+    ...(await readCommandState()), carrierTabId: tab.id, status: 'RUNNING',
+    updatedAt: new Date().toISOString(),
+  })
+  if (dispatch.lastEventType !== 'COMMAND_STARTED' && dispatch.lastEventType !== 'DATA_BATCH') {
+    sequence = await postCommandEvent({ dispatch, device, sequence, type: 'COMMAND_STARTED' })
+  }
+  if (dispatch.lastEventType !== 'DATA_BATCH') {
+    const token = randomToken()
+    const correlationId = crypto.randomUUID()
+    const detail = await capturePolicyDetailWithRetry(tab.id, {
+      type: 'CAPTURE_POLICY_DETAIL',
+      expectedPolicyNumber: params.policyNumber,
+      navigatePath: params.navigatePath,
+      token,
+      correlationId,
+    })
+    sequence = await postCommandEvent({
+      dispatch,
+      device,
+      sequence,
+      type: 'DATA_BATCH',
+      payload: { policyDetail: detail },
+    })
+  }
+  sequence = await postCommandEvent({
+    dispatch,
+    device,
+    sequence,
+    type: 'COMMAND_COMPLETED',
+    payload: { result: 'POLICY_DETAIL_SYNCED' },
+  })
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId: tab.id,
+    nextEventSequence: sequence,
+    status: 'COMPLETED',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+function parseForesightCommandInput(value: unknown): {
+  inputHash: string
+  snapshot: NonNullable<ReturnType<typeof parseForesightIllustrationSnapshot>>
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('FORESIGHT_INPUT_INVALID')
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).length !== 2 || typeof record.inputHash !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(record.inputHash)) throw new Error('FORESIGHT_INPUT_INVALID')
+  const snapshot = parseForesightIllustrationSnapshot(record.snapshot)
+  if (!snapshot) throw new Error('FORESIGHT_INPUT_INVALID')
+  return { inputHash: record.inputHash, snapshot }
+}
+
+async function decodeForesightPdf(response: Extract<ForesightExecutionResponse, { ok: true }>): Promise<Uint8Array> {
+  let binary: string
+  try {
+    binary = atob(response.document.pdfBase64)
+  } catch {
+    throw new Error('FORESIGHT_REPORT_RESPONSE_INVALID')
+  }
+  if (binary.length !== response.receipt.documentBytes || !binary.startsWith('%PDF-')) {
+    throw new Error('FORESIGHT_REPORT_RESPONSE_INVALID')
+  }
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  const hash = [...digest].map((value) => value.toString(16).padStart(2, '0')).join('')
+  if (hash !== response.receipt.documentSha256) throw new Error('FORESIGHT_REPORT_HASH_MISMATCH')
+  return bytes
+}
+
+async function uploadForesightArtifact(input: {
+  dispatch: ConnectorCommandDispatch
+  device: { deviceId: string; baseUrl: string }
+  response: Extract<ForesightExecutionResponse, { ok: true }>
+}): Promise<void> {
+  const bytes = await decodeForesightPdf(input.response)
+  let lastError: unknown
+  for (const delay of [0, 500, 1_500]) {
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
+    try {
+      const stored = await signedBinaryRequest<{ documentSha256?: unknown; documentBytes?: unknown }>({
+        baseUrl: input.device.baseUrl,
+        deviceId: input.device.deviceId,
+        method: 'PUT',
+        pathname: `/api/agent/integrations/national-life/local-connector/commands/${encodeURIComponent(input.dispatch.command.commandId)}/artifact`,
+        contentType: 'application/pdf',
+        body: bytes,
+      })
+      if (stored.documentSha256 !== input.response.receipt.documentSha256 ||
+        stored.documentBytes !== input.response.receipt.documentBytes) {
+        throw new Error('FORESIGHT_ARTIFACT_RECEIPT_MISMATCH')
+      }
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError ?? new Error('FORESIGHT_ARTIFACT_UPLOAD_FAILED')
+}
+
+async function sendForesightExecution(
+  tabId: number,
+  message: ExecuteForesightIllustrationMessage,
+): Promise<ForesightExecutionResponse> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, message)
+      return parseForesightExecutionResponse(response, message)
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError ?? new Error('FORESIGHT_BRIDGE_UNAVAILABLE')
+}
+
+async function executeForesightCommand(
+  dispatch: ConnectorCommandDispatch,
+  device: { deviceId: string; baseUrl: string },
+  hint?: chrome.tabs.Tab,
+) {
+  if (dispatch.command.capability !== 'GENERATE_ILLUSTRATION') throw new Error('UNKNOWN_CAPABILITY')
+  const params = dispatch.command.params
+  if (!('illustrationId' in params) || !('inputHash' in params)) throw new Error('INVALID_COMMAND')
+
+  const previous = await readCommandState()
+  const sameCommand = previous.commandId === dispatch.command.commandId
+  let carrierTabId = sameCommand ? previous.carrierTabId : undefined
+  let sequence = dispatch.nextEventSequence
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId,
+    nextEventSequence: sequence,
+    status: 'NAVIGATING',
+    updatedAt: new Date().toISOString(),
+  })
+
+  const targetUrl = `${NLG_ORIGIN}/agent/sso/foresight`
+  const tab = await findBoundCommandTab(carrierTabId, hint)
+  if (!tab?.id) {
+    const created = await chrome.tabs.create({ active: false, url: targetUrl })
+    if (created.id === undefined) throw new Error('COMMAND_TAB_UNAVAILABLE')
+    await writeCommandState({
+      ...(await readCommandState()),
+      carrierTabId: created.id,
+      status: 'NAVIGATING',
+      updatedAt: new Date().toISOString(),
+    })
+    return
+  }
+  carrierTabId = tab.id
+  let currentUrl: URL
+  try {
+    currentUrl = new URL(tab.url ?? '')
+  } catch {
+    await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+  if (!sameCommand && currentUrl.origin === NLG_ORIGIN && currentUrl.pathname === '/NWI/Main/Layout.aspx') {
+    await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+  if (currentUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(currentUrl.pathname) ||
+    currentUrl.pathname.startsWith('/NWI/Unsecure/')) {
+    const requirement = currentUrl.pathname.includes('/mfa') || currentUrl.pathname.includes('/challenge')
+      ? 'MFA_REQUIRED' as const
+      : 'AUTH_REQUIRED' as const
+    if (dispatch.lastEventType !== requirement) {
+      sequence = await postCommandEvent({
+        dispatch, device, sequence, type: requirement,
+        payload: { action: 'SIGN_IN_TO_CONTINUE' },
+      })
+    }
+    await writeCommandState({
+      ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
+      status: requirement, updatedAt: new Date().toISOString(),
+    })
+    if (!tab.active) await updateTab(tab.id, { active: true })
+    return
+  }
+  if (currentUrl.origin !== NLG_ORIGIN || currentUrl.pathname !== '/NWI/Main/Layout.aspx') {
+    if (currentUrl.href !== targetUrl) await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+
+  const rawInput = await signedJsonRequest<unknown>({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname: `/api/agent/integrations/national-life/local-connector/commands/${encodeURIComponent(dispatch.command.commandId)}/input`,
+    body: {},
+  })
+  const approved = parseForesightCommandInput(rawInput)
+  if (approved.inputHash !== params.inputHash || approved.snapshot.illustrationId !== params.illustrationId ||
+    await sha256ForesightSnapshot(approved.snapshot) !== approved.inputHash) {
+    throw new Error('FORESIGHT_INPUT_HASH_MISMATCH')
+  }
+  await writeCommandState({
+    ...(await readCommandState()), carrierTabId: tab.id, status: 'RUNNING',
+    updatedAt: new Date().toISOString(),
+  })
+  if (dispatch.lastEventType !== 'COMMAND_STARTED' && dispatch.lastEventType !== 'DATA_BATCH') {
+    sequence = await postCommandEvent({ dispatch, device, sequence, type: 'COMMAND_STARTED' })
+  }
+  const token = randomToken()
+  const correlationId = crypto.randomUUID()
+  const response = await sendForesightExecution(tab.id, {
+    type: 'EXECUTE_FORESIGHT_ILLUSTRATION',
+    token,
+    correlationId,
+    inputHash: approved.inputHash,
+    snapshot: approved.snapshot,
+  })
+  if (!response.ok) throw new Error(response.code)
+  await uploadForesightArtifact({ dispatch, device, response })
+  sequence = await postCommandEvent({
+    dispatch,
+    device,
+    sequence,
+    type: 'DATA_BATCH',
+    payload: { illustration: response.receipt },
+  })
+  sequence = await postCommandEvent({
+    dispatch,
+    device,
+    sequence,
+    type: 'COMMAND_COMPLETED',
+    payload: { result: 'FORESIGHT_NAIC_ILLUSTRATION_READY', receipt: response.receipt },
+  })
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId: tab.id,
+    nextEventSequence: sequence,
+    status: 'COMPLETED',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?: string): Promise<void> {
+  if (commandPollLock) return commandPollLock as Promise<void>
+  const operation = (async () => {
+    const device = await readDeviceState()
+    if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) return
+    await writeCommandState({ ...(await readCommandState()), status: 'POLLING' })
+    try {
+      const raw = await signedJsonRequest<unknown>({
+        baseUrl: device.baseUrl,
+        deviceId: device.deviceId,
+        method: 'POST',
+        pathname: '/api/agent/integrations/national-life/local-connector/commands/next',
+        body: requestedCommandId ? { commandId: requestedCommandId } : {},
+      })
+      if (raw === undefined) {
+        const current = await readCommandState()
+        if (current.status === 'POLLING') await writeCommandState({ status: 'IDLE' })
+        return
+      }
+      const dispatch = parseConnectorCommandDispatch(raw)
+      const executor = dispatch.command.capability === 'GENERATE_ILLUSTRATION'
+        ? executeForesightCommand
+        : executePolicyDetailCommand
+      await executor(dispatch, {
+        deviceId: device.deviceId,
+        baseUrl: device.baseUrl,
+      }, hint)
+    } catch (error) {
+      await writeCommandState({
+        ...(await readCommandState()),
+        status: 'ERROR',
+        errorCode: errorCode(error, 'COMMAND_FAILED'),
+        updatedAt: new Date().toISOString(),
+      })
+    }
+  })()
+  const tracked: Promise<void> = operation.finally(() => {
+    if (commandPollLock === tracked) commandPollLock = null
+  })
+  commandPollLock = tracked
+  return tracked
 }
 
 async function reportRunFailure(code: string) {
@@ -1824,7 +2308,9 @@ async function resumePending(options?: { reconcileWithServer?: boolean }) {
 }
 
 async function getConnectorStatus() {
-  const [device, sync] = await Promise.all([readDeviceState(), readSyncState()])
+  const [device, sync, command] = await Promise.all([
+    readDeviceState(), readSyncState(), readCommandState(),
+  ])
   const stage = currentStage(sync)
   return {
     ok: true as const,
@@ -1834,6 +2320,7 @@ async function getConnectorStatus() {
       stageKey: stage ? stageKey(stage) : undefined,
       totalStages: sync.plan?.length,
     },
+    command,
   }
 }
 
@@ -1883,6 +2370,18 @@ export default defineBackground(() => {
       respond(sendResponse, fetchNationalLifeDocument(message))
       return true
     }
+    if (message.type === 'START_NATIONAL_LIFE_COMMAND') {
+      respond(
+        sendResponse,
+        pollAndExecuteCommand(undefined, message.commandId).then(async () => {
+          const command = await readCommandState()
+          return command.commandId === message.commandId && command.status !== 'ERROR'
+            ? { ok: true as const, commandId: message.commandId, command }
+            : { ok: false as const, commandId: message.commandId, error: command.errorCode ?? 'COMMAND_UNAVAILABLE', command }
+        }),
+      )
+      return true
+    }
     respond(sendResponse, startNewSync(message.forceRefresh === true))
     return true
   })
@@ -1909,6 +2408,17 @@ export default defineBackground(() => {
       respond(
         sendResponse,
         (async () => {
+          const command = await readCommandState()
+          if (
+            (command.status === 'AUTH_REQUIRED' || command.status === 'MFA_REQUIRED') &&
+            command.carrierTabId !== undefined
+          ) {
+            const commandTab = await findBoundCommandTab(command.carrierTabId)
+            if (commandTab?.id !== undefined) {
+              await updateTab(commandTab.id, { active: true })
+              return { ok: true as const }
+            }
+          }
           const state = await readSyncState()
           if (state.runId && currentStage(state) && state.status !== 'COMPLETED') {
             await navigatePendingGrid()
@@ -1930,6 +2440,12 @@ export default defineBackground(() => {
 
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete') {
+      void (async () => {
+        const command = await readCommandState()
+        if (command.carrierTabId === tabId && command.status !== 'COMPLETED') {
+          await pollAndExecuteCommand(tab)
+        }
+      })()
       void handleTabReady(tabId, tab.url).catch((error) =>
         failSync(errorCode(error, 'TAB_EDIT_FAILED')),
       )
@@ -1962,6 +2478,10 @@ export default defineBackground(() => {
     }
     if (alarm.name === SCHEDULED_SYNC_ALARM) {
       void startScheduledSyncIfDue().catch((error) => failSync(errorCode(error, 'SYNC_START_FAILED')))
+      return
+    }
+    if (alarm.name === COMMAND_POLL_ALARM) {
+      void pollAndExecuteCommand()
     }
   })
 
@@ -1979,6 +2499,7 @@ export default defineBackground(() => {
   // session needs attention, the existing AUTH_REQUIRED path brings its one
   // bound National Life tab to the foreground.
   void ensureScheduledSyncAlarm().catch(() => {})
+  void ensureCommandPollAlarm().catch(() => {})
   // Uma batida a cada subida do service worker. É a janela mais barata que existe
   // para uma flag chegar sem nenhuma ação do agente, e o worker sobe com muita
   // frequência justamente porque este conector acorda o tempo todo.

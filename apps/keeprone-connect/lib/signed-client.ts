@@ -178,6 +178,7 @@ export async function signedBinaryRequest<T>(input: {
   method: 'PUT'
   pathname: string
   body: Uint8Array
+  contentType?: 'application/octet-stream' | 'application/pdf'
 }): Promise<T> {
   const baseUrl = requireAllowedBaseUrl(input.baseUrl)
   if (!input.pathname.startsWith('/api/agent/integrations/national-life/local-connector/')) {
@@ -191,7 +192,7 @@ export async function signedBinaryRequest<T>(input: {
   const canonical = canonicalMessage({ method: input.method, pathname: input.pathname, jti, timestamp, bodyHash })
   const signature = await signCanonicalMessage(key, canonical)
   const headers = new Headers({
-    'content-type': 'application/octet-stream',
+    'content-type': input.contentType ?? 'application/octet-stream',
     'x-fyntra-device-id': input.deviceId,
     'x-fyntra-jti': jti,
     'x-fyntra-timestamp': timestamp,

@@ -1,5 +1,6 @@
 import { isGridKeyLabel } from './constants'
 import { MAX_PORTAL_RECORDS, PAGE_SIZE } from './paging'
+import type { PolicyDetailObservation } from './policy-detail'
 
 type JsonObject = Record<string, unknown>
 
@@ -37,12 +38,18 @@ export type FetchDocumentMessage = {
   reportRowId: string
 }
 
+export type StartConnectorCommandMessage = {
+  type: 'START_NATIONAL_LIFE_COMMAND'
+  commandId: string
+}
+
 export type ExternalMessage =
   | PairConnectorMessage
   | StartSyncMessage
   | GetConnectorStatusMessage
   | UnpairConnectorMessage
   | FetchDocumentMessage
+  | StartConnectorCommandMessage
 
 export type BeginGridMessage = {
   type: 'BEGIN_GRID'
@@ -87,6 +94,22 @@ export type ProbeAuthAck = {
   token: string
   correlationId: string
   authenticated: boolean
+}
+
+export type CapturePolicyDetailMessage = {
+  type: 'CAPTURE_POLICY_DETAIL'
+  expectedPolicyNumber: string
+  navigatePath: string
+  token: string
+  correlationId: string
+}
+
+export type CapturePolicyDetailAck = {
+  ok: true
+  type: 'POLICY_DETAIL_CAPTURED'
+  token: string
+  correlationId: string
+  detail: PolicyDetailObservation
 }
 
 export type PageCaptureAck = {
@@ -279,6 +302,12 @@ export function parseExternalMessage(value: unknown): ExternalMessage | null {
       ? { type: value.type, reportRowId: value.reportRowId }
       : null
   }
+  if (value.type === 'START_NATIONAL_LIFE_COMMAND') {
+    return hasExactKeys(value, ['type', 'commandId']) &&
+      isShortString(value.commandId, 200) && /^[A-Za-z0-9._:-]+$/.test(value.commandId)
+      ? { type: value.type, commandId: value.commandId }
+      : null
+  }
   if (value.type !== 'PAIR_CONNECTOR' || !hasExactKeys(value, ['type', 'code', 'label', 'baseUrl'])) {
     return null
   }
@@ -408,6 +437,84 @@ export function parsePageCaptureAck(value: unknown): PageCaptureAck | null {
     return null
   }
   return value as PageCaptureAck
+}
+
+const POLICY_DETAIL_PATH =
+  /^\/agent\/book-of-business\/inforce-book\/all-clients\/policy-details\?id=[a-f0-9]{32}$/
+const POLICY_DETAIL_LABELS = new Set([
+  'COVERAGE:Total Face Amount',
+  'COVERAGE:Net Death Benefit',
+  'COVERAGE:MEC Limit',
+  'COVERAGE:Guideline Premium Limit',
+  'PAYMENTS:Next Scheduled Payment Date',
+  'PAYMENTS:Payment Frequency',
+  'PAYMENTS:Planned Periodic Payment',
+  'PAYMENTS:Anticipated Annual Premium',
+  'PAYMENTS:Minimum Monthly Premium',
+  'PAYMENTS:Minimum Guaranteed Premium',
+  'PAYMENTS:CTP',
+])
+
+function isPolicyNumber(value: unknown): value is string {
+  return isShortString(value, 64) && /^[A-Za-z0-9._:-]+$/.test(value)
+}
+
+function isPolicyDetailObservation(value: unknown): value is PolicyDetailObservation {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, [
+      'navigatePath', 'expectedPolicyNumber', 'visiblePolicyNumber', 'observedAt', 'fields',
+    ]) ||
+    typeof value.navigatePath !== 'string' ||
+    !POLICY_DETAIL_PATH.test(value.navigatePath) ||
+    !isPolicyNumber(value.expectedPolicyNumber) ||
+    !isPolicyNumber(value.visiblePolicyNumber) ||
+    typeof value.observedAt !== 'string' ||
+    value.observedAt.length > 40 ||
+    !Number.isFinite(Date.parse(value.observedAt)) ||
+    !Array.isArray(value.fields) ||
+    value.fields.length > POLICY_DETAIL_LABELS.size
+  ) return false
+  return value.fields.every((field) => {
+    if (
+      !isObject(field) ||
+      !hasExactKeys(field, ['section', 'label', 'value']) ||
+      (field.section !== 'COVERAGE' && field.section !== 'PAYMENTS') ||
+      typeof field.label !== 'string' ||
+      !POLICY_DETAIL_LABELS.has(`${field.section}:${field.label}`) ||
+      !isShortString(field.value, 256)
+    ) return false
+    return true
+  })
+}
+
+export function parseCapturePolicyDetailMessage(value: unknown): CapturePolicyDetailMessage | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, [
+      'type', 'expectedPolicyNumber', 'navigatePath', 'token', 'correlationId',
+    ]) ||
+    value.type !== 'CAPTURE_POLICY_DETAIL' ||
+    !isPolicyNumber(value.expectedPolicyNumber) ||
+    typeof value.navigatePath !== 'string' ||
+    !POLICY_DETAIL_PATH.test(value.navigatePath) ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16)
+  ) return null
+  return value as CapturePolicyDetailMessage
+}
+
+export function parseCapturePolicyDetailAck(value: unknown): CapturePolicyDetailAck | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ['ok', 'type', 'token', 'correlationId', 'detail']) ||
+    value.ok !== true ||
+    value.type !== 'POLICY_DETAIL_CAPTURED' ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16) ||
+    !isPolicyDetailObservation(value.detail)
+  ) return null
+  return value as CapturePolicyDetailAck
 }
 
 export function parseBridgeMessage(value: unknown): BridgeMessage | null {

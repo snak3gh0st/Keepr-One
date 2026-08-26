@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 
 vi.mock('../lib/signed-client', () => ({
   SignedRequestError: class extends Error {
@@ -7,13 +8,15 @@ vi.mock('../lib/signed-client', () => ({
     }
   },
   signedJsonRequest: vi.fn(),
+  signedBinaryRequest: vi.fn(),
 }))
 vi.mock('../lib/key-store', () => ({
   clearDeviceKeys: vi.fn(),
   getOrCreateDeviceKey: vi.fn(),
 }))
 
-import { signedJsonRequest } from '../lib/signed-client'
+import { signedBinaryRequest, signedJsonRequest } from '../lib/signed-client'
+import { sha256ForesightSnapshot } from '../lib/foresight-contract'
 
 const NLG = 'https://www.nationallife.com'
 const NLG_AUTH0 = 'https://nlg-prod.auth0.com'
@@ -30,6 +33,11 @@ const COMMISSION_DETAIL_PATH_2 =
 const PROJECTED_COMMISSIONS_PATH = '/agent/compensation/commissions/projected-commissions'
 const PAYABLE_PERSONAL_PATH =
   '/agent/compensation/commissions/projected-commissions/payable-gross-commissions/personal'
+const POLICY_DETAIL_PATH =
+  `/agent/book-of-business/inforce-book/all-clients/policy-details?id=${'a'.repeat(32)}`
+const FORESIGHT_PDF = new TextEncoder().encode('%PDF-1.7\n')
+const FORESIGHT_PDF_HASH = createHash('sha256').update(FORESIGHT_PDF).digest('hex')
+const FORESIGHT_PDF_BASE64 = Buffer.from(FORESIGHT_PDF).toString('base64')
 
 const TWO_STAGE_PLAN = [
   { capability: 'READ_GRID', params: { gridKey: 'NEW_BUSINESS', navigatePath: NEW_BUSINESS_PATH } },
@@ -94,6 +102,8 @@ async function defaultTabMessageResponse(tabId: number, message: unknown) {
     sourceKey?: string
     token?: string
     correlationId?: string
+    inputHash?: string
+    snapshot?: { carrierCaseName?: string }
   }
   if (value.type === 'CAPTURE_PAGE') {
     return {
@@ -112,6 +122,44 @@ async function defaultTabMessageResponse(tabId: number, message: unknown) {
       token: value.token,
       correlationId: value.correlationId,
       authenticated: true,
+    }
+  }
+  if (value.type === 'CAPTURE_POLICY_DETAIL') {
+    return {
+      ok: true,
+      type: 'POLICY_DETAIL_CAPTURED',
+      token: value.token,
+      correlationId: value.correlationId,
+      detail: {
+        navigatePath: POLICY_DETAIL_PATH,
+        expectedPolicyNumber: 'LS1473219',
+        visiblePolicyNumber: 'LS1473219',
+        observedAt: '2026-08-26T17:00:00.000Z',
+        fields: [
+          { section: 'COVERAGE', label: 'Total Face Amount', value: '$100,000.00' },
+          { section: 'PAYMENTS', label: 'Anticipated Annual Premium', value: '$5,100.00' },
+        ],
+      },
+    }
+  }
+  if (value.type === 'EXECUTE_FORESIGHT_ILLUSTRATION') {
+    return {
+      ok: true,
+      type: 'FORESIGHT_ILLUSTRATION_SAVED',
+      token: value.token,
+      correlationId: value.correlationId,
+      receipt: {
+        inputHash: value.inputHash,
+        caseFingerprint: `case_${'b'.repeat(64)}`,
+        carrierCaseName: value.snapshot?.carrierCaseName,
+        productCode: '956',
+        release: '5.3.65.31',
+        reportCode: 'NAIC_ILLUSTRATION',
+        documentSha256: FORESIGHT_PDF_HASH,
+        documentBytes: FORESIGHT_PDF.byteLength,
+        saved: true,
+      },
+      document: { contentType: 'application/pdf', pdfBase64: FORESIGHT_PDF_BASE64 },
     }
   }
   if (value.type === 'BEGIN_GRID' || value.type === 'ABORT_GRID') {
@@ -208,6 +256,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   tabs.sendMessage.mockImplementation(defaultTabMessageResponse)
   vi.mocked(signedJsonRequest).mockResolvedValue({})
+  vi.mocked(signedBinaryRequest).mockResolvedValue({
+    documentSha256: FORESIGHT_PDF_HASH,
+    documentBytes: FORESIGHT_PDF.byteLength,
+  })
   tabs.query.mockResolvedValue([])
   storage.device = { deviceId: 'device-1', baseUrl: 'http://localhost:3000', status: 'READY' }
   vi.stubGlobal('chrome', chromeStub)
@@ -381,6 +433,195 @@ describe('empurrão de atualização no caminho real', () => {
 })
 
 describe('background plan executor', () => {
+  it('executes only the signed and hash-matched approved Foresight snapshot', async () => {
+    const snapshot = {
+      schemaVersion: 1,
+      illustrationId: 'ill_123',
+      caseId: 'case_123',
+      carrierCaseName: 'KEEPRONE-20260826-ILL_123',
+      insured: { firstName: 'KeeprOne', lastName: 'Test', dateOfBirth: '1990-01-01', issueState: 'FL' },
+      product: { name: 'FlexLife', code: '956' },
+      solve: { method: 'Specify_Amount', amount: 100_000 },
+      faceAmount: 100_000,
+      premium: { mode: 'Monthly', amount: 250 },
+      underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
+      deathBenefitOption: 'A_Level',
+      allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 100 }],
+      riders: [
+        'DeathBenefitProtection', 'ABRTerminalIllness', 'ABRChronicIllness',
+        'ABRCriticalIllness', 'ABRCriticalInjury', 'ABRAlzheimersDisease',
+      ],
+      reports: ['NAIC_ILLUSTRATION'],
+    } as const
+    const inputHash = await sha256ForesightSnapshot(snapshot)
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_illustration_1',
+      runId: 'run_illustration_1',
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: snapshot.illustrationId },
+      params: { illustrationId: snapshot.illustrationId, inputHash },
+      idempotencyKey: `illustration:${snapshot.illustrationId}:${inputHash}`,
+      issuedAt: '2026-08-26T17:00:00.000Z',
+      expiresAt: '2026-08-26T17:30:00.000Z',
+      requiresConfirmation: true,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+      } as never
+      if (request.pathname.endsWith('/commands/cmd_illustration_1/input')) {
+        return { inputHash, snapshot } as never
+      }
+      return undefined as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
+      url: `${NLG}/agent/sso/foresight`,
+    })
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: false, url: `${NLG}/NWI/Main/Layout.aspx`,
+    })
+    await flush()
+
+    await vi.waitFor(() => expect(tabs.sendMessage).toHaveBeenCalled())
+    expect(tabs.sendMessage).toHaveBeenCalledWith(4, expect.objectContaining({
+      type: 'EXECUTE_FORESIGHT_ILLUSTRATION', inputHash, snapshot,
+    }))
+    expect(signedBinaryRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'PUT',
+      pathname: '/api/agent/integrations/national-life/local-connector/commands/cmd_illustration_1/artifact',
+      contentType: 'application/pdf',
+      body: FORESIGHT_PDF,
+    }))
+    const events = vi.mocked(signedJsonRequest).mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.pathname.endsWith('/commands/cmd_illustration_1/events'))
+      .map((request) => request.body as { type: string; payload?: unknown })
+    expect(events.map((event) => event.type)).toEqual([
+      'COMMAND_STARTED', 'DATA_BATCH', 'COMMAND_COMPLETED',
+    ])
+    expect(storage.command).toMatchObject({ status: 'COMPLETED', nextEventSequence: 4 })
+  })
+
+  it('executes an on-demand policy detail command in its own inactive tab', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_policy_1',
+      runId: 'run_policy_1',
+      capability: 'READ_POLICY_DETAIL',
+      target: { kind: 'POLICY', id: 'policy_1', carrierExternalId: 'LS1473219' },
+      params: { policyNumber: 'LS1473219', navigatePath: POLICY_DETAIL_PATH },
+      idempotencyKey: 'policy_1:detail:1',
+      issuedAt: '2026-08-26T17:00:00.000Z',
+      expiresAt: '2026-08-26T17:30:00.000Z',
+      requiresConfirmation: false,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (input) => {
+      if (input.pathname.endsWith('/commands/next')) {
+        return {
+          command,
+          state: 'QUEUED',
+          nextEventSequence: 1,
+          lastEventType: 'COMMAND_ACCEPTED',
+        } as never
+      }
+      return undefined as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    expect(tabs.create).toHaveBeenCalledWith({ active: false, url: `${NLG}${POLICY_DETAIL_PATH}` })
+    expect(storage.command).toMatchObject({
+      commandId: 'cmd_policy_1', carrierTabId: 4, status: 'NAVIGATING',
+    })
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: false, url: `${NLG}${POLICY_DETAIL_PATH}`,
+    })
+    await flush()
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(4, expect.objectContaining({
+      type: 'CAPTURE_POLICY_DETAIL', expectedPolicyNumber: 'LS1473219',
+    }))
+    const events = vi.mocked(signedJsonRequest).mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.pathname.endsWith('/commands/cmd_policy_1/events'))
+      .map((input) => input.body as { type?: string; payload?: unknown })
+    expect(events.map((event) => event.type)).toEqual([
+      'COMMAND_STARTED', 'DATA_BATCH', 'COMMAND_COMPLETED',
+    ])
+    expect(events[1]?.payload).toEqual(expect.objectContaining({
+      policyDetail: expect.objectContaining({ visiblePolicyNumber: 'LS1473219' }),
+    }))
+    expect(storage.command).toMatchObject({ status: 'COMPLETED', nextEventSequence: 4 })
+  })
+
+  it('pauses for National Life login and resumes the same command after authentication', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_policy_auth',
+      runId: 'run_policy_auth',
+      capability: 'READ_POLICY_DETAIL',
+      target: { kind: 'POLICY', id: 'policy_1' },
+      params: { policyNumber: 'LS1473219', navigatePath: POLICY_DETAIL_PATH },
+      idempotencyKey: 'policy_1:detail:auth',
+      issuedAt: '2026-08-26T17:00:00.000Z',
+      expiresAt: '2026-08-26T17:30:00.000Z',
+      requiresConfirmation: false,
+    }
+    let cursor = 1
+    let state = 'QUEUED'
+    let lastEventType: string | null = 'COMMAND_ACCEPTED'
+    vi.mocked(signedJsonRequest).mockImplementation(async (input) => {
+      if (input.pathname.endsWith('/commands/next')) {
+        return { command, state, nextEventSequence: cursor, lastEventType } as never
+      }
+      if (input.pathname.endsWith('/commands/cmd_policy_auth/events')) {
+        const event = input.body as { sequence: number; type: string }
+        cursor = event.sequence + 1
+        lastEventType = event.type
+        state = event.type === 'AUTH_REQUIRED' ? 'AUTH_REQUIRED' : 'RUNNING'
+      }
+      return undefined as never
+    })
+    storage.command = {
+      commandId: 'cmd_policy_auth', runId: 'run_policy_auth', carrierTabId: 4,
+      nextEventSequence: 1, status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{ id: 4, active: false, url: `${NLG_AUTH0}/authorize` }])
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+    expect(storage.command).toMatchObject({
+      commandId: 'cmd_policy_auth', carrierTabId: 4, status: 'AUTH_REQUIRED', nextEventSequence: 2,
+    })
+    expect(tabs.update).toHaveBeenCalledWith(4, { active: true })
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: true, url: `${NLG}${POLICY_DETAIL_PATH}`,
+    })
+    await flush()
+    expect(storage.command).toMatchObject({
+      commandId: 'cmd_policy_auth', status: 'COMPLETED', nextEventSequence: 5,
+    })
+    const eventTypes = vi.mocked(signedJsonRequest).mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.pathname.endsWith('/commands/cmd_policy_auth/events'))
+      .map((input) => (input.body as { type: string }).type)
+    expect(eventTypes).toEqual([
+      'AUTH_REQUIRED', 'COMMAND_STARTED', 'DATA_BATCH', 'COMMAND_COMPLETED',
+    ])
+  })
+
   it('starts a due daily sync from the extension alarm without the Keepr One page', async () => {
     storage.sync = {
       status: 'COMPLETED',

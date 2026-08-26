@@ -1,8 +1,8 @@
 # iGo e-App: o que seria preciso para propor pelo app
 
-Estado: **estudo**. Nada foi submetido, nada foi automatizado. Este documento
-existe para que a decisão de fazer — ou não fazer — seja tomada com o custo real
-à vista.
+Estado: **fase futura; fora do release de sync + Illustration**. Nada foi
+submetido. O KeeproneConnect 0.1.26 não executa iGO, não possui permissões
+iPipeline e não prepara/salva propostas.
 
 Revisto em 2026-07-31 depois de mapear o Foresight: o iGo continua sendo
 terceiro, mas **provavelmente não precisa do salto SSO próprio** — a ferramenta
@@ -20,13 +20,14 @@ A diferença que decide tudo:
 | | Foresight (ilustração) | iGo (proposta) |
 | --- | --- | --- |
 | dono | National Life, **mesma origem** do portal | **iPipeline**, terceiro de verdade |
-| natureza | leitura — gera um PDF | **escrita** — submete proposta em nome do agente |
-| allowlist | já coberta | precisou de `federate.ipipeline.com` |
+| natureza | gera/salva artefato após confirmação | navegação é leitura; draft e submit são escritas distintas |
+| allowlist | National Life | futura, somente origens iPipeline exatas e observadas |
 | erro possível | nenhuma ilustração | **um documento vinculante na conta do agente** |
 
-Tudo que foi construído até hoje na integração National Life é leitura: sondar,
-extrair, cotar. O iGo é a primeira coisa que **escreve contra a conta do
-agente**, e isso muda a classe de risco, não o tamanho da tarefa.
+O executor de Illustration agora gera e salva um artefato após confirmação. No
+iGO, abrir/probar é navegação; criar um draft é uma escrita reversível; submeter
+é outra ação, de risco superior. O protocolo e a extensão mantêm essas três
+fronteiras separadas.
 
 ## Existe um segundo caminho, por dentro do Foresight (2026-07-31)
 
@@ -82,17 +83,20 @@ após o login.~~ **Resolvido, e a causa era outra:** o keep-alive que cruzava o
 `/authorize` a cada 10 min é que matava a sessão em ~7 min. Com
 `NATIONAL_LIFE_KEEP_ALIVE_SSO_JUMP` desligado ela vive; o job de PDF cruza uma
 vez, faz o que precisa, persiste o contexto e sai. O e-App pode usar o mesmo
-desenho. Fica a ressalva de que a federação iPipeline é um salto **a mais**, e
-esse nunca foi atravessado. Ver `docs/operations/national-life-portal-contract.md`.
+desenho. A cadeia iPipeline já alcançou `igoforms2` no Chrome normal. Depois de
+renovar o login, a sonda controlada também comprovou `federate` ->
+`igoforms2/SilentSignIn.aspx`, mas o próprio Chrome interrompeu a landing com
+`ERR_BLOCKED_BY_CLIENT`. Sessão do portal, Foresight e iPipeline continua sendo
+comprovada por perna, nunca inferida.
 
-**2. A allowlist precisou crescer.** `NATIONAL_LIFE_PORTAL_ORIGINS` agora inclui
-`federate.ipipeline.com`. Isso permite **medir** o salto; não autoriza submeter
-nada. E provavelmente não é suficiente: `federate` é o ponto de federação, e o
-app real do iGo tende a viver em outro host do mesmo fornecedor. A sonda reporta
-`blockedOrigins` justamente para que a próxima origem apareça como dado em vez
-de virar chute — expandir de novo é decisão consciente, uma origem por vez.
+**2. A allowlist futura precisará crescer.** `pipepasstoigo`, `federate` e
+`igoforms2` foram observados na cadeia, mas permanecem fora do manifest do
+release atual. Quando o iGO voltar ao escopo, cada origem entra explicitamente;
+`*.ipipeline.com` continua proibido.
 
-**3. Escrever exige portões que a leitura não exigiu.** Nada disso existe hoje.
+**3. Escrever exige portões próprios.** O contrato já distingue draft e submit,
+mas ambos permanecem fora da allowlist executável até o iGO voltar ao escopo e
+o read-back dos campos reais ser comprovado.
 
 ## O que o app precisaria ter
 

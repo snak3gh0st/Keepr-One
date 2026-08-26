@@ -1,0 +1,103 @@
+import { describe, expect, it } from 'vitest'
+import {
+  buildForesightIllustrationSnapshot,
+  foresightIllustrationInputHash,
+  parseForesightIllustrationReceipt,
+} from './foresight-illustration-contract'
+
+const input = {
+  id: 'cm123illustration',
+  caseId: null,
+  createdAt: new Date('2026-08-26T17:00:00.000Z'),
+  productName: 'FlexLife',
+  rawPayload: {
+    request: {
+      IssueState: 'FL',
+      FirstName: 'KeeprOne',
+      LastName: 'Test',
+      DateOfBirth: '01/01/1990',
+      Gender: 'Male',
+      RateClass: 'Standard_NT',
+      SolveType: 'Specify_Amount',
+      Amount: 100_000,
+      DeathBenefitOption: 'A_Level',
+      Strategy: 'SP500PointToPointCapFocus',
+      Allocation: 100,
+      ProductCode: '956',
+    },
+    response: { ok: true, faceAmount: 100_000, monthlyPremium: 250 },
+  },
+}
+
+describe('server-owned Foresight illustration snapshot', () => {
+  it('builds a versioned immutable FlexLife snapshot without an InsuranceCase', () => {
+    expect(buildForesightIllustrationSnapshot(input)).toEqual({
+      schemaVersion: 1,
+      illustrationId: 'cm123illustration',
+      caseId: null,
+      carrierCaseName: 'KEEPRONE-20260826-CM123ILLUSTRATION',
+      insured: {
+        firstName: 'KeeprOne',
+        lastName: 'Test',
+        dateOfBirth: '1990-01-01',
+        issueState: 'FL',
+      },
+      product: { name: 'FlexLife', code: '956' },
+      solve: { method: 'Specify_Amount', amount: 100_000 },
+      faceAmount: 100_000,
+      premium: { mode: 'Monthly', amount: 250 },
+      underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
+      deathBenefitOption: 'A_Level',
+      allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 100 }],
+      riders: [
+        'DeathBenefitProtection',
+        'ABRTerminalIllness',
+        'ABRChronicIllness',
+        'ABRCriticalIllness',
+        'ABRCriticalInjury',
+        'ABRAlzheimersDisease',
+      ],
+      reports: ['NAIC_ILLUSTRATION'],
+    })
+  })
+
+  it('hashes the canonical snapshot and changes the hash with a material input', () => {
+    const first = buildForesightIllustrationSnapshot(input)
+    const changed = buildForesightIllustrationSnapshot({
+      ...input,
+      rawPayload: {
+        request: { ...(input.rawPayload.request), Amount: 200_000 },
+        response: { ...input.rawPayload.response, faceAmount: 200_000 },
+      },
+    })
+    expect(foresightIllustrationInputHash(first)).toMatch(/^[a-f0-9]{64}$/)
+    expect(foresightIllustrationInputHash(changed)).not.toBe(foresightIllustrationInputHash(first))
+  })
+
+  it('accepts only an exact NAIC PDF receipt', () => {
+    const receipt = {
+      inputHash: 'a'.repeat(64),
+      caseFingerprint: `case_${'b'.repeat(64)}`,
+      carrierCaseName: 'KEEPRONE-20260826-CM123ILLUSTRATION',
+      productCode: '956',
+      release: '5.3.65.31',
+      reportCode: 'NAIC_ILLUSTRATION',
+      documentSha256: 'c'.repeat(64),
+      documentBytes: 1_500_000,
+      saved: true,
+    }
+    expect(parseForesightIllustrationReceipt(receipt)).toEqual(receipt)
+    expect(parseForesightIllustrationReceipt({ ...receipt, reportCode: 'CLIENT_ILLUSTRATION' })).toBeNull()
+    expect(parseForesightIllustrationReceipt({ ...receipt, extra: true })).toBeNull()
+  })
+
+  it.each([
+    { ...input, productName: 'Term' },
+    { ...input, rawPayload: {} },
+    { ...input, rawPayload: { request: { ...input.rawPayload.request, ProductCode: '999' } } },
+    { ...input, rawPayload: { request: { ...input.rawPayload.request, Allocation: 99 } } },
+    { ...input, rawPayload: { request: { ...input.rawPayload.request, FirstName: '' } } },
+  ])('fails closed when the reviewed source is incomplete or unsupported', (candidate) => {
+    expect(() => buildForesightIllustrationSnapshot(candidate)).toThrow('INVALID_FORESIGHT_INPUT')
+  })
+})

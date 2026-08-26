@@ -2,7 +2,15 @@ import { isGridKeyLabel } from './constants'
 import { hasExactKeys } from './messages'
 import { parseConnectorCommand, type ConnectorCommand } from './command-contract'
 
-export type Capability = 'READ_GRID' | 'READ_PAGE' | 'READ_EXPORT'
+export type Capability = 'READ_GRID' | 'READ_PAGE' | 'READ_EXPORT' | 'READ_POLICY_DETAIL' |
+  'GENERATE_ILLUSTRATION'
+
+export type ConnectorCommandDispatch = {
+  command: ConnectorCommand
+  state: 'QUEUED' | 'RUNNING' | 'AUTH_REQUIRED'
+  nextEventSequence: number
+  lastEventType: string | null
+}
 
 export type StagePlan =
   | {
@@ -12,7 +20,9 @@ export type StagePlan =
   | { capability: 'READ_PAGE'; params: { sourceKey: string; navigatePath: string } }
   | { capability: 'READ_EXPORT'; params: { sourceKey: string; navigatePath: string; includeContactInformation: true } }
 
-const IMPLEMENTED_CAPABILITIES = ['READ_GRID', 'READ_PAGE', 'READ_EXPORT'] as const
+const IMPLEMENTED_CAPABILITIES = [
+  'READ_GRID', 'READ_PAGE', 'READ_EXPORT', 'READ_POLICY_DETAIL', 'GENERATE_ILLUSTRATION',
+] as const
 // A plan is server-authorized and each stage is independently bounded. Leave
 // room for the source inventory to grow without making the 33rd source a hard
 // client-side rollout failure.
@@ -136,6 +146,27 @@ export function parseExecutableConnectorCommand(value: unknown): ConnectorComman
   if (!(IMPLEMENTED_CAPABILITIES as readonly string[]).includes(command.capability)) {
     throw new Error('UNKNOWN_CAPABILITY')
   }
+  if (command.capability === 'READ_POLICY_DETAIL') {
+    if (
+      command.target?.kind !== 'POLICY' ||
+      !('policyNumber' in command.params) ||
+      !('navigatePath' in command.params) ||
+      !isSafePolicyDetailPath(command.params.navigatePath)
+    ) {
+      throw new Error('INVALID_COMMAND')
+    }
+    return command
+  }
+  if (command.capability === 'GENERATE_ILLUSTRATION') {
+    if (
+      command.target?.kind !== 'ILLUSTRATION' ||
+      !('illustrationId' in command.params) ||
+      !('inputHash' in command.params) ||
+      command.params.illustrationId !== command.target.id ||
+      !/^[a-f0-9]{64}$/.test(command.params.inputHash)
+    ) throw new Error('INVALID_COMMAND')
+    return command
+  }
   if (command.capability !== 'READ_GRID' && command.capability !== 'READ_PAGE' && command.capability !== 'READ_EXPORT') {
     throw new Error('UNKNOWN_CAPABILITY')
   }
@@ -148,4 +179,32 @@ export function parseExecutableConnectorCommand(value: unknown): ConnectorComman
   }
   if (!isSafeNavigatePath(params.navigatePath)) throw new Error('UNSAFE_NAVIGATE_PATH')
   return command
+}
+
+export function parseConnectorCommandDispatch(value: unknown): ConnectorCommandDispatch {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !hasExactKeys(value, [
+    'command', 'state', 'nextEventSequence', 'lastEventType',
+  ])) throw new Error('INVALID_COMMAND')
+  const record = value as Record<string, unknown>
+  const command = parseExecutableConnectorCommand(record.command)
+  if (
+    record.state !== 'QUEUED' &&
+    record.state !== 'RUNNING' &&
+    record.state !== 'AUTH_REQUIRED'
+  ) throw new Error('INVALID_COMMAND')
+  if (
+    !Number.isInteger(record.nextEventSequence) ||
+    (record.nextEventSequence as number) < 1 ||
+    (record.nextEventSequence as number) > 10_000
+  ) throw new Error('INVALID_COMMAND')
+  if (
+    record.lastEventType !== null &&
+    (typeof record.lastEventType !== 'string' || record.lastEventType.length > 64)
+  ) throw new Error('INVALID_COMMAND')
+  return {
+    command,
+    state: record.state,
+    nextEventSequence: record.nextEventSequence as number,
+    lastEventType: record.lastEventType as string | null,
+  }
 }

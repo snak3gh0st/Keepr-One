@@ -1,5 +1,5 @@
 import { connectorFailure } from './failure'
-import type { DeviceState, SyncState } from './state'
+import type { CommandState, DeviceState, SyncState } from './state'
 
 const STATUS_TEXT: Record<Exclude<SyncState['status'], 'ERROR'>, string> = {
   IDLE: 'Ready to sync. Start it from the National Life page in Keepr One.',
@@ -12,7 +12,20 @@ const STATUS_TEXT: Record<Exclude<SyncState['status'], 'ERROR'>, string> = {
   PARTIAL: 'Available areas were saved. Retry from Keepr One to finish the remaining areas.',
 }
 
-export function popupStatusText(device: DeviceState, sync: SyncState): string {
+const COMMAND_STATUS_TEXT: Partial<Record<CommandState['status'], string>> = {
+  POLLING: 'Checking for a Keepr One request…',
+  NAVIGATING: 'Opening the requested National Life page in the background…',
+  RUNNING: 'Reading the requested National Life data…',
+  AUTH_REQUIRED: 'Sign in to National Life. Your request will resume automatically.',
+  MFA_REQUIRED: 'Complete National Life verification. Your request will resume automatically.',
+  COMPLETED: 'Your latest National Life request is complete.',
+}
+
+export function popupStatusText(
+  device: DeviceState,
+  sync: SyncState,
+  command?: CommandState,
+): string {
   if (device.status === 'PAIRING') return 'Linking this computer to Keepr One…'
   if (device.status !== 'READY') {
     // Um pareamento morto deixa a falha gravada no sync; é ela que explica por
@@ -20,7 +33,11 @@ export function popupStatusText(device: DeviceState, sync: SyncState): string {
     if (sync.status === 'ERROR') return connectorFailure(sync.errorCode).message
     return 'Connect this computer from the National Life page in Keepr One.'
   }
+  if (command?.status === 'ERROR') return connectorFailure(command.errorCode).message
+  const commandText = command ? COMMAND_STATUS_TEXT[command.status] : undefined
+  if (commandText && command?.status !== 'COMPLETED') return commandText
   if (sync.status === 'ERROR') return connectorFailure(sync.errorCode).message
+  if (commandText) return commandText
   return STATUS_TEXT[sync.status]
 }
 

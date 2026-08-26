@@ -367,6 +367,7 @@ model Agent {
   nationalLifeForesightDocuments        NationalLifeForesightDocument[]
   illustrations                         Illustration[]
   nationalLifeInforcePolicies           NationalLifeInforcePolicy[]
+  nationalLifePolicyDetailSnapshots     NationalLifePolicyDetailSnapshot[]
   nationalLifeReportRows                NationalLifeReportRow[]
   nationalLifeRawGridPages              NationalLifeRawGridPage[]
   nationalLifeConnectorPairings         NationalLifeConnectorPairing[]
@@ -489,6 +490,41 @@ model NationalLifeInforcePolicy {
   @@unique([agentId, deploymentScope, policyNumber])
   @@index([agentId])
   @@index([fetchedAt])
+}
+
+/// Latest normalized coverage/payment detail read from the carrier's
+/// per-policy page. This is intentionally typed and bounded: the connector does
+/// not persist a DOM dump containing unrelated client information.
+model NationalLifePolicyDetailSnapshot {
+  id                           String    @id @default(cuid())
+  agentId                      String
+  agent                        Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope              String
+  policyId                     String    @unique
+  policy                       Policy    @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  policyNumber                 String
+  sourcePath                   String
+  coverageCaptured             Boolean   @default(false)
+  paymentsCaptured             Boolean   @default(false)
+  totalFaceAmount              Decimal?  @db.Decimal(18, 2)
+  netDeathBenefit              Decimal?  @db.Decimal(18, 2)
+  nextScheduledPaymentDate     DateTime?
+  paymentFrequency             String?
+  plannedPeriodicPayment       Decimal?  @db.Decimal(18, 2)
+  anticipatedAnnualPremium     Decimal?  @db.Decimal(18, 2)
+  minimumMonthlyPremium        Decimal?  @db.Decimal(18, 2)
+  minimumGuaranteedPremium     Decimal?  @db.Decimal(18, 2)
+  ctp                          Decimal?  @db.Decimal(18, 2)
+  mecLimit                     Decimal?  @db.Decimal(18, 2)
+  mecLimitThrough              DateTime?
+  guidelinePremiumLimit        Decimal?  @db.Decimal(18, 2)
+  guidelinePremiumLimitThrough DateTime?
+  observedAt                   DateTime
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+
+  @@index([agentId, deploymentScope, observedAt])
+  @@index([policyNumber])
 }
 
 /// Generic landing zone for the portal's report grids — paid commissions,
@@ -677,43 +713,43 @@ model Client {
 }
 
 model Policy {
-  id               String         @id @default(cuid())
-  clientId         String
-  client           Client         @relation(fields: [clientId], references: [id])
-  agentId          String
-  agent            Agent          @relation(fields: [agentId], references: [id])
-  carrier          String
-  product          String
-  policyNumber     String         @unique
-  // Null means "not known yet", not zero. Face amount is absent from all 33
-  // columns of the carrier's official export and exists only on the per-policy
-  // detail page, so it arrives by backfill, long after the row itself. The
-  // previous required column is why the CSV import wrote 0.00 on all 9,614
-  // rows — a wrong number is worse than a missing one.
-  faceAmount       Decimal?
+  id                     String                            @id @default(cuid())
+  clientId               String
+  client                 Client                            @relation(fields: [clientId], references: [id])
+  agentId                String
+  agent                  Agent                             @relation(fields: [agentId], references: [id])
+  carrier                String
+  product                String
+  policyNumber           String                            @unique
+  // Null means "not known yet", not zero. The bulk export omits face amount;
+  // the carrier policy-detail page supplies it on demand.
+  faceAmount             Decimal?
+  faceAmountSource       String?
   // The carrier's own status string, kept beside the mapped enum. PolicyStatus
   // has no "Pending Lapse", and that is precisely the status worth acting on,
   // so mapping it to INFORCE alone would erase the signal.
-  sourceStatus     String?
+  sourceStatus           String?
   // The modal premium — what the client actually pays each time — kept with the
   // mode it is paid in. Annualising on write would destroy the distinction the
   // client chose: $250 monthly and $250 annual are different policies.
   // Null means the carrier has not supplied a premium in a structured source.
   // It must not be rendered or aggregated as zero.
-  premium          Decimal?
-  premiumMode      String?
-  status           PolicyStatus
-  effectiveDate    DateTime?
-  lastPaymentDate  DateTime?
-  statusChangedAt  DateTime?
-  importBatchId    String?
-  importBatch      ImportBatch?   @relation(fields: [importBatchId], references: [id])
-  caseId           String?
-  case             InsuranceCase? @relation(fields: [caseId], references: [id])
-  sourceProvider   String?
-  sourceExternalId String?
-  sourceUpdatedAt  DateTime?
-  createdAt        DateTime       @default(now())
+  premium                Decimal?
+  premiumMode            String?
+  carrierDetailUpdatedAt DateTime?
+  status                 PolicyStatus
+  effectiveDate          DateTime?
+  lastPaymentDate        DateTime?
+  statusChangedAt        DateTime?
+  importBatchId          String?
+  importBatch            ImportBatch?                      @relation(fields: [importBatchId], references: [id])
+  caseId                 String?
+  case                   InsuranceCase?                    @relation(fields: [caseId], references: [id])
+  sourceProvider         String?
+  sourceExternalId       String?
+  sourceUpdatedAt        DateTime?
+  nationalLifeDetail     NationalLifePolicyDetailSnapshot?
+  createdAt              DateTime                          @default(now())
 
   commissionRecords             CommissionRecord[]
   documents                     PolicyDocument[]

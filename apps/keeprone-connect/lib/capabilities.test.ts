@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   isSafePolicyDetailPath,
+  parseConnectorCommandDispatch,
   parseExecutableConnectorCommand,
   parseStagePlan,
   policyDetailNavigatePath,
@@ -259,6 +260,28 @@ describe('parseStagePlan', () => {
 })
 
 describe('parseExecutableConnectorCommand', () => {
+  it('accepts a confirmed illustration only with a sealed input hash', () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_illustration_1',
+      runId: 'run_illustration_1',
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_1' },
+      params: { illustrationId: 'illustration_1', inputHash: 'a'.repeat(64) },
+      idempotencyKey: 'illustration_1:generate:1',
+      issuedAt: '2026-08-10T20:00:00.000Z',
+      expiresAt: '2026-08-10T20:30:00.000Z',
+      requiresConfirmation: true,
+    }
+    expect(parseExecutableConnectorCommand(command)).toMatchObject({
+      capability: 'GENERATE_ILLUSTRATION',
+    })
+    expect(() => parseExecutableConnectorCommand({
+      ...command,
+      params: { illustrationId: 'illustration_1' },
+    })).toThrow('INVALID_COMMAND')
+  })
+
   it('accepts the current READ_GRID command and refuses an unshipped capability', () => {
     expect(() => parseExecutableConnectorCommand({
       protocolVersion: 1,
@@ -285,5 +308,54 @@ describe('parseExecutableConnectorCommand', () => {
       expiresAt: '2026-08-10T20:30:00.000Z',
       requiresConfirmation: false,
     })).toThrow('UNKNOWN_CAPABILITY')
+  })
+
+  it('accepts only the exact READ_POLICY_DETAIL route authorized by the server', () => {
+    const navigatePath = policyDetailNavigatePath('a73f1af893a94906b965e68d11db807b')
+    const value = {
+      protocolVersion: 1,
+      commandId: 'cmd_policy_1',
+      runId: 'run_policy_1',
+      capability: 'READ_POLICY_DETAIL',
+      target: { kind: 'POLICY', id: 'policy_1', carrierExternalId: 'LS1473219' },
+      params: { policyNumber: 'LS1473219', navigatePath },
+      idempotencyKey: 'policy_1:detail:1',
+      issuedAt: '2026-08-10T20:00:00.000Z',
+      expiresAt: '2026-08-10T20:30:00.000Z',
+      requiresConfirmation: false,
+    }
+
+    expect(parseExecutableConnectorCommand(value)).toMatchObject({ capability: 'READ_POLICY_DETAIL' })
+    expect(() => parseExecutableConnectorCommand({
+      ...value,
+      params: { ...value.params, navigatePath: `${navigatePath}&next=/agent/x` },
+    })).toThrow('INVALID_COMMAND')
+  })
+
+  it('accepts only a bounded resumable dispatch cursor', () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_policy_1',
+      runId: 'run_policy_1',
+      capability: 'READ_POLICY_DETAIL',
+      target: { kind: 'POLICY', id: 'policy_1' },
+      params: {
+        policyNumber: 'LS1473219',
+        navigatePath: policyDetailNavigatePath('a73f1af893a94906b965e68d11db807b'),
+      },
+      idempotencyKey: 'policy_1:detail:1',
+      issuedAt: '2026-08-10T20:00:00.000Z',
+      expiresAt: '2026-08-10T20:30:00.000Z',
+      requiresConfirmation: false,
+    }
+    expect(parseConnectorCommandDispatch({
+      command,
+      state: 'RUNNING',
+      nextEventSequence: 2,
+      lastEventType: 'COMMAND_STARTED',
+    })).toMatchObject({ state: 'RUNNING', nextEventSequence: 2 })
+    expect(() => parseConnectorCommandDispatch({
+      command, state: 'RUNNING', nextEventSequence: -1, lastEventType: null,
+    })).toThrow('INVALID_COMMAND')
   })
 })

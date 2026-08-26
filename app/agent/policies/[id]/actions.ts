@@ -9,8 +9,16 @@ import { buildStoredPath, saveUploadedFile } from '@/lib/storage'
 import { nextAnnualReview } from '@/lib/annual-review'
 import { revalidatePath } from 'next/cache'
 import { randomUUID } from 'crypto'
+import { issueConnectorCommand, prismaConnectorCommandRepository } from '@/lib/national-life/connector-command-service'
+import {
+  requestNationalLifePolicyDetailRefresh,
+} from '@/lib/national-life/policy-detail-command'
+import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from '@/lib/national-life/local-connector/config'
 
 type ActionResult = { ok: true } | { ok: false; message: string }
+export type PolicyDetailRefreshResult =
+  | { ok: true; commandId: string }
+  | { ok: false; message: string }
 
 // Confirms the caller may act on this policy; returns null when allowed,
 // otherwise a failure result the action can pass straight back to the UI.
@@ -123,4 +131,60 @@ export async function completeAnnualReview(reviewId: string, notes: string): Pro
 
   revalidatePath(`/agent/policies/${review.policyId}`)
   return { ok: true }
+}
+
+export async function refreshNationalLifePolicyDetail(
+  policyId: string,
+): Promise<PolicyDetailRefreshResult> {
+  try {
+    const session = await requireRole('ADMIN', 'AGENT')
+    const policy = await prisma.policy.findUnique({
+      where: { id: policyId },
+      select: { id: true, agentId: true, policyNumber: true, carrier: true },
+    })
+    if (!policy) return { ok: false, message: 'Apólice não encontrada.' }
+
+    let agentScopeIds = [policy.agentId]
+    if (session.user.role === 'AGENT') {
+      const agent = await getCurrentAgent()
+      const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
+      agentScopeIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
+      if (!agentScopeIds.includes(policy.agentId)) {
+        return { ok: false, message: 'Apólice fora da sua carteira.' }
+      }
+    }
+
+    const result = await requestNationalLifePolicyDetailRefresh({
+      findOwnedPolicy: async () => policy,
+      findCarrierRow: (input) => prisma.nationalLifeInforcePolicy.findUnique({
+        where: {
+          agentId_deploymentScope_policyNumber: {
+            agentId: input.agentId,
+            deploymentScope: input.deploymentScope,
+            policyNumber: input.policyNumber,
+          },
+        },
+        select: { raw: true },
+      }),
+      issue: async (input) => {
+        const issued = await issueConnectorCommand(prismaConnectorCommandRepository, input)
+        return { commandId: issued.command.commandId }
+      },
+    }, {
+      agentScopeIds,
+      policyId,
+      deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+    })
+    revalidatePath(`/agent/policies/${policyId}`)
+    return { ok: true, commandId: result.commandId }
+  } catch (error) {
+    const code = error instanceof Error ? error.message : ''
+    if (code === 'POLICY_DETAIL_ROUTE_UNAVAILABLE') {
+      return {
+        ok: false,
+        message: 'Atualize a carteira da National Life primeiro para localizar esta apólice.',
+      }
+    }
+    return { ok: false, message: 'Não foi possível iniciar a atualização agora.' }
+  }
 }

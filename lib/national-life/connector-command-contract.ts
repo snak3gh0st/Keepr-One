@@ -76,7 +76,9 @@ export type ConnectorCommandParams =
   | { caseKey: string }
   | { externalApplicationId: string }
   | { policyNumber: string }
+  | { policyNumber: string; navigatePath: string }
   | { illustrationId: string }
+  | { illustrationId: string; inputHash: string }
   | { applicationId: string }
   | { applicationId: string; documentId: string; contentHash: string }
   | { applicationId: string; payloadHash: string }
@@ -188,6 +190,9 @@ function isTimestamp(value: unknown): value is string {
   return Number.isFinite(Date.parse(value))
 }
 
+const POLICY_DETAIL_PATH =
+  /^\/agent\/book-of-business\/inforce-book\/all-clients\/policy-details\?id=[a-f0-9]{32}$/
+
 function parseTarget(value: unknown): ConnectorCommandTarget | null | undefined {
   if (value === null) return null
   if (!isObject(value)) return undefined
@@ -247,6 +252,12 @@ function parseParams(
         ? { externalApplicationId: value.externalApplicationId }
         : undefined
     case 'READ_POLICY_DETAIL':
+      return has(['policyNumber', 'navigatePath']) &&
+        isIdentifier(value.policyNumber) &&
+        typeof value.navigatePath === 'string' &&
+        POLICY_DETAIL_PATH.test(value.navigatePath)
+        ? { policyNumber: value.policyNumber, navigatePath: value.navigatePath }
+        : undefined
     case 'READ_COMMISSIONS':
     case 'OPEN_POLICY':
       return has(['policyNumber']) && isIdentifier(value.policyNumber)
@@ -255,6 +266,10 @@ function parseParams(
     case 'OPEN_ILLUSTRATION':
       return has(['caseKey']) && isIdentifier(value.caseKey) ? { caseKey: value.caseKey } : undefined
     case 'GENERATE_ILLUSTRATION':
+      return has(['illustrationId', 'inputHash']) && isIdentifier(value.illustrationId) &&
+        isHash(value.inputHash)
+        ? { illustrationId: value.illustrationId, inputHash: value.inputHash }
+        : undefined
     case 'FLEXLIFE_QUOTE':
       return has(['illustrationId']) && isIdentifier(value.illustrationId)
         ? { illustrationId: value.illustrationId }

@@ -140,7 +140,7 @@ describe('connector command service', () => {
       agentId: 'agent_1',
       capability: 'GENERATE_ILLUSTRATION',
       target: { kind: 'ILLUSTRATION', id: 'illustration_1' },
-      params: { illustrationId: 'illustration_1' },
+      params: { illustrationId: 'illustration_1', inputHash: 'a'.repeat(64) },
       idempotencyKey: 'illustration_1:generate:1',
       expiresAt: new Date(now.getTime() + 10 * 60_000),
       now,

@@ -1,25 +1,32 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { requestIllustrationPdf } from './actions'
+import { sendConnectorMessage } from '@/app/agent/integrations/national-life/NationalLifeConnectorClient'
 
-/// Asks for the PDF and says what happened.
-///
-/// The render runs on the carrier's own tool through a queued browser job, so
-/// it is not instant and the button must not pretend otherwise. It also depends
-/// on a carrier session that expires — the message says so plainly rather than
-/// leaving the agent to wonder why nothing arrived.
+/// Starts the exact approved Foresight command and keeps the server-rendered
+/// status fresh while the local extension works in its own background tab.
 export function IllustrationPdfButton({
   illustrationId,
+  extensionId,
   disabled = false,
+  status,
 }: {
   illustrationId: string
+  extensionId?: string
   disabled?: boolean
+  status?: 'WORKING' | 'BLOCKED' | 'FAILED'
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [message, setMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (status !== 'WORKING') return
+    const timer = window.setInterval(() => router.refresh(), 5_000)
+    return () => window.clearInterval(timer)
+  }, [router, status])
 
   return (
     <div>
@@ -29,19 +36,36 @@ export function IllustrationPdfButton({
         onClick={() =>
           startTransition(async () => {
             const result = await requestIllustrationPdf(illustrationId)
-            setMessage(
-              result.ok
-                ? result.duplicate
-                  ? 'Já em andamento.'
-                  : 'Pedido enviado. O PDF aparece aqui quando a seguradora terminar.'
-                : result.message,
-            )
-            if (result.ok) router.refresh()
+            if (!result.ok) {
+              setMessage(result.message)
+              return
+            }
+            if (result.completed) {
+              setMessage('A ilustração oficial já foi gerada na National Life.')
+              router.refresh()
+              return
+            }
+            if (extensionId) {
+              try {
+                await sendConnectorMessage(extensionId, {
+                  type: 'START_NATIONAL_LIFE_COMMAND',
+                  commandId: result.commandId,
+                })
+              } catch {
+                // The durable one-minute alarm wakes the same command if the
+                // direct page-to-extension channel is temporarily unavailable.
+              }
+            }
+            setMessage(result.duplicate
+              ? 'Retomando a geração oficial já registrada.'
+              : 'Ilustração oficial iniciada. Você pode sair desta página; se a sessão expirar, avisaremos para entrar novamente.')
+            router.refresh()
           })
         }
         className="text-teal transition-colors hover:text-teal-deep disabled:text-ink-muted"
       >
-        {pending ? 'Pedindo…' : disabled ? 'Gerando PDF…' : 'Gerar PDF'}
+        {pending ? 'Iniciando…' : disabled ? 'Gerando em segundo plano…' :
+          status === 'BLOCKED' ? 'Continuar após login' : 'Gerar ilustração oficial'}
       </button>
       {message && (
         <p className="mt-1 text-xs text-ink-muted" role="status" aria-live="polite">
