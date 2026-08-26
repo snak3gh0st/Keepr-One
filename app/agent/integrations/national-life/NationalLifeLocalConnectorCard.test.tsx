@@ -371,6 +371,43 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(screen.getByRole('button', { name: 'Reconnect this computer' })).toBeEnabled()
   })
 
+  it('does not show a stale extension error after the server completed the run', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        run: { runId: 'run-complete', state: 'COMPLETED', safeErrorCode: null },
+      }), { status: 200 }),
+    )
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: {
+            runId: 'run-complete',
+            status: 'ERROR',
+            errorCode: 'PORTAL_REQUEST_FAILED',
+          },
+        })
+        return
+      }
+      callback({ ok: false, error: 'PORTAL_REQUEST_FAILED' })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    const status = await screen.findByRole('status')
+    await waitFor(() => expect(status).toHaveTextContent('connected and ready to sync'))
+    expect(status).not.toHaveTextContent('National Life did not respond')
+    expect(screen.getByRole('button', { name: 'Sync National Life' })).toBeEnabled()
+  })
+
   it('tells an out-of-date extension to update instead of to retry', async () => {
     installChromeMock((message, callback) => {
       if (message.type === 'GET_CONNECTOR_STATUS') {

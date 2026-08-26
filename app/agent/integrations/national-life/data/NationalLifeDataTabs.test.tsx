@@ -4,10 +4,14 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it } from 'vitest'
 import { NationalLifeDataTabs } from './NationalLifeDataTabs'
+import { NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS } from '@/lib/national-life/operational-report-keys'
 
 afterEach(cleanup)
 
 describe('NationalLifeDataTabs', () => {
+  it('keeps commission earning detail on the operational surface', () => {
+    expect(NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS).toContain('COMMISSIONS_EARNING_REPORT')
+  })
   it('does not count a discovery-page artifact as an operational report', () => {
     const html = renderToStaticMarkup(
       <NationalLifeDataTabs

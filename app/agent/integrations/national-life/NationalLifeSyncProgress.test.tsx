@@ -354,4 +354,25 @@ describe('NationalLifeSyncProgress', () => {
     expect(screen.getByText(/1 previously verified area was reused/)).toBeTruthy()
     expect(screen.getByText('4 of 12 portal areas checked')).toBeTruthy()
   })
+
+  it('does not mention reuse on a fresh verified run', () => {
+    render(
+      <NationalLifeSyncProgress
+        initialStatus={status({
+          state: 'COMPLETED',
+          shouldPoll: false,
+          completed: 1,
+          total: 1,
+          stageCoverage: [{
+            gridKey: 'NEW_BUSINESS',
+            label: 'new business',
+            state: 'VERIFIED',
+            verifiedRecords: 10,
+          }],
+        })}
+      />,
+    )
+
+    expect(document.body.textContent).not.toContain('Reused areas were already verified')
+  })
 })

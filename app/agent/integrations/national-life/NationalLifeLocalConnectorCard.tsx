@@ -419,8 +419,30 @@ export function NationalLifeLocalConnectorCard({
   useEffect(() => {
     if (!browserIsCompatible || !extensionId) return
     void sendConnectorMessage(extensionId, { type: 'GET_CONNECTOR_STATUS' })
-      .then((status) => {
+      .then(async (status) => {
         if (status.device?.deviceId) setPairedDeviceId(status.device.deviceId)
+        // The database is authoritative once a run reaches a terminal state.
+        // A service worker can retain the last transient portal error after the
+        // server has already accepted and completed every stage; surfacing that
+        // stale error beside an up-to-date 13/13 panel makes a healthy sync look
+        // broken after a reload.
+        if (status.sync?.status === 'ERROR' && status.sync.runId) {
+          const durable = await readDurableSync(status.sync.runId)
+          if (durable?.state === 'COMPLETED') {
+            setErrorCode(null)
+            setState('idle')
+            return
+          }
+          if (durable?.state === 'PARTIAL') {
+            setErrorCode(null)
+            setState('partial')
+            return
+          }
+          if (durable?.state === 'FAILED') {
+            fail(durable.safeErrorCode ?? 'SYNC_INCOMPLETE')
+            return
+          }
+        }
         if (status.sync?.status === 'AUTH_REQUIRED') setState('login-required')
         // Um ERROR gravado tem de sobreviver ao F5. Antes, recarregar a página
         // devolvia o cartão ao repouso como se nada tivesse acontecido.
