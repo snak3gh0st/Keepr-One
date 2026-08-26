@@ -1,84 +1,69 @@
-"use client";
+'use client'
 
-import { useState } from "react";
-import Link from "next/link";
-import { Button } from "@/components/Button";
-import { Field, Input, Select } from "@/components/Field";
-import {
-  DEATH_BENEFIT_OPTIONS,
-  GENDERS,
-  ISSUE_STATES,
-  RATE_CLASSES,
-  SOLVE_TYPES,
-  STRATEGIES,
-} from "@/lib/national-life/rapid-solve";
-import { QUOTE_DISCLAIMER } from "@/lib/national-life/quote-disclaimer";
-import { requestCarrierQuote } from "./new/actions";
-import { useRapidSolveQuote } from "./useRapidSolveQuote";
-import { sendConnectorMessage } from "@/app/agent/integrations/national-life/NationalLifeConnectorClient";
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Button } from '@/components/Button'
+import { Field, Input, Select } from '@/components/Field'
+import { FORESIGHT_ISSUE_STATES } from '@/lib/national-life/foresight-illustration-contract'
+import { requestForesightIllustration } from './new/actions'
+import { sendConnectorMessage } from '@/app/agent/integrations/national-life/NationalLifeConnectorClient'
 
-const currency = (value: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  }).format(value);
+const GENDERS = {
+  FEMALE: 'Female',
+  MALE: 'Male',
+} as const
 
-// 'NEVER' is the carrier's confirmed "does not lapse" (LapseYear: 0); null is
-// "the carrier said nothing parseable". Only 'NEVER' may read as "Não lapsa"
-// — collapsing null into the same label would put an unread carrier answer on
-// screen as a definite fact, which is the one thing this panel exists not to
-// do. Mirrors lapseLabel on app/agent/illustrations/[id]/page.tsx.
-function lapseLabel(value: number | "NEVER" | null): string {
-  if (value === "NEVER") return "Não lapsa";
-  if (value === null) return "—";
-  return `Ano ${value}`;
-}
+const RATE_CLASSES = {
+  STANDARD_NON_TOBACCO: 'Standard_NT',
+  STANDARD_TOBACCO: 'Standard_Tobacco',
+} as const
+
+const DEATH_BENEFIT_OPTIONS = {
+  LEVEL: 'A_Level',
+  INCREASING: 'B_Increasing',
+} as const
+
+const CAP_FOCUS = 'SP500PointToPointCapFocus'
 
 export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
-  const [submitting, setSubmitting] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  const { status, error: pollError } = useRapidSolveQuote(jobId);
+  const router = useRouter()
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   async function handleSubmit(formData: FormData) {
-    setSubmitting(true);
-    setSubmitError(null);
-    setJobId(null);
-
-    const result = await requestCarrierQuote(formData);
-    if (result.ok) {
-      setJobId(result.jobId);
-      if (extensionId) {
-        try {
-          await sendConnectorMessage(extensionId, {
-            type: "START_NATIONAL_LIFE_COMMAND",
-            commandId: result.commandId,
-          });
-        } catch {
-          // The extension's durable alarm retries approved commands even when
-          // this immediate browser-to-extension wake-up is unavailable.
-        }
-      }
-    } else {
-      setSubmitError(result.message);
+    setSubmitting(true)
+    setSubmitError(null)
+    const result = await requestForesightIllustration(formData)
+    if (!result.ok) {
+      setSubmitError(result.message)
+      setSubmitting(false)
+      return
     }
-
-    setSubmitting(false);
+    if (extensionId) {
+      try {
+        await sendConnectorMessage(extensionId, {
+          type: 'START_NATIONAL_LIFE_COMMAND',
+          commandId: result.commandId,
+        })
+      } catch {
+        // The extension alarm picks up the durable, approved command if the
+        // immediate page-to-extension wake-up is unavailable.
+      }
+    }
+    router.push(`/agent/illustrations/${encodeURIComponent(result.illustrationId)}`)
   }
 
   return (
     <div className="module-main-surface">
       <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
-        National Life • FlexLife
+        National Life • Foresight • FlexLife
       </p>
       <h2 className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">
-        Cotação FlexLife
+        Ilustração oficial FlexLife
       </h2>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">
-        Os valores vêm da própria seguradora. Esta cotação é do produto FlexLife —
-        Term não entra neste fluxo.
+        O KeeproneConnect preenche e salva a ilustração no Foresight da National Life,
+        confere os dados gravados e traz o PDF oficial para cá.
       </p>
 
       <form action={handleSubmit} className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -93,170 +78,54 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
         </Field>
         <Field label="Estado de emissão">
           <Select name="issueState" required defaultValue="" className="w-full">
-            <option value="" disabled>
-              Selecione...
-            </option>
-            {ISSUE_STATES.map((state) => (
-              <option key={state} value={state}>
-                {state}
-              </option>
-            ))}
+            <option value="" disabled>Selecione...</option>
+            {FORESIGHT_ISSUE_STATES.map((state) => <option key={state} value={state}>{state}</option>)}
           </Select>
         </Field>
         <Field label="Sexo">
           <Select name="gender" required defaultValue="" className="w-full">
-            <option value="" disabled>
-              Selecione...
-            </option>
+            <option value="" disabled>Selecione...</option>
             <option value={GENDERS.FEMALE}>Feminino</option>
             <option value={GENDERS.MALE}>Masculino</option>
           </Select>
         </Field>
-        {/* The carrier has two classes and no former-smoker value, so this is
-            the agent's underwriting call rather than something derived from a
-            tobacco question. */}
         <Field label="Classe de risco">
           <Select name="rateClass" required defaultValue="" className="w-full">
-            <option value="" disabled>
-              Selecione...
-            </option>
+            <option value="" disabled>Selecione...</option>
             <option value={RATE_CLASSES.STANDARD_NON_TOBACCO}>Standard não-tabagista</option>
             <option value={RATE_CLASSES.STANDARD_TOBACCO}>Standard tabagista</option>
           </Select>
         </Field>
-        <Field label="O que a seguradora deve calcular">
-          <Select name="solveType" required className="w-full" defaultValue={SOLVE_TYPES.SPECIFY_AMOUNT}>
-            <option value={SOLVE_TYPES.SPECIFY_AMOUNT}>
-              Informo o capital, quero o prêmio
-            </option>
-          </Select>
-        </Field>
         <Field label="Capital segurado">
-          <Input name="amount" type="number" min={1} step="0.01" required placeholder="250000" />
+          <Input name="faceAmount" type="number" min={1} step="0.01" required placeholder="250000" />
+        </Field>
+        <Field label="Prêmio mensal">
+          <Input name="monthlyPremium" type="number" min={0.01} step="0.01" required placeholder="350" />
         </Field>
         <Field label="Opção de benefício por morte">
           <Select name="deathBenefitOption" required defaultValue="" className="w-full">
-            <option value="" disabled>
-              Selecione...
-            </option>
+            <option value="" disabled>Selecione...</option>
             <option value={DEATH_BENEFIT_OPTIONS.LEVEL}>A — nivelado</option>
             <option value={DEATH_BENEFIT_OPTIONS.INCREASING}>B — crescente</option>
           </Select>
         </Field>
         <Field label="Estratégia de índice">
-          <Select name="strategy" required defaultValue={STRATEGIES.CAP_FOCUS} className="w-full">
-            <option value={STRATEGIES.CAP_FOCUS}>S&P 500 — foco em teto</option>
+          <Select name="strategy" required defaultValue={CAP_FOCUS} className="w-full">
+            <option value={CAP_FOCUS}>S&P 500 — foco em teto</option>
           </Select>
         </Field>
 
         <div className="border-t border-border-steel pt-5 sm:col-span-2">
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={submitting || status?.state === "PENDING"}
-            className="w-full sm:w-auto"
-          >
-            {submitting
-              ? "Enviando..."
-              : status?.state === "PENDING"
-                ? "Aguardando a seguradora..."
-                : "Cotar na National Life"}
+          <Button type="submit" variant="primary" disabled={submitting} className="w-full sm:w-auto">
+            {submitting ? 'Iniciando...' : 'Gerar ilustração oficial'}
           </Button>
+          <p className="mt-3 text-xs leading-5 text-ink-muted">
+            Você pode sair desta tela. Se a sessão da National Life expirar, o KeeprOne pede o login e continua de onde parou.
+          </p>
         </div>
       </form>
 
-      {submitError && (
-        <p role="alert" className="mt-4 text-sm text-danger">
-          {submitError}
-        </p>
-      )}
-
-      {pollError && (
-        <p role="alert" className="mt-4 text-sm text-danger">
-          {pollError}
-        </p>
-      )}
-
-      {status?.state === "PENDING" && !pollError && (
-        <p className="mt-4 text-sm text-ink-muted">
-          A cotação foi enviada para a National Life. A resposta aparece aqui assim que chegar.
-        </p>
-      )}
-
-      {status?.state === "AUTH_REQUIRED" && !pollError && (
-        <p role="status" className="mt-4 text-sm text-amber-700">
-          Entre na National Life na aba que o KeeproneConnect abriu. Depois do login, a cotação continua automaticamente — você pode voltar para esta tela.
-        </p>
-      )}
-
-      {/* A refusal is the carrier's own sentence and belongs on screen. It is
-          not an error in the app, and it is not a quote either. */}
-      {status?.state === "ANSWERED" && !status.quote.ok && (
-        <p role="alert" className="mt-4 text-sm text-danger">
-          A seguradora não cotou: {status.quote.message}
-        </p>
-      )}
-
-      {status?.state === "UNAVAILABLE" && (
-        <p role="alert" className="mt-4 text-sm text-danger">
-          Não foi possível obter a cotação ({status.safeErrorCode}). Nenhum valor foi calculado.
-        </p>
-      )}
-
-      {status?.state === "ANSWERED" && status.quote.ok && (
-        <div className="mt-4 space-y-2">
-          <div className="rounded-2xl border border-border-steel bg-panel/55 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-ink">Cotação FlexLife</p>
-              <p className="text-xs text-ink-muted">National Life • prêmio mensal</p>
-            </div>
-
-            {/* The carrier's own condition, which an agent has to accept on its
-                site before it will quote. Reproduced here because our screen
-                shows the same number without asking, and the restriction
-                travels with the number rather than with the checkbox. */}
-            <p className="mt-3 border-l-2 border-border-steel pl-3 text-xs leading-5 text-ink-muted">
-              {QUOTE_DISCLAIMER}
-            </p>
-
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full border-collapse">
-                <tbody>
-                  <tr className="border-b border-border-steel/70">
-                    <td className="py-2 pr-3 text-sm text-ink-muted">Capital segurado</td>
-                    <td className="py-2 text-sm font-semibold text-ink">
-                      {currency(status.quote.faceAmount)}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-border-steel/70">
-                    <td className="py-2 pr-3 text-sm text-ink-muted">Prêmio mensal</td>
-                    <td className="py-2 text-sm font-semibold text-ink">
-                      {currency(status.quote.monthlyPremium)}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-border-steel/70">
-                    <td className="py-2 pr-3 text-sm text-ink-muted">Prêmio anual</td>
-                    <td className="py-2 text-sm font-semibold text-ink">
-                      {currency(status.quote.annualPremium)}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="py-2 pr-3 text-sm text-ink-muted">Lapso projetado</td>
-                    <td className="py-2 text-sm font-semibold text-ink">
-                      {lapseLabel(status.quote.lapseYear)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <p>
-            <Link href="/agent/illustrations" className="text-sm text-ink-muted hover:text-ink">
-              Ver todas as ilustrações
-            </Link>
-          </p>
-        </div>
-      )}
+      {submitError && <p role="alert" className="mt-4 text-sm text-danger">{submitError}</p>}
     </div>
-  );
+  )
 }

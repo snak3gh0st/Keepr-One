@@ -1,4 +1,4 @@
-"use server";
+'use server'
 
 import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
@@ -10,53 +10,44 @@ import {
   createPrismaConnectorCommandRepository,
   issueConnectorCommand,
 } from '@/lib/national-life/connector-command-service'
+import {
+  buildForesightIllustrationSnapshot,
+  FORESIGHT_ISSUE_STATES,
+  foresightIllustrationInputHash,
+} from '@/lib/national-life/foresight-illustration-contract'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
-import {
-  buildRapidSolveRequest,
-  DEATH_BENEFIT_OPTIONS,
-  GENDERS,
-  ISSUE_STATES,
-  RAPID_SOLVE_ALLOCATION,
-  RAPID_SOLVE_PRODUCT_CODE,
-  RATE_CLASSES,
-  SOLVE_TYPES,
-  STRATEGIES,
-} from '@/lib/national-life/rapid-solve'
-import {
-  buildFlexLifeQuoteSnapshot,
-  flexLifeQuoteInputHash,
-} from '@/lib/national-life/flexlife-quote-contract'
 import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
 
 function normalizeText(value: string | null | undefined): string {
   return (value ?? '').trim()
 }
 
-type RequestCarrierQuoteResult =
-  | { ok: true; jobId: string; commandId: string; illustrationId: string }
+function parseIsoDate(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const date = new Date(`${value}T00:00:00.000Z`)
+  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value || date > new Date()
+    ? null
+    : date
+}
+
+type RequestForesightIllustrationResult =
+  | { ok: true; commandId: string; illustrationId: string }
   | { ok: false; message: string }
 
-const SOLVE_TYPE_VALUES = new Set<string>(Object.values(SOLVE_TYPES))
-const RATE_CLASS_VALUES = new Set<string>(Object.values(RATE_CLASSES))
-const GENDER_VALUES = new Set<string>(Object.values(GENDERS))
-const DEATH_BENEFIT_VALUES = new Set<string>(Object.values(DEATH_BENEFIT_OPTIONS))
-const ISSUE_STATE_VALUES = new Set<string>(ISSUE_STATES)
-const STRATEGY_VALUES = new Set<string>(Object.values(STRATEGIES))
+const GENDERS = new Set(['Male', 'Female'])
+const RATE_CLASSES = new Set(['Standard_NT', 'Standard_Tobacco'])
+const DEATH_BENEFIT_OPTIONS = new Set(['A_Level', 'B_Increasing'])
+const CAP_FOCUS = 'SP500PointToPointCapFocus'
 
-/// Asks National Life to price the illustration, instead of estimating it here.
-///
-/// Returns a durable command id rather than a quote. KeeproneConnect executes
-/// that exact approved request in the agent's authenticated National Life tab,
-/// and the screen polls the persisted carrier answer.
-///
-/// The carrier's own fields are taken from the form rather than derived from
-/// the ones already there. A tobacco answer is not a rate class, and guessing
-/// the mapping would misprice the quote in a way that looks like a quote.
-export async function requestCarrierQuote(
+/// Creates the exact, reviewable instruction that the Foresight executor will
+/// write into the carrier. It intentionally does not call Rapid Solve: capital
+/// and monthly premium are the agent's explicit inputs, and the official NAIC
+/// document is the carrier artifact returned by Foresight.
+export async function requestForesightIllustration(
   formData: FormData,
-): Promise<RequestCarrierQuoteResult> {
+): Promise<RequestForesightIllustrationResult> {
   if (!isNationalLifeLocalConnectorEnabled()) {
-    return { ok: false, message: 'Conecte o KeeproneConnect para cotar na National Life.' }
+    return { ok: false, message: 'Conecte o KeeproneConnect para gerar a ilustração oficial.' }
   }
   const agent = await getCurrentAgent()
 
@@ -66,88 +57,52 @@ export async function requestCarrierQuote(
   const issueState = normalizeText(formData.get('issueState') as string | null)
   const gender = normalizeText(formData.get('gender') as string | null)
   const rateClass = normalizeText(formData.get('rateClass') as string | null)
-  const solveType = normalizeText(formData.get('solveType') as string | null)
   const deathBenefitOption = normalizeText(formData.get('deathBenefitOption') as string | null)
   const strategy = normalizeText(formData.get('strategy') as string | null)
   const clientId = normalizeText(formData.get('clientId') as string | null)
-  const amount = Number(normalizeText(formData.get('amount') as string | null))
+  const faceAmount = Number(normalizeText(formData.get('faceAmount') as string | null))
+  const monthlyPremium = Number(normalizeText(formData.get('monthlyPremium') as string | null))
 
   if (!firstName) return { ok: false, message: 'Informe o nome.' }
   if (!lastName) return { ok: false, message: 'Informe o sobrenome.' }
-  if (!dateOfBirthRaw) return { ok: false, message: 'Informe a data de nascimento (DOB).' }
-
-  // Checked against the carrier's own lists rather than for non-emptiness. New
-  // York is the reason this matters: it is not on the list, and a prospect
-  // there should be turned away here instead of by a refusal that costs a
-  // carrier round trip and reads like the quote failed.
-  if (!ISSUE_STATE_VALUES.has(issueState)) {
-    return {
-      ok: false,
-      message: 'A National Life não emite neste estado por este portal.',
-    }
+  const dateOfBirth = parseIsoDate(dateOfBirthRaw)
+  if (!dateOfBirth) return { ok: false, message: 'Data de nascimento inválida.' }
+  if (!FORESIGHT_ISSUE_STATES.includes(issueState as typeof FORESIGHT_ISSUE_STATES[number])) {
+    return { ok: false, message: 'Escolha o estado de emissão.' }
   }
-  if (!GENDER_VALUES.has(gender)) {
-    return { ok: false, message: 'Informe o sexo, como a seguradora o classifica.' }
-  }
-  if (!RATE_CLASS_VALUES.has(rateClass)) {
-    return { ok: false, message: 'Informe a classe de risco.' }
-  }
-  if (!DEATH_BENEFIT_VALUES.has(deathBenefitOption)) {
+  if (!GENDERS.has(gender)) return { ok: false, message: 'Informe o sexo, como a seguradora o classifica.' }
+  if (!RATE_CLASSES.has(rateClass)) return { ok: false, message: 'Informe a classe de risco.' }
+  if (!DEATH_BENEFIT_OPTIONS.has(deathBenefitOption)) {
     return { ok: false, message: 'Informe a opção de benefício por morte.' }
   }
-  if (!SOLVE_TYPE_VALUES.has(solveType)) {
-    return { ok: false, message: 'Escolha o que a seguradora deve calcular.' }
+  if (strategy !== CAP_FOCUS) {
+    return { ok: false, message: 'A ilustração oficial usa S&P 500 — foco em teto.' }
   }
-  if (solveType !== SOLVE_TYPES.SPECIFY_AMOUNT) {
-    return {
-      ok: false,
-      message: 'Por enquanto, informe o capital segurado para gerar a ilustração oficial.',
-    }
+  if (!Number.isFinite(faceAmount) || faceAmount <= 0 || faceAmount > 1_000_000_000) {
+    return { ok: false, message: 'Informe um capital segurado maior que zero.' }
   }
-  if (!STRATEGY_VALUES.has(strategy)) {
-    return { ok: false, message: 'Escolha a estratégia de índice.' }
-  }
-  if (strategy !== STRATEGIES.CAP_FOCUS) {
-    return {
-      ok: false,
-      message: 'Por enquanto, a ilustração oficial usa S&P 500 — foco em teto.',
-    }
+  if (!Number.isFinite(monthlyPremium) || monthlyPremium <= 0 || monthlyPremium > 100_000_000) {
+    return { ok: false, message: 'Informe um prêmio mensal maior que zero.' }
   }
 
-  // The same field carries face amount or premium depending on the solve type,
-  // which is how the carrier's own screen works.
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return {
-      ok: false,
-      message:
-        solveType === SOLVE_TYPES.SPECIFY_AMOUNT
-          ? 'Informe um capital segurado maior que zero.'
-          : 'Informe um prêmio maior que zero.',
-    }
-  }
-
-  const dateOfBirth = new Date(`${dateOfBirthRaw}T00:00:00.000Z`)
-  if (Number.isNaN(dateOfBirth.getTime()) || dateOfBirth > new Date()) {
-    return { ok: false, message: 'Data de nascimento inválida.' }
-  }
-
-  try {
-    const request = buildRapidSolveRequest({
-      issueState,
+  const illustrationId = `ill_${randomUUID()}`
+  const rawPayload = {
+    foresightDraft: {
+      schemaVersion: 1,
       firstName,
       lastName,
-      dateOfBirth,
+      dateOfBirth: dateOfBirthRaw,
+      issueState,
       gender,
       rateClass,
-      solveType: solveType as (typeof SOLVE_TYPES)[keyof typeof SOLVE_TYPES],
-      amount,
+      faceAmount,
+      monthlyPremium,
       deathBenefitOption,
-      strategy,
-      allocation: RAPID_SOLVE_ALLOCATION,
-      productCode: RAPID_SOLVE_PRODUCT_CODE,
-    }, new Date())
-    const illustrationId = `ill_${randomUUID()}`
-    const rawPayload = { request } as Prisma.InputJsonValue
+      strategy: CAP_FOCUS,
+    },
+  } as Prisma.InputJsonValue
+
+  try {
     const issued = await prisma.$transaction(async (tx) => {
       const repository = createPrismaConnectorCommandRepository(tx)
       const created = await tx.illustration.create({
@@ -159,23 +114,29 @@ export async function requestCarrierQuote(
           productName: 'FlexLife',
           provider: NATIONAL_LIFE_PROVIDER,
           externalId: illustrationId,
-          faceAmount: solveType === SOLVE_TYPES.SPECIFY_AMOUNT ? amount : null,
+          faceAmount,
+          premium: null,
+          targetPremium: monthlyPremium,
+          targetPremiumSource: 'AGENT_INPUT_FOR_FORESIGHT',
           insuredName: `${firstName} ${lastName}`,
           insuredDateOfBirth: dateOfBirth,
           rawPayload,
         },
-        select: { id: true },
+        select: { id: true, createdAt: true },
       })
-      const inputHash = flexLifeQuoteInputHash(buildFlexLifeQuoteSnapshot({
-        id: created.id,
+      const snapshot = buildForesightIllustrationSnapshot({
+        ...created,
+        caseId: null,
+        productName: 'FlexLife',
         rawPayload,
-      }))
+      })
+      const inputHash = foresightIllustrationInputHash(snapshot)
       const command = await issueConnectorCommand(repository, {
         agentId: agent.id,
-        capability: 'FLEXLIFE_QUOTE',
+        capability: 'GENERATE_ILLUSTRATION',
         target: { kind: 'ILLUSTRATION', id: created.id },
         params: { illustrationId: created.id, inputHash },
-        idempotencyKey: `flexlife-quote:${created.id}:${inputHash}`,
+        idempotencyKey: `foresight:${created.id}:${inputHash}`,
         expiresAt: new Date(Date.now() + 60 * 60_000),
       })
       await approveConnectorCommand(repository, {
@@ -186,10 +147,8 @@ export async function requestCarrierQuote(
       })
       return { ...command, illustrationId: created.id }
     })
-
     return {
       ok: true,
-      jobId: issued.command.commandId,
       commandId: issued.command.commandId,
       illustrationId: issued.illustrationId,
     }
@@ -202,15 +161,10 @@ export async function requestCarrierQuote(
         : error instanceof Error && /^[A-Z0-9_]{1,80}$/.test(error.message)
           ? error.message
           : 'UNCLASSIFIED'
-    console.error('NATIONAL_LIFE_QUOTE_COMMAND_FAILED', {
+    console.error('NATIONAL_LIFE_FORESIGHT_COMMAND_FAILED', {
       errorName: error instanceof Error ? error.name : typeof error,
       errorCode: rawCode,
     })
-    // The reason is either a validation detail already checked above or an
-    // infrastructure fault. Neither is something to put in front of an agent.
-    return {
-      ok: false,
-      message: 'Não foi possível enviar a cotação para a seguradora. Tente novamente.',
-    }
+    return { ok: false, message: 'Não foi possível iniciar a ilustração oficial agora.' }
   }
 }
