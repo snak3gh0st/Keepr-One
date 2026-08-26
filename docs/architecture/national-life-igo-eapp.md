@@ -1,7 +1,7 @@
 # iGo e-App: o que seria preciso para propor pelo app
 
 Estado: **fase futura; fora do release de sync + Illustration**. Nada foi
-submetido. O KeeproneConnect 0.1.26 não executa iGO, não possui permissões
+submetido. O KeeproneConnect 0.1.27 não executa iGO, não possui permissões
 iPipeline e não prepara/salva propostas.
 
 Revisto em 2026-07-31 depois de mapear o Foresight: o iGo continua sendo
