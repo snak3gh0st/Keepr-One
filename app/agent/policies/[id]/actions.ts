@@ -145,8 +145,7 @@ export async function refreshNationalLifePolicyDetail(
     let agentScopeIds = [policy.agentId]
     if (session.user.role === 'AGENT') {
       const agent = await getCurrentAgent()
-      const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
-      agentScopeIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
+      agentScopeIds = await getAgentScopeIds(agent.id)
       if (!agentScopeIds.includes(policy.agentId)) {
         return { ok: false, message: 'Apólice fora da sua carteira.' }
       }
