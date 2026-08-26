@@ -98,8 +98,12 @@ describe('NationalLifeLocalConnectorCard', () => {
       new Response(JSON.stringify({ code: 'NL-super-secret-pairing-code' }), { status: 201 }),
     )
     const messages: string[] = []
+    const refreshModes: Array<true | undefined> = []
     installChromeMock((message, callback) => {
       messages.push(message.type)
+      if (message.type === 'START_NATIONAL_LIFE_SYNC') {
+        refreshModes.push(message.forceRefresh)
+      }
       if (message.type === 'GET_CONNECTOR_STATUS') {
         callback({
           ok: true,
@@ -126,6 +130,7 @@ describe('NationalLifeLocalConnectorCard', () => {
       ),
     )
     expect(document.body).not.toHaveTextContent('NL-super-secret-pairing-code')
+    expect(refreshModes).toEqual([true])
     expect(window.location.search).toBe('')
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalled())
   })

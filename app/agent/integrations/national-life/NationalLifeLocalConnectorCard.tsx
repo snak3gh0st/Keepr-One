@@ -354,7 +354,10 @@ export function NationalLifeLocalConnectorCard({
     })
     if (!paired.ok) throw new Error(paired.error ?? 'PAIRING_FAILED')
     if (typeof paired.deviceId === 'string') setPairedDeviceId(paired.deviceId)
-    await startSync()
+    // A newly paired device must never inherit a failed plan from a previous
+    // device. Starting with forceRefresh creates the current priority plan
+    // (9 structured sources, or 13 when READ_PAGE is enabled) from scratch.
+    await startSync(true)
   }
 
   async function startSync(forceRefresh = false): Promise<void> {
