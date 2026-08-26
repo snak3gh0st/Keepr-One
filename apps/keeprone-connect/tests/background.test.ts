@@ -15,7 +15,7 @@ vi.mock('../lib/key-store', () => ({
   getOrCreateDeviceKey: vi.fn(),
 }))
 
-import { signedBinaryRequest, signedJsonRequest } from '../lib/signed-client'
+import { SignedRequestError, signedBinaryRequest, signedJsonRequest } from '../lib/signed-client'
 import { sha256ForesightSnapshot } from '../lib/foresight-contract'
 
 const NLG = 'https://www.nationallife.com'
@@ -965,8 +965,9 @@ describe('background plan executor', () => {
       resume: { sequence: 3, offset: 600 },
     } as never)
     await bootBackground()
-    emit('runtime.onMessage', { type: 'RETRY_SYNC' }, {}, vi.fn())
-    await flush()
+    const sendResponse = vi.fn()
+    emit('runtime.onMessage', { type: 'RETRY_SYNC' }, {}, sendResponse)
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled())
 
     expect(tabs.sendMessage).toHaveBeenCalledWith(
       9,
@@ -977,6 +978,189 @@ describe('background plan executor', () => {
         offsetStart: 600,
       }),
     )
+  })
+
+  it('rebuilds a commission-detail retry from the server statement cursor', async () => {
+    storage.sync = {
+      runId: 'run-commission-detail',
+      carrierTabId: 11,
+      plan: COMMISSION_DETAIL_PLAN,
+      stageIndex: 1,
+      status: 'ERROR',
+      commissionDetailLinks: [
+        { path: COMMISSION_DETAIL_PATH, statementId: 'aaa1' },
+        { path: COMMISSION_DETAIL_PATH_2, statementId: 'bbb2' },
+      ],
+      commissionDetailIndex: 1,
+      // The inconsistent local cursor observed in production: the global
+      // offset advanced, but the child-page index did not.
+      commissionDetailOffset: 2273,
+    }
+    tabs.query.mockResolvedValue([{
+      id: 11,
+      active: false,
+      url: `${NLG}${COMMISSIONS_EARNING_REPORT_PATH}`,
+    }])
+    vi.mocked(signedJsonRequest).mockImplementation(async (input) => {
+      if (input.pathname === '/api/agent/integrations/national-life/local-connector/runs') {
+        return {
+          runId: 'run-commission-detail',
+          schemaVersion: 3,
+          stages: COMMISSION_DETAIL_PLAN,
+          duplicate: true,
+          completedStages: 1,
+          nextStageIndex: 1,
+          resume: { sequence: 13, offset: 2273, recordCount: 2273 },
+        } as never
+      }
+      if (input.pathname.endsWith('/details')) {
+        return {
+          links: [
+            { path: COMMISSION_DETAIL_PATH, statementId: 'aaa1' },
+            { path: COMMISSION_DETAIL_PATH_2, statementId: 'bbb2' },
+          ],
+          resume: {
+            statementId: 'bbb2',
+            statementOffset: 664,
+            baseOffset: 1609,
+            sequence: 13,
+            receivedRecordCount: 2273,
+          },
+        } as never
+      }
+      return {} as never
+    })
+    await bootBackground()
+
+    const sendResponse = vi.fn()
+    emit('runtime.onMessage', { type: 'RETRY_SYNC' }, {}, sendResponse)
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled())
+
+    expect(readSync()).toMatchObject({
+      commissionDetailIndex: 1,
+      commissionDetailOffset: 1609,
+      commissionDetailCurrentOffset: 664,
+      commissionDetailReceivedRecords: 2273,
+      resumeSequence: 13,
+      resumeOffset: 664,
+      status: 'NAVIGATING',
+    })
+    expect(tabs.update).toHaveBeenLastCalledWith(11, {
+      url: `${NLG}${COMMISSION_DETAIL_PATH_2}`,
+    })
+  })
+
+  it('stops a mixed-version retry when the server omits the statement cursor', async () => {
+    storage.sync = {
+      runId: 'run-commission-detail',
+      carrierTabId: 11,
+      plan: COMMISSION_DETAIL_PLAN,
+      stageIndex: 1,
+      status: 'ERROR',
+    }
+    tabs.query.mockResolvedValue([{
+      id: 11,
+      active: false,
+      url: `${NLG}${COMMISSIONS_EARNING_REPORT_PATH}`,
+    }])
+    vi.mocked(signedJsonRequest).mockImplementation(async (input) => {
+      if (input.pathname === '/api/agent/integrations/national-life/local-connector/runs') {
+        return {
+          runId: 'run-commission-detail',
+          stages: COMMISSION_DETAIL_PLAN,
+          completedStages: 1,
+          nextStageIndex: 1,
+          resume: { sequence: 13, offset: 2273, recordCount: 2273 },
+        } as never
+      }
+      if (input.pathname.endsWith('/details')) {
+        return {
+          links: [{ path: COMMISSION_DETAIL_PATH, statementId: 'aaa1' }],
+        } as never
+      }
+      return {} as never
+    })
+    await bootBackground()
+
+    const sendResponse = vi.fn()
+    emit('runtime.onMessage', { type: 'RETRY_SYNC' }, {}, sendResponse)
+    await vi.waitFor(() => expect(readSync()).toMatchObject({
+      status: 'ERROR',
+      errorCode: 'COMMISSION_DETAIL_CURSOR_UNAVAILABLE',
+    }))
+    expect(sendResponse).toHaveBeenCalled()
+    expect(tabs.update).not.toHaveBeenCalledWith(11, {
+      url: `${NLG}${COMMISSION_DETAIL_PATH}`,
+    })
+  })
+
+  it('recovers one commission-detail idempotency race without making the agent restart the sync', async () => {
+    storage.sync = {
+      runId: 'run-commission-detail',
+      carrierTabId: 11,
+      plan: COMMISSION_DETAIL_PLAN,
+      stageIndex: 1,
+      status: 'NAVIGATING',
+      commissionDetailLinks: [
+        { path: COMMISSION_DETAIL_PATH, statementId: 'aaa1' },
+        { path: COMMISSION_DETAIL_PATH_2, statementId: 'bbb2' },
+      ],
+      commissionDetailIndex: 1,
+      commissionDetailOffset: 1609,
+      commissionDetailCurrentOffset: 664,
+      resumeSequence: 13,
+      resumeOffset: 664,
+    }
+    tabs.query.mockResolvedValue([{
+      id: 11,
+      active: false,
+      url: `${NLG}${COMMISSION_DETAIL_PATH_2}`,
+    }])
+    await bootBackground()
+    const begin = beginGridMessage()
+    vi.mocked(signedJsonRequest).mockImplementation(async (input) => {
+      if (input.method === 'PUT') throw new SignedRequestError('IDEMPOTENCY_CONFLICT')
+      if (input.pathname === '/api/agent/integrations/national-life/local-connector/runs') {
+        return {
+          runId: 'run-commission-detail',
+          stages: COMMISSION_DETAIL_PLAN,
+          completedStages: 1,
+          nextStageIndex: 1,
+          resume: { sequence: 13, offset: 2273, recordCount: 2273 },
+        } as never
+      }
+      return {} as never
+    })
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'COMMISSIONS_EARNING_REPORT',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 12,
+        recordsTotal: 664,
+        truncated: false,
+        sourceOffset: 600,
+        nextOffset: 664,
+        records: [{ GrossCommEarned: '$20.00' }],
+      },
+      { tab: { id: 11 }, url: `${NLG}${COMMISSION_DETAIL_PATH_2}` },
+      vi.fn(),
+    )
+
+    await vi.waitFor(() => expect(readSync()).toMatchObject({
+      status: 'NAVIGATING',
+      commissionDetailRecoveryAttempts: 1,
+      resumeSequence: 13,
+    }))
+    expect(signedJsonRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      pathname: expect.stringMatching(/\/fail$/),
+    }))
+    expect(tabs.update).toHaveBeenLastCalledWith(11, {
+      url: `${NLG}${COMMISSIONS_EARNING_REPORT_PATH}`,
+    })
   })
 
   it('accepts the redirected in-force route for a run with the legacy plan path', async () => {
