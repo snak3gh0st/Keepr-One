@@ -86,6 +86,10 @@ describe('National Life document viewer request', () => {
     })
 
     const request = portalFetch.mock.calls[0]?.[1] as RequestInit
+    expect(request.headers).toEqual({
+      'content-type': 'application/json; charset=utf-8',
+      'x-requested-with': 'XMLHttpRequest',
+    })
     expect(JSON.parse(String(request.body))).toEqual({
       requestParams: ['RU5DUllQVEVEX0hBTkRMRQ=='],
       isMergePdf: false,

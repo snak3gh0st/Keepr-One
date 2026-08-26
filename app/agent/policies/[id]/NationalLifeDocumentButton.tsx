@@ -23,6 +23,15 @@ function documentErrorMessage(code: string | undefined): string {
   if (code === 'CONNECTOR_PAUSED') {
     return 'A busca de documentos está pausada temporariamente.'
   }
+  if (code === 'BRIDGE_UNAVAILABLE') {
+    return 'Recarregue a aba da National Life e tente trazer o documento novamente.'
+  }
+  if (code === 'PORTAL_REQUEST_FAILED') {
+    return 'A National Life não conseguiu entregar este documento agora. Tente novamente.'
+  }
+  if (code === 'INVALID_DOCUMENT_RESPONSE') {
+    return 'A National Life devolveu um arquivo inesperado. Tente novamente mais tarde.'
+  }
   return 'Não foi possível trazer o documento agora. Tente novamente.'
 }
 
