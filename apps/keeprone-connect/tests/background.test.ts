@@ -20,6 +20,7 @@ import { sha256ForesightSnapshot } from '../lib/foresight-contract'
 
 const NLG = 'https://www.nationallife.com'
 const NLG_AUTH0 = 'https://nlg-prod.auth0.com'
+const IGO_FORMS = 'https://igoforms2.ipipeline.com'
 const NEW_BUSINESS_PATH = '/agent/book-of-business/new-business/all-new-business-cases'
 const INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients/all-clients-agent'
 const LEGACY_INFORCE_PATH = '/agent/book-of-business/inforce-book/all-clients'
@@ -160,6 +161,15 @@ async function defaultTabMessageResponse(tabId: number, message: unknown) {
         saved: true,
       },
       document: { contentType: 'application/pdf', pdfBase64: FORESIGHT_PDF_BASE64 },
+    }
+  }
+  if (value.type === 'PROBE_IGO_SURFACE') {
+    return {
+      ok: true,
+      type: 'IGO_SURFACE_PROBED',
+      token: value.token,
+      correlationId: value.correlationId,
+      surface: 'IGO_HOME',
     }
   }
   if (value.type === 'BEGIN_GRID' || value.type === 'ABORT_GRID') {
@@ -433,6 +443,130 @@ describe('empurrão de atualização no caminho real', () => {
 })
 
 describe('background plan executor', () => {
+  it('opens and probes iGO without reading fields or enabling a carrier write', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_igo_probe_1',
+      runId: 'run_igo_probe_1',
+      capability: 'OPEN_EAPP',
+      target: null,
+      params: {},
+      idempotencyKey: 'igo-probe-1',
+      issuedAt: '2026-08-26T17:00:00.000Z',
+      expiresAt: '2026-08-26T17:30:00.000Z',
+      requiresConfirmation: false,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+      } as never
+      return undefined as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
+      url: `${NLG}/agent/sso/igo-eapp`,
+    })
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: false, url: `${IGO_FORMS}/CossEnterpriseSuite/webforms/StartUpResp.aspx`,
+    })
+    await flush()
+
+    await vi.waitFor(() => expect(storage.command).toMatchObject({ status: 'COMPLETED' }))
+    expect(tabs.sendMessage).toHaveBeenCalledWith(4, expect.objectContaining({
+      type: 'PROBE_IGO_SURFACE',
+    }))
+    const events = vi.mocked(signedJsonRequest).mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.pathname.endsWith('/commands/cmd_igo_probe_1/events'))
+      .map((request) => request.body as { type: string; payload?: unknown })
+    expect(events).toEqual([
+      expect.objectContaining({ type: 'COMMAND_STARTED' }),
+      expect.objectContaining({
+        type: 'COMMAND_COMPLETED',
+        payload: { result: 'IGO_GATEWAY_READY', surface: 'IGO_HOME' },
+      }),
+    ])
+    expect(JSON.stringify(events)).not.toMatch(/token|session|StartUpResp/i)
+  })
+
+  it('pauses the iGO probe at the official login without probing the page', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_igo_auth_1',
+      runId: 'run_igo_auth_1',
+      capability: 'OPEN_EAPP',
+      target: null,
+      params: {},
+      idempotencyKey: 'igo-auth-1',
+      issuedAt: '2026-08-26T17:00:00.000Z',
+      expiresAt: '2026-08-26T17:30:00.000Z',
+      requiresConfirmation: false,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+      } as never
+      return undefined as never
+    })
+    await bootBackground()
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: false, url: `${NLG_AUTH0}/login`,
+    })
+    await flush()
+
+    await vi.waitFor(() => expect(storage.command).toMatchObject({ status: 'AUTH_REQUIRED' }))
+    expect(tabs.update).toHaveBeenCalledWith(4, { active: true })
+    expect(tabs.sendMessage).not.toHaveBeenCalledWith(4, expect.objectContaining({
+      type: 'PROBE_IGO_SURFACE',
+    }))
+  })
+
+  it('fails the iGO probe safely on an unexpected origin without leaking its URL', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_igo_origin_1',
+      runId: 'run_igo_origin_1',
+      capability: 'OPEN_EAPP',
+      target: null,
+      params: {},
+      idempotencyKey: 'igo-origin-1',
+      issuedAt: '2026-08-26T17:00:00.000Z',
+      expiresAt: '2026-08-26T17:30:00.000Z',
+      requiresConfirmation: false,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+      } as never
+      return undefined as never
+    })
+    await bootBackground()
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: false, url: 'https://unexpected.example/path?session=secret',
+    })
+    await flush()
+
+    await vi.waitFor(() => expect(storage.command).toMatchObject({
+      status: 'ERROR', errorCode: 'IGO_UNEXPECTED_ORIGIN',
+    }))
+    const serialized = JSON.stringify(vi.mocked(signedJsonRequest).mock.calls
+      .map(([request]) => request.body)
+      .filter(Boolean))
+    expect(serialized).toContain('IGO_UNEXPECTED_ORIGIN')
+    expect(serialized).not.toMatch(/unexpected\.example|session=secret/)
+  })
+
   it('executes only the signed and hash-matched approved Foresight snapshot', async () => {
     const snapshot = {
       schemaVersion: 1,

@@ -68,6 +68,13 @@ import {
   type ForesightExecutionResponse,
 } from '../lib/foresight-messages'
 import {
+  classifyIgoProbe,
+  parseIgoProbeResponse,
+  type IgoSurface,
+  type IgoSurfaceProbeMessage,
+} from '../lib/igo-gateway'
+import { IGO_ORIGINS } from '../lib/igo-origin'
+import {
   currentStage,
   readCommandState,
   readDeviceState,
@@ -124,6 +131,7 @@ const SYNC_WATCHDOG_ALARM = 'keeprone-national-life-sync-watchdog'
 const SCHEDULED_SYNC_ALARM = 'keeprone-national-life-scheduled-sync'
 const COMMAND_POLL_ALARM = 'keeprone-national-life-command-poll'
 const COMMAND_POLL_PERIOD_MINUTES = 1
+const IGO_LAUNCHER_PATH = '/agent/sso/igo-eapp'
 const SCHEDULED_SYNC_PERIOD_MINUTES = 15
 const SCHEDULED_SYNC_FRESH_MS = 24 * 60 * 60_000
 // One navigation can legitimately start from the previous grid. A second
@@ -527,9 +535,35 @@ async function findBoundCommandTab(
   if (typeof carrierTabId !== 'number') return undefined
   if (hint?.id === carrierTabId) return hint
   const tabs = await chrome.tabs.query({
-    url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
+    url: [
+      `${NLG_ORIGIN}/*`,
+      `${NLG_AUTH0_ORIGIN}/*`,
+      `${IGO_ORIGINS.passThrough}/*`,
+      `${IGO_ORIGINS.federation}/*`,
+      `${IGO_ORIGINS.forms}/*`,
+    ],
   })
   return tabs.find((tab) => tab.id === carrierTabId)
+}
+
+async function probeIgoSurfaceWithRetry(
+  tabId: number,
+  message: IgoSurfaceProbeMessage,
+): Promise<IgoSurface> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = parseIgoProbeResponse(await chrome.tabs.sendMessage(tabId, message), message)
+      if (!response) throw new Error('IGO_BRIDGE_UNAVAILABLE')
+      return response.surface
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError ?? new Error('IGO_BRIDGE_UNAVAILABLE')
 }
 
 async function postCommandEvent(input: {
@@ -684,6 +718,132 @@ async function executePolicyDetailCommand(
     commandId: dispatch.command.commandId,
     runId: dispatch.command.runId,
     carrierTabId: tab.id,
+    nextEventSequence: sequence,
+    status: 'COMPLETED',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+async function executeOpenEappProbeCommand(
+  dispatch: ConnectorCommandDispatch,
+  device: { deviceId: string; baseUrl: string },
+  hint?: chrome.tabs.Tab,
+) {
+  if (dispatch.command.capability !== 'OPEN_EAPP' || dispatch.command.target !== null ||
+    Object.keys(dispatch.command.params).length !== 0) throw new Error('UNKNOWN_CAPABILITY')
+
+  const previous = await readCommandState()
+  const sameCommand = previous.commandId === dispatch.command.commandId
+  let carrierTabId = sameCommand ? previous.carrierTabId : undefined
+  let sequence = dispatch.nextEventSequence
+  const failProbe = async (code: string) => {
+    sequence = await postCommandEvent({
+      dispatch,
+      device,
+      sequence,
+      type: 'COMMAND_FAILED',
+      error: { code, safeMessage: 'Não foi possível confirmar o acesso ao iGO.' },
+    })
+    await writeCommandState({
+      commandId: dispatch.command.commandId,
+      runId: dispatch.command.runId,
+      carrierTabId,
+      nextEventSequence: sequence,
+      status: 'ERROR',
+      errorCode: code,
+      updatedAt: new Date().toISOString(),
+    })
+  }
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId,
+    nextEventSequence: sequence,
+    status: 'NAVIGATING',
+    updatedAt: new Date().toISOString(),
+  })
+
+  const targetUrl = `${NLG_ORIGIN}${IGO_LAUNCHER_PATH}`
+  const tab = await findBoundCommandTab(carrierTabId, hint)
+  if (!tab?.id) {
+    const created = await chrome.tabs.create({ active: false, url: targetUrl })
+    if (created.id === undefined) throw new Error('COMMAND_TAB_UNAVAILABLE')
+    await writeCommandState({
+      ...(await readCommandState()), carrierTabId: created.id, status: 'NAVIGATING',
+      updatedAt: new Date().toISOString(),
+    })
+    return
+  }
+  carrierTabId = tab.id
+
+  const probeState = classifyIgoProbe({
+    url: tab.url ?? '',
+    online: globalThis.navigator?.onLine !== false,
+  })
+  if (probeState === 'AUTH_REQUIRED' || probeState === 'MFA_REQUIRED') {
+    const requirement = probeState
+    if (dispatch.lastEventType !== requirement) {
+      sequence = await postCommandEvent({
+        dispatch, device, sequence, type: requirement,
+        payload: { action: 'SIGN_IN_TO_CONTINUE' },
+      })
+    }
+    await writeCommandState({
+      ...(await readCommandState()), carrierTabId, nextEventSequence: sequence,
+      status: requirement, updatedAt: new Date().toISOString(),
+    })
+    if (!tab.active) await updateTab(tab.id, { active: true })
+    return
+  }
+  if (probeState === 'GATEWAY_NO_NETWORK' || probeState === 'GATEWAY_BLOCKED_BY_CLIENT') {
+    await failProbe(probeState)
+    return
+  }
+  if (probeState === 'UNEXPECTED_ORIGIN') {
+    if (!tab.url) {
+      await updateTab(tab.id, { url: targetUrl })
+      return
+    }
+    await failProbe('IGO_UNEXPECTED_ORIGIN')
+    return
+  }
+  if (probeState === 'GATEWAY_IN_PROGRESS') {
+    await writeCommandState({
+      ...(await readCommandState()), carrierTabId, status: 'NAVIGATING',
+      updatedAt: new Date().toISOString(),
+    })
+    return
+  }
+
+  await writeCommandState({
+    ...(await readCommandState()), carrierTabId, status: 'RUNNING',
+    updatedAt: new Date().toISOString(),
+  })
+  if (dispatch.lastEventType !== 'COMMAND_STARTED') {
+    sequence = await postCommandEvent({ dispatch, device, sequence, type: 'COMMAND_STARTED' })
+  }
+  let surface: IgoSurface
+  try {
+    surface = await probeIgoSurfaceWithRetry(tab.id, {
+      type: 'PROBE_IGO_SURFACE',
+      token: randomToken(),
+      correlationId: crypto.randomUUID(),
+    })
+  } catch {
+    await failProbe('IGO_BRIDGE_UNAVAILABLE')
+    return
+  }
+  sequence = await postCommandEvent({
+    dispatch,
+    device,
+    sequence,
+    type: 'COMMAND_COMPLETED',
+    payload: { result: 'IGO_GATEWAY_READY', surface },
+  })
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId,
     nextEventSequence: sequence,
     status: 'COMPLETED',
     updatedAt: new Date().toISOString(),
@@ -915,7 +1075,9 @@ async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?
       const dispatch = parseConnectorCommandDispatch(raw)
       const executor = dispatch.command.capability === 'GENERATE_ILLUSTRATION'
         ? executeForesightCommand
-        : executePolicyDetailCommand
+        : dispatch.command.capability === 'OPEN_EAPP'
+          ? executeOpenEappProbeCommand
+          : executePolicyDetailCommand
       await executor(dispatch, {
         deviceId: device.deviceId,
         baseUrl: device.baseUrl,

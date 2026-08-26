@@ -1,8 +1,12 @@
 # National Life — documentos, Foresight e iGO em 2026-08-26
 
 Estado: captura sob demanda de documentos validada em produção e publicada em
-`main` pelo PR #73 (`eb3be78`); Foresight/iGO somente observados em leitura.
-Nenhum caso, relatório, rascunho ou application foi criado ou submetido.
+`main` pelo PR #73 (`eb3be78`). A branch isolada
+`feat/national-life-illustration-igo` implementa a geração local de Illustration
+e o probe somente-leitura do iGO; ainda não foi publicada nem validada ponta a
+ponta no Keepr One. Um único caso sintético autorizado foi salvo manualmente no
+Foresight e gerou o relatório NAIC. Nenhum rascunho/application iGO foi criado,
+salvo ou submetido.
 
 ## Correspondence: contrato confirmado e implementação
 
@@ -70,9 +74,10 @@ O bundle comprova três fronteiras:
   `PageService.asmx/RenderReports` geram ou alteram artefatos do caso corrente.
 
 Consequência: `IllustrateCase`, `RenderReports` e `SetupEAppLauncher` não são
-leituras e não entram no background sync. Um executor futuro precisa confirmar
-que o caso visível no Foresight é o mesmo caso local antes de qualquer chamada,
-mostrar as opções ao agente e exigir confirmação explícita.
+leituras e não entram no sync diário. O executor de Illustration da branch
+confirma o caso e o snapshot aprovado antes de gerar/salvar o artefato e exige
+confirmação explícita. `SetupEAppLauncher` permanece desabilitado até o fluxo
+iGO ser validado separadamente.
 
 ### Correção por observação autenticada em 2026-08-26
 
@@ -101,6 +106,15 @@ o snapshot aprovado, reler todos os campos materiais e comparar o fingerprint
 antes de `Save`. A página de Reports não ficou operacional antes de um Save;
 isso vira uma precondição explícita, não uma tentativa a repetir.
 
+### Smoke sintético autorizado
+
+No mesmo dia, o caso sintético `KEEPRONE-TEST-20260826-SMOKE` foi criado e salvo
+no Foresight com FlexLife, Florida, capital de US$ 100.000 e prêmio mensal de
+US$ 250. O relatório oficial NAIC abriu como PDF e mostrou prêmio anual de
+US$ 3.000, coerente com 12 parcelas. Esse teste comprova o comportamento do
+portal e do relatório; não comprova ainda o transporte assinado do PDF, a
+persistência no banco ou a renderização pelo fluxo completo do Keepr One.
+
 ## iGO: estado observado
 
 A navegação isolada para `/agent/sso/igo-eapp` chegou ao Auth0, mesmo com o
@@ -120,20 +134,28 @@ confirma que `Start New Case` pertence ao fluxo application/iGO, enquanto `New
 Illustration` pertence ao Foresight. Identificadores temporários de sessão não
 foram persistidos nem entram na allowlist.
 
-Como o destino do launcher vem apenas na resposta de `SetupEAppLauncher`, os
-assets estáticos não provam ainda a origem final nem os campos do formulário
-iGO. Chamar esse endpoint apenas para descobrir seria uma ação preparatória no
-caso corrente e permanece bloqueado.
+O KeeproneConnect 0.1.27 da branch permite somente o comando `OPEN_EAPP`: abre a
+rota oficial, classifica Auth0/MFA/gateway/origem inesperada e, se chegar a
+`igoforms2`, devolve apenas `IGO_HOME`, `IGO_CASE_LIST`, `IGO_FORM` ou
+`IGO_UNKNOWN`. Ele não lê valores, não clica, não abre `Start New Case` e não
+salva. Os hosts iPipeline são allowlists exatas; não existe wildcard.
+
+Como a tentativa atual parou em `AUTH_REQUIRED`, a cadeia downstream e o
+contrato dos campos não foram revalidados nessa sessão. Por isso
+`PREPARE_APPLICATION_DRAFT` e `SUBMIT_APPLICATION` continuam localmente
+desabilitados. `SetupEAppLauncher` também não é chamado pelo probe.
 
 ## Estado dos portões
 
-1. Concluído: migration, app e KeeproneConnect 0.1.25 no piloto unpacked.
+1. Concluído em produção: migration, app e KeeproneConnect 0.1.25 no piloto
+   unpacked para documentos.
 2. Concluído: smoke autenticado com um único documento: índice -> request ->
    chunks -> `PolicyDocument` -> abertura autorizada na apólice.
-3. Foresight em leitura: inventário, detalhes, serviços e PDFs já existentes,
-   sem `IllustrateCase`, `RenderReports`, save ou launcher.
-4. Illustration oficial: criação/execução somente como comando separado, alvo
-   reconfirmado e confirmação humana; nunca como sync diário.
-5. iGO: autenticação assistida e varredura de nomes/controles sem PII. A primeira
-   automação termina em rascunho revisável; submissão final continua fora do
-  escopo até existir auditoria, idempotência e confirmação no ato.
+3. Concluído na branch: executor Foresight com snapshot selado, releitura dos
+   campos materiais, geração do NAIC PDF, hash e upload assinado.
+4. Pendente: smoke ponta a ponta com a extensão 0.1.27 carregada, artefato único
+   persistido e aberto pelo Keepr One; depois, deploy controlado e PR.
+5. iGO probe: código e testes somente-leitura prontos; sessão real atual está em
+   `AUTH_REQUIRED` e exige renovação do agente.
+6. iGO draft: bloqueado por decisão de segurança até validar a cadeia autenticada
+   e mapear/read-back os campos reais. Submit continua fora do primeiro release.

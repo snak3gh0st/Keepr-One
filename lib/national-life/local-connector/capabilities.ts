@@ -25,6 +25,8 @@ export const EXECUTABLE_LOCAL_CONNECTOR_CAPABILITIES = [
   'READ_EXPORT',
   'READ_DOCUMENT',
   'READ_POLICY_DETAIL',
+  'GENERATE_ILLUSTRATION',
+  'OPEN_EAPP',
 ] as const satisfies readonly LocalConnectorCapabilityName[]
 
 /// Named for planning and UI copy only. The extension's IMPLEMENTED_CAPABILITIES
