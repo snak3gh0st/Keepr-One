@@ -74,4 +74,17 @@ describe('NationalLifeDocumentButton', () => {
 
     expect(await screen.findByRole('status')).toHaveTextContent('Atualize e recarregue o KeeproneConnect')
   })
+
+  it.each([
+    ['BRIDGE_UNAVAILABLE', 'Recarregue a aba da National Life'],
+    ['PORTAL_REQUEST_FAILED', 'A National Life não conseguiu entregar este documento'],
+    ['INVALID_DOCUMENT_RESPONSE', 'A National Life devolveu um arquivo inesperado'],
+  ])('reports the document boundary that failed for %s', async (error, expectedMessage) => {
+    installChromeResponse({ ok: false, error })
+    render(<NationalLifeDocumentButton extensionId={extensionId} reportRowId="report-row-1" />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Trazer para o Keepr One' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(expectedMessage)
+  })
 })

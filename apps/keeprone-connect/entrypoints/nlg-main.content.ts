@@ -277,7 +277,10 @@ export default defineContentScript({
           `${NLG_ORIGIN}${DOCUMENT_VIEWER_URL_PATH}`,
           {
             method: 'POST',
-            headers: { 'content-type': 'application/json; charset=utf-8' },
+            headers: {
+              'content-type': 'application/json; charset=utf-8',
+              'x-requested-with': 'XMLHttpRequest',
+            },
             body: JSON.stringify({
               requestParams: [message.encryptedHandle],
               isMergePdf: false,
