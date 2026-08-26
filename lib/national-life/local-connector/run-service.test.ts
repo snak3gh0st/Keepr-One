@@ -1652,9 +1652,16 @@ describe('local connector runs', () => {
       },
       nationalLifeConnectorStageReceipt: {
         findMany: vi.fn().mockResolvedValue([
-          { sequence: 0, recordCount: 200 },
-          { sequence: 1, recordCount: 57 },
+          {
+            id: 'receipt-0', sequence: 0, recordCount: 200,
+            writtenCount: 200, duplicateCount: 0, rejectedCount: 0,
+          },
+          {
+            id: 'receipt-1', sequence: 1, recordCount: 57,
+            writtenCount: 57, duplicateCount: 0, rejectedCount: 0,
+          },
         ]),
+        update: vi.fn().mockResolvedValue({}),
       },
       nationalLifeConnectorStageCompletion: {
         upsert: vi.fn().mockResolvedValue({}),
@@ -1669,6 +1676,18 @@ describe('local connector runs', () => {
       nationalLifeReportRow: { deleteMany: vi.fn() },
       nationalLifeRawGridPage: {
         upsert: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            sequence: 0,
+            recordCount: 200,
+            records: Array.from({ length: 200 }, (_, index) => ({ PolicyNo: `P${index}` })),
+          },
+          {
+            sequence: 1,
+            recordCount: 57,
+            records: Array.from({ length: 57 }, (_, index) => ({ PolicyNo: `P${index + 199}` })),
+          },
+        ]),
         findFirst: vi.fn().mockResolvedValue({ observedAt: now }),
         deleteMany: vi.fn(),
       },
@@ -1694,6 +1713,11 @@ describe('local connector runs', () => {
         fetchedAt: { lt: now },
       },
     })
+    expect(tx.nationalLifeConnectorStageReceipt.update).toHaveBeenCalledTimes(1)
+    expect(tx.nationalLifeConnectorStageReceipt.update).toHaveBeenCalledWith({
+      where: { id: 'receipt-1' },
+      data: { writtenCount: 56, duplicateCount: 1, rejectedCount: 0 },
+    })
   })
 
   it.each([
@@ -1711,7 +1735,11 @@ describe('local connector runs', () => {
         update: vi.fn().mockResolvedValue({}),
       },
       nationalLifeConnectorStageReceipt: {
-        findMany: vi.fn().mockResolvedValue([{ sequence: 0, recordCount: 1 }]),
+        findMany: vi.fn().mockResolvedValue([{
+          id: 'receipt-0', sequence: 0, recordCount: 1,
+          writtenCount: 1, duplicateCount: 0, rejectedCount: 0,
+        }]),
+        update: vi.fn().mockResolvedValue({}),
       },
       nationalLifeConnectorStageCompletion: {
         upsert: vi.fn().mockResolvedValue({}),
@@ -1723,6 +1751,11 @@ describe('local connector runs', () => {
       },
       ...models,
       nationalLifeRawGridPage: {
+        findMany: vi.fn().mockResolvedValue([{
+          sequence: 0,
+          recordCount: 1,
+          records: [{ PolicyNumber: 'P1' }],
+        }]),
         findFirst: vi.fn().mockResolvedValue({ observedAt: now }),
         deleteMany: vi.fn(),
       },

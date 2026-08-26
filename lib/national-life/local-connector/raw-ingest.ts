@@ -87,6 +87,11 @@ export type RawIngestStats = {
   rejectedCount: number
 }
 
+export type ReconciledRawIngestPage = RawIngestStats & {
+  sequence: number
+  writtenCount: number
+}
+
 function countMappedRows<T>(
   rows: Record<string, unknown>[],
   map: (row: Record<string, unknown>) => T | null,
@@ -152,4 +157,56 @@ export function planRawIngest(
     }
   }
   throw new LocalConnectorRawIngestError('GRID_NOT_ROUTED', gridKey)
+}
+
+function normalizedIdentities(plan: RawIngestPlan): string[] {
+  switch (plan.target) {
+    case 'CASE_SNAPSHOT':
+      return plan.snapshots.map((snapshot) => snapshot.policyNo)
+    case 'INFORCE_POLICY':
+      return plan.snapshots.map((snapshot) => snapshot.policyNumber)
+    case 'REPORT_ROW':
+      return plan.rows.map((row) => row.rowKey)
+    case 'RAW_PAGE_ONLY':
+      return []
+  }
+}
+
+/// Page receipts are written as each carrier response arrives, so their initial
+/// duplicate count can only see repetitions inside that response. Reconcile the
+/// complete raw snapshot before finalizing the stage so an identity repeated on
+/// a later page is reported as a duplicate instead of a second write. The raw
+/// rows remain untouched and the normalized upsert is already protected by the
+/// same stable identities.
+export function reconcileRawIngestPages(
+  gridKey: NationalLifeGridKey,
+  pages: readonly { sequence: number; rows: Record<string, unknown>[] }[],
+): ReconciledRawIngestPage[] {
+  const seen = new Set<string>()
+
+  return [...pages]
+    .sort((left, right) => left.sequence - right.sequence)
+    .map(({ sequence, rows }) => {
+      const plan = planRawIngest(gridKey, rows)
+      const identities = normalizedIdentities(plan)
+      let crossPageDuplicateCount = 0
+      let writtenCount = 0
+
+      for (const identity of identities) {
+        if (seen.has(identity)) {
+          crossPageDuplicateCount += 1
+        } else {
+          seen.add(identity)
+          writtenCount += 1
+        }
+      }
+
+      return {
+        sequence,
+        receivedCount: plan.stats.receivedCount,
+        writtenCount,
+        duplicateCount: plan.stats.duplicateCount + crossPageDuplicateCount,
+        rejectedCount: plan.stats.rejectedCount,
+      }
+    })
 }
