@@ -3,6 +3,14 @@ export type CommissionDetailTarget = {
   statementId: string
 }
 
+export type CommissionDetailResume = {
+  statementId: string
+  statementOffset: number
+  baseOffset: number
+  sequence: number
+  receivedRecordCount: number
+}
+
 const NLD_DETAIL_PATH =
   '/agent/compensation/commissions/paid-commissions/commissions-earning-report/nld-commission-earning'
 const NLD_ID_PATTERN = /^[A-Za-z0-9]+$/
@@ -43,4 +51,42 @@ export function parseCommissionDetailTargets(value: unknown): CommissionDetailTa
     targets.push({ path, statementId })
   }
   return targets
+}
+
+export function parseCommissionDetailResume(
+  value: unknown,
+  targets: CommissionDetailTarget[],
+): CommissionDetailResume | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('INVALID_COMMISSION_DETAIL_RESUME')
+  }
+  const resume = (value as { resume?: unknown }).resume
+  if (resume === undefined) return undefined
+  if (!resume || typeof resume !== 'object' || Array.isArray(resume)) {
+    throw new Error('INVALID_COMMISSION_DETAIL_RESUME')
+  }
+  const candidate = resume as Record<string, unknown>
+  const statementId = candidate.statementId
+  const statementOffset = candidate.statementOffset
+  const baseOffset = candidate.baseOffset
+  const sequence = candidate.sequence
+  const receivedRecordCount = candidate.receivedRecordCount
+  if (
+    typeof statementId !== 'string' ||
+    !targets.some((target) => target.statementId === statementId) ||
+    !Number.isInteger(statementOffset) || Number(statementOffset) < 0 || Number(statementOffset) > 200_000 ||
+    !Number.isInteger(baseOffset) || Number(baseOffset) < 0 || Number(baseOffset) > 200_000 ||
+    !Number.isInteger(sequence) || Number(sequence) < 0 || Number(sequence) > 10_000 ||
+    !Number.isInteger(receivedRecordCount) || Number(receivedRecordCount) < 0 || Number(receivedRecordCount) > 200_000 ||
+    Number(baseOffset) + Number(statementOffset) !== Number(receivedRecordCount)
+  ) {
+    throw new Error('INVALID_COMMISSION_DETAIL_RESUME')
+  }
+  return {
+    statementId,
+    statementOffset: Number(statementOffset),
+    baseOffset: Number(baseOffset),
+    sequence: Number(sequence),
+    receivedRecordCount: Number(receivedRecordCount),
+  }
 }

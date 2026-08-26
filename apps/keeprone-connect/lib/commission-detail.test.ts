@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { isSafeCommissionDetailPath, parseCommissionDetailTargets } from './commission-detail'
+import {
+  isSafeCommissionDetailPath,
+  parseCommissionDetailResume,
+  parseCommissionDetailTargets,
+} from './commission-detail'
 
 const path =
   '/agent/compensation/commissions/paid-commissions/commissions-earning-report/nld-commission-earning?id=statementa'
@@ -27,5 +31,26 @@ describe('KeeproneConnect commission detail targets', () => {
     expect(() => parseCommissionDetailTargets({
       links: [{ path, statementId: 'statementb' }],
     })).toThrow('INVALID_COMMISSION_DETAIL_LINKS')
+  })
+
+  it('accepts only a server cursor that belongs to one returned statement', () => {
+    const response = {
+      links: [{ path, statementId: 'statementa' }],
+      resume: {
+        statementId: 'statementa',
+        statementOffset: 664,
+        baseOffset: 1609,
+        sequence: 13,
+        receivedRecordCount: 2273,
+      },
+    }
+
+    expect(parseCommissionDetailResume(response, parseCommissionDetailTargets(response))).toEqual(
+      response.resume,
+    )
+    expect(() => parseCommissionDetailResume({
+      ...response,
+      resume: { ...response.resume, statementId: 'unknown' },
+    }, parseCommissionDetailTargets(response))).toThrow('INVALID_COMMISSION_DETAIL_RESUME')
   })
 })

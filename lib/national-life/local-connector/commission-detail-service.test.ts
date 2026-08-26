@@ -55,4 +55,45 @@ describe('local connector commission detail link service', () => {
       runId: 'run-1',
     })).rejects.toThrow('GRID_NOT_PLANNED')
   })
+
+  it('returns the durable statement cursor instead of trusting extension storage after a retry', async () => {
+    const database = db()
+    database.nationalLifeRawGridPage.findMany.mockImplementation(async (input) => {
+      if (input.where.gridKey === 'PAID_COMMISSIONS') {
+        return [{
+          records: [
+            { NLDCommEarningAmt: link },
+            {
+              NLDCommEarningAmt:
+                "<a href='/agent/compensation/commissions/paid-commissions/commissions-earning-report/nld-commission-earning?id=bbb2'>NLD</a>",
+            },
+          ],
+        }]
+      }
+      return [
+        { sequence: 0, records: [{ CommissionStatementId: 'aaa1' }] },
+        {
+          sequence: 1,
+          records: [
+            { CommissionStatementId: 'bbb2' },
+            { CommissionStatementId: 'bbb2' },
+          ],
+        },
+      ]
+    })
+
+    await expect(listNationalLifeCommissionEarningLinks(database as never, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      runId: 'run-1',
+    })).resolves.toMatchObject({
+      resume: {
+        statementId: 'bbb2',
+        statementOffset: 2,
+        baseOffset: 1,
+        sequence: 2,
+        receivedRecordCount: 3,
+      },
+    })
+  })
 })

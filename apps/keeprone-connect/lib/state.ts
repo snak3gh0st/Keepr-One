@@ -46,6 +46,10 @@ export type SyncState = {
   commissionDetailOffset?: number
   commissionDetailCurrentOffset?: number
   commissionDetailReceivedRecords?: number
+  /// One automatic recovery is allowed when a stale child-page attempt races
+  /// the server's durable sequence cursor. Persisted to prevent retry loops
+  /// across service-worker eviction.
+  commissionDetailRecoveryAttempts?: number
   /// True only while the carrier asks the agent to renew the browser session.
   /// No credential, cookie or MFA material is ever stored here.
   authRenewalPending?: boolean

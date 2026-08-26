@@ -42,6 +42,7 @@ import {
 } from '../lib/messages'
 import { chunkRecordsForUpload } from '../lib/record-chunks'
 import {
+  parseCommissionDetailResume,
   parseCommissionDetailTargets,
   type CommissionDetailTarget,
 } from '../lib/commission-detail'
@@ -345,6 +346,10 @@ async function withSyncLock<T>(operation: () => Promise<T>): Promise<T> {
     if (syncStartLock === tracked) syncStartLock = null
   })
   syncStartLock = tracked
+  // `run` is the promise returned to the caller; `tracked` exists only so the
+  // next entrant can wait for cleanup. Observe its mirrored rejection too, or
+  // Chrome reports an unhandled rejection even when the caller catches `run`.
+  void tracked.catch(() => {})
   return run
 }
 
@@ -361,6 +366,7 @@ async function withTabNavigationLock<T>(operation: () => Promise<T>): Promise<T>
     if (tabNavigationLock === tracked) tabNavigationLock = null
   })
   tabNavigationLock = tracked
+  void tracked.catch(() => {})
   return run
 }
 
@@ -378,6 +384,7 @@ async function withTabReadyLock(tabId: number, operation: () => Promise<void>): 
     if (tabReadyLocks.get(tabId) === tracked) tabReadyLocks.delete(tabId)
   })
   tabReadyLocks.set(tabId, tracked)
+  void tracked.catch(() => {})
   return run
 }
 
@@ -1167,6 +1174,7 @@ async function createRun(forceRefresh = false) {
   const resumeOffset = previousDetailStage
     ? Math.max(0, serverResumeOffset - (previous.commissionDetailOffset ?? 0))
     : serverResumeOffset
+  const durableDetailResume = isCommissionDetailStage(plan[nextStageIndex]) && resumeSequence > 0
   if (previous.runId === response.runId && currentStage(previous)) {
     // A retry of a still-live run must resume from the server-confirmed cursor.
     // Local storage can be stale when Chrome evicts the worker between a grid
@@ -1179,6 +1187,14 @@ async function createRun(forceRefresh = false) {
       resumeSequence,
       resumeOffset,
       ...(previousDetailStage ? { commissionDetailReceivedRecords: serverResumeRecordCount } : {}),
+      ...(durableDetailResume
+        ? {
+            commissionDetailLinks: undefined,
+            commissionDetailIndex: undefined,
+            commissionDetailOffset: undefined,
+            commissionDetailCurrentOffset: undefined,
+          }
+        : {}),
       navigationGridKey: undefined,
       navigationAttempts: undefined,
       status: 'NAVIGATING',
@@ -1398,22 +1414,35 @@ async function beginCommissionDetailStage(tabId: number) {
   })
   const links = parseCommissionDetailTargets(response)
   if (links.length === 0) throw new Error('NO_COMMISSION_DETAIL_LINKS')
+  const resume = parseCommissionDetailResume(response, links)
+  if ((state.resumeSequence ?? 0) > 0 && !resume) {
+    // Never guess a child-page position from a global stage offset. Replaying a
+    // whole statement under new sequence numbers is accepted as new raw input
+    // and inflates the carrier-received count even though promotion deduplicates
+    // it. A mixed-version rollout pauses safely until the server can supply the
+    // durable per-statement cursor.
+    await failSync('COMMISSION_DETAIL_CURSOR_UNAVAILABLE', tabId)
+    return
+  }
+  const resumeIndex = resume
+    ? links.findIndex((target) => target.statementId === resume.statementId)
+    : 0
 
   const nextState = {
     ...state,
     commissionDetailLinks: links,
-    commissionDetailIndex: 0,
-    commissionDetailOffset: 0,
-    commissionDetailCurrentOffset: 0,
-    commissionDetailReceivedRecords: 0,
-    resumeSequence: 0,
-    resumeOffset: 0,
+    commissionDetailIndex: resumeIndex,
+    commissionDetailOffset: resume?.baseOffset ?? 0,
+    commissionDetailCurrentOffset: resume?.statementOffset ?? 0,
+    commissionDetailReceivedRecords: resume?.receivedRecordCount ?? 0,
+    resumeSequence: resume?.sequence ?? 0,
+    resumeOffset: resume?.statementOffset ?? 0,
     status: 'NAVIGATING' as const,
     navigationGridKey: stageKey(stage),
     navigationAttempts: 0,
   }
   await writeSyncState(nextState)
-  await updateTab(tabId, { url: `${NLG_ORIGIN}${links[0]!.path}` })
+  await updateTab(tabId, { url: `${NLG_ORIGIN}${links[resumeIndex]!.path}` })
 }
 
 async function beginExtraction(tabId: number, stage: StagePlan) {
@@ -2208,6 +2237,30 @@ async function abortExtraction(tabId: number) {
   }
 }
 
+async function recoverCommissionDetailIdempotencyRace(tabId: number): Promise<boolean> {
+  const state = await readSyncState()
+  if (!isCommissionDetailStage(currentStage(state)) || (state.commissionDetailRecoveryAttempts ?? 0) >= 1) {
+    return false
+  }
+  await writeSyncState({
+    ...state,
+    status: 'STARTING',
+    errorCode: undefined,
+    commissionDetailRecoveryAttempts: (state.commissionDetailRecoveryAttempts ?? 0) + 1,
+  })
+  try {
+    // The run is still RUNNING: the 409 rejected the stale chunk before any
+    // mutation. Re-entering the signed start endpoint returns its durable
+    // sequence; the details endpoint then resolves that global cursor to the
+    // exact statement and local offset.
+    await createRun()
+    await navigatePendingGrid()
+  } catch (error) {
+    await failSync(errorCode(error, 'SYNC_RESUME_FAILED'), tabId)
+  }
+  return true
+}
+
 async function processBridgeMessage(tabId: number, message: BridgeMessage) {
   if ('transferId' in message) {
     await processDocumentMessage(tabId, message)
@@ -2238,7 +2291,11 @@ async function processBridgeMessage(tabId: number, message: BridgeMessage) {
     // não passa por aqui — ali o extrator já parou sozinho.
     await abortExtraction(tabId)
     activeNavigations.delete(tabId)
-    await failSync(error instanceof Error ? error.message : 'UPLOAD_FAILED', tabId)
+    const code = error instanceof Error ? error.message : 'UPLOAD_FAILED'
+    if (code === 'IDEMPOTENCY_CONFLICT' && await recoverCommissionDetailIdempotencyRace(tabId)) {
+      return
+    }
+    await failSync(code, tabId)
   }
 }
 
