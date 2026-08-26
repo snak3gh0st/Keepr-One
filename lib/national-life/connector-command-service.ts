@@ -342,7 +342,10 @@ export function createPrismaConnectorCommandRepository(
     })
   },
   async createConfirmation(input) {
-    await db.nationalLifeConnectorCommandConfirmation.create({ data: input })
+    const { now, ...data } = input
+    await db.nationalLifeConnectorCommandConfirmation.create({
+      data: { ...data, createdAt: now, updatedAt: now },
+    })
   },
   async approveConfirmation(input) {
     await db.nationalLifeConnectorCommandConfirmation.updateMany({

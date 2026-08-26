@@ -5,6 +5,7 @@ import type { ConnectorCommandState } from './connector-command-contract'
 import {
   ConnectorCommandError,
   approveConnectorCommand,
+  createPrismaConnectorCommandRepository,
   issueConnectorCommand,
   recordConnectorCommandEvent,
 } from './connector-command-service'
@@ -58,6 +59,44 @@ function createRepository() {
 }
 
 describe('connector command service', () => {
+  it('maps the service clock to Prisma timestamps instead of persisting an unknown now field', async () => {
+    let persisted: Record<string, unknown> | null = null
+    const repository = createPrismaConnectorCommandRepository({
+      nationalLifeConnectorCommand: {},
+      nationalLifeConnectorCommandEvent: {},
+      nationalLifeConnectorCommandConfirmation: {
+        async create(input: { data: Record<string, unknown> }) {
+          const allowed = [
+            'commandId', 'payloadHash', 'state', 'expiresAt', 'createdAt', 'updatedAt',
+          ].sort()
+          const actual = Object.keys(input.data).sort()
+          if (actual.length !== allowed.length || actual.some((key, index) => key !== allowed[index])) {
+            throw new Error(`PRISMA_UNKNOWN_FIELDS:${actual.join(',')}`)
+          }
+          persisted = input.data
+          return input.data
+        },
+      },
+    } as never)
+
+    await repository.createConfirmation({
+      commandId: 'command_1',
+      payloadHash: 'a'.repeat(64),
+      state: 'PENDING',
+      expiresAt: new Date('2026-08-10T21:00:00.000Z'),
+      now,
+    })
+
+    expect(persisted).toEqual({
+      commandId: 'command_1',
+      payloadHash: 'a'.repeat(64),
+      state: 'PENDING',
+      expiresAt: new Date('2026-08-10T21:00:00.000Z'),
+      createdAt: now,
+      updatedAt: now,
+    })
+  })
+
   it('creates a read command as executable and deduplicates the same intent', async () => {
     const { repository } = createRepository()
     const input = {
