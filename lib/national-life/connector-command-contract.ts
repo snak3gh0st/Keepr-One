@@ -271,8 +271,9 @@ function parseParams(
         ? { illustrationId: value.illustrationId, inputHash: value.inputHash }
         : undefined
     case 'FLEXLIFE_QUOTE':
-      return has(['illustrationId']) && isIdentifier(value.illustrationId)
-        ? { illustrationId: value.illustrationId }
+      return has(['illustrationId', 'inputHash']) && isIdentifier(value.illustrationId) &&
+        isHash(value.inputHash)
+        ? { illustrationId: value.illustrationId, inputHash: value.inputHash }
         : undefined
     case 'PREPARE_APPLICATION_DRAFT':
       return has(['applicationId']) && isIdentifier(value.applicationId)

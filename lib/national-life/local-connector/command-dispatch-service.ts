@@ -24,6 +24,11 @@ import {
   parseForesightIllustrationReceipt,
   type ForesightIllustrationExecutionSnapshot,
 } from '../foresight-illustration-contract'
+import {
+  buildFlexLifeQuoteSnapshot,
+  flexLifeQuoteInputHash,
+  type FlexLifeQuoteSnapshotV1,
+} from '../flexlife-quote-contract'
 
 export type LocalConnectorCommandCandidate = {
   id: string
@@ -78,6 +83,15 @@ export type ForesightArtifactRepository = {
     documentBytes: Uint8Array | null
     documentMimeType: string | null
   } | null>
+}
+
+export type FlexLifeQuoteResultRepository = {
+  persistOwnedQuoteResult(input: {
+    agentId: string
+    illustrationId: string
+    inputHash: string
+    response: Record<string, unknown>
+  }): Promise<void>
 }
 
 function toPublicCommand(candidate: LocalConnectorCommandCandidate): ConnectorCommand {
@@ -144,7 +158,7 @@ export async function readDeviceConnectorCommandInput(
   input: { agentId: string; deviceId: string; commandId: string; now?: Date },
 ): Promise<{
   inputHash: string
-  snapshot: ForesightIllustrationExecutionSnapshot
+  snapshot: ForesightIllustrationExecutionSnapshot | FlexLifeQuoteSnapshotV1
 }> {
   const command = await repository.findDeviceOwned(input)
   const now = input.now ?? new Date()
@@ -153,7 +167,7 @@ export async function readDeviceConnectorCommandInput(
   }
   if (command.expiresAt <= now) throw new ConnectorCommandError('COMMAND_EXPIRED')
   if (
-    command.capability !== 'GENERATE_ILLUSTRATION' ||
+    !['GENERATE_ILLUSTRATION', 'FLEXLIFE_QUOTE'].includes(command.capability) ||
     command.confirmationState !== 'APPROVED' ||
     !['QUEUED', 'RUNNING', 'AUTH_REQUIRED'].includes(command.state)
   ) throw new ConnectorCommandError('COMMAND_NOT_FOUND')
@@ -169,13 +183,19 @@ export async function readDeviceConnectorCommandInput(
     illustrationId: publicCommand.target.id,
   })
   if (!illustration) throw new ConnectorCommandError('COMMAND_NOT_FOUND')
-  let snapshot: ForesightIllustrationExecutionSnapshot
+  let snapshot: ForesightIllustrationExecutionSnapshot | FlexLifeQuoteSnapshotV1
+  let inputHash: string
   try {
-    snapshot = buildForesightIllustrationSnapshot(illustration)
+    if (command.capability === 'FLEXLIFE_QUOTE') {
+      snapshot = buildFlexLifeQuoteSnapshot(illustration)
+      inputHash = flexLifeQuoteInputHash(snapshot)
+    } else {
+      snapshot = buildForesightIllustrationSnapshot(illustration)
+      inputHash = foresightIllustrationInputHash(snapshot)
+    }
   } catch {
     throw new ConnectorCommandError('COMMAND_INVALID')
   }
-  const inputHash = foresightIllustrationInputHash(snapshot)
   if (inputHash !== publicCommand.params.inputHash) {
     throw new ConnectorCommandError('COMMAND_INVALID')
   }
@@ -192,6 +212,7 @@ export async function recordDeviceConnectorCommandEvent(
     now?: Date
     policyDetailRepository?: PolicyDetailRepository
     foresightArtifactRepository?: ForesightArtifactRepository
+    flexLifeQuoteRepository?: FlexLifeQuoteResultRepository
     deploymentScope?: string
   },
 ): Promise<void> {
@@ -251,6 +272,27 @@ export async function recordDeviceConnectorCommandEvent(
       createHash('sha256').update(artifact.documentBytes).digest('hex') !== receipt.documentSha256) {
       throw new ConnectorCommandError('EVENT_INVALID')
     }
+  }
+  if (event.type === 'DATA_BATCH' && command.capability === 'FLEXLIFE_QUOTE') {
+    const publicCommand = toPublicCommand(command)
+    const payload = event.payload
+    const quote = payload && Object.keys(payload).length === 1 && Object.hasOwn(payload, 'flexLifeQuote')
+      ? payload.flexLifeQuote
+      : null
+    if (publicCommand.target?.kind !== 'ILLUSTRATION' || !('inputHash' in publicCommand.params) ||
+      !quote || typeof quote !== 'object' || Array.isArray(quote) ||
+      Object.keys(quote).sort().join(',') !== 'inputHash,response' ||
+      (quote as Record<string, unknown>).inputHash !== publicCommand.params.inputHash ||
+      !(quote as Record<string, unknown>).response ||
+      typeof (quote as Record<string, unknown>).response !== 'object' ||
+      Array.isArray((quote as Record<string, unknown>).response) ||
+      !input.flexLifeQuoteRepository) throw new ConnectorCommandError('EVENT_INVALID')
+    await input.flexLifeQuoteRepository.persistOwnedQuoteResult({
+      agentId: input.agentId,
+      illustrationId: publicCommand.target.id,
+      inputHash: publicCommand.params.inputHash,
+      response: (quote as Record<string, unknown>).response as Record<string, unknown>,
+    })
   }
 
   await recordConnectorCommandEvent(repository, {

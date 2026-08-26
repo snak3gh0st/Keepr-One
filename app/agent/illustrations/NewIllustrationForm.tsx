@@ -15,6 +15,7 @@ import {
 import { QUOTE_DISCLAIMER } from "@/lib/national-life/quote-disclaimer";
 import { requestCarrierQuote } from "./new/actions";
 import { useRapidSolveQuote } from "./useRapidSolveQuote";
+import { sendConnectorMessage } from "@/app/agent/integrations/national-life/NationalLifeConnectorClient";
 
 const currency = (value: number) =>
   new Intl.NumberFormat("en-US", {
@@ -34,20 +35,10 @@ function lapseLabel(value: number | "NEVER" | null): string {
   return `Ano ${value}`;
 }
 
-// Which side of the illustration the carrier solves for decides whether the
-// amount field is a face amount or a premium — the carrier sends both in the
-// same field, keyed by this.
-const AMOUNT_LABELS: Record<string, string> = {
-  [SOLVE_TYPES.SPECIFY_AMOUNT]: "Capital segurado",
-  [SOLVE_TYPES.PREMIUM_DEATH_BENEFIT_FOCUS]: "Prêmio mensal",
-  [SOLVE_TYPES.PREMIUM_ACCUMULATION_FOCUS]: "Prêmio mensal",
-};
-
-export function NewIllustrationForm() {
+export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [solveType, setSolveType] = useState<string>(SOLVE_TYPES.SPECIFY_AMOUNT);
 
   const { status, error: pollError } = useRapidSolveQuote(jobId);
 
@@ -59,6 +50,17 @@ export function NewIllustrationForm() {
     const result = await requestCarrierQuote(formData);
     if (result.ok) {
       setJobId(result.jobId);
+      if (extensionId) {
+        try {
+          await sendConnectorMessage(extensionId, {
+            type: "START_NATIONAL_LIFE_COMMAND",
+            commandId: result.commandId,
+          });
+        } catch {
+          // The extension's durable alarm retries approved commands even when
+          // this immediate browser-to-extension wake-up is unavailable.
+        }
+      }
     } else {
       setSubmitError(result.message);
     }
@@ -123,25 +125,13 @@ export function NewIllustrationForm() {
           </Select>
         </Field>
         <Field label="O que a seguradora deve calcular">
-          <Select
-            name="solveType"
-            required
-            className="w-full"
-            value={solveType}
-            onChange={(event) => setSolveType(event.target.value)}
-          >
+          <Select name="solveType" required className="w-full" defaultValue={SOLVE_TYPES.SPECIFY_AMOUNT}>
             <option value={SOLVE_TYPES.SPECIFY_AMOUNT}>
               Informo o capital, quero o prêmio
             </option>
-            <option value={SOLVE_TYPES.PREMIUM_DEATH_BENEFIT_FOCUS}>
-              Informo o prêmio, foco em benefício por morte
-            </option>
-            <option value={SOLVE_TYPES.PREMIUM_ACCUMULATION_FOCUS}>
-              Informo o prêmio, foco em acúmulo
-            </option>
           </Select>
         </Field>
-        <Field label={AMOUNT_LABELS[solveType] ?? "Valor"}>
+        <Field label="Capital segurado">
           <Input name="amount" type="number" min={1} step="0.01" required placeholder="250000" />
         </Field>
         <Field label="Opção de benefício por morte">
@@ -154,13 +144,8 @@ export function NewIllustrationForm() {
           </Select>
         </Field>
         <Field label="Estratégia de índice">
-          <Select name="strategy" required defaultValue="" className="w-full">
-            <option value="" disabled>
-              Selecione...
-            </option>
+          <Select name="strategy" required defaultValue={STRATEGIES.CAP_FOCUS} className="w-full">
             <option value={STRATEGIES.CAP_FOCUS}>S&P 500 — foco em teto</option>
-            <option value={STRATEGIES.PAR_FOCUS}>S&P 500 — foco em participação</option>
-            <option value={STRATEGIES.ONE_PERCENT_FLOOR}>S&P 500 — piso de 1%</option>
           </Select>
         </Field>
 
@@ -195,6 +180,12 @@ export function NewIllustrationForm() {
       {status?.state === "PENDING" && !pollError && (
         <p className="mt-4 text-sm text-ink-muted">
           A cotação foi enviada para a National Life. A resposta aparece aqui assim que chegar.
+        </p>
+      )}
+
+      {status?.state === "AUTH_REQUIRED" && !pollError && (
+        <p role="status" className="mt-4 text-sm text-amber-700">
+          Entre na National Life na aba que o KeeproneConnect abriu. Depois do login, a cotação continua automaticamente — você pode voltar para esta tela.
         </p>
       )}
 

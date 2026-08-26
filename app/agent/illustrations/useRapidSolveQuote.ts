@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 /// of zero.
 export type QuoteStatus =
   | { state: 'PENDING' }
+  | { state: 'AUTH_REQUIRED' }
   | {
       state: 'ANSWERED'
       quote:
@@ -74,7 +75,7 @@ export function useRapidSolveQuote(jobId: string | null) {
         const next = (await response.json()) as QuoteStatus
         setStatus(next)
 
-        if (next.state !== 'PENDING') {
+        if (next.state === 'ANSWERED' || next.state === 'UNAVAILABLE') {
           stopped = true
           return
         }

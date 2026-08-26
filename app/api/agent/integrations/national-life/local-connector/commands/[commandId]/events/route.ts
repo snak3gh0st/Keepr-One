@@ -25,6 +25,7 @@ import {
 } from '@/lib/national-life/local-connector/request'
 import { prisma } from '@/lib/prisma'
 import { createPrismaPolicyDetailRepository } from '@/lib/national-life/policy-detail-prisma'
+import { createFlexLifeQuoteResultRepository } from '@/lib/national-life/flexlife-quote-result'
 
 const MAX_BODY_BYTES = 64 * 1024
 const NO_STORE = { 'Cache-Control': 'no-store' }
@@ -32,6 +33,7 @@ const paramsSchema = z.strictObject({
   commandId: z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/),
 })
 const policyDetailRepository = createPrismaPolicyDetailRepository(prisma)
+const flexLifeQuoteRepository = createFlexLifeQuoteResultRepository(prisma)
 const foresightArtifactRepository = {
   async findOwnedArtifact(input: { agentId: string; illustrationId: string }) {
     return prisma.illustration.findFirst({
@@ -80,6 +82,7 @@ export async function POST(
         now: new Date(),
         policyDetailRepository,
         foresightArtifactRepository,
+        flexLifeQuoteRepository,
         deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
       },
     )

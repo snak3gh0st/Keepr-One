@@ -1,8 +1,16 @@
 import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
 import { createGridExtractionRunner, type RequestTemplate } from '../lib/grid-extraction'
-import { parseAbortGridMessage, parseBeginDocumentMessage, parseBeginExportMessage, parseBeginGridMessage } from '../lib/messages'
+import {
+  parseAbortGridMessage,
+  parseBeginDocumentMessage,
+  parseBeginExportMessage,
+  parseBeginGridMessage,
+  parseExecuteFlexLifeQuoteMessage,
+} from '../lib/messages'
 import { buildOfficialExportRequest } from '../lib/official-export-request'
 import { fetchWithinBudget } from '../lib/fetch-budget'
+import { sha256FlexLifeQuoteSnapshot } from '../lib/flexlife-quote-contract'
+import { RAPID_SOLVE_HEADERS, RAPID_SOLVE_PAGE_PATH, RAPID_SOLVE_PATH } from '../../../lib/national-life/rapid-solve'
 
 const DATATABLE_PATH = '/agent/Datatable/GetJsonResult'
 const DOWNLOAD_EXCEL_PATH = '/agent/Datatable/DownloadExcel'
@@ -19,6 +27,7 @@ const EXPORT_BUDGET_MS = 3 * 60_000
 const EXPORT_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 const DOCUMENT_CONTENT_TYPE = 'application/pdf'
 const DOCUMENT_BUDGET_MS = 2 * 60_000
+const FLEXLIFE_QUOTE_BUDGET_MS = 60_000
 const ALLOWED_HEADERS = new Set(['content-type', 'x-requested-with'])
 
 type DatatableConfig = {
@@ -387,12 +396,59 @@ export default defineContentScript({
       }
     }
 
+    async function executeFlexLifeQuote(
+      message: NonNullable<ReturnType<typeof parseExecuteFlexLifeQuoteMessage>>,
+    ) {
+      const base = {
+        token: message.token,
+        correlationId: message.correlationId,
+        inputHash: message.inputHash,
+      }
+      try {
+        if (location.pathname !== RAPID_SOLVE_PAGE_PATH) throw new Error('PORTAL_PATH_MISMATCH')
+        if (await sha256FlexLifeQuoteSnapshot(message.snapshot) !== message.inputHash) {
+          throw new Error('INPUT_HASH_MISMATCH')
+        }
+        const response = await fetchWithinBudget(
+          originalFetch,
+          `${NLG_ORIGIN}${RAPID_SOLVE_PATH}`,
+          {
+            method: 'POST',
+            headers: RAPID_SOLVE_HEADERS,
+            body: JSON.stringify(message.snapshot.request),
+            credentials: 'include',
+            cache: 'no-store',
+          },
+          FLEXLIFE_QUOTE_BUDGET_MS,
+        )
+        if (!response.ok) throw new Error('PORTAL_REQUEST_FAILED')
+        const payload = await response.json() as unknown
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+          JSON.stringify(payload).length > 16_384) {
+          throw new Error('INVALID_PORTAL_RESPONSE')
+        }
+        post({ type: 'FLEXLIFE_QUOTE_DONE', ...base, response: payload as Record<string, unknown> })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : ''
+        const code = [
+          'PORTAL_PATH_MISMATCH', 'INPUT_HASH_MISMATCH',
+          'PORTAL_REQUEST_FAILED', 'INVALID_PORTAL_RESPONSE',
+        ].includes(message) ? message : 'INVALID_PORTAL_RESPONSE'
+        post({ type: 'FLEXLIFE_QUOTE_ERROR', ...base, code })
+      }
+    }
+
     window.addEventListener('message', (event) => {
       if (event.source !== window || event.origin !== location.origin) return
       if (typeof event.data !== 'object' || event.data === null || event.data.channel !== CHANNEL) return
       const begin = parseBeginGridMessage(event.data.payload)
       if (begin) {
         void runner.begin(begin)
+        return
+      }
+      const quote = parseExecuteFlexLifeQuoteMessage(event.data.payload)
+      if (quote) {
+        void executeFlexLifeQuote(quote)
         return
       }
       const beginExport = parseBeginExportMessage(event.data.payload)

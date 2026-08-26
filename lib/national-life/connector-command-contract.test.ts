@@ -58,6 +58,27 @@ describe('National Life connector command contract', () => {
     ).toMatchObject({ capability: 'FORESIGHT_CASE_DETAIL', params: { caseKey: 'RP-SMITH-QQ-081026' } })
   })
 
+  it('seals a FlexLife quote to its immutable input hash', () => {
+    const command = {
+      protocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,
+      commandId: 'cmd_quote_1',
+      runId: 'run_quote_1',
+      capability: 'FLEXLIFE_QUOTE',
+      target: { kind: 'ILLUSTRATION', id: 'ill_1' },
+      params: { illustrationId: 'ill_1', inputHash: 'b'.repeat(64) },
+      idempotencyKey: 'ill_1:quote:hash',
+      issuedAt,
+      expiresAt,
+      requiresConfirmation: true,
+    }
+
+    expect(parseConnectorCommand(command)).toEqual(command)
+    expect(parseConnectorCommand({
+      ...command,
+      params: { illustrationId: 'ill_1' },
+    })).toBeNull()
+  })
+
   it('seals policy detail reads to the exact carrier detail path', () => {
     const navigatePath = '/agent/book-of-business/inforce-book/all-clients/policy-details?id=a73f1af893a94906b965e68d11db807b'
     const base = {

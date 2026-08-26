@@ -17,6 +17,7 @@ vi.mock('../lib/key-store', () => ({
 
 import { SignedRequestError, signedBinaryRequest, signedJsonRequest } from '../lib/signed-client'
 import { sha256ForesightSnapshot } from '../lib/foresight-contract'
+import { sha256FlexLifeQuoteSnapshot } from '../lib/flexlife-quote-contract'
 
 const NLG = 'https://www.nationallife.com'
 const NLG_AUTH0 = 'https://nlg-prod.auth0.com'
@@ -160,6 +161,22 @@ async function defaultTabMessageResponse(tabId: number, message: unknown) {
         saved: true,
       },
       document: { contentType: 'application/pdf', pdfBase64: FORESIGHT_PDF_BASE64 },
+    }
+  }
+  if (value.type === 'EXECUTE_FLEXLIFE_QUOTE') {
+    return {
+      ok: true,
+      type: 'FLEXLIFE_QUOTE_RECEIVED',
+      token: value.token,
+      correlationId: value.correlationId,
+      inputHash: value.inputHash,
+      response: {
+        Success: true,
+        FaceAmount: '$250,000.00',
+        AnnualPremium: '$4,200.00',
+        MonthlyPremium: '$350.00',
+        LapseYear: 0,
+      },
     }
   }
   if (value.type === 'BEGIN_GRID' || value.type === 'ABORT_GRID') {
@@ -433,6 +450,136 @@ describe('empurrão de atualização no caminho real', () => {
 })
 
 describe('background plan executor', () => {
+  it('executes a sealed FlexLife quote in the agent portal instead of Steel', async () => {
+    const snapshot = {
+      schemaVersion: 1,
+      illustrationId: 'ill_quote_1',
+      request: {
+        IssueState: 'FL', FirstName: 'KeeprOne', LastName: 'Test', DateOfBirth: '08/26/1981',
+        IssueAge: 45, Gender: 'Male', RateClass: 'Standard_NT', SolveType: 'Specify_Amount',
+        Amount: 250000, DeathBenefitOption: 'A_Level', Strategy: 'SP500PointToPointCapFocus',
+        Allocation: 100, ProductCode: '956', PremiumMode: 'Monthly',
+      },
+    } as const
+    const inputHash = await sha256FlexLifeQuoteSnapshot(snapshot)
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_quote_1',
+      runId: 'run_quote_1',
+      capability: 'FLEXLIFE_QUOTE',
+      target: { kind: 'ILLUSTRATION', id: snapshot.illustrationId },
+      params: { illustrationId: snapshot.illustrationId, inputHash },
+      idempotencyKey: `quote:${snapshot.illustrationId}:${inputHash}`,
+      issuedAt: '2026-08-26T17:00:00.000Z',
+      expiresAt: '2026-08-26T18:00:00.000Z',
+      requiresConfirmation: true,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+      } as never
+      if (request.pathname.endsWith('/commands/cmd_quote_1/input')) {
+        return { inputHash, snapshot } as never
+      }
+      return undefined as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
+      url: `${NLG}/agent/tools/business-tools/illustrations`,
+    })
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: false, url: `${NLG}/agent/tools/business-tools/illustrations`,
+    })
+    await flush()
+
+    await vi.waitFor(() => expect(tabs.sendMessage).toHaveBeenCalledWith(
+      4,
+      expect.objectContaining({ type: 'EXECUTE_FLEXLIFE_QUOTE', inputHash, snapshot }),
+    ))
+    const events = vi.mocked(signedJsonRequest).mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.pathname.endsWith('/commands/cmd_quote_1/events'))
+      .map((request) => request.body as { type: string; payload?: unknown })
+    expect(events.map((event) => event.type)).toEqual([
+      'COMMAND_STARTED', 'DATA_BATCH', 'COMMAND_COMPLETED',
+    ])
+    expect(events[1]?.payload).toEqual({
+      flexLifeQuote: {
+        inputHash,
+        response: {
+          Success: true,
+          FaceAmount: '$250,000.00',
+          AnnualPremium: '$4,200.00',
+          MonthlyPremium: '$350.00',
+          LapseYear: 0,
+        },
+      },
+    })
+  })
+
+  it('marks a carrier quote command failed when the page bridge refuses it', async () => {
+    const snapshot = {
+      schemaVersion: 1,
+      illustrationId: 'ill_quote_failed',
+      request: {
+        IssueState: 'FL', FirstName: 'KeeprOne', LastName: 'Test', DateOfBirth: '08/26/1981',
+        IssueAge: 45, Gender: 'Male', RateClass: 'Standard_NT', SolveType: 'Specify_Amount',
+        Amount: 250000, DeathBenefitOption: 'A_Level', Strategy: 'SP500PointToPointCapFocus',
+        Allocation: 100, ProductCode: '956', PremiumMode: 'Monthly',
+      },
+    } as const
+    const inputHash = await sha256FlexLifeQuoteSnapshot(snapshot)
+    const command = {
+      protocolVersion: 1, commandId: 'cmd_quote_failed', runId: 'run_quote_failed',
+      capability: 'FLEXLIFE_QUOTE', target: { kind: 'ILLUSTRATION', id: snapshot.illustrationId },
+      params: { illustrationId: snapshot.illustrationId, inputHash },
+      idempotencyKey: `quote:${snapshot.illustrationId}:${inputHash}`,
+      issuedAt: '2026-08-26T17:00:00.000Z', expiresAt: '2026-08-26T18:00:00.000Z',
+      requiresConfirmation: true,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+      } as never
+      if (request.pathname.endsWith('/commands/cmd_quote_failed/input')) {
+        return { inputHash, snapshot } as never
+      }
+      return undefined as never
+    })
+    tabs.sendMessage.mockImplementation(async (_tabId, value) => {
+      const message = value as Record<string, unknown>
+      if (message.type === 'EXECUTE_FLEXLIFE_QUOTE') return {
+        ok: false, type: 'FLEXLIFE_QUOTE_FAILED', token: message.token,
+        correlationId: message.correlationId, inputHash: message.inputHash,
+        code: 'PORTAL_REQUEST_FAILED',
+      }
+      return defaultTabMessageResponse(_tabId, value)
+    })
+    await bootBackground()
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: false, url: `${NLG}/agent/tools/business-tools/illustrations`,
+    })
+    await flush()
+
+    await vi.waitFor(() => {
+      const failure = vi.mocked(signedJsonRequest).mock.calls
+        .map(([request]) => request)
+        .find((request) => request.pathname.endsWith('/commands/cmd_quote_failed/events') &&
+          (request.body as { type?: string })?.type === 'COMMAND_FAILED')
+      expect(failure?.body).toMatchObject({
+        type: 'COMMAND_FAILED',
+        error: { code: 'PORTAL_REQUEST_FAILED' },
+      })
+    })
+  })
+
   it('executes only the signed and hash-matched approved Foresight snapshot', async () => {
     const snapshot = {
       schemaVersion: 1,

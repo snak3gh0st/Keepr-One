@@ -147,6 +147,70 @@ describe('National Life grid request budget', () => {
   })
 })
 
+describe('National Life FlexLife quote request', () => {
+  it('posts the sealed request from the authenticated Illustration tool page', async () => {
+    const snapshot = {
+      schemaVersion: 1,
+      illustrationId: 'ill_quote_1',
+      request: {
+        IssueState: 'FL', FirstName: 'KeeprOne', LastName: 'Test', DateOfBirth: '08/26/1981',
+        IssueAge: 45, Gender: 'Male', RateClass: 'Standard_NT', SolveType: 'Specify_Amount',
+        Amount: 250000, DeathBenefitOption: 'A_Level', Strategy: 'SP500PointToPointCapFocus',
+        Allocation: 100, ProductCode: '956', PremiumMode: 'Monthly',
+      },
+    }
+    portalFetch.mockResolvedValue(new Response(JSON.stringify({
+      Success: true, AnnualPremium: 5100,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('location', {
+      origin: NLG,
+      href: `${NLG}/agent/tools/business-tools/illustrations`,
+      pathname: '/agent/tools/business-tools/illustrations',
+    })
+    const contentScript = (await import('../entrypoints/nlg-main.content')).default as unknown as {
+      main: () => void
+    }
+    contentScript.main()
+    listeners.get('message')?.at(-1)?.({
+      source: window,
+      origin: NLG,
+      data: {
+        channel: 'FYNTRA_NL_CONNECTOR_V1',
+        payload: {
+          type: 'EXECUTE_FLEXLIFE_QUOTE', token: 't'.repeat(32),
+          correlationId: 'c'.repeat(16),
+          inputHash: 'be96cd11f9ca6da7bd5d9734386d5aec91e8c5c8ceeaf70a60e78874333a5558',
+          snapshot,
+        },
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(posted.some(({ payload }) => payload.type === 'FLEXLIFE_QUOTE_DONE')).toBe(true)
+    })
+    expect(fetchWithinBudgetSpy).toHaveBeenCalledWith(
+      expect.any(Function),
+      `${NLG}/agent/RapidSolve/GetQuote`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'x-requested-with': 'XMLHttpRequest',
+        },
+        body: JSON.stringify(snapshot.request),
+        credentials: 'include',
+        cache: 'no-store',
+      },
+      60_000,
+    )
+    expect(posted.at(-1)?.payload).toMatchObject({
+      type: 'FLEXLIFE_QUOTE_DONE',
+      inputHash: 'be96cd11f9ca6da7bd5d9734386d5aec91e8c5c8ceeaf70a60e78874333a5558',
+      response: { Success: true, AnnualPremium: 5100 },
+    })
+  })
+})
+
 describe('National Life document viewer request', () => {
   it('requests one correspondence document without the merge-PDF mode', async () => {
     const viewerId = 'a'.repeat(32)
