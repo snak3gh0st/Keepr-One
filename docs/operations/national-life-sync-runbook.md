@@ -13,6 +13,11 @@ links para `CommissionStatementId` e `GrossCommEarned`.
 O export oficial do carrier para o in-force continua sendo opcional e troca a
 forma de leitura dessa área; ele não amplia o escopo do sync.
 
+Na extensão 0.1.20, `Commission Earning Detail` pede até 1.000 linhas por
+resposta do carrier e continua transportando lotes assinados de no máximo 200
+linhas. Isso reduz viagens HTTP sem alterar `CommissionStatementId`,
+`GrossCommEarned`, os limites do endpoint ou o cursor de retomada.
+
 O que ele **não** fecha, e ninguém pode fechar por código: a execução contra o
 portal vivo. É um humano por credencial.
 
