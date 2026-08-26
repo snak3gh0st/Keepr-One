@@ -22,7 +22,7 @@ import {
   LOCAL_CONNECTOR_SCHEMA_VERSION,
   type LocalConnectorRawStageEnvelope,
 } from './contracts'
-import { planRawIngest } from './raw-ingest'
+import { planRawIngest, reconcileRawIngestPages } from './raw-ingest'
 import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './config'
 import { NATIONAL_LIFE_SYNC_STAGES } from '../sync-progress'
 import {
@@ -1121,7 +1121,14 @@ export async function completeLocalConnectorStage(
     const receipts = await tx.nationalLifeConnectorStageReceipt.findMany({
       where: { deviceId: input.deviceId, runId: run.id, gridKey: input.gridKey },
       orderBy: { sequence: 'asc' },
-      select: { sequence: true, recordCount: true },
+      select: {
+        id: true,
+        sequence: true,
+        recordCount: true,
+        writtenCount: true,
+        duplicateCount: true,
+        rejectedCount: true,
+      },
     })
     const receivedRecordCount = receipts.reduce((total, receipt) => total + receipt.recordCount, 0)
     const sequencesAreComplete =
@@ -1129,6 +1136,51 @@ export async function completeLocalConnectorStage(
       receipts.every((receipt, index) => receipt.sequence === index)
     if (!sequencesAreComplete || receivedRecordCount !== input.expectedRecordCount) {
       throw new LocalConnectorStageCompletionError('STAGE_INCOMPLETE')
+    }
+
+    const rawPages = await tx.nationalLifeRawGridPage.findMany({
+      where: { runId: run.id, gridKey: input.gridKey },
+      orderBy: { sequence: 'asc' },
+      select: { sequence: true, recordCount: true, records: true },
+    })
+    const rawPagesAreComplete =
+      rawPages.length === receipts.length &&
+      rawPages.every((page, index) =>
+        page.sequence === receipts[index]?.sequence &&
+        page.recordCount === receipts[index]?.recordCount &&
+        Array.isArray(page.records) &&
+        page.records.length === page.recordCount &&
+        page.records.every((record) =>
+          typeof record === 'object' && record !== null && !Array.isArray(record),
+        ),
+      )
+    if (!rawPagesAreComplete) {
+      throw new LocalConnectorStageCompletionError('STAGE_INCOMPLETE')
+    }
+
+    const reconciledPages = reconcileRawIngestPages(
+      input.gridKey,
+      rawPages.map((page) => ({
+        sequence: page.sequence,
+        rows: page.records as Record<string, unknown>[],
+      })),
+    )
+    for (const [index, reconciled] of reconciledPages.entries()) {
+      const receipt = receipts[index]!
+      if (
+        receipt.writtenCount !== reconciled.writtenCount ||
+        receipt.duplicateCount !== reconciled.duplicateCount ||
+        receipt.rejectedCount !== reconciled.rejectedCount
+      ) {
+        await tx.nationalLifeConnectorStageReceipt.update({
+          where: { id: receipt.id },
+          data: {
+            writtenCount: reconciled.writtenCount,
+            duplicateCount: reconciled.duplicateCount,
+            rejectedCount: reconciled.rejectedCount,
+          },
+        })
+      }
     }
 
     await tx.nationalLifeConnectorStageCompletion.upsert({

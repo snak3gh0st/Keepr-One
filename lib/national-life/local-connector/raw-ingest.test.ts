@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { planRawIngest, LocalConnectorRawIngestError } from './raw-ingest'
+import {
+  planRawIngest,
+  reconcileRawIngestPages,
+  LocalConnectorRawIngestError,
+} from './raw-ingest'
 
 describe('planRawIngest', () => {
   it('routes new business rows to case snapshots and keeps the raw row', () => {
@@ -62,5 +66,60 @@ describe('planRawIngest', () => {
       expect(error).toBeInstanceOf(LocalConnectorRawIngestError)
       expect((error as LocalConnectorRawIngestError).code).toBe('GRID_NOT_ROUTED')
     }
+  })
+})
+
+describe('reconcileRawIngestPages', () => {
+  it('counts repeated identities across page boundaries as duplicates', () => {
+    const pages = reconcileRawIngestPages('COMMISSIONS_EARNING_REPORT', [
+      {
+        sequence: 0,
+        rows: [
+          { CommissionStatementId: 'A', PolicyNumber: 'P1' },
+          { CommissionStatementId: 'B', PolicyNumber: 'P2' },
+          { CommissionStatementId: 'A', PolicyNumber: 'P1' },
+        ],
+      },
+      {
+        sequence: 1,
+        rows: [
+          { CommissionStatementId: 'B', PolicyNumber: 'P2' },
+          { CommissionStatementId: 'C', PolicyNumber: 'P3' },
+        ],
+      },
+    ])
+
+    expect(pages).toEqual([
+      {
+        sequence: 0,
+        receivedCount: 3,
+        writtenCount: 2,
+        duplicateCount: 1,
+        rejectedCount: 0,
+      },
+      {
+        sequence: 1,
+        receivedCount: 2,
+        writtenCount: 1,
+        duplicateCount: 1,
+        rejectedCount: 0,
+      },
+    ])
+    expect(pages.reduce((total, page) => total + page.writtenCount, 0)).toBe(3)
+    expect(pages.reduce((total, page) => total + page.duplicateCount, 0)).toBe(2)
+  })
+
+  it('keeps discovery pages raw-only', () => {
+    expect(reconcileRawIngestPages('AGENT_DASHBOARD', [
+      { sequence: 0, rows: [{ RecordType: 'PAGE_META' }, { RecordType: 'PAGE_TEXT' }] },
+    ])).toEqual([
+      {
+        sequence: 0,
+        receivedCount: 2,
+        writtenCount: 0,
+        duplicateCount: 0,
+        rejectedCount: 0,
+      },
+    ])
   })
 })

@@ -3,6 +3,12 @@ import { PHASE_DEVELOPMENT_SERVER } from "next/constants.js";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Coolify builds on the same 8 GB host that serves production. Next otherwise
+  // fans page-data collection out to every visible CPU and can starve the live
+  // containers even though the old release remains available during the build.
+  experimental: {
+    cpus: 2,
+  },
   allowedDevOrigins: ["127.0.0.1"],
   images: {
     remotePatterns: [
