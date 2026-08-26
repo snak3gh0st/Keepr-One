@@ -137,7 +137,7 @@ confirma que `Start New Case` pertence ao fluxo application/iGO, enquanto `New
 Illustration` pertence ao Foresight. Identificadores temporários de sessão não
 foram persistidos nem entram na allowlist.
 
-Por decisão de escopo, o KeeproneConnect 0.1.26 não inclui `OPEN_EAPP`, content
+Por decisão de escopo, o KeeproneConnect 0.1.27 não inclui `OPEN_EAPP`, content
 script iGO ou permissões iPipeline. A evidência da cadeia fica documentada para
 uma fase futura, mas `PREPARE_APPLICATION_DRAFT`, `SUBMIT_APPLICATION` e
 `SetupEAppLauncher` permanecem localmente desabilitados.
@@ -150,7 +150,7 @@ uma fase futura, mas `PREPARE_APPLICATION_DRAFT`, `SUBMIT_APPLICATION` e
    chunks -> `PolicyDocument` -> abertura autorizada na apólice.
 3. Concluído na branch: executor Foresight com snapshot selado, releitura dos
    campos materiais, geração do NAIC PDF, hash e upload assinado.
-4. Pendente: smoke ponta a ponta com a extensão 0.1.26 carregada, artefato único
+4. Pendente: smoke ponta a ponta com a extensão 0.1.27 carregada, artefato único
    persistido e aberto pelo Keepr One; depois, deploy controlado e PR.
 5. iGO: fora do release atual; cadeia observada preservada somente como
    documentação para retomada futura.
