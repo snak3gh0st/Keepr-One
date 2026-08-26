@@ -26,6 +26,8 @@ import {
   type BridgeMessage,
   type CapturePageMessage,
   type BeginExportMessage,
+  type BeginDocumentMessage,
+  type DocumentControlAck,
 } from '../lib/messages'
 import { chunkRecordsForUpload } from '../lib/record-chunks'
 import {
@@ -68,6 +70,18 @@ type ActiveNavigation = {
 }
 
 const activeNavigations = new Map<number, ActiveNavigation>()
+type DocumentFetchResult = { ok: true; documentId: string } | { ok: false; error: string }
+type ActiveDocument = {
+  transferId: string
+  token: string
+  correlationId: string
+  tabId: number
+  nextSequence: number
+  resolve: (result: DocumentFetchResult) => void
+  timer: ReturnType<typeof setTimeout>
+}
+const activeDocuments = new Map<number, ActiveDocument>()
+let documentFetchLock = false
 const tabQueues = new Map<number, Promise<void>>()
 /// Quantas mensagens da ponte estão pendentes por aba, incluindo a que está sendo
 /// processada agora. `tabQueues` sozinho não distingue "uma mensagem, que sou eu"
@@ -238,6 +252,25 @@ async function sendBeginExportWithRetry(tabId: number, message: BeginExportMessa
   throw lastError ?? new Error('BRIDGE_UNAVAILABLE')
 }
 
+async function sendBeginDocumentWithRetry(tabId: number, message: BeginDocumentMessage): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = await chrome.tabs.sendMessage<BeginDocumentMessage, DocumentControlAck>(tabId, message)
+      if (response?.ok !== true || response.type !== 'BEGIN_DOCUMENT_ACK' ||
+        response.transferId !== message.transferId || response.token !== message.token ||
+        response.correlationId !== message.correlationId) throw new Error('BRIDGE_UNAVAILABLE')
+      return
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError ?? new Error('BRIDGE_UNAVAILABLE')
+}
+
 function senderAllowed(sender: chrome.runtime.MessageSender): boolean {
   if (!sender.origin || !sender.url) return false
   try {
@@ -376,6 +409,11 @@ async function unpairConnector() {
   await writeDeviceState({ status: 'UNPAIRED' })
   await writeSyncState({ status: 'IDLE' })
   activeNavigations.clear()
+  for (const active of activeDocuments.values()) {
+    clearTimeout(active.timer)
+    active.resolve({ ok: false, error: 'CONNECTOR_UNPAIRED' })
+  }
+  activeDocuments.clear()
   tabQueues.clear()
   await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
   await chrome.alarms.clear(SCHEDULED_SYNC_ALARM)
@@ -501,6 +539,7 @@ async function nudgeUpdateIfSafe(selfTabId?: number): Promise<void> {
     /// modo que só um sync *concorrente* o deixa ocupado.
     isBusy: async () => {
       if (activeNavigations.size > 0) return true
+      if (activeDocuments.size > 0) return true
       let pending = 0
       for (const count of pendingBridgeMessages.values()) pending += count
       if (selfTabId !== undefined) pending -= 1
@@ -647,7 +686,12 @@ async function findNationalLifeTab(): Promise<chrome.tabs.Tab | undefined> {
   const carrierTabs = tabs.filter((tab) => {
     if (typeof tab.url !== 'string') return false
     try {
-      return new URL(tab.url).origin === NLG_ORIGIN
+      const url = new URL(tab.url)
+      // Chrome's native PDF viewer does not host our content-script bridge.
+      // Reusing it would replace a document the agent is reading and then fail
+      // the auth probe. Prefer an actual agent page or create one.
+      return url.origin === NLG_ORIGIN &&
+        url.pathname !== '/agent/correspondence/documentviewer'
     } catch {
       return false
     }
@@ -755,6 +799,9 @@ async function navigatePendingGrid() {
 }
 
 async function startNewSync(forceRefresh = false) {
+  if (documentFetchLock || activeDocuments.size > 0) {
+    return { ok: false as const, error: 'DOCUMENT_FETCH_IN_PROGRESS' }
+  }
   return withSyncLock(async () => {
     try {
       const current = await readSyncState()
@@ -1359,6 +1406,190 @@ async function processExportMessage(tabId: number, message: Extract<BridgeMessag
   await advanceAfterExport(tabId, result)
 }
 
+function settleDocument(tabId: number, result: DocumentFetchResult) {
+  const active = activeDocuments.get(tabId)
+  if (!active) return
+  clearTimeout(active.timer)
+  activeDocuments.delete(tabId)
+  active.resolve(result)
+}
+
+async function processDocumentMessage(
+  tabId: number,
+  message: Extract<BridgeMessage, { type: 'DOCUMENT_BEGIN' | 'DOCUMENT_CHUNK' | 'DOCUMENT_DONE' | 'DOCUMENT_ERROR' }>,
+) {
+  const active = activeDocuments.get(tabId)
+  if (!active || active.transferId !== message.transferId ||
+    active.token !== message.token || active.correlationId !== message.correlationId) return
+  const device = await readDeviceState()
+  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
+    settleDocument(tabId, { ok: false, error: 'CONNECTOR_NOT_PAIRED' })
+    return
+  }
+  try {
+    if (message.type === 'DOCUMENT_ERROR') {
+      settleDocument(tabId, { ok: false, error: message.code })
+      return
+    }
+    if (message.type === 'DOCUMENT_BEGIN') {
+      const result = await signedJsonRequest<{ nextSequence?: unknown; completed?: unknown }>({
+        baseUrl: device.baseUrl,
+        deviceId: device.deviceId,
+        method: 'POST',
+        pathname: `/api/agent/integrations/national-life/local-connector/document-transfers/${encodeURIComponent(active.transferId)}/begin`,
+        body: {
+          transferId: active.transferId,
+          contentType: message.contentType,
+          expectedBytes: message.expectedBytes,
+          expectedSha256: message.expectedSha256,
+        },
+      })
+      if (!Number.isInteger(result.nextSequence)) throw new Error('INVALID_DOCUMENT_RESPONSE')
+      const current = activeDocuments.get(tabId)
+      if (current) activeDocuments.set(tabId, { ...current, nextSequence: result.nextSequence as number })
+      return
+    }
+    const current = activeDocuments.get(tabId)
+    if (!current) return
+    if (message.type === 'DOCUMENT_CHUNK') {
+      if (message.sequence < current.nextSequence) return
+      if (message.sequence !== current.nextSequence) throw new Error('DOCUMENT_CHUNK_INVALID')
+      await signedBinaryRequest({
+        baseUrl: device.baseUrl,
+        deviceId: device.deviceId,
+        method: 'PUT',
+        pathname: `/api/agent/integrations/national-life/local-connector/document-transfers/${encodeURIComponent(current.transferId)}/chunks/${message.sequence}`,
+        body: Uint8Array.from(message.bytes),
+      })
+      const latest = activeDocuments.get(tabId)
+      if (latest) activeDocuments.set(tabId, { ...latest, nextSequence: message.sequence + 1 })
+      return
+    }
+    const result = await signedJsonRequest<{ documentId?: unknown }>({
+      baseUrl: device.baseUrl,
+      deviceId: device.deviceId,
+      method: 'POST',
+      pathname: `/api/agent/integrations/national-life/local-connector/document-transfers/${encodeURIComponent(current.transferId)}/complete`,
+      body: { transferId: current.transferId },
+    })
+    if (typeof result.documentId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(result.documentId)) {
+      throw new Error('INVALID_DOCUMENT_RESPONSE')
+    }
+    settleDocument(tabId, { ok: true, documentId: result.documentId })
+  } catch (error) {
+    settleDocument(tabId, { ok: false, error: errorCode(error, 'DOCUMENT_FETCH_FAILED') })
+  }
+}
+
+async function waitForLoadedAgentTab(tabId: number): Promise<chrome.tabs.Tab> {
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const tab = await chrome.tabs.get(tabId)
+    if (tab.status === 'complete' && tab.url) return tab
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  throw new Error('NATIONAL_LIFE_TAB_TIMEOUT')
+}
+
+async function fetchNationalLifeDocumentInternal(
+  message: Extract<ReturnType<typeof parseExternalMessage>, { type: 'FETCH_NATIONAL_LIFE_DOCUMENT' }>,
+): Promise<DocumentFetchResult> {
+  const [device, sync] = await Promise.all([readDeviceState(), readSyncState()])
+  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
+    return { ok: false, error: 'CONNECTOR_NOT_PAIRED' }
+  }
+  if (syncStartLock || isBusySyncStatus(sync.status) || activeNavigations.size > 0) {
+    return { ok: false, error: 'SYNC_IN_PROGRESS' }
+  }
+  if (activeDocuments.size > 0) return { ok: false, error: 'DOCUMENT_FETCH_IN_PROGRESS' }
+  const remote = await ensureFreshRemoteConfig(device.baseUrl)
+  if (!remote.syncEnabled || remote.disabledCapabilities.includes('READ_DOCUMENT')) {
+    return { ok: false, error: 'CONNECTOR_PAUSED' }
+  }
+  if (!remote.executableCapabilities.includes('READ_DOCUMENT')) {
+    return { ok: false, error: 'CLIENT_TOO_OLD' }
+  }
+
+  try {
+    const requested = await signedJsonRequest<{
+      completed?: unknown
+      documentId?: unknown
+      transferId?: unknown
+      encryptedHandle?: unknown
+    }>({
+      baseUrl: device.baseUrl,
+      deviceId: device.deviceId,
+      method: 'POST',
+      pathname: `/api/agent/integrations/national-life/local-connector/documents/${encodeURIComponent(message.reportRowId)}`,
+      body: { reportRowId: message.reportRowId },
+    })
+    if (requested.completed === true && typeof requested.documentId === 'string') {
+      return { ok: true, documentId: requested.documentId }
+    }
+    if (
+      typeof requested.transferId !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(requested.transferId) ||
+      typeof requested.encryptedHandle !== 'string'
+    ) return { ok: false, error: 'INVALID_DOCUMENT_RESPONSE' }
+
+    let tab = await findNationalLifeTab()
+    if (tab?.id === undefined) {
+      tab = await chrome.tabs.create({ url: `${NLG_ORIGIN}/agent/`, active: false })
+    }
+    if (tab.id === undefined) return { ok: false, error: 'NATIONAL_LIFE_TAB_UNAVAILABLE' }
+    const tabId = tab.id
+    tab = await waitForLoadedAgentTab(tabId)
+    if (!tab.url || new URL(tab.url).origin !== NLG_ORIGIN || !(await hasAuthenticatedPortalSession(tabId))) {
+      await updateTab(tabId, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+      return { ok: false, error: 'AUTH_REQUIRED' }
+    }
+
+    const token = randomToken()
+    const correlationId = crypto.randomUUID()
+    const result = new Promise<DocumentFetchResult>((resolve) => {
+      const timer = setTimeout(() => settleDocument(tabId, { ok: false, error: 'DOCUMENT_FETCH_TIMEOUT' }), 3 * 60_000)
+      activeDocuments.set(tabId, {
+        transferId: requested.transferId as string,
+        token,
+        correlationId,
+        tabId,
+        nextSequence: 0,
+        resolve,
+        timer,
+      })
+    })
+    try {
+      await sendBeginDocumentWithRetry(tabId, {
+        type: 'BEGIN_DOCUMENT',
+        transferId: requested.transferId,
+        encryptedHandle: requested.encryptedHandle,
+        token,
+        correlationId,
+      })
+    } catch (error) {
+      settleDocument(tabId, { ok: false, error: errorCode(error, 'BRIDGE_UNAVAILABLE') })
+    }
+    return await result
+  } catch (error) {
+    return { ok: false, error: errorCode(error, 'DOCUMENT_FETCH_FAILED') }
+  }
+}
+
+async function fetchNationalLifeDocument(
+  message: Extract<ReturnType<typeof parseExternalMessage>, { type: 'FETCH_NATIONAL_LIFE_DOCUMENT' }>,
+): Promise<DocumentFetchResult> {
+  // External messages can arrive concurrently. Reserve the operation before
+  // the first await so two clicks cannot both see an empty activeDocuments map
+  // and overwrite each other's correlation state on the same carrier tab.
+  if (documentFetchLock) return { ok: false, error: 'DOCUMENT_FETCH_IN_PROGRESS' }
+  documentFetchLock = true
+  try {
+    return await fetchNationalLifeDocumentInternal(message)
+  } finally {
+    documentFetchLock = false
+  }
+}
+
 async function skipFailedStage(tabId: number, gridKey: string, code: string) {
   const state = await readSyncState()
   const stage = currentStage(state)
@@ -1441,6 +1672,10 @@ async function abortExtraction(tabId: number) {
 }
 
 async function processBridgeMessage(tabId: number, message: BridgeMessage) {
+  if ('transferId' in message) {
+    await processDocumentMessage(tabId, message)
+    return
+  }
   const active = activeNavigations.get(tabId)
   if (
     !active ||
@@ -1591,6 +1826,10 @@ export default defineBackground(() => {
       respond(sendResponse, unpairConnector())
       return true
     }
+    if (message.type === 'FETCH_NATIONAL_LIFE_DOCUMENT') {
+      respond(sendResponse, fetchNationalLifeDocument(message))
+      return true
+    }
     respond(sendResponse, startNewSync(message.forceRefresh === true))
     return true
   })
@@ -1644,6 +1883,7 @@ export default defineBackground(() => {
     }
   })
   chrome.tabs.onRemoved.addListener((tabId) => {
+    settleDocument(tabId, { ok: false, error: 'CONNECTOR_TAB_CLOSED' })
     activeNavigations.delete(tabId)
     tabQueues.delete(tabId)
     tabReadyLocks.delete(tabId)

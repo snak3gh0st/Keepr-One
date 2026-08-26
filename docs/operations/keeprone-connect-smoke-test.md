@@ -42,8 +42,12 @@ Em ordem, e a ordem importa.
    Depois: `chrome://extensions` → recarregar a extensão unpacked apontando para
    `apps/keeprone-connect/.output/chrome-mv3`.
 
-   Confirme no manifest gerado que as permissões não mudaram — devem ser
-   exatamente `["storage","tabs"]` e os dois hosts de sempre.
+   Confirme no manifest gerado que as permissões são exatamente
+   `["storage","tabs","alarms"]` e os hosts permanecem restritos ao Keepr One
+   configurado e à National Life. `alarms` sustenta o sync diário em background.
+
+   Para o smoke de documentos, confirme também KeeproneConnect **0.1.21+** e a
+   migration `20260826134000_national_life_correspondence_documents` aplicada.
 
 ## O teste
 
@@ -57,6 +61,20 @@ Em ordem, e a ordem importa.
 
 O caminho feliz visível: `NEW_BUSINESS` → navega sozinho para a grade de inforce →
 `INFORCE_CLIENTS` → concluído.
+
+### Smoke de um documento oficial
+
+Depois do sync de `CORRESPONDENCE`, abra uma apólice que liste documento na
+National Life e clique **Trazer para o Keepr One**. Se houver login/MFA, conclua
+na aba oficial e clique novamente. O resultado só é válido quando:
+
+1. o botão muda para **Abrir no Keepr One**;
+2. o endpoint `/api/documents/<id>` abre um PDF;
+3. o banco contém `PolicyDocument.provider = 'NATIONAL_LIFE'`, `sourceRowId`,
+   `contentHash` e `fetchedAt`;
+4. a transferência está `COMPLETED` e os chunks temporários foram apagados.
+
+Não use o primeiro smoke para baixar todos os documentos da apólice.
 
 ## O que olhar no banco — esta é a parte que importa
 

@@ -3,9 +3,11 @@ import {
   parseBeginGridMessage,
   parseBridgeMessage,
   parseCapturePageMessage,
+  parseBeginDocumentMessage,
   parseBeginExportMessage,
   parseProbeAuthMessage,
   type BeginGridMessage,
+  type BeginDocumentMessage,
 } from '../lib/messages'
 import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
 import { isAuthenticatedAgentResponse } from '../lib/auth-probe'
@@ -18,7 +20,10 @@ export default defineContentScript({
   runAt: 'document_start',
   main() {
     if (!shouldInstrumentNationalLifePath(location.pathname)) return
-    let active: BeginGridMessage | { type: 'BEGIN_EXPORT'; sourceKey: 'INFORCE_CLIENTS'; token: string; correlationId: string } | null = null
+    let active: BeginGridMessage |
+      { type: 'BEGIN_EXPORT'; sourceKey: 'INFORCE_CLIENTS'; token: string; correlationId: string } |
+      BeginDocumentMessage |
+      null = null
 
     chrome.runtime.onMessage.addListener((value, _sender, sendResponse) => {
       const probe = parseProbeAuthMessage(value)
@@ -86,12 +91,27 @@ export default defineContentScript({
         })
         return false
       }
+      const beginDocument = parseBeginDocumentMessage(value)
+      if (beginDocument) {
+        active = beginDocument
+        window.postMessage({ channel: CHANNEL, payload: beginDocument }, location.origin)
+        sendResponse({
+          ok: true,
+          type: 'BEGIN_DOCUMENT_ACK',
+          transferId: beginDocument.transferId,
+          token: beginDocument.token,
+          correlationId: beginDocument.correlationId,
+        })
+        return false
+      }
 
       // A ordem de parar atravessa para a página pelo mesmo canal, e só se falar
       // da extração que esta ponte está acompanhando: uma ordem com token de
       // outra extração pararia a errada.
       const abort = parseAbortGridMessage(value)
-      const activeGridKey = active && ('gridKey' in active ? active.gridKey : active.sourceKey)
+      const activeGridKey = active && ('gridKey' in active
+        ? active.gridKey
+        : 'sourceKey' in active ? active.sourceKey : null)
       if (
         !abort ||
         !active ||
@@ -117,15 +137,13 @@ export default defineContentScript({
       if (event.source !== window || event.origin !== location.origin) return
       if (typeof event.data !== 'object' || event.data === null || event.data.channel !== CHANNEL) return
       const message = parseBridgeMessage(event.data.payload)
-      if (
-        !message ||
-        !active ||
-        message.token !== active.token ||
-        message.correlationId !== active.correlationId ||
-        message.gridKey !== ('gridKey' in active ? active.gridKey : active.sourceKey)
-      ) {
+      if (!message || !active || message.token !== active.token || message.correlationId !== active.correlationId) {
         return
       }
+      const matchesActive = 'transferId' in message
+        ? 'transferId' in active && message.transferId === active.transferId
+        : !('transferId' in active) && message.gridKey === ('gridKey' in active ? active.gridKey : active.sourceKey)
+      if (!matchesActive) return
       // A terminal message is only retired after the service worker confirms that
       // it processed the upload/finish. Before this, the bridge cleared `active`
       // immediately and a closed message channel could lose the only GRID_DONE.
@@ -133,7 +151,9 @@ export default defineContentScript({
         (response) => {
           if (
             response?.ok === true &&
-            (message.type === 'GRID_DONE' || message.type === 'GRID_ERROR' || message.type === 'EXPORT_DONE' || message.type === 'EXPORT_ERROR')
+            (message.type === 'GRID_DONE' || message.type === 'GRID_ERROR' ||
+              message.type === 'EXPORT_DONE' || message.type === 'EXPORT_ERROR' ||
+              message.type === 'DOCUMENT_DONE' || message.type === 'DOCUMENT_ERROR')
           ) {
             active = null
           }

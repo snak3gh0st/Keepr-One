@@ -9,38 +9,11 @@ import {
   connectorFailure,
 } from '@/lib/national-life/local-connector/connector-failure'
 import { NATIONAL_LIFE_SYNC_STARTED_EVENT } from './NationalLifeSyncProgress'
-
-type ConnectorResponse = {
-  ok: boolean
-  error?: string
-  status?: string
-  deviceId?: string
-  device?: { status?: string; deviceId?: string }
-  sync?: {
-    runId?: string
-    status?: string
-    errorCode?: string
-    uploads?: number
-    stageIndex?: number
-    stageKey?: string
-    totalStages?: number
-  }
-}
-
-type ConnectorMessage =
-  | { type: 'START_NATIONAL_LIFE_SYNC'; forceRefresh?: true }
-  | { type: 'GET_CONNECTOR_STATUS' }
-  | { type: 'UNPAIR_CONNECTOR' }
-  | { type: 'PAIR_CONNECTOR'; code: string; label: string; baseUrl: string }
-
-type ChromeRuntime = {
-  lastError?: { message?: string }
-  sendMessage: (
-    extensionId: string,
-    message: ConnectorMessage,
-    callback: (response?: ConnectorResponse) => void,
-  ) => void
-}
+import {
+  hasConnectorRuntime,
+  sendConnectorMessage,
+  type ConnectorResponse,
+} from './NationalLifeConnectorClient'
 
 type ConnectorState =
   | 'idle'
@@ -54,48 +27,6 @@ type ConnectorState =
   | 'success'
   | 'error'
 
-function chromeRuntime(): ChromeRuntime | null {
-  if (typeof window === 'undefined') return null
-  const candidate = (window as typeof window & { chrome?: { runtime?: ChromeRuntime } }).chrome
-    ?.runtime
-  return candidate && typeof candidate.sendMessage === 'function' ? candidate : null
-}
-
-export function sendConnectorMessage(
-  extensionId: string,
-  message: ConnectorMessage,
-  timeoutMs = 5_000,
-): Promise<ConnectorResponse> {
-  return new Promise((resolve, reject) => {
-    const runtime = chromeRuntime()
-    if (!runtime) {
-      reject(new Error('CONNECTOR_UNAVAILABLE'))
-      return
-    }
-    let settled = false
-    const timer = window.setTimeout(() => {
-      settled = true
-      reject(new Error('CONNECTOR_TIMEOUT'))
-    }, timeoutMs)
-
-    try {
-      runtime.sendMessage(extensionId, message, (response) => {
-        if (settled) return
-        settled = true
-        window.clearTimeout(timer)
-        if (runtime.lastError || !response || typeof response.ok !== 'boolean') {
-          reject(new Error('CONNECTOR_UNAVAILABLE'))
-          return
-        }
-        resolve(response)
-      })
-    } catch {
-      window.clearTimeout(timer)
-      reject(new Error('CONNECTOR_UNAVAILABLE'))
-    }
-  })
-}
-
 function openStore(storeUrl: string) {
   const link = document.createElement('a')
   link.href = storeUrl
@@ -107,7 +38,7 @@ function openStore(storeUrl: string) {
 function browserSupportsConnector(): boolean {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
   const userAgent = navigator.userAgent
-  return /(?:Chrome|Chromium|Edg)\//.test(userAgent) || chromeRuntime() !== null
+  return /(?:Chrome|Chromium|Edg)\//.test(userAgent) || hasConnectorRuntime()
 }
 
 function sleep(ms: number) {
