@@ -76,7 +76,6 @@ type Listener = (...args: unknown[]) => unknown
 
 const storage: Record<string, unknown> = {}
 const listeners: Record<string, Listener[]> = {}
-const alarms = new Map<string, Record<string, unknown>>()
 
 function register(name: string) {
   return {
@@ -158,11 +157,8 @@ const chromeStub = {
     onMessageExternal: register('runtime.onMessageExternal'),
   },
   alarms: {
-    create: vi.fn((name: string, options: Record<string, unknown>) => {
-      alarms.set(name, { name, ...options })
-    }),
-    get: vi.fn(async (name: string) => alarms.get(name)),
-    clear: vi.fn(async (name: string) => alarms.delete(name)),
+    create: vi.fn(),
+    clear: vi.fn(async () => true),
     onAlarm: register('alarms.onAlarm'),
   },
   tabs,
@@ -204,7 +200,6 @@ function beginGridMessage() {
 
 beforeEach(() => {
   for (const key of Object.keys(storage)) delete storage[key]
-  alarms.clear()
   vi.clearAllMocks()
   tabs.sendMessage.mockImplementation(defaultTabMessageResponse)
   vi.mocked(signedJsonRequest).mockResolvedValue({})
@@ -381,50 +376,6 @@ describe('empurrão de atualização no caminho real', () => {
 })
 
 describe('background plan executor', () => {
-  it('starts a due daily sync from the extension alarm without the Keepr One page', async () => {
-    storage.sync = {
-      status: 'COMPLETED',
-      completedAt: new Date(Date.now() - 25 * 60 * 60_000).toISOString(),
-    }
-    vi.mocked(signedJsonRequest).mockResolvedValue({
-      runId: 'run-scheduled',
-      stages: TWO_STAGE_PLAN,
-      completedStages: 0,
-      nextStageIndex: 0,
-    } as never)
-    await bootBackground()
-
-    emit('alarms.onAlarm', { name: 'keeprone-national-life-scheduled-sync' })
-    await flush()
-
-    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
-      method: 'POST',
-      pathname: '/api/agent/integrations/national-life/local-connector/runs',
-      body: {},
-    }))
-    expect(tabs.create).toHaveBeenCalledWith({
-      active: false,
-      url: `${NLG}${NEW_BUSINESS_PATH}`,
-    })
-    expect(readSync()).toMatchObject({ runId: 'run-scheduled', status: 'NAVIGATING' })
-  })
-
-  it('does not start another scheduled sync while the last completion is fresh', async () => {
-    storage.sync = {
-      status: 'COMPLETED',
-      completedAt: new Date(Date.now() - 23 * 60 * 60_000).toISOString(),
-    }
-    await bootBackground()
-
-    emit('alarms.onAlarm', { name: 'keeprone-national-life-scheduled-sync' })
-    await flush()
-
-    expect(signedJsonRequest).not.toHaveBeenCalledWith(expect.objectContaining({
-      pathname: '/api/agent/integrations/national-life/local-connector/runs',
-    }))
-    expect(tabs.create).not.toHaveBeenCalled()
-  })
-
   it('forwards an explicit full refresh to the run endpoint', async () => {
     vi.mocked(signedJsonRequest).mockResolvedValue({
       runId: 'run-full',

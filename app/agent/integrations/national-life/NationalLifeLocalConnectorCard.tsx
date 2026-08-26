@@ -140,8 +140,8 @@ const storeStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
   installing: 'Opening the secure install page…',
   connecting: 'Connecting to Keepr One…',
   'login-required': 'Sign in to the National Life portal to continue. Your sync picks up from there on its own.',
-  syncing: 'Reading National Life and saving each completed area to Keepr One. You can leave this page; the sync continues in the background.',
-  slow: 'Waiting for National Life to finish the current area. You can leave this page; completed areas remain saved.',
+  syncing: 'Reading National Life and saving each completed area to Keepr One.',
+  slow: 'Waiting for National Life to finish the current area. Completed areas remain saved.',
   partial: 'The available areas were saved. Sync again to retry only the areas National Life did not return.',
   success: 'Your National Life data is up to date.',
 }

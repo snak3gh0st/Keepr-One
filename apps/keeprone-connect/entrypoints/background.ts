@@ -84,9 +84,6 @@ const BRIDGE_RETRY_DELAYS_MS = [150, 300, 600, 1_000, 1_500]
 // de uma espera curta.
 const TAB_EDIT_RETRY_DELAYS_MS = [50, 100, 200, 400, 800]
 const SYNC_WATCHDOG_ALARM = 'keeprone-national-life-sync-watchdog'
-const SCHEDULED_SYNC_ALARM = 'keeprone-national-life-scheduled-sync'
-const SCHEDULED_SYNC_PERIOD_MINUTES = 15
-const SCHEDULED_SYNC_FRESH_MS = 24 * 60 * 60_000
 // One navigation can legitimately start from the previous grid. A second
 // redirect can be the carrier's canonical route. If that canonical route still
 // does not match, a third trip would be a loop, so isolate the source instead.
@@ -360,9 +357,6 @@ async function pairConnector(
       throw new Error('PAIRING_REJECTED')
     }
     await writeDeviceState({ deviceId: result.deviceId, baseUrl, status: 'READY' })
-    // Scheduling is best-effort. The device is already paired at this point;
-    // an unavailable alarms API must not turn a valid pairing into ERROR.
-    void ensureScheduledSyncAlarm().catch(() => {})
     return { ok: true as const, deviceId: result.deviceId }
   } catch {
     await writeDeviceState({ baseUrl, status: 'ERROR' })
@@ -378,40 +372,7 @@ async function unpairConnector() {
   activeNavigations.clear()
   tabQueues.clear()
   await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
-  await chrome.alarms.clear(SCHEDULED_SYNC_ALARM)
   return { ok: true as const, deviceId: device.deviceId }
-}
-
-function scheduledSyncIsDue(
-  device: Awaited<ReturnType<typeof readDeviceState>>,
-  sync: Awaited<ReturnType<typeof readSyncState>>,
-  now = Date.now(),
-): boolean {
-  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) return false
-  if (!['IDLE', 'COMPLETED', 'PARTIAL'].includes(sync.status)) return false
-  if (!sync.completedAt) return true
-  const completedAt = Date.parse(sync.completedAt)
-  return !Number.isFinite(completedAt) || now - completedAt >= SCHEDULED_SYNC_FRESH_MS
-}
-
-async function ensureScheduledSyncAlarm() {
-  const device = await readDeviceState()
-  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
-    await chrome.alarms.clear(SCHEDULED_SYNC_ALARM)
-    return
-  }
-  const existing = await chrome.alarms.get(SCHEDULED_SYNC_ALARM)
-  if (existing) return
-  chrome.alarms.create(SCHEDULED_SYNC_ALARM, {
-    delayInMinutes: 1,
-    periodInMinutes: SCHEDULED_SYNC_PERIOD_MINUTES,
-  })
-}
-
-async function startScheduledSyncIfDue() {
-  const [device, sync] = await Promise.all([readDeviceState(), readSyncState()])
-  if (!scheduledSyncIsDue(device, sync)) return
-  await startNewSync()
 }
 
 async function reportRunFailure(code: string) {
@@ -1663,13 +1624,8 @@ export default defineBackground(() => {
   })
 
   chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === SYNC_WATCHDOG_ALARM) {
-      void resumePending({ reconcileWithServer: true }).catch((error) => failSync(errorCode(error, 'SYNC_RESUME_FAILED')))
-      return
-    }
-    if (alarm.name === SCHEDULED_SYNC_ALARM) {
-      void startScheduledSyncIfDue().catch((error) => failSync(errorCode(error, 'SYNC_START_FAILED')))
-    }
+    if (alarm.name !== SYNC_WATCHDOG_ALARM) return
+    void resumePending({ reconcileWithServer: true }).catch((error) => failSync(errorCode(error, 'SYNC_RESUME_FAILED')))
   })
 
   void (async () => {
@@ -1680,12 +1636,6 @@ export default defineBackground(() => {
     // click or the next alarm would turn a recoverable hand-off into a stall.
     await resumePending({ reconcileWithServer: state.status === 'UPLOADING' })
   })().catch((error) => failSync(errorCode(error, 'SYNC_RESUME_FAILED')))
-  // The integration page is an observer, not an executor. A durable Chrome
-  // alarm wakes the extension and starts a due daily run even when Keepr One is
-  // closed. Chrome and the carrier session still have to be available; if the
-  // session needs attention, the existing AUTH_REQUIRED path brings its one
-  // bound National Life tab to the foreground.
-  void ensureScheduledSyncAlarm().catch(() => {})
   // Uma batida a cada subida do service worker. É a janela mais barata que existe
   // para uma flag chegar sem nenhuma ação do agente, e o worker sobe com muita
   // frequência justamente porque este conector acorda o tempo todo.
