@@ -265,6 +265,32 @@ export default defineContentScript({
       }
     }
 
+    function requestDocumentViewerUrl(encryptedHandle: string): Promise<{ redirectUrl?: unknown }> {
+      return new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest()
+        request.open('POST', `${NLG_ORIGIN}${DOCUMENT_VIEWER_URL_PATH}`, true)
+        request.timeout = DOCUMENT_BUDGET_MS
+        request.responseType = 'json'
+        request.setRequestHeader('content-type', 'application/json; charset=utf-8')
+        request.setRequestHeader('x-requested-with', 'XMLHttpRequest')
+        request.onload = () => {
+          if (request.status < 200 || request.status >= 300 || !request.response) {
+            reject(new Error('PORTAL_REQUEST_FAILED'))
+            return
+          }
+          resolve(request.response as { redirectUrl?: unknown })
+        }
+        request.onerror = () => reject(new Error('PORTAL_REQUEST_FAILED'))
+        request.ontimeout = () => reject(new Error('PORTAL_REQUEST_FAILED'))
+        request.send(JSON.stringify({
+          requestParams: [encryptedHandle],
+          isMergePdf: false,
+          isClientTab: true,
+          SubAgentNumber: '',
+        }))
+      })
+    }
+
     async function beginDocument(message: NonNullable<ReturnType<typeof parseBeginDocumentMessage>>) {
       const base = {
         transferId: message.transferId,
@@ -272,28 +298,7 @@ export default defineContentScript({
         correlationId: message.correlationId,
       }
       try {
-        const viewerResponse = await fetchWithinBudget(
-          originalFetch,
-          `${NLG_ORIGIN}${DOCUMENT_VIEWER_URL_PATH}`,
-          {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json; charset=utf-8',
-              'x-requested-with': 'XMLHttpRequest',
-            },
-            body: JSON.stringify({
-              requestParams: [message.encryptedHandle],
-              isMergePdf: false,
-              isClientTab: true,
-              SubAgentNumber: '',
-            }),
-            credentials: 'include',
-            cache: 'no-store',
-          },
-          DOCUMENT_BUDGET_MS,
-        )
-        if (!viewerResponse.ok) throw new Error('PORTAL_REQUEST_FAILED')
-        const viewerPayload = await viewerResponse.json() as { redirectUrl?: unknown }
+        const viewerPayload = await requestDocumentViewerUrl(message.encryptedHandle)
         const viewerUrl = safeDocumentViewerUrl(viewerPayload.redirectUrl)
         if (!viewerUrl) throw new Error('INVALID_DOCUMENT_RESPONSE')
 

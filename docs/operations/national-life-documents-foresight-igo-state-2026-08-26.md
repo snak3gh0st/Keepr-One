@@ -19,7 +19,8 @@ Contrato observado no portal autenticado:
    `/agent/correspondence/documentviewer?id=<32-hex>`;
 3. `GET` dessa rota devolve `application/pdf`.
 
-O KeeproneConnect 0.1.23 valida origem, path, query, MIME, assinatura `%PDF-`,
+O KeeproneConnect 0.1.24 usa o mesmo transporte `XMLHttpRequest` do portal e
+valida origem, path, query, MIME, assinatura `%PDF-`,
 tamanho máximo de 25 MiB e SHA-256. O arquivo passa em chunks assinados de até
 1 MiB e só vira `PolicyDocument` depois da remontagem e da segunda validação no
 servidor. A autoridade do pedido inclui device, agente, source row de
@@ -74,7 +75,7 @@ caso corrente e permanece bloqueado.
 
 ## Portões para as próximas entregas
 
-1. Deploy controlado da migration, app e KeeproneConnect 0.1.23.
+1. Deploy controlado da migration, app e KeeproneConnect 0.1.24.
 2. Smoke autenticado com um único documento: índice -> request -> chunks ->
    `PolicyDocument` -> abertura autorizada na apólice.
 3. Foresight em leitura: inventário, detalhes, serviços e PDFs já existentes,
