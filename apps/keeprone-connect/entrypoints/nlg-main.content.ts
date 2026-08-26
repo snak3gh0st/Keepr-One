@@ -27,6 +27,21 @@ type DatatableConfig = {
   [key: string]: unknown
 }
 
+type CarrierJQuery = {
+  ajax: (options: {
+    type: 'POST'
+    timeout: number
+    url: string
+    data: string
+    cache: false
+    contentType: 'application/json; charset=utf-8'
+    dataType: 'json'
+    success: (response: unknown) => void
+    failure: () => void
+    error: () => void
+  }) => unknown
+}
+
 function allowedHeader(name: string): boolean {
   const lower = name.toLowerCase()
   return (
@@ -267,27 +282,46 @@ export default defineContentScript({
 
     function requestDocumentViewerUrl(encryptedHandle: string): Promise<{ redirectUrl?: unknown }> {
       return new Promise((resolve, reject) => {
-        const request = new XMLHttpRequest()
-        request.open('POST', `${NLG_ORIGIN}${DOCUMENT_VIEWER_URL_PATH}`, true)
-        request.timeout = DOCUMENT_BUDGET_MS
-        request.responseType = 'json'
-        request.setRequestHeader('content-type', 'application/json; charset=utf-8')
-        request.setRequestHeader('x-requested-with', 'XMLHttpRequest')
-        request.onload = () => {
-          if (request.status < 200 || request.status >= 300 || !request.response) {
-            reject(new Error('PORTAL_REQUEST_FAILED'))
-            return
-          }
-          resolve(request.response as { redirectUrl?: unknown })
+        const carrierJQuery = (window as Window & { jQuery?: CarrierJQuery }).jQuery
+        if (!carrierJQuery || typeof carrierJQuery.ajax !== 'function') {
+          reject(new Error('PORTAL_REQUEST_FAILED'))
+          return
         }
-        request.onerror = () => reject(new Error('PORTAL_REQUEST_FAILED'))
-        request.ontimeout = () => reject(new Error('PORTAL_REQUEST_FAILED'))
-        request.send(JSON.stringify({
-          requestParams: [encryptedHandle],
-          isMergePdf: false,
-          isClientTab: true,
-          SubAgentNumber: '',
-        }))
+        let settled = false
+        const fail = () => {
+          if (settled) return
+          settled = true
+          reject(new Error('PORTAL_REQUEST_FAILED'))
+        }
+        try {
+          carrierJQuery.ajax({
+            type: 'POST',
+            timeout: DOCUMENT_BUDGET_MS,
+            url: DOCUMENT_VIEWER_URL_PATH,
+            data: JSON.stringify({
+              requestParams: [encryptedHandle],
+              isMergePdf: false,
+              isClientTab: true,
+              SubAgentNumber: '',
+            }),
+            cache: false,
+            contentType: 'application/json; charset=utf-8',
+            dataType: 'json',
+            success: (response) => {
+              if (settled) return
+              settled = true
+              if (!response || typeof response !== 'object' || Array.isArray(response)) {
+                reject(new Error('PORTAL_REQUEST_FAILED'))
+                return
+              }
+              resolve(response as { redirectUrl?: unknown })
+            },
+            failure: fail,
+            error: fail,
+          })
+        } catch {
+          fail()
+        }
       })
     }
 
