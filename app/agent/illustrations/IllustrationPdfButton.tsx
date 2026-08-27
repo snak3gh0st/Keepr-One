@@ -34,7 +34,13 @@ export function IllustrationPdfButton({
     return () => window.clearInterval(timer)
   }, [router, status])
 
-  if (status === 'FAILED' && safeErrorCode === 'FORESIGHT_PREMIUM_WRITE_MISMATCH') {
+  if (status === 'FAILED' && [
+    'FORESIGHT_PREMIUM_WRITE_MISMATCH',
+    'FORESIGHT_CALCULATION_UNAVAILABLE',
+    'FORESIGHT_SOLVE_READBACK_TIMEOUT',
+    'FORESIGHT_SOLVE_READBACK_MISMATCH',
+    'FORESIGHT_RESPONSE_INVALID',
+  ].includes(safeErrorCode ?? '')) {
     return (
       <Link
         href="/agent/illustrations/new"

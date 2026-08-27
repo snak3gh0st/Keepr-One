@@ -44,11 +44,12 @@ const RATE_CLASSES = new Set(['Standard_NT', 'Standard_Tobacco'])
 const DEATH_BENEFIT_OPTIONS = new Set(['A_Level', 'B_Increasing'])
 const CAP_FOCUS = 'SP500PointToPointCapFocus'
 const TERM_DURATIONS = new Set(['10-G', '15-G', '20-G', '30-G', 'ART'])
+const IUL_SOLVE_BASES = new Set(['DEATH_BENEFIT', 'PREMIUM'])
 
 /// Creates the exact, reviewable instruction that the Foresight executor will
 /// write into the carrier. It intentionally does not call Rapid Solve: capital
-/// and monthly premium are the agent's explicit inputs, and the official NAIC
-/// document is the carrier artifact returned by Foresight.
+/// or monthly premium is the agent's explicit source, while the other value is
+/// calculated by Foresight and accepted only with the official NAIC document.
 export async function requestForesightIllustration(
   formData: FormData,
 ): Promise<RequestForesightIllustrationResult> {
@@ -64,6 +65,7 @@ export async function requestForesightIllustration(
   const issueState = normalizeText(formData.get('issueState') as string | null)
   const gender = normalizeText(formData.get('gender') as string | null)
   const rateClass = normalizeText(formData.get('rateClass') as string | null)
+  const solveBasis = normalizeText(formData.get('solveBasis') as string | null)
   const deathBenefitOption = normalizeText(formData.get('deathBenefitOption') as string | null)
   const strategy = normalizeText(formData.get('strategy') as string | null)
   const termDuration = normalizeText(formData.get('termDuration') as string | null)
@@ -82,17 +84,23 @@ export async function requestForesightIllustration(
   }
   if (!GENDERS.has(gender)) return { ok: false, message: 'Informe o sexo, como a seguradora o classifica.' }
   if (!RATE_CLASSES.has(rateClass)) return { ok: false, message: 'Informe a classe de risco.' }
-  if (!Number.isFinite(faceAmount) || faceAmount <= 0 || faceAmount > 1_000_000_000) {
+  const isPremiumSolve = product?.kind === 'IUL' && solveBasis === 'PREMIUM'
+  const isExplicitIulSolve = product?.kind === 'IUL' && solveBasis.length > 0
+  if (!isPremiumSolve && (!Number.isFinite(faceAmount) || faceAmount <= 0 || faceAmount > 1_000_000_000)) {
     return { ok: false, message: 'Informe um capital segurado maior que zero.' }
   }
   if (product.kind === 'IUL') {
+    if (isExplicitIulSolve && !IUL_SOLVE_BASES.has(solveBasis)) {
+      return { ok: false, message: 'Escolha se a ilustração será resolvida por capital ou prêmio.' }
+    }
     if (!DEATH_BENEFIT_OPTIONS.has(deathBenefitOption)) {
       return { ok: false, message: 'Informe a opção de benefício por morte.' }
     }
     if (strategy !== CAP_FOCUS) {
       return { ok: false, message: 'A ilustração oficial usa S&P 500 — foco em teto.' }
     }
-    if (!Number.isFinite(monthlyPremium) || monthlyPremium <= 0 || monthlyPremium > 100_000_000) {
+    if ((isPremiumSolve || !isExplicitIulSolve) &&
+      (!Number.isFinite(monthlyPremium) || monthlyPremium <= 0 || monthlyPremium > 100_000_000)) {
       return { ok: false, message: 'Informe um prêmio mensal maior que zero.' }
     }
   } else if (!TERM_DURATIONS.has(termDuration)) {
@@ -103,7 +111,25 @@ export async function requestForesightIllustration(
 
   const illustrationId = `ill_${randomUUID()}`
   const rawPayload = (product.kind === 'IUL'
-    ? {
+    ? isExplicitIulSolve
+      ? {
+          foresightDraft: {
+            schemaVersion: 2,
+            firstName,
+            lastName,
+            dateOfBirth: dateOfBirthRaw,
+            issueState,
+            gender,
+            rateClass,
+            solveBasis,
+            ...(solveBasis === 'PREMIUM'
+              ? { targetMonthlyPremium: monthlyPremium }
+              : { targetFaceAmount: faceAmount }),
+            deathBenefitOption,
+            strategy: CAP_FOCUS,
+          },
+        }
+      : {
         foresightDraft: {
           schemaVersion: 1,
           firstName,
@@ -156,11 +182,15 @@ export async function requestForesightIllustration(
           productName: product.carrierName,
           provider: NATIONAL_LIFE_PROVIDER,
           externalId: illustrationId,
-          faceAmount,
+          faceAmount: isPremiumSolve ? null : faceAmount,
           premium: null,
-          targetPremium: product.kind === 'IUL' ? monthlyPremium : null,
+          targetPremium: product.kind === 'IUL' && (isPremiumSolve || !isExplicitIulSolve)
+            ? monthlyPremium
+            : null,
           targetPremiumSource: product.kind === 'IUL'
-            ? 'AGENT_INPUT_FOR_FORESIGHT'
+            ? isPremiumSolve || !isExplicitIulSolve
+              ? 'AGENT_INPUT_FOR_FORESIGHT'
+              : 'FORESIGHT_CALCULATES_PREMIUM_FROM_DEATH_BENEFIT'
             : 'CARRIER_CALCULATED_FOR_TERM',
           insuredName: `${firstName} ${lastName}`,
           insuredDateOfBirth: dateOfBirth,

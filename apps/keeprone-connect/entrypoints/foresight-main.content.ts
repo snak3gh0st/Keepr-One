@@ -7,7 +7,7 @@ const MAIN_FRAME_ID = 'ctl00_mobilityPH_iframeMain'
 type CarrierWindow = Window & { $find?: (id: string) => unknown }
 
 type MainRequest = {
-  type: 'APPLY_CLIENT' | 'APPLY_LEDGER' | 'APPLY_ALLOCATION' |
+  type: 'APPLY_CLIENT' | 'APPLY_LEDGER' | 'APPLY_LEDGER_SOLVE' | 'APPLY_ALLOCATION' |
     'APPLY_TERM_CLIENT' | 'APPLY_TERM_FUNDING' | 'APPLY_TERM_REPORTS' | 'CAPTURE_REPORT'
   token: string
   correlationId: string
@@ -20,7 +20,7 @@ function object(value: unknown): value is Record<string, unknown> {
 
 function request(value: unknown): MainRequest | null {
   if (!object(value) || ![
-    'APPLY_CLIENT', 'APPLY_LEDGER', 'APPLY_ALLOCATION',
+    'APPLY_CLIENT', 'APPLY_LEDGER', 'APPLY_LEDGER_SOLVE', 'APPLY_ALLOCATION',
     'APPLY_TERM_CLIENT', 'APPLY_TERM_FUNDING', 'APPLY_TERM_REPORTS', 'CAPTURE_REPORT',
   ].includes(String(value.type)) ||
     typeof value.token !== 'string' || value.token.length < 32 || value.token.length > 128 ||
@@ -140,6 +140,75 @@ export default defineContentScript({
       ;({ doc, win } = carrier())
       invoke(win, 'ctl00_mobilityPH_panelPremium_ucPremium', 'updatePremiumSchedule')
       await delay(1_100)
+    }
+    const solveRadio = (doc: Document, marker: string, label: string) => {
+      const radios = [...doc.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
+        .filter((radio) => radio.id.includes(marker) || radio.name.includes(marker))
+      const matches = radios.filter((radio) => {
+        const explicit = radio.id
+          ? doc.querySelector<HTMLLabelElement>(`label[for="${radio.id}"]`)?.textContent
+          : null
+        const nearby = radio.closest('label')?.textContent ?? radio.parentElement?.textContent ?? ''
+        return [explicit, nearby].some((text) => text?.replace(/\s+/g, ' ').trim() === label)
+      })
+      if (matches.length !== 1) throw new Error('FORESIGHT_SCHEMA_MISMATCH')
+      const radio = matches[0]!
+      if (!radio.checked) radio.click()
+      if (!radio.checked) throw new Error('FORESIGHT_WRITE_MISMATCH')
+    }
+    const applySolvedLedger = async (values: MainRequest['values']) => {
+      const basis = String(values.solveBasis)
+      if (basis !== 'DEATH_BENEFIT' && basis !== 'PREMIUM') {
+        throw new Error('FORESIGHT_SCHEMA_MISMATCH')
+      }
+      let { doc, win } = carrier()
+      if (basis === 'PREMIUM') {
+        solveRadio(doc, 'rdoDeathBenefitSolves', 'Based on Target Premium')
+        await delay(900)
+        ;({ doc, win } = carrier())
+        solveRadio(doc, 'rdoPremiumSolves', 'None')
+        await delay(500)
+        ;({ doc, win } = carrier())
+        setSelect(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumMode, '7')
+        invoke(win, 'ctl00_mobilityPH_panelPremium_ucPremium', 'updatePremiumMode')
+        await delay(900)
+        ;({ doc, win } = carrier())
+        setSelect(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumType, '-4')
+        element<HTMLSelectElement>(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumType)
+          .dispatchEvent(new Event('change', { bubbles: true }))
+        await delay(500)
+        ;({ doc, win } = carrier())
+        writeForesightControlValue(
+          element<HTMLInputElement>(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount),
+          Number(values.premiumAmount),
+        )
+        await delay(200)
+        ;({ doc, win } = carrier())
+        invoke(win, 'ctl00_mobilityPH_panelPremium_ucPremium', 'updatePremiumSchedule')
+        await delay(1_100)
+      } else {
+        solveRadio(doc, 'rdoDeathBenefitSolves', 'None')
+        await delay(500)
+        ;({ doc, win } = carrier())
+        setSelect(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitType, '-4')
+        writeForesightControlValue(
+          element<HTMLInputElement>(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitAmount),
+          Number(values.faceAmount),
+        )
+        invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefit', 'updateDeathBenefitSchedule')
+        await delay(900)
+        ;({ doc, win } = carrier())
+        setSelect(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumMode, '7')
+        invoke(win, 'ctl00_mobilityPH_panelPremium_ucPremium', 'updatePremiumMode')
+        await delay(900)
+        ;({ doc, win } = carrier())
+        solveRadio(doc, 'rdoPremiumSolves', 'Protection Focus')
+        await delay(1_100)
+      }
+      ;({ doc, win } = carrier())
+      setSelect(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitOption, String(values.deathBenefitOption))
+      invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefitOption', 'updateDeathBenefitOptionSchedule')
+      await delay(900)
     }
     const applyAllocation = async () => {
       const { doc } = carrier()
@@ -273,11 +342,12 @@ export default defineContentScript({
       if (!value) return
       void (value.type === 'APPLY_CLIENT' ? applyClient(value.values)
         : value.type === 'APPLY_LEDGER' ? applyLedger(value.values)
-          : value.type === 'APPLY_ALLOCATION' ? applyAllocation()
-            : value.type === 'APPLY_TERM_CLIENT' ? applyTermClient(value.values)
-              : value.type === 'APPLY_TERM_FUNDING' ? applyTermFunding(value.values)
-                : value.type === 'APPLY_TERM_REPORTS' ? applyTermReports(value.values)
-                  : captureReport()).then(
+          : value.type === 'APPLY_LEDGER_SOLVE' ? applySolvedLedger(value.values)
+            : value.type === 'APPLY_ALLOCATION' ? applyAllocation()
+              : value.type === 'APPLY_TERM_CLIENT' ? applyTermClient(value.values)
+                : value.type === 'APPLY_TERM_FUNDING' ? applyTermFunding(value.values)
+                  : value.type === 'APPLY_TERM_REPORTS' ? applyTermReports(value.values)
+                    : captureReport()).then(
         (result) => window.postMessage({
           channel: CHANNEL,
           payload: result ? {

@@ -133,6 +133,33 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
     expect(mocks.createIllustration).not.toHaveBeenCalled()
   })
 
+  it('issues a premium-solved IUL command without fabricating a face amount', async () => {
+    const premiumSolved = form()
+    premiumSolved.set('solveBasis', 'PREMIUM')
+    premiumSolved.delete('faceAmount')
+
+    await expect(requestForesightIllustration(premiumSolved)).resolves.toEqual({
+      ok: true,
+      commandId: 'cmd_foresight_1',
+      illustrationId: 'ill_foresight_1',
+    })
+    expect(mocks.createIllustration).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        faceAmount: null,
+        premium: null,
+        targetPremium: 350,
+        targetPremiumSource: 'AGENT_INPUT_FOR_FORESIGHT',
+        rawPayload: {
+          foresightDraft: expect.objectContaining({
+            schemaVersion: 2,
+            solveBasis: 'PREMIUM',
+            targetMonthlyPremium: 350,
+          }),
+        },
+      }),
+    }))
+  })
+
   it('issues a Term command with the carrier-selected duration and no agent premium', async () => {
     const term = new FormData()
     term.set('product', 'LSW_TERM')

@@ -46,6 +46,26 @@ const termSnapshot = {
   reports: ['NAIC_ILLUSTRATION'],
 } as const
 
+const premiumSolvedSnapshot = {
+  schemaVersion: 2,
+  illustrationId: 'ill_premium_123',
+  caseId: 'case_123',
+  carrierCaseName: 'KEEPRONE-TEST-20260827-ILLPREMIUM123',
+  insured: { firstName: 'KeeprOne', lastName: 'Premium', dateOfBirth: '1990-01-01', issueState: 'FL' },
+  product: { name: 'FlexLife', code: '956' },
+  solve: { basis: 'PREMIUM', method: 'Based_on_Target_Premium', amount: 350 },
+  faceAmount: null,
+  premium: { mode: 'Monthly', amount: 350 },
+  underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
+  deathBenefitOption: 'A_Level',
+  allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 100 }],
+  riders: [
+    'DeathBenefitProtection', 'ABRTerminalIllness', 'ABRChronicIllness',
+    'ABRCriticalIllness', 'ABRCriticalInjury', 'ABRAlzheimersDisease',
+  ],
+  reports: ['NAIC_ILLUSTRATION'],
+} as const
+
 describe('Foresight content messages', () => {
   it('accepts only a correlated and independently valid execution message', () => {
     expect(parseExecuteForesightIllustrationMessage(message)).toEqual(message)
@@ -105,5 +125,36 @@ describe('Foresight content messages', () => {
       ...response,
       receipt: { ...response.receipt, carrierProduct: 'LSW Term' },
     }, termMessage)).toThrow('FORESIGHT_RESPONSE_INVALID')
+  })
+
+  it('requires the Foresight-calculated result for a premium-solved IUL', () => {
+    const premiumMessage = { ...message, snapshot: premiumSolvedSnapshot }
+    const response = {
+      ok: true,
+      type: 'FORESIGHT_ILLUSTRATION_SAVED',
+      token: premiumMessage.token,
+      correlationId: premiumMessage.correlationId,
+      receipt: {
+        inputHash: premiumMessage.inputHash,
+        caseFingerprint: `case_${'b'.repeat(64)}`,
+        carrierCaseName: premiumSolvedSnapshot.carrierCaseName,
+        productCode: '956',
+        solveBasis: 'PREMIUM',
+        faceAmount: 250_000,
+        monthlyPremium: 350,
+        release: '5.3.65.31',
+        reportCode: 'NAIC_ILLUSTRATION',
+        documentSha256: 'c'.repeat(64),
+        documentBytes: 9,
+        saved: true,
+      },
+      document: { contentType: 'application/pdf', pdfBase64: 'JVBERi0xLjcK' },
+    } as const
+
+    expect(parseForesightExecutionResponse(response, premiumMessage)).toEqual(response)
+    expect(() => parseForesightExecutionResponse({
+      ...response,
+      receipt: { ...response.receipt, faceAmount: 0 },
+    }, premiumMessage)).toThrow('FORESIGHT_RESPONSE_INVALID')
   })
 })

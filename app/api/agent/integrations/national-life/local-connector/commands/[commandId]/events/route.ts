@@ -43,6 +43,28 @@ const foresightArtifactRepository = {
       },
     })
   },
+  async persistSolvedResult(input: {
+    agentId: string
+    illustrationId: string
+    solveBasis: 'DEATH_BENEFIT' | 'PREMIUM'
+    faceAmount: number
+    monthlyPremium: number
+  }) {
+    const updated = await prisma.illustration.updateMany({
+      where: { id: input.illustrationId, agentId: input.agentId, productName: 'FlexLife' },
+      data: {
+        faceAmount: input.faceAmount,
+        premium: input.monthlyPremium,
+        ...(input.solveBasis === 'DEATH_BENEFIT'
+          ? {
+              targetPremium: input.monthlyPremium,
+              targetPremiumSource: 'FORESIGHT_CALCULATED_FROM_DEATH_BENEFIT',
+            }
+          : {}),
+      },
+    })
+    if (updated.count !== 1) throw new ConnectorCommandError('EVENT_INVALID')
+  },
 }
 
 function commandErrorResponse(error: ConnectorCommandError): Response {

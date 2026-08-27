@@ -35,6 +35,7 @@ export default async function IllustrationsPage() {
         createdAt: true,
         insuredName: true,
         faceAmount: true,
+        premium: true,
         targetPremium: true,
         targetPremiumSource: true,
         productName: true,
@@ -51,7 +52,7 @@ export default async function IllustrationsPage() {
       <PageHeader
         title="Ilustrações"
         eyebrow="Pré-venda"
-        description="Crie o cenário FlexLife, acompanhe o Foresight em segundo plano e guarde o PDF oficial no histórico do segurado."
+        description="Crie o cenário, acompanhe o Foresight em segundo plano e guarde o PDF oficial no histórico do segurado."
       >
         <Link
           href="/agent/illustrations/new"
@@ -70,13 +71,15 @@ export default async function IllustrationsPage() {
               <Th>Cliente</Th>
               <Th>Produto</Th>
               <Th className="text-right">Capital segurado</Th>
-              <Th className="text-right">Prêmio mensal informado</Th>
+              <Th className="text-right">Prêmio mensal</Th>
               <Th>Documento</Th>
             </tr>
           </Thead>
           <tbody>
             {illustrations.map((illustration) => {
               const status = pdfStatus.get(illustration.id)
+              const hasCarrierPremium = Boolean(illustration.documentFetchedAt && illustration.premium)
+              const premium = hasCarrierPremium ? illustration.premium : illustration.targetPremium
               return (
               <Tr key={illustration.id}>
                 <Td>{formatCarrierInstant(illustration.createdAt)}</Td>
@@ -109,10 +112,16 @@ export default async function IllustrationsPage() {
                   {illustration.faceAmount ? currency(Number(illustration.faceAmount)) : '—'}
                 </TdNum>
                 <TdNum>
-                  {illustration.targetPremium ? currency(Number(illustration.targetPremium)) : '—'}
-                  {illustration.targetPremiumSource === 'AGENT_INPUT_FOR_FORESIGHT' && (
-                    <span className="mt-0.5 block text-xs font-normal text-ink-muted">para a ilustração</span>
-                  )}
+                  {premium ? currency(Number(premium)) : '—'}
+                  <span className="mt-0.5 block text-xs font-normal text-ink-muted">
+                    {hasCarrierPremium
+                      ? 'confirmado no Foresight'
+                      : illustration.targetPremiumSource === 'AGENT_INPUT_FOR_FORESIGHT'
+                        ? 'para a ilustração'
+                        : illustration.targetPremiumSource === 'FORESIGHT_CALCULATES_PREMIUM_FROM_DEATH_BENEFIT'
+                          ? 'a calcular pela National Life'
+                          : null}
+                  </span>
                 </TdNum>
                 <Td>
                   {illustration.documentFetchedAt ? (

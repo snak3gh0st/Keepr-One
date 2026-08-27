@@ -1,9 +1,9 @@
 import { ForesightExecutionError, executeForesightIllustration } from '../lib/foresight-executor'
 import { executeForesightTermIllustration } from '../lib/foresight-term-executor'
 import { parseExecuteForesightIllustrationMessage } from '../lib/foresight-messages'
-import type { ForesightIllustrationSnapshotV1 } from '../lib/foresight-contract'
+import type { ForesightIllustrationSnapshot } from '../lib/foresight-contract'
 
-function isFlexLifeSnapshot(snapshot: unknown): snapshot is ForesightIllustrationSnapshotV1 {
+function isFlexLifeSnapshot(snapshot: unknown): snapshot is ForesightIllustrationSnapshot {
   return typeof snapshot === 'object' && snapshot !== null &&
     'product' in snapshot && typeof snapshot.product === 'object' && snapshot.product !== null &&
     'code' in snapshot.product

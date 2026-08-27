@@ -3,6 +3,7 @@ import {
   buildForesightIllustrationSnapshot,
   foresightIllustrationInputHash,
   parseForesightIllustrationReceipt,
+  parseForesightSolvedIllustrationReceipt,
 } from './foresight-illustration-contract'
 
 const input = {
@@ -55,6 +56,32 @@ describe('server-owned Foresight illustration snapshot', () => {
       solve: { method: 'Specify_Amount', amount: 100_000 },
       faceAmount: 100_000,
       premium: { mode: 'Monthly', amount: 250 },
+    })
+  })
+
+  it('seals a premium-solved scenario without pretending that its face amount is known', () => {
+    expect(buildForesightIllustrationSnapshot({
+      ...input,
+      rawPayload: {
+        foresightDraft: {
+          schemaVersion: 2,
+          firstName: 'KeeprOne',
+          lastName: 'Test',
+          dateOfBirth: '1990-01-01',
+          issueState: 'FL',
+          gender: 'Male',
+          rateClass: 'Standard_NT',
+          solveBasis: 'PREMIUM',
+          targetMonthlyPremium: 350,
+          deathBenefitOption: 'A_Level',
+          strategy: 'SP500PointToPointCapFocus',
+        },
+      },
+    })).toMatchObject({
+      schemaVersion: 2,
+      solve: { basis: 'PREMIUM', method: 'Based_on_Target_Premium', amount: 350 },
+      faceAmount: null,
+      premium: { mode: 'Monthly', amount: 350 },
     })
   })
 
@@ -117,6 +144,25 @@ describe('server-owned Foresight illustration snapshot', () => {
     expect(parseForesightIllustrationReceipt(receipt)).toEqual(receipt)
     expect(parseForesightIllustrationReceipt({ ...receipt, reportCode: 'CLIENT_ILLUSTRATION' })).toBeNull()
     expect(parseForesightIllustrationReceipt({ ...receipt, extra: true })).toBeNull()
+  })
+
+  it('accepts a calculated IUL result only when it reports both values', () => {
+    const receipt = {
+      inputHash: 'a'.repeat(64),
+      caseFingerprint: `case_${'b'.repeat(64)}`,
+      carrierCaseName: 'KEEPRONE-20260827-CM123ILLUSTRATION',
+      productCode: '956',
+      solveBasis: 'DEATH_BENEFIT',
+      faceAmount: 250_000,
+      monthlyPremium: 350,
+      release: '5.3.65.31',
+      reportCode: 'NAIC_ILLUSTRATION',
+      documentSha256: 'c'.repeat(64),
+      documentBytes: 1_500_000,
+      saved: true,
+    } as const
+    expect(parseForesightSolvedIllustrationReceipt(receipt)).toEqual(receipt)
+    expect(parseForesightSolvedIllustrationReceipt({ ...receipt, monthlyPremium: 0 })).toBeNull()
   })
 
   it.each([

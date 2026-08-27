@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getCurrentAgent: vi.fn(),
@@ -50,6 +50,8 @@ vi.mock('../IllustrationPdfButton', () => ({
 }))
 
 import IllustrationDetailPage from './page'
+
+afterEach(cleanup)
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -140,6 +142,38 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('A — nivelado')).toBeTruthy()
     expect(screen.getByText('Mensal • Specify Amount')).toBeTruthy()
     expect(screen.getByText('S&P 500 — foco em teto (100%)')).toBeTruthy()
+  })
+
+  it('shows the carrier-confirmed result for a premium-solved IUL only after the PDF exists', async () => {
+    mocks.findFirstIllustration.mockResolvedValue({
+      id: 'illustration-solved-iul',
+      createdAt: new Date('2026-08-27T12:00:00.000Z'),
+      insuredName: 'Cliente Teste',
+      insuredDateOfBirth: new Date('1988-02-06T00:00:00.000Z'),
+      productName: 'FlexLife',
+      faceAmount: 250_000,
+      premium: 350,
+      targetPremium: 350,
+      targetPremiumSource: 'AGENT_INPUT_FOR_FORESIGHT',
+      documentFetchedAt: new Date('2026-08-27T12:02:00.000Z'),
+      documentMimeType: 'application/pdf',
+      caseId: null,
+      rawPayload: {
+        foresightDraft: {
+          schemaVersion: 2,
+          firstName: 'Cliente', lastName: 'Teste', dateOfBirth: '1988-02-06', issueState: 'FL',
+          gender: 'Female', rateClass: 'Standard_NT', solveBasis: 'PREMIUM', targetMonthlyPremium: 350,
+          deathBenefitOption: 'A_Level', strategy: 'SP500PointToPointCapFocus',
+        },
+      },
+    })
+
+    render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-solved-iul' }) }))
+
+    expect(screen.getByText('Prêmio mensal confirmado')).toBeTruthy()
+    expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
+    expect(screen.getByText('Resolvido pelo prêmio mensal')).toBeTruthy()
+    expect(screen.getByText('Based on Target Premium')).toBeTruthy()
   })
 
   it('shows a premium rejection as a scenario review instead of an in-progress Foresight run', async () => {

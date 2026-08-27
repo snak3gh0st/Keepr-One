@@ -106,6 +106,14 @@ describe('illustrationPdfMessage', () => {
     })
   })
 
+  it('explains a carrier calculation failure without exposing connector internals', () => {
+    expect(
+      illustrationPdfMessage({ state: 'FAILED', safeErrorCode: 'FORESIGHT_CALCULATION_UNAVAILABLE' }),
+    ).toBe(
+      'O Foresight não conseguiu calcular um cenário válido com esse valor de origem. Revise o capital ou prêmio e gere uma nova ilustração; nenhum PDF foi emitido.',
+    )
+  })
+
   it('does not print an empty parenthesis when there is no code', () => {
     expect(illustrationPdfMessage({ state: 'FAILED', safeErrorCode: null })).toBe(
       'Não foi possível gerar.',

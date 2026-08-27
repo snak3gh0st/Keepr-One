@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('./new/actions', () => ({ requestForesightIllustration: vi.fn() }))
@@ -12,7 +12,24 @@ vi.mock('@/app/agent/integrations/national-life/NationalLifeConnectorClient', ()
 
 import { NewIllustrationForm } from './NewIllustrationForm'
 
+afterEach(cleanup)
+
 describe('NewIllustrationForm', () => {
+  it('collects exactly one source amount for the selected IUL solve basis', async () => {
+    const user = userEvent.setup()
+    render(<NewIllustrationForm />)
+
+    expect(screen.getByRole('radio', { name: 'Resolver pelo capital segurado' })).toBeChecked()
+    expect(screen.getByRole('spinbutton', { name: 'Capital segurado' })).toBeTruthy()
+    expect(screen.queryByRole('spinbutton', { name: 'Prêmio mensal' })).toBeNull()
+
+    await user.click(screen.getByRole('radio', { name: 'Resolver pelo prêmio mensal' }))
+
+    expect(screen.getByRole('spinbutton', { name: 'Prêmio mensal' })).toBeTruthy()
+    expect(screen.queryByRole('spinbutton', { name: 'Capital segurado' })).toBeNull()
+    expect(screen.getByDisplayValue('PREMIUM')).toBeTruthy()
+  })
+
   it('switches to the carrier-specific Term fields without asking for an IUL premium', async () => {
     const user = userEvent.setup()
     render(<NewIllustrationForm />)

@@ -22,7 +22,9 @@ import {
   buildForesightIllustrationSnapshot,
   foresightIllustrationInputHash,
   parseForesightIllustrationReceipt,
-  type ForesightIllustrationExecutionSnapshot,
+  parseForesightSolvedIllustrationReceipt,
+  type ForesightIllustrationSnapshot,
+  type ForesightSolvedIllustrationReceipt,
 } from '../foresight-illustration-contract'
 import {
   buildForesightTermIllustrationSnapshot,
@@ -90,6 +92,13 @@ export type ForesightArtifactRepository = {
     documentBytes: Uint8Array | null
     documentMimeType: string | null
   } | null>
+  persistSolvedResult?: (input: {
+    agentId: string
+    illustrationId: string
+    solveBasis: 'DEATH_BENEFIT' | 'PREMIUM'
+    faceAmount: number
+    monthlyPremium: number
+  }) => Promise<void>
 }
 
 export type FlexLifeQuoteResultRepository = {
@@ -99,6 +108,12 @@ export type FlexLifeQuoteResultRepository = {
     inputHash: string
     response: Record<string, unknown>
   }): Promise<void>
+}
+
+function isForesightSolvedIllustrationReceipt(
+  receipt: unknown,
+): receipt is ForesightSolvedIllustrationReceipt {
+  return parseForesightSolvedIllustrationReceipt(receipt) !== null
 }
 
 function toPublicCommand(candidate: LocalConnectorCommandCandidate): ConnectorCommand {
@@ -165,7 +180,7 @@ export async function readDeviceConnectorCommandInput(
   input: { agentId: string; deviceId: string; commandId: string; now?: Date },
 ): Promise<{
   inputHash: string
-  snapshot: ForesightIllustrationExecutionSnapshot | ForesightTermIllustrationSnapshotV1 | FlexLifeQuoteSnapshotV1
+  snapshot: ForesightIllustrationSnapshot | ForesightTermIllustrationSnapshotV1 | FlexLifeQuoteSnapshotV1
 }> {
   const command = await repository.findDeviceOwned(input)
   const now = input.now ?? new Date()
@@ -190,7 +205,7 @@ export async function readDeviceConnectorCommandInput(
     illustrationId: publicCommand.target.id,
   })
   if (!illustration) throw new ConnectorCommandError('COMMAND_NOT_FOUND')
-  let snapshot: ForesightIllustrationExecutionSnapshot | ForesightTermIllustrationSnapshotV1 | FlexLifeQuoteSnapshotV1
+  let snapshot: ForesightIllustrationSnapshot | ForesightTermIllustrationSnapshotV1 | FlexLifeQuoteSnapshotV1
   let inputHash: string
   try {
     if (command.capability === 'FLEXLIFE_QUOTE') {
@@ -268,6 +283,7 @@ export async function recordDeviceConnectorCommandEvent(
       !payload || Object.keys(payload).length !== 1 || !Object.hasOwn(payload, 'illustration') ||
       !input.foresightArtifactRepository) throw new ConnectorCommandError('EVENT_INVALID')
     const receipt = parseForesightIllustrationReceipt(payload.illustration) ??
+      parseForesightSolvedIllustrationReceipt(payload.illustration) ??
       parseForesightTermIllustrationReceipt(payload.illustration)
     if (!receipt || receipt.inputHash !== publicCommand.params.inputHash) {
       throw new ConnectorCommandError('EVENT_INVALID')
@@ -283,6 +299,18 @@ export async function recordDeviceConnectorCommandEvent(
       artifact.documentBytes.byteLength !== receipt.documentBytes ||
       createHash('sha256').update(artifact.documentBytes).digest('hex') !== receipt.documentSha256) {
       throw new ConnectorCommandError('EVENT_INVALID')
+    }
+    if (isForesightSolvedIllustrationReceipt(receipt)) {
+      if (!input.foresightArtifactRepository.persistSolvedResult) {
+        throw new ConnectorCommandError('EVENT_INVALID')
+      }
+      await input.foresightArtifactRepository.persistSolvedResult({
+        agentId: input.agentId,
+        illustrationId: publicCommand.target.id,
+        solveBasis: receipt.solveBasis,
+        faceAmount: receipt.faceAmount,
+        monthlyPremium: receipt.monthlyPremium,
+      })
     }
   }
   if (event.type === 'DATA_BATCH' && command.capability === 'FLEXLIFE_QUOTE') {

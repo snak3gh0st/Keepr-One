@@ -1,5 +1,6 @@
 import {
   sha256ForesightSnapshot,
+  type ForesightIllustrationSnapshot,
   type ForesightIllustrationSnapshotV1,
 } from './foresight-contract'
 
@@ -171,7 +172,7 @@ export function foresightReadbackMismatchCode(mismatches: readonly string[]): st
 }
 
 export async function deterministicCaseFingerprint(
-  snapshot: ForesightIllustrationSnapshotV1,
+  snapshot: ForesightIllustrationSnapshot,
 ): Promise<string> {
   // Reuse the complete approved input hash: the receipt exposes only a digest,
   // never the insured values used to derive it.
