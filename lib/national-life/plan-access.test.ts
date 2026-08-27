@@ -48,6 +48,14 @@ describe('National Life plan source boundary', () => {
     ).resolves.toBe(false)
   })
 
+  it('keeps paid commissions before its earning-detail drill-down for individual runs', () => {
+    const paidIndex = NATIONAL_LIFE_PERSONAL_GRID_KEYS.indexOf('PAID_COMMISSIONS')
+    const detailIndex = NATIONAL_LIFE_PERSONAL_GRID_KEYS.indexOf('COMMISSIONS_EARNING_REPORT')
+
+    expect(paidIndex).toBeGreaterThanOrEqual(0)
+    expect(detailIndex).toBeGreaterThan(paidIndex)
+  })
+
   it('allows the agency source only for the entitled owner', async () => {
     mocks.getAgentAccessForAgent.mockResolvedValue({
       isActive: true,
