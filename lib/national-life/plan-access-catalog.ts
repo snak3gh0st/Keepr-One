@@ -13,6 +13,10 @@ export const NATIONAL_LIFE_PERSONAL_GRID_KEYS = [
   'NEW_BUSINESS',
   'RECENTLY_CLOSED',
   'INFORCE_CLIENTS',
+  // Commission Earning Detail is a drill-down of Paid Commissions. Personal
+  // runs must collect the parent statement rows first so the server can hand
+  // the extension only the validated National Life detail links.
+  'PAID_COMMISSIONS',
   'COMMISSIONS_EARNING_REPORT',
   'CORRESPONDENCE',
   'CLIENT_INTELLIGENCE',
