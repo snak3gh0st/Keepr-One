@@ -7,7 +7,8 @@ const MAIN_FRAME_ID = 'ctl00_mobilityPH_iframeMain'
 type CarrierWindow = Window & { $find?: (id: string) => unknown }
 
 type MainRequest = {
-  type: 'APPLY_CLIENT' | 'APPLY_LEDGER' | 'APPLY_ALLOCATION' | 'CAPTURE_REPORT'
+  type: 'APPLY_CLIENT' | 'APPLY_LEDGER' | 'APPLY_ALLOCATION' |
+    'APPLY_TERM_CLIENT' | 'APPLY_TERM_FUNDING' | 'APPLY_TERM_REPORTS' | 'CAPTURE_REPORT'
   token: string
   correlationId: string
   values: Record<string, string | number>
@@ -18,7 +19,10 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 function request(value: unknown): MainRequest | null {
-  if (!object(value) || !['APPLY_CLIENT', 'APPLY_LEDGER', 'APPLY_ALLOCATION', 'CAPTURE_REPORT'].includes(String(value.type)) ||
+  if (!object(value) || ![
+    'APPLY_CLIENT', 'APPLY_LEDGER', 'APPLY_ALLOCATION',
+    'APPLY_TERM_CLIENT', 'APPLY_TERM_FUNDING', 'APPLY_TERM_REPORTS', 'CAPTURE_REPORT',
+  ].includes(String(value.type)) ||
     typeof value.token !== 'string' || value.token.length < 32 || value.token.length > 128 ||
     typeof value.correlationId !== 'string' || value.correlationId.length < 16 || value.correlationId.length > 128 ||
     !object(value.values) || Object.keys(value.values).length > 20 ||
@@ -147,6 +151,81 @@ export default defineContentScript({
       preference.dispatchEvent(new Event('change', { bubbles: true }))
       await delay(1_000)
     }
+    const optionByText = (doc: Document, id: string, text: string) => {
+      const select = element<HTMLSelectElement>(doc, id)
+      const option = [...select.options].find((candidate) => candidate.text.trim() === text)
+      if (!option) throw new Error('FORESIGHT_SCHEMA_MISMATCH')
+      return option.value
+    }
+    const applyTermClient = async (values: MainRequest['values']) => {
+      let { doc, win } = carrier()
+      const fields = {
+        jurisdiction: 'ctl00_mobilityPH_panelIllustration_cboJurisdiction',
+        firstName: 'ctl00_mobilityPH_panelInsured_ucInsured_txtFirstName',
+        lastName: 'ctl00_mobilityPH_panelInsured_ucInsured_txtLastName',
+        gender: 'ctl00_mobilityPH_panelInsured_ucInsured_cboGender',
+        birthDate: 'ctl00_mobilityPH_panelInsured_ucInsured_txtBirthDate',
+        riskClass: 'ctl00_mobilityPH_panelInsured_ucRisk_cboRiskClass',
+        ownerType: 'ctl00_mobilityPH_panelOwner_ucOwner_cboOwnerType',
+      }
+      setSelect(doc, fields.jurisdiction, String(values.jurisdiction))
+      element<HTMLSelectElement>(doc, fields.jurisdiction).dispatchEvent(new Event('change', { bubbles: true }))
+      await delay(700)
+
+      ;({ doc, win } = carrier())
+      setInput(doc, fields.firstName, String(values.firstName))
+      setInput(doc, fields.lastName, String(values.lastName))
+      invoke(win, 'ctl00_mobilityPH_panelInsured_ucInsured', 'updateName')
+      await delay(500)
+      setSelect(doc, fields.gender, String(values.gender))
+      setInput(doc, fields.birthDate, String(values.birthDate))
+      invoke(win, 'ctl00_mobilityPH_panelInsured_ucInsured', 'updateInformation')
+      await delay(800)
+
+      ;({ doc, win } = carrier())
+      setSelect(doc, fields.riskClass, String(values.riskClass))
+      invoke(win, 'ctl00_mobilityPH_panelInsured_ucRisk', 'updateInformation')
+      await delay(600)
+      setSelect(doc, fields.ownerType, optionByText(doc, fields.ownerType, 'Same as Insured'))
+      invoke(win, 'ctl00_mobilityPH_panelOwner_ucOwner', 'updateOwnerType')
+      await delay(600)
+    }
+    const applyTermFunding = async (values: MainRequest['values']) => {
+      let { doc, win } = carrier()
+      const fields = {
+        designType: 'ctl00_mobilityPH_panelDBO_ucDeathBenefit_cboDesignType',
+        faceAmount: 'ctl00_mobilityPH_panelDBO_ucDeathBenefit_txtInitialFaceAmount',
+        premiumMode: 'ctl00_mobilityPH_panelDBO_ucDeathBenefit_cboPremiumMode',
+        termDuration: 'ctl00_mobilityPH_panelTermProduct_ucTermProduct_cboTermProduct',
+      }
+      setSelect(doc, fields.designType, String(values.designType))
+      element<HTMLSelectElement>(doc, fields.designType).dispatchEvent(new Event('change', { bubbles: true }))
+      await delay(600)
+      ;({ doc, win } = carrier())
+      writeForesightControlValue(element<HTMLInputElement>(doc, fields.faceAmount), Number(values.faceAmount))
+      invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefit', 'updateDeathBenefitSchedule')
+      await delay(900)
+      ;({ doc, win } = carrier())
+      setSelect(doc, fields.premiumMode, String(values.premiumMode))
+      element<HTMLSelectElement>(doc, fields.premiumMode).dispatchEvent(new Event('change', { bubbles: true }))
+      await delay(700)
+      ;({ doc, win } = carrier())
+      setSelect(doc, fields.termDuration, String(values.termDuration))
+      element<HTMLSelectElement>(doc, fields.termDuration).dispatchEvent(new Event('change', { bubbles: true }))
+      await delay(900)
+    }
+    const applyTermReports = async (values: MainRequest['values']) => {
+      const { doc } = carrier()
+      const groups = [...doc.querySelectorAll<HTMLInputElement>('input[type="checkbox"][id$="_chkGroup"]')]
+      const main = groups.find((checkbox) => checkbox.parentElement?.parentElement?.textContent?.includes(`Term ${String(values.duration)}`) && checkbox.parentElement?.parentElement?.textContent?.includes('NAIC Illustration'))
+      if (!main) throw new Error('FORESIGHT_REPORT_SELECTION_MISMATCH')
+      for (const checkbox of groups) if (checkbox !== main && checkbox.checked) checkbox.click()
+      if (!main.checked) main.click()
+      for (const checkbox of doc.querySelectorAll<HTMLInputElement>('input[type="checkbox"][id*="rptOptionalReports"]')) {
+        if (checkbox.checked) checkbox.click()
+      }
+      await delay(500)
+    }
     const base64 = (bytes: Uint8Array) => {
       let binary = ''
       for (let offset = 0; offset < bytes.length; offset += 32_768) {
@@ -195,7 +274,10 @@ export default defineContentScript({
       void (value.type === 'APPLY_CLIENT' ? applyClient(value.values)
         : value.type === 'APPLY_LEDGER' ? applyLedger(value.values)
           : value.type === 'APPLY_ALLOCATION' ? applyAllocation()
-            : captureReport()).then(
+            : value.type === 'APPLY_TERM_CLIENT' ? applyTermClient(value.values)
+              : value.type === 'APPLY_TERM_FUNDING' ? applyTermFunding(value.values)
+                : value.type === 'APPLY_TERM_REPORTS' ? applyTermReports(value.values)
+                  : captureReport()).then(
         (result) => window.postMessage({
           channel: CHANNEL,
           payload: result ? {

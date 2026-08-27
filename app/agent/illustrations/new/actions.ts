@@ -15,6 +15,10 @@ import {
   FORESIGHT_ISSUE_STATES,
   foresightIllustrationInputHash,
 } from '@/lib/national-life/foresight-illustration-contract'
+import {
+  buildForesightTermIllustrationSnapshot,
+  foresightTermIllustrationInputHash,
+} from '@/lib/national-life/foresight-term-contract'
 import { getForesightIllustrationProduct } from '@/lib/national-life/foresight-product-catalog'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
 import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
@@ -39,6 +43,7 @@ const GENDERS = new Set(['Male', 'Female'])
 const RATE_CLASSES = new Set(['Standard_NT', 'Standard_Tobacco'])
 const DEATH_BENEFIT_OPTIONS = new Set(['A_Level', 'B_Increasing'])
 const CAP_FOCUS = 'SP500PointToPointCapFocus'
+const TERM_DURATIONS = new Set(['10-G', '15-G', '20-G', '30-G', 'ART'])
 
 /// Creates the exact, reviewable instruction that the Foresight executor will
 /// write into the carrier. It intentionally does not call Rapid Solve: capital
@@ -61,14 +66,13 @@ export async function requestForesightIllustration(
   const rateClass = normalizeText(formData.get('rateClass') as string | null)
   const deathBenefitOption = normalizeText(formData.get('deathBenefitOption') as string | null)
   const strategy = normalizeText(formData.get('strategy') as string | null)
+  const termDuration = normalizeText(formData.get('termDuration') as string | null)
+  const premiumMode = normalizeText(formData.get('premiumMode') as string | null)
   const clientId = normalizeText(formData.get('clientId') as string | null)
   const faceAmount = Number(normalizeText(formData.get('faceAmount') as string | null))
   const monthlyPremium = Number(normalizeText(formData.get('monthlyPremium') as string | null))
 
   if (!product) return { ok: false, message: 'Escolha o produto da ilustração.' }
-  if (product.availability !== 'READY') {
-    return { ok: false, message: 'A ilustração Term ainda precisa da validação do formulário da National Life no Foresight.' }
-  }
   if (!firstName) return { ok: false, message: 'Informe o nome.' }
   if (!lastName) return { ok: false, message: 'Informe o sobrenome.' }
   const dateOfBirth = parseIsoDate(dateOfBirthRaw)
@@ -78,35 +82,57 @@ export async function requestForesightIllustration(
   }
   if (!GENDERS.has(gender)) return { ok: false, message: 'Informe o sexo, como a seguradora o classifica.' }
   if (!RATE_CLASSES.has(rateClass)) return { ok: false, message: 'Informe a classe de risco.' }
-  if (!DEATH_BENEFIT_OPTIONS.has(deathBenefitOption)) {
-    return { ok: false, message: 'Informe a opção de benefício por morte.' }
-  }
-  if (strategy !== CAP_FOCUS) {
-    return { ok: false, message: 'A ilustração oficial usa S&P 500 — foco em teto.' }
-  }
   if (!Number.isFinite(faceAmount) || faceAmount <= 0 || faceAmount > 1_000_000_000) {
     return { ok: false, message: 'Informe um capital segurado maior que zero.' }
   }
-  if (!Number.isFinite(monthlyPremium) || monthlyPremium <= 0 || monthlyPremium > 100_000_000) {
-    return { ok: false, message: 'Informe um prêmio mensal maior que zero.' }
+  if (product.kind === 'IUL') {
+    if (!DEATH_BENEFIT_OPTIONS.has(deathBenefitOption)) {
+      return { ok: false, message: 'Informe a opção de benefício por morte.' }
+    }
+    if (strategy !== CAP_FOCUS) {
+      return { ok: false, message: 'A ilustração oficial usa S&P 500 — foco em teto.' }
+    }
+    if (!Number.isFinite(monthlyPremium) || monthlyPremium <= 0 || monthlyPremium > 100_000_000) {
+      return { ok: false, message: 'Informe um prêmio mensal maior que zero.' }
+    }
+  } else if (!TERM_DURATIONS.has(termDuration)) {
+    return { ok: false, message: 'Escolha a duração do Term.' }
+  } else if (premiumMode !== 'Monthly') {
+    return { ok: false, message: 'A ilustração Term oficial usa cobrança mensal.' }
   }
 
   const illustrationId = `ill_${randomUUID()}`
-  const rawPayload = {
-    foresightDraft: {
-      schemaVersion: 1,
-      firstName,
-      lastName,
-      dateOfBirth: dateOfBirthRaw,
-      issueState,
-      gender,
-      rateClass,
-      faceAmount,
-      monthlyPremium,
-      deathBenefitOption,
-      strategy: CAP_FOCUS,
-    },
-  } as Prisma.InputJsonValue
+  const rawPayload = (product.kind === 'IUL'
+    ? {
+        foresightDraft: {
+          schemaVersion: 1,
+          firstName,
+          lastName,
+          dateOfBirth: dateOfBirthRaw,
+          issueState,
+          gender,
+          rateClass,
+          faceAmount,
+          monthlyPremium,
+          deathBenefitOption,
+          strategy: CAP_FOCUS,
+        },
+      }
+    : {
+        foresightTermDraft: {
+          schemaVersion: 1,
+          carrierProduct: product.carrierName,
+          firstName,
+          lastName,
+          dateOfBirth: dateOfBirthRaw,
+          issueState,
+          gender,
+          rateClass,
+          faceAmount,
+          premiumMode: 'Monthly',
+          termDuration,
+        },
+      }) as Prisma.InputJsonValue
 
   if (clientId) {
     const ownedClient = await prisma.client.findFirst({
@@ -127,26 +153,25 @@ export async function requestForesightIllustration(
           agentId: agent.id,
           clientId: clientId || null,
           kind: 'PRELIMINARY',
-          productName: 'FlexLife',
+          productName: product.carrierName,
           provider: NATIONAL_LIFE_PROVIDER,
           externalId: illustrationId,
           faceAmount,
           premium: null,
-          targetPremium: monthlyPremium,
-          targetPremiumSource: 'AGENT_INPUT_FOR_FORESIGHT',
+          targetPremium: product.kind === 'IUL' ? monthlyPremium : null,
+          targetPremiumSource: product.kind === 'IUL'
+            ? 'AGENT_INPUT_FOR_FORESIGHT'
+            : 'CARRIER_CALCULATED_FOR_TERM',
           insuredName: `${firstName} ${lastName}`,
           insuredDateOfBirth: dateOfBirth,
           rawPayload,
         },
         select: { id: true, createdAt: true },
       })
-      const snapshot = buildForesightIllustrationSnapshot({
-        ...created,
-        caseId: null,
-        productName: 'FlexLife',
-        rawPayload,
-      })
-      const inputHash = foresightIllustrationInputHash(snapshot)
+      const source = { ...created, caseId: null, productName: product.carrierName, rawPayload }
+      const inputHash = product.kind === 'IUL'
+        ? foresightIllustrationInputHash(buildForesightIllustrationSnapshot(source))
+        : foresightTermIllustrationInputHash(buildForesightTermIllustrationSnapshot(source))
       const command = await issueConnectorCommand(repository, {
         agentId: agent.id,
         capability: 'GENERATE_ILLUSTRATION',

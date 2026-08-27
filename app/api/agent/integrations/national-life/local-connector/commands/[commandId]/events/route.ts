@@ -39,7 +39,7 @@ const foresightArtifactRepository = {
     return prisma.illustration.findFirst({
       where: { id: input.illustrationId, agentId: input.agentId },
       select: {
-        provider: true, externalId: true, documentBytes: true, documentMimeType: true,
+        provider: true, externalId: true, productName: true, documentBytes: true, documentMimeType: true,
       },
     })
   },

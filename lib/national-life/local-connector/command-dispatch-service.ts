@@ -25,6 +25,12 @@ import {
   type ForesightIllustrationExecutionSnapshot,
 } from '../foresight-illustration-contract'
 import {
+  buildForesightTermIllustrationSnapshot,
+  foresightTermIllustrationInputHash,
+  parseForesightTermIllustrationReceipt,
+  type ForesightTermIllustrationSnapshotV1,
+} from '../foresight-term-contract'
+import {
   buildFlexLifeQuoteSnapshot,
   flexLifeQuoteInputHash,
   type FlexLifeQuoteSnapshotV1,
@@ -80,6 +86,7 @@ export type ForesightArtifactRepository = {
   findOwnedArtifact(input: { agentId: string; illustrationId: string }): Promise<{
     provider: string | null
     externalId: string | null
+    productName: string | null
     documentBytes: Uint8Array | null
     documentMimeType: string | null
   } | null>
@@ -158,7 +165,7 @@ export async function readDeviceConnectorCommandInput(
   input: { agentId: string; deviceId: string; commandId: string; now?: Date },
 ): Promise<{
   inputHash: string
-  snapshot: ForesightIllustrationExecutionSnapshot | FlexLifeQuoteSnapshotV1
+  snapshot: ForesightIllustrationExecutionSnapshot | ForesightTermIllustrationSnapshotV1 | FlexLifeQuoteSnapshotV1
 }> {
   const command = await repository.findDeviceOwned(input)
   const now = input.now ?? new Date()
@@ -183,12 +190,15 @@ export async function readDeviceConnectorCommandInput(
     illustrationId: publicCommand.target.id,
   })
   if (!illustration) throw new ConnectorCommandError('COMMAND_NOT_FOUND')
-  let snapshot: ForesightIllustrationExecutionSnapshot | FlexLifeQuoteSnapshotV1
+  let snapshot: ForesightIllustrationExecutionSnapshot | ForesightTermIllustrationSnapshotV1 | FlexLifeQuoteSnapshotV1
   let inputHash: string
   try {
     if (command.capability === 'FLEXLIFE_QUOTE') {
       snapshot = buildFlexLifeQuoteSnapshot(illustration)
       inputHash = flexLifeQuoteInputHash(snapshot)
+    } else if (illustration.productName === 'LSW Term' || illustration.productName === 'NL Term') {
+      snapshot = buildForesightTermIllustrationSnapshot(illustration)
+      inputHash = foresightTermIllustrationInputHash(snapshot)
     } else {
       snapshot = buildForesightIllustrationSnapshot(illustration)
       inputHash = foresightIllustrationInputHash(snapshot)
@@ -257,7 +267,8 @@ export async function recordDeviceConnectorCommandEvent(
     if (publicCommand.target?.kind !== 'ILLUSTRATION' || !('inputHash' in publicCommand.params) ||
       !payload || Object.keys(payload).length !== 1 || !Object.hasOwn(payload, 'illustration') ||
       !input.foresightArtifactRepository) throw new ConnectorCommandError('EVENT_INVALID')
-    const receipt = parseForesightIllustrationReceipt(payload.illustration)
+    const receipt = parseForesightIllustrationReceipt(payload.illustration) ??
+      parseForesightTermIllustrationReceipt(payload.illustration)
     if (!receipt || receipt.inputHash !== publicCommand.params.inputHash) {
       throw new ConnectorCommandError('EVENT_INVALID')
     }
@@ -267,6 +278,7 @@ export async function recordDeviceConnectorCommandEvent(
     })
     if (!artifact || artifact.provider !== 'NATIONAL_LIFE_FORESIGHT' ||
       artifact.externalId !== `${input.agentId}:${receipt.carrierCaseName}` ||
+      artifact.productName !== ('productCode' in receipt ? 'FlexLife' : receipt.carrierProduct) ||
       artifact.documentMimeType !== 'application/pdf' || !artifact.documentBytes ||
       artifact.documentBytes.byteLength !== receipt.documentBytes ||
       createHash('sha256').update(artifact.documentBytes).digest('hex') !== receipt.documentSha256) {

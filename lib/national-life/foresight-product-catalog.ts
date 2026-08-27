@@ -1,7 +1,8 @@
 export type ForesightIllustrationProduct = {
-  key: 'FLEXLIFE_IUL' | 'NATIONAL_LIFE_TERM'
+  key: 'FLEXLIFE_IUL' | 'LSW_TERM' | 'NL_TERM'
   label: 'IUL' | 'Term'
-  carrierName: 'FlexLife' | 'NL Term'
+  kind: 'IUL' | 'TERM'
+  carrierName: 'FlexLife' | 'LSW Term' | 'NL Term'
   description: string
   availability: 'READY' | 'CONTRACT_REQUIRED'
 }
@@ -13,16 +14,26 @@ export const FORESIGHT_ILLUSTRATION_PRODUCTS: readonly ForesightIllustrationProd
   {
     key: 'FLEXLIFE_IUL',
     label: 'IUL',
+    kind: 'IUL',
     carrierName: 'FlexLife',
     description: 'FlexLife • Indexed Universal Life',
     availability: 'READY',
   },
   {
-    key: 'NATIONAL_LIFE_TERM',
+    key: 'LSW_TERM',
     label: 'Term',
+    kind: 'TERM',
+    carrierName: 'LSW Term',
+    description: 'Life Insurance Company of the Southwest • Term Life',
+    availability: 'READY',
+  },
+  {
+    key: 'NL_TERM',
+    label: 'Term',
+    kind: 'TERM',
     carrierName: 'NL Term',
-    description: 'National Life Term',
-    availability: 'CONTRACT_REQUIRED',
+    description: 'National Life Insurance Company • Term Life',
+    availability: 'READY',
   },
 ] as const
 

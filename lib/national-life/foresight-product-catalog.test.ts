@@ -5,24 +5,35 @@ import {
 } from './foresight-product-catalog'
 
 describe('Foresight illustration product catalog', () => {
-  it('shows the carrier-observed IUL and Term choices without treating an unverified Term workflow as executable', () => {
+  it('exposes IUL and both carrier-specific Term contracts as executable products', () => {
     expect(FORESIGHT_ILLUSTRATION_PRODUCTS).toEqual([
       {
         key: 'FLEXLIFE_IUL',
         label: 'IUL',
+        kind: 'IUL',
         carrierName: 'FlexLife',
         description: 'FlexLife • Indexed Universal Life',
         availability: 'READY',
       },
       {
-        key: 'NATIONAL_LIFE_TERM',
+        key: 'LSW_TERM',
         label: 'Term',
+        kind: 'TERM',
+        carrierName: 'LSW Term',
+        description: 'Life Insurance Company of the Southwest • Term Life',
+        availability: 'READY',
+      },
+      {
+        key: 'NL_TERM',
+        label: 'Term',
+        kind: 'TERM',
         carrierName: 'NL Term',
-        description: 'National Life Term',
-        availability: 'CONTRACT_REQUIRED',
+        description: 'National Life Insurance Company • Term Life',
+        availability: 'READY',
       },
     ])
     expect(getForesightIllustrationProduct('FLEXLIFE_IUL')?.availability).toBe('READY')
-    expect(getForesightIllustrationProduct('NATIONAL_LIFE_TERM')?.availability).toBe('CONTRACT_REQUIRED')
+    expect(getForesightIllustrationProduct('LSW_TERM')?.carrierName).toBe('LSW Term')
+    expect(getForesightIllustrationProduct('NL_TERM')?.carrierName).toBe('NL Term')
   })
 })

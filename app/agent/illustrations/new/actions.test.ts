@@ -133,15 +133,43 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
     expect(mocks.createIllustration).not.toHaveBeenCalled()
   })
 
-  it('does not turn an unverified Term menu choice into a FlexLife carrier command', async () => {
-    const term = form()
-    term.set('product', 'NATIONAL_LIFE_TERM')
+  it('issues a Term command with the carrier-selected duration and no agent premium', async () => {
+    const term = new FormData()
+    term.set('product', 'LSW_TERM')
+    term.set('firstName', 'KeeprOne')
+    term.set('lastName', 'Term')
+    term.set('dateOfBirth', '1981-08-26')
+    term.set('issueState', 'FL')
+    term.set('gender', 'Male')
+    term.set('rateClass', 'Standard_NT')
+    term.set('faceAmount', '250000')
+    term.set('termDuration', '20-G')
+    term.set('premiumMode', 'Monthly')
 
     await expect(requestForesightIllustration(term)).resolves.toEqual({
-      ok: false,
-      message: 'A ilustração Term ainda precisa da validação do formulário da National Life no Foresight.',
+      ok: true,
+      commandId: 'cmd_foresight_1',
+      illustrationId: 'ill_foresight_1',
     })
-    expect(mocks.createIllustration).not.toHaveBeenCalled()
-    expect(mocks.issue).not.toHaveBeenCalled()
+    expect(mocks.createIllustration).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        productName: 'LSW Term',
+        insuredName: 'KeeprOne Term',
+        faceAmount: 250000,
+        premium: null,
+        targetPremium: null,
+        targetPremiumSource: 'CARRIER_CALCULATED_FOR_TERM',
+        rawPayload: expect.objectContaining({
+          foresightTermDraft: expect.objectContaining({
+            schemaVersion: 1,
+            carrierProduct: 'LSW Term',
+            termDuration: '20-G',
+            premiumMode: 'Monthly',
+            faceAmount: 250000,
+            issueState: 'FL',
+          }),
+        }),
+      }),
+    }))
   })
 })

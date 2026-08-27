@@ -64,8 +64,13 @@ import {
   sha256ForesightSnapshot,
 } from '../lib/foresight-contract'
 import {
+  parseForesightTermIllustrationSnapshot,
+  sha256ForesightTermSnapshot,
+} from '../lib/foresight-term-contract'
+import {
   parseForesightExecutionResponse,
   type ExecuteForesightIllustrationMessage,
+  type ForesightExecutionSnapshot,
   type ForesightExecutionResponse,
 } from '../lib/foresight-messages'
 import {
@@ -896,13 +901,14 @@ async function executeFlexLifeQuoteCommand(
 
 function parseForesightCommandInput(value: unknown): {
   inputHash: string
-  snapshot: NonNullable<ReturnType<typeof parseForesightIllustrationSnapshot>>
+  snapshot: ForesightExecutionSnapshot
 } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('FORESIGHT_INPUT_INVALID')
   const record = value as Record<string, unknown>
   if (Object.keys(record).length !== 2 || typeof record.inputHash !== 'string' ||
     !/^[a-f0-9]{64}$/.test(record.inputHash)) throw new Error('FORESIGHT_INPUT_INVALID')
-  const snapshot = parseForesightIllustrationSnapshot(record.snapshot)
+  const snapshot = parseForesightIllustrationSnapshot(record.snapshot) ??
+    parseForesightTermIllustrationSnapshot(record.snapshot)
   if (!snapshot) throw new Error('FORESIGHT_INPUT_INVALID')
   return { inputHash: record.inputHash, snapshot }
 }
@@ -1051,8 +1057,11 @@ async function executeForesightCommand(
     body: {},
   })
   const approved = parseForesightCommandInput(rawInput)
+  const verifiedInputHash = 'code' in approved.snapshot.product
+    ? await sha256ForesightSnapshot(approved.snapshot)
+    : await sha256ForesightTermSnapshot(approved.snapshot)
   if (approved.inputHash !== params.inputHash || approved.snapshot.illustrationId !== params.illustrationId ||
-    await sha256ForesightSnapshot(approved.snapshot) !== approved.inputHash) {
+    verifiedInputHash !== approved.inputHash) {
     throw new Error('FORESIGHT_INPUT_HASH_MISMATCH')
   }
   await writeCommandState({
