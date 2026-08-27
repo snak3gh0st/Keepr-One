@@ -69,6 +69,33 @@ export class SignedRequestError extends Error {
   }
 }
 
+function isTransientSignedRequestFailure(error: unknown): boolean {
+  if (error instanceof TypeError) return true
+  return error instanceof SignedRequestError &&
+    error.code === 'DEVICE_REQUEST_FAILED' &&
+    (error.status === undefined || error.status >= 500)
+}
+
+export async function retryIdempotentSignedRequest<T>(input: {
+  request: () => Promise<T>
+  wait?: (milliseconds: number) => Promise<unknown>
+  delaysMs?: readonly number[]
+}): Promise<T> {
+  const delays = input.delaysMs ?? [750, 2_500]
+  const wait = input.wait ?? ((milliseconds: number) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds)))
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await input.request()
+    } catch (error) {
+      const delay = delays[attempt]
+      if (delay === undefined || !isTransientSignedRequestFailure(error)) throw error
+      await wait(delay)
+    }
+  }
+}
+
 /// Um 401 sozinho não prova nada sobre o pareamento: o servidor devolve o mesmo
 /// status para relógio fora da janela da assinatura e para soluço de banco no
 /// registro de replay. Só a afirmação explícita de que o dispositivo não existe

@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   base64Url,
   canonicalMessage,
   classifyFailedResponse,
+  retryIdempotentSignedRequest,
+  SignedRequestError,
   sha256,
   sha256Bytes,
   signCanonicalMessage,
@@ -89,5 +91,44 @@ describe('classifyFailedResponse', () => {
   it('keeps a run-start rate limit distinct from a portal failure', () => {
     expect(classifyFailedResponse(429, new Headers({ 'retry-after': '120' })))
       .toBe('RUN_START_RATE_LIMITED')
+  })
+})
+
+describe('retryIdempotentSignedRequest', () => {
+  it('retries transient gateway failures and then returns the accepted receipt', async () => {
+    const request = vi.fn()
+      .mockRejectedValueOnce(new SignedRequestError('DEVICE_REQUEST_FAILED', 504))
+      .mockResolvedValue({ duplicate: false })
+    const wait = vi.fn().mockResolvedValue(undefined)
+
+    await expect(retryIdempotentSignedRequest({ request, wait, delaysMs: [25, 75] }))
+      .resolves.toEqual({ duplicate: false })
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(wait).toHaveBeenCalledWith(25)
+  })
+
+  it('retries a browser network failure but stops after the configured budget', async () => {
+    const failure = new TypeError('Failed to fetch')
+    const request = vi.fn().mockRejectedValue(failure)
+    const wait = vi.fn().mockResolvedValue(undefined)
+
+    await expect(retryIdempotentSignedRequest({ request, wait, delaysMs: [10, 20] }))
+      .rejects.toBe(failure)
+    expect(request).toHaveBeenCalledTimes(3)
+    expect(wait.mock.calls).toEqual([[10], [20]])
+  })
+
+  it.each([
+    new SignedRequestError('DEVICE_REQUEST_FAILED', 400),
+    new SignedRequestError('DEVICE_REQUEST_REJECTED', 401),
+    new SignedRequestError('IDEMPOTENCY_CONFLICT', 409),
+  ])('does not retry deterministic or security failures (%s)', async (failure) => {
+    const request = vi.fn().mockRejectedValue(failure)
+    const wait = vi.fn().mockResolvedValue(undefined)
+
+    await expect(retryIdempotentSignedRequest({ request, wait, delaysMs: [10, 20] }))
+      .rejects.toBe(failure)
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(wait).not.toHaveBeenCalled()
   })
 })

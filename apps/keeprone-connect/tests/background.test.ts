@@ -9,6 +9,7 @@ vi.mock('../lib/signed-client', () => ({
   },
   signedJsonRequest: vi.fn(),
   signedBinaryRequest: vi.fn(),
+  retryIdempotentSignedRequest: vi.fn(async ({ request }: { request: () => Promise<unknown> }) => request()),
 }))
 vi.mock('../lib/key-store', () => ({
   clearDeviceKeys: vi.fn(),
@@ -928,7 +929,7 @@ describe('background plan executor', () => {
     expect(tabs.update).not.toHaveBeenCalledWith(44, expect.objectContaining({ url: expect.any(String) }))
   })
 
-  it('defers a scheduled sync while an illustration command owns the carrier session', async () => {
+  it('starts a scheduled sync in its own tab while an illustration command is running', async () => {
     storage.sync = {
       status: 'COMPLETED',
       completedAt: new Date(Date.now() - 25 * 60 * 60_000).toISOString(),
@@ -940,16 +941,25 @@ describe('background plan executor', () => {
       status: 'RUNNING',
     }
     tabs.query.mockResolvedValue([{ id: 44, active: false, url: `${NLG}/NWI/Main/Layout.aspx` }])
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      runId: 'run-scheduled',
+      stages: TWO_STAGE_PLAN,
+      completedStages: 0,
+      nextStageIndex: 0,
+    } as never)
     await bootBackground()
 
     emit('alarms.onAlarm', { name: 'keeprone-national-life-scheduled-sync' })
     await flush()
 
-    expect(tabs.create).not.toHaveBeenCalled()
-    expect(tabs.update).not.toHaveBeenCalled()
-    expect(signedJsonRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
       pathname: '/api/agent/integrations/national-life/local-connector/runs',
     }))
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
+      url: `${NLG}${NEW_BUSINESS_PATH}`,
+    })
+    expect(tabs.update).not.toHaveBeenCalledWith(44, expect.objectContaining({ url: expect.any(String) }))
   })
 
   it('does not start another scheduled sync while the last completion is fresh', async () => {
