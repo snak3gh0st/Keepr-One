@@ -1,4 +1,4 @@
-import { FORESIGHT_FLEXLIFE_FIELDS } from '../lib/foresight-target'
+import { FORESIGHT_FLEXLIFE_FIELDS, foresightSolveValue } from '../lib/foresight-target'
 import { isForesightPdf, parseForesightReportUrl } from '../lib/foresight-report'
 import { writeForesightControlValue } from '../lib/foresight-control-value'
 
@@ -142,15 +142,11 @@ export default defineContentScript({
       await delay(1_100)
     }
     const solveRadio = (doc: Document, marker: string, label: string) => {
+      const expectedValue = foresightSolveValue(marker, label)
+      if (!expectedValue) throw new Error('FORESIGHT_SCHEMA_MISMATCH')
       const radios = [...doc.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
         .filter((radio) => radio.id.includes(marker) || radio.name.includes(marker))
-      const matches = radios.filter((radio) => {
-        const explicit = radio.id
-          ? doc.querySelector<HTMLLabelElement>(`label[for="${radio.id}"]`)?.textContent
-          : null
-        const nearby = radio.closest('label')?.textContent ?? radio.parentElement?.textContent ?? ''
-        return [explicit, nearby].some((text) => text?.replace(/\s+/g, ' ').trim() === label)
-      })
+      const matches = radios.filter((radio) => radio.value === expectedValue)
       if (matches.length !== 1) throw new Error('FORESIGHT_SCHEMA_MISMATCH')
       const radio = matches[0]!
       if (!radio.checked) radio.click()

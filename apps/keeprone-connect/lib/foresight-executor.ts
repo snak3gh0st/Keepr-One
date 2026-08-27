@@ -13,6 +13,7 @@ import {
   compareForesightTarget,
   deterministicCaseFingerprint,
   foresightReadbackMismatchCode,
+  foresightSolveLabel,
   validateForesightSurface,
   type ForesightMaterialReadback,
   foresightClientBirthDate,
@@ -434,12 +435,7 @@ function selectedSolveRadio(doc: Document, marker: string): string {
     .filter((radio) => (radio.id.includes(marker) || radio.name.includes(marker)) && radio.checked)
   if (selected.length !== 1) fail('FORESIGHT_SCHEMA_MISMATCH')
   const radio = selected[0]!
-  const explicit = radio.id
-    ? doc.querySelector<HTMLLabelElement>(`label[for="${radio.id}"]`)?.textContent
-    : null
-  const nearby = radio.closest('label')?.textContent ?? radio.parentElement?.textContent
-  const label = (explicit ?? nearby ?? '').replace(/\s+/g, ' ').trim()
-  return label || fail('FORESIGHT_SCHEMA_MISMATCH')
+  return foresightSolveLabel(marker, radio.value) ?? fail('FORESIGHT_SCHEMA_MISMATCH')
 }
 
 function hasCarrierCalculationError(doc: Document): boolean {

@@ -7,6 +7,8 @@ import {
   deterministicCaseFingerprint,
   foresightReadbackMismatchCode,
   foresightClientBirthDate,
+  foresightSolveLabel,
+  foresightSolveValue,
   validateForesightSurface,
   type ForesightMaterialReadback,
 } from './foresight-target'
@@ -45,6 +47,14 @@ const snapshot = parseForesightIllustrationSnapshot({
 })! as ForesightIllustrationSnapshotV1
 
 describe('Foresight target verification', () => {
+  it('maps the carrier solve radio values without relying on missing HTML labels', () => {
+    expect(foresightSolveValue('rdoDeathBenefitSolves', 'None')).toBe('0')
+    expect(foresightSolveValue('rdoDeathBenefitSolves', 'Based on Target Premium')).toBe('1001')
+    expect(foresightSolveValue('rdoPremiumSolves', 'Protection Focus')).toBe('103')
+    expect(foresightSolveLabel('rdoPremiumSolves', '0')).toBe('None')
+    expect(foresightSolveLabel('rdoDeathBenefitSolves', '1005')).toBe('Protection Focus')
+  })
+
   it('formats a non-palindromic birth date for the US Foresight client form', () => {
     expect(foresightClientBirthDate('1981-08-26')).toBe('08/26/1981')
   })
