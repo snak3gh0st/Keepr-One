@@ -49,6 +49,7 @@ export type ForesightSolvedExecutionReceipt = {
   solveBasis: 'DEATH_BENEFIT' | 'PREMIUM'
   faceAmount: number
   monthlyPremium: number
+  annualPremium: number
   release: string
   reportCode: 'NAIC_ILLUSTRATION'
   documentSha256: string
@@ -139,9 +140,10 @@ function validReceipt(
     if (expected.snapshot.schemaVersion === 2) {
       return exactKeys(receipt, [
         'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'solveBasis', 'faceAmount',
-        'monthlyPremium', 'release', 'reportCode', 'documentSha256', 'documentBytes', 'saved',
+        'monthlyPremium', 'annualPremium', 'release', 'reportCode', 'documentSha256', 'documentBytes', 'saved',
       ]) && receipt.productCode === '956' && receipt.solveBasis === expected.snapshot.solve.basis &&
-        positiveCarrierAmount(receipt.faceAmount) && positiveCarrierAmount(receipt.monthlyPremium)
+        positiveCarrierAmount(receipt.faceAmount) && positiveCarrierAmount(receipt.monthlyPremium) &&
+        positiveCarrierAmount(receipt.annualPremium)
     }
     return exactKeys(receipt, [
       'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'release', 'reportCode',

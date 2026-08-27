@@ -419,6 +419,7 @@ type ForesightSolvedLedgerReadback = {
   premiumSolve: string
   faceAmount: number
   monthlyPremium: number
+  annualPremium: number
   premiumMode: string
   deathBenefitOption: string
 }
@@ -435,14 +436,18 @@ export function monthlyPremiumFromAnnual(annualPremium: number): number | null {
   return Math.round((annualPremium / 12) * 100) / 100
 }
 
-function solvedMonthlyPremium(doc: Document): number | null {
-  const scheduled = carrierAmount(input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount).value)
-  if (scheduled !== null) return scheduled
+function solvedAnnualPremium(): number | null {
   const summary = globalThis.document.getElementById('ctl00_mobilityPH_quickCalc_BodySection')
   const annual = [...(summary?.querySelectorAll('tr') ?? [])].find((row) =>
     row.querySelector('td')?.textContent?.trim() === 'Premium:',
   )?.querySelectorAll('td')[1]?.textContent ?? ''
-  const annualPremium = carrierAmount(annual)
+  return carrierAmount(annual)
+}
+
+function solvedMonthlyPremium(doc: Document): number | null {
+  const scheduled = carrierAmount(input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount).value)
+  if (scheduled !== null) return scheduled
+  const annualPremium = solvedAnnualPremium()
   return annualPremium === null ? null : monthlyPremiumFromAnnual(annualPremium)
 }
 
@@ -462,12 +467,14 @@ function readSolvedLedger(doc: Document): ForesightSolvedLedgerReadback | null {
   validateSurface(doc, '/NWI/IUL2025/ledger.aspx')
   const faceAmount = carrierAmount(input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitAmount).value)
   const monthlyPremium = solvedMonthlyPremium(doc)
-  if (faceAmount === null || monthlyPremium === null) return null
+  const annualPremium = solvedAnnualPremium()
+  if (faceAmount === null || monthlyPremium === null || annualPremium === null) return null
   return {
     faceSolve: selectedSolveRadio(doc, 'rdoDeathBenefitSolves'),
     premiumSolve: selectedSolveRadio(doc, 'rdoPremiumSolves'),
     faceAmount,
     monthlyPremium,
+    annualPremium,
     premiumMode: selectedText(select(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumMode)),
     deathBenefitOption: selectedText(select(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitOption)),
   }
@@ -477,19 +484,18 @@ function expectedDeathBenefitOption(snapshot: ForesightSolvedIllustrationSnapsho
   return snapshot.deathBenefitOption === 'A_Level' ? 'A (Level)' : 'B (Increasing)'
 }
 
-function solvedLedgerMatches(
+export function solvedLedgerMatches(
   snapshot: ForesightSolvedIllustrationSnapshotV2,
   observed: ForesightSolvedLedgerReadback,
 ): boolean {
   if (observed.premiumMode !== 'Monthly' || observed.deathBenefitOption !== expectedDeathBenefitOption(snapshot)) {
     return false
   }
+  if (Math.abs(observed.annualPremium - (observed.monthlyPremium * 12)) > 0.06) return false
   if (snapshot.solve.basis === 'PREMIUM') {
-    return observed.faceSolve === 'Based on Target Premium' && observed.premiumSolve === 'None' &&
-      carrierAmountEquals(observed.monthlyPremium, snapshot.solve.amount)
+    return observed.faceSolve === 'Based on Target Premium' && observed.premiumSolve === 'None'
   }
-  return observed.faceSolve === 'None' && observed.premiumSolve === 'Protection Focus' &&
-    carrierAmountEquals(observed.faceAmount, snapshot.solve.amount)
+  return observed.faceSolve === 'None' && observed.premiumSolve === 'Protection Focus'
 }
 
 async function fillSolvedLedger(
@@ -650,11 +656,11 @@ async function executeForesightSolvedIllustration(input: {
   if (!solvedClientMatches(input.snapshot, client)) fail('FORESIGHT_READBACK_CLIENT_MISMATCH')
   // FlexLife will not calculate a new solved illustration while its strategy
   // allocation is still 0%. Prime the required 100% allocation first.
-  const primedAllocations = opened.existing ? null : await fillAllocation(
+  const primedAllocations = await fillAllocation(
     await navigate('/NWI/IUL2025/InterestRates.aspx', MENU_IDS.interestRates),
   )
   const ledgerDoc = await navigate('/NWI/IUL2025/ledger.aspx', MENU_IDS.ledger)
-  const ledger = opened.existing ? readSolvedLedger(ledgerDoc) : await fillSolvedLedger(ledgerDoc, input.snapshot)
+  const ledger = await fillSolvedLedger(ledgerDoc, input.snapshot)
   if (!ledger || hasCarrierCalculationError(ledgerDoc) || !solvedLedgerMatches(input.snapshot, ledger)) {
     fail(hasCarrierCalculationError(ledgerDoc) ? 'FORESIGHT_CALCULATION_UNAVAILABLE' : 'FORESIGHT_SOLVE_READBACK_MISMATCH')
   }
@@ -681,6 +687,7 @@ async function executeForesightSolvedIllustration(input: {
     solveBasis: input.snapshot.solve.basis,
     faceAmount: ledger.faceAmount,
     monthlyPremium: ledger.monthlyPremium,
+    annualPremium: ledger.annualPremium,
     release,
     reportCode: 'NAIC_ILLUSTRATION',
     documentSha256: await sha256Hex(pdf),

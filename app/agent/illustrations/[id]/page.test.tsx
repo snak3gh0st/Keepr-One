@@ -165,15 +165,49 @@ describe('Illustration detail page', () => {
           gender: 'Female', rateClass: 'Standard_NT', solveBasis: 'PREMIUM', targetMonthlyPremium: 350,
           deathBenefitOption: 'A_Level', strategy: 'SP500PointToPointCapFocus',
         },
+        foresightResult: {
+          solveBasis: 'PREMIUM', requestedAmount: 350, confirmedFaceAmount: 250_000,
+          confirmedMonthlyPremium: 350, confirmedAnnualPremium: 4_200,
+        },
       },
     })
 
     render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-solved-iul' }) }))
 
     expect(screen.getByText('Prêmio mensal confirmado')).toBeTruthy()
+    expect(screen.getByText('Prêmio anual confirmado')).toBeTruthy()
+    expect(screen.getByText('$4,200.00')).toBeTruthy()
     expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
     expect(screen.getByText('Resolvido pelo prêmio mensal')).toBeTruthy()
     expect(screen.getByText('Based on Target Premium')).toBeTruthy()
+  })
+
+  it('explains when the carrier confirms values different from the agent input', async () => {
+    mocks.findFirstIllustration.mockResolvedValue({
+      id: 'illustration-adjusted-iul', createdAt: new Date('2026-08-27T12:00:00.000Z'),
+      insuredName: 'Ale Teste', insuredDateOfBirth: new Date('1998-03-12T00:00:00.000Z'),
+      productName: 'FlexLife', faceAmount: 2_000_000, premium: 105, targetPremium: 100,
+      targetPremiumSource: 'AGENT_INPUT_FOR_FORESIGHT',
+      documentFetchedAt: new Date('2026-08-27T12:02:00.000Z'), documentMimeType: 'application/pdf',
+      caseId: null,
+      rawPayload: {
+        foresightDraft: {
+          schemaVersion: 2, firstName: 'Ale', lastName: 'Teste', dateOfBirth: '1998-03-12',
+          issueState: 'FL', gender: 'Male', rateClass: 'Standard_NT', solveBasis: 'PREMIUM',
+          targetMonthlyPremium: 100, deathBenefitOption: 'A_Level',
+          strategy: 'SP500PointToPointCapFocus',
+        },
+        foresightResult: {
+          solveBasis: 'PREMIUM', requestedAmount: 100, confirmedFaceAmount: 2_000_000,
+          confirmedMonthlyPremium: 105, confirmedAnnualPremium: 1_260,
+        },
+      },
+    })
+
+    render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-adjusted-iul' }) }))
+
+    expect(screen.getByText(/Você informou \$100\.00 por mês/)).toBeTruthy()
+    expect(screen.getByText(/National Life confirmou \$105\.00 por mês e \$1,260\.00 por ano/)).toBeTruthy()
   })
 
   it('shows a premium rejection as a scenario review instead of an in-progress Foresight run', async () => {

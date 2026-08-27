@@ -155,6 +155,7 @@ describe('server-owned Foresight illustration snapshot', () => {
       solveBasis: 'DEATH_BENEFIT',
       faceAmount: 250_000,
       monthlyPremium: 350,
+      annualPremium: 4_200,
       release: '5.3.65.31',
       reportCode: 'NAIC_ILLUSTRATION',
       documentSha256: 'c'.repeat(64),
@@ -163,6 +164,7 @@ describe('server-owned Foresight illustration snapshot', () => {
     } as const
     expect(parseForesightSolvedIllustrationReceipt(receipt)).toEqual(receipt)
     expect(parseForesightSolvedIllustrationReceipt({ ...receipt, monthlyPremium: 0 })).toBeNull()
+    expect(parseForesightSolvedIllustrationReceipt({ ...receipt, annualPremium: 0 })).toBeNull()
   })
 
   it.each([
