@@ -98,6 +98,7 @@ export type ForesightArtifactRepository = {
     solveBasis: 'DEATH_BENEFIT' | 'PREMIUM'
     faceAmount: number
     monthlyPremium: number
+    annualPremium: number
   }) => Promise<void>
 }
 
@@ -310,6 +311,7 @@ export async function recordDeviceConnectorCommandEvent(
         solveBasis: receipt.solveBasis,
         faceAmount: receipt.faceAmount,
         monthlyPremium: receipt.monthlyPremium,
+        annualPremium: receipt.annualPremium,
       })
     }
   }

@@ -3,6 +3,7 @@ import {
   applyForesightAllocationPreference,
   selectForesightOption,
   writeForesightControlValue,
+  writeForesightControlValueWhenReady,
 } from './foresight-control-value'
 
 describe('Foresight currency control writer', () => {
@@ -19,7 +20,7 @@ describe('Foresight currency control writer', () => {
     const setValue = vi.fn((value: string) => { input.value = value })
     input.control = { set_Value: setValue }
 
-    writeForesightControlValue(input, 50)
+    expect(writeForesightControlValue(input, 50)).toBe(true)
 
     expect(setValue).toHaveBeenCalledWith('50')
     expect(input.value).toBe('50')
@@ -28,14 +29,69 @@ describe('Foresight currency control writer', () => {
     ])
   })
 
-  it('falls back to the visible field only when the carrier widget is absent', () => {
+  it('refuses a visible-only write while the carrier schedule widget is absent', () => {
     const dispatchEvent = vi.fn()
     const input = { value: '1500', dispatchEvent }
 
-    writeForesightControlValue(input, 50)
+    expect(writeForesightControlValue(input, 50)).toBe(false)
 
-    expect(input.value).toBe('50')
-    expect(dispatchEvent).toHaveBeenCalledTimes(3)
+    expect(input.value).toBe('1500')
+    expect(dispatchEvent).not.toHaveBeenCalled()
+  })
+
+  it('refuses a write when the carrier widget reads back a different amount', () => {
+    const dispatchEvent = vi.fn()
+    const input = {
+      value: '1500',
+      control: {
+        set_Value: vi.fn(),
+        get_RawValue: vi.fn(() => '1500'),
+      },
+      dispatchEvent,
+    }
+
+    expect(writeForesightControlValue(input, 100)).toBe(false)
+    expect(dispatchEvent).not.toHaveBeenCalled()
+  })
+
+  it('waits for the carrier schedule widget before writing an approved amount', async () => {
+    const staleInput = { value: '1500', dispatchEvent: vi.fn() }
+    const readyInput: {
+      value: string
+      control?: { set_Value(value: string): void }
+      dispatchEvent: ReturnType<typeof vi.fn>
+    } = { value: '1500', dispatchEvent: vi.fn() }
+    readyInput.control = { set_Value: (value) => { readyInput.value = value } }
+    const read = vi.fn()
+      .mockReturnValueOnce(staleInput)
+      .mockReturnValueOnce(readyInput)
+    const wait = vi.fn().mockResolvedValue(undefined)
+
+    await expect(writeForesightControlValueWhenReady({ read, value: 100, wait }))
+      .resolves.toBe(true)
+
+    expect(staleInput.value).toBe('1500')
+    expect(readyInput.value).toBe('100')
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(wait).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps waiting while the carrier replaces its iframe document', async () => {
+    const readyInput: {
+      value: string
+      control?: { set_Value(value: string): void }
+      dispatchEvent: ReturnType<typeof vi.fn>
+    } = { value: '1500', dispatchEvent: vi.fn() }
+    readyInput.control = { set_Value: (value) => { readyInput.value = value } }
+    const read = vi.fn()
+      .mockImplementationOnce(() => { throw new Error('document replaced') })
+      .mockReturnValueOnce(readyInput)
+    const wait = vi.fn().mockResolvedValue(undefined)
+
+    await expect(writeForesightControlValueWhenReady({ read, value: 100, wait }))
+      .resolves.toBe(true)
+    expect(readyInput.value).toBe('100')
+    expect(wait).toHaveBeenCalledTimes(1)
   })
 })
 

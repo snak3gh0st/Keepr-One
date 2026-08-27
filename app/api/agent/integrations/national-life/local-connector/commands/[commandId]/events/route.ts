@@ -49,12 +49,36 @@ const foresightArtifactRepository = {
     solveBasis: 'DEATH_BENEFIT' | 'PREMIUM'
     faceAmount: number
     monthlyPremium: number
+    annualPremium: number
   }) {
+    const existing = await prisma.illustration.findFirst({
+      where: { id: input.illustrationId, agentId: input.agentId, productName: 'FlexLife' },
+      select: { rawPayload: true, targetPremium: true, faceAmount: true },
+    })
+    if (!existing) throw new ConnectorCommandError('EVENT_INVALID')
+    const rawPayload = existing.rawPayload && typeof existing.rawPayload === 'object' &&
+      !Array.isArray(existing.rawPayload) ? existing.rawPayload : {}
+    const requestedAmount = input.solveBasis === 'PREMIUM'
+      ? Number(existing.targetPremium)
+      : Number(existing.faceAmount)
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+      throw new ConnectorCommandError('EVENT_INVALID')
+    }
     const updated = await prisma.illustration.updateMany({
       where: { id: input.illustrationId, agentId: input.agentId, productName: 'FlexLife' },
       data: {
         faceAmount: input.faceAmount,
         premium: input.monthlyPremium,
+        rawPayload: {
+          ...rawPayload,
+          foresightResult: {
+            solveBasis: input.solveBasis,
+            requestedAmount,
+            confirmedFaceAmount: input.faceAmount,
+            confirmedMonthlyPremium: input.monthlyPremium,
+            confirmedAnnualPremium: input.annualPremium,
+          },
+        },
         ...(input.solveBasis === 'DEATH_BENEFIT'
           ? {
               targetPremium: input.monthlyPremium,

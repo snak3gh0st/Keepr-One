@@ -23,6 +23,33 @@ const currency = (value: number) =>
     style: 'currency', currency: 'USD', maximumFractionDigits: 0,
   }).format(value)
 
+const premiumCurrency = (value: number) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
+  }).format(value)
+
+type ForesightResult = {
+  solveBasis: 'DEATH_BENEFIT' | 'PREMIUM'
+  requestedAmount: number
+  confirmedFaceAmount: number
+  confirmedMonthlyPremium: number
+  confirmedAnnualPremium: number
+}
+
+function foresightResultFrom(rawPayload: unknown): ForesightResult | null {
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload) ||
+    !('foresightResult' in rawPayload)) return null
+  const result = rawPayload.foresightResult
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null
+  const candidate = result as Record<string, unknown>
+  if (!['DEATH_BENEFIT', 'PREMIUM'].includes(String(candidate.solveBasis)) ||
+    !['requestedAmount', 'confirmedFaceAmount', 'confirmedMonthlyPremium', 'confirmedAnnualPremium']
+      .every((key) => typeof candidate[key] === 'number' && Number.isFinite(candidate[key]) && Number(candidate[key]) > 0)) {
+    return null
+  }
+  return candidate as ForesightResult
+}
+
 const day = (value: Date) =>
   new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeZone: 'UTC' }).format(value)
 
@@ -62,8 +89,13 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
   })()
   const commandStatus = (await getIllustrationCommandStatuses(agent.id)).get(illustration.id)
   const documentReady = illustration.documentFetchedAt && illustration.documentMimeType === 'application/pdf'
+  const foresightResult = documentReady ? foresightResultFrom(illustration.rawPayload) : null
   const hasCarrierPremium = Boolean(documentReady && illustration.premium)
   const premiumValue = hasCarrierPremium ? illustration.premium : illustration.targetPremium
+  const carrierAdjustedPremium = foresightResult?.solveBasis === 'PREMIUM' &&
+    Math.abs(foresightResult.requestedAmount - foresightResult.confirmedMonthlyPremium) > 0.005
+  const carrierAdjustedFace = foresightResult?.solveBasis === 'DEATH_BENEFIT' &&
+    Math.abs(foresightResult.requestedAmount - foresightResult.confirmedFaceAmount) > 0.005
   const delivery = describeIllustrationDelivery({ documentReady: Boolean(documentReady), status: commandStatus })
   const isGenerating = commandStatus?.state === 'WORKING'
   const foresightStep = documentReady
@@ -153,11 +185,16 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
           </dl>
         </section>
         <section className="module-main-surface">
-          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Instruções enviadas</p>
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
+            {foresightResult ? 'Resultado confirmado pela National' : 'Instruções enviadas'}
+          </p>
           <dl className="mt-3">
             <Fact label="Produto" value={flexLifeProductLabel(illustration.productName)} />
             <Fact label="Capital segurado" value={illustration.faceAmount ? currency(Number(illustration.faceAmount)) : null} />
-            <Fact label={hasCarrierPremium ? 'Prêmio mensal confirmado' : 'Prêmio mensal informado'} value={premiumValue ? currency(Number(premiumValue)) : null} />
+            <Fact label={hasCarrierPremium ? 'Prêmio mensal confirmado' : 'Prêmio mensal informado'} value={premiumValue ? premiumCurrency(Number(premiumValue)) : null} />
+            {foresightResult && (
+              <Fact label="Prêmio anual confirmado" value={premiumCurrency(foresightResult.confirmedAnnualPremium)} />
+            )}
             <Fact label="Origem do prêmio" value={
               hasCarrierPremium
                 ? 'Confirmado no Foresight com o PDF oficial'
@@ -168,6 +205,19 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                     : null
             } />
           </dl>
+          {carrierAdjustedPremium && foresightResult && (
+            <p className="mt-4 rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 text-xs leading-5 text-ink">
+              Você informou {premiumCurrency(foresightResult.requestedAmount)} por mês. A National Life confirmou{' '}
+              {premiumCurrency(foresightResult.confirmedMonthlyPremium)} por mês e{' '}
+              {premiumCurrency(foresightResult.confirmedAnnualPremium)} por ano no PDF oficial.
+            </p>
+          )}
+          {carrierAdjustedFace && foresightResult && (
+            <p className="mt-4 rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 text-xs leading-5 text-ink">
+              Você informou {currency(foresightResult.requestedAmount)} de capital segurado. A National Life confirmou{' '}
+              {currency(foresightResult.confirmedFaceAmount)} no PDF oficial.
+            </p>
+          )}
         </section>
         {foresightSnapshot && (
           <section className="module-main-surface md:col-span-2">

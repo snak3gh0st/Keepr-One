@@ -403,6 +403,7 @@ describe('local connector command dispatch', () => {
       solveBasis: 'PREMIUM',
       faceAmount: 250_000,
       monthlyPremium: 350,
+      annualPremium: 4_200,
       release: '5.3.65.31',
       reportCode: 'NAIC_ILLUSTRATION',
       documentSha256: createHash('sha256').update(bytes).digest('hex'),
@@ -429,7 +430,7 @@ describe('local connector command dispatch', () => {
 
     expect(foresightArtifactRepository.persistSolvedResult).toHaveBeenCalledWith({
       agentId: 'agent_1', illustrationId: 'illustration_solved_1',
-      solveBasis: 'PREMIUM', faceAmount: 250_000, monthlyPremium: 350,
+      solveBasis: 'PREMIUM', faceAmount: 250_000, monthlyPremium: 350, annualPremium: 4_200,
     })
     expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
       sequence: 2, type: 'DATA_BATCH',

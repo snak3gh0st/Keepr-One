@@ -142,6 +142,7 @@ describe('Foresight content messages', () => {
         solveBasis: 'PREMIUM',
         faceAmount: 250_000,
         monthlyPremium: 350,
+        annualPremium: 4_200,
         release: '5.3.65.31',
         reportCode: 'NAIC_ILLUSTRATION',
         documentSha256: 'c'.repeat(64),

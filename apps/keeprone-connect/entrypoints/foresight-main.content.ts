@@ -2,7 +2,7 @@ import { FORESIGHT_FLEXLIFE_FIELDS, foresightSolveValue } from '../lib/foresight
 import { isForesightPdf, parseForesightReportUrl } from '../lib/foresight-report'
 import {
   applyForesightAllocationPreference,
-  writeForesightControlValue,
+  writeForesightControlValueWhenReady,
 } from '../lib/foresight-control-value'
 
 const CHANNEL = 'FYNTRA_FORESIGHT_CONNECTOR_V1'
@@ -91,6 +91,14 @@ export default defineContentScript({
       }
       ;(value[method] as (...values: unknown[]) => unknown).apply(value, args)
     }
+    const writeScheduleValue = async (id: string, value: number) => {
+      const written = await writeForesightControlValueWhenReady({
+        read: () => element<HTMLInputElement>(carrier().doc, id),
+        value,
+        wait: () => delay(100),
+      })
+      if (!written) throw new Error('FORESIGHT_CONTROL_UNAVAILABLE')
+    }
     const applyClient = async (values: MainRequest['values']) => {
       let { doc, win } = carrier()
       setSelect(doc, FORESIGHT_FLEXLIFE_FIELDS.client.jurisdiction, String(values.jurisdiction))
@@ -147,8 +155,10 @@ export default defineContentScript({
       // Foresight owns a widget value as well as its displayed input. Writing
       // only the latter makes the page restore its previous/default premium
       // during updatePremiumSchedule.
-      const premiumAmount = element<HTMLInputElement>(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount)
-      writeForesightControlValue(premiumAmount, Number(values.premiumAmount))
+      await writeScheduleValue(
+        FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount,
+        Number(values.premiumAmount),
+      )
       await delay(200)
 
       ;({ doc, win } = carrier())
@@ -188,8 +198,8 @@ export default defineContentScript({
           .dispatchEvent(new Event('change', { bubbles: true }))
         await delay(500)
         ;({ doc, win } = carrier())
-        writeForesightControlValue(
-          element<HTMLInputElement>(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount),
+        await writeScheduleValue(
+          FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount,
           Number(values.premiumAmount),
         )
         await delay(200)
@@ -201,8 +211,8 @@ export default defineContentScript({
         await delay(500)
         ;({ doc, win } = carrier())
         setSelect(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitType, '-4')
-        writeForesightControlValue(
-          element<HTMLInputElement>(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitAmount),
+        await writeScheduleValue(
+          FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitAmount,
           Number(values.faceAmount),
         )
         invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefit', 'updateDeathBenefitSchedule')
@@ -304,7 +314,7 @@ export default defineContentScript({
       element<HTMLSelectElement>(doc, fields.designType).dispatchEvent(new Event('change', { bubbles: true }))
       await delay(600)
       ;({ doc, win } = carrier())
-      writeForesightControlValue(element<HTMLInputElement>(doc, fields.faceAmount), Number(values.faceAmount))
+      await writeScheduleValue(fields.faceAmount, Number(values.faceAmount))
       invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefit', 'updateDeathBenefitSchedule')
       await delay(900)
       ;({ doc, win } = carrier())

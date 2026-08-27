@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import type { ForesightSolvedIllustrationSnapshotV2 } from './foresight-contract'
-import { monthlyPremiumFromAnnual, solvedClientMatches } from './foresight-executor'
+import { monthlyPremiumFromAnnual, solvedClientMatches, solvedLedgerMatches } from './foresight-executor'
 
 it('primes a new solved illustration allocation before asking Foresight to calculate', () => {
   const source = readFileSync(new URL('./foresight-executor.ts', import.meta.url), 'utf8')
@@ -57,4 +57,31 @@ it('accepts the US birth date read back from the solved Foresight client form', 
 
 it('derives the monthly solved premium from the carrier annual summary', () => {
   expect(monthlyPremiumFromAnnual(2_758)).toBe(229.83)
+})
+
+it('accepts a carrier-confirmed adjustment after the approved input was written', () => {
+  const snapshot = {
+    schemaVersion: 2, illustrationId: 'ill_premium_123', caseId: null,
+    carrierCaseName: 'KEEPRONE-TEST-20260827-PREMIUM123',
+    insured: { firstName: 'Ale', lastName: 'Teste', dateOfBirth: '1998-03-12', issueState: 'FL' },
+    product: { name: 'FlexLife', code: '956' },
+    solve: { basis: 'PREMIUM', method: 'Based_on_Target_Premium', amount: 100 },
+    faceAmount: null, premium: { mode: 'Monthly', amount: 100 },
+    underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
+    deathBenefitOption: 'A_Level',
+    allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 100 }],
+    riders: ['DeathBenefitProtection', 'ABRTerminalIllness', 'ABRChronicIllness', 'ABRCriticalIllness', 'ABRCriticalInjury', 'ABRAlzheimersDisease'],
+    reports: ['NAIC_ILLUSTRATION'],
+  } as const satisfies ForesightSolvedIllustrationSnapshotV2
+
+  expect(solvedLedgerMatches(snapshot, {
+    faceSolve: 'Based on Target Premium', premiumSolve: 'None', faceAmount: 2_000_000,
+    monthlyPremium: 105, annualPremium: 1_260, premiumMode: 'Monthly',
+    deathBenefitOption: 'A (Level)',
+  })).toBe(true)
+  expect(solvedLedgerMatches(snapshot, {
+    faceSolve: 'Based on Target Premium', premiumSolve: 'None', faceAmount: 2_000_000,
+    monthlyPremium: 100, annualPremium: 18_000, premiumMode: 'Monthly',
+    deathBenefitOption: 'A (Level)',
+  })).toBe(false)
 })

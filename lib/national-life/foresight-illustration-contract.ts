@@ -361,6 +361,7 @@ export type ForesightSolvedIllustrationReceipt = {
   solveBasis: 'DEATH_BENEFIT' | 'PREMIUM'
   faceAmount: number
   monthlyPremium: number
+  annualPremium: number
   release: string
   reportCode: 'NAIC_ILLUSTRATION'
   documentSha256: string
@@ -393,7 +394,7 @@ export function parseForesightSolvedIllustrationReceipt(value: unknown): Foresig
   const receipt = value as Record<string, unknown>
   const expected = [
     'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'solveBasis', 'faceAmount',
-    'monthlyPremium', 'release', 'reportCode', 'documentSha256', 'documentBytes', 'saved',
+    'monthlyPremium', 'annualPremium', 'release', 'reportCode', 'documentSha256', 'documentBytes', 'saved',
   ].sort()
   const keys = Object.keys(receipt).sort()
   if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index]) ||
@@ -404,7 +405,9 @@ export function parseForesightSolvedIllustrationReceipt(value: unknown): Foresig
     typeof receipt.faceAmount !== 'number' || !Number.isFinite(receipt.faceAmount) || receipt.faceAmount <= 0 ||
     receipt.faceAmount > 1_000_000_000 || typeof receipt.monthlyPremium !== 'number' ||
     !Number.isFinite(receipt.monthlyPremium) || receipt.monthlyPremium <= 0 ||
-    receipt.monthlyPremium > 100_000_000 || typeof receipt.release !== 'string' || receipt.release.length > 32 ||
+    receipt.monthlyPremium > 100_000_000 || typeof receipt.annualPremium !== 'number' ||
+    !Number.isFinite(receipt.annualPremium) || receipt.annualPremium <= 0 ||
+    receipt.annualPremium > 1_000_000_000 || typeof receipt.release !== 'string' || receipt.release.length > 32 ||
     receipt.reportCode !== 'NAIC_ILLUSTRATION' || typeof receipt.documentSha256 !== 'string' ||
     !/^[a-f0-9]{64}$/.test(receipt.documentSha256) || !Number.isSafeInteger(receipt.documentBytes) ||
     (receipt.documentBytes as number) < 5 || (receipt.documentBytes as number) > 25 * 1024 * 1024 ||
