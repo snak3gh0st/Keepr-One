@@ -1,6 +1,19 @@
 import { expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import type { ForesightSolvedIllustrationSnapshotV2 } from './foresight-contract'
-import { solvedClientMatches } from './foresight-executor'
+import { monthlyPremiumFromAnnual, solvedClientMatches } from './foresight-executor'
+
+it('primes a new solved illustration allocation before asking Foresight to calculate', () => {
+  const source = readFileSync(new URL('./foresight-executor.ts', import.meta.url), 'utf8')
+  const workflow = source.slice(
+    source.indexOf('async function executeForesightSolvedIllustration'),
+    source.indexOf('export async function executeForesightIllustration'),
+  )
+
+  expect(workflow.indexOf("navigate('/NWI/IUL2025/InterestRates.aspx'")).toBeLessThan(
+    workflow.indexOf("navigate('/NWI/IUL2025/ledger.aspx'"),
+  )
+})
 
 it('accepts the US birth date read back from the solved Foresight client form', () => {
   const snapshot = {
@@ -40,4 +53,8 @@ it('accepts the US birth date read back from the solved Foresight client form', 
     gender: 'Male',
     rateClass: 'Standard_NT',
   })).toBe(true)
+})
+
+it('derives the monthly solved premium from the carrier annual summary', () => {
+  expect(monthlyPremiumFromAnnual(2_758)).toBe(229.83)
 })

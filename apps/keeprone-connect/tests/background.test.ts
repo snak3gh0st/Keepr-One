@@ -706,6 +706,38 @@ describe('background plan executor', () => {
     expect(storage.command).toMatchObject({ status: 'COMPLETED', nextEventSequence: 4 })
   })
 
+  it('reuses the latest Foresight tab for a new illustration command', async () => {
+    storage.command = { status: 'COMPLETED', carrierTabId: 12 }
+    tabs.query.mockResolvedValue([
+      { id: 44, active: false, lastAccessed: 20, url: `${NLG}/NWI/Main/Layout.aspx` },
+      { id: 45, active: false, lastAccessed: 10, url: `${NLG}/NWI/Main/Layout.aspx` },
+      { id: 46, active: false, lastAccessed: 30, url: `${NLG}${COMMISSIONS_PATH}` },
+    ])
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_illustration_reuse',
+      runId: 'run_illustration_reuse',
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'ill_reuse' },
+      params: { illustrationId: 'ill_reuse', inputHash: 'a'.repeat(64) },
+      idempotencyKey: 'illustration:reuse',
+      issuedAt: '2026-08-27T18:00:00.000Z',
+      expiresAt: '2026-08-27T18:30:00.000Z',
+      requiresConfirmation: true,
+    }
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+    } as never)
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    expect(tabs.update).toHaveBeenCalledWith(44, { url: `${NLG}/agent/sso/foresight` })
+    expect(tabs.create).not.toHaveBeenCalled()
+    expect(storage.command).toMatchObject({ carrierTabId: 44, status: 'NAVIGATING' })
+  })
+
   it('executes an on-demand policy detail command in its own inactive tab', async () => {
     const command = {
       protocolVersion: 1,
