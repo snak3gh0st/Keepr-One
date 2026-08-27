@@ -8,6 +8,7 @@ import { formatPlatformPlanPrice } from '@/lib/plans'
 import { prisma } from '@/lib/prisma'
 import { requireRoleWithoutFounderAccess } from '@/lib/require-role'
 import { buildAccessRequiredPresentation } from './presentation'
+import { getStripeCatalogEntry } from '@/lib/stripe/platform-catalog'
 
 export const metadata: Metadata = {
   title: 'Continuar na Keepr One',
@@ -23,7 +24,12 @@ function formatDate(date: Date | null): string {
   }).format(date)
 }
 
-export default async function FounderExpiredPage() {
+export default async function FounderExpiredPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ billing?: string }>
+}) {
+  const billingState = (await searchParams).billing
   let session
   try {
     session = await requireRoleWithoutFounderAccess('AGENT')
@@ -47,6 +53,7 @@ export default async function FounderExpiredPage() {
   const price = formatPlatformPlanPrice(presentation.plan)
   const billingContactUrl = process.env.NEXT_PUBLIC_BILLING_CONTACT_URL
     ?? 'https://keeprone.com/#planos'
+  const stripePlan = getStripeCatalogEntry(presentation.plan)
 
   return (
     <main className="relative isolate min-h-svh overflow-hidden bg-[#050706] px-5 py-6 text-white sm:px-8 sm:py-8">
@@ -104,15 +111,40 @@ export default async function FounderExpiredPage() {
               <li className="flex gap-3"><span className="text-mint">✓</span> {presentation.profileBenefit}</li>
             </ul>
 
-            <Link
-              href={billingContactUrl}
-              className="mt-8 flex min-h-14 items-center justify-between bg-white px-5 text-sm font-bold text-black transition-colors hover:bg-mint focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-mint"
-            >
-              Escolher assinatura
-              <span aria-hidden>↗</span>
-            </Link>
+            {billingState === 'canceled' && (
+              <p className="mt-6 border border-white/12 bg-white/[0.04] px-4 py-3 text-sm text-white/66">
+                Ativação cancelada. Nenhuma nova assinatura foi vinculada.
+              </p>
+            )}
+            {(billingState === 'pending' || billingState === 'invalid') && (
+              <p className="mt-6 border border-amber-300/25 bg-amber-200/[0.06] px-4 py-3 text-sm text-amber-100/80">
+                Ainda não foi possível confirmar a assinatura no Stripe. Você pode tentar novamente; seus dados continuam preservados.
+              </p>
+            )}
+
+            {stripePlan ? (
+              <form action="/api/billing/checkout" method="post">
+                <button
+                  type="submit"
+                  className="mt-8 flex min-h-14 w-full items-center justify-between bg-white px-5 text-sm font-bold text-black transition-colors hover:bg-mint focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-mint"
+                >
+                  Ativar assinatura segura
+                  <span aria-hidden>↗</span>
+                </button>
+              </form>
+            ) : (
+              <Link
+                href={billingContactUrl}
+                className="mt-8 flex min-h-14 items-center justify-between bg-white px-5 text-sm font-bold text-black transition-colors hover:bg-mint focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-mint"
+              >
+                Falar com a Keepr One
+                <span aria-hidden>↗</span>
+              </Link>
+            )}
             <p className="mt-4 text-xs leading-5 text-white/42">
-              A etapa de pagamento é concluída no canal comercial da Keepr One.
+              {stripePlan
+                ? 'Pagamento e renovação são processados pelo Stripe. Seus dados da National Life não são enviados ao billing.'
+                : 'A ativação deste plano é concluída com a equipe da Keepr One.'}
             </p>
           </aside>
         </section>

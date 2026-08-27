@@ -69,6 +69,17 @@ const DISCOVERY_PAGE_KEYS = new Set<NationalLifeGridKey>(NATIONAL_LIFE_DISCOVERY
 const DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS = new Set<NationalLifeGridKey>([
   'PROJECTED_COMMISSIONS',
 ])
+/// Paid carrier transactions are an append-only ledger, not a current-state
+/// inventory. National Life may remove an older statement from the default
+/// portal window even though the payment remains part of the agent's history.
+/// Keep the normalized rows across verified runs; their stable statement/
+/// transaction keys still make re-reading the same statement idempotent.
+export const NATIONAL_LIFE_HISTORICAL_REPORT_GRID_KEYS = new Set<NationalLifeGridKey>([
+  'PAID_COMMISSIONS',
+  'COMMISSIONS_EARNING_REPORT',
+  'COMMISSIONS_POLICY_HISTORY',
+  'POLICY_PAYMENT_HISTORY',
+])
 const UPSERT_CHUNK_SIZE = 100
 
 type LocalConnectorDb = Pick<
@@ -792,6 +803,10 @@ async function pruneRowsMissingFromVerifiedSnapshot(
     select: { observedAt: true },
   })
   if (!firstPage) throw new LocalConnectorStageCompletionError('STAGE_INCOMPLETE')
+
+  if (NATIONAL_LIFE_HISTORICAL_REPORT_GRID_KEYS.has(input.gridKey)) {
+    return { count: 0 }
+  }
 
   const commonWhere = {
     agentId: input.agentId,

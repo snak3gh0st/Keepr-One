@@ -583,6 +583,13 @@ model PlatformSubscription {
   currentPeriodEnd   DateTime?
   cancelAtPeriodEnd  Boolean                    @default(false)
   canceledAt         DateTime?
+  /// Provider references are stored on the commercial subject, never on a
+  /// National Life row. This keeps billing identity separate from carrier
+  /// data while giving each agent/agency tenant one traceable Stripe link.
+  stripeCustomerId     String?
+  stripeSubscriptionId String?                  @unique
+  stripeProductId      String?
+  stripePriceId        String?
   createdAt          DateTime                   @default(now())
   updatedAt          DateTime                   @updatedAt
 
@@ -593,6 +600,8 @@ model PlatformSubscription {
   @@index([agentId, status])
   @@index([agencyId, status])
   @@index([agencyMembershipId, status])
+  @@index([stripeCustomerId])
+  @@index([stripePriceId])
 }
 
 /// Marks accounts created through the founders program. Its presence is the
