@@ -7,6 +7,7 @@ import {
 const EVERY_CODE = [
   'DEVICE_REVOKED',
   'DEVICE_REQUEST_REJECTED',
+  'FOUNDER_ACCESS_REQUIRED',
   'DISCONNECT_FAILED',
   'DEVICE_KEY_UNAVAILABLE',
   'PAIRING_REJECTED',
@@ -64,6 +65,14 @@ describe('connectorFailure', () => {
     // 401 cobre relógio fora da janela e soluço de banco. Tratar isso como
     // pareamento morto manda o agente reconectar para cair no mesmo 401.
     expect(connectorFailureRequiresReconnect('DEVICE_REQUEST_REJECTED')).toBe(false)
+    expect(connectorFailureRequiresReconnect('FOUNDER_ACCESS_REQUIRED')).toBe(false)
+  })
+
+  it('directs an account without commercial access to subscription without disconnecting the computer', () => {
+    const failure = connectorFailure('FOUNDER_ACCESS_REQUIRED')
+    expect(failure.action).toBe('subscription')
+    expect(failure.actionLabel).toMatch(/subscription/i)
+    expect(failure.message).toMatch(/remains linked/i)
   })
 
   it('gives a failed disconnect its own way out, not a button that syncs', () => {

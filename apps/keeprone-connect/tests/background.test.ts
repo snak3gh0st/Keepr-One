@@ -271,6 +271,14 @@ beforeEach(() => {
   for (const key of Object.keys(storage)) delete storage[key]
   alarms.clear()
   vi.clearAllMocks()
+  // The worker opportunistically refreshes its remote config in the background.
+  // Keep this executor suite independent from whatever happens to be listening on
+  // localhost:3000: a delayed PAUSED response can otherwise land between two
+  // START_NATIONAL_LIFE_SYNC messages and make a lock test fail for the wrong
+  // reason. Remote-config fetching and pause parsing have their own focused tests.
+  vi.stubGlobal('fetch', vi.fn(async () => {
+    throw new Error('REMOTE_CONFIG_UNAVAILABLE')
+  }))
   tabs.sendMessage.mockImplementation(defaultTabMessageResponse)
   vi.mocked(signedJsonRequest).mockResolvedValue({})
   vi.mocked(signedBinaryRequest).mockResolvedValue({

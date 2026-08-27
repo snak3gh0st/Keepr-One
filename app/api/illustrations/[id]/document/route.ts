@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/require-role'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getDownlineIds } from '@/lib/hierarchy'
+import { getAgentScopeIds } from '@/lib/agent-access'
 import { illustrationDocumentFilename } from '@/lib/national-life/foresight-report'
 
 /// Serves the illustration PDF the carrier rendered.
@@ -36,8 +36,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (session.user.role === 'AGENT') {
     try {
       const agent = await getCurrentAgent()
-      const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
-      allowed = [agent.id, ...getDownlineIds(allAgents, agent.id)].includes(illustration.agentId)
+      const scopeIds = await getAgentScopeIds(agent.id)
+      allowed = scopeIds.includes(illustration.agentId)
     } catch {
       return new NextResponse('Forbidden', { status: 403 })
     }

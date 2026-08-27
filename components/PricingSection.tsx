@@ -4,8 +4,13 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
+import { INVITED_AGENT_MONTHLY_PRICE_CENTS } from "@/lib/plans";
 
 type BillingCycle = "monthly" | "annual";
+
+const invitedAgentMonthlyAmount = (INVITED_AGENT_MONTHLY_PRICE_CENTS / 100)
+  .toFixed(2)
+  .replace(".", ",");
 
 const pricingSignals = [
   "Carteira individual",
@@ -260,7 +265,7 @@ export function PricingSection() {
                 <p>Assinatura individual vinculada à agência</p>
               </div>
               <strong>
-                US$ 49,90
+                US$ {invitedAgentMonthlyAmount}
                 <small>por usuário / mês</small>
               </strong>
             </div>
@@ -286,7 +291,7 @@ export function PricingSection() {
 
         <p className="landing-pricing-note">
           O Plano Agência inclui o painel de gestão. Cada agente convidado
-          assina sua conta vinculada separadamente por US$ 49,90 ao mês.
+          assina sua conta vinculada separadamente por US$ {invitedAgentMonthlyAmount} ao mês.
         </p>
       </div>
 

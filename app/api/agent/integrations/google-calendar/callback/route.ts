@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'INVALID_OAUTH_CALLBACK' }, { status: 400 })
   }
   try {
-    const user = await requireCalendarUser()
+    const user = await requireCalendarUser({ allowOnboarding: true })
     const env = getGoogleCalendarEnv()
     const consumed = await consumeGoogleOAuthState(
       { state, userId: user.userId, sessionToken: user.sessionId },

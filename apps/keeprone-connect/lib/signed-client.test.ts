@@ -72,6 +72,15 @@ describe('classifyFailedResponse', () => {
     ).toBe('DEVICE_REQUEST_REJECTED')
   })
 
+  it('preserves an expired Founder refusal without calling it a revocation', () => {
+    expect(
+      classifyFailedResponse(
+        401,
+        new Headers({ 'x-fyntra-device-error': 'FOUNDER_ACCESS_REQUIRED' }),
+      ),
+    ).toBe('FOUNDER_ACCESS_REQUIRED')
+  })
+
   it('leaves every other status as a plain failure', () => {
     expect(classifyFailedResponse(500, new Headers())).toBe('DEVICE_REQUEST_FAILED')
     expect(classifyFailedResponse(403, new Headers())).toBe('DEVICE_REQUEST_FAILED')

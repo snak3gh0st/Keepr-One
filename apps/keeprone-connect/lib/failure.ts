@@ -15,6 +15,7 @@ export type ConnectorFailureAction =
   | 'retry'
   | 'update'
   | 'paused'
+  | 'subscription'
   | 'support'
 
 export type ConnectorFailure = {
@@ -57,6 +58,10 @@ export const OUTDATED_CODES: readonly string[] = [
 export const PAUSED_CODES: readonly string[] = ['CONNECTOR_PAUSED']
 
 export const RATE_LIMIT_CODES: readonly string[] = ['RUN_START_RATE_LIMITED']
+
+/// A conta perdeu o acesso comercial, mas este computador continua pareado.
+/// Repetir ou reconectar não resolve; a saída acontece no plano Keepr One.
+export const SUBSCRIPTION_CODES: readonly string[] = ['FOUNDER_ACCESS_REQUIRED']
 
 export const RECONCILIATION_CODES: readonly string[] = [
   'STAGE_INCOMPLETE',
@@ -116,6 +121,13 @@ export function connectorFailure(code: string | undefined | null): ConnectorFail
       action: 'retry',
       message:
         'Too many sync attempts were started. Wait a few minutes, then try once — your National Life connection is still intact.',
+    }
+  }
+  if (typeof code === 'string' && SUBSCRIPTION_CODES.includes(code)) {
+    return {
+      action: 'subscription',
+      message:
+        'Your Keepr One access needs an active subscription. Activate a subscription for your plan in Keepr One to sync again — this computer remains linked.',
     }
   }
   if (typeof code === 'string' && RECONCILIATION_CODES.includes(code)) {

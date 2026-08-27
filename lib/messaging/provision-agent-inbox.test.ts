@@ -51,6 +51,46 @@ describe('provisionAgentInbox', () => {
     expect(h.saved).toEqual([])
   })
 
+  it('serializes concurrent first-connect attempts through the durable coordinator', async () => {
+    const h = harness(null)
+    let stored: {
+      externalAccountId: string
+      externalUserId: string
+    } | null = null
+    h.deps.findAccount = vi.fn(async () => stored)
+    h.deps.saveAccount = vi.fn(async (row) => {
+      stored = {
+        externalAccountId: row.externalAccountId,
+        externalUserId: row.externalUserId,
+      }
+    })
+
+    let tail = Promise.resolve()
+    h.deps.runExclusive = async (_agentId, operation) => {
+      const previous = tail
+      let release = () => {}
+      tail = new Promise<void>((resolve) => { release = resolve })
+      await previous
+      try {
+        return await operation(h.deps)
+      } finally {
+        release()
+      }
+    }
+
+    const results = await Promise.all([
+      provisionAgentInbox(h.deps, input),
+      provisionAgentInbox(h.deps, input),
+    ])
+
+    expect(results).toEqual([
+      { accountId: '7', userId: '12', created: true },
+      { accountId: '7', userId: '12', created: false },
+    ])
+    expect(h.deps.chatwoot.createUser).toHaveBeenCalledTimes(1)
+    expect(h.deps.chatwoot.createAccount).toHaveBeenCalledTimes(1)
+  })
+
   it('never reuses a password across agents', async () => {
     const h = harness(null)
     await provisionAgentInbox(h.deps, input)

@@ -11,6 +11,7 @@ import { LocalConnectorRequestError, parseJsonBody, readLimitedBody } from '@/li
 import { refuseLocalConnectorCapability } from '@/lib/national-life/local-connector/remote-config'
 import {
   completeLocalConnectorStage,
+  failLocalConnectorRun,
   LocalConnectorRunError,
   LocalConnectorStageCompletionError,
 } from '@/lib/national-life/local-connector/run-service'
@@ -18,6 +19,7 @@ import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '@/lib/national-li
 import { ingestPortfolioIfRunFinished } from '@/lib/national-life/portfolio-ingest'
 import { prismaIngestDeps } from '@/lib/national-life/portfolio-ingest-prisma'
 import { prisma } from '@/lib/prisma'
+import { canAgentReadNationalLifeGrid } from '@/lib/national-life/plan-access'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
 const MAX_COMPLETE_BODY_BYTES = 1_024
@@ -50,6 +52,24 @@ export async function POST(
       body: raw,
     })
     const params = paramsSchema.parse(await context.params)
+    if (!await canAgentReadNationalLifeGrid(device.agentId, params.gridKey)) {
+      try {
+        await failLocalConnectorRun(prisma, {
+          agentId: device.agentId,
+          deviceId: device.deviceId,
+          runId: params.runId,
+          safeErrorCode: 'PLAN_ACCESS_CHANGED',
+        })
+      } catch (error) {
+        if (!(error instanceof LocalConnectorRunError && error.code === 'RUN_NOT_ACTIVE')) {
+          throw error
+        }
+      }
+      return Response.json(
+        { error: 'AGENCY_PLAN_REQUIRED' },
+        { status: 403, headers: NO_STORE },
+      )
+    }
     const body = bodySchema.parse(parseJsonBody(raw))
     if (params.runId !== body.runId || params.gridKey !== body.gridKey) {
       return Response.json({ error: 'INVALID_REQUEST' }, { status: 400, headers: NO_STORE })

@@ -3,6 +3,10 @@ import 'server-only'
 import { createHash, timingSafeEqual, webcrypto } from 'node:crypto'
 import type { PrismaClient } from '@prisma/client'
 import { z } from 'zod'
+import {
+  FounderAccessRequiredError,
+  requireFounderAccessForAgent,
+} from '@/lib/founder-access'
 import { publicP256JwkSchema } from './contracts'
 
 export const LOCAL_CONNECTOR_SIGNATURE_WINDOW_MS = 5 * 60_000
@@ -28,15 +32,19 @@ type SignatureDb = Pick<
 >
 
 /// `DEVICE_REVOKED` é a única afirmação sobre o dispositivo em si: o servidor
-/// não conhece mais esta identidade. Todo o resto — relógio fora da janela,
-/// hash divergente, JWK ilegível, soluço de banco no replay — é
-/// `INVALID_DEVICE_SIGNATURE`, e pode dar certo na próxima tentativa.
+/// não conhece mais esta identidade. `FOUNDER_ACCESS_REQUIRED` afirma apenas o
+/// estado comercial da conta, mantendo a identidade pareada intacta. Todo erro
+/// técnico — relógio fora da janela, hash divergente, JWK ilegível ou soluço de
+/// banco — é `INVALID_DEVICE_SIGNATURE` e pode dar certo na próxima tentativa.
 ///
 /// A distinção é o que impede o cliente de destruir a chave privada de um
 /// dispositivo saudável só porque o relógio dele está adiantado: apagar a chave
 /// por causa de desvio de horário é um laço, porque o desvio persiste depois de
 /// reparear.
-export type LocalConnectorSignatureFailure = 'INVALID_DEVICE_SIGNATURE' | 'DEVICE_REVOKED'
+export type LocalConnectorSignatureFailure =
+  | 'INVALID_DEVICE_SIGNATURE'
+  | 'DEVICE_REVOKED'
+  | 'FOUNDER_ACCESS_REQUIRED'
 
 export class LocalConnectorSignatureError extends Error {
   constructor(readonly code: LocalConnectorSignatureFailure = 'INVALID_DEVICE_SIGNATURE') {
@@ -135,6 +143,14 @@ export async function verifyLocalConnectorDeviceRequest(
     )
     if (!valid) throw new LocalConnectorSignatureError()
 
+    // A signed connector request is an authenticated product entrypoint just
+    // like an Agent Route Handler. Enforce the additive commercial boundary
+    // here so every device-signed route inherits it. This happens only after
+    // the signature is proven, avoiding an oracle for arbitrary device IDs,
+    // and before replay/last-seen writes so a billing refusal does not mutate
+    // otherwise healthy device state.
+    await requireFounderAccessForAgent(device.agentId)
+
     await db.$transaction(async (tx) => {
       await tx.nationalLifeConnectorReplay.create({
         data: {
@@ -153,10 +169,17 @@ export async function verifyLocalConnectorDeviceRequest(
 
     return { deviceId: device.id, agentId: device.agentId, jti: signed.jti }
   } catch (error) {
-    // O motivo só escapa deste catch quando é uma afirmação sobre o dispositivo.
-    // Qualquer outra exceção continua colapsando em "assinatura inválida", para
-    // não virar oráculo de qual etapa da verificação falhou.
-    if (error instanceof LocalConnectorSignatureError && error.code === 'DEVICE_REVOKED') {
+    // Só escapam motivos que o cliente precisa distinguir: revogação da
+    // identidade ou bloqueio comercial. Qualquer exceção técnica continua
+    // colapsando em "assinatura inválida", para não virar oráculo de qual etapa
+    // da verificação falhou.
+    if (error instanceof FounderAccessRequiredError) {
+      throw new LocalConnectorSignatureError('FOUNDER_ACCESS_REQUIRED')
+    }
+    if (
+      error instanceof LocalConnectorSignatureError
+      && (error.code === 'DEVICE_REVOKED' || error.code === 'FOUNDER_ACCESS_REQUIRED')
+    ) {
       throw error
     }
     throw new LocalConnectorSignatureError()

@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import { getCurrentAgent } from '@/lib/agent-context'
+import { getCurrentAgentWithoutOnboarding } from '@/lib/agent-context'
 import { whatsappConfigFromEnv } from '@/lib/messaging/whatsapp-config'
 import {
   createWhatsappClient,
@@ -9,6 +9,7 @@ import {
 import { Prisma } from '@prisma/client'
 import { assertSameOriginAction } from '@/lib/security/same-origin-action'
 import { whatsappChannelModeFromEnv } from '@/lib/messaging/channel-mode'
+import { ensureAgentInbox } from '@/lib/messaging/ensure-agent-inbox'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
 
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: 'FORBIDDEN' }, { status: 403, headers: NO_STORE })
   }
-  const agent = await getCurrentAgent()
+  const agent = await getCurrentAgentWithoutOnboarding()
   if (whatsappChannelModeFromEnv(process.env) !== 'EVOLUTION') {
     return Response.json({ error: 'LEGACY_CHANNEL_DISABLED' }, { status: 409, headers: NO_STORE })
   }
@@ -56,6 +57,8 @@ export async function POST(request: Request) {
   const client = createWhatsappClient({ ...config, http: (url, init) => fetch(url, init) })
 
   try {
+    await ensureAgentInbox({ agentId: agent.id, userId: agent.userId })
+
     // Creating an instance that already exists answers 403; only that exact state
     // is an idempotent reconnect. Authentication, network and provider failures
     // must remain visible.
@@ -131,7 +134,10 @@ export async function POST(request: Request) {
         { status: 409, headers: NO_STORE },
       )
     }
-    const errorCode = error instanceof Error && error.message === 'CHATWOOT_ACCOUNT_NOT_READY'
+    const errorCode = error instanceof Error && (
+      error.message === 'CHATWOOT_ACCOUNT_NOT_READY'
+      || error.message === 'CHATWOOT_UNAVAILABLE'
+    )
       ? 'CHATWOOT_ACCOUNT_NOT_READY'
       : 'CONNECT_FAILED'
     await recordChannelFailure(agent.id, errorCode)

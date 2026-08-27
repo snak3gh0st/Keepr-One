@@ -3,7 +3,7 @@
 import { prisma } from '@/lib/prisma'
 import type { ApplicationStatus } from '@prisma/client'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getDownlineIds } from '@/lib/hierarchy'
+import { getAgentScopeIds } from '@/lib/agent-access'
 import { canAccessCase } from '@/lib/case-access'
 import { computeNeedsAnalysis, type NeedsAnalysisInput } from '@/lib/needs-analysis'
 import { revalidatePath } from 'next/cache'
@@ -21,8 +21,7 @@ type ActionResult = { ok: true } | { ok: false; message: string }
 
 async function agentScopeIds(): Promise<{ agentId: string; scope: string[] }> {
   const agent = await getCurrentAgent()
-  const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
-  return { agentId: agent.id, scope: [agent.id, ...getDownlineIds(allAgents, agent.id)] }
+  return { agentId: agent.id, scope: await getAgentScopeIds(agent.id) }
 }
 
 function crmActionError(error: unknown): ActionResult {

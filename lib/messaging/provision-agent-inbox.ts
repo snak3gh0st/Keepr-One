@@ -1,6 +1,6 @@
 import type { ChatwootClient } from './chatwoot-client'
 
-export type ProvisionDeps = {
+export type ProvisionOperationDeps = {
   findAccount: (
     agentId: string,
   ) => Promise<{ externalAccountId: string; externalUserId: string } | null>
@@ -14,6 +14,13 @@ export type ProvisionDeps = {
   randomPassword: () => string
 }
 
+export type ProvisionDeps = ProvisionOperationDeps & {
+  runExclusive?: <T>(
+    agentId: string,
+    operation: (lockedDeps: ProvisionOperationDeps) => Promise<T>,
+  ) => Promise<T>
+}
+
 /// One account per agent, created on first connect and reused forever after.
 ///
 /// The row is written only after the link succeeds. Persisting earlier would leave
@@ -21,6 +28,18 @@ export type ProvisionDeps = {
 /// every later connect would take the idempotent path and never repair it.
 export async function provisionAgentInbox(
   deps: ProvisionDeps,
+  input: { agentId: string; agentName: string; agentEmail: string },
+): Promise<{ accountId: string; userId: string; created: boolean }> {
+  if (deps.runExclusive) {
+    return deps.runExclusive(input.agentId, (lockedDeps) =>
+      provisionAgentInboxUnlocked(lockedDeps, input),
+    )
+  }
+  return provisionAgentInboxUnlocked(deps, input)
+}
+
+async function provisionAgentInboxUnlocked(
+  deps: ProvisionOperationDeps,
   input: { agentId: string; agentName: string; agentEmail: string },
 ): Promise<{ accountId: string; userId: string; created: boolean }> {
   const existing = await deps.findAccount(input.agentId)

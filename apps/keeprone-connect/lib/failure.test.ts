@@ -14,6 +14,7 @@ describe('revokesDevice', () => {
     expect(revokesDevice('DEVICE_REQUEST_FAILED')).toBe(false)
     expect(revokesDevice('BRIDGE_UNAVAILABLE')).toBe(false)
     expect(revokesDevice('PORTAL_REQUEST_FAILED')).toBe(false)
+    expect(revokesDevice('FOUNDER_ACCESS_REQUIRED')).toBe(false)
     expect(revokesDevice(undefined)).toBe(false)
   })
 })
@@ -55,6 +56,14 @@ describe('connectorFailure', () => {
     expect(failure.message).toMatch(/connection is still intact/i)
   })
 
+  it('keeps the device linked when a commercial subscription is required', () => {
+    const failure = connectorFailure('FOUNDER_ACCESS_REQUIRED')
+    expect(failure.action).toBe('subscription')
+    expect(failure.message).toMatch(/activate a subscription/i)
+    expect(failure.message).toMatch(/remains linked/i)
+    expect(revokesDevice('FOUNDER_ACCESS_REQUIRED')).toBe(false)
+  })
+
   it('falls back to a generic message only for codes it does not know', () => {
     const failure = connectorFailure('SOMETHING_NOBODY_MAPPED')
     expect(failure.action).toBe('support')
@@ -65,6 +74,7 @@ describe('connectorFailure', () => {
     const codes = [
       'DEVICE_REVOKED',
       'DEVICE_REQUEST_REJECTED',
+      'FOUNDER_ACCESS_REQUIRED',
       'UNKNOWN_CAPABILITY',
       'PORTAL_REQUEST_FAILED',
       'SYNC_STATE_INVALID',

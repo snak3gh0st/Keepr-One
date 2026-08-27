@@ -2,8 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getCurrentAgent } from "@/lib/agent-context";
-import { getDownlineIds } from "@/lib/hierarchy";
-import { prisma } from "@/lib/prisma";
+import { getAgentScopeIds } from "@/lib/agent-access";
 import {
   CrmDomainError,
   archiveCrmStage,
@@ -19,12 +18,9 @@ export type CrmActionResult = { ok: true } | { ok: false; message: string };
 
 async function actionContext() {
   const agent = await getCurrentAgent();
-  const allAgents = await prisma.agent.findMany({
-    select: { id: true, parentAgentId: true },
-  });
   return {
     agent,
-    scope: [agent.id, ...getDownlineIds(allAgents, agent.id)],
+    scope: await getAgentScopeIds(agent.id),
   };
 }
 

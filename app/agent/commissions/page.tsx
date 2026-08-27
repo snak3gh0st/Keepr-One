@@ -10,7 +10,7 @@ import {
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
 import { toCarrierCommissionRecords } from '@/lib/national-life/commission-records'
-import { getDownlineIds } from '@/lib/hierarchy'
+import { getAgentScopeIds } from '@/lib/agent-access'
 import { CommissionsList } from './CommissionsList'
 import { COMMISSION_EARNING_GRID_KEYS } from '@/lib/national-life/commission-grid-keys'
 
@@ -30,10 +30,10 @@ type Record_ = {
 /// `lib/national-life/commission-records` for why the carrier rows are read
 /// rather than promoted.
 function toCommissionRecords(
-  rows: Array<{ id: string; raw: unknown; amounts: unknown }>,
+  records: ReturnType<typeof toCarrierCommissionRecords>,
   policyIdByNumber: ReadonlyMap<string, string>,
 ): Record_[] {
-  return toCarrierCommissionRecords(rows).map((record) => ({
+  return records.map((record) => ({
     id: record.id,
     period: record.period,
     type: record.type,
@@ -52,18 +52,20 @@ function toCommissionRecords(
 
 export default async function CommissionsPage() {
   const agent = await getCurrentAgent()
-  const [user, allAgents] = await Promise.all([
+  const [user, scopeAgentIds] = await Promise.all([
     prisma.user.findUnique({ where: { id: agent.userId } }),
-    prisma.agent.findMany({ select: { id: true, parentAgentId: true } }),
+    getAgentScopeIds(agent.id),
   ])
-  const scopeAgentIds = [agent.id, ...getDownlineIds(allAgents, agent.id)]
   let records: Record_[] = []
   let loadError = false
 
   try {
     const localConnectorEnabled = getNationalLifeLocalConnectorConfig().enabled
     const stored = await prisma.commissionRecord.findMany({
-      where: { agentId: agent.id },
+      where: {
+        agentId: { in: scopeAgentIds },
+        policy: { agentId: { in: scopeAgentIds } },
+      },
       include: { policy: { include: { agent: { include: { user: true } } } } },
       orderBy: [{ period: 'desc' }, { createdAt: 'desc' }],
     })
@@ -72,17 +74,23 @@ export default async function CommissionsPage() {
     if (localConnectorEnabled) {
       const carrierRows = await prisma.nationalLifeReportRow.findMany({
         where: {
-          agentId: agent.id,
+          agentId: { in: scopeAgentIds },
           deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
           gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
         },
         select: { id: true, raw: true, amounts: true },
       })
+      // Override rows can name and pay producers outside the commercial
+      // agency. Until the carrier row has a persisted producer identity, only
+      // direct earnings are safe; an agency still sees direct earnings from
+      // each actively subscribed member connector in its scope.
+      const directCarrierRecords = toCarrierCommissionRecords(carrierRows)
+        .filter((record) => record.type === 'DIRECT')
 
       // Resolve the ones that do exist locally so their number becomes a link.
       const numbers = Array.from(
         new Set(
-          toCarrierCommissionRecords(carrierRows)
+          directCarrierRecords
             .map((record) => record.policyNumber)
             .filter((number) => number && number !== '—'),
         ),
@@ -98,7 +106,7 @@ export default async function CommissionsPage() {
         : []
 
       carrierRecords = toCommissionRecords(
-        carrierRows,
+        directCarrierRecords,
         new Map(localPolicies.map((policy) => [policy.policyNumber, policy.id])),
       )
     }

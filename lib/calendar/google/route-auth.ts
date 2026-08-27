@@ -1,13 +1,11 @@
 import 'server-only'
 
-import { auth } from '@/lib/auth'
-import { headers } from 'next/headers'
+import { requireRole, requireRoleWithoutOnboarding } from '@/lib/require-role'
 
-export async function requireCalendarUser() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session) throw new Error('Not authenticated')
-  const role = String(session.user.role)
-  if (role !== 'AGENT' && role !== 'ADMIN') throw new Error('Forbidden')
+export async function requireCalendarUser(options?: { allowOnboarding?: boolean }) {
+  const session = options?.allowOnboarding
+    ? await requireRoleWithoutOnboarding('AGENT', 'ADMIN')
+    : await requireRole('AGENT', 'ADMIN')
   return {
     userId: session.user.id,
     // Bind state to Better Auth's stable server-side session identity; the raw

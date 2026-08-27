@@ -102,6 +102,16 @@ export async function requestForesightIllustration(
     },
   } as Prisma.InputJsonValue
 
+  if (clientId) {
+    const ownedClient = await prisma.client.findFirst({
+      where: { id: clientId, assignedAgentId: agent.id },
+      select: { id: true },
+    })
+    if (!ownedClient) {
+      return { ok: false, message: 'Cliente fora da sua carteira pessoal.' }
+    }
+  }
+
   try {
     const issued = await prisma.$transaction(async (tx) => {
       const repository = createPrismaConnectorCommandRepository(tx)

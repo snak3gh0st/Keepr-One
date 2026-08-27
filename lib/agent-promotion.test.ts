@@ -143,6 +143,24 @@ describe("promotion entitlement boundary", () => {
       { kind: "AGENCY", leaderAgentId: "agent-1" },
     ]);
   });
+
+  it("limits agency attribution queries to current subscribed members", () => {
+    expect(
+      getPromotionAttributionPredicates("agent-1", true, [
+        "agent-1",
+        "member-1",
+      ]),
+    ).toEqual([
+      { kind: "PERSONAL", agentId: "agent-1" },
+      {
+        kind: "AGENCY",
+        leaderAgentId: "agent-1",
+        promotionCredit: {
+          producerAgentId: { in: ["agent-1", "member-1"] },
+        },
+      },
+    ]);
+  });
 });
 
 describe("rollupPromotionCredits", () => {
@@ -285,6 +303,52 @@ describe("rollupPromotionCredits", () => {
     expect(result.pendingAgencyPc).toBe(0);
     expect(result.confirmedCreditCount).toBe(1);
     expect(result.pendingCreditCount).toBe(0);
+  });
+
+  it("drops legacy hierarchy credits from producers outside the agency membership", () => {
+    const result = rollupPromotionCredits(
+      [
+        row({ id: "personal", status: "CONFIRMED", creditedPc: 500 }),
+        row({
+          id: "linked-member",
+          status: "CONFIRMED",
+          creditedPc: 700,
+          kind: "AGENCY",
+          agentId: "member-1",
+          leaderAgentId: "agent-1",
+          promotionCredit: {
+            id: "linked-member",
+            producerAgentId: "member-1",
+            creditedPc: 700,
+            status: "CONFIRMED",
+            recognizedAt: NOW,
+            createdAt: NOW,
+          },
+        }),
+        row({
+          id: "legacy-downline",
+          status: "CONFIRMED",
+          creditedPc: 9_000,
+          kind: "AGENCY",
+          agentId: "individual-downline",
+          leaderAgentId: "agent-1",
+          promotionCredit: {
+            id: "legacy-downline",
+            producerAgentId: "individual-downline",
+            creditedPc: 9_000,
+            status: "CONFIRMED",
+            recognizedAt: NOW,
+            createdAt: NOW,
+          },
+        }),
+      ],
+      "agent-1",
+      true,
+      ["agent-1", "member-1"],
+    );
+
+    expect(result.personalPc).toBe(500);
+    expect(result.agencyPc).toBe(1_200);
   });
 
   it("keeps estimates and carrier-pending PC out of confirmed promotion totals", () => {

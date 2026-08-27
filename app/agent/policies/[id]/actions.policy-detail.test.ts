@@ -3,18 +3,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   requireRole: vi.fn(),
   currentAgent: vi.fn(),
+  agentScope: vi.fn(),
   policyFind: vi.fn(),
-  agentsFind: vi.fn(),
   requestRefresh: vi.fn(),
   revalidate: vi.fn(),
 }))
 
 vi.mock('@/lib/require-role', () => ({ requireRole: mocks.requireRole }))
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.currentAgent }))
+vi.mock('@/lib/agent-access', () => ({ getAgentScopeIds: mocks.agentScope }))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     policy: { findUnique: mocks.policyFind },
-    agent: { findMany: mocks.agentsFind },
     nationalLifeInforcePolicy: { findUnique: vi.fn() },
   },
 }))
@@ -37,7 +37,7 @@ describe('refreshNationalLifePolicyDetail action', () => {
     mocks.policyFind.mockResolvedValue({
       id: 'policy_1', agentId: 'agent_1', policyNumber: 'LS1473219', carrier: 'National Life',
     })
-    mocks.agentsFind.mockResolvedValue([{ id: 'agent_1', parentAgentId: null }])
+    mocks.agentScope.mockResolvedValue(['agent_1'])
     mocks.requestRefresh.mockResolvedValue({ commandId: 'cmd_1' })
   })
 
@@ -48,6 +48,7 @@ describe('refreshNationalLifePolicyDetail action', () => {
     expect(mocks.requestRefresh).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       agentScopeIds: ['agent_1'], policyId: 'policy_1',
     }))
+    expect(mocks.agentScope).toHaveBeenCalledWith('agent_1')
     expect(mocks.revalidate).toHaveBeenCalledWith('/agent/policies/policy_1')
   })
 

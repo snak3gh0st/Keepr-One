@@ -15,7 +15,9 @@ vi.mock('@/lib/national-life/local-connector/config', () => ({
       { status: 404, headers: { 'Cache-Control': 'no-store' } },
     ),
 }))
-vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.currentAgent }))
+vi.mock('@/lib/agent-context', () => ({
+  getCurrentAgentWithoutOnboarding: mocks.currentAgent,
+}))
 vi.mock('@/lib/national-life/local-connector/pairing', () => ({
   createLocalConnectorPairing: mocks.createPairing,
 }))

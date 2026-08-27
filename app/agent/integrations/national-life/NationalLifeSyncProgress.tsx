@@ -7,6 +7,7 @@ import {
   NATIONAL_LIFE_PRIORITY_GRID_KEYS,
   nationalLifeReadCoverageSummary,
 } from '@/lib/national-life/read-coverage'
+import { NATIONAL_LIFE_PERSONAL_GRID_KEYS } from '@/lib/national-life/plan-access-catalog'
 import type { NationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
 
 const POLL_INTERVAL_MS = 1_500
@@ -14,6 +15,13 @@ const PORTAL_COVERAGE = nationalLifeReadCoverageSummary()
 const DISCOVERY_PAGE_KEYS = new Set<string>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
 const STRUCTURED_PRIORITY_GRID_KEYS = NATIONAL_LIFE_PRIORITY_GRID_KEYS.filter(
   (gridKey) => !DISCOVERY_PAGE_KEYS.has(gridKey),
+)
+const PERSONAL_GRID_KEYS = new Set<string>(NATIONAL_LIFE_PERSONAL_GRID_KEYS)
+const PERSONAL_PRIORITY_GRID_KEYS = NATIONAL_LIFE_PRIORITY_GRID_KEYS.filter(
+  (gridKey) => PERSONAL_GRID_KEYS.has(gridKey),
+)
+const PERSONAL_STRUCTURED_PRIORITY_GRID_KEYS = STRUCTURED_PRIORITY_GRID_KEYS.filter(
+  (gridKey) => PERSONAL_GRID_KEYS.has(gridKey),
 )
 export const NATIONAL_LIFE_SYNC_STARTED_EVENT = 'national-life-sync-started'
 
@@ -95,11 +103,13 @@ function snapshotRecordCount(status: NationalLifeSyncStatus): number {
 
 function isCurrentPriorityPlan(status: NationalLifeSyncStatus): boolean {
   const coverageKeys = status.stageCoverage?.map((stage) => stage.gridKey) ?? []
-  const expected = status.total === NATIONAL_LIFE_PRIORITY_GRID_KEYS.length
-    ? NATIONAL_LIFE_PRIORITY_GRID_KEYS
-    : status.total === STRUCTURED_PRIORITY_GRID_KEYS.length
-      ? STRUCTURED_PRIORITY_GRID_KEYS
-      : null
+  const knownPlans = [
+    NATIONAL_LIFE_PRIORITY_GRID_KEYS,
+    STRUCTURED_PRIORITY_GRID_KEYS,
+    PERSONAL_PRIORITY_GRID_KEYS,
+    PERSONAL_STRUCTURED_PRIORITY_GRID_KEYS,
+  ]
+  const expected = knownPlans.find((plan) => plan.length === status.total) ?? null
   if (!expected) return false
   // Older non-local status payloads may not include coverage. For current local
   // runs, require the same exact ordered plan used by run reuse.

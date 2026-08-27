@@ -75,6 +75,8 @@ describe('classificação das recusas novas', () => {
   it('não mexe na distinção que autoriza apagar a chave', () => {
     expect(classifyFailedResponse(401, new Headers({ 'x-fyntra-device-error': 'DEVICE_REVOKED' })))
       .toBe('DEVICE_REVOKED')
+    expect(classifyFailedResponse(401, new Headers({ 'x-fyntra-device-error': 'FOUNDER_ACCESS_REQUIRED' })))
+      .toBe('FOUNDER_ACCESS_REQUIRED')
     expect(classifyFailedResponse(401, headers())).toBe('DEVICE_REQUEST_REJECTED')
     expect(classifyFailedResponse(500, headers())).toBe('DEVICE_REQUEST_FAILED')
   })

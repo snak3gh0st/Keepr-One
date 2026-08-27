@@ -8,6 +8,7 @@ import type { InforceRow } from './portfolio-reconcile'
 
 const row = (overrides: Partial<InforceRow>): InforceRow => ({
   deploymentScope: 'LOCAL_CONNECTOR',
+  agentNumber: '10001',
   policyNumber: 'LS1',
   policyStatus: 'Active',
   policyIssueDate: '06/02/2023',

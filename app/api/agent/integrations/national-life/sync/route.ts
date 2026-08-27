@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
-import { getCurrentAgent } from '@/lib/agent-context'
+import { getCurrentAgentWithoutOnboarding } from '@/lib/agent-context'
 import {
   getNationalLifeLocalConnectorConfig,
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
 import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
+import { sanitizeNationalLifeSyncStatusForAgent } from '@/lib/national-life/plan-access'
 import {
   NATIONAL_LIFE_SYNC_ENGINE,
   NATIONAL_LIFE_SYNC_PIPELINE,
@@ -29,8 +30,11 @@ export async function GET() {
   }
 
   try {
-    const agent = await getCurrentAgent()
-    const status = await getNationalLifeSyncStatus(agent.id, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE)
+    const agent = await getCurrentAgentWithoutOnboarding()
+    const status = await sanitizeNationalLifeSyncStatusForAgent(
+      agent.id,
+      await getNationalLifeSyncStatus(agent.id, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE),
+    )
     return NextResponse.json(
       {
         engine: NATIONAL_LIFE_SYNC_ENGINE,

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { PublicLanding } from "@/components/PublicLanding";
-import { requireRole } from '@/lib/require-role'
+import { requireRoleWithoutFounderAccess } from '@/lib/require-role'
 
 export const metadata: Metadata = {
   title: "Controle total para agentes financeiros",
@@ -42,7 +42,7 @@ export default async function Home() {
   // comment replaced.
   let role: string | null = null
   try {
-    const session = await requireRole('ADMIN', 'AGENT', 'CLIENT')
+    const session = await requireRoleWithoutFounderAccess('ADMIN', 'AGENT', 'CLIENT')
     role = session.user.role
   } catch {
     // Not signed in — fall through to the guest landing page.

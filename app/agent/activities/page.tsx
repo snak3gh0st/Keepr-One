@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getCurrentAgent } from "@/lib/agent-context";
-import { getDownlineIds } from "@/lib/hierarchy";
+import { getAgentScopeIds } from "@/lib/agent-access";
 import { Shell } from "@/components/Shell";
 import { CrmNavigation } from "@/components/CrmNavigation";
 import { PageHeader } from "@/components/PageHeader";
@@ -67,10 +67,7 @@ function personName(firstName: string, lastName: string) {
 export default async function ActivitiesPage() {
   const agent = await getCurrentAgent();
   const user = await prisma.user.findUnique({ where: { id: agent.userId } });
-  const allAgents = await prisma.agent.findMany({
-    select: { id: true, parentAgentId: true },
-  });
-  const scopeAgentIds = [agent.id, ...getDownlineIds(allAgents, agent.id)];
+  const scopeAgentIds = await getAgentScopeIds(agent.id);
 
   let data: Awaited<ReturnType<typeof loadActivities>> | null = null;
   let followUps: DueFollowUpView[] = [];

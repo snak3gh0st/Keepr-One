@@ -1,6 +1,14 @@
 import 'server-only'
+import type { CreateEmailOptions } from 'resend'
 import { getResendClient, EMAIL_FROM } from './client'
 import { renderEmailLayout } from './layout'
+
+async function deliverEmail(payload: CreateEmailOptions): Promise<void> {
+  const result = await getResendClient().emails.send(payload)
+  if (result.error) {
+    throw new Error(`Email provider rejected the message: ${result.error.name}`)
+  }
+}
 
 export async function sendResetPasswordEmail(options: {
   to: string
@@ -17,10 +25,33 @@ export async function sendResetPasswordEmail(options: {
     ctaUrl: options.resetUrl,
   })
 
-  await getResendClient().emails.send({
+  await deliverEmail({
     from: EMAIL_FROM,
     to: options.to,
     subject: 'Redefinir sua senha — Keepr One',
+    html,
+  })
+}
+
+export async function sendVerificationEmail(options: {
+  to: string
+  verificationUrl: string
+}): Promise<void> {
+  const html = renderEmailLayout({
+    preheader: 'Confirme seu novo e-mail no Keepr One',
+    heading: 'Confirme seu endereço de e-mail',
+    bodyHtml: `
+      <p style="margin:0 0 16px;">Recebemos uma solicitação para usar este endereço na sua conta Keepr One.</p>
+      <p style="margin:0;">Confirme pelo botão abaixo. Seu e-mail de acesso só será alterado depois desta verificação.</p>
+    `,
+    ctaLabel: 'Confirmar novo e-mail',
+    ctaUrl: options.verificationUrl,
+  })
+
+  await deliverEmail({
+    from: EMAIL_FROM,
+    to: options.to,
+    subject: 'Confirme seu e-mail — Keepr One',
     html,
   })
 }
@@ -36,10 +67,118 @@ export async function sendWelcomeEmail(options: { to: string; agentName: string 
     ctaUrl: 'https://app.keeprone.com',
   })
 
-  await getResendClient().emails.send({
+  await deliverEmail({
     from: EMAIL_FROM,
     to: options.to,
     subject: 'Bem-vindo ao Keepr One',
+    html,
+  })
+}
+
+function escapeEmailText(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function sanitizeEmailHeader(value: string): string {
+  return value.replace(/[\r\n]+/g, ' ').trim()
+}
+
+export async function sendChangeEmailConfirmationEmail(options: {
+  to: string
+  newEmail: string
+  confirmationUrl: string
+}): Promise<void> {
+  const safeNewEmail = escapeEmailText(options.newEmail)
+  const html = renderEmailLayout({
+    preheader: 'Autorize a alteração do e-mail da sua conta',
+    heading: 'Você solicitou esta alteração?',
+    bodyHtml: `
+      <p style="margin:0 0 16px;">Foi solicitada a troca do e-mail da sua conta para <strong style="color:#ffffff;">${safeNewEmail}</strong>.</p>
+      <p style="margin:0;">Autorize pelo botão abaixo. Depois disso, também confirmaremos o novo endereço antes de concluir a mudança.</p>
+    `,
+    ctaLabel: 'Autorizar alteração',
+    ctaUrl: options.confirmationUrl,
+  })
+
+  await deliverEmail({
+    from: EMAIL_FROM,
+    to: options.to,
+    subject: 'Autorize a alteração do seu e-mail — Keepr One',
+    html,
+  })
+}
+
+export async function sendFounderWelcomeEmail(options: {
+  to: string
+  founderName: string
+  accountType: 'AGENT' | 'AGENCY'
+  trialEndsAt: Date
+  loginUrl: string
+}): Promise<void> {
+  const safeName = escapeEmailText(options.founderName)
+  const planLabel = options.accountType === 'AGENCY' ? 'Agência' : 'Agente'
+  const trialEndLabel = new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'long',
+    timeZone: 'UTC',
+  }).format(options.trialEndsAt)
+  const html = renderEmailLayout({
+    preheader: 'Seu acesso Founder de 30 dias está pronto',
+    heading: `Bem-vindo ao programa Founders, ${safeName}`,
+    bodyHtml: `
+      <p style="margin:0 0 16px;">Seu acesso ao plano ${planLabel} já está ativo por 30 dias, com término em <strong style="color:#ffffff;">${trialEndLabel}</strong>.</p>
+      <p style="margin:0;">Você não será cobrado agora. Para manter o acesso depois desse período, será necessário ativar uma assinatura.</p>
+    `,
+    ctaLabel: 'Acessar a plataforma',
+    ctaUrl: options.loginUrl,
+  })
+
+  await deliverEmail({
+    from: EMAIL_FROM,
+    to: options.to,
+    subject: 'Seu acesso Founder está pronto — Keepr One',
+    html,
+  })
+}
+
+export async function sendAgencyInvitationEmail(options: {
+  to: string
+  inviteeName?: string | null
+  agencyName: string
+  intendedType: 'AGENT' | 'AGENCY'
+  invitationUrl: string
+  expiresAt: Date
+}): Promise<void> {
+  const safeInviteeName = options.inviteeName?.trim()
+    ? escapeEmailText(options.inviteeName.trim())
+    : 'Olá'
+  const safeAgencyName = escapeEmailText(options.agencyName)
+  const safeAgencyHeader = sanitizeEmailHeader(options.agencyName)
+  const accountTypeLabel = options.intendedType === 'AGENCY' ? 'Agência' : 'Agente'
+  const accountTypeArticle = options.intendedType === 'AGENCY' ? 'uma agência' : 'um agente'
+  const expiresLabel = new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'long',
+    timeZone: 'UTC',
+  }).format(options.expiresAt)
+  const html = renderEmailLayout({
+    preheader: `${safeAgencyName} convidou você para o Keepr One`,
+    heading: safeInviteeName,
+    bodyHtml: `
+      <p style="margin:0 0 16px;">A <strong style="color:#ffffff;">${safeAgencyName}</strong> convidou você para fazer parte da estrutura no Keepr One como <strong style="color:#ffffff;">${accountTypeArticle}</strong>.</p>
+      <p style="margin:0;">O tipo de acesso ${accountTypeLabel} já foi definido pela agência convidante. O link é individual e fica disponível até <strong style="color:#ffffff;">${expiresLabel}</strong>.</p>
+    `,
+    ctaLabel: 'Ver e aceitar o convite',
+    ctaUrl: options.invitationUrl,
+  })
+
+  await deliverEmail({
+    from: EMAIL_FROM,
+    to: options.to,
+    subject: `${safeAgencyHeader} convidou você — Keepr One`,
     html,
   })
 }
@@ -59,7 +198,7 @@ export async function sendNoticeEmail(options: {
     ctaUrl: options.ctaUrl,
   })
 
-  await getResendClient().emails.send({
+  await deliverEmail({
     from: EMAIL_FROM,
     to: options.to,
     subject: options.subject,

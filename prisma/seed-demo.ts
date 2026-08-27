@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client'
-import { auth } from '../lib/auth'
+import { randomUUID } from 'node:crypto'
+import { hashPassword } from 'better-auth/crypto'
 import { computeOverrides } from '../lib/commission'
 import type { PolicyStatus } from '@prisma/client'
 
@@ -61,13 +62,21 @@ async function createUser(email: string, name: string, role: 'ADMIN' | 'AGENT' |
     return existing
   }
 
-  const result = await auth.api.signUpEmail({
-    body: { email, name, password: SEED_PASSWORD, role },
-  })
-
-  return prisma.user.update({
-    where: { id: result.user.id },
-    data: { role },
+  const password = await hashPassword(SEED_PASSWORD)
+  return prisma.$transaction(async (transaction) => {
+    const user = await transaction.user.create({
+      data: { email, name, role },
+    })
+    await transaction.account.create({
+      data: {
+        id: randomUUID(),
+        accountId: user.id,
+        providerId: 'credential',
+        userId: user.id,
+        password,
+      },
+    })
+    return user
   })
 }
 
@@ -85,6 +94,7 @@ async function createDemoHierarchy(agentCount: number) {
 
     const parentIndex = i === 0 ? null : Math.floor((i - 1) / branches)
     const parentAgentId = parentIndex === null ? null : seeds[parentIndex]?.id
+    const phone = `+1555${String(i + 1).padStart(7, '0')}`
 
     const agent = await prisma.agent.upsert({
       where: { userId: user.id },
@@ -92,12 +102,14 @@ async function createDemoHierarchy(agentCount: number) {
         parentAgentId,
         rank,
         npn: `DEMO-${String(i + 1).padStart(5, '0')}`,
+        phone,
         status: 'ACTIVE',
       },
       create: {
         userId: user.id,
         rank,
         npn: `DEMO-${String(i + 1).padStart(5, '0')}`,
+        phone,
         status: 'ACTIVE',
         parentAgentId,
       },

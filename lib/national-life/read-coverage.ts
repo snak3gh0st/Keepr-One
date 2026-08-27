@@ -61,6 +61,9 @@ export const NATIONAL_LIFE_PRIORITY_GRID_KEYS = [
   'COMMISSIONS_OVERVIEW',
   'COMMISSIONS_POLICY_HISTORY',
   'AGENT_DASHBOARD',
+  // Planned only for an entitled agency owner. The local-connector route
+  // filters this key out for individual/member plans and after downgrade.
+  'PREMIUM_REPORT_AGENCY',
 ] as const satisfies readonly NationalLifeGridKey[]
 
 /// Sources that require a server-rendered page/form snapshot before their

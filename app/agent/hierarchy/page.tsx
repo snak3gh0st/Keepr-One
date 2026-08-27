@@ -1,55 +1,53 @@
 export const dynamic = 'force-dynamic'
 
-import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getDownlineWithLevels, getUplineIds } from '@/lib/hierarchy'
+import { getCurrentAgentAccess } from '@/lib/agent-access'
+import { getAgencyTreeForAgent } from '@/lib/agency-tree'
+import { redirect } from 'next/navigation'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { HierarchyCanvas } from './HierarchyCanvas'
 import { HierarchyMetrics } from './HierarchyMetrics'
 import { ContextPanel } from '@/components/ContextPanel'
+import { createHierarchyView, getHierarchySummary } from './view-model'
 
 export default async function HierarchyPage() {
+  const access = await getCurrentAgentAccess()
+  if (!access.canManageTeam) redirect('/agent/agency')
+
   const agent = await getCurrentAgent()
-  const [user, allAgents] = await Promise.all([
-    prisma.user.findUnique({ where: { id: agent.userId } }),
-    prisma.agent.findMany({ include: { user: true } }),
-  ])
-
-  const uplineIds = getUplineIds(allAgents, agent.id)
-  const downline = getDownlineWithLevels(allAgents, agent.id)
-  const levelById = new Map(downline.map((d) => [d.id, d.level]))
-  const relevantIds = new Set([...uplineIds, agent.id, ...downline.map((d) => d.id)])
-
-  const canvasAgents = allAgents
-    .filter((a) => relevantIds.has(a.id))
-    .map((a) => ({
-      id: a.id,
-      name: a.user.name,
-      rank: a.rank,
-      parentAgentId: a.parentAgentId,
-      level: levelById.get(a.id) ?? null,
-    }))
+  const agencyTree = await getAgencyTreeForAgent(agent.id)
+  const hierarchyNodes = createHierarchyView(agencyTree, agent.id)
+  const summary = getHierarchySummary(hierarchyNodes)
+  const peopleLabel = summary.peopleBelow === 1
+    ? '1 pessoa abaixo de você'
+    : `${summary.peopleBelow} pessoas abaixo de você`
 
   return (
-    <Shell role="AGENT" userName={user?.name ?? ''}>
-      <PageHeader title="Equipe" eyebrow="Estrutura da agência" description="Veja sua linha de liderança, sua posição e cada agente conectado à produção da sua operação.">
-        <span className="inline-flex rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal">{canvasAgents.length} agentes</span>
+    <Shell role="AGENT" userName={hierarchyNodes[0]?.name ?? ''}>
+      <PageHeader
+        title="Minha estrutura"
+        eyebrow="Árvore da agência"
+        description="Esta visão começa em você e mostra, em ordem, somente agentes e agências conectados abaixo da sua posição."
+      >
+        <span className="inline-flex rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal">
+          {peopleLabel}
+        </span>
       </PageHeader>
 
       <HierarchyMetrics
-        uplineCount={uplineIds.length}
-        downlineCount={downline.length}
-        depth={Math.max(0, ...downline.map((item) => item.level))}
+        peopleBelow={summary.peopleBelow}
+        agenciesBelow={summary.agenciesBelow}
+        depth={summary.depth}
       />
 
       <div className="module-content-grid">
-        <HierarchyCanvas agents={canvasAgents} youId={agent.id} />
-        <ContextPanel eyebrow="Continue por aqui" title="Sua posição na estrutura">
-          <p>Acima de você estão os responsáveis pela sua linha. Abaixo estão os agentes conectados à sua estrutura.</p>
+        <HierarchyCanvas agents={hierarchyNodes} />
+        <ContextPanel eyebrow="Limite da visão" title="Sua árvore começa aqui">
+          <p>Você vê seu próprio nome e cada ramo formado abaixo da sua posição. Pessoas acima de você nunca aparecem nesta área.</p>
           <div className="mt-5 border-t border-white/10 pt-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Impacto</p>
-            <p className="mt-2">A estrutura define de onde vêm seus repasses de comissão.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Subagências</p>
+            <p className="mt-2">Quando um agente abaixo de você cria uma agência, a equipe dele continua dentro do mesmo ramo.</p>
           </div>
         </ContextPanel>
       </div>

@@ -1,7 +1,7 @@
 import { cache } from "react";
+import { getAgentAccessForAgent } from "@/lib/agent-access";
 import { decimalToNumber } from "@/lib/decimal";
 import { prisma } from "@/lib/prisma";
-import { COMMISSION_EARNING_GRID_KEYS } from "./national-life/commission-grid-keys";
 import {
   isRecognizedPromotionCreditStatus,
   type PromotionCreditStatus,
@@ -87,11 +87,16 @@ type PromotionAccessContext = {
   mode: PromotionMode;
   canViewAgencyJourney: boolean;
   hasAgencyStructure: boolean;
+  scopeAgentIds?: string[];
 };
 
 type PromotionAttributionPredicate =
   | { kind: "PERSONAL"; agentId: string }
-  | { kind: "AGENCY"; leaderAgentId: string };
+  | {
+      kind: "AGENCY";
+      leaderAgentId: string;
+      promotionCredit?: { producerAgentId: { in: string[] } };
+    };
 
 function prismaErrorCode(error: unknown) {
   return typeof error === "object" && error !== null && "code" in error
@@ -119,46 +124,22 @@ export function getLegacyPromotionAccessContext(
 }
 
 /**
- * Reads the explicit plan entitlement. The second branch exists only so a
- * developer database that has not received the additive migration can still
- * render localhost; once migrated, hierarchy never grants agency access.
+ * The commercial subscription is the single authority for the agency Journey.
+ * `promotionAccessScope` remains in the schema only for migration compatibility;
+ * it must not outlive a downgraded or canceled agency plan as an access grant.
  */
 async function getPromotionAccessContext(
   agentId: string,
 ): Promise<PromotionAccessContext> {
-  try {
-    const agent = await prisma.agent.findUnique({
-      where: { id: agentId },
-      select: {
-        promotionAccessScope: true,
-        subAgents: { select: { id: true }, take: 1 },
-      },
-    });
-    const canViewAgencyJourney = agent?.promotionAccessScope === "AGENCY";
-    return {
-      mode: canViewAgencyJourney ? "agency" : "individual",
-      canViewAgencyJourney,
-      hasAgencyStructure: Boolean(agent?.subAgents.length),
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const missingAccessField =
-      /promotionAccessScope/i.test(message) &&
-      (prismaErrorCode(error) === "P2022" || /Unknown field/i.test(message));
-    if (!missingAccessField) {
-      throw error;
-    }
+  const access = await getAgentAccessForAgent(agentId);
+  const canViewAgencyJourney = access.canViewTeamData;
 
-    const legacyAgent = await prisma.agent.findUnique({
-      where: { id: agentId },
-      select: { subAgents: { select: { id: true }, take: 1 } },
-    });
-    const hasAgencyStructure = Boolean(legacyAgent?.subAgents.length);
-    return getLegacyPromotionAccessContext(
-      hasAgencyStructure,
-      process.env.NODE_ENV,
-    );
-  }
+  return {
+    mode: canViewAgencyJourney ? "agency" : "individual",
+    canViewAgencyJourney,
+    hasAgencyStructure: access.scopeAgentIds.some((id) => id !== agentId),
+    scopeAgentIds: access.scopeAgentIds,
+  };
 }
 
 /**
@@ -238,12 +219,23 @@ export function getDurablePromotionIdentity(
 export function getPromotionAttributionPredicates(
   agentId: string,
   canViewAgencyJourney: boolean,
+  agencyProducerAgentIds?: readonly string[],
 ): PromotionAttributionPredicate[] {
   const predicates: PromotionAttributionPredicate[] = [
     { kind: "PERSONAL", agentId },
   ];
   if (canViewAgencyJourney) {
-    predicates.push({ kind: "AGENCY", leaderAgentId: agentId });
+    predicates.push({
+      kind: "AGENCY",
+      leaderAgentId: agentId,
+      ...(agencyProducerAgentIds
+        ? {
+            promotionCredit: {
+              producerAgentId: { in: [...agencyProducerAgentIds] },
+            },
+          }
+        : {}),
+    });
   }
   return predicates;
 }
@@ -257,6 +249,7 @@ export function rollupPromotionCredits(
   rows: readonly PromotionAttributionRow[],
   agentId: string,
   includeAgency = true,
+  agencyProducerAgentIds?: readonly string[],
 ): PromotionCreditRollup {
   const personal: Record<PromotionBucket, Map<string, number>> = {
     confirmed: new Map(),
@@ -269,6 +262,9 @@ export function rollupPromotionCredits(
     pending: new Map(),
   };
   const allCredits = new Map<string, PromotionAttributionRow["promotionCredit"]>();
+  const agencyProducerScope = agencyProducerAgentIds
+    ? new Set(agencyProducerAgentIds)
+    : null;
 
   for (const row of rows) {
     const credit = row.promotionCredit;
@@ -277,6 +273,7 @@ export function rollupPromotionCredits(
       includeAgency &&
       row.kind === "AGENCY" &&
       row.leaderAgentId === agentId &&
+      (agencyProducerScope === null || agencyProducerScope.has(credit.producerAgentId)) &&
       credit.producerAgentId !== agentId;
     if (!isPersonal && !isTeam) continue;
 
@@ -342,6 +339,7 @@ function emptySnapshot({
     mode: "individual",
     canViewAgencyJourney: false,
     hasAgencyStructure: false,
+    scopeAgentIds: [],
   },
   asOf = new Date(),
 }: {
@@ -411,6 +409,7 @@ export const getAgentPromotionSnapshot = cache(
             OR: getPromotionAttributionPredicates(
               agentId,
               access.canViewAgencyJourney,
+              access.scopeAgentIds ?? [agentId],
             ),
             promotionCredit: {
               recognizedAt: { gte: windowStart, lte: windowEnd },
@@ -433,7 +432,15 @@ export const getAgentPromotionSnapshot = cache(
           },
         }),
         prisma.promotionAchievement.findFirst({
-          where: { agentId, invalidatedAt: null },
+          where: {
+            agentId,
+            invalidatedAt: null,
+            // Historical AGENCY achievements were written from the legacy
+            // hierarchy and cannot be proven to belong to the current agency
+            // membership. Keep the durable badge personal until achievements
+            // carry an agency subject of their own.
+            route: "PERSONAL" as const,
+          },
           orderBy: [{ step: "desc" }, { achievedAt: "asc" }],
           select: {
             rankId: true,
@@ -450,6 +457,7 @@ export const getAgentPromotionSnapshot = cache(
         rows,
         agentId,
         access.canViewAgencyJourney,
+        access.scopeAgentIds ?? [agentId],
       );
       const hasAgencyStructure =
         access.hasAgencyStructure ||

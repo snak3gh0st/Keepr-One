@@ -252,6 +252,101 @@ enum PromotionAchievementRoute {
   AGENCY
 }
 
+/// The commercial plan is deliberately separate from `Role`, hierarchy, and
+/// promotion access. A user can remain an AGENT while their product
+/// capabilities change as their subscription changes.
+enum PlatformPlan {
+  AGENT_INDIVIDUAL
+  AGENCY
+  AGENT_AGENCY_MEMBER
+}
+
+enum PlatformSubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+/// Identifies which commercial workspace a founder selected when entering the
+/// early-access cohort. This remains separate from User.role because both
+/// account types authenticate through an AGENT user.
+enum FounderAccountType {
+  AGENT
+  AGENCY
+}
+
+enum AgentOnboardingStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum AgentOnboardingStep {
+  WELCOME
+  PROFILE
+  NATIONAL_LIFE
+  CALENDAR
+  WHATSAPP
+  MODULES
+  REVIEW
+  COMPLETED
+}
+
+enum AgentOnboardingOptionalDecision {
+  CONNECTED
+  SKIPPED
+}
+
+enum AgentOnboardingModule {
+  TODAY
+  CALENDAR
+  CRM
+  MESSAGES
+  POLICIES
+  ILLUSTRATIONS
+  COMMISSIONS
+  JOURNEY
+  TEAM
+  INTEGRATIONS
+}
+
+enum AgentOnboardingNationalLifeSource {
+  LOCAL_CONNECTOR_SYNC
+}
+
+enum AgencyMembershipRole {
+  OWNER
+  MEMBER
+}
+
+enum AgencyInvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+/// Declares the commercial shape chosen by the inviting agency. It remains
+/// nullable only so invitations created before this field existed can expire
+/// or be reissued without an unsafe guessed backfill.
+enum AgencyInvitationIntendedType {
+  AGENT
+  AGENCY
+}
+
+enum AgencyRecruitmentStage {
+  PROSPECT
+  CONTACTED
+  MEETING_SCHEDULED
+  QUALIFIED
+  INVITED
+  ONBOARDING
+  ACTIVE
+  PAUSED
+  DECLINED
+}
+
 enum SyncStatus {
   PENDING
   PROCESSING
@@ -345,6 +440,7 @@ model Agent {
   subAgents            Agent[]              @relation("AgentHierarchy")
   rank                 String
   npn                  String?              @unique
+  phone                String?
   status               AgentStatus          @default(ACTIVE)
   promotionAccessScope PromotionAccessScope @default(PERSONAL)
   createdAt            DateTime             @default(now())
@@ -383,8 +479,169 @@ model Agent {
   promotionAchievements                 PromotionAchievement[]
   crmPipeline                           CrmPipeline?
   ownedFollowUps                        FollowUp[]                             @relation("FollowUpOwner")
+  platformSubscriptions                 PlatformSubscription[]                 @relation("AgentPlatformSubscriptions")
+  founderEnrollment                     FounderEnrollment?
+  onboarding                            AgentOnboarding?
+  agencyMemberships                     AgencyMembership[]                     @relation("AgencyMembershipAgent")
+  agencyMembershipInvitationsSent       AgencyMembership[]                     @relation("AgencyMembershipInviter")
+  agencyInvitationsSent                 AgencyInvitation[]                     @relation("AgencyInvitationInviter")
+  agencyInvitationsAccepted             AgencyInvitation[]                     @relation("AgencyInvitationAcceptedAgent")
 
   @@index([parentAgentId])
+}
+
+/// A commercial agency workspace. Ownership is represented by the single
+/// active OWNER membership, rather than duplicating an owner foreign key here.
+model Agency {
+  id             String   @id @default(cuid())
+  name           String
+  parentAgencyId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  parentAgency      Agency?                @relation("AgencyHierarchy", fields: [parentAgencyId], references: [id], onDelete: Restrict)
+  childAgencies     Agency[]               @relation("AgencyHierarchy")
+  memberships       AgencyMembership[]
+  invitations       AgencyInvitation[]
+  subscriptions     PlatformSubscription[]
+  founderEnrollment FounderEnrollment?
+
+  @@index([parentAgencyId])
+}
+
+/// An agent's durable link to an agency. Ending a membership preserves the
+/// billing and invitation history while immediately removing team access.
+model AgencyMembership {
+  id               String               @id @default(cuid())
+  agencyId         String
+  agentId          String
+  role             AgencyMembershipRole
+  invitedByAgentId String?
+  joinedAt         DateTime             @default(now())
+  endedAt          DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  agent              Agent                  @relation("AgencyMembershipAgent", fields: [agentId], references: [id], onDelete: Restrict)
+  agency             Agency                 @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+  invitedBy          Agent?                 @relation("AgencyMembershipInviter", fields: [invitedByAgentId], references: [id], onDelete: SetNull)
+  subscriptions      PlatformSubscription[]
+  acceptedInvitation AgencyInvitation?      @relation("AgencyInvitationAcceptedMembership")
+
+  @@index([agencyId, endedAt])
+  @@index([agentId, endedAt])
+  @@index([invitedByAgentId])
+}
+
+/// Invitation state is persisted before any external billing provider is
+/// involved. The token itself is never stored, only its hash.
+model AgencyInvitation {
+  id                   String                        @id @default(cuid())
+  agencyId             String
+  email                String
+  name                 String?
+  invitedByAgentId     String
+  tokenHash            String                        @unique
+  status               AgencyInvitationStatus        @default(PENDING)
+  intendedType         AgencyInvitationIntendedType?
+  recruitmentStage     AgencyRecruitmentStage        @default(INVITED)
+  stageUpdatedAt       DateTime                      @default(now())
+  monthlyPriceCents    Int                           @default(4990)
+  expiresAt            DateTime
+  acceptedAt           DateTime?
+  acceptedAgentId      String?
+  acceptedPlan         PlatformPlan?
+  acceptedMembershipId String?                       @unique
+  revokedAt            DateTime?
+  createdAt            DateTime                      @default(now())
+  updatedAt            DateTime                      @updatedAt
+
+  agency             Agency            @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+  invitedBy          Agent             @relation("AgencyInvitationInviter", fields: [invitedByAgentId], references: [id], onDelete: Restrict)
+  acceptedAgent      Agent?            @relation("AgencyInvitationAcceptedAgent", fields: [acceptedAgentId], references: [id], onDelete: Restrict)
+  acceptedMembership AgencyMembership? @relation("AgencyInvitationAcceptedMembership", fields: [acceptedMembershipId], references: [id], onDelete: Restrict)
+
+  @@index([agencyId, status])
+  @@index([agencyId, recruitmentStage, status])
+  @@index([invitedByAgentId])
+  @@index([acceptedAgentId])
+}
+
+/// A subscription has exactly one subject. Individual plans point to an Agent,
+/// agency plans to an Agency, and discounted invited-agent plans to the durable
+/// AgencyMembership so the agency link cannot be lost while that plan exists.
+model PlatformSubscription {
+  id                 String                     @id @default(cuid())
+  plan               PlatformPlan
+  status             PlatformSubscriptionStatus @default(TRIALING)
+  agentId            String?
+  agencyId           String?
+  agencyMembershipId String?
+  unitAmountCents    Int
+  currency           String                     @default("USD")
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean                    @default(false)
+  canceledAt         DateTime?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+
+  agent            Agent?            @relation("AgentPlatformSubscriptions", fields: [agentId], references: [id], onDelete: Restrict)
+  agency           Agency?           @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+  agencyMembership AgencyMembership? @relation(fields: [agencyMembershipId], references: [id], onDelete: Restrict)
+
+  @@index([agentId, status])
+  @@index([agencyId, status])
+  @@index([agencyMembershipId, status])
+}
+
+/// Marks accounts created through the founders program. Its presence is the
+/// additive boundary that allows legacy users to keep their historical access
+/// while founder accounts become subject to trial/payment enforcement.
+model FounderEnrollment {
+  id              String             @id @default(cuid())
+  agentId         String             @unique
+  agencyId        String?            @unique
+  accountType     FounderAccountType
+  phone           String
+  cohort          String             @default("FOUNDERS_2026")
+  accessCodeHash  String?            @unique
+  trialStartedAt  DateTime
+  trialEndsAt     DateTime
+  acceptedTermsAt DateTime
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  agent  Agent   @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  agency Agency? @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+
+  @@index([trialEndsAt])
+}
+
+/// Only accounts provisioned by a new-account flow receive an onboarding row.
+/// Its absence is the explicit grandfathering marker for legacy agents.
+model AgentOnboarding {
+  id                             String                             @id @default(cuid())
+  agentId                        String                             @unique
+  status                         AgentOnboardingStatus              @default(IN_PROGRESS)
+  currentStep                    AgentOnboardingStep                @default(WELCOME)
+  welcomeCompletedAt             DateTime?
+  profileCompletedAt             DateTime?
+  nationalLifeVerifiedAt         DateTime?
+  nationalLifeVerificationSource AgentOnboardingNationalLifeSource?
+  calendarDecision               AgentOnboardingOptionalDecision?
+  calendarDecidedAt              DateTime?
+  whatsappDecision               AgentOnboardingOptionalDecision?
+  whatsappDecidedAt              DateTime?
+  requiredModules                AgentOnboardingModule[]
+  completedModules               AgentOnboardingModule[]            @default([])
+  completedAt                    DateTime?
+  createdAt                      DateTime                           @default(now())
+  updatedAt                      DateTime                           @updatedAt
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([status, currentStep])
 }
 
 /// Raw landing zone for rows read from the National Life agent portal grids.

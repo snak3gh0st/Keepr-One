@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getDownlineIds } from '@/lib/hierarchy'
+import { getCurrentAgentAccess } from '@/lib/agent-access'
 import { decimalToNumber } from '@/lib/decimal'
 import { periodFromDate, shiftPeriod, percentChange } from '@/lib/period'
 import {
@@ -177,15 +177,15 @@ export default async function AgentDashboard({
   const { preview } = await searchParams
   const localPromotionPreview = getLocalPromotionPreview(preview)
   const agent = await getCurrentAgent()
-  const [user, allAgents, promotion] = await Promise.all([
+  const [user, access, promotion] = await Promise.all([
     prisma.user.findUnique({ where: { id: agent.userId } }),
-    prisma.agent.findMany({ select: { id: true, parentAgentId: true } }),
+    getCurrentAgentAccess(),
     getAgentPromotionSnapshot(agent.id),
   ])
-  const downlineIds = getDownlineIds(allAgents, agent.id)
-  const scope = [agent.id, ...downlineIds]
+  const scope = access.scopeAgentIds
+  const teamAgentIds = scope.filter((id) => id !== agent.id)
 
-  const displayedPromotion = localPromotionPreview
+  const availablePromotion = localPromotionPreview
     ? {
         personalPc: localPromotionPreview.personalPc,
         agencyPc: localPromotionPreview.agencyPc,
@@ -210,16 +210,34 @@ export default async function AgentDashboard({
         mode: promotion.mode,
         loadError: promotion.loadError,
       }
+  // The legacy promotion entitlement is intentionally not an authorization
+  // source for the platform plan. An individual subscriber can keep their
+  // personal journey without receiving agency production or achievements.
+  const displayedPromotion = access.canViewAgencyNationalLife
+    ? availablePromotion
+    : {
+        ...availablePromotion,
+        agencyPc: 0,
+        estimatedAgencyPc: 0,
+        pendingAgencyPc: 0,
+        highestAchievementRankId:
+          getPromotionJourney({
+            personalPc: availablePromotion.personalPc,
+            agencyPc: 0,
+            mode: 'individual',
+          }).currentRank?.id ?? null,
+        mode: 'individual' as const,
+      }
   const previewPromotionIdentity = localPromotionPreview
     ? getPromotionIdentity(
         getPromotionJourney({
-          personalPc: localPromotionPreview.personalPc,
-          agencyPc: localPromotionPreview.agencyPc,
-          mode: localPromotionPreview.mode,
+          personalPc: displayedPromotion.personalPc,
+          agencyPc: displayedPromotion.agencyPc,
+          mode: displayedPromotion.mode,
         }),
       )
     : undefined
-  const journeyHref = localPromotionPreview
+  const journeyHref = localPromotionPreview && access.canViewAgencyNationalLife
     ? `/agent/journey?preview=${encodeURIComponent(preview ?? '')}`
     : '/agent/journey'
 
@@ -231,7 +249,8 @@ export default async function AgentDashboard({
   const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
   const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1)
 
-  // Work-queue counters (actionable, scoped to the agent + downline).
+  // Work-queue counters are restricted by the subscription access resolved on
+  // the server. Individual subscribers receive only their own records.
   let openCases = 0
   let awaitingIllustration = 0
   let openRequirements = 0
@@ -258,6 +277,11 @@ export default async function AgentDashboard({
   let byCarrier: { carrier: string; _count: { _all: number } }[] = []
   let byProduct: { product: string; _count: { _all: number } }[] = []
   let loadError = false
+  const commissionScopeWhere = {
+    agentId: { in: scope },
+    policy: { agentId: { in: scope } },
+    ...(!access.canViewTeamData ? { type: 'DIRECT' as const } : {}),
+  }
 
   try {
     const [
@@ -277,31 +301,31 @@ export default async function AgentDashboard({
       dueFollowUpsResult,
       dueReviewCount,
     ] = await Promise.all([
-      prisma.policy.count({ where: { agentId: agent.id } }),
-      prisma.commissionRecord.aggregate({ where: { agentId: agent.id }, _sum: { amount: true } }),
-      prisma.commissionRecord.aggregate({ where: { agentId: agent.id, period: currentP }, _sum: { amount: true } }),
-      prisma.commissionRecord.aggregate({ where: { agentId: agent.id, period: previousP }, _sum: { amount: true } }),
+      prisma.policy.count({ where: { agentId: { in: scope } } }),
+      prisma.commissionRecord.aggregate({ where: commissionScopeWhere, _sum: { amount: true } }),
+      prisma.commissionRecord.aggregate({ where: { ...commissionScopeWhere, period: currentP }, _sum: { amount: true } }),
+      prisma.commissionRecord.aggregate({ where: { ...commissionScopeWhere, period: previousP }, _sum: { amount: true } }),
       prisma.commissionRecord.groupBy({
         by: ['period'],
-        where: { agentId: agent.id, period: { gte: trendStartP, lte: currentP } },
+        where: { ...commissionScopeWhere, period: { gte: trendStartP, lte: currentP } },
         _sum: { amount: true },
         orderBy: { period: 'asc' },
       }),
       prisma.policy.groupBy({
         by: ['status'],
-        where: { agentId: agent.id },
+        where: { agentId: { in: scope } },
         _count: { _all: true },
         orderBy: { status: 'asc' },
       }),
       prisma.policy.groupBy({
         by: ['carrier'],
-        where: { agentId: agent.id },
+        where: { agentId: { in: scope } },
         _count: { _all: true },
         orderBy: { carrier: 'asc' },
       }),
       prisma.policy.groupBy({
         by: ['product'],
-        where: { agentId: agent.id },
+        where: { agentId: { in: scope } },
         _count: { _all: true },
         orderBy: { product: 'asc' },
       }),
@@ -315,11 +339,12 @@ export default async function AgentDashboard({
       prisma.applicationRequirement.count({
         where: { status: 'OPEN', application: { insuranceCase: { assignedAgentId: { in: scope } } } },
       }),
-      prisma.policy.count({ where: { agentId: agent.id, status: 'LAPSED' } }),
+      prisma.policy.count({ where: { agentId: { in: scope }, status: 'LAPSED' } }),
       prisma.commissionTransaction.groupBy({
         by: ['type'],
         where: {
-          agentId: agent.id,
+          agentId: { in: scope },
+          policy: { agentId: { in: scope } },
           occurredAt: { gte: currentMonthStart, lt: nextMonthStart },
         },
         _sum: { amount: true },
@@ -366,13 +391,14 @@ export default async function AgentDashboard({
     if (localConnectorEnabled) {
       const carrierRows = await prisma.nationalLifeReportRow.findMany({
         where: {
-          agentId: agent.id,
+          agentId: { in: scope },
           deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
           gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
         },
         select: { id: true, raw: true, amounts: true },
       })
       const carrierRecords = toCarrierCommissionRecords(carrierRows)
+        .filter((record) => record.type === 'DIRECT')
 
       commissionTotalAmount += totalOf(carrierRecords)
       commissionThisMonth += totalForPeriod(carrierRecords, currentP)
@@ -463,7 +489,9 @@ export default async function AgentDashboard({
     { label: 'Oportunidades ativas', value: countValue(openCases) },
     { label: 'Comissão esperada', value: moneyValue(txnExpected) },
     { label: 'Apólices', value: countValue(policyCount) },
-    { label: 'Equipe', value: countValue(downlineIds.length) },
+    ...(access.canManageTeam
+      ? [{ label: 'Equipe', value: countValue(teamAgentIds.length) }]
+      : []),
     { label: 'Revisões', value: countValue(dueReviews) },
   ]
   const signals: OperationSignal[] = loadError ? [] : [
@@ -489,7 +517,9 @@ export default async function AgentDashboard({
       title: txnExpected > txnPaid ? 'Existe receita esperada pronta para acompanhamento.' : 'Sua produção está alinhada com os pagamentos registrados.',
       description: txnExpected > txnPaid
         ? `A diferença atual entre o esperado e o pago é de ${formatCurrency(Math.max(0, txnExpected - txnPaid))}.`
-        : 'Use o extrato para acompanhar detalhes, repasses e movimentos da sua equipe.',
+        : access.canManageTeam
+          ? 'Use o extrato para acompanhar detalhes, repasses e movimentos da sua equipe.'
+          : 'Use o extrato para acompanhar os detalhes e movimentos da sua produção.',
       action: 'Ver comissões',
       href: '/agent/commissions',
       tone: 'violet',
@@ -762,20 +792,22 @@ export default async function AgentDashboard({
             </div>
           </Link>
 
-          <Link href="/agent/hierarchy" className="keepr-card keepr-card-interactive group relative min-h-[250px] overflow-hidden rounded-[28px] p-7 lg:col-span-4" data-stack-card>
-            <div aria-hidden className="absolute -bottom-24 left-1/3 h-56 w-56 rounded-full bg-[oklch(0.91_0.045_286)] transition-transform duration-700 ease-out group-hover:scale-105" />
-            <div className="relative flex h-full flex-col justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-muted">Rede</p>
-                <p className="mt-4 font-mono text-5xl font-medium tracking-[-0.06em] tabular-nums text-ink">{countValue(downlineIds.length)}</p>
-                <p className="mt-2 text-sm text-ink-muted">agentes conectados à sua estrutura</p>
+          {access.canManageTeam ? (
+            <Link href="/agent/hierarchy" className="keepr-card keepr-card-interactive group relative min-h-[250px] overflow-hidden rounded-[28px] p-7 lg:col-span-4" data-stack-card>
+              <div aria-hidden className="absolute -bottom-24 left-1/3 h-56 w-56 rounded-full bg-[oklch(0.91_0.045_286)] transition-transform duration-700 ease-out group-hover:scale-105" />
+              <div className="relative flex h-full flex-col justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-muted">Rede</p>
+                  <p className="mt-4 font-mono text-5xl font-medium tracking-[-0.06em] tabular-nums text-ink">{countValue(teamAgentIds.length)}</p>
+                  <p className="mt-2 text-sm text-ink-muted">agentes conectados à sua estrutura</p>
+                </div>
+                <div className="mt-8 flex items-center justify-between border-t border-border-steel/70 pt-4 text-xs">
+                  <span className="text-ink-muted">{moneyValue(commissionTotalAmount)} em comissões</span>
+                  <span aria-hidden className="text-ink">↗</span>
+                </div>
               </div>
-              <div className="mt-8 flex items-center justify-between border-t border-border-steel/70 pt-4 text-xs">
-                <span className="text-ink-muted">{moneyValue(commissionTotalAmount)} em comissões</span>
-                <span aria-hidden className="text-ink">↗</span>
-              </div>
-            </div>
-          </Link>
+            </Link>
+          ) : null}
         </section>
 
         <section className="py-24 sm:py-32" aria-labelledby="portfolio-panorama-title">

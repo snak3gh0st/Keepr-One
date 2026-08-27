@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
-import { getDownlineIds } from '@/lib/hierarchy'
+import { getAgentScopeIds } from '@/lib/agent-access'
 import { canAccessCase } from '@/lib/case-access'
 import { decimalToNumber } from '@/lib/decimal'
 import { formatMoney } from '@/lib/format'
@@ -17,8 +17,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   const { id } = await params
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId }, select: { name: true, timeZone: true } })
-  const allAgents = await prisma.agent.findMany({ select: { id: true, parentAgentId: true } })
-  const scope = [agent.id, ...getDownlineIds(allAgents, agent.id)]
+  const scope = await getAgentScopeIds(agent.id)
 
   const c = await prisma.insuranceCase.findUnique({
     where: { id },

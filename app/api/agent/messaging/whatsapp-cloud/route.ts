@@ -1,10 +1,11 @@
 import { Prisma } from '@prisma/client'
-import { getCurrentAgent } from '@/lib/agent-context'
+import { getCurrentAgentWithoutOnboarding } from '@/lib/agent-context'
 import { prisma } from '@/lib/prisma'
 import { assertSameOriginAction } from '@/lib/security/same-origin-action'
 import { chatwootConfigFromEnv } from '@/lib/messaging/chatwoot-config'
 import { createChatwootClient } from '@/lib/messaging/chatwoot-client'
 import { whatsappChannelModeFromEnv } from '@/lib/messaging/channel-mode'
+import { ensureAgentInbox } from '@/lib/messaging/ensure-agent-inbox'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
 
@@ -36,7 +37,16 @@ export async function POST(request: Request) {
   const config = chatwootConfigFromEnv(process.env)
   if (!config) return Response.json({ error: 'UNAVAILABLE' }, { status: 503, headers: NO_STORE })
 
-  const agent = await getCurrentAgent()
+  const agent = await getCurrentAgentWithoutOnboarding()
+  try {
+    await ensureAgentInbox({ agentId: agent.id, userId: agent.userId })
+  } catch (error) {
+    console.error('[whatsapp-cloud] inbox provisioning failed', error)
+    return Response.json(
+      { error: 'CHATWOOT_ACCOUNT_NOT_READY' },
+      { status: 502, headers: NO_STORE },
+    )
+  }
   const account = await prisma.agentMessagingAccount.findUnique({
     where: { agentId: agent.id },
     select: { externalAccountId: true, externalUserToken: true },
