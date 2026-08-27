@@ -1,10 +1,24 @@
 import { FORESIGHT_FLEXLIFE_FIELDS, foresightSolveValue } from '../lib/foresight-target'
 import { isForesightPdf, parseForesightReportUrl } from '../lib/foresight-report'
-import { writeForesightControlValue } from '../lib/foresight-control-value'
+import {
+  applyForesightAllocationPreference,
+  writeForesightControlValue,
+} from '../lib/foresight-control-value'
 
 const CHANNEL = 'FYNTRA_FORESIGHT_CONNECTOR_V1'
 const MAIN_FRAME_ID = 'ctl00_mobilityPH_iframeMain'
-type CarrierWindow = Window & { $find?: (id: string) => unknown }
+type CarrierDeferred = {
+  done(callback: () => void): CarrierDeferred
+  fail(callback: () => void): CarrierDeferred
+}
+type CarrierWindow = Window & {
+  $find?: (id: string) => unknown
+  $ITAjax?: {
+    sendRequest(path: string, parameters: unknown[]): CarrierDeferred
+  }
+  $ITCommon?: { sessionTokenId(): string }
+  __doPostBack?: (target: string, argument: string) => void
+}
 
 type MainRequest = {
   type: 'APPLY_CLIENT' | 'APPLY_LEDGER' | 'APPLY_LEDGER_SOLVE' | 'APPLY_ALLOCATION' |
@@ -207,14 +221,37 @@ export default defineContentScript({
       await delay(900)
     }
     const applyAllocation = async () => {
-      const { doc } = carrier()
+      const { doc, win } = carrier()
       const preference = element<HTMLSelectElement>(
         doc,
         'ctl00_mobilityPH_panelInterestRates_cboPremiumAllocationPreference',
       )
-      preference.value = '24'
-      preference.dispatchEvent(new Event('change', { bubbles: true }))
-      await delay(1_000)
+      if (!win.$ITAjax?.sendRequest || !win.$ITCommon?.sessionTokenId || !win.__doPostBack ||
+        !await applyForesightAllocationPreference({
+          select: preference,
+          preference: '24',
+          sessionTokenId: () => win.$ITCommon!.sessionTokenId(),
+          sendRequest: (path, parameters) => win.$ITAjax!.sendRequest(path, parameters),
+          postBack: (target, argument) => win.__doPostBack!(target, argument),
+        })) {
+        throw new Error('FORESIGHT_SCHEMA_MISMATCH')
+      }
+      for (let attempt = 0; attempt < 25; attempt += 1) {
+        await delay(200)
+        try {
+          const current = carrier().doc
+          if (element<HTMLInputElement>(
+            current,
+            'ctl00_mobilityPH_panelInterestRates_txtStrategy1Allocation',
+          ).value === '100' && element<HTMLInputElement>(
+            current,
+            'ctl00_mobilityPH_panelInterestRates_txtTotalAllocation',
+          ).value === '100') return
+        } catch {
+          // The carrier replaces the iframe document during its postback.
+        }
+      }
+      throw new Error('FORESIGHT_ALLOCATION_WRITE_MISMATCH')
     }
     const optionByText = (doc: Document, id: string, text: string) => {
       const select = element<HTMLSelectElement>(doc, id)

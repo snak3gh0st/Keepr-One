@@ -544,12 +544,24 @@ async function findBoundCommandTab(
   carrierTabId: number | undefined,
   hint?: chrome.tabs.Tab,
 ): Promise<chrome.tabs.Tab | undefined> {
-  if (typeof carrierTabId !== 'number') return undefined
-  if (hint?.id === carrierTabId) return hint
+  const reusableForesightTab = (tab: chrome.tabs.Tab) => {
+    try {
+      const url = new URL(tab.url ?? '')
+      return url.origin === NLG_ORIGIN && (
+        url.pathname === '/agent/sso/foresight' || url.pathname.startsWith('/NWI/')
+      )
+    } catch {
+      return false
+    }
+  }
+  if (typeof carrierTabId === 'number' && hint?.id === carrierTabId) return hint
+  if (typeof carrierTabId !== 'number' && hint && reusableForesightTab(hint)) return hint
   const tabs = await chrome.tabs.query({
     url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
   })
-  return tabs.find((tab) => tab.id === carrierTabId)
+  if (typeof carrierTabId === 'number') return tabs.find((tab) => tab.id === carrierTabId)
+  return tabs.filter(reusableForesightTab)
+    .sort((left, right) => (right.lastAccessed ?? 0) - (left.lastAccessed ?? 0))[0]
 }
 
 async function postCommandEvent(input: {
@@ -1015,6 +1027,11 @@ async function executeForesightCommand(
     return
   }
   carrierTabId = tab.id
+  await writeCommandState({
+    ...(await readCommandState()),
+    carrierTabId,
+    updatedAt: new Date().toISOString(),
+  })
   let currentUrl: URL
   try {
     currentUrl = new URL(tab.url ?? '')

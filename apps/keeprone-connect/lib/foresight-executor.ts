@@ -430,6 +430,22 @@ function carrierAmount(value: string): number | null {
   return Number.isFinite(amount) && amount > 0 ? amount : null
 }
 
+export function monthlyPremiumFromAnnual(annualPremium: number): number | null {
+  if (!Number.isFinite(annualPremium) || annualPremium <= 0) return null
+  return Math.round((annualPremium / 12) * 100) / 100
+}
+
+function solvedMonthlyPremium(doc: Document): number | null {
+  const scheduled = carrierAmount(input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount).value)
+  if (scheduled !== null) return scheduled
+  const summary = globalThis.document.getElementById('ctl00_mobilityPH_quickCalc_BodySection')
+  const annual = [...(summary?.querySelectorAll('tr') ?? [])].find((row) =>
+    row.querySelector('td')?.textContent?.trim() === 'Premium:',
+  )?.querySelectorAll('td')[1]?.textContent ?? ''
+  const annualPremium = carrierAmount(annual)
+  return annualPremium === null ? null : monthlyPremiumFromAnnual(annualPremium)
+}
+
 function selectedSolveRadio(doc: Document, marker: string): string {
   const selected = [...doc.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
     .filter((radio) => (radio.id.includes(marker) || radio.name.includes(marker)) && radio.checked)
@@ -445,7 +461,7 @@ function hasCarrierCalculationError(doc: Document): boolean {
 function readSolvedLedger(doc: Document): ForesightSolvedLedgerReadback | null {
   validateSurface(doc, '/NWI/IUL2025/ledger.aspx')
   const faceAmount = carrierAmount(input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitAmount).value)
-  const monthlyPremium = carrierAmount(input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount).value)
+  const monthlyPremium = solvedMonthlyPremium(doc)
   if (faceAmount === null || monthlyPremium === null) return null
   return {
     faceSolve: selectedSolveRadio(doc, 'rdoDeathBenefitSolves'),
@@ -632,6 +648,11 @@ async function executeForesightSolvedIllustration(input: {
   const opened = await openFlexLife(input.snapshot)
   const client = opened.existing ? readClient(opened.doc, input.snapshot) : await fillClient(opened.doc, input.snapshot)
   if (!solvedClientMatches(input.snapshot, client)) fail('FORESIGHT_READBACK_CLIENT_MISMATCH')
+  // FlexLife will not calculate a new solved illustration while its strategy
+  // allocation is still 0%. Prime the required 100% allocation first.
+  const primedAllocations = opened.existing ? null : await fillAllocation(
+    await navigate('/NWI/IUL2025/InterestRates.aspx', MENU_IDS.interestRates),
+  )
   const ledgerDoc = await navigate('/NWI/IUL2025/ledger.aspx', MENU_IDS.ledger)
   const ledger = opened.existing ? readSolvedLedger(ledgerDoc) : await fillSolvedLedger(ledgerDoc, input.snapshot)
   if (!ledger || hasCarrierCalculationError(ledgerDoc) || !solvedLedgerMatches(input.snapshot, ledger)) {
@@ -639,8 +660,9 @@ async function executeForesightSolvedIllustration(input: {
   }
   const ridersDoc = await navigate('/NWI/IUL2025/product.aspx', MENU_IDS.riders)
   const riders = verifyRiders(ridersDoc)
-  const ratesDoc = await navigate('/NWI/IUL2025/InterestRates.aspx', MENU_IDS.interestRates)
-  const allocations = opened.existing ? readAllocation(ratesDoc) : await fillAllocation(ratesDoc)
+  const allocations = primedAllocations ?? readAllocation(
+    await navigate('/NWI/IUL2025/InterestRates.aspx', MENU_IDS.interestRates),
+  )
   const reportsDoc = await navigate('/NWI/ProductWorkflow/reportselection.aspx', MENU_IDS.reports)
   const reports = verifyReports(reportsDoc)
   if (JSON.stringify(allocations) !== JSON.stringify(input.snapshot.allocations) ||
