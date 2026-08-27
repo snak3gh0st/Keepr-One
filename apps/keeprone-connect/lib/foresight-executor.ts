@@ -613,12 +613,12 @@ async function executeForesightIllustrationV1(input: {
   return { receipt, document }
 }
 
-function solvedClientMatches(
+export function solvedClientMatches(
   snapshot: ForesightSolvedIllustrationSnapshotV2,
   client: Pick<ForesightMaterialReadback,
     'firstName' | 'lastName' | 'dateOfBirth' | 'issueState' | 'gender' | 'rateClass'>,
 ): boolean {
-  const expectedDate = snapshot.insured.dateOfBirth.split('-').reverse().join('/')
+  const expectedDate = foresightClientBirthDate(snapshot.insured.dateOfBirth)
   return client.firstName === snapshot.insured.firstName && client.lastName === snapshot.insured.lastName &&
     client.dateOfBirth === expectedDate && client.issueState === snapshot.insured.issueState &&
     client.gender === snapshot.underwriting.gender && client.rateClass === snapshot.underwriting.rateClass
