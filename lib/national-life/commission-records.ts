@@ -17,6 +17,10 @@ export type CarrierCommissionRow = {
   amounts: unknown
 }
 
+export type ScopedCarrierCommissionRow = CarrierCommissionRow & {
+  agentId: string
+}
+
 export type CarrierCommissionRecord = {
   id: string
   period: string
@@ -97,6 +101,22 @@ export function toCarrierCommissionRecords(
       },
     ]
   })
+}
+
+/**
+ * An override belongs to the agent whose authenticated National Life connector
+ * returned it. Agency owners may also see direct production from entitled
+ * members, but importing those members' overrides would both expose an outside
+ * producer name and risk counting the same hierarchy payment more than once.
+ */
+export function toVisibleCarrierCommissionRecords(
+  rows: readonly ScopedCarrierCommissionRow[],
+  currentAgentId: string,
+): CarrierCommissionRecord[] {
+  const ownerByRecordId = new Map(rows.map((row) => [row.id, row.agentId]))
+  return toCarrierCommissionRecords(rows).filter((record) =>
+    record.type === 'DIRECT' || ownerByRecordId.get(record.id) === currentAgentId,
+  )
 }
 
 export function totalOf(records: readonly CarrierCommissionRecord[]): number {
