@@ -15,6 +15,7 @@ import {
   FORESIGHT_ISSUE_STATES,
   foresightIllustrationInputHash,
 } from '@/lib/national-life/foresight-illustration-contract'
+import { getForesightIllustrationProduct } from '@/lib/national-life/foresight-product-catalog'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
 import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
 
@@ -52,6 +53,7 @@ export async function requestForesightIllustration(
   const agent = await getCurrentAgent()
 
   const firstName = normalizeText(formData.get('firstName') as string | null)
+  const product = getForesightIllustrationProduct(normalizeText(formData.get('product') as string | null))
   const lastName = normalizeText(formData.get('lastName') as string | null)
   const dateOfBirthRaw = normalizeText(formData.get('dateOfBirth') as string | null)
   const issueState = normalizeText(formData.get('issueState') as string | null)
@@ -63,6 +65,10 @@ export async function requestForesightIllustration(
   const faceAmount = Number(normalizeText(formData.get('faceAmount') as string | null))
   const monthlyPremium = Number(normalizeText(formData.get('monthlyPremium') as string | null))
 
+  if (!product) return { ok: false, message: 'Escolha o produto da ilustração.' }
+  if (product.availability !== 'READY') {
+    return { ok: false, message: 'A ilustração Term ainda precisa da validação do formulário da National Life no Foresight.' }
+  }
   if (!firstName) return { ok: false, message: 'Informe o nome.' }
   if (!lastName) return { ok: false, message: 'Informe o sobrenome.' }
   const dateOfBirth = parseIsoDate(dateOfBirthRaw)

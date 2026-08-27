@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { requestIllustrationPdf } from './actions'
 import { sendConnectorMessage } from '@/app/agent/integrations/national-life/NationalLifeConnectorClient'
@@ -12,11 +13,13 @@ export function IllustrationPdfButton({
   extensionId,
   disabled = false,
   status,
+  safeErrorCode,
 }: {
   illustrationId: string
   extensionId?: string
   disabled?: boolean
   status?: 'WORKING' | 'BLOCKED' | 'FAILED'
+  safeErrorCode?: string | null
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -27,6 +30,17 @@ export function IllustrationPdfButton({
     const timer = window.setInterval(() => router.refresh(), 5_000)
     return () => window.clearInterval(timer)
   }, [router, status])
+
+  if (status === 'FAILED' && safeErrorCode === 'FORESIGHT_PREMIUM_WRITE_MISMATCH') {
+    return (
+      <Link
+        href="/agent/illustrations/new"
+        className="text-teal transition-colors hover:text-teal-deep"
+      >
+        Revisar e criar novo cenário
+      </Link>
+    )
+  }
 
   return (
     <div>
@@ -65,7 +79,8 @@ export function IllustrationPdfButton({
         className="text-teal transition-colors hover:text-teal-deep disabled:text-ink-muted"
       >
         {pending ? 'Iniciando…' : disabled ? 'Gerando em segundo plano…' :
-          status === 'BLOCKED' ? 'Continuar após login' : 'Gerar ilustração oficial'}
+          status === 'BLOCKED' ? 'Continuar após login' :
+            status === 'FAILED' ? 'Tentar novamente' : 'Gerar ilustração oficial'}
       </button>
       {message && (
         <p className="mt-1 text-xs text-ink-muted" role="status" aria-live="polite">

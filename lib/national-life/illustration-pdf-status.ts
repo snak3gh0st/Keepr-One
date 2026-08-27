@@ -13,6 +13,12 @@ export type IllustrationPdfStatus =
   | { state: 'BLOCKED'; safeErrorCode: string | null }
   | { state: 'FAILED'; safeErrorCode: string | null }
 
+export type IllustrationDelivery = {
+  eyebrow: string
+  title: string
+  detail: string
+}
+
 /// Everything the queue still intends to act on. `RETRYABLE` belongs here: the
 /// worker will pick it up again, and telling the agent it failed would send
 /// them to click a button the queue is about to press itself.
@@ -96,11 +102,52 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
       return 'O caso foi concluído sem o PDF verificável. Gere novamente.'
     case 'COMMAND_EXPIRED':
       return 'A tentativa expirou antes de terminar. Pode pedir de novo.'
+    case 'FORESIGHT_PREMIUM_WRITE_MISMATCH':
+      return 'O Foresight não aceitou o prêmio mensal informado para este cenário. Revise o prêmio e gere uma nova ilustração; nenhum PDF foi emitido.'
     case null:
       return 'Não foi possível gerar.'
     default:
       // The code is shown rather than hidden: an unmapped failure is exactly
       // when the agent needs something to quote back to whoever can read it.
       return `Não foi possível gerar (${status.safeErrorCode}).`
+  }
+}
+
+export function describeIllustrationDelivery(input: {
+  documentReady: boolean
+  status?: IllustrationPdfStatus
+}): IllustrationDelivery {
+  if (input.documentReady) {
+    return {
+      eyebrow: 'Documento pronto',
+      title: 'PDF oficial verificado',
+      detail: 'O arquivo foi recebido do Foresight e conferido antes de ficar disponível aqui.',
+    }
+  }
+  if (input.status?.state === 'BLOCKED') {
+    return {
+      eyebrow: 'Ação necessária',
+      title: 'Conecte a National Life para continuar',
+      detail: 'A sessão do navegador expirou. Depois do login, a extensão retoma o mesmo pedido.',
+    }
+  }
+  if (input.status?.state === 'WORKING') {
+    return {
+      eyebrow: 'Foresight em andamento',
+      title: 'Gerando a ilustração oficial',
+      detail: 'O caso está sendo salvo e o PDF será trazido automaticamente para esta página.',
+    }
+  }
+  if (input.status?.state === 'FAILED') {
+    return {
+      eyebrow: 'Revisão necessária',
+      title: 'O Foresight não aceitou este cenário',
+      detail: illustrationPdfMessage(input.status),
+    }
+  }
+  return {
+    eyebrow: 'Pedido preparado',
+    title: 'Pronto para enviar ao Foresight',
+    detail: 'Revise as instruções abaixo e inicie a geração oficial quando estiver pronto.',
   }
 }

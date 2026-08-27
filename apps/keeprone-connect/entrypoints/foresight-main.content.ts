@@ -1,5 +1,6 @@
 import { FORESIGHT_FLEXLIFE_FIELDS } from '../lib/foresight-target'
 import { isForesightPdf, parseForesightReportUrl } from '../lib/foresight-report'
+import { writeForesightControlValue } from '../lib/foresight-control-value'
 
 const CHANNEL = 'FYNTRA_FORESIGHT_CONNECTOR_V1'
 const MAIN_FRAME_ID = 'ctl00_mobilityPH_iframeMain'
@@ -125,13 +126,11 @@ export default defineContentScript({
       await delay(500)
 
       ;({ doc, win } = carrier())
-      // This is the same carrier interaction verified in the browser: enter
-      // the displayed amount after selecting "Specify Amount", then leave it.
+      // Foresight owns a widget value as well as its displayed input. Writing
+      // only the latter makes the page restore its previous/default premium
+      // during updatePremiumSchedule.
       const premiumAmount = element<HTMLInputElement>(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount)
-      premiumAmount.value = String(values.premiumAmount)
-      premiumAmount.dispatchEvent(new Event('input', { bubbles: true }))
-      premiumAmount.dispatchEvent(new Event('change', { bubbles: true }))
-      premiumAmount.dispatchEvent(new Event('blur', { bubbles: true }))
+      writeForesightControlValue(premiumAmount, Number(values.premiumAmount))
       await delay(200)
 
       ;({ doc, win } = carrier())

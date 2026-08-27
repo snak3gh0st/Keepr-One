@@ -6,10 +6,14 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { formatCarrierInstant } from '@/lib/national-life/carrier-instant'
 import { flexLifeProductLabel } from '@/lib/national-life/flex-life'
+import { buildForesightIllustrationSnapshot } from '@/lib/national-life/foresight-illustration-contract'
 import { IllustrationPdfButton } from '../IllustrationPdfButton'
 import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
 import { getIllustrationCommandStatuses } from '@/lib/national-life/illustration-command-status'
-import { illustrationPdfMessage } from '@/lib/national-life/illustration-pdf-status'
+import {
+  describeIllustrationDelivery,
+  illustrationPdfMessage,
+} from '@/lib/national-life/illustration-pdf-status'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 
@@ -42,35 +46,31 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
     select: {
       id: true, createdAt: true, insuredName: true, insuredDateOfBirth: true,
       productName: true, faceAmount: true, targetPremium: true, targetPremiumSource: true,
-      documentFetchedAt: true, documentMimeType: true,
+      documentFetchedAt: true, documentMimeType: true, caseId: true, rawPayload: true,
     },
   })
   if (!illustration) notFound()
+  const foresightSnapshot = (() => {
+    try {
+      return buildForesightIllustrationSnapshot(illustration)
+    } catch {
+      // Older rows are still useful history, even when they pre-date the
+      // sealed Foresight request shape and cannot safely be regenerated.
+      return null
+    }
+  })()
   const commandStatus = (await getIllustrationCommandStatuses(agent.id)).get(illustration.id)
   const documentReady = illustration.documentFetchedAt && illustration.documentMimeType === 'application/pdf'
-  const delivery = documentReady
-    ? {
-        eyebrow: 'Documento pronto',
-        title: 'PDF oficial verificado',
-        detail: 'O arquivo foi recebido do Foresight e conferido antes de ficar disponível aqui.',
-      }
+  const delivery = describeIllustrationDelivery({ documentReady: Boolean(documentReady), status: commandStatus })
+  const foresightStep = documentReady
+    ? 'Caso salvo'
     : commandStatus?.state === 'BLOCKED'
-      ? {
-          eyebrow: 'Ação necessária',
-          title: 'Conecte a National Life para continuar',
-          detail: 'A sessão do navegador expirou. Depois do login, a extensão retoma o mesmo pedido.',
-        }
-      : commandStatus?.state === 'WORKING'
-        ? {
-            eyebrow: 'Foresight em andamento',
-            title: 'Gerando a ilustração oficial',
-            detail: 'O caso está sendo salvo e o PDF será trazido automaticamente para esta página.',
-          }
-        : {
-            eyebrow: 'Pedido preparado',
-            title: 'Pronto para enviar ao Foresight',
-            detail: 'Revise as instruções abaixo e inicie a geração oficial quando estiver pronto.',
-          }
+      ? 'Aguardando login'
+      : commandStatus?.state === 'FAILED'
+        ? 'Revisão do cenário necessária'
+        : commandStatus?.state === 'WORKING'
+          ? 'Em andamento'
+          : 'Aguardando início'
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
@@ -110,13 +110,14 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
               extensionId={localConnector.enabled ? localConnector.extensionTarget : undefined}
               disabled={commandStatus?.state === 'WORKING'}
               status={commandStatus?.state}
+              safeErrorCode={commandStatus?.state === 'FAILED' ? commandStatus.safeErrorCode : undefined}
             />
           )}
         </div>
         <ol className="relative mt-6 grid gap-3 border-t border-border-steel pt-5 sm:grid-cols-3" aria-label="Progresso da ilustração">
           {[
             ['Dados revisados', 'Cenário FlexLife aprovado', true],
-            ['Foresight', commandStatus?.state === 'BLOCKED' ? 'Aguardando login' : documentReady ? 'Caso salvo' : 'Em andamento', documentReady || commandStatus?.state === 'WORKING'],
+            ['Foresight', foresightStep, documentReady || commandStatus?.state === 'WORKING'],
             ['PDF oficial', documentReady ? 'Arquivo disponível' : 'Aguardando confirmação', documentReady],
           ].map(([title, detail, complete], index) => (
             <li key={title as string} className="flex items-start gap-3">
@@ -152,6 +153,30 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
             <Fact label="Origem do prêmio" value={illustration.targetPremiumSource === 'AGENT_INPUT_FOR_FORESIGHT' ? 'Informado pelo agente para a ilustração' : null} />
           </dl>
         </section>
+        {foresightSnapshot && (
+          <section className="module-main-surface md:col-span-2">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Parâmetros do Foresight</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-ink-muted">
+              Cliente, capital, prêmio, opção de benefício, alocação, riders e relatório são conferidos no Foresight antes de salvar o caso.
+            </p>
+            <dl className="mt-3 grid gap-x-6 md:grid-cols-2 xl:grid-cols-3">
+              <Fact label="Estado de emissão" value={foresightSnapshot.insured.issueState} />
+              <Fact
+                label="Perfil de risco"
+                value={`${foresightSnapshot.underwriting.gender === 'Female' ? 'Feminino' : 'Masculino'} • ${
+                  foresightSnapshot.underwriting.rateClass === 'Standard_NT' ? 'Standard não-tabagista' : 'Standard tabagista'
+                }`}
+              />
+              <Fact
+                label="Benefício por morte"
+                value={foresightSnapshot.deathBenefitOption === 'A_Level' ? 'A — nivelado' : 'B — crescente'}
+              />
+              <Fact label="Modo e tipo de prêmio" value="Mensal • Specify Amount" />
+              <Fact label="Estratégia de índice" value="S&P 500 — foco em teto (100%)" />
+              <Fact label="Configuração padrão" value="Sem solve, sem 1035 exchange e sem distribuição" />
+            </dl>
+          </section>
+        )}
       </div>
 
       <p className="mt-5 text-xs leading-5 text-ink-muted">

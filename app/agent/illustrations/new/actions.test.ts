@@ -37,6 +37,7 @@ import { requestForesightIllustration } from './actions'
 
 function form(): FormData {
   const value = new FormData()
+  value.set('product', 'FLEXLIFE_IUL')
   value.set('firstName', 'KeeprOne')
   value.set('lastName', 'Test')
   value.set('dateOfBirth', '1981-08-26')
@@ -130,5 +131,17 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
       message: 'Informe um prêmio mensal maior que zero.',
     })
     expect(mocks.createIllustration).not.toHaveBeenCalled()
+  })
+
+  it('does not turn an unverified Term menu choice into a FlexLife carrier command', async () => {
+    const term = form()
+    term.set('product', 'NATIONAL_LIFE_TERM')
+
+    await expect(requestForesightIllustration(term)).resolves.toEqual({
+      ok: false,
+      message: 'A ilustração Term ainda precisa da validação do formulário da National Life no Foresight.',
+    })
+    expect(mocks.createIllustration).not.toHaveBeenCalled()
+    expect(mocks.issue).not.toHaveBeenCalled()
   })
 })

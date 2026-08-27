@@ -22,7 +22,7 @@ export default defineConfig({
   manifest: {
     name: 'KeeproneConnect',
     description: 'KeeproneConnect sincroniza dados do National Life no seu navegador, com segurança.',
-    version: '0.1.32',
+    version: '0.1.33',
     // Chrome Web Store rejects the development-only key field. Keep it for
     // unpacked local builds so the smoke-test extension retains its stable ID.
     ...(!isChromeWebStoreBuild && manifestKey ? { key: manifestKey } : {}),

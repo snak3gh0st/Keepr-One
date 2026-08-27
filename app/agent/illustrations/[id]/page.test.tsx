@@ -19,9 +19,12 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 vi.mock('next/navigation', () => ({ notFound: mocks.notFound }))
-vi.mock('@/lib/national-life/illustration-command-status', () => ({
-  getIllustrationCommandStatuses: mocks.getCommandStatuses,
-}))
+vi.mock('@/lib/national-life/illustration-command-status', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/national-life/illustration-command-status')>(
+    '@/lib/national-life/illustration-command-status',
+  )
+  return { ...actual, getIllustrationCommandStatuses: mocks.getCommandStatuses }
+})
 vi.mock('@/components/Shell', () => ({
   Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
@@ -97,5 +100,72 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('Prêmio mensal informado')).toBeTruthy()
     expect(screen.getByText('Informado pelo agente para a ilustração')).toBeTruthy()
     expect(screen.queryByText('O que a seguradora respondeu')).toBeNull()
+  })
+
+  it('shows the material Foresight choices that will be verified before a carrier save', async () => {
+    mocks.findFirstIllustration.mockResolvedValue({
+      id: 'illustration-reviewed-inputs',
+      createdAt: new Date('2026-08-27T12:00:00.000Z'),
+      insuredName: 'Cliente Teste',
+      insuredDateOfBirth: new Date('1988-02-06T00:00:00.000Z'),
+      productName: 'FlexLife',
+      faceAmount: 1_000_000,
+      targetPremium: 350,
+      targetPremiumSource: 'AGENT_INPUT_FOR_FORESIGHT',
+      documentFetchedAt: null,
+      documentMimeType: null,
+      caseId: null,
+      rawPayload: {
+        foresightDraft: {
+          schemaVersion: 1,
+          firstName: 'Cliente',
+          lastName: 'Teste',
+          dateOfBirth: '1988-02-06',
+          issueState: 'FL',
+          gender: 'Female',
+          rateClass: 'Standard_NT',
+          faceAmount: 1_000_000,
+          monthlyPremium: 350,
+          deathBenefitOption: 'A_Level',
+          strategy: 'SP500PointToPointCapFocus',
+        },
+      },
+    })
+
+    render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-reviewed-inputs' }) }))
+
+    expect(screen.getByText('Parâmetros do Foresight')).toBeTruthy()
+    expect(screen.getByText('FL')).toBeTruthy()
+    expect(screen.getByText('Feminino • Standard não-tabagista')).toBeTruthy()
+    expect(screen.getByText('A — nivelado')).toBeTruthy()
+    expect(screen.getByText('Mensal • Specify Amount')).toBeTruthy()
+    expect(screen.getByText('S&P 500 — foco em teto (100%)')).toBeTruthy()
+  })
+
+  it('shows a premium rejection as a scenario review instead of an in-progress Foresight run', async () => {
+    mocks.findFirstIllustration.mockResolvedValue({
+      id: 'illustration-rejected-premium',
+      createdAt: new Date('2026-08-27T12:00:00.000Z'),
+      insuredName: 'Cliente Teste',
+      insuredDateOfBirth: null,
+      productName: 'FlexLife',
+      faceAmount: 1_000_000,
+      targetPremium: 50,
+      targetPremiumSource: 'AGENT_INPUT_FOR_FORESIGHT',
+      documentFetchedAt: null,
+      documentMimeType: null,
+    })
+    mocks.getCommandStatuses.mockResolvedValue(new Map([[
+      'illustration-rejected-premium',
+      { state: 'FAILED', safeErrorCode: 'FORESIGHT_PREMIUM_WRITE_MISMATCH' },
+    ]]))
+
+    render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-rejected-premium' }) }))
+
+    expect(screen.getByText('O Foresight não aceitou este cenário')).toBeTruthy()
+    expect(screen.getAllByText(
+      'O Foresight não aceitou o prêmio mensal informado para este cenário. Revise o prêmio e gere uma nova ilustração; nenhum PDF foi emitido.',
+    ).length).toBeGreaterThan(0)
+    expect(screen.queryByText('Gerando a ilustração oficial')).toBeNull()
   })
 })

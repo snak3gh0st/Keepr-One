@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  describeIllustrationDelivery,
   illustrationPdfMessage,
   latestPdfStatusByIllustration,
 } from './illustration-pdf-status'
@@ -87,6 +88,22 @@ describe('illustrationPdfMessage', () => {
     expect(illustrationPdfMessage({ state: 'FAILED', safeErrorCode: 'WAT' })).toBe(
       'Não foi possível gerar (WAT).',
     )
+  })
+
+  it('explains that Foresight rejected the entered premium without pretending a PDF is still running', () => {
+    expect(
+      illustrationPdfMessage({ state: 'FAILED', safeErrorCode: 'FORESIGHT_PREMIUM_WRITE_MISMATCH' }),
+    ).toBe(
+      'O Foresight não aceitou o prêmio mensal informado para este cenário. Revise o prêmio e gere uma nova ilustração; nenhum PDF foi emitido.',
+    )
+    expect(describeIllustrationDelivery({
+      documentReady: false,
+      status: { state: 'FAILED', safeErrorCode: 'FORESIGHT_PREMIUM_WRITE_MISMATCH' },
+    })).toEqual({
+      eyebrow: 'Revisão necessária',
+      title: 'O Foresight não aceitou este cenário',
+      detail: 'O Foresight não aceitou o prêmio mensal informado para este cenário. Revise o prêmio e gere uma nova ilustração; nenhum PDF foi emitido.',
+    })
   })
 
   it('does not print an empty parenthesis when there is no code', () => {
