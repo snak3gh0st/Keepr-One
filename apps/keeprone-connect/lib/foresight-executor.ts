@@ -9,6 +9,7 @@ import {
   buildForesightTarget,
   compareForesightTarget,
   deterministicCaseFingerprint,
+  foresightReadbackMismatchCode,
   validateForesightSurface,
   type ForesightMaterialReadback,
 } from './foresight-target'
@@ -478,7 +479,7 @@ export async function executeForesightIllustration(input: {
     riders,
   }
   const comparison = compareForesightTarget(input.snapshot, observed)
-  if (!comparison.ok) fail('FORESIGHT_READBACK_MISMATCH')
+  if (!comparison.ok) fail(foresightReadbackMismatchCode(comparison.mismatches))
   if (!opened.existing) await saveCase(target.carrierCaseName)
   const document = await captureReportInMainWorld()
   const pdf = decodePdf(document)

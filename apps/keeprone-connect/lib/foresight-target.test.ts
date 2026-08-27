@@ -4,6 +4,7 @@ import {
   buildForesightTarget,
   compareForesightTarget,
   deterministicCaseFingerprint,
+  foresightReadbackMismatchCode,
   validateForesightSurface,
   type ForesightMaterialReadback,
 } from './foresight-target'
@@ -95,6 +96,9 @@ describe('Foresight target verification', () => {
       ok: false,
       mismatches: ['issueState'],
     })
+    expect(foresightReadbackMismatchCode(['issueState'])).toBe('FORESIGHT_READBACK_ISSUE_STATE_MISMATCH')
+    expect(foresightReadbackMismatchCode(['premiumAmount'])).toBe('FORESIGHT_READBACK_PREMIUM_AMOUNT_MISMATCH')
+    expect(foresightReadbackMismatchCode([])).toBe('FORESIGHT_READBACK_MISMATCH')
   })
 
   it('uses only non-PII identifiers in the receipt fingerprint', async () => {

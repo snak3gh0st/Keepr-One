@@ -153,6 +153,19 @@ export function compareForesightTarget(
   return mismatches.length === 0 ? { ok: true } : { ok: false, mismatches }
 }
 
+/**
+ * Error codes may travel through the extension and the connector event log.
+ * Keep the diagnostic limited to the field name: that makes a carrier drift
+ * actionable without ever placing the insured value in telemetry.
+ */
+export function foresightReadbackMismatchCode(mismatches: readonly string[]): string {
+  const field = mismatches[0]
+  if (!field) return 'FORESIGHT_READBACK_MISMATCH'
+  const normalized = field.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toUpperCase()
+  const code = `FORESIGHT_READBACK_${normalized}_MISMATCH`
+  return code.length <= 80 ? code : 'FORESIGHT_READBACK_MISMATCH'
+}
+
 export async function deterministicCaseFingerprint(
   snapshot: ForesightIllustrationSnapshotV1,
 ): Promise<string> {
