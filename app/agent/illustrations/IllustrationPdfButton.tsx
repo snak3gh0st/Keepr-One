@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { requestIllustrationPdf } from './actions'
 import { sendConnectorMessage } from '@/app/agent/integrations/national-life/NationalLifeConnectorClient'
+import { ForesightActivityIndicator } from './ForesightActivityIndicator'
 
 /// Starts the exact approved Foresight command and keeps the server-rendered
 /// status fresh while the local extension works in its own background tab.
@@ -24,6 +25,8 @@ export function IllustrationPdfButton({
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [message, setMessage] = useState<string | null>(null)
+  const [started, setStarted] = useState(false)
+  const generating = pending || disabled || started
 
   useEffect(() => {
     if (status !== 'WORKING') return
@@ -46,12 +49,14 @@ export function IllustrationPdfButton({
     <div>
       <button
         type="button"
-        disabled={pending || disabled}
+        disabled={generating}
         onClick={() =>
           startTransition(async () => {
+            setStarted(true)
             const result = await requestIllustrationPdf(illustrationId)
             if (!result.ok) {
               setMessage(result.message)
+              setStarted(false)
               return
             }
             if (result.completed) {
@@ -78,7 +83,7 @@ export function IllustrationPdfButton({
         }
         className="text-teal transition-colors hover:text-teal-deep disabled:text-ink-muted"
       >
-        {pending ? 'Iniciando…' : disabled ? 'Gerando em segundo plano…' :
+        {generating ? <ForesightActivityIndicator label={pending ? 'Iniciando no Foresight…' : 'Gerando em segundo plano…'} /> :
           status === 'BLOCKED' ? 'Continuar após login' :
             status === 'FAILED' ? 'Tentar novamente' : 'Gerar ilustração oficial'}
       </button>

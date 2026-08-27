@@ -76,6 +76,7 @@ export default async function IllustrationsPage() {
           </Thead>
           <tbody>
             {illustrations.map((illustration) => {
+              const status = pdfStatus.get(illustration.id)
               return (
               <Tr key={illustration.id}>
                 <Td>{formatCarrierInstant(illustration.createdAt)}</Td>
@@ -130,17 +131,20 @@ export default async function IllustrationsPage() {
                       <IllustrationPdfButton
                         illustrationId={illustration.id}
                         extensionId={localConnector.enabled ? localConnector.extensionTarget : undefined}
-                        disabled={pdfStatus.get(illustration.id)?.state === 'WORKING'}
-                        status={pdfStatus.get(illustration.id)?.state}
+                        disabled={status?.state === 'WORKING'}
+                        status={status?.state}
+                        safeErrorCode={status?.state === 'FAILED'
+                          ? status.safeErrorCode
+                          : undefined}
                       />
                       {/* Without this the row went silent after "pedido
                           enviado": a render that failed looked exactly like one
                           still running. The carrier's illustration tool has its
                           own login and it expires early, so the common failure
                           is not a broken quote — it is "connect again". */}
-                      {pdfStatus.get(illustration.id) && (
+                      {status && (
                         <p className="mt-1 text-xs text-ink-muted">
-                          {illustrationPdfMessage(pdfStatus.get(illustration.id)!)}
+                          {illustrationPdfMessage(status)}
                         </p>
                       )}
                     </>

@@ -8,6 +8,7 @@ import { FORESIGHT_ISSUE_STATES } from '@/lib/national-life/foresight-illustrati
 import { FORESIGHT_ILLUSTRATION_PRODUCTS } from '@/lib/national-life/foresight-product-catalog'
 import { requestForesightIllustration } from './new/actions'
 import { sendConnectorMessage } from '@/app/agent/integrations/national-life/NationalLifeConnectorClient'
+import { ForesightActivityIndicator } from './ForesightActivityIndicator'
 
 const GENDERS = {
   FEMALE: 'Female',
@@ -197,7 +198,9 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
             Você pode sair desta tela. A extensão abre o Foresight em segundo plano; só traz a aba à frente se a National Life pedir login. Se o portal alterar um valor, a geração para antes do PDF.
           </p>
           <Button type="submit" variant="primary" disabled={submitting} className="w-full shrink-0 sm:w-auto">
-            {submitting ? 'Preparando no Foresight...' : 'Gerar ilustração oficial'}
+            {submitting
+              ? <ForesightActivityIndicator label="Preparando no Foresight…" />
+              : 'Gerar ilustração oficial'}
           </Button>
         </div>
       </form>

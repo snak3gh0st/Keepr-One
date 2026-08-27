@@ -16,6 +16,7 @@ import {
 } from '@/lib/national-life/illustration-pdf-status'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
+import { ForesightActivityIndicator } from '../ForesightActivityIndicator'
 
 const currency = (value: number) =>
   new Intl.NumberFormat('en-US', {
@@ -62,6 +63,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
   const commandStatus = (await getIllustrationCommandStatuses(agent.id)).get(illustration.id)
   const documentReady = illustration.documentFetchedAt && illustration.documentMimeType === 'application/pdf'
   const delivery = describeIllustrationDelivery({ documentReady: Boolean(documentReady), status: commandStatus })
+  const isGenerating = commandStatus?.state === 'WORKING'
   const foresightStep = documentReady
     ? 'Caso salvo'
     : commandStatus?.state === 'BLOCKED'
@@ -91,7 +93,11 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
         <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full border border-teal/15 shadow-[0_0_0_28px_rgba(31,128,86,0.035),0_0_0_56px_rgba(31,128,86,0.02)]" aria-hidden="true" />
         <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div>
-            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">{delivery.eyebrow}</p>
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
+              {isGenerating
+                ? <ForesightActivityIndicator label={delivery.eyebrow} />
+                : delivery.eyebrow}
+            </p>
             <h2 className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">{delivery.title}</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">{delivery.detail}</p>
           </div>
