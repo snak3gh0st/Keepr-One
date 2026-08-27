@@ -2639,13 +2639,60 @@ async function getConnectorStatus() {
   }
 }
 
+function isKeeprOneTab(tab: chrome.tabs.Tab, origin: string): boolean {
+  if (typeof tab.id !== 'number' || typeof tab.url !== 'string') return false
+  try {
+    return new URL(tab.url).origin === origin
+  } catch {
+    return false
+  }
+}
+
+function isOwnStoreListing(tab: chrome.tabs.Tab): boolean {
+  if (typeof tab.id !== 'number' || typeof tab.url !== 'string') return false
+  try {
+    const url = new URL(tab.url)
+    return url.protocol === 'https:' &&
+      (url.hostname === 'chromewebstore.google.com' || url.hostname === 'chrome.google.com') &&
+      url.pathname.split('/').includes(chrome.runtime.id)
+  } catch {
+    return false
+  }
+}
+
+async function handOffInstalledConnector() {
+  const origin = requireAllowedBaseUrl(__KEEPR_ORIGIN__)
+  const integrationUrl = `${origin}/agent/integrations/national-life?connector=installed`
+  const openTabs = await chrome.tabs.query({})
+  const keeprTabs = openTabs.filter((tab) => isKeeprOneTab(tab, origin))
+  const integrationTab = keeprTabs.find((tab) => {
+    try {
+      return new URL(tab.url!).pathname === '/agent/integrations/national-life'
+    } catch {
+      return false
+    }
+  })
+  const existing = integrationTab ?? keeprTabs.find((tab) => tab.active) ?? keeprTabs[0]
+  const storeTab = openTabs.find(isOwnStoreListing)
+
+  if (existing?.id !== undefined) {
+    await updateTab(existing.id, { active: true })
+    if (storeTab?.id !== undefined && storeTab.id !== existing.id) {
+      await chrome.tabs.remove(storeTab.id)
+    }
+    return
+  }
+  if (storeTab?.id !== undefined) {
+    await updateTab(storeTab.id, { active: true, url: integrationUrl })
+    return
+  }
+  await chrome.tabs.create({ active: true, url: integrationUrl })
+}
+
 export default defineBackground(() => {
   chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason !== 'install') return
-    const origin = requireAllowedBaseUrl(__KEEPR_ORIGIN__)
-    void chrome.tabs.create({
-      url: `${origin}/agent/integrations/national-life?connector=installed`,
-    })
+    void handOffInstalledConnector()
   })
 
   chrome.runtime.onMessageExternal.addListener((value, sender, sendResponse) => {
