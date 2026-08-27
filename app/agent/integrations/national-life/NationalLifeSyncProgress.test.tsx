@@ -104,6 +104,7 @@ describe('NationalLifeSyncProgress', () => {
       'NEW_BUSINESS',
       'RECENTLY_CLOSED',
       'INFORCE_CLIENTS',
+      'PAID_COMMISSIONS',
       'COMMISSIONS_EARNING_REPORT',
       'CORRESPONDENCE',
     ]
