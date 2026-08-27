@@ -8,7 +8,7 @@ import { decimalToNumber } from '@/lib/decimal'
 import { periodFromDate, shiftPeriod, percentChange } from '@/lib/period'
 import {
   sumByPeriod,
-  toCarrierCommissionRecords,
+  toVisibleCarrierCommissionRecords,
   totalForPeriod,
   totalOf,
 } from '@/lib/national-life/commission-records'
@@ -395,10 +395,13 @@ export default async function AgentDashboard({
           deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
           gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
         },
-        select: { id: true, raw: true, amounts: true },
+        select: { id: true, agentId: true, raw: true, amounts: true },
       })
-      const carrierRecords = toCarrierCommissionRecords(carrierRows)
-        .filter((record) => record.type === 'DIRECT')
+      // The homepage headline is the authenticated agent's total commission,
+      // not only direct production. Keep member direct production available to
+      // entitled agency owners, but include overrides only from this agent's
+      // own National Life session—the same tenant-safe rule as the statement.
+      const carrierRecords = toVisibleCarrierCommissionRecords(carrierRows, agent.id)
 
       commissionTotalAmount += totalOf(carrierRecords)
       commissionThisMonth += totalForPeriod(carrierRecords, currentP)

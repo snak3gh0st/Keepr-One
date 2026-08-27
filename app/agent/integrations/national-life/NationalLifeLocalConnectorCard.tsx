@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/Button'
 import {
@@ -27,10 +27,12 @@ type ConnectorState =
   | 'success'
   | 'error'
 
+type ConnectorPresence = 'checking' | 'installed' | 'missing'
+
 function openStore(storeUrl: string) {
   const link = document.createElement('a')
   link.href = storeUrl
-  link.target = '_self'
+  link.target = '_blank'
   link.rel = 'noopener noreferrer'
   link.click()
 }
@@ -68,7 +70,7 @@ async function readDurableSync(runId: string) {
 const storeStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
   idle: 'Ready to connect.',
   checking: 'Checking this browser…',
-  installing: 'Opening the secure install page…',
+  installing: 'Install KeeproneConnect in the Chrome Web Store, then return here. We will recognize it automatically.',
   connecting: 'Connecting to Keepr One…',
   'login-required': 'Sign in to the National Life portal to continue. Your sync picks up from there on its own.',
   syncing: 'Reading National Life and saving each completed area to Keepr One. You can leave this page; the sync continues in the background.',
@@ -140,6 +142,7 @@ export function NationalLifeLocalConnectorCard({
   const [state, setState] = useState<ConnectorState>('idle')
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [compatible, setCompatible] = useState(false)
+  const [connectorPresence, setConnectorPresence] = useState<ConnectorPresence>('checking')
   const [pairedDeviceId, setPairedDeviceId] = useState<string | null>(null)
   const [liveSync, setLiveSync] = useState<ConnectorResponse['sync']>(undefined)
   // The capability probe is asynchronous after hydration, but a user can click
@@ -157,7 +160,7 @@ export function NationalLifeLocalConnectorCard({
     state === 'error' ||
     state === 'slow' ||
     state === 'login-required' ||
-    (installMode === 'pilot' && state === 'installing')
+    state === 'installing'
   const busy = !recoverable
   const stateCopy = installMode === 'pilot' ? pilotStateCopy : storeStateCopy
   const failure = state === 'error' ? connectorFailure(errorCode) : null
@@ -187,6 +190,19 @@ export function NationalLifeLocalConnectorCard({
       alive = false
     }
   }, [])
+
+  const verifyInstallation = useCallback(async (): Promise<boolean> => {
+    setConnectorPresence('checking')
+    try {
+      const status = await sendConnectorMessage(extensionId, { type: 'GET_CONNECTOR_STATUS' })
+      setConnectorPresence('installed')
+      if (status.device?.deviceId) setPairedDeviceId(status.device.deviceId)
+      return true
+    } catch {
+      setConnectorPresence('missing')
+      return false
+    }
+  }, [extensionId])
 
   /// O laço de acompanhamento não termina sozinho: passado o limite ele só fica
   /// mais lento. Sem invalidar o token na desmontagem, sair da página por
@@ -357,6 +373,7 @@ export function NationalLifeLocalConnectorCard({
     if (!browserIsCompatible || !extensionId) return
     void sendConnectorMessage(extensionId, { type: 'GET_CONNECTOR_STATUS' })
       .then(async (status) => {
+        setConnectorPresence('installed')
         if (status.device?.deviceId) setPairedDeviceId(status.device.deviceId)
         if (
           status.sync?.runId &&
@@ -400,8 +417,29 @@ export function NationalLifeLocalConnectorCard({
         // página passaria a vida dizendo "concluído". Quem mostra a última
         // sincronização, datada, é o painel de progresso.
       })
-      .catch(() => {})
+      .catch(() => {
+        setConnectorPresence('missing')
+      })
   }, [browserIsCompatible, extensionId])
+
+  // The Store opens in a separate tab. When the agent returns, verify again so
+  // the page recognizes the new installation without a reload or a technical
+  // setup step.
+  useEffect(() => {
+    if (state !== 'installing' || !browserIsCompatible || !extensionId) return
+    const recheck = () => {
+      if (document.visibilityState !== 'visible') return
+      void verifyInstallation().then((installed) => {
+        setState(installed ? 'idle' : 'installing')
+      })
+    }
+    window.addEventListener('focus', recheck)
+    document.addEventListener('visibilitychange', recheck)
+    return () => {
+      window.removeEventListener('focus', recheck)
+      document.removeEventListener('visibilitychange', recheck)
+    }
+  }, [state, browserIsCompatible, extensionId, verifyInstallation])
 
   function promptInstall() {
     beginAttempt('installing')
@@ -411,6 +449,16 @@ export function NationalLifeLocalConnectorCard({
   }
 
   async function handlePrimaryAction() {
+    if (state === 'installing') {
+      beginAttempt('checking')
+      const installed = await verifyInstallation()
+      setState(installed ? 'idle' : 'installing')
+      return
+    }
+    if (connectorPresence === 'missing') {
+      promptInstall()
+      return
+    }
     if (!browserIsCompatible) {
       promptInstall()
       return
@@ -567,6 +615,10 @@ export function NationalLifeLocalConnectorCard({
             >
               {!browserCapabilityResolved
                 ? 'Connecting on this computer needs Google Chrome or Microsoft Edge.'
+                : connectorPresence === 'checking' && state === 'idle'
+                  ? 'Checking whether KeeproneConnect is installed…'
+                  : connectorPresence === 'missing' && state !== 'installing'
+                    ? 'KeeproneConnect is not installed on this browser. Install it from the Chrome Web Store to connect National Life.'
                 : state === 'error'
                   ? connectorFailure(errorCode).message
                   : state === 'idle' && pairedDeviceId
@@ -581,7 +633,9 @@ export function NationalLifeLocalConnectorCard({
             {state === 'installing'
               ? installMode === 'pilot'
                 ? "I've installed it — connect"
-                : 'Opening the install page…'
+                : 'Check installation'
+              : connectorPresence === 'missing'
+                ? 'Install KeeproneConnect'
               : failure
                 ? failure.actionLabel
                 : state === 'login-required'
@@ -626,6 +680,18 @@ export function NationalLifeLocalConnectorCard({
             className="text-sm font-semibold text-teal underline-offset-4 hover:underline"
           >
             Open the extension page to update it
+          </a>
+        </div>
+      )}
+      {installMode === 'store' && storeUrl && connectorPresence === 'missing' && (
+        <div className="border-t border-border-steel px-5 py-4 sm:px-6">
+          <a
+            href={storeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-semibold text-teal underline-offset-4 hover:underline"
+          >
+            Download KeeproneConnect from the Chrome Web Store
           </a>
         </div>
       )}

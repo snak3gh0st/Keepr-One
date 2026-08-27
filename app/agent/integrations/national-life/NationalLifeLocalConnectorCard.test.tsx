@@ -69,7 +69,58 @@ describe('NationalLifeLocalConnectorCard', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
 
     expect(clicked).toHaveBeenCalledOnce()
-    expect(screen.getByRole('status')).toHaveTextContent('Opening the secure install page')
+    expect(screen.getByRole('status')).toHaveTextContent('Install KeeproneConnect in the Chrome Web Store')
+  })
+
+  it('detects a missing connector and links the official Chrome Web Store before sync', async () => {
+    installChromeMock((_message, callback) => callback())
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    expect(await screen.findByRole('status')).toHaveTextContent('is not installed on this browser')
+    expect(screen.getByRole('button', { name: 'Install KeeproneConnect' })).toBeEnabled()
+    expect(screen.getByRole('link', { name: /Download KeeproneConnect/i })).toHaveAttribute(
+      'href',
+      storeUrl,
+    )
+  })
+
+  it('recognizes a newly installed connector when the agent returns from the Store', async () => {
+    let installed = false
+    installChromeMock((_message, callback) => {
+      if (!installed) {
+        callback()
+        return
+      }
+      callback({ ok: true, device: { status: 'UNPAIRED' }, sync: { status: 'IDLE' } })
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    await screen.findByRole('button', { name: 'Install KeeproneConnect' })
+    await userEvent.click(screen.getByRole('button', { name: 'Install KeeproneConnect' }))
+    installed = true
+    window.dispatchEvent(new Event('focus'))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Connect National Life' })).toBeEnabled()
+    })
+    expect(screen.queryByRole('link', { name: /Download KeeproneConnect/i })).not.toBeInTheDocument()
   })
 
   it('guides unpacked install in pilot mode without opening a store URL', async () => {
