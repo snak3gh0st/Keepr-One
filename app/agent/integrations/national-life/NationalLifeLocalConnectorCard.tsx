@@ -8,7 +8,10 @@ import {
   DISCONNECT_FAILED,
   connectorFailure,
 } from '@/lib/national-life/local-connector/connector-failure'
-import { NATIONAL_LIFE_SYNC_STARTED_EVENT } from './NationalLifeSyncProgress'
+import {
+  NATIONAL_LIFE_RETRY_REMAINING_EVENT,
+  NATIONAL_LIFE_SYNC_STARTED_EVENT,
+} from './NationalLifeSyncProgress'
 import {
   hasConnectorRuntime,
   sendConnectorMessage,
@@ -182,6 +185,7 @@ export function NationalLifeLocalConnectorCard({
   const router = useRouter()
   const installedFlowStarted = useRef(false)
   const watchAbort = useRef(0)
+  const handlePrimaryActionRef = useRef<() => Promise<void>>(async () => {})
   const [state, setState] = useState<ConnectorState>('idle')
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [compatible, setCompatible] = useState(false)
@@ -599,6 +603,19 @@ export function NationalLifeLocalConnectorCard({
       fail(code)
     }
   }
+
+  useEffect(() => {
+    handlePrimaryActionRef.current = handlePrimaryAction
+  })
+
+  useEffect(() => {
+    const retryRemaining = () => {
+      if (busy) return
+      void handlePrimaryActionRef.current()
+    }
+    window.addEventListener(NATIONAL_LIFE_RETRY_REMAINING_EVENT, retryRemaining)
+    return () => window.removeEventListener(NATIONAL_LIFE_RETRY_REMAINING_EVENT, retryRemaining)
+  }, [busy])
 
   async function handleDisconnect() {
     if (!pairedDeviceId) return

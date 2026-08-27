@@ -186,8 +186,8 @@ describe('local stage coverage', () => {
       resumedAt: null,
       completions: [{ gridKey: 'NEW_BUSINESS', expectedRecordCount: 715, completedAt: now }],
     })).toEqual([
-      expect.objectContaining({ gridKey: 'NEW_BUSINESS', state: 'VERIFIED', verifiedRecords: 715 }),
-      expect.objectContaining({ gridKey: 'INFORCE_CLIENTS', state: 'READING', verifiedRecords: null }),
+      expect.objectContaining({ gridKey: 'NEW_BUSINESS', state: 'VERIFIED', verifiedRecords: 715, verifiedAt: now }),
+      expect.objectContaining({ gridKey: 'INFORCE_CLIENTS', state: 'READING', verifiedRecords: null, verifiedAt: null }),
     ])
   })
 

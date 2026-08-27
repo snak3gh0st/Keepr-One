@@ -180,6 +180,10 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
     expect(screen.getByText('Resolvido pelo prêmio mensal')).toBeTruthy()
     expect(screen.getByText('Based on Target Premium')).toBeTruthy()
+    expect(screen.getByText('Pedido do agente')).toBeTruthy()
+    expect(screen.getByText('Confirmação da National Life')).toBeTruthy()
+    expect(screen.getByText('$350.00 por mês')).toBeTruthy()
+    expect(screen.getByText('$4,200.00 por ano')).toBeTruthy()
   })
 
   it('explains when the carrier confirms values different from the agent input', async () => {

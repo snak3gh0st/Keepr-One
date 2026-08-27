@@ -80,6 +80,8 @@ export async function sanitizeNationalLifeSyncStatusForAgent(
           writtenRecords: null,
           duplicateRecords: null,
           rejectedRecords: null,
+          estimate: null,
+          delta: null,
         }
       : {}),
   }

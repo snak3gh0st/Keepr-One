@@ -10,7 +10,10 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh }),
 }))
 
-import { NATIONAL_LIFE_SYNC_STARTED_EVENT } from './NationalLifeSyncProgress'
+import {
+  NATIONAL_LIFE_RETRY_REMAINING_EVENT,
+  NATIONAL_LIFE_SYNC_STARTED_EVENT,
+} from './NationalLifeSyncProgress'
 import { NationalLifeLocalConnectorCard } from './NationalLifeLocalConnectorCard'
 
 const extensionId = 'abcdefghijklmnopabcdefghijklmnop'
@@ -280,12 +283,14 @@ describe('NationalLifeLocalConnectorCard', () => {
   })
 
   it('offers a focused retry when the run finishes with isolated source failures', async () => {
+    const messages: string[] = []
     vi.mocked(fetch).mockResolvedValue(
       new Response(JSON.stringify({
         run: { runId: 'run-partial', state: 'PARTIAL', safeErrorCode: 'SOURCE_PARTIAL_FAILURE' },
       }), { status: 200 }),
     )
     installChromeMock((message, callback) => {
+      messages.push(message.type)
       if (message.type === 'GET_CONNECTOR_STATUS') {
         callback({
           ok: true,
@@ -312,6 +317,11 @@ describe('NationalLifeLocalConnectorCard', () => {
     })
     expect(screen.getByRole('button', { name: 'Retry remaining areas' })).toBeEnabled()
     expect(screen.getByRole('status')).not.toHaveTextContent('stopped')
+
+    window.dispatchEvent(new Event(NATIONAL_LIFE_RETRY_REMAINING_EVENT))
+    await waitFor(() => {
+      expect(messages.filter((type) => type === 'START_NATIONAL_LIFE_SYNC')).toHaveLength(2)
+    })
   })
 
   it('shows a sync action when an existing paired computer is detected', async () => {
