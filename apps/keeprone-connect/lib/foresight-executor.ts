@@ -7,6 +7,7 @@ import {
 import {
   FORESIGHT_FLEXLIFE_FIELDS,
   buildForesightTarget,
+  carrierAmountEquals,
   compareForesightTarget,
   deterministicCaseFingerprint,
   foresightReadbackMismatchCode,
@@ -368,11 +369,14 @@ async function fillLedger(doc: Document, snapshot: ForesightIllustrationSnapshot
     deathBenefitOption: optionValue(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitOption, optionText),
   })
   doc = await waitForFrame('/NWI/IUL2025/ledger.aspx')
-  await waitFor(() => {
-    const face = input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitAmount).value
-    const premium = input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount).value
-    return /\d/.test(face) && /\d/.test(premium) ? true : null
-  }, 'FORESIGHT_LEDGER_READBACK_TIMEOUT')
+  await waitFor(() => carrierAmountEquals(
+    input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitAmount).value,
+    target.faceAmount,
+  ) ? true : null, 'FORESIGHT_FACE_AMOUNT_WRITE_MISMATCH')
+  await waitFor(() => carrierAmountEquals(
+    input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount).value,
+    target.premiumAmount,
+  ) ? true : null, 'FORESIGHT_PREMIUM_WRITE_MISMATCH')
   return readLedger(doc)
 }
 

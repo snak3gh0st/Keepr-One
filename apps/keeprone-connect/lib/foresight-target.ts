@@ -120,6 +120,10 @@ function normalizeAmount(value: number | string): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+export function carrierAmountEquals(value: number | string, expected: number): boolean {
+  return normalizeAmount(value) === expected
+}
+
 function normalizeCarrierDate(value: string): string {
   const match = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
   return match ? `${match[1]!.padStart(2, '0')}/${match[2]!.padStart(2, '0')}/${match[3]}` : value
@@ -144,9 +148,9 @@ export function compareForesightTarget(
     const right = key === 'dateOfBirth' ? normalizeCarrierDate(expected[key]) : normalizeText(expected[key])
     if (left !== right) mismatches.push(key)
   }
-  if (normalizeAmount(observed.solveAmount) !== expected.solveAmount) mismatches.push('solveAmount')
-  if (normalizeAmount(observed.faceAmount) !== expected.faceAmount) mismatches.push('faceAmount')
-  if (normalizeAmount(observed.premiumAmount) !== expected.premiumAmount) mismatches.push('premiumAmount')
+  if (!carrierAmountEquals(observed.solveAmount, expected.solveAmount)) mismatches.push('solveAmount')
+  if (!carrierAmountEquals(observed.faceAmount, expected.faceAmount)) mismatches.push('faceAmount')
+  if (!carrierAmountEquals(observed.premiumAmount, expected.premiumAmount)) mismatches.push('premiumAmount')
   if (!sameStructured(observed.allocations, expected.allocations)) mismatches.push('allocations')
   if (!sameStructured(observed.riders, expected.riders)) mismatches.push('riders')
   if (!sameStructured(observed.reports, expected.reports)) mismatches.push('reports')

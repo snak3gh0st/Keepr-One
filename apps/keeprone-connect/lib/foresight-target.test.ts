@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   FORESIGHT_FLEXLIFE_FIELDS,
   buildForesightTarget,
+  carrierAmountEquals,
   compareForesightTarget,
   deterministicCaseFingerprint,
   foresightReadbackMismatchCode,
@@ -99,6 +100,8 @@ describe('Foresight target verification', () => {
     expect(foresightReadbackMismatchCode(['issueState'])).toBe('FORESIGHT_READBACK_ISSUE_STATE_MISMATCH')
     expect(foresightReadbackMismatchCode(['premiumAmount'])).toBe('FORESIGHT_READBACK_PREMIUM_AMOUNT_MISMATCH')
     expect(foresightReadbackMismatchCode([])).toBe('FORESIGHT_READBACK_MISMATCH')
+    expect(carrierAmountEquals('$350.00', 350)).toBe(true)
+    expect(carrierAmountEquals('$1,500.00', 350)).toBe(false)
   })
 
   it('uses only non-PII identifiers in the receipt fingerprint', async () => {

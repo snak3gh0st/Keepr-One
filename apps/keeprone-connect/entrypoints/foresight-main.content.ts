@@ -56,6 +56,7 @@ export default defineContentScript({
       const control = (input as HTMLInputElement & { control?: { set_Value(value: string): void } }).control
       if (control?.set_Value) control.set_Value(value)
       else input.value = value
+      return input
     }
     const setSelect = (doc: Document, id: string, value: string) => {
       const select = element<HTMLSelectElement>(doc, id)
@@ -120,7 +121,18 @@ export default defineContentScript({
       ;({ doc, win } = carrier())
       invoke(win, 'ctl00_mobilityPH_panelPremium_ucPremium_rdoPremiumSolves', 'set_Value', 0)
       setSelect(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumType, '-4')
-      setInput(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount, String(values.premiumAmount))
+      element<HTMLSelectElement>(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumType)
+        .dispatchEvent(new Event('change', { bubbles: true }))
+      await delay(500)
+
+      ;({ doc, win } = carrier())
+      const premiumAmount = setInput(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount, String(values.premiumAmount))
+      premiumAmount.dispatchEvent(new Event('input', { bubbles: true }))
+      premiumAmount.dispatchEvent(new Event('change', { bubbles: true }))
+      premiumAmount.dispatchEvent(new Event('blur', { bubbles: true }))
+      await delay(200)
+
+      ;({ doc, win } = carrier())
       invoke(win, 'ctl00_mobilityPH_panelPremium_ucPremium', 'updatePremiumSchedule')
       await delay(1_100)
     }
