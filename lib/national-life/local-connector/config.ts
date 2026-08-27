@@ -2,6 +2,9 @@ import { CANONICAL_NATIONAL_LIFE_SYNC } from '../sync-engine'
 
 const CHROME_EXTENSION_ID = /^[a-p]{32}$/
 const CHROME_WEB_STORE_HOST = 'chromewebstore.google.com'
+const OFFICIAL_CHROME_EXTENSION_ID = 'anfhdbmapiohhbplmccimflcenijfnoi'
+const OFFICIAL_CHROME_STORE_URL =
+  `https://${CHROME_WEB_STORE_HOST}/detail/keeproneconnect/${OFFICIAL_CHROME_EXTENSION_ID}?hl=pt-BR`
 
 export const LOCAL_CONNECTOR_DEPLOYMENT_SCOPE = CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope
 
@@ -109,7 +112,16 @@ export function getNationalLifeLocalConnectorConfig(): PublicLocalConnectorConfi
 
   const extensionIds = parseExtensionIds()
   const extensionId = extensionIds[0]
-  const rawStoreUrl = process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL?.trim()
+  const configuredStoreUrl = process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL?.trim()
+  // The Store ID is a signed product identity, not a deploy-specific secret.
+  // Production already rolls out that ID first; if an older Coolify variable
+  // still has the URL blank, use only this exact verified listing. Any other ID
+  // stays in explicit pilot mode instead of being linked to a guessed store.
+  const rawStoreUrl = configuredStoreUrl || (
+    process.env.NODE_ENV === 'production' && extensionId === OFFICIAL_CHROME_EXTENSION_ID
+      ? OFFICIAL_CHROME_STORE_URL
+      : undefined
+  )
   const baseUrl = parseAppOrigin(process.env.BETTER_AUTH_URL)
 
   // Empty / unset Store URL = pilot (unpacked extension). Store listing is Phase 6.
