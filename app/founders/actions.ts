@@ -83,8 +83,14 @@ function formString(formData: FormData, key: string): string {
 }
 
 function registrationFingerprints(email: string, requestHeaders: Headers) {
-  const forwardedFor = requestHeaders.get('x-forwarded-for')?.split(',')[0]?.trim()
-  const address = forwardedFor || requestHeaders.get('x-real-ip') || 'unknown'
+  const forwardedFor = requestHeaders
+    .get('x-forwarded-for')
+    ?.split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  const address = requestHeaders.get('x-real-ip')
+    || (forwardedFor && forwardedFor[forwardedFor.length - 1])
+    || 'unknown'
   const digest = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 32)
   return {
     address: digest(address),

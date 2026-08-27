@@ -248,6 +248,21 @@ describe('registerFounderAction', () => {
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
+  it('uses X-Real-IP ahead of a client-prepended X-Forwarded-For entry for rate limiting', async () => {
+    mocks.headers.mockResolvedValue(new Headers({
+      'x-forwarded-for': '198.51.100.8, 203.0.113.8',
+      'x-real-ip': '203.0.113.7',
+    }))
+
+    await registerFounderAction(registrationForm())
+
+    expect(mocks.consumeRateLimit).toHaveBeenNthCalledWith(1, {
+      key: 'founders-register-ip:fec52565aa0cf18f57d7cf5b3ac72850',
+      max: 12,
+      windowSeconds: 60 * 60,
+    })
+  })
+
   it('rejects a concurrently redeemed one-time invite', async () => {
     mocks.transaction.mockRejectedValue(new Prisma.PrismaClientKnownRequestError(
       'Unique constraint failed',
