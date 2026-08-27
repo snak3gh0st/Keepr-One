@@ -71,7 +71,9 @@ describe('grid extraction', () => {
     await runGridExtraction(MESSAGE, deps(h))
 
     expect(h.fetchPage).toHaveBeenCalledTimes(2)
-    expect(h.posts.map((post) => post.type)).toEqual(['GRID_CHUNK', 'GRID_CHUNK', 'GRID_DONE'])
+    expect(h.posts.map((post) => post.type)).toEqual([
+      'GRID_CHUNK', 'GRID_CHUNK', 'GRID_CHUNK', 'GRID_DONE',
+    ])
   })
 
   it('continues from the server checkpoint instead of rereading earlier pages', async () => {
@@ -93,7 +95,7 @@ describe('grid extraction', () => {
     expect(h.posts.at(-1)).toMatchObject({ type: 'GRID_DONE' })
   })
 
-  it('reads commission detail in larger carrier pages but emits resumable 200-row chunks', async () => {
+  it('reads commission detail in larger carrier pages but emits resumable 100-row upload chunks', async () => {
     const h = harness([{ data: rows(450), recordsTotal: 450 }])
 
     await runGridExtraction(
@@ -106,15 +108,17 @@ describe('grid extraction', () => {
       objJsonModel: { length: number }
     }
     expect(request.objJsonModel.length).toBe(1_000)
-    expect(h.posts.slice(0, 3)).toMatchObject([
-      { type: 'GRID_CHUNK', sequence: 0, sourceOffset: 0, nextOffset: 200 },
-      { type: 'GRID_CHUNK', sequence: 1, sourceOffset: 200, nextOffset: 400 },
-      { type: 'GRID_CHUNK', sequence: 2, sourceOffset: 400, nextOffset: 450 },
+    expect(h.posts.slice(0, 5)).toMatchObject([
+      { type: 'GRID_CHUNK', sequence: 0, sourceOffset: 0, nextOffset: 100 },
+      { type: 'GRID_CHUNK', sequence: 1, sourceOffset: 100, nextOffset: 200 },
+      { type: 'GRID_CHUNK', sequence: 2, sourceOffset: 200, nextOffset: 300 },
+      { type: 'GRID_CHUNK', sequence: 3, sourceOffset: 300, nextOffset: 400 },
+      { type: 'GRID_CHUNK', sequence: 4, sourceOffset: 400, nextOffset: 450 },
     ])
-    expect((h.posts[0]!.records as unknown[])).toHaveLength(200)
-    expect((h.posts[1]!.records as unknown[])).toHaveLength(200)
-    expect((h.posts[2]!.records as unknown[])).toHaveLength(50)
-    expect(h.posts[3]).toMatchObject({ type: 'GRID_DONE' })
+    expect((h.posts[0]!.records as unknown[])).toHaveLength(100)
+    expect((h.posts[3]!.records as unknown[])).toHaveLength(100)
+    expect((h.posts[4]!.records as unknown[])).toHaveLength(50)
+    expect(h.posts[5]).toMatchObject({ type: 'GRID_DONE' })
   })
 
   it('sends one empty chunk for a grid with no rows', async () => {
