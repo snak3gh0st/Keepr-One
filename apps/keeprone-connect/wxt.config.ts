@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'wxt'
+import { normalizeManifestKey } from './lib/manifest-key'
 
 const keeprOrigin = new URL(process.env.WXT_KEEPR_ORIGIN ?? 'https://app.keeprone.com').origin
 const localhostOrigin = 'http://localhost:3000'
@@ -14,7 +15,7 @@ const keeprMatchOrigin = keeprOrigin === localhostOrigin ? 'http://localhost' : 
 
 const manifestKeyPath = resolve(__dirname, '.keys/manifest-key.txt')
 const manifestKey = existsSync(manifestKeyPath)
-  ? readFileSync(manifestKeyPath, 'utf8').trim()
+  ? normalizeManifestKey(readFileSync(manifestKeyPath, 'utf8'))
   : undefined
 const isChromeWebStoreBuild = process.env.WXT_CHROME_WEB_STORE === 'true'
 
