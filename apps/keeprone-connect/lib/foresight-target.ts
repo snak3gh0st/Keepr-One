@@ -28,6 +28,31 @@ export const FORESIGHT_FLEXLIFE_FIELDS = {
   },
 } as const
 
+const FORESIGHT_SOLVE_VALUES = {
+  rdoDeathBenefitSolves: {
+    None: '0',
+    'Minimum DB/Max Cash Value': '101',
+    'Balanced DB': '1004',
+    'Based on Target Premium': '1001',
+    'Protection Focus': '1005',
+  },
+  rdoPremiumSolves: {
+    None: '0',
+    'Protection Focus': '103',
+    'Retirement Focus': '1001',
+  },
+} as const
+
+export function foresightSolveValue(group: string, label: string): string | null {
+  const values = FORESIGHT_SOLVE_VALUES[group as keyof typeof FORESIGHT_SOLVE_VALUES]
+  return values?.[label as keyof typeof values] ?? null
+}
+
+export function foresightSolveLabel(group: string, value: string): string | null {
+  const values = FORESIGHT_SOLVE_VALUES[group as keyof typeof FORESIGHT_SOLVE_VALUES]
+  return Object.entries(values ?? {}).find(([, candidate]) => candidate === value)?.[0] ?? null
+}
+
 const FORESIGHT_SURFACES = {
   '/NWI/IUL2025/client.aspx': {
     surface: 'CLIENT' as const,
