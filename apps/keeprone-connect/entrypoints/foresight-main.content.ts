@@ -119,14 +119,16 @@ export default defineContentScript({
       await delay(900)
 
       ;({ doc, win } = carrier())
-      invoke(win, 'ctl00_mobilityPH_panelPremium_ucPremium_rdoPremiumSolves', 'set_Value', 0)
       setSelect(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumType, '-4')
       element<HTMLSelectElement>(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumType)
         .dispatchEvent(new Event('change', { bubbles: true }))
       await delay(500)
 
       ;({ doc, win } = carrier())
-      const premiumAmount = setInput(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount, String(values.premiumAmount))
+      // This is the same carrier interaction verified in the browser: enter
+      // the displayed amount after selecting "Specify Amount", then leave it.
+      const premiumAmount = element<HTMLInputElement>(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount)
+      premiumAmount.value = String(values.premiumAmount)
       premiumAmount.dispatchEvent(new Event('input', { bubbles: true }))
       premiumAmount.dispatchEvent(new Event('change', { bubbles: true }))
       premiumAmount.dispatchEvent(new Event('blur', { bubbles: true }))
