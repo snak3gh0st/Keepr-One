@@ -72,6 +72,7 @@ const MENU_IDS = {
   ledger: 'ctl00_mobilityPH_verticalMenu_Ledger_0',
   riders: 'ctl00_mobilityPH_verticalMenu_Product_0',
   interestRates: 'ctl00_mobilityPH_verticalMenu_InterestRate_0',
+  quickView: 'ctl00_mobilityPH_verticalMenu_Quickview_1',
   reports: 'ctl00_mobilityPH_verticalMenu_Reportselection_2',
 } as const
 
@@ -417,7 +418,7 @@ function readLedger(doc: Document): Pick<ForesightMaterialReadback,
 type ForesightSolvedLedgerReadback = {
   faceSolve: string
   premiumSolve: string
-  faceAmount: number
+  faceAmount: number | null
   monthlyPremium: number
   annualPremium: number
   premiumMode: string
@@ -431,17 +432,35 @@ function carrierAmount(value: string): number | null {
   return Number.isFinite(amount) && amount > 0 ? amount : null
 }
 
+export function carrierSummaryAmount(
+  rows: ReadonlyArray<readonly [string, string]>,
+  label: string,
+): number | null {
+  const value = rows.find(([candidate]) => candidate.trim() === label)?.[1] ?? ''
+  return carrierAmount(value)
+}
+
+function solvedSummaryRows(): Array<[string, string]> {
+  const summary = globalThis.document.getElementById('ctl00_mobilityPH_quickCalc_BodySection')
+  return [...(summary?.querySelectorAll('tr') ?? [])].flatMap((row) => {
+    const cells = row.querySelectorAll('td')
+    return cells.length >= 2
+      ? [[cells[0]?.textContent ?? '', cells[1]?.textContent ?? ''] as [string, string]]
+      : []
+  })
+}
+
 export function monthlyPremiumFromAnnual(annualPremium: number): number | null {
   if (!Number.isFinite(annualPremium) || annualPremium <= 0) return null
   return Math.round((annualPremium / 12) * 100) / 100
 }
 
 function solvedAnnualPremium(): number | null {
-  const summary = globalThis.document.getElementById('ctl00_mobilityPH_quickCalc_BodySection')
-  const annual = [...(summary?.querySelectorAll('tr') ?? [])].find((row) =>
-    row.querySelector('td')?.textContent?.trim() === 'Premium:',
-  )?.querySelectorAll('td')[1]?.textContent ?? ''
-  return carrierAmount(annual)
+  return carrierSummaryAmount(solvedSummaryRows(), 'Premium:')
+}
+
+function solvedFaceAmount(doc: Document): number | null {
+  return carrierAmount(input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitAmount).value)
 }
 
 function solvedMonthlyPremium(doc: Document): number | null {
@@ -465,10 +484,10 @@ function hasCarrierCalculationError(doc: Document): boolean {
 
 function readSolvedLedger(doc: Document): ForesightSolvedLedgerReadback | null {
   validateSurface(doc, '/NWI/IUL2025/ledger.aspx')
-  const faceAmount = carrierAmount(input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitAmount).value)
+  const faceAmount = solvedFaceAmount(doc)
   const monthlyPremium = solvedMonthlyPremium(doc)
   const annualPremium = solvedAnnualPremium()
-  if (faceAmount === null || monthlyPremium === null || annualPremium === null) return null
+  if (monthlyPremium === null || annualPremium === null) return null
   return {
     faceSolve: selectedSolveRadio(doc, 'rdoDeathBenefitSolves'),
     premiumSolve: selectedSolveRadio(doc, 'rdoPremiumSolves'),
@@ -482,6 +501,20 @@ function readSolvedLedger(doc: Document): ForesightSolvedLedgerReadback | null {
 
 function expectedDeathBenefitOption(snapshot: ForesightSolvedIllustrationSnapshotV2): string {
   return snapshot.deathBenefitOption === 'A_Level' ? 'A (Level)' : 'B (Increasing)'
+}
+
+export function quickViewInitialFaceAmount(rows: ReadonlyArray<ReadonlyArray<string>>): number | null {
+  const headerIndex = rows.findIndex((row) => row.some((cell) => cell.trim() === 'Initial Face Amount'))
+  if (headerIndex < 0) return null
+  const faceColumn = rows[headerIndex]!.findIndex((cell) => cell.trim() === 'Initial Face Amount')
+  return carrierAmount(rows[headerIndex + 1]?.[faceColumn] ?? '')
+}
+
+function readQuickViewInitialFaceAmount(doc: Document): number | null {
+  if (doc.location.pathname !== '/NWI/IUL2025/quickview.aspx') return null
+  const rows = [...doc.querySelectorAll('tr')].map((row) =>
+    [...row.querySelectorAll('th, td')].map((cell) => cell.textContent?.trim() ?? ''))
+  return quickViewInitialFaceAmount(rows)
 }
 
 export function solvedLedgerMatches(
@@ -501,7 +534,7 @@ export function solvedLedgerMatches(
 async function fillSolvedLedger(
   doc: Document,
   snapshot: ForesightSolvedIllustrationSnapshotV2,
-): Promise<ForesightSolvedLedgerReadback> {
+): Promise<ForesightSolvedLedgerReadback & { faceAmount: number }> {
   validateSurface(doc, '/NWI/IUL2025/ledger.aspx')
   const values: Record<string, string | number> = {
     solveBasis: snapshot.solve.basis,
@@ -517,11 +550,17 @@ async function fillSolvedLedger(
   await applyInMainWorld('APPLY_LEDGER_SOLVE', values)
   doc = await waitForFrame('/NWI/IUL2025/ledger.aspx')
   try {
-    return await waitFor(() => {
+    const observed = await waitFor(() => {
       if (hasCarrierCalculationError(doc)) return null
       const observed = readSolvedLedger(doc)
       return observed && solvedLedgerMatches(snapshot, observed) ? observed : null
     }, 'FORESIGHT_SOLVE_READBACK_TIMEOUT', 30_000)
+    if (observed.faceAmount !== null) return { ...observed, faceAmount: observed.faceAmount }
+    if (snapshot.solve.basis !== 'PREMIUM') fail('FORESIGHT_SOLVE_READBACK_MISMATCH')
+    const quickView = await navigate('/NWI/IUL2025/quickview.aspx', MENU_IDS.quickView)
+    const faceAmount = readQuickViewInitialFaceAmount(quickView)
+    if (faceAmount === null) fail('FORESIGHT_SOLVE_READBACK_MISMATCH')
+    return { ...observed, faceAmount }
   } catch (error) {
     if (hasCarrierCalculationError(doc)) fail('FORESIGHT_CALCULATION_UNAVAILABLE')
     throw error

@@ -58,7 +58,12 @@ import {
   nudgeExtensionUpdate,
   type UpdateNudgeRecord,
 } from '../lib/update-nudge'
-import { SignedRequestError, signedBinaryRequest, signedJsonRequest } from '../lib/signed-client'
+import {
+  retryIdempotentSignedRequest,
+  SignedRequestError,
+  signedBinaryRequest,
+  signedJsonRequest,
+} from '../lib/signed-client'
 import {
   parseForesightIllustrationSnapshot,
   sha256ForesightSnapshot,
@@ -518,11 +523,8 @@ async function ensureScheduledSyncAlarm() {
 }
 
 async function startScheduledSyncIfDue() {
-  const [device, sync, command] = await Promise.all([
-    readDeviceState(), readSyncState(), readCommandState(),
-  ])
+  const [device, sync] = await Promise.all([readDeviceState(), readSyncState()])
   if (!scheduledSyncIsDue(device, sync)) return
-  if (['POLLING', 'NAVIGATING', 'RUNNING', 'AUTH_REQUIRED', 'MFA_REQUIRED'].includes(command.status)) return
   await startNewSync()
 }
 
@@ -1919,31 +1921,35 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
   const nextOffset = detailBaseOffset + localNextOffset
   await writeSyncState({ ...state, status: 'UPLOADING', errorCode: undefined })
   const pathname = `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}/stages/${encodeURIComponent(message.gridKey)}`
+  const baseUrl = device.baseUrl
+  const deviceId = device.deviceId
   let uploadResult: { duplicate?: unknown } | undefined
   try {
-    uploadResult = await signedJsonRequest<{ duplicate?: unknown }>({
-      baseUrl: device.baseUrl,
-      deviceId: device.deviceId,
-      method: 'PUT',
-      pathname,
-      // The stage index is in the key because the plan is server-supplied now: two
-      // stages naming the same grid would otherwise share an idempotency key and
-      // silently collide. Retries of the same chunk still reuse the same key.
-      idempotencyKey: `nlc:${state.runId}:${state.stageIndex ?? 0}:${message.gridKey}:${message.sequence}`,
-      body: {
-        // Raw carrier rows, exactly as the portal returned them. Field names and
-        // meanings are the server's business now.
-        schemaVersion: CONNECTOR_SCHEMA_VERSION,
-        runId: state.runId,
-        gridKey: message.gridKey,
-        sequence: message.sequence,
-        sourceOffset,
-        nextOffset,
-        observedAt: new Date().toISOString(),
-        recordsTotal: message.recordsTotal,
-        truncated: message.truncated,
-        records,
-      },
+    uploadResult = await retryIdempotentSignedRequest({
+      request: () => signedJsonRequest<{ duplicate?: unknown }>({
+        baseUrl,
+        deviceId,
+        method: 'PUT',
+        pathname,
+        // The stage index is in the key because the plan is server-supplied now: two
+        // stages naming the same grid would otherwise share an idempotency key and
+        // silently collide. Retries of the same chunk still reuse the same key.
+        idempotencyKey: `nlc:${state.runId}:${state.stageIndex ?? 0}:${message.gridKey}:${message.sequence}`,
+        body: {
+          // Raw carrier rows, exactly as the portal returned them. Field names and
+          // meanings are the server's business now.
+          schemaVersion: CONNECTOR_SCHEMA_VERSION,
+          runId: state.runId,
+          gridKey: message.gridKey,
+          sequence: message.sequence,
+          sourceOffset,
+          nextOffset,
+          observedAt: new Date().toISOString(),
+          recordsTotal: message.recordsTotal,
+          truncated: message.truncated,
+          records,
+        },
+      }),
     })
   } catch (error) {
     if (error instanceof SignedRequestError && error.code === 'IDEMPOTENCY_CONFLICT') {

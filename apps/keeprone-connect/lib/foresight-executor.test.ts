@@ -1,7 +1,13 @@
 import { expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import type { ForesightSolvedIllustrationSnapshotV2 } from './foresight-contract'
-import { monthlyPremiumFromAnnual, solvedClientMatches, solvedLedgerMatches } from './foresight-executor'
+import {
+  carrierSummaryAmount,
+  quickViewInitialFaceAmount,
+  monthlyPremiumFromAnnual,
+  solvedClientMatches,
+  solvedLedgerMatches,
+} from './foresight-executor'
 
 it('primes a new solved illustration allocation before asking Foresight to calculate', () => {
   const source = readFileSync(new URL('./foresight-executor.ts', import.meta.url), 'utf8')
@@ -57,6 +63,28 @@ it('accepts the US birth date read back from the solved Foresight client form', 
 
 it('derives the monthly solved premium from the carrier annual summary', () => {
   expect(monthlyPremiumFromAnnual(2_758)).toBe(229.83)
+})
+
+it('reads the solved death benefit from the exact National Life summary row', () => {
+  const rows = [
+    ['Target Premium:', '$1,200.00'],
+    ['Premium:', '$1,200'],
+    ['Net Death Benefit:', '$92,937'],
+  ] as const
+
+  expect(carrierSummaryAmount(rows, 'Net Death Benefit:')).toBe(92_937)
+  expect(carrierSummaryAmount(rows, 'Premium:')).toBe(1_200)
+  expect(carrierSummaryAmount(rows, 'Death Benefit:')).toBeNull()
+})
+
+it('reads the official solved face amount from Foresight Quick View', () => {
+  const rows = [
+    ['Initial Face Amount', 'Lapse Year', 'MEC Year', 'Modal Premium', 'Premium Mode'],
+    ['$92,937', 'N/A', 'N/A', '$100.00', 'Monthly (EFT)'],
+  ]
+
+  expect(quickViewInitialFaceAmount(rows)).toBe(92_937)
+  expect(quickViewInitialFaceAmount([['Initial Face Amount'], ['N/A']])).toBeNull()
 })
 
 it('accepts a carrier-confirmed adjustment after the approved input was written', () => {
