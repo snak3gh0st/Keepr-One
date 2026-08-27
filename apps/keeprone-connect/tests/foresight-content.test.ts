@@ -30,6 +30,26 @@ const snapshot = {
   reports: ['NAIC_ILLUSTRATION'],
 } as const
 
+const premiumSolvedSnapshot = {
+  schemaVersion: 2,
+  illustrationId: 'ill_premium_123',
+  caseId: null,
+  carrierCaseName: 'KEEPRONE-20260827-ILLPREMIUM123',
+  insured: { firstName: 'KeeprOne', lastName: 'Premium', dateOfBirth: '1990-01-01', issueState: 'FL' },
+  product: { name: 'FlexLife', code: '956' },
+  solve: { basis: 'PREMIUM', method: 'Based_on_Target_Premium', amount: 350 },
+  faceAmount: null,
+  premium: { mode: 'Monthly', amount: 350 },
+  underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
+  deathBenefitOption: 'A_Level',
+  allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 100 }],
+  riders: [
+    'DeathBenefitProtection', 'ABRTerminalIllness', 'ABRChronicIllness',
+    'ABRCriticalIllness', 'ABRCriticalInjury', 'ABRAlzheimersDisease',
+  ],
+  reports: ['NAIC_ILLUSTRATION'],
+} as const
+
 beforeEach(() => {
   vi.resetModules()
   mocks.execute.mockReset()
@@ -114,6 +134,27 @@ describe('Foresight isolated-world executor', () => {
       expect(async).toBe(true)
     })
     expect(mocks.executeTerm).toHaveBeenCalledWith({ inputHash: receipt.inputHash, snapshot: termSnapshot })
+    expect(response).toEqual(expect.objectContaining({ ok: true, receipt, document }))
+  })
+
+  it('routes a sealed solved IUL command without inventing its calculated result', async () => {
+    const receipt = {
+      inputHash: 'a'.repeat(64), caseFingerprint: `case_${'b'.repeat(64)}`,
+      carrierCaseName: premiumSolvedSnapshot.carrierCaseName, productCode: '956', solveBasis: 'PREMIUM',
+      faceAmount: 250_000, monthlyPremium: 350, release: '5.3.65.31', reportCode: 'NAIC_ILLUSTRATION',
+      documentSha256: 'c'.repeat(64), documentBytes: 9, saved: true,
+    } as const
+    const document = { contentType: 'application/pdf', pdfBase64: 'JVBERi0xLjcK' } as const
+    mocks.execute.mockResolvedValue({ receipt, document })
+    const content = (await import('../entrypoints/foresight.content')).default as unknown as { main(): void }
+    content.main()
+    const response = await new Promise<unknown>((resolve) => {
+      listener?.({
+        type: 'EXECUTE_FORESIGHT_ILLUSTRATION', token: 't'.repeat(32), correlationId: 'c'.repeat(16),
+        inputHash: receipt.inputHash, snapshot: premiumSolvedSnapshot,
+      }, {}, resolve)
+    })
+    expect(mocks.execute).toHaveBeenCalledWith({ inputHash: receipt.inputHash, snapshot: premiumSolvedSnapshot })
     expect(response).toEqual(expect.objectContaining({ ok: true, receipt, document }))
   })
 })

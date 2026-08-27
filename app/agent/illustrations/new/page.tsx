@@ -19,7 +19,7 @@ export default async function NewIllustrationPage() {
       <PageHeader
         title="Nova ilustração"
         eyebrow="Carteira"
-        description="Gere a ilustração oficial FlexLife no Foresight da National Life."
+        description="Gere a ilustração oficial no Foresight da National Life."
       >
         <Link
           href="/agent/illustrations"
@@ -37,8 +37,9 @@ export default async function NewIllustrationPage() {
         </div>
         <ContextPanel eyebrow="Dica rápida" title="O que enviar">
           <p>
-            Informe os dados do segurado, o capital e o prêmio mensal. O KeeproneConnect cria
-            o caso FlexLife no Foresight, confere o que foi gravado e devolve o PDF oficial.
+            Informe os dados do segurado e escolha se o cenário será resolvido pelo capital ou
+            pelo prêmio mensal. O KeeproneConnect cria o caso FlexLife no Foresight, confere o
+            resultado calculado e devolve o PDF oficial.
           </p>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Classe de risco</p>

@@ -33,6 +33,7 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [productFamily, setProductFamily] = useState<'IUL' | 'TERM'>('IUL')
   const [termCarrier, setTermCarrier] = useState<'LSW_TERM' | 'NL_TERM'>('LSW_TERM')
+  const [iulSolveBasis, setIulSolveBasis] = useState<'DEATH_BENEFIT' | 'PREMIUM'>('DEATH_BENEFIT')
 
   async function handleSubmit(formData: FormData) {
     setSubmitting(true)
@@ -204,11 +205,39 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
           <legend className="flex items-center gap-3 text-sm font-semibold text-ink">
             <span className="grid h-7 w-7 place-items-center rounded-full bg-teal text-[10px] font-mono tracking-[0.08em] text-paper">03</span>
             Cenário IUL • FlexLife
-            <span className="font-normal text-ink-muted">Os valores que você quer ilustrar</span>
+            <span className="font-normal text-ink-muted">Escolha o único valor que a National Life deve resolver</span>
           </legend>
+          <input type="hidden" name="solveBasis" value={iulSolveBasis} />
+          <div className="mt-4 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Base de cálculo do IUL">
+            <label className={`relative flex cursor-pointer flex-col rounded-2xl border p-4 transition-colors ${iulSolveBasis === 'DEATH_BENEFIT' ? 'border-teal bg-teal-pale/60' : 'border-border-steel bg-paper hover:bg-panel/55'}`}>
+              <input
+                className="sr-only"
+                type="radio"
+                name="iulSolveBasisChoice"
+                aria-label="Resolver pelo capital segurado"
+                checked={iulSolveBasis === 'DEATH_BENEFIT'}
+                onChange={() => setIulSolveBasis('DEATH_BENEFIT')}
+              />
+              <strong className="text-sm font-semibold text-ink">Resolver pelo capital segurado</strong>
+              <span className="mt-1 text-xs leading-5 text-ink-muted">Você informa a cobertura; o Foresight calcula o prêmio mensal com Protection Focus.</span>
+            </label>
+            <label className={`relative flex cursor-pointer flex-col rounded-2xl border p-4 transition-colors ${iulSolveBasis === 'PREMIUM' ? 'border-teal bg-teal-pale/60' : 'border-border-steel bg-paper hover:bg-panel/55'}`}>
+              <input
+                className="sr-only"
+                type="radio"
+                name="iulSolveBasisChoice"
+                aria-label="Resolver pelo prêmio mensal"
+                checked={iulSolveBasis === 'PREMIUM'}
+                onChange={() => setIulSolveBasis('PREMIUM')}
+              />
+              <strong className="text-sm font-semibold text-ink">Resolver pelo prêmio mensal</strong>
+              <span className="mt-1 text-xs leading-5 text-ink-muted">Você informa o aporte; o Foresight calcula o capital com Based on Target Premium.</span>
+            </label>
+          </div>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <Field label="Capital segurado"><Input name="faceAmount" type="number" min={1} step="0.01" required placeholder="250000" /></Field>
-            <Field label="Prêmio mensal"><Input name="monthlyPremium" type="number" min={0.01} step="0.01" required placeholder="350" /></Field>
+            {iulSolveBasis === 'DEATH_BENEFIT'
+              ? <Field label="Capital segurado"><Input name="faceAmount" type="number" min={1} step="0.01" required placeholder="250000" /></Field>
+              : <Field label="Prêmio mensal"><Input name="monthlyPremium" type="number" min={0.01} step="0.01" required placeholder="350" /></Field>}
             <Field label="Opção de benefício por morte">
               <Select name="deathBenefitOption" required defaultValue="" className="w-full">
                 <option value="" disabled>Selecione...</option>
@@ -225,9 +254,9 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
           <aside className="mt-5 rounded-xl border border-border-steel bg-panel/50 p-4" aria-label="Configuração padrão do Foresight">
             <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-teal-deep">Configuração padrão do Foresight</p>
             <div className="mt-3 grid gap-2 text-xs leading-5 text-ink-muted sm:grid-cols-2">
-              <p><strong className="font-semibold text-ink">Ilustração:</strong> Basic Illustration, solve “None”, GPT e MEC “None”.</p>
-              <p><strong className="font-semibold text-ink">Benefício:</strong> uma linha de capital e vigência 1–M; APB em US$ 0.</p>
-              <p><strong className="font-semibold text-ink">Prêmio:</strong> mensal, “Specify Amount”, sem ajuste, vigência 1–M.</p>
+              <p><strong className="font-semibold text-ink">Ilustração:</strong> Basic Illustration, GPT e MEC “None”.</p>
+              <p><strong className="font-semibold text-ink">Base escolhida:</strong> {iulSolveBasis === 'DEATH_BENEFIT' ? 'capital especificado; prêmio resolvido pela National Life.' : 'prêmio especificado; capital resolvido pela National Life.'}</p>
+              <p><strong className="font-semibold text-ink">Validação:</strong> o Keeprone só aceita o PDF se os dois valores calculados e o método escolhido voltarem do Foresight.</p>
               <p><strong className="font-semibold text-ink">Exchange e distribuição:</strong> ambos “None”.</p>
             </div>
           </aside>

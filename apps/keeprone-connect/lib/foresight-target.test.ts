@@ -9,7 +9,10 @@ import {
   validateForesightSurface,
   type ForesightMaterialReadback,
 } from './foresight-target'
-import { parseForesightIllustrationSnapshot } from './foresight-contract'
+import {
+  parseForesightIllustrationSnapshot,
+  type ForesightIllustrationSnapshotV1,
+} from './foresight-contract'
 
 const snapshot = parseForesightIllustrationSnapshot({
   schemaVersion: 1,
@@ -38,7 +41,7 @@ const snapshot = parseForesightIllustrationSnapshot({
     'ABRAlzheimersDisease',
   ],
   reports: ['NAIC_ILLUSTRATION'],
-})!
+})! as ForesightIllustrationSnapshotV1
 
 describe('Foresight target verification', () => {
   it('accepts only the observed FlexLife page inventory', () => {

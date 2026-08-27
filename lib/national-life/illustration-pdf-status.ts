@@ -104,6 +104,12 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
       return 'A tentativa expirou antes de terminar. Pode pedir de novo.'
     case 'FORESIGHT_PREMIUM_WRITE_MISMATCH':
       return 'O Foresight não aceitou o prêmio mensal informado para este cenário. Revise o prêmio e gere uma nova ilustração; nenhum PDF foi emitido.'
+    case 'FORESIGHT_CALCULATION_UNAVAILABLE':
+      return 'O Foresight não conseguiu calcular um cenário válido com esse valor de origem. Revise o capital ou prêmio e gere uma nova ilustração; nenhum PDF foi emitido.'
+    case 'FORESIGHT_SOLVE_READBACK_TIMEOUT':
+    case 'FORESIGHT_SOLVE_READBACK_MISMATCH':
+    case 'FORESIGHT_RESPONSE_INVALID':
+      return 'O Foresight não devolveu um resultado verificável para este cenário. Revise o valor de origem e gere uma nova ilustração; nenhum PDF foi emitido.'
     case null:
       return 'Não foi possível gerar.'
     default:

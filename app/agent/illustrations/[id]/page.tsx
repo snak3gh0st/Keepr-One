@@ -46,7 +46,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
     where: { id, agentId: agent.id },
     select: {
       id: true, createdAt: true, insuredName: true, insuredDateOfBirth: true,
-      productName: true, faceAmount: true, targetPremium: true, targetPremiumSource: true,
+      productName: true, faceAmount: true, premium: true, targetPremium: true, targetPremiumSource: true,
       documentFetchedAt: true, documentMimeType: true, caseId: true, rawPayload: true,
     },
   })
@@ -62,6 +62,8 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
   })()
   const commandStatus = (await getIllustrationCommandStatuses(agent.id)).get(illustration.id)
   const documentReady = illustration.documentFetchedAt && illustration.documentMimeType === 'application/pdf'
+  const hasCarrierPremium = Boolean(documentReady && illustration.premium)
+  const premiumValue = hasCarrierPremium ? illustration.premium : illustration.targetPremium
   const delivery = describeIllustrationDelivery({ documentReady: Boolean(documentReady), status: commandStatus })
   const isGenerating = commandStatus?.state === 'WORKING'
   const foresightStep = documentReady
@@ -77,7 +79,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <PageHeader
-        title="Ilustração FlexLife"
+        title={`Ilustração ${flexLifeProductLabel(illustration.productName)}`}
         eyebrow="Carteira"
         description="Pedido oficial preparado para o Foresight da National Life."
       >
@@ -155,8 +157,16 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
           <dl className="mt-3">
             <Fact label="Produto" value={flexLifeProductLabel(illustration.productName)} />
             <Fact label="Capital segurado" value={illustration.faceAmount ? currency(Number(illustration.faceAmount)) : null} />
-            <Fact label="Prêmio mensal informado" value={illustration.targetPremium ? currency(Number(illustration.targetPremium)) : null} />
-            <Fact label="Origem do prêmio" value={illustration.targetPremiumSource === 'AGENT_INPUT_FOR_FORESIGHT' ? 'Informado pelo agente para a ilustração' : null} />
+            <Fact label={hasCarrierPremium ? 'Prêmio mensal confirmado' : 'Prêmio mensal informado'} value={premiumValue ? currency(Number(premiumValue)) : null} />
+            <Fact label="Origem do prêmio" value={
+              hasCarrierPremium
+                ? 'Confirmado no Foresight com o PDF oficial'
+                : illustration.targetPremiumSource === 'AGENT_INPUT_FOR_FORESIGHT'
+                  ? 'Informado pelo agente para a ilustração'
+                  : illustration.targetPremiumSource === 'FORESIGHT_CALCULATES_PREMIUM_FROM_DEATH_BENEFIT'
+                    ? 'Será calculado pela National Life'
+                    : null
+            } />
           </dl>
         </section>
         {foresightSnapshot && (
@@ -177,9 +187,27 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                 label="Benefício por morte"
                 value={foresightSnapshot.deathBenefitOption === 'A_Level' ? 'A — nivelado' : 'B — crescente'}
               />
-              <Fact label="Modo e tipo de prêmio" value="Mensal • Specify Amount" />
+              {foresightSnapshot.schemaVersion === 2 ? (
+                <>
+                  <Fact
+                    label="Base de cálculo"
+                    value={foresightSnapshot.solve.basis === 'PREMIUM'
+                      ? 'Resolvido pelo prêmio mensal'
+                      : 'Resolvido pelo capital segurado'}
+                  />
+                  <Fact label="Método Foresight" value={foresightSnapshot.solve.method.replaceAll('_', ' ')} />
+                  <Fact
+                    label="Valor de origem"
+                    value={currency(foresightSnapshot.solve.amount)}
+                  />
+                </>
+              ) : (
+                <>
+                  <Fact label="Modo e tipo de prêmio" value="Mensal • Specify Amount" />
+                  <Fact label="Configuração padrão" value="Sem solve, sem 1035 exchange e sem distribuição" />
+                </>
+              )}
               <Fact label="Estratégia de índice" value="S&P 500 — foco em teto (100%)" />
-              <Fact label="Configuração padrão" value="Sem solve, sem 1035 exchange e sem distribuição" />
             </dl>
           </section>
         )}

@@ -2,7 +2,9 @@ import {
   classifyForesightLocation,
   parseForesightRelease,
   sha256ForesightSnapshot,
+  type ForesightIllustrationSnapshot,
   type ForesightIllustrationSnapshotV1,
+  type ForesightSolvedIllustrationSnapshotV2,
 } from './foresight-contract'
 import {
   FORESIGHT_FLEXLIFE_FIELDS,
@@ -14,7 +16,12 @@ import {
   validateForesightSurface,
   type ForesightMaterialReadback,
 } from './foresight-target'
-import type { ForesightExecutionDocument, ForesightExecutionReceipt } from './foresight-messages'
+import type {
+  AnyForesightExecutionReceipt,
+  ForesightExecutionDocument,
+  ForesightExecutionReceipt,
+  ForesightSolvedExecutionReceipt,
+} from './foresight-messages'
 
 const MAIN_FRAME_ID = 'ctl00_mobilityPH_iframeMain'
 const MODAL_FRAME_ID = 'ctl00_mobilityPH_modalDialog__Iframe'
@@ -167,7 +174,7 @@ function optionValue(doc: Document, id: string, text: string): string {
 }
 
 async function applyInMainWorld(
-  type: 'APPLY_CLIENT' | 'APPLY_LEDGER' | 'APPLY_ALLOCATION',
+  type: 'APPLY_CLIENT' | 'APPLY_LEDGER' | 'APPLY_LEDGER_SOLVE' | 'APPLY_ALLOCATION',
   values: Record<string, string | number>,
 ): Promise<void> {
   const token = `${crypto.randomUUID()}${crypto.randomUUID()}`
@@ -283,7 +290,7 @@ function currentRelease(): string {
   return release ?? fail('FORESIGHT_RELEASE_UNAPPROVED')
 }
 
-async function openFlexLife(snapshot: ForesightIllustrationSnapshotV1): Promise<{
+async function openFlexLife(snapshot: ForesightIllustrationSnapshot): Promise<{
   doc: Document
   existing: boolean
 }> {
@@ -315,7 +322,7 @@ async function openFlexLife(snapshot: ForesightIllustrationSnapshotV1): Promise<
   return { doc: await waitForFrame('/NWI/IUL2025/client.aspx'), existing: false }
 }
 
-function readClient(doc: Document, snapshot: ForesightIllustrationSnapshotV1): Pick<ForesightMaterialReadback,
+function readClient(doc: Document, snapshot: ForesightIllustrationSnapshot): Pick<ForesightMaterialReadback,
   'firstName' | 'lastName' | 'dateOfBirth' | 'issueState' | 'gender' | 'rateClass'> {
   validateSurface(doc, '/NWI/IUL2025/client.aspx')
   const expectedState = STATE_NAMES[snapshot.insured.issueState]
@@ -332,10 +339,17 @@ function readClient(doc: Document, snapshot: ForesightIllustrationSnapshotV1): P
   }
 }
 
-async function fillClient(doc: Document, snapshot: ForesightIllustrationSnapshotV1): Promise<Pick<ForesightMaterialReadback,
+async function fillClient(doc: Document, snapshot: ForesightIllustrationSnapshot): Promise<Pick<ForesightMaterialReadback,
   'firstName' | 'lastName' | 'dateOfBirth' | 'issueState' | 'gender' | 'rateClass'>> {
   validateSurface(doc, '/NWI/IUL2025/client.aspx')
-  const target = buildForesightTarget(snapshot)
+  const target = {
+    firstName: snapshot.insured.firstName,
+    lastName: snapshot.insured.lastName,
+    dateOfBirth: snapshot.insured.dateOfBirth.split('-').reverse().join('/'),
+    issueState: snapshot.insured.issueState,
+    gender: snapshot.underwriting.gender,
+    rateClass: snapshot.underwriting.rateClass,
+  }
   const rateText = target.rateClass === 'Standard_NT' ? 'Standard Non-Tobacco' : 'Standard Tobacco'
   await applyInMainWorld('APPLY_CLIENT', {
     jurisdiction: optionValue(doc, FORESIGHT_FLEXLIFE_FIELDS.client.jurisdiction, STATE_NAMES[target.issueState]!),
@@ -398,6 +412,103 @@ function readLedger(doc: Document): Pick<ForesightMaterialReadback,
   }
 }
 
+type ForesightSolvedLedgerReadback = {
+  faceSolve: string
+  premiumSolve: string
+  faceAmount: number
+  monthlyPremium: number
+  premiumMode: string
+  deathBenefitOption: string
+}
+
+function carrierAmount(value: string): number | null {
+  const normalized = value.replace(/[^0-9.-]/g, '')
+  if (!/\d/.test(normalized)) return null
+  const amount = Number(normalized)
+  return Number.isFinite(amount) && amount > 0 ? amount : null
+}
+
+function selectedSolveRadio(doc: Document, marker: string): string {
+  const selected = [...doc.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
+    .filter((radio) => (radio.id.includes(marker) || radio.name.includes(marker)) && radio.checked)
+  if (selected.length !== 1) fail('FORESIGHT_SCHEMA_MISMATCH')
+  const radio = selected[0]!
+  const explicit = radio.id
+    ? doc.querySelector<HTMLLabelElement>(`label[for="${radio.id}"]`)?.textContent
+    : null
+  const nearby = radio.closest('label')?.textContent ?? radio.parentElement?.textContent
+  const label = (explicit ?? nearby ?? '').replace(/\s+/g, ' ').trim()
+  return label || fail('FORESIGHT_SCHEMA_MISMATCH')
+}
+
+function hasCarrierCalculationError(doc: Document): boolean {
+  return /Calculations Unavailable|The illustration has errors/i.test(doc.body?.innerText ?? '')
+}
+
+function readSolvedLedger(doc: Document): ForesightSolvedLedgerReadback | null {
+  validateSurface(doc, '/NWI/IUL2025/ledger.aspx')
+  const faceAmount = carrierAmount(input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitAmount).value)
+  const monthlyPremium = carrierAmount(input(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumAmount).value)
+  if (faceAmount === null || monthlyPremium === null) return null
+  return {
+    faceSolve: selectedSolveRadio(doc, 'rdoDeathBenefitSolves'),
+    premiumSolve: selectedSolveRadio(doc, 'rdoPremiumSolves'),
+    faceAmount,
+    monthlyPremium,
+    premiumMode: selectedText(select(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.premiumMode)),
+    deathBenefitOption: selectedText(select(doc, FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitOption)),
+  }
+}
+
+function expectedDeathBenefitOption(snapshot: ForesightSolvedIllustrationSnapshotV2): string {
+  return snapshot.deathBenefitOption === 'A_Level' ? 'A (Level)' : 'B (Increasing)'
+}
+
+function solvedLedgerMatches(
+  snapshot: ForesightSolvedIllustrationSnapshotV2,
+  observed: ForesightSolvedLedgerReadback,
+): boolean {
+  if (observed.premiumMode !== 'Monthly' || observed.deathBenefitOption !== expectedDeathBenefitOption(snapshot)) {
+    return false
+  }
+  if (snapshot.solve.basis === 'PREMIUM') {
+    return observed.faceSolve === 'Based on Target Premium' && observed.premiumSolve === 'None' &&
+      carrierAmountEquals(observed.monthlyPremium, snapshot.solve.amount)
+  }
+  return observed.faceSolve === 'None' && observed.premiumSolve === 'Protection Focus' &&
+    carrierAmountEquals(observed.faceAmount, snapshot.solve.amount)
+}
+
+async function fillSolvedLedger(
+  doc: Document,
+  snapshot: ForesightSolvedIllustrationSnapshotV2,
+): Promise<ForesightSolvedLedgerReadback> {
+  validateSurface(doc, '/NWI/IUL2025/ledger.aspx')
+  const values: Record<string, string | number> = {
+    solveBasis: snapshot.solve.basis,
+    deathBenefitOption: optionValue(
+      doc,
+      FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitOption,
+      expectedDeathBenefitOption(snapshot),
+    ),
+    ...(snapshot.solve.basis === 'PREMIUM'
+      ? { premiumAmount: snapshot.solve.amount }
+      : { faceAmount: snapshot.solve.amount }),
+  }
+  await applyInMainWorld('APPLY_LEDGER_SOLVE', values)
+  doc = await waitForFrame('/NWI/IUL2025/ledger.aspx')
+  try {
+    return await waitFor(() => {
+      if (hasCarrierCalculationError(doc)) return null
+      const observed = readSolvedLedger(doc)
+      return observed && solvedLedgerMatches(snapshot, observed) ? observed : null
+    }, 'FORESIGHT_SOLVE_READBACK_TIMEOUT', 30_000)
+  } catch (error) {
+    if (hasCarrierCalculationError(doc)) fail('FORESIGHT_CALCULATION_UNAVAILABLE')
+    throw error
+  }
+}
+
 function verifyRiders(doc: Document): string[] {
   const expected: Array<[keyof typeof RIDER_FIELDS, 'Yes' | 'No']> = [
     ['BalanceSheetBenefit', 'No'], ['BenefitDistributionOption', 'No'], ['ChildTerm', 'No'],
@@ -453,7 +564,7 @@ async function saveCase(caseName: string): Promise<void> {
   await waitFor(() => document.body?.innerText.includes(caseName), 'FORESIGHT_SAVE_READBACK_FAILED')
 }
 
-export async function executeForesightIllustration(input: {
+async function executeForesightIllustrationV1(input: {
   inputHash: string
   snapshot: ForesightIllustrationSnapshotV1
 }): Promise<{ receipt: ForesightExecutionReceipt; document: ForesightExecutionDocument }> {
@@ -499,4 +610,74 @@ export async function executeForesightIllustration(input: {
     saved: true,
   }
   return { receipt, document }
+}
+
+function solvedClientMatches(
+  snapshot: ForesightSolvedIllustrationSnapshotV2,
+  client: Pick<ForesightMaterialReadback,
+    'firstName' | 'lastName' | 'dateOfBirth' | 'issueState' | 'gender' | 'rateClass'>,
+): boolean {
+  const expectedDate = snapshot.insured.dateOfBirth.split('-').reverse().join('/')
+  return client.firstName === snapshot.insured.firstName && client.lastName === snapshot.insured.lastName &&
+    client.dateOfBirth === expectedDate && client.issueState === snapshot.insured.issueState &&
+    client.gender === snapshot.underwriting.gender && client.rateClass === snapshot.underwriting.rateClass
+}
+
+async function executeForesightSolvedIllustration(input: {
+  inputHash: string
+  snapshot: ForesightSolvedIllustrationSnapshotV2
+}): Promise<{ receipt: ForesightSolvedExecutionReceipt; document: ForesightExecutionDocument }> {
+  if (classifyForesightLocation(location.href) !== 'FORESIGHT' ||
+    location.pathname !== '/NWI/Main/Layout.aspx') fail('FORESIGHT_LOCATION_UNEXPECTED')
+  const independentHash = await sha256ForesightSnapshot(input.snapshot)
+  if (independentHash !== input.inputHash) fail('FORESIGHT_INPUT_HASH_MISMATCH')
+  const release = currentRelease()
+  const opened = await openFlexLife(input.snapshot)
+  const client = opened.existing ? readClient(opened.doc, input.snapshot) : await fillClient(opened.doc, input.snapshot)
+  if (!solvedClientMatches(input.snapshot, client)) fail('FORESIGHT_READBACK_CLIENT_MISMATCH')
+  const ledgerDoc = await navigate('/NWI/IUL2025/ledger.aspx', MENU_IDS.ledger)
+  const ledger = opened.existing ? readSolvedLedger(ledgerDoc) : await fillSolvedLedger(ledgerDoc, input.snapshot)
+  if (!ledger || hasCarrierCalculationError(ledgerDoc) || !solvedLedgerMatches(input.snapshot, ledger)) {
+    fail(hasCarrierCalculationError(ledgerDoc) ? 'FORESIGHT_CALCULATION_UNAVAILABLE' : 'FORESIGHT_SOLVE_READBACK_MISMATCH')
+  }
+  const ridersDoc = await navigate('/NWI/IUL2025/product.aspx', MENU_IDS.riders)
+  const riders = verifyRiders(ridersDoc)
+  const ratesDoc = await navigate('/NWI/IUL2025/InterestRates.aspx', MENU_IDS.interestRates)
+  const allocations = opened.existing ? readAllocation(ratesDoc) : await fillAllocation(ratesDoc)
+  const reportsDoc = await navigate('/NWI/ProductWorkflow/reportselection.aspx', MENU_IDS.reports)
+  const reports = verifyReports(reportsDoc)
+  if (JSON.stringify(allocations) !== JSON.stringify(input.snapshot.allocations) ||
+    JSON.stringify(riders) !== JSON.stringify(input.snapshot.riders) ||
+    JSON.stringify(reports) !== JSON.stringify(input.snapshot.reports)) {
+    fail('FORESIGHT_READBACK_MISMATCH')
+  }
+  if (!opened.existing) await saveCase(input.snapshot.carrierCaseName)
+  const document = await captureReportInMainWorld()
+  const pdf = decodePdf(document)
+  const receipt: ForesightSolvedExecutionReceipt = {
+    inputHash: independentHash,
+    caseFingerprint: await deterministicCaseFingerprint(input.snapshot),
+    carrierCaseName: input.snapshot.carrierCaseName,
+    productCode: '956',
+    solveBasis: input.snapshot.solve.basis,
+    faceAmount: ledger.faceAmount,
+    monthlyPremium: ledger.monthlyPremium,
+    release,
+    reportCode: 'NAIC_ILLUSTRATION',
+    documentSha256: await sha256Hex(pdf),
+    documentBytes: pdf.byteLength,
+    saved: true,
+  }
+  return { receipt, document }
+}
+
+export async function executeForesightIllustration(input: {
+  inputHash: string
+  snapshot: ForesightIllustrationSnapshot
+}): Promise<{ receipt: AnyForesightExecutionReceipt; document: ForesightExecutionDocument }> {
+  if (input.snapshot.schemaVersion === 2) return executeForesightSolvedIllustration({
+    inputHash: input.inputHash,
+    snapshot: input.snapshot,
+  })
+  return executeForesightIllustrationV1({ inputHash: input.inputHash, snapshot: input.snapshot })
 }

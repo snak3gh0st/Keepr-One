@@ -1,13 +1,13 @@
 import {
   parseForesightIllustrationSnapshot,
-  type ForesightIllustrationSnapshotV1,
+  type ForesightIllustrationSnapshot,
 } from './foresight-contract'
 import {
   parseForesightTermIllustrationSnapshot,
   type ForesightTermIllustrationSnapshotV1,
 } from './foresight-term-contract'
 
-export type ForesightExecutionSnapshot = ForesightIllustrationSnapshotV1 | ForesightTermIllustrationSnapshotV1
+export type ForesightExecutionSnapshot = ForesightIllustrationSnapshot | ForesightTermIllustrationSnapshotV1
 
 export type ExecuteForesightIllustrationMessage = {
   type: 'EXECUTE_FORESIGHT_ILLUSTRATION'
@@ -41,7 +41,25 @@ export type ForesightTermExecutionReceipt = {
   saved: true
 }
 
-export type AnyForesightExecutionReceipt = ForesightExecutionReceipt | ForesightTermExecutionReceipt
+export type ForesightSolvedExecutionReceipt = {
+  inputHash: string
+  caseFingerprint: string
+  carrierCaseName: string
+  productCode: '956'
+  solveBasis: 'DEATH_BENEFIT' | 'PREMIUM'
+  faceAmount: number
+  monthlyPremium: number
+  release: string
+  reportCode: 'NAIC_ILLUSTRATION'
+  documentSha256: string
+  documentBytes: number
+  saved: true
+}
+
+export type AnyForesightExecutionReceipt =
+  | ForesightExecutionReceipt
+  | ForesightSolvedExecutionReceipt
+  | ForesightTermExecutionReceipt
 
 export type ForesightExecutionDocument = {
   contentType: 'application/pdf'
@@ -108,12 +126,23 @@ function commonReceiptFields(receipt: Record<string, unknown>, expectedHash: str
     receipt.documentBytes >= 5 && receipt.documentBytes <= 25 * 1024 * 1024 && receipt.saved === true
 }
 
+function positiveCarrierAmount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 1_000_000_000
+}
+
 function validReceipt(
   receipt: Record<string, unknown>,
   expected: { inputHash: string; snapshot: ForesightExecutionSnapshot },
 ): receipt is AnyForesightExecutionReceipt {
   if (!commonReceiptFields(receipt, expected.inputHash)) return false
   if ('code' in expected.snapshot.product) {
+    if (expected.snapshot.schemaVersion === 2) {
+      return exactKeys(receipt, [
+        'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'solveBasis', 'faceAmount',
+        'monthlyPremium', 'release', 'reportCode', 'documentSha256', 'documentBytes', 'saved',
+      ]) && receipt.productCode === '956' && receipt.solveBasis === expected.snapshot.solve.basis &&
+        positiveCarrierAmount(receipt.faceAmount) && positiveCarrierAmount(receipt.monthlyPremium)
+    }
     return exactKeys(receipt, [
       'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'release', 'reportCode',
       'documentSha256', 'documentBytes', 'saved',

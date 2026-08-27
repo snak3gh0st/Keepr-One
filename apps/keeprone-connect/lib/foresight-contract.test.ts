@@ -37,12 +37,43 @@ const snapshot = {
   reports: ['NAIC_ILLUSTRATION'],
 } as const
 
+const premiumSolvedSnapshot = {
+  schemaVersion: 2,
+  illustrationId: 'ill_premium_123',
+  caseId: 'case_123',
+  carrierCaseName: 'KEEPRONE-TEST-20260827-ILLPREMIUM123',
+  insured: {
+    firstName: 'KeeprOne', lastName: 'Test', dateOfBirth: '1990-01-01', issueState: 'FL',
+  },
+  product: { name: 'FlexLife', code: '956' },
+  solve: { basis: 'PREMIUM', method: 'Based_on_Target_Premium', amount: 350 },
+  faceAmount: null,
+  premium: { mode: 'Monthly', amount: 350 },
+  underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
+  deathBenefitOption: 'A_Level',
+  allocations: [{ strategy: 'SP500PointToPointCapFocus', percentage: 100 }],
+  riders: [
+    'DeathBenefitProtection', 'ABRTerminalIllness', 'ABRChronicIllness',
+    'ABRCriticalIllness', 'ABRCriticalInjury', 'ABRAlzheimersDisease',
+  ],
+  reports: ['NAIC_ILLUSTRATION'],
+} as const
+
 describe('Foresight illustration execution snapshot', () => {
   it('accepts the exact bounded v1 shape', () => {
     expect(parseForesightIllustrationSnapshot(snapshot)).toEqual(snapshot)
     expect(parseForesightIllustrationSnapshot({ ...snapshot, caseId: null })).toMatchObject({
       caseId: null,
     })
+  })
+
+  it('accepts a premium-solved v2 snapshot only when the unknown face amount is null', () => {
+    expect(parseForesightIllustrationSnapshot(premiumSolvedSnapshot)).toEqual(premiumSolvedSnapshot)
+    expect(parseForesightIllustrationSnapshot({ ...premiumSolvedSnapshot, faceAmount: 250_000 })).toBeNull()
+    expect(parseForesightIllustrationSnapshot({
+      ...premiumSolvedSnapshot,
+      solve: { ...premiumSolvedSnapshot.solve, method: 'Protection_Focus' },
+    })).toBeNull()
   })
 
   it.each([

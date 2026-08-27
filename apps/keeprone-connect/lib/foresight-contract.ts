@@ -46,6 +46,37 @@ export type ForesightIllustrationSnapshotV1 = {
   reports: string[]
 }
 
+export type ForesightSolvedIllustrationSnapshotV2 = {
+  schemaVersion: 2
+  illustrationId: string
+  caseId: string | null
+  carrierCaseName: string
+  insured: {
+    firstName: string
+    lastName: string
+    dateOfBirth: string
+    issueState: string
+  }
+  product: { name: 'FlexLife'; code: '956' }
+  solve: {
+    basis: 'DEATH_BENEFIT' | 'PREMIUM'
+    method: 'Protection_Focus' | 'Based_on_Target_Premium'
+    amount: number
+  }
+  faceAmount: number | null
+  premium: { mode: 'Monthly'; amount: number | null }
+  underwriting: {
+    gender: 'Male' | 'Female'
+    rateClass: 'Standard_NT' | 'Standard_Tobacco'
+  }
+  deathBenefitOption: 'A_Level' | 'B_Increasing'
+  allocations: Array<{ strategy: string; percentage: number }>
+  riders: string[]
+  reports: string[]
+}
+
+export type ForesightIllustrationSnapshot = ForesightIllustrationSnapshotV1 | ForesightSolvedIllustrationSnapshotV2
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -94,7 +125,8 @@ function parseIdentifierList(value: unknown, maxItems: number): string[] | null 
 
 export function parseForesightIllustrationSnapshot(
   value: unknown,
-): ForesightIllustrationSnapshotV1 | null {
+): ForesightIllustrationSnapshot | null {
+  if (isObject(value) && value.schemaVersion === 2) return parseForesightSolvedIllustrationSnapshot(value)
   if (!isObject(value) || !hasExactKeys(value, [
     'schemaVersion', 'illustrationId', 'caseId', 'carrierCaseName', 'insured',
     'product', 'solve', 'faceAmount', 'premium', 'underwriting', 'deathBenefitOption', 'allocations',
@@ -169,6 +201,66 @@ export function parseForesightIllustrationSnapshot(
     allocations,
     riders,
     reports,
+  }
+}
+
+function parseForesightSolvedIllustrationSnapshot(
+  value: Record<string, unknown>,
+): ForesightSolvedIllustrationSnapshotV2 | null {
+  if (!hasExactKeys(value, [
+    'schemaVersion', 'illustrationId', 'caseId', 'carrierCaseName', 'insured', 'product', 'solve', 'faceAmount',
+    'premium', 'underwriting', 'deathBenefitOption', 'allocations', 'riders', 'reports',
+  ]) || !isIdentifier(value.illustrationId) || (value.caseId !== null && !isIdentifier(value.caseId)) ||
+    typeof value.carrierCaseName !== 'string' || !/^[A-Z0-9][A-Z0-9_-]{5,79}$/.test(value.carrierCaseName)) return null
+  const insured = value.insured
+  if (!isObject(insured) || !hasExactKeys(insured, ['firstName', 'lastName', 'dateOfBirth', 'issueState']) ||
+    !isSafeName(insured.firstName) || !isSafeName(insured.lastName) || !isIsoDate(insured.dateOfBirth) ||
+    typeof insured.issueState !== 'string' || !/^[A-Z]{2}$/.test(insured.issueState)) return null
+  const product = value.product
+  if (!isObject(product) || !hasExactKeys(product, ['name', 'code']) || product.name !== 'FlexLife' || product.code !== '956') return null
+  const solve = value.solve
+  if (!isObject(solve) || !hasExactKeys(solve, ['basis', 'method', 'amount']) ||
+    !['DEATH_BENEFIT', 'PREMIUM'].includes(String(solve.basis)) ||
+    typeof solve.amount !== 'number' || !Number.isFinite(solve.amount) || solve.amount <= 0 ||
+    solve.amount > 1_000_000_000 ||
+    (solve.basis === 'DEATH_BENEFIT' && solve.method !== 'Protection_Focus') ||
+    (solve.basis === 'PREMIUM' && solve.method !== 'Based_on_Target_Premium')) return null
+  if (!isObject(value.premium) || !hasExactKeys(value.premium, ['mode', 'amount']) || value.premium.mode !== 'Monthly') return null
+  const isFaceSolve = solve.basis === 'DEATH_BENEFIT'
+  if ((isFaceSolve && (typeof value.faceAmount !== 'number' || value.faceAmount !== solve.amount || value.premium.amount !== null)) ||
+    (!isFaceSolve && (value.faceAmount !== null || typeof value.premium.amount !== 'number' || value.premium.amount !== solve.amount || value.premium.amount > 100_000_000))) return null
+  const underwriting = value.underwriting
+  if (!isObject(underwriting) || !hasExactKeys(underwriting, ['gender', 'rateClass']) ||
+    !['Male', 'Female'].includes(String(underwriting.gender)) ||
+    !['Standard_NT', 'Standard_Tobacco'].includes(String(underwriting.rateClass)) ||
+    !['A_Level', 'B_Increasing'].includes(String(value.deathBenefitOption))) return null
+  const allocations = parseAllocations(value.allocations)
+  const riders = parseIdentifierList(value.riders, 20)
+  const reports = parseIdentifierList(value.reports, 10)
+  if (!allocations || !riders || !reports || allocations.length !== 1 ||
+    allocations[0]?.strategy !== 'SP500PointToPointCapFocus' || allocations[0]?.percentage !== 100 ||
+    JSON.stringify(riders) !== JSON.stringify(FORESIGHT_FLEXLIFE_INCLUDED_RIDERS) ||
+    reports.length !== 1 || reports[0] !== 'NAIC_ILLUSTRATION') return null
+  return {
+    schemaVersion: 2,
+    illustrationId: value.illustrationId,
+    caseId: value.caseId,
+    carrierCaseName: value.carrierCaseName,
+    insured: { firstName: insured.firstName, lastName: insured.lastName, dateOfBirth: insured.dateOfBirth, issueState: insured.issueState },
+    product: { name: 'FlexLife', code: '956' },
+    solve: {
+      basis: solve.basis as ForesightSolvedIllustrationSnapshotV2['solve']['basis'],
+      method: solve.method as ForesightSolvedIllustrationSnapshotV2['solve']['method'],
+      amount: solve.amount,
+    },
+    faceAmount: value.faceAmount as number | null,
+    premium: { mode: 'Monthly', amount: value.premium.amount as number | null },
+    underwriting: {
+      gender: underwriting.gender as ForesightSolvedIllustrationSnapshotV2['underwriting']['gender'],
+      rateClass: underwriting.rateClass as ForesightSolvedIllustrationSnapshotV2['underwriting']['rateClass'],
+    },
+    deathBenefitOption: value.deathBenefitOption as ForesightSolvedIllustrationSnapshotV2['deathBenefitOption'],
+    allocations, riders, reports,
   }
 }
 
