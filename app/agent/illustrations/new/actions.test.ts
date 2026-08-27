@@ -37,6 +37,7 @@ import { requestForesightIllustration } from './actions'
 
 function form(): FormData {
   const value = new FormData()
+  value.set('product', 'FLEXLIFE_IUL')
   value.set('firstName', 'KeeprOne')
   value.set('lastName', 'Test')
   value.set('dateOfBirth', '1981-08-26')
@@ -130,5 +131,45 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
       message: 'Informe um prêmio mensal maior que zero.',
     })
     expect(mocks.createIllustration).not.toHaveBeenCalled()
+  })
+
+  it('issues a Term command with the carrier-selected duration and no agent premium', async () => {
+    const term = new FormData()
+    term.set('product', 'LSW_TERM')
+    term.set('firstName', 'KeeprOne')
+    term.set('lastName', 'Term')
+    term.set('dateOfBirth', '1981-08-26')
+    term.set('issueState', 'FL')
+    term.set('gender', 'Male')
+    term.set('rateClass', 'Standard_NT')
+    term.set('faceAmount', '250000')
+    term.set('termDuration', '20-G')
+    term.set('premiumMode', 'Monthly')
+
+    await expect(requestForesightIllustration(term)).resolves.toEqual({
+      ok: true,
+      commandId: 'cmd_foresight_1',
+      illustrationId: 'ill_foresight_1',
+    })
+    expect(mocks.createIllustration).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        productName: 'LSW Term',
+        insuredName: 'KeeprOne Term',
+        faceAmount: 250000,
+        premium: null,
+        targetPremium: null,
+        targetPremiumSource: 'CARRIER_CALCULATED_FOR_TERM',
+        rawPayload: expect.objectContaining({
+          foresightTermDraft: expect.objectContaining({
+            schemaVersion: 1,
+            carrierProduct: 'LSW Term',
+            termDuration: '20-G',
+            premiumMode: 'Monthly',
+            faceAmount: 250000,
+            issueState: 'FL',
+          }),
+        }),
+      }),
+    }))
   })
 })

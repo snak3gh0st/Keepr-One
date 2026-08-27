@@ -156,6 +156,42 @@ describe('local connector command dispatch', () => {
     })).rejects.toThrow('COMMAND_NOT_FOUND')
   })
 
+  it('returns the selected Term carrier and duration without inventing an agent premium', async () => {
+    const illustration = {
+      id: 'illustration_term_1',
+      caseId: null,
+      createdAt: now,
+      productName: 'LSW Term',
+      rawPayload: {
+        foresightTermDraft: {
+          schemaVersion: 1,
+          carrierProduct: 'LSW Term',
+          firstName: 'KeeprOne', lastName: 'Term', dateOfBirth: '1990-01-01', issueState: 'FL',
+          gender: 'Male', rateClass: 'Standard_NT', faceAmount: 250_000,
+          premiumMode: 'Monthly', termDuration: '20-G',
+        },
+      },
+    }
+    const { buildForesightTermIllustrationSnapshot, foresightTermIllustrationInputHash } = await import(
+      '../foresight-term-contract'
+    )
+    const snapshot = buildForesightTermIllustrationSnapshot(illustration)
+    const inputHash = foresightTermIllustrationInputHash(snapshot)
+    const repo = repository(candidate({
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: illustration.id },
+      params: { illustrationId: illustration.id, inputHash },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+    }))
+
+    await expect(readDeviceConnectorCommandInput(repo, {
+      findOwnedIllustration: vi.fn().mockResolvedValue(illustration),
+    }, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
+    })).resolves.toEqual({ inputHash, snapshot })
+  })
+
   it('returns the sealed FlexLife quote request to the assigned device', async () => {
     const illustration = {
       id: 'illustration_quote_1',
@@ -329,6 +365,7 @@ describe('local connector command dispatch', () => {
       findOwnedArtifact: vi.fn().mockResolvedValue({
         provider: 'NATIONAL_LIFE_FORESIGHT',
         externalId: `agent_1:${carrierCaseName}`,
+        productName: 'FlexLife',
         documentBytes: bytes,
         documentMimeType: 'application/pdf',
       }),
@@ -344,6 +381,75 @@ describe('local connector command dispatch', () => {
     expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
       sequence: 2, type: 'DATA_BATCH', payload: { illustration: receipt },
     }))
+  })
+
+  it('accepts a Term PDF receipt only after the same named carrier artifact is stored', async () => {
+    const bytes = new TextEncoder().encode('%PDF-1.7\nterm')
+    const inputHash = 'a'.repeat(64)
+    const carrierCaseName = 'KEEPRONE-20260827-ILLTERM123'
+    const receipt = {
+      inputHash,
+      caseFingerprint: `case_${'b'.repeat(64)}`,
+      carrierCaseName,
+      carrierProduct: 'NL Term',
+      release: '5.3.65.31',
+      reportCode: 'NAIC_ILLUSTRATION',
+      documentSha256: createHash('sha256').update(bytes).digest('hex'),
+      documentBytes: bytes.byteLength,
+      saved: true,
+    }
+    const repo = repository(candidate({
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_term_1' },
+      params: { illustrationId: 'illustration_term_1', inputHash },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+      events: [{ sequence: 0 }, { sequence: 1 }],
+    }))
+    const event = {
+      protocolVersion: 1, eventId: 'event_term_illustration_1', commandId: 'cmd_1', runId: 'run_1',
+      sequence: 2, type: 'DATA_BATCH', emittedAt: now.toISOString(),
+      payload: { illustration: receipt }, error: null,
+    }
+    await expect(recordDeviceConnectorCommandEvent(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', event, now,
+      foresightArtifactRepository: {
+        findOwnedArtifact: vi.fn().mockResolvedValue({
+          provider: 'NATIONAL_LIFE_FORESIGHT', externalId: `agent_1:${carrierCaseName}`,
+          productName: 'NL Term', documentBytes: bytes, documentMimeType: 'application/pdf',
+        }),
+      },
+    })).resolves.toBeUndefined()
+    expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ payload: { illustration: receipt } }))
+  })
+
+  it('refuses a Term receipt when it names a carrier other than the persisted illustration', async () => {
+    const bytes = new TextEncoder().encode('%PDF-1.7\nterm')
+    const inputHash = 'a'.repeat(64)
+    const carrierCaseName = 'KEEPRONE-20260827-ILLTERM123'
+    const repo = repository(candidate({
+      capability: 'GENERATE_ILLUSTRATION', target: { kind: 'ILLUSTRATION', id: 'illustration_term_1' },
+      params: { illustrationId: 'illustration_term_1', inputHash }, requiresConfirmation: true,
+      confirmationState: 'APPROVED', events: [{ sequence: 0 }, { sequence: 1 }],
+    }))
+    await expect(recordDeviceConnectorCommandEvent(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
+      event: {
+        protocolVersion: 1, eventId: 'event_term_carrier_mismatch', commandId: 'cmd_1', runId: 'run_1',
+        sequence: 2, type: 'DATA_BATCH', emittedAt: now.toISOString(), error: null,
+        payload: { illustration: {
+          inputHash, caseFingerprint: `case_${'b'.repeat(64)}`, carrierCaseName, carrierProduct: 'NL Term',
+          release: '5.3.65.31', reportCode: 'NAIC_ILLUSTRATION',
+          documentSha256: createHash('sha256').update(bytes).digest('hex'), documentBytes: bytes.byteLength, saved: true,
+        } },
+      },
+      foresightArtifactRepository: {
+        findOwnedArtifact: vi.fn().mockResolvedValue({
+          provider: 'NATIONAL_LIFE_FORESIGHT', externalId: `agent_1:${carrierCaseName}`,
+          productName: 'LSW Term', documentBytes: bytes, documentMimeType: 'application/pdf',
+        }),
+      },
+    })).rejects.toThrow('EVENT_INVALID')
   })
 
   it('persists a carrier quote only after its sealed input hash matches', async () => {

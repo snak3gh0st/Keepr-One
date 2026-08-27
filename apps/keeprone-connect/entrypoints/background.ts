@@ -64,8 +64,13 @@ import {
   sha256ForesightSnapshot,
 } from '../lib/foresight-contract'
 import {
+  parseForesightTermIllustrationSnapshot,
+  sha256ForesightTermSnapshot,
+} from '../lib/foresight-term-contract'
+import {
   parseForesightExecutionResponse,
   type ExecuteForesightIllustrationMessage,
+  type ForesightExecutionSnapshot,
   type ForesightExecutionResponse,
 } from '../lib/foresight-messages'
 import {
@@ -513,8 +518,11 @@ async function ensureScheduledSyncAlarm() {
 }
 
 async function startScheduledSyncIfDue() {
-  const [device, sync] = await Promise.all([readDeviceState(), readSyncState()])
+  const [device, sync, command] = await Promise.all([
+    readDeviceState(), readSyncState(), readCommandState(),
+  ])
   if (!scheduledSyncIsDue(device, sync)) return
+  if (['POLLING', 'NAVIGATING', 'RUNNING', 'AUTH_REQUIRED', 'MFA_REQUIRED'].includes(command.status)) return
   await startNewSync()
 }
 
@@ -893,13 +901,14 @@ async function executeFlexLifeQuoteCommand(
 
 function parseForesightCommandInput(value: unknown): {
   inputHash: string
-  snapshot: NonNullable<ReturnType<typeof parseForesightIllustrationSnapshot>>
+  snapshot: ForesightExecutionSnapshot
 } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('FORESIGHT_INPUT_INVALID')
   const record = value as Record<string, unknown>
   if (Object.keys(record).length !== 2 || typeof record.inputHash !== 'string' ||
     !/^[a-f0-9]{64}$/.test(record.inputHash)) throw new Error('FORESIGHT_INPUT_INVALID')
-  const snapshot = parseForesightIllustrationSnapshot(record.snapshot)
+  const snapshot = parseForesightIllustrationSnapshot(record.snapshot) ??
+    parseForesightTermIllustrationSnapshot(record.snapshot)
   if (!snapshot) throw new Error('FORESIGHT_INPUT_INVALID')
   return { inputHash: record.inputHash, snapshot }
 }
@@ -1048,8 +1057,11 @@ async function executeForesightCommand(
     body: {},
   })
   const approved = parseForesightCommandInput(rawInput)
+  const verifiedInputHash = 'code' in approved.snapshot.product
+    ? await sha256ForesightSnapshot(approved.snapshot)
+    : await sha256ForesightTermSnapshot(approved.snapshot)
   if (approved.inputHash !== params.inputHash || approved.snapshot.illustrationId !== params.illustrationId ||
-    await sha256ForesightSnapshot(approved.snapshot) !== approved.inputHash) {
+    verifiedInputHash !== approved.inputHash) {
     throw new Error('FORESIGHT_INPUT_HASH_MISMATCH')
   }
   await writeCommandState({
@@ -1447,21 +1459,22 @@ async function findNationalLifeTab(): Promise<chrome.tabs.Tab | undefined> {
   const tabs = await chrome.tabs.query({
     url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
   })
-  const carrierTabs = tabs.filter((tab) => {
-    if (typeof tab.url !== 'string') return false
-    try {
-      const url = new URL(tab.url)
-      // Chrome's native PDF viewer does not host our content-script bridge.
-      // Reusing it would replace a document the agent is reading and then fail
-      // the auth probe. Prefer an actual agent page or create one.
-      return url.origin === NLG_ORIGIN &&
-        url.pathname !== '/agent/correspondence/documentviewer'
-    } catch {
-      return false
-    }
-  })
-  const usableTabs = carrierTabs.filter((tab) => typeof tab.id === 'number')
+  const usableTabs = tabs.filter(isSyncCarrierTab)
   return usableTabs.find((tab) => !tab.active) ?? usableTabs.find((tab) => tab.active) ?? usableTabs[0]
+}
+
+function isSyncCarrierTab(tab: chrome.tabs.Tab): boolean {
+  if (typeof tab.id !== 'number' || typeof tab.url !== 'string') return false
+  try {
+    const url = new URL(tab.url)
+    // A sync owns only an agent-portal tab. A Foresight /NWI tab owns an
+    // illustration command and must never be repurposed for grid extraction.
+    return url.origin === NLG_AUTH0_ORIGIN ||
+      (url.origin === NLG_ORIGIN && url.pathname.startsWith('/agent/') &&
+        url.pathname !== '/agent/correspondence/documentviewer')
+  } catch {
+    return false
+  }
 }
 
 async function findConnectorTab(state: Awaited<ReturnType<typeof readSyncState>>) {
@@ -1469,7 +1482,7 @@ async function findConnectorTab(state: Awaited<ReturnType<typeof readSyncState>>
   const tabs = await chrome.tabs.query({
     url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
   })
-  return tabs.find((tab) => tab.id === state.carrierTabId)
+  return tabs.find((tab) => tab.id === state.carrierTabId && isSyncCarrierTab(tab))
 }
 
 async function findReusableConnectorTab(state: Awaited<ReturnType<typeof readSyncState>>) {
@@ -1479,7 +1492,7 @@ async function findReusableConnectorTab(state: Awaited<ReturnType<typeof readSyn
   const tabs = await chrome.tabs.query({
     url: [`${NLG_ORIGIN}/*`, `${NLG_AUTH0_ORIGIN}/*`],
   })
-  const usable = tabs.filter((tab) => typeof tab.id === 'number')
+  const usable = tabs.filter(isSyncCarrierTab)
   // If an older attempt lost its stored tab id, bind to an existing carrier tab
   // instead of creating a second one. This is deliberately one-tab-first: the
   // connector must not multiply windows while recovering from a worker restart.

@@ -2,13 +2,19 @@ import {
   parseForesightIllustrationSnapshot,
   type ForesightIllustrationSnapshotV1,
 } from './foresight-contract'
+import {
+  parseForesightTermIllustrationSnapshot,
+  type ForesightTermIllustrationSnapshotV1,
+} from './foresight-term-contract'
+
+export type ForesightExecutionSnapshot = ForesightIllustrationSnapshotV1 | ForesightTermIllustrationSnapshotV1
 
 export type ExecuteForesightIllustrationMessage = {
   type: 'EXECUTE_FORESIGHT_ILLUSTRATION'
   token: string
   correlationId: string
   inputHash: string
-  snapshot: ForesightIllustrationSnapshotV1
+  snapshot: ForesightExecutionSnapshot
 }
 
 export type ForesightExecutionReceipt = {
@@ -23,6 +29,20 @@ export type ForesightExecutionReceipt = {
   saved: true
 }
 
+export type ForesightTermExecutionReceipt = {
+  inputHash: string
+  caseFingerprint: string
+  carrierCaseName: string
+  carrierProduct: 'LSW Term' | 'NL Term'
+  release: string
+  reportCode: 'NAIC_ILLUSTRATION'
+  documentSha256: string
+  documentBytes: number
+  saved: true
+}
+
+export type AnyForesightExecutionReceipt = ForesightExecutionReceipt | ForesightTermExecutionReceipt
+
 export type ForesightExecutionDocument = {
   contentType: 'application/pdf'
   pdfBase64: string
@@ -34,7 +54,7 @@ export type ForesightExecutionResponse =
     type: 'FORESIGHT_ILLUSTRATION_SAVED'
     token: string
     correlationId: string
-    receipt: ForesightExecutionReceipt
+    receipt: AnyForesightExecutionReceipt
     document: ForesightExecutionDocument
   }
   | {
@@ -67,7 +87,8 @@ export function parseExecuteForesightIllustrationMessage(
   ]) || value.type !== 'EXECUTE_FORESIGHT_ILLUSTRATION' ||
     !boundedToken(value.token, 32) || !boundedToken(value.correlationId, 16) ||
     typeof value.inputHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.inputHash)) return null
-  const snapshot = parseForesightIllustrationSnapshot(value.snapshot)
+  const snapshot = parseForesightIllustrationSnapshot(value.snapshot) ??
+    parseForesightTermIllustrationSnapshot(value.snapshot)
   return snapshot ? {
     type: 'EXECUTE_FORESIGHT_ILLUSTRATION',
     token: value.token,
@@ -77,9 +98,36 @@ export function parseExecuteForesightIllustrationMessage(
   } : null
 }
 
+function commonReceiptFields(receipt: Record<string, unknown>, expectedHash: string): boolean {
+  return receipt.inputHash === expectedHash && typeof receipt.caseFingerprint === 'string' &&
+    /^case_[a-f0-9]{64}$/.test(receipt.caseFingerprint) && typeof receipt.carrierCaseName === 'string' &&
+    /^[A-Z0-9][A-Z0-9_-]{5,79}$/.test(receipt.carrierCaseName) && typeof receipt.release === 'string' &&
+    receipt.release.length <= 32 && receipt.reportCode === 'NAIC_ILLUSTRATION' &&
+    typeof receipt.documentSha256 === 'string' && /^[a-f0-9]{64}$/.test(receipt.documentSha256) &&
+    typeof receipt.documentBytes === 'number' && Number.isSafeInteger(receipt.documentBytes) &&
+    receipt.documentBytes >= 5 && receipt.documentBytes <= 25 * 1024 * 1024 && receipt.saved === true
+}
+
+function validReceipt(
+  receipt: Record<string, unknown>,
+  expected: { inputHash: string; snapshot: ForesightExecutionSnapshot },
+): receipt is AnyForesightExecutionReceipt {
+  if (!commonReceiptFields(receipt, expected.inputHash)) return false
+  if ('code' in expected.snapshot.product) {
+    return exactKeys(receipt, [
+      'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'release', 'reportCode',
+      'documentSha256', 'documentBytes', 'saved',
+    ]) && receipt.productCode === '956'
+  }
+  return exactKeys(receipt, [
+    'inputHash', 'caseFingerprint', 'carrierCaseName', 'carrierProduct', 'release', 'reportCode',
+    'documentSha256', 'documentBytes', 'saved',
+  ]) && receipt.carrierProduct === expected.snapshot.product.carrierName
+}
+
 export function parseForesightExecutionResponse(
   value: unknown,
-  expected: Pick<ExecuteForesightIllustrationMessage, 'token' | 'correlationId' | 'inputHash'>,
+  expected: Pick<ExecuteForesightIllustrationMessage, 'token' | 'correlationId' | 'inputHash'> & { snapshot?: unknown },
 ): ForesightExecutionResponse {
   if (!isObject(value) || value.token !== expected.token || value.correlationId !== expected.correlationId) {
     throw new Error('FORESIGHT_RESPONSE_INVALID')
@@ -89,22 +137,11 @@ export function parseForesightExecutionResponse(
     typeof value.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(value.code)) {
     return value as ForesightExecutionResponse
   }
-  if (value.ok !== true || value.type !== 'FORESIGHT_ILLUSTRATION_SAVED' ||
+  const snapshot = parseForesightIllustrationSnapshot(expected.snapshot) ??
+    parseForesightTermIllustrationSnapshot(expected.snapshot)
+  if (value.ok !== true || value.type !== 'FORESIGHT_ILLUSTRATION_SAVED' || !snapshot ||
     !exactKeys(value, ['ok', 'type', 'token', 'correlationId', 'receipt', 'document']) || !isObject(value.receipt) ||
-    !exactKeys(value.receipt, [
-      'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'release', 'reportCode',
-      'documentSha256', 'documentBytes', 'saved',
-    ]) || value.receipt.inputHash !== expected.inputHash ||
-    typeof value.receipt.caseFingerprint !== 'string' ||
-    !/^case_[a-f0-9]{64}$/.test(value.receipt.caseFingerprint) ||
-    typeof value.receipt.carrierCaseName !== 'string' ||
-    !/^[A-Z0-9][A-Z0-9_-]{5,79}$/.test(value.receipt.carrierCaseName) ||
-    value.receipt.productCode !== '956' || typeof value.receipt.release !== 'string' ||
-    value.receipt.release.length > 32 || value.receipt.reportCode !== 'NAIC_ILLUSTRATION' ||
-    typeof value.receipt.documentSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.receipt.documentSha256) ||
-    typeof value.receipt.documentBytes !== 'number' || !Number.isSafeInteger(value.receipt.documentBytes) ||
-    value.receipt.documentBytes < 5 || value.receipt.documentBytes > 25 * 1024 * 1024 ||
-    value.receipt.saved !== true ||
+    !validReceipt(value.receipt, { inputHash: expected.inputHash, snapshot }) ||
     !isObject(value.document) || !exactKeys(value.document, ['contentType', 'pdfBase64']) ||
     value.document.contentType !== 'application/pdf' || typeof value.document.pdfBase64 !== 'string' ||
     value.document.pdfBase64.length < 8 || value.document.pdfBase64.length > 35_000_000 ||

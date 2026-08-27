@@ -7,6 +7,7 @@ import { Field, Input, Select } from '@/components/Field'
 import { FORESIGHT_ISSUE_STATES } from '@/lib/national-life/foresight-illustration-contract'
 import { requestForesightIllustration } from './new/actions'
 import { sendConnectorMessage } from '@/app/agent/integrations/national-life/NationalLifeConnectorClient'
+import { ForesightActivityIndicator } from './ForesightActivityIndicator'
 
 const GENDERS = {
   FEMALE: 'Female',
@@ -24,11 +25,14 @@ const DEATH_BENEFIT_OPTIONS = {
 } as const
 
 const CAP_FOCUS = 'SP500PointToPointCapFocus'
+const TERM_DURATIONS = ['10-G', '15-G', '20-G', '30-G', 'ART'] as const
 
 export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
   const router = useRouter()
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [productFamily, setProductFamily] = useState<'IUL' | 'TERM'>('IUL')
+  const [termCarrier, setTermCarrier] = useState<'LSW_TERM' | 'NL_TERM'>('LSW_TERM')
 
   async function handleSubmit(formData: FormData) {
     setSubmitting(true)
@@ -56,20 +60,20 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
   return (
     <div className="module-main-surface">
       <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
-        National Life • Foresight • FlexLife
+        National Life • Foresight
       </p>
       <h2 className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">
-        Ilustração oficial FlexLife
+        Ilustração oficial
       </h2>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">
-        O KeeproneConnect preenche e salva a ilustração no Foresight da National Life,
-        confere os dados gravados e traz o PDF oficial para cá.
+        Você revisa o cenário aqui. O KeeproneConnect o preenche em uma aba discreta do
+        Foresight, confere o que a National Life reteve e traz apenas o PDF oficial válido.
       </p>
 
       <ol className="mt-6 grid gap-px overflow-hidden rounded-2xl border border-border-steel bg-border-steel sm:grid-cols-3" aria-label="Etapas da ilustração oficial">
         {[
-          ['01', 'Revisar dados', 'Você define o cenário'],
-          ['02', 'Criar no Foresight', 'A extensão trabalha na sua sessão'],
+          ['01', 'Escolher produto', 'IUL ou Term, com rota própria'],
+          ['02', 'Revisar cenário', 'Você define os dados materiais'],
           ['03', 'Receber o PDF', 'Arquivo oficial verificado'],
         ].map(([number, title, detail], index) => (
           <li key={number} className={`flex gap-3 bg-paper px-4 py-3.5 ${index === 0 ? 'bg-teal-pale/45' : ''}`}>
@@ -86,6 +90,50 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
         <fieldset>
           <legend className="flex items-center gap-3 text-sm font-semibold text-ink">
             <span className="grid h-7 w-7 place-items-center rounded-full bg-ink text-[10px] font-mono tracking-[0.08em] text-paper">01</span>
+            Produto
+            <span className="font-normal text-ink-muted">Escolha somente uma modalidade com contrato validado</span>
+          </legend>
+          <input type="hidden" name="product" value={productFamily === 'IUL' ? 'FLEXLIFE_IUL' : termCarrier} />
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className={`relative flex min-h-28 cursor-pointer flex-col justify-between overflow-hidden rounded-2xl border p-4 transition-colors ${productFamily === 'IUL' ? 'border-teal bg-teal-pale/60' : 'border-border-steel bg-paper hover:bg-panel/55'}`}>
+              <input
+                className="sr-only"
+                type="radio"
+                name="productFamily"
+                aria-label="IUL"
+                checked={productFamily === 'IUL'}
+                onChange={() => setProductFamily('IUL')}
+              />
+              <span>
+                <strong className="block text-base font-semibold tracking-[-0.025em] text-ink">IUL</strong>
+                <span className="mt-1 block text-xs leading-5 text-ink-muted">FlexLife • Indexed Universal Life</span>
+              </span>
+              <span className="mt-3 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-teal-deep">Pronto para gerar</span>
+            </label>
+            <label className={`relative flex min-h-28 cursor-pointer flex-col justify-between overflow-hidden rounded-2xl border p-4 transition-colors ${productFamily === 'TERM' ? 'border-teal bg-teal-pale/60' : 'border-border-steel bg-paper hover:bg-panel/55'}`}>
+              <input
+                className="sr-only"
+                type="radio"
+                name="productFamily"
+                aria-label="Term Life"
+                checked={productFamily === 'TERM'}
+                onChange={() => setProductFamily('TERM')}
+              />
+              <span>
+                <strong className="block text-base font-semibold tracking-[-0.025em] text-ink">Term Life</strong>
+                <span className="mt-1 block text-xs leading-5 text-ink-muted">LSW Term ou NL Term • prazo definido</span>
+              </span>
+              <span className="mt-3 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-teal-deep">Pronto para gerar</span>
+            </label>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-ink-muted">
+            Cada rota usa seu próprio contrato no Foresight. O Keeprone não converte Term em IUL, nem infere uma emissora ou prazo.
+          </p>
+        </fieldset>
+
+        <fieldset className="border-t border-border-steel pt-6">
+          <legend className="flex items-center gap-3 text-sm font-semibold text-ink">
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-ink text-[10px] font-mono tracking-[0.08em] text-paper">02</span>
             Segurado
             <span className="font-normal text-ink-muted">Informação que será gravada no caso</span>
           </legend>
@@ -116,10 +164,46 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
           </div>
         </fieldset>
 
-        <fieldset className="border-t border-border-steel pt-6">
+        {productFamily === 'TERM' && <fieldset className="border-t border-border-steel pt-6">
           <legend className="flex items-center gap-3 text-sm font-semibold text-ink">
-            <span className="grid h-7 w-7 place-items-center rounded-full bg-teal text-[10px] font-mono tracking-[0.08em] text-paper">02</span>
-            Cenário FlexLife
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-teal text-[10px] font-mono tracking-[0.08em] text-paper">03</span>
+            Cenário Term
+            <span className="font-normal text-ink-muted">A National Life calcula o prêmio oficial por prazo</span>
+          </legend>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field label="Emissora do Term">
+              <Select
+                name="termCarrier"
+                required
+                value={termCarrier}
+                onChange={(event) => setTermCarrier(event.target.value as 'LSW_TERM' | 'NL_TERM')}
+                className="w-full"
+              >
+                <option value="LSW_TERM">LSW Term — Life Insurance Company of the Southwest</option>
+                <option value="NL_TERM">NL Term — National Life Insurance Company</option>
+              </Select>
+            </Field>
+            <Field label="Prazo do Term">
+              <Select name="termDuration" required defaultValue="" className="w-full">
+                <option value="" disabled>Selecione o prazo...</option>
+                {TERM_DURATIONS.map((duration) => <option key={duration} value={duration}>{duration}</option>)}
+              </Select>
+            </Field>
+            <Field label="Capital segurado"><Input name="faceAmount" type="number" min={1} step="0.01" required placeholder="250000" /></Field>
+          </div>
+          <input type="hidden" name="premiumMode" value="Monthly" />
+          <aside className="mt-5 rounded-xl border border-border-steel bg-panel/50 p-4" aria-label="Cálculo de prêmio do Term">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-teal-deep">Prêmio calculado pela seguradora</p>
+            <p className="mt-2 text-xs leading-5 text-ink-muted">
+              O Foresight recebe a emissora, prazo, capital e perfil de risco; ele calcula e apresenta os prêmios mensais reais no PDF oficial. O Keeprone não inventa nem sobrescreve esse valor.
+            </p>
+          </aside>
+        </fieldset>}
+
+        {productFamily === 'IUL' && <fieldset className="border-t border-border-steel pt-6">
+          <legend className="flex items-center gap-3 text-sm font-semibold text-ink">
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-teal text-[10px] font-mono tracking-[0.08em] text-paper">03</span>
+            Cenário IUL • FlexLife
             <span className="font-normal text-ink-muted">Os valores que você quer ilustrar</span>
           </legend>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -138,14 +222,25 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
               </Select>
             </Field>
           </div>
-        </fieldset>
+          <aside className="mt-5 rounded-xl border border-border-steel bg-panel/50 p-4" aria-label="Configuração padrão do Foresight">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-teal-deep">Configuração padrão do Foresight</p>
+            <div className="mt-3 grid gap-2 text-xs leading-5 text-ink-muted sm:grid-cols-2">
+              <p><strong className="font-semibold text-ink">Ilustração:</strong> Basic Illustration, solve “None”, GPT e MEC “None”.</p>
+              <p><strong className="font-semibold text-ink">Benefício:</strong> uma linha de capital e vigência 1–M; APB em US$ 0.</p>
+              <p><strong className="font-semibold text-ink">Prêmio:</strong> mensal, “Specify Amount”, sem ajuste, vigência 1–M.</p>
+              <p><strong className="font-semibold text-ink">Exchange e distribuição:</strong> ambos “None”.</p>
+            </div>
+          </aside>
+        </fieldset>}
 
         <div className="flex flex-col gap-4 border-t border-border-steel pt-5 sm:flex-row sm:items-center sm:justify-between">
           <p className="max-w-md text-xs leading-5 text-ink-muted">
-            Você pode sair desta tela. Se a sessão da National Life expirar, o KeeprOne pede o login e continua de onde parou.
+            Você pode sair desta tela. A extensão abre o Foresight em segundo plano; só traz a aba à frente se a National Life pedir login. Se o portal alterar um valor, a geração para antes do PDF.
           </p>
           <Button type="submit" variant="primary" disabled={submitting} className="w-full shrink-0 sm:w-auto">
-            {submitting ? 'Preparando no Foresight...' : 'Gerar ilustração oficial'}
+            {submitting
+              ? <ForesightActivityIndicator label="Preparando no Foresight…" />
+              : 'Gerar ilustração oficial'}
           </Button>
         </div>
       </form>

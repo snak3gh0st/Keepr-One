@@ -805,6 +805,79 @@ describe('background plan executor', () => {
     expect(readSync()).toMatchObject({ runId: 'run-scheduled', status: 'NAVIGATING' })
   })
 
+  it('does not repurpose a Foresight tab for a scheduled sync', async () => {
+    storage.sync = {
+      status: 'COMPLETED',
+      completedAt: new Date(Date.now() - 25 * 60 * 60_000).toISOString(),
+    }
+    tabs.query.mockResolvedValue([{ id: 44, active: false, url: `${NLG}/NWI/Main/Layout.aspx` }])
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      runId: 'run-scheduled',
+      stages: TWO_STAGE_PLAN,
+      completedStages: 0,
+      nextStageIndex: 0,
+    } as never)
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-scheduled-sync' })
+    await flush()
+
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
+      url: `${NLG}${NEW_BUSINESS_PATH}`,
+    })
+    expect(tabs.update).not.toHaveBeenCalledWith(44, expect.objectContaining({ url: expect.any(String) }))
+  })
+
+  it('drops a legacy sync binding that points at a Foresight tab', async () => {
+    storage.sync = {
+      carrierTabId: 44,
+      status: 'COMPLETED',
+      completedAt: new Date(Date.now() - 25 * 60 * 60_000).toISOString(),
+    }
+    tabs.query.mockResolvedValue([{ id: 44, active: false, url: `${NLG}/NWI/Main/Layout.aspx` }])
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      runId: 'run-scheduled',
+      stages: TWO_STAGE_PLAN,
+      completedStages: 0,
+      nextStageIndex: 0,
+    } as never)
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-scheduled-sync' })
+    await flush()
+
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
+      url: `${NLG}${NEW_BUSINESS_PATH}`,
+    })
+    expect(tabs.update).not.toHaveBeenCalledWith(44, expect.objectContaining({ url: expect.any(String) }))
+  })
+
+  it('defers a scheduled sync while an illustration command owns the carrier session', async () => {
+    storage.sync = {
+      status: 'COMPLETED',
+      completedAt: new Date(Date.now() - 25 * 60 * 60_000).toISOString(),
+    }
+    storage.command = {
+      commandId: 'cmd_illustration_active',
+      runId: 'run_illustration_active',
+      carrierTabId: 44,
+      status: 'RUNNING',
+    }
+    tabs.query.mockResolvedValue([{ id: 44, active: false, url: `${NLG}/NWI/Main/Layout.aspx` }])
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-scheduled-sync' })
+    await flush()
+
+    expect(tabs.create).not.toHaveBeenCalled()
+    expect(tabs.update).not.toHaveBeenCalled()
+    expect(signedJsonRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs',
+    }))
+  })
+
   it('does not start another scheduled sync while the last completion is fresh', async () => {
     storage.sync = {
       status: 'COMPLETED',
