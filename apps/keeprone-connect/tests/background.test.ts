@@ -196,6 +196,7 @@ const tabs = {
   query: vi.fn(async () => [] as unknown[]),
   update: vi.fn(async () => undefined),
   create: vi.fn(async () => ({ id: 4, active: false, url: undefined })),
+  remove: vi.fn(async () => undefined),
   // Tipado com os dois argumentos reais para que um teste possa afirmar sobre a
   // mensagem enviada, e não só sobre ter havido envio.
   sendMessage: vi.fn(defaultTabMessageResponse),
@@ -216,6 +217,7 @@ const chromeStub = {
     },
   },
   runtime: {
+    id: 'abcdefghijklmnopabcdefghijklmnop',
     getManifest: () => ({ version: '0.1.0' }),
     requestUpdateCheck: vi.fn(async () => ({ status: 'no_update' })),
     reload: vi.fn(),
@@ -459,6 +461,24 @@ describe('empurrão de atualização no caminho real', () => {
 })
 
 describe('background plan executor', () => {
+  it('returns to the existing Keepr One tab after Store install without opening a duplicate', async () => {
+    const keeprUrl = 'http://localhost:3000/agent/integrations/national-life'
+    const storeUrl =
+      'https://chromewebstore.google.com/detail/keeproneconnect/abcdefghijklmnopabcdefghijklmnop'
+    tabs.query.mockResolvedValue([
+      { id: 21, active: false, url: keeprUrl, lastAccessed: 10 },
+      { id: 22, active: true, url: storeUrl, lastAccessed: 20 },
+    ])
+    await bootBackground()
+
+    emit('runtime.onInstalled', { reason: 'install' })
+    await flush()
+
+    expect(tabs.update).toHaveBeenCalledWith(21, { active: true })
+    expect(tabs.remove).toHaveBeenCalledWith(22)
+    expect(tabs.create).not.toHaveBeenCalled()
+  })
+
   it('does not swallow an on-demand command while a background poll is in flight', async () => {
     const command = {
       protocolVersion: 1,

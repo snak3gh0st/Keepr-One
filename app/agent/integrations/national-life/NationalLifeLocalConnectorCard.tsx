@@ -28,6 +28,49 @@ type ConnectorState =
   | 'error'
 
 type ConnectorPresence = 'checking' | 'installed' | 'missing'
+type JourneyStepState = 'waiting' | 'active' | 'complete'
+
+function ConnectionJourneyStep({
+  label,
+  detail,
+  state,
+}: {
+  label: string
+  detail: string
+  state: JourneyStepState
+}) {
+  return (
+    <li
+      aria-current={state === 'active' ? 'step' : undefined}
+      className={`flex min-w-0 items-center gap-3 rounded-xl border px-3 py-3 transition-colors duration-500 sm:px-4 ${
+        state === 'complete'
+          ? 'border-teal/20 bg-teal-pale/55'
+          : state === 'active'
+            ? 'border-teal/35 bg-paper shadow-[0_12px_32px_-24px_rgba(0,93,82,0.55)]'
+            : 'border-border-steel/70 bg-panel/35'
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[11px] font-semibold transition-all duration-500 ${
+          state === 'complete'
+            ? 'border-teal bg-teal text-paper'
+            : state === 'active'
+              ? 'animate-pulse border-teal bg-teal-pale text-teal-deep'
+              : 'border-border-steel bg-paper text-ink-muted/55'
+        }`}
+      >
+        {state === 'complete' ? '✓' : '•'}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-xs font-semibold text-ink">{label}</span>
+        <span className={`mt-0.5 block truncate text-[11px] ${state === 'active' ? 'text-teal-deep' : 'text-ink-muted'}`}>
+          {detail}
+        </span>
+      </span>
+    </li>
+  )
+}
 
 function openStore(storeUrl: string) {
   const link = document.createElement('a')
@@ -159,11 +202,35 @@ export function NationalLifeLocalConnectorCard({
     state === 'partial' ||
     state === 'error' ||
     state === 'slow' ||
-    state === 'login-required' ||
     state === 'installing'
   const busy = !recoverable
   const stateCopy = installMode === 'pilot' ? pilotStateCopy : storeStateCopy
   const failure = state === 'error' ? connectorFailure(errorCode) : null
+  const loginComplete = ['syncing', 'slow', 'partial', 'success'].includes(state)
+  const syncComplete = state === 'partial' || state === 'success'
+  const syncActive = state === 'syncing' || state === 'slow'
+  const extensionStepState: JourneyStepState = connectorPresence === 'installed' ? 'complete' : 'active'
+  const loginStepState: JourneyStepState = loginComplete
+    ? 'complete'
+    : connectorPresence === 'installed'
+      ? 'active'
+      : 'waiting'
+  const syncStepState: JourneyStepState = syncComplete ? 'complete' : syncActive ? 'active' : 'waiting'
+  const extensionStepDetail = connectorPresence === 'installed'
+    ? 'Installed'
+    : connectorPresence === 'checking'
+      ? 'Checking'
+      : state === 'installing'
+        ? 'Installing'
+        : 'Install'
+  const loginStepDetail = loginComplete
+    ? 'Connected'
+    : state === 'login-required'
+      ? 'Waiting for sign-in'
+      : connectorPresence === 'installed'
+        ? state === 'connecting' || state === 'checking' ? 'Opening portal' : 'Ready'
+        : 'Next'
+  const syncStepDetail = syncComplete ? 'Up to date' : syncActive ? 'Syncing' : 'Waiting'
 
   /// Toda tentativa nova começa sem o motivo da anterior. Sem isso a frase de um
   /// dispositivo revogado sobrevive por baixo do sucesso seguinte.
@@ -245,8 +312,10 @@ export function NationalLifeLocalConnectorCard({
         return
       }
       if (syncStatus === 'AUTH_REQUIRED') {
+        signature = progressSignature(status.sync)
+        idle = 0
         setState('login-required')
-        return
+        continue
       }
       if (syncStatus === 'COMPLETED') {
         setState('success')
@@ -359,6 +428,23 @@ export function NationalLifeLocalConnectorCard({
     runInstalledFlowRef.current = runInstalledFlow
   })
 
+  async function continueAfterInstallation() {
+    if (installedFlowStarted.current) return
+    const installed = await verifyInstallation()
+    if (!installed) {
+      setState('installing')
+      return
+    }
+    installedFlowStarted.current = true
+    beginAttempt('connecting')
+    await runInstalledFlowRef.current()
+  }
+  const continueAfterInstallationRef = useRef(continueAfterInstallation)
+
+  useEffect(() => {
+    continueAfterInstallationRef.current = continueAfterInstallation
+  })
+
   useEffect(() => {
     const url = new URL(window.location.href)
     if (url.searchParams.get('connector') !== 'installed' || installedFlowStarted.current) return
@@ -429,9 +515,7 @@ export function NationalLifeLocalConnectorCard({
     if (state !== 'installing' || !browserIsCompatible || !extensionId) return
     const recheck = () => {
       if (document.visibilityState !== 'visible') return
-      void verifyInstallation().then((installed) => {
-        setState(installed ? 'idle' : 'installing')
-      })
+      void continueAfterInstallationRef.current()
     }
     window.addEventListener('focus', recheck)
     document.addEventListener('visibilitychange', recheck)
@@ -450,9 +534,7 @@ export function NationalLifeLocalConnectorCard({
 
   async function handlePrimaryAction() {
     if (state === 'installing') {
-      beginAttempt('checking')
-      const installed = await verifyInstallation()
-      setState(installed ? 'idle' : 'installing')
+      await continueAfterInstallationRef.current()
       return
     }
     if (connectorPresence === 'missing') {
@@ -599,6 +681,14 @@ export function NationalLifeLocalConnectorCard({
         )}
       </div>
 
+      <div className="border-b border-border-steel bg-paper px-5 py-4 sm:px-7">
+        <ol aria-label="Connection progress" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <ConnectionJourneyStep label="Extension" detail={extensionStepDetail} state={extensionStepState} />
+          <ConnectionJourneyStep label="National Life" detail={loginStepDetail} state={loginStepState} />
+          <ConnectionJourneyStep label="Your data" detail={syncStepDetail} state={syncStepState} />
+        </ol>
+      </div>
+
       <div className="grid gap-5 bg-panel/45 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
         <div className="min-w-0">
           <div className="flex items-start gap-3">
@@ -636,10 +726,10 @@ export function NationalLifeLocalConnectorCard({
                 : 'Check installation'
               : connectorPresence === 'missing'
                 ? 'Install KeeproneConnect'
-              : failure
-                ? failure.actionLabel
+                : failure
+                  ? failure.actionLabel
                 : state === 'login-required'
-                  ? 'Continue'
+                  ? 'Waiting for login…'
                   : state === 'slow'
                     ? 'Check again'
                     : busy

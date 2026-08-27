@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -90,16 +90,36 @@ describe('NationalLifeLocalConnectorCard', () => {
       'href',
       storeUrl,
     )
+    const progress = screen.getByRole('list', { name: 'Connection progress' })
+    expect(within(progress).getByText('Extension')).toBeInTheDocument()
+    expect(within(progress).getByText('Install')).toBeInTheDocument()
+    expect(within(progress).getByText('National Life')).toBeInTheDocument()
+    expect(within(progress).getByText('Your data')).toBeInTheDocument()
   })
 
-  it('recognizes a newly installed connector when the agent returns from the Store', async () => {
+  it('pairs and starts sync automatically when the agent returns from the Store', async () => {
     let installed = false
-    installChromeMock((_message, callback) => {
+    let installedChecks = 0
+    const messages: string[] = []
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ code: 'NL-pair-after-store-install' }), { status: 201 }),
+    )
+    installChromeMock((message, callback) => {
+      messages.push(message.type)
       if (!installed) {
         callback()
         return
       }
-      callback({ ok: true, device: { status: 'UNPAIRED' }, sync: { status: 'IDLE' } })
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        installedChecks += 1
+        callback({
+          ok: true,
+          device: { status: installedChecks > 1 ? 'READY' : 'UNPAIRED', deviceId: installedChecks > 1 ? 'device-1' : undefined },
+          sync: { status: installedChecks > 1 ? 'COMPLETED' : 'IDLE' },
+        })
+        return
+      }
+      callback({ ok: true, deviceId: 'device-1' })
     })
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
 
@@ -117,9 +137,12 @@ describe('NationalLifeLocalConnectorCard', () => {
     installed = true
     window.dispatchEvent(new Event('focus'))
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Connect National Life' })).toBeEnabled()
-    })
+    await waitFor(
+      () => expect(screen.getByRole('status')).toHaveTextContent('up to date'),
+      { timeout: 3_000 },
+    )
+    expect(messages).toContain('PAIR_CONNECTOR')
+    expect(messages).toContain('START_NATIONAL_LIFE_SYNC')
     expect(screen.queryByRole('link', { name: /Download KeeproneConnect/i })).not.toBeInTheDocument()
   })
 
@@ -382,18 +405,24 @@ describe('NationalLifeLocalConnectorCard', () => {
     )
   })
 
-  it('surfaces AUTH_REQUIRED while the agent logs into National Life', async () => {
-    let syncStatus = 'NAVIGATING'
+  it('keeps observing and completes automatically after the National Life login', async () => {
+    let started = false
+    let checksAfterStart = 0
     installChromeMock((message, callback) => {
       if (message.type === 'GET_CONNECTOR_STATUS') {
+        const status = !started
+          ? 'IDLE'
+          : checksAfterStart++ === 0
+            ? 'AUTH_REQUIRED'
+            : 'COMPLETED'
         callback({
           ok: true,
           device: { status: 'READY', deviceId: 'device-1' },
-          sync: { status: syncStatus },
+          sync: { status },
         })
         return
       }
-      syncStatus = 'AUTH_REQUIRED'
+      started = true
       callback({ ok: true })
     })
 
@@ -407,11 +436,14 @@ describe('NationalLifeLocalConnectorCard', () => {
     )
     await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
 
-    await waitFor(
-      () => expect(screen.getByRole('status')).toHaveTextContent('Sign in to the National Life portal'),
-      { timeout: 3_000 },
-    )
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled()
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('up to date')
+    }, { timeout: 4_000 })
+    expect(checksAfterStart).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument()
+    expect(
+      within(screen.getByRole('list', { name: 'Connection progress' })).getByText('Up to date'),
+    ).toBeInTheDocument()
   })
 
   it('shows a recoverable friendly error', async () => {
