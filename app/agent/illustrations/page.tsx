@@ -129,7 +129,7 @@ export default async function IllustrationsPage() {
                     <>
                       <IllustrationPdfButton
                         illustrationId={illustration.id}
-                        extensionId={localConnector.enabled ? localConnector.extensionId : undefined}
+                        extensionId={localConnector.enabled ? localConnector.extensionTarget : undefined}
                         disabled={pdfStatus.get(illustration.id)?.state === 'WORKING'}
                         status={pdfStatus.get(illustration.id)?.state}
                       />

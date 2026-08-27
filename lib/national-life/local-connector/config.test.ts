@@ -29,6 +29,7 @@ describe('local connector config', () => {
     expect(getNationalLifeLocalConnectorConfig()).toEqual({
       enabled: true,
       extensionId,
+      extensionTarget: extensionId,
       installMode: 'pilot',
       storeUrl: null,
       baseUrl: 'https://app.keeprone.com',
@@ -47,6 +48,7 @@ describe('local connector config', () => {
     expect(getNationalLifeLocalConnectorConfig()).toEqual({
       enabled: true,
       extensionId,
+      extensionTarget: extensionId,
       installMode: 'store',
       storeUrl: `https://chromewebstore.google.com/detail/keeproneconnect/${extensionId}`,
       baseUrl: 'https://app.keeprone.com',
@@ -72,6 +74,24 @@ describe('local connector config', () => {
     vi.stubEnv('BETTER_AUTH_URL', 'https://app.keeprone.com')
 
     expect(() => getNationalLifeLocalConnectorConfig()).toThrow(/Chrome Web Store URL/)
+  })
+
+  it('tries the Store build before an existing unpacked pilot during rollout', () => {
+    const storeId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_ENABLED', 'true')
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_ID', extensionId)
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_IDS', `${storeId},${extensionId}`)
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL', `https://chromewebstore.google.com/detail/keeproneconnect/${storeId}`)
+    vi.stubEnv('BETTER_AUTH_URL', 'https://app.keeprone.com')
+
+    expect(getNationalLifeLocalConnectorConfig()).toEqual({
+      enabled: true,
+      extensionId: storeId,
+      extensionTarget: `${storeId},${extensionId}`,
+      installMode: 'store',
+      storeUrl: `https://chromewebstore.google.com/detail/keeproneconnect/${storeId}`,
+      baseUrl: 'https://app.keeprone.com',
+    })
   })
 
   it('keeps page discovery off until the new extension rollout is enabled', () => {

@@ -107,7 +107,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
           ) : (
             <IllustrationPdfButton
               illustrationId={illustration.id}
-              extensionId={localConnector.enabled ? localConnector.extensionId : undefined}
+              extensionId={localConnector.enabled ? localConnector.extensionTarget : undefined}
               disabled={commandStatus?.state === 'WORKING'}
               status={commandStatus?.state}
             />

@@ -399,7 +399,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             <NationalLifePolicyDetailCard
               detail={carrierDetail}
               refresh={localConnector.enabled
-                ? { policyId: policy.id, extensionId: localConnector.extensionId }
+                ? { policyId: policy.id, extensionId: localConnector.extensionTarget }
                 : undefined}
             />
           )}
@@ -447,7 +447,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                         </a>
                       ) : localConnector.enabled ? (
                         <NationalLifeDocumentButton
-                          extensionId={localConnector.extensionId}
+                          extensionId={localConnector.extensionTarget}
                           reportRowId={doc.id}
                         />
                       ) : null}

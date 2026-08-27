@@ -12,6 +12,8 @@ export type PublicLocalConnectorConfig =
   | {
       enabled: true
       extensionId: string
+      /** Ordered Chrome targets. The first is the Store release when configured. */
+      extensionTarget: string
       installMode: LocalConnectorInstallMode
       /** Official Chrome Web Store listing; null in pilot (unpacked) mode. */
       storeUrl: string | null
@@ -40,6 +42,17 @@ function parseExtensionId(value: string | undefined): string {
     throw new Error('NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_ID must be a valid Chrome extension ID')
   }
   return extensionId
+}
+
+function parseExtensionIds(): string[] {
+  const configured = process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_IDS?.trim()
+  if (!configured) return [parseExtensionId(process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_ID)]
+
+  const extensionIds = configured.split(',').map((value) => value.trim())
+  if (!extensionIds.length || extensionIds.some((extensionId) => !CHROME_EXTENSION_ID.test(extensionId))) {
+    throw new Error('NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_IDS must contain valid Chrome extension IDs')
+  }
+  return [...new Set(extensionIds)]
 }
 
 function parseStoreUrl(value: string | undefined, extensionId: string): string {
@@ -94,7 +107,8 @@ export function getNationalLifeLocalConnectorConfig(): PublicLocalConnectorConfi
     return { enabled: false }
   }
 
-  const extensionId = parseExtensionId(process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_ID)
+  const extensionIds = parseExtensionIds()
+  const extensionId = extensionIds[0]
   const rawStoreUrl = process.env.NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL?.trim()
   const baseUrl = parseAppOrigin(process.env.BETTER_AUTH_URL)
 
@@ -103,6 +117,7 @@ export function getNationalLifeLocalConnectorConfig(): PublicLocalConnectorConfi
     return {
       enabled: true,
       extensionId,
+      extensionTarget: extensionIds.join(','),
       installMode: 'pilot',
       storeUrl: null,
       baseUrl,
@@ -112,6 +127,7 @@ export function getNationalLifeLocalConnectorConfig(): PublicLocalConnectorConfi
   return {
     enabled: true,
     extensionId,
+    extensionTarget: extensionIds.join(','),
     installMode: 'store',
     storeUrl: parseStoreUrl(rawStoreUrl, extensionId),
     baseUrl,

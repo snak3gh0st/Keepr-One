@@ -53,7 +53,11 @@ export function hasConnectorRuntime(): boolean {
   return chromeRuntime() !== null
 }
 
-export function sendConnectorMessage(
+function extensionIds(extensionTarget: string): string[] {
+  return [...new Set(extensionTarget.split(',').map((value) => value.trim()).filter(Boolean))]
+}
+
+function sendConnectorMessageToExtension(
   extensionId: string,
   message: ConnectorMessage,
   timeoutMs = 5_000,
@@ -86,4 +90,23 @@ export function sendConnectorMessage(
       reject(new Error('CONNECTOR_UNAVAILABLE'))
     }
   })
+}
+
+/// Store and unpacked builds can coexist during a controlled rollout. Try the
+/// Store ID first, then the still-paired pilot build; both are configuration
+/// allowlisted before reaching this client helper.
+export async function sendConnectorMessage(
+  extensionTarget: string,
+  message: ConnectorMessage,
+  timeoutMs = 5_000,
+): Promise<ConnectorResponse> {
+  let lastError: unknown = new Error('CONNECTOR_UNAVAILABLE')
+  for (const extensionId of extensionIds(extensionTarget)) {
+    try {
+      return await sendConnectorMessageToExtension(extensionId, message, timeoutMs)
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError
 }

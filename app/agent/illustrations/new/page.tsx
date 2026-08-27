@@ -32,7 +32,7 @@ export default async function NewIllustrationPage() {
       <div className="module-content-grid">
         <div className="min-w-0">
           <NewIllustrationForm
-            extensionId={localConnector.enabled ? localConnector.extensionId : undefined}
+            extensionId={localConnector.enabled ? localConnector.extensionTarget : undefined}
           />
         </div>
         <ContextPanel eyebrow="Dica rápida" title="O que enviar">
