@@ -335,6 +335,65 @@ describe('local connector runs', () => {
     }))
   })
 
+  it('repairs a stopped earning-detail run by inserting its paid-commission parent', async () => {
+    const runUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const failureUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const oldPlan = [
+      'NEW_BUSINESS',
+      'RECENTLY_CLOSED',
+      'INFORCE_CLIENTS',
+      'COMMISSIONS_EARNING_REPORT',
+      'CORRESPONDENCE',
+    ] as const
+    const repairedPlan = [
+      'NEW_BUSINESS',
+      'RECENTLY_CLOSED',
+      'INFORCE_CLIENTS',
+      'PAID_COMMISSIONS',
+      'COMMISSIONS_EARNING_REPORT',
+      'CORRESPONDENCE',
+    ] as const
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: runUpdateMany,
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            id: 'run-missing-parent',
+            state: 'FAILED',
+            plannedGridKeys: [...oldPlan],
+            completedStages: 3,
+            currentGridKey: 'COMMISSIONS_EARNING_REPORT',
+            stageCompletions: oldPlan.slice(0, 3).map((gridKey) => ({ gridKey })),
+            stageFailures: [{ gridKey: 'COMMISSIONS_EARNING_REPORT' }],
+          })
+          .mockResolvedValueOnce(null),
+      },
+      nationalLifeConnectorStageFailure: { updateMany: failureUpdateMany },
+      nationalLifeConnectorStageReceipt: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never
+
+    await expect(startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: repairedPlan },
+    )).resolves.toMatchObject({
+      runId: 'run-missing-parent',
+      completedStages: 3,
+      nextStageIndex: 3,
+    })
+    expect(runUpdateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      data: expect.objectContaining({
+        state: 'RUNNING',
+        plannedGridKeys: repairedPlan,
+        totalStages: repairedPlan.length,
+        completedStages: 3,
+        currentGridKey: 'PAID_COMMISSIONS',
+      }),
+    }))
+  })
+
 
   it('resolves failures for a deprecated source when migrating a running plan', async () => {
     const failureUpdateMany = vi.fn().mockResolvedValue({ count: 1 })

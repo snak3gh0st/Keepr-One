@@ -142,6 +142,16 @@ function planLocalConnectorStages(
   )
 }
 
+function withCommissionDetailPrerequisite(
+  keys: readonly NationalLifeGridKey[],
+): NationalLifeGridKey[] {
+  const unique = [...new Set(keys)]
+  const detailIndex = unique.indexOf('COMMISSIONS_EARNING_REPORT')
+  if (detailIndex < 0 || unique.includes('PAID_COMMISSIONS')) return unique
+  unique.splice(detailIndex, 0, 'PAID_COMMISSIONS')
+  return unique
+}
+
 async function failStaleLocalRuns(
   db: LocalConnectorRunDb,
   input: { agentId: string; deviceId?: string; now: Date },
@@ -194,7 +204,9 @@ export async function startLocalConnectorRun(
   resume?: { sequence: number; offset: number; recordCount: number }
 }> {
   const now = input.now ?? new Date()
-  const requestedGridKeys = options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS
+  const requestedGridKeys = withCommissionDetailPrerequisite(
+    options?.gridKeys ?? LOCAL_CONNECTOR_DEFAULT_GRID_KEYS,
+  )
   // Planned before any write: an unknown grid key must fail the request rather
   // than leave a RUNNING run behind that no device can ever finish.
   const stages = planLocalConnectorStages(requestedGridKeys, {
@@ -266,8 +278,9 @@ export async function startLocalConnectorRun(
   // - RUNNING keeps its plan. Swapping stages under a device that is already
   //   navigating is exactly what the plan-authority rule below exists to prevent.
   // - FAILED/PARTIAL keeps its plan too, because it owns a durable cursor worth
-  //   resuming. It costs at most one cycle: when it finishes on the narrow plan
-  //   it becomes COMPLETED, and the next start supersedes it here.
+  //   resuming. The one repair allowed below is adding Paid Commissions before
+  //   an already-planned earning-detail stage: without that parent source the
+  //   old run is structurally unable to resume.
   // - COMPLETED has nothing left to resume and no reopen path — `reopening` does
   //   not include it, and its `nextStageIndex` is the end of the plan — so it can
   //   only be replaced. Changing it in place would leave a finished run holding
@@ -289,7 +302,15 @@ export async function startLocalConnectorRun(
   const active = running ?? (options?.forceRefresh ? null : failed) ?? reusableCompleted
   if (active) {
     const storedPlan = plannedGridKeys(active)
-    const activePlan = storedPlan.filter((gridKey) => !DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS.has(gridKey))
+    const retainedPlan = storedPlan.filter((gridKey) => !DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS.has(gridKey))
+    const reopening = active.state === 'FAILED' || active.state === 'PARTIAL'
+    const addsMissingCommissionParent = reopening &&
+      requestedGridKeys.includes('PAID_COMMISSIONS') &&
+      retainedPlan.includes('COMMISSIONS_EARNING_REPORT') &&
+      !retainedPlan.includes('PAID_COMMISSIONS')
+    const activePlan = addsMissingCommissionParent
+      ? withCommissionDetailPrerequisite(retainedPlan)
+      : retainedPlan
     const planChanged = activePlan.length !== storedPlan.length
     const receiptCompletedKeys = active.stageCompletions
       ?.map((row) => row.gridKey)
@@ -308,14 +329,15 @@ export async function startLocalConnectorRun(
     const firstFailedIndex = failedKeys
       .map((key) => activePlan.indexOf(key as NationalLifeGridKey))
       .find((index) => index >= 0)
-    const nextStageIndex = active.state === 'COMPLETED'
+    const nextStageIndex = addsMissingCommissionParent
+      ? activePlan.indexOf('PAID_COMMISSIONS')
+      : active.state === 'COMPLETED'
       ? activePlan.length
       : active.state === 'PARTIAL' && firstFailedIndex !== undefined
         ? firstFailedIndex
         : currentIndex >= 0
           ? currentIndex
           : nextUnsettledStageIndex(activePlan, completedKeys, failedKeys)
-    const reopening = active.state === 'FAILED' || active.state === 'PARTIAL'
     const completedStages = completedKeys.filter((key) =>
       activePlan.includes(key as NationalLifeGridKey),
     ).length
