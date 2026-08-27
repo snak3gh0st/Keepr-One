@@ -9,7 +9,10 @@ import {
   getNationalLifeLocalConnectorConfig,
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
-import { toCarrierCommissionRecords } from '@/lib/national-life/commission-records'
+import {
+  toCarrierCommissionRecords,
+  toVisibleCarrierCommissionRecords,
+} from '@/lib/national-life/commission-records'
 import { getAgentScopeIds } from '@/lib/agent-access'
 import { CommissionsList } from './CommissionsList'
 import { COMMISSION_EARNING_GRID_KEYS } from '@/lib/national-life/commission-grid-keys'
@@ -78,19 +81,17 @@ export default async function CommissionsPage() {
           deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
           gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
         },
-        select: { id: true, raw: true, amounts: true },
+        select: { id: true, agentId: true, raw: true, amounts: true },
       })
-      // Override rows can name and pay producers outside the commercial
-      // agency. Until the carrier row has a persisted producer identity, only
-      // direct earnings are safe; an agency still sees direct earnings from
-      // each actively subscribed member connector in its scope.
-      const directCarrierRecords = toCarrierCommissionRecords(carrierRows)
-        .filter((record) => record.type === 'DIRECT')
+      const visibleCarrierRecords = toVisibleCarrierCommissionRecords(
+        carrierRows,
+        agent.id,
+      )
 
       // Resolve the ones that do exist locally so their number becomes a link.
       const numbers = Array.from(
         new Set(
-          directCarrierRecords
+          visibleCarrierRecords
             .map((record) => record.policyNumber)
             .filter((number) => number && number !== '—'),
         ),
@@ -106,7 +107,7 @@ export default async function CommissionsPage() {
         : []
 
       carrierRecords = toCommissionRecords(
-        directCarrierRecords,
+        visibleCarrierRecords,
         new Map(localPolicies.map((policy) => [policy.policyNumber, policy.id])),
       )
     }

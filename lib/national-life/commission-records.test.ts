@@ -4,6 +4,7 @@ import {
   parseCarrierAmount,
   sumByPeriod,
   toCarrierCommissionRecords,
+  toVisibleCarrierCommissionRecords,
   toPeriod,
   totalForPeriod,
   totalOf,
@@ -91,6 +92,46 @@ describe('toCarrierCommissionRecords', () => {
 
   it('survives rows whose payload is not an object', () => {
     expect(toCarrierCommissionRecords([{ id: 'a', raw: null, amounts: undefined }])).toEqual([])
+  })
+})
+
+describe('toVisibleCarrierCommissionRecords', () => {
+  const scopedRow = (
+    agentId: string,
+    policyNumber: string,
+    level: 'Personal' | 'Override',
+    amount: string,
+  ) => ({
+    ...row({
+      PaymentDate: '8/25/2026',
+      PolicyNumber: policyNumber,
+      WritingAgtLevel: level,
+    }, { GrossCommEarned: amount }),
+    agentId,
+  })
+
+  it('shows direct and override earnings returned by the current agent connector', () => {
+    const records = toVisibleCarrierCommissionRecords([
+      scopedRow('agent-1', 'DIRECT-1', 'Personal', '$100'),
+      scopedRow('agent-1', 'OVERRIDE-1', 'Override', '$250'),
+    ], 'agent-1')
+
+    expect(records.map((record) => record.type)).toEqual(['DIRECT', 'OVERRIDE'])
+    expect(totalOf(records)).toBe(350)
+  })
+
+  it('keeps member direct production visible without importing the member override', () => {
+    const records = toVisibleCarrierCommissionRecords([
+      scopedRow('owner', 'OWNER-OVERRIDE', 'Override', '$250'),
+      scopedRow('member', 'MEMBER-DIRECT', 'Personal', '$100'),
+      scopedRow('member', 'MEMBER-OVERRIDE', 'Override', '$900'),
+    ], 'owner')
+
+    expect(records.map((record) => record.policyNumber)).toEqual([
+      'OWNER-OVERRIDE',
+      'MEMBER-DIRECT',
+    ])
+    expect(totalOf(records)).toBe(350)
   })
 })
 
