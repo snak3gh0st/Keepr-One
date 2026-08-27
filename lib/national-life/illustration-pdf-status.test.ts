@@ -114,6 +114,14 @@ describe('illustrationPdfMessage', () => {
     )
   })
 
+  it('turns a rejected client form into a retryable explanation without exposing connector internals', () => {
+    expect(
+      illustrationPdfMessage({ state: 'FAILED', safeErrorCode: 'FORESIGHT_CLIENT_READBACK_TIMEOUT' }),
+    ).toBe(
+      'O Foresight não confirmou os dados do segurado. Revise nascimento, estado e perfil de risco antes de tentar novamente; nenhum PDF foi emitido.',
+    )
+  })
+
   it('does not print an empty parenthesis when there is no code', () => {
     expect(illustrationPdfMessage({ state: 'FAILED', safeErrorCode: null })).toBe(
       'Não foi possível gerar.',

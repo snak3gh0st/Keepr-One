@@ -1107,7 +1107,14 @@ async function executeForesightCommand(
 }
 
 async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?: string): Promise<void> {
-  if (commandPollLock) return commandPollLock as Promise<void>
+  if (commandPollLock) {
+    const activePoll = commandPollLock
+    if (!requestedCommandId) return activePoll as Promise<void>
+    await activePoll
+    const current = await readCommandState()
+    if (current.commandId === requestedCommandId && current.status !== 'ERROR') return
+    return pollAndExecuteCommand(hint, requestedCommandId)
+  }
   const operation = (async () => {
     const device = await readDeviceState()
     if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) return
