@@ -106,6 +106,8 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
       return 'O Foresight não aceitou o prêmio mensal informado para este cenário. Revise o prêmio e gere uma nova ilustração; nenhum PDF foi emitido.'
     case 'FORESIGHT_CALCULATION_UNAVAILABLE':
       return 'O Foresight não conseguiu calcular um cenário válido com esse valor de origem. Revise o capital ou prêmio e gere uma nova ilustração; nenhum PDF foi emitido.'
+    case 'FORESIGHT_CLIENT_READBACK_TIMEOUT':
+      return 'O Foresight não confirmou os dados do segurado. Revise nascimento, estado e perfil de risco antes de tentar novamente; nenhum PDF foi emitido.'
     case 'FORESIGHT_SOLVE_READBACK_TIMEOUT':
     case 'FORESIGHT_SOLVE_READBACK_MISMATCH':
     case 'FORESIGHT_RESPONSE_INVALID':

@@ -6,6 +6,7 @@ import {
   compareForesightTarget,
   deterministicCaseFingerprint,
   foresightReadbackMismatchCode,
+  foresightClientBirthDate,
   validateForesightSurface,
   type ForesightMaterialReadback,
 } from './foresight-target'
@@ -44,6 +45,10 @@ const snapshot = parseForesightIllustrationSnapshot({
 })! as ForesightIllustrationSnapshotV1
 
 describe('Foresight target verification', () => {
+  it('formats a non-palindromic birth date for the US Foresight client form', () => {
+    expect(foresightClientBirthDate('1981-08-26')).toBe('08/26/1981')
+  })
+
   it('accepts only the observed FlexLife page inventory', () => {
     expect(validateForesightSurface({
       path: '/NWI/IUL2025/client.aspx',

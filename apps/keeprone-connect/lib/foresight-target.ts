@@ -80,7 +80,7 @@ export type ForesightMaterialReadback = Omit<ForesightMaterialTarget, 'solveAmou
   premiumAmount: number | string
 }
 
-function carrierDate(iso: string): string {
+export function foresightClientBirthDate(iso: string): string {
   const [year, month, day] = iso.split('-')
   return `${month}/${day}/${year}`
 }
@@ -92,7 +92,7 @@ export function buildForesightTarget(
     carrierCaseName: snapshot.carrierCaseName,
     firstName: snapshot.insured.firstName,
     lastName: snapshot.insured.lastName,
-    dateOfBirth: carrierDate(snapshot.insured.dateOfBirth),
+    dateOfBirth: foresightClientBirthDate(snapshot.insured.dateOfBirth),
     issueState: snapshot.insured.issueState,
     productCode: snapshot.product.code,
     solveMethod: snapshot.solve.method,

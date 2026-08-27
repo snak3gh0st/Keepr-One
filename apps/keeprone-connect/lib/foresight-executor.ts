@@ -15,6 +15,7 @@ import {
   foresightReadbackMismatchCode,
   validateForesightSurface,
   type ForesightMaterialReadback,
+  foresightClientBirthDate,
 } from './foresight-target'
 import type {
   AnyForesightExecutionReceipt,
@@ -345,7 +346,7 @@ async function fillClient(doc: Document, snapshot: ForesightIllustrationSnapshot
   const target = {
     firstName: snapshot.insured.firstName,
     lastName: snapshot.insured.lastName,
-    dateOfBirth: snapshot.insured.dateOfBirth.split('-').reverse().join('/'),
+    dateOfBirth: foresightClientBirthDate(snapshot.insured.dateOfBirth),
     issueState: snapshot.insured.issueState,
     gender: snapshot.underwriting.gender,
     rateClass: snapshot.underwriting.rateClass,

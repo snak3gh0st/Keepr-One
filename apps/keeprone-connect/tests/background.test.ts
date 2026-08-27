@@ -458,6 +458,48 @@ describe('empurrão de atualização no caminho real', () => {
 })
 
 describe('background plan executor', () => {
+  it('does not swallow an on-demand command while a background poll is in flight', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_policy_during_poll',
+      runId: 'run_policy_during_poll',
+      capability: 'READ_POLICY_DETAIL',
+      target: { kind: 'POLICY', id: 'policy_1', carrierExternalId: 'LS1473219' },
+      params: { policyNumber: 'LS1473219', navigatePath: POLICY_DETAIL_PATH },
+      idempotencyKey: 'policy_1:detail:during-poll',
+      issuedAt: '2026-08-27T16:00:00.000Z',
+      expiresAt: '2026-08-27T16:30:00.000Z',
+      requiresConfirmation: false,
+    }
+    let releaseBackgroundPoll!: (value: unknown) => void
+    const backgroundPoll = new Promise((resolve) => { releaseBackgroundPoll = resolve })
+    let pollCalls = 0
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (!request.pathname.endsWith('/commands/next')) return undefined as never
+      pollCalls += 1
+      if (pollCalls === 1) return await backgroundPoll as never
+      expect(request.body).toEqual({ commandId: command.commandId })
+      return {
+        command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+      } as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+    emit(
+      'runtime.onMessageExternal',
+      { type: 'START_NATIONAL_LIFE_COMMAND', commandId: command.commandId },
+      EXTERNAL_SENDER,
+      vi.fn(),
+    )
+    await flush()
+    releaseBackgroundPoll(undefined)
+
+    await vi.waitFor(() => expect(pollCalls).toBe(2))
+    expect(tabs.create).toHaveBeenCalledWith({ active: false, url: `${NLG}${POLICY_DETAIL_PATH}` })
+  })
+
   it('executes a sealed FlexLife quote in the agent portal instead of Steel', async () => {
     const snapshot = {
       schemaVersion: 1,
