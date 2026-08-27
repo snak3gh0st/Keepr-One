@@ -5,6 +5,7 @@ import {
 } from './config'
 
 const extensionId = 'abcdefghijklmnopabcdefghijklmnop'
+const officialStoreId = 'anfhdbmapiohhbplmccimflcenijfnoi'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -90,6 +91,28 @@ describe('local connector config', () => {
       extensionTarget: `${storeId},${extensionId}`,
       installMode: 'store',
       storeUrl: `https://chromewebstore.google.com/detail/keeproneconnect/${storeId}`,
+      baseUrl: 'https://app.keeprone.com',
+    })
+  })
+
+  it('uses the verified Store listing in production when Coolify still has the pilot URL blank', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_ENABLED', 'true')
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_ID', extensionId)
+    vi.stubEnv(
+      'NATIONAL_LIFE_LOCAL_CONNECTOR_EXTENSION_IDS',
+      `${officialStoreId},${extensionId}`,
+    )
+    vi.stubEnv('NATIONAL_LIFE_LOCAL_CONNECTOR_STORE_URL', '')
+    vi.stubEnv('BETTER_AUTH_URL', 'https://app.keeprone.com')
+
+    expect(getNationalLifeLocalConnectorConfig()).toEqual({
+      enabled: true,
+      extensionId: officialStoreId,
+      extensionTarget: `${officialStoreId},${extensionId}`,
+      installMode: 'store',
+      storeUrl:
+        `https://chromewebstore.google.com/detail/keeproneconnect/${officialStoreId}?hl=pt-BR`,
       baseUrl: 'https://app.keeprone.com',
     })
   })
