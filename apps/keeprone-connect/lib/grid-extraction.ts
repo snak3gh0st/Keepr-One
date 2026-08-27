@@ -30,6 +30,10 @@ export type GridExtractionDeps = {
 
 const KNOWN_CODES = ['TEMPLATE_UNAVAILABLE', 'PORTAL_REQUEST_FAILED', 'INVALID_PORTAL_RESPONSE']
 const LARGE_PAGE_GRID_KEYS = new Set(['COMMISSIONS_EARNING_REPORT'])
+// One upload is processed inside a single database transaction. Keeping it to
+// one server upsert tranche avoids proxy timeouts without changing how many rows
+// are fetched from National Life per page.
+const UPLOAD_CHUNK_SIZE = 100
 
 export async function runGridExtraction(
   message: BeginGridMessage,
@@ -74,8 +78,9 @@ export async function runGridExtraction(
       )
       // A carrier that ignores `length` can hand back more rows than a page, so
       // slice to the cap the envelope accepts rather than losing the whole chunk.
-      for (let offset = 0; offset < records.length; offset += PAGE_SIZE) {
-        const chunk = records.slice(offset, offset + PAGE_SIZE)
+      for (let offset = 0; offset < records.length; offset += UPLOAD_CHUNK_SIZE) {
+        if (deps.aborted()) return
+        const chunk = records.slice(offset, offset + UPLOAD_CHUNK_SIZE)
         deps.post({
           type: 'GRID_CHUNK',
           gridKey: message.gridKey,
