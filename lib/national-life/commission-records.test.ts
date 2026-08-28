@@ -108,13 +108,27 @@ describe('toCarrierCommissionRecords', () => {
       WritingAgtLevel: 'Personal',
     }
     const records = toCarrierCommissionRecords([
-      { id: 'old-row', raw: { ...raw, CommissionStatementId: 'old' }, amounts: { GrossCommEarned: '$100' } },
-      { id: 'new-row', raw: { ...raw, CommissionStatementId: 'new' }, amounts: { GrossCommEarned: '$100' } },
-      { id: 'newest-row', raw: { ...raw, CommissionStatementId: 'newest' }, amounts: { GrossCommEarned: '$100' } },
+      { id: 'old-row', agentId: 'agent-1', raw: { ...raw, CommissionStatementId: 'old' }, amounts: { GrossCommEarned: '$100' } },
+      { id: 'new-row', agentId: 'agent-1', raw: { ...raw, CommissionStatementId: 'new' }, amounts: { GrossCommEarned: '$100' } },
+      { id: 'newest-row', agentId: 'agent-1', raw: { ...raw, CommissionStatementId: 'newest' }, amounts: { GrossCommEarned: '$100' } },
     ])
 
     expect(records).toHaveLength(1)
     expect(totalOf(records)).toBe(100)
+  })
+
+  it('preserves unscoped rows because their tenant boundary is unknown', () => {
+    const raw = {
+      PolicyNumber: 'NL1',
+      PaymentDate: '08/25/2026',
+      WritingAgtLevel: 'Personal',
+    }
+    const records = toCarrierCommissionRecords([
+      { id: 'row-a', raw, amounts: { GrossCommEarned: '$100' } },
+      { id: 'row-b', raw, amounts: { GrossCommEarned: '$100' } },
+    ])
+
+    expect(records).toHaveLength(2)
   })
 })
 

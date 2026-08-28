@@ -15,6 +15,7 @@ import { commissionEarningIdentity } from './commission-identity'
 /// exists so both read one source.
 export type CarrierCommissionRow = {
   id: string
+  agentId?: string
   raw: unknown
   amounts: unknown
 }
@@ -137,9 +138,8 @@ export function toCarrierCommissionRecords(
     if (type === null) continue
     const isOverride = type === 'OVERRIDE'
     const identity = commissionEarningIdentity(raw, amounts)
-    const scopedRow = row as CarrierCommissionRow & { agentId?: unknown }
-    const owner = typeof scopedRow.agentId === 'string' ? scopedRow.agentId : ''
-    const dedupeKey = identity ? `${owner}\u0000${identity}` : null
+    const owner = typeof row.agentId === 'string' ? row.agentId : null
+    const dedupeKey = identity && owner ? `${owner}\u0000${identity}` : null
     if (dedupeKey && seen.has(dedupeKey)) continue
     if (dedupeKey) seen.add(dedupeKey)
 
