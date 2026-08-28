@@ -22,6 +22,7 @@ export type ConnectorResponse = {
     status?: string
     errorCode?: string
     updatedAt?: string
+    phase?: string
   }
 }
 

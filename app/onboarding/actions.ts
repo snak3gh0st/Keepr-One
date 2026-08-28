@@ -355,8 +355,8 @@ export async function verifyNationalLifeOnboardingAction(
     if (integrations.nationalLife !== 'VERIFIED_SYNC') {
       throw new OnboardingActionError(
         integrations.nationalLife === 'CONNECTOR_PAIRED'
-          ? 'O KeeproneConnect está pareado, mas ainda falta concluir uma sincronização verificada da National Life.'
-          : 'Conecte o KeeproneConnect e conclua a primeira sincronização da National Life.',
+          ? 'O K-Bot está conectado, mas ainda falta concluir uma sincronização verificada da National Life.'
+          : 'Conecte o K-Bot e conclua a primeira sincronização da National Life.',
       )
     }
 

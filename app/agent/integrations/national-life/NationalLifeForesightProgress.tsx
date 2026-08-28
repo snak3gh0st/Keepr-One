@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import type { ForesightReadStatus } from '@/lib/national-life/foresight-run-service'
+import { KBotActivity, type KBotState } from '@/components/kbot/KBotAvatar'
 
 const POLL_MS = 1_500
 
@@ -38,22 +39,21 @@ export function NationalLifeForesightProgress({
   const progress = status.totalServices > 0
     ? `reading ${status.completedServices} of ${status.totalServices} services`
     : `reading ${status.inventoriedCases} of ${status.totalCases} cases`
+  const botState: KBotState = paused ? 'waiting' : terminal ? 'success' : 'working'
 
   return (
     <section aria-label="Foresight progress" className="mb-6 rounded-2xl border border-border-steel bg-paper p-5 shadow-[var(--shadow-card)] sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Foresight</p>
-          <h2 className="mt-1 text-lg font-semibold text-ink">
-            {paused ? 'Needs your attention' : terminal ? 'Finished reading' : 'Reading your carrier data'}
-          </h2>
-        </div>
+        <KBotActivity
+          state={botState}
+          title={paused ? 'K-Bot needs your National Life login' : terminal ? 'K-Bot finished reading Foresight' : 'K-Bot is reading Foresight'}
+          detail={paused ? 'Reconnect once and this same inventory job continues.' : `Foresight: ${progress}`}
+          compact
+        />
         <span className="font-mono text-sm font-semibold text-teal">{status.percent}%</span>
       </div>
       <progress aria-label="Foresight reading progress" className="mt-5 h-2 w-full accent-teal" max={100} value={status.percent} />
-      <p className="mt-3 text-sm text-ink-muted">
-        {paused ? 'Reconnect to National Life to keep going. Nothing was changed at the carrier.' : `Foresight: ${progress}`}
-      </p>
+      {paused && <p className="mt-3 text-sm text-ink-muted">Nothing was changed at the carrier.</p>}
     </section>
   )
 }

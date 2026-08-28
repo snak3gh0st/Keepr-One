@@ -42,7 +42,7 @@ const USD = new Intl.NumberFormat("en-US", {
 
 const DOCUMENT_LABEL: Record<IllustrationDocumentState, string> = {
   READY: "PDF pronto",
-  WORKING: "Em geração",
+  WORKING: "K-Bot trabalhando",
   ATTENTION: "Pede atenção",
   NOT_REQUESTED: "PDF não solicitado",
 };

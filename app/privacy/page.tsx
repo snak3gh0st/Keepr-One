@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
   title: 'Política de privacidade · Keepr One',
-  description: 'Política de privacidade do Keepr One e do KeeproneConnect.',
+  description: 'Política de privacidade do Keepr One e do K-Bot.',
 }
 
 export default function PrivacyPage() {
@@ -17,7 +17,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-xl font-semibold text-[#17211b]">Escopo</h2>
             <p className="mt-2">
-              Esta política explica como o Keepr One e a extensão KeeproneConnect tratam dados usados
+              Esta política explica como o Keepr One e a extensão K-Bot (identificada tecnicamente como KeeproneConnect) tratam dados usados
               para sincronizar informações do portal National Life com a conta do agente.
             </p>
           </section>
@@ -36,7 +36,7 @@ export default function PrivacyPage() {
             <h2 className="text-xl font-semibold text-[#17211b]">Login e segurança</h2>
             <p className="mt-2">
               O login e o MFA da National Life acontecem no navegador local do agente. O Keepr One e o
-              KeeproneConnect não solicitam, armazenam nem enviam a senha, códigos MFA, cookies, tokens de
+              K-Bot e Keepr One não solicitam, armazenam nem enviam a senha, códigos MFA, cookies, tokens de
               sessão ou HTML bruto da carrier. A extensão mantém apenas o estado técnico necessário para
               o pareamento e para retomar uma sincronização.
             </p>
@@ -56,7 +56,7 @@ export default function PrivacyPage() {
             <h2 className="text-xl font-semibold text-[#17211b]">Retenção e solicitações</h2>
             <p className="mt-2">
               Os dados sincronizados seguem a retenção e os controles de acesso da conta do Keepr One. O
-              agente pode desconectar o KeeproneConnect e solicitar ajuda sobre acesso, correção ou remoção
+              agente pode desconectar o K-Bot e solicitar ajuda sobre acesso, correção ou remoção
               de dados pelo suporte do Keepr One em{' '}
               <a className="font-semibold text-[#235c42] underline" href="https://app.keeprone.com">
                 app.keeprone.com

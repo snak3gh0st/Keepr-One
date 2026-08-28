@@ -92,7 +92,7 @@ describe('Foresight isolated-world executor', () => {
       }, {}, resolve)
       expect(async).toBe(true)
     })
-    expect(mocks.execute).toHaveBeenCalledWith({ inputHash: receipt.inputHash, snapshot })
+    expect(mocks.execute).toHaveBeenCalledWith({ inputHash: receipt.inputHash, snapshot, onProgress: expect.any(Function) })
     expect(response).toEqual({
       ok: true,
       type: 'FORESIGHT_ILLUSTRATION_SAVED',
@@ -133,7 +133,7 @@ describe('Foresight isolated-world executor', () => {
       }, {}, resolve)
       expect(async).toBe(true)
     })
-    expect(mocks.executeTerm).toHaveBeenCalledWith({ inputHash: receipt.inputHash, snapshot: termSnapshot })
+    expect(mocks.executeTerm).toHaveBeenCalledWith({ inputHash: receipt.inputHash, snapshot: termSnapshot, onProgress: expect.any(Function) })
     expect(response).toEqual(expect.objectContaining({ ok: true, receipt, document }))
   })
 
@@ -155,7 +155,7 @@ describe('Foresight isolated-world executor', () => {
         inputHash: receipt.inputHash, snapshot: premiumSolvedSnapshot,
       }, {}, resolve)
     })
-    expect(mocks.execute).toHaveBeenCalledWith({ inputHash: receipt.inputHash, snapshot: premiumSolvedSnapshot })
+    expect(mocks.execute).toHaveBeenCalledWith({ inputHash: receipt.inputHash, snapshot: premiumSolvedSnapshot, onProgress: expect.any(Function) })
     expect(response).toEqual(expect.objectContaining({ ok: true, receipt, document }))
   })
 })

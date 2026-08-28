@@ -132,7 +132,7 @@ describe('illustrationPdfMessage', () => {
   // carrier: minutes, not seconds. Without it, silence reads as broken.
   it('says how long a render in flight usually takes', () => {
     expect(illustrationPdfMessage({ state: 'WORKING' })).toBe(
-      'PDF a caminho — costuma levar de 2 a 5 minutos.',
+      'K-Bot está fazendo no Foresight o que você faria: preenchendo o cenário, aguardando o cálculo e preparando o PDF. Estimativa típica: 2–5 minutos.',
     )
   })
 
@@ -147,7 +147,7 @@ describe('illustrationPdfMessage', () => {
       safeErrorCode: 'FORESIGHT_SSO_EXPIRED',
     })
     expect(illustrationPdfMessage(status.get('ill-1')!)).toBe(
-      'Aguardando você conectar na seguradora.',
+      'K-Bot está aguardando você entrar na National Life para continuar o mesmo pedido.',
     )
   })
 
@@ -163,7 +163,7 @@ describe('illustrationPdfMessage', () => {
       safeErrorCode: 'NATIONAL_LIFE_RECONNECT_REQUIRED',
     })
     expect(illustrationPdfMessage(status.get('ill-1')!)).toBe(
-      'Aguardando você conectar na seguradora.',
+      'K-Bot está aguardando você entrar na National Life para continuar o mesmo pedido.',
     )
   })
 })

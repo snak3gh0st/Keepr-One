@@ -1,4 +1,4 @@
-import { popupCanRetry, popupStatusText } from '../../lib/popup-copy'
+import { popupCanRetry, popupCommandStatusText, popupSyncStatusText } from '../../lib/popup-copy'
 import type { CommandState, DeviceState, SyncState } from '../../lib/state'
 
 function requiredElement<T extends Element>(selector: string): T {
@@ -7,17 +7,23 @@ function requiredElement<T extends Element>(selector: string): T {
   return element
 }
 
-const statusElement = requiredElement<HTMLParagraphElement>('#status')
+const syncStatusElement = requiredElement<HTMLParagraphElement>('#sync-status')
+const commandStatusElement = requiredElement<HTMLParagraphElement>('#command-status')
+const commandRowElement = requiredElement<HTMLElement>('#command-row')
 const popupElement = requiredElement<HTMLElement>('#popup')
 const connectionElement = requiredElement<HTMLSpanElement>('#connection')
 const openButton = requiredElement<HTMLButtonElement>('#open')
 const retryButton = requiredElement<HTMLButtonElement>('#retry')
 
 function render(device: DeviceState, sync: SyncState, command?: CommandState) {
-  statusElement.textContent = popupStatusText(device, sync, command)
+  syncStatusElement.textContent = popupSyncStatusText(device, sync)
+  const showCommand = Boolean(command && command.status !== 'IDLE')
+  commandRowElement.hidden = !showCommand
+  commandStatusElement.textContent = command && showCommand ? popupCommandStatusText(command) : ''
   retryButton.hidden = !popupCanRetry(device, sync)
   popupElement.dataset.device = device.status.toLowerCase()
   popupElement.dataset.sync = sync.status.toLowerCase()
+  popupElement.dataset.command = command?.status.toLowerCase() ?? 'idle'
 
   if (device.status !== 'READY') {
     connectionElement.textContent = device.status === 'PAIRING' ? 'Linking' : 'Not linked'
@@ -25,7 +31,7 @@ function render(device: DeviceState, sync: SyncState, command?: CommandState) {
     return
   }
 
-  connectionElement.textContent = sync.status === 'ERROR' ? 'Needs attention' : 'Connected'
+  connectionElement.textContent = sync.status === 'ERROR' || command?.status === 'ERROR' ? 'Needs attention' : 'Connected'
   openButton.textContent = sync.status === 'AUTH_REQUIRED' ||
     command?.status === 'AUTH_REQUIRED' || command?.status === 'MFA_REQUIRED'
     ? 'Continue sign-in'

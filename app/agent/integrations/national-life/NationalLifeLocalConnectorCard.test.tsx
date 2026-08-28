@@ -72,7 +72,7 @@ describe('NationalLifeLocalConnectorCard', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Connect National Life' }))
 
     expect(clicked).toHaveBeenCalledOnce()
-    expect(screen.getByRole('status')).toHaveTextContent('Install KeeproneConnect in the Chrome Web Store')
+    expect(screen.getByRole('status')).toHaveTextContent('Install K-Bot by KeeprOne from the Chrome Web Store')
   })
 
   it('detects a missing connector and links the official Chrome Web Store before sync', async () => {
@@ -88,16 +88,16 @@ describe('NationalLifeLocalConnectorCard', () => {
     )
 
     expect(await screen.findByRole('status')).toHaveTextContent('is not installed on this browser')
-    expect(screen.getByRole('button', { name: 'Install KeeproneConnect' })).toBeEnabled()
-    expect(screen.getByRole('link', { name: /Download KeeproneConnect/i })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Install K-Bot' })).toBeEnabled()
+    expect(screen.getByRole('link', { name: /Download K-Bot/i })).toHaveAttribute(
       'href',
       storeUrl,
     )
     const progress = screen.getByRole('list', { name: 'Connection progress' })
-    expect(within(progress).getByText('Extension')).toBeInTheDocument()
+    expect(within(progress).getByText('K-Bot')).toBeInTheDocument()
     expect(within(progress).getByText('Install')).toBeInTheDocument()
-    expect(within(progress).getByText('National Life')).toBeInTheDocument()
-    expect(within(progress).getByText('Your data')).toBeInTheDocument()
+    expect(within(progress).getByText('National Life session')).toBeInTheDocument()
+    expect(within(progress).getByText('Verified data')).toBeInTheDocument()
   })
 
   it('pairs and starts sync automatically when the agent returns from the Store', async () => {
@@ -135,8 +135,8 @@ describe('NationalLifeLocalConnectorCard', () => {
       />,
     )
 
-    await screen.findByRole('button', { name: 'Install KeeproneConnect' })
-    await userEvent.click(screen.getByRole('button', { name: 'Install KeeproneConnect' }))
+    await screen.findByRole('button', { name: 'Install K-Bot' })
+    await userEvent.click(screen.getByRole('button', { name: 'Install K-Bot' }))
     installed = true
     window.dispatchEvent(new Event('focus'))
 
@@ -146,7 +146,7 @@ describe('NationalLifeLocalConnectorCard', () => {
     )
     expect(messages).toContain('PAIR_CONNECTOR')
     expect(messages).toContain('START_NATIONAL_LIFE_SYNC')
-    expect(screen.queryByRole('link', { name: /Download KeeproneConnect/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Download K-Bot/i })).not.toBeInTheDocument()
   })
 
   it('guides unpacked install in pilot mode without opening a store URL', async () => {
@@ -313,7 +313,7 @@ describe('NationalLifeLocalConnectorCard', () => {
     await userEvent.click(screen.getByRole('button', { name: /National Life/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('available areas were saved')
+      expect(screen.getByRole('status')).toHaveTextContent('saved every available area')
     })
     expect(screen.getByRole('button', { name: 'Retry remaining areas' })).toBeEnabled()
     expect(screen.getByRole('status')).not.toHaveTextContent('stopped')

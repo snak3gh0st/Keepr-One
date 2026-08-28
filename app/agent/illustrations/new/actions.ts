@@ -54,7 +54,7 @@ export async function requestForesightIllustration(
   formData: FormData,
 ): Promise<RequestForesightIllustrationResult> {
   if (!isNationalLifeLocalConnectorEnabled()) {
-    return { ok: false, message: 'Conecte o KeeproneConnect para gerar a ilustração oficial.' }
+    return { ok: false, message: 'Conecte o K-Bot neste navegador para gerar a ilustração oficial.' }
   }
   const agent = await getCurrentAgent()
 

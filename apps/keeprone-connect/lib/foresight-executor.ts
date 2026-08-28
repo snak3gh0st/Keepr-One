@@ -24,6 +24,9 @@ import type {
   ForesightExecutionReceipt,
   ForesightSolvedExecutionReceipt,
 } from './foresight-messages'
+import type { ForesightProgressPhase } from './foresight-progress'
+
+type ProgressReporter = (phase: ForesightProgressPhase) => void
 
 const MAIN_FRAME_ID = 'ctl00_mobilityPH_iframeMain'
 const MODAL_FRAME_ID = 'ctl00_mobilityPH_modalDialog__Iframe'
@@ -625,14 +628,18 @@ async function saveCase(caseName: string): Promise<void> {
 async function executeForesightIllustrationV1(input: {
   inputHash: string
   snapshot: ForesightIllustrationSnapshotV1
+  onProgress?: ProgressReporter
 }): Promise<{ receipt: ForesightExecutionReceipt; document: ForesightExecutionDocument }> {
   if (classifyForesightLocation(location.href) !== 'FORESIGHT' ||
     location.pathname !== '/NWI/Main/Layout.aspx') fail('FORESIGHT_LOCATION_UNEXPECTED')
   const independentHash = await sha256ForesightSnapshot(input.snapshot)
   if (independentHash !== input.inputHash) fail('FORESIGHT_INPUT_HASH_MISMATCH')
   const release = currentRelease()
+  input.onProgress?.('OPENING_CASE')
   const opened = await openFlexLife(input.snapshot)
+  input.onProgress?.('FILLING_CLIENT')
   const client = opened.existing ? readClient(opened.doc, input.snapshot) : await fillClient(opened.doc, input.snapshot)
+  input.onProgress?.('CONFIGURING_PRODUCT')
   const ledgerDoc = await navigate('/NWI/IUL2025/ledger.aspx', MENU_IDS.ledger)
   const ledger = opened.existing ? readLedger(ledgerDoc) : await fillLedger(ledgerDoc, input.snapshot)
   const ridersDoc = await navigate('/NWI/IUL2025/product.aspx', MENU_IDS.riders)
@@ -642,6 +649,7 @@ async function executeForesightIllustrationV1(input: {
   const reportsDoc = await navigate('/NWI/ProductWorkflow/reportselection.aspx', MENU_IDS.reports)
   const reports = verifyReports(reportsDoc)
   const target = buildForesightTarget(input.snapshot)
+  input.onProgress?.('VERIFYING_VALUES')
   const observed: ForesightMaterialReadback = {
     carrierCaseName: target.carrierCaseName,
     productCode: '956',
@@ -653,7 +661,11 @@ async function executeForesightIllustrationV1(input: {
   }
   const comparison = compareForesightTarget(input.snapshot, observed)
   if (!comparison.ok) fail(foresightReadbackMismatchCode(comparison.mismatches))
-  if (!opened.existing) await saveCase(target.carrierCaseName)
+  if (!opened.existing) {
+    input.onProgress?.('SAVING_CASE')
+    await saveCase(target.carrierCaseName)
+  }
+  input.onProgress?.('GENERATING_PDF')
   const document = await captureReportInMainWorld()
   const pdf = decodePdf(document)
   const receipt: ForesightExecutionReceipt = {
@@ -684,20 +696,25 @@ export function solvedClientMatches(
 async function executeForesightSolvedIllustration(input: {
   inputHash: string
   snapshot: ForesightSolvedIllustrationSnapshotV2
+  onProgress?: ProgressReporter
 }): Promise<{ receipt: ForesightSolvedExecutionReceipt; document: ForesightExecutionDocument }> {
   if (classifyForesightLocation(location.href) !== 'FORESIGHT' ||
     location.pathname !== '/NWI/Main/Layout.aspx') fail('FORESIGHT_LOCATION_UNEXPECTED')
   const independentHash = await sha256ForesightSnapshot(input.snapshot)
   if (independentHash !== input.inputHash) fail('FORESIGHT_INPUT_HASH_MISMATCH')
   const release = currentRelease()
+  input.onProgress?.('OPENING_CASE')
   const opened = await openFlexLife(input.snapshot)
+  input.onProgress?.('FILLING_CLIENT')
   const client = opened.existing ? readClient(opened.doc, input.snapshot) : await fillClient(opened.doc, input.snapshot)
   if (!solvedClientMatches(input.snapshot, client)) fail('FORESIGHT_READBACK_CLIENT_MISMATCH')
   // FlexLife will not calculate a new solved illustration while its strategy
   // allocation is still 0%. Prime the required 100% allocation first.
+  input.onProgress?.('CONFIGURING_PRODUCT')
   const primedAllocations = await fillAllocation(
     await navigate('/NWI/IUL2025/InterestRates.aspx', MENU_IDS.interestRates),
   )
+  input.onProgress?.('CALCULATING')
   const ledgerDoc = await navigate('/NWI/IUL2025/ledger.aspx', MENU_IDS.ledger)
   const ledger = await fillSolvedLedger(ledgerDoc, input.snapshot)
   if (!ledger || hasCarrierCalculationError(ledgerDoc) || !solvedLedgerMatches(input.snapshot, ledger)) {
@@ -715,7 +732,12 @@ async function executeForesightSolvedIllustration(input: {
     JSON.stringify(reports) !== JSON.stringify(input.snapshot.reports)) {
     fail('FORESIGHT_READBACK_MISMATCH')
   }
-  if (!opened.existing) await saveCase(input.snapshot.carrierCaseName)
+  input.onProgress?.('VERIFYING_VALUES')
+  if (!opened.existing) {
+    input.onProgress?.('SAVING_CASE')
+    await saveCase(input.snapshot.carrierCaseName)
+  }
+  input.onProgress?.('GENERATING_PDF')
   const document = await captureReportInMainWorld()
   const pdf = decodePdf(document)
   const receipt: ForesightSolvedExecutionReceipt = {
@@ -739,10 +761,12 @@ async function executeForesightSolvedIllustration(input: {
 export async function executeForesightIllustration(input: {
   inputHash: string
   snapshot: ForesightIllustrationSnapshot
+  onProgress?: ProgressReporter
 }): Promise<{ receipt: AnyForesightExecutionReceipt; document: ForesightExecutionDocument }> {
   if (input.snapshot.schemaVersion === 2) return executeForesightSolvedIllustration({
     inputHash: input.inputHash,
     snapshot: input.snapshot,
+    onProgress: input.onProgress,
   })
-  return executeForesightIllustrationV1({ inputHash: input.inputHash, snapshot: input.snapshot })
+  return executeForesightIllustrationV1({ inputHash: input.inputHash, snapshot: input.snapshot, onProgress: input.onProgress })
 }

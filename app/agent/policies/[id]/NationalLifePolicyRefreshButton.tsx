@@ -38,7 +38,7 @@ export function NationalLifePolicyRefreshButton({
       // The command is already durable on the server. Chrome's one-minute alarm
       // is the fallback when the direct wake-up channel is unavailable.
       setState('queued')
-      setMessage('Atualização agendada. O KeeproneConnect continuará em segundo plano.')
+      setMessage('Atualização agendada. O K-Bot continuará em segundo plano.')
     }
   }
 

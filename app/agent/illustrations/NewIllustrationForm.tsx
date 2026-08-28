@@ -67,8 +67,8 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
         Ilustração oficial
       </h2>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">
-        Você revisa o cenário aqui. O KeeproneConnect o preenche em uma aba discreta do
-        Foresight, confere o que a National Life reteve e traz apenas o PDF oficial válido.
+        Você revisa o cenário aqui. O K-Bot executa os passos aprovados no Foresight,
+        confere o que a National Life calculou e traz apenas o PDF oficial válido.
       </p>
 
       <ol className="mt-6 grid gap-px overflow-hidden rounded-2xl border border-border-steel bg-border-steel sm:grid-cols-3" aria-label="Etapas da ilustração oficial">
@@ -264,11 +264,11 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
 
         <div className="flex flex-col gap-4 border-t border-border-steel pt-5 sm:flex-row sm:items-center sm:justify-between">
           <p className="max-w-md text-xs leading-5 text-ink-muted">
-            Você pode sair desta tela. A extensão abre o Foresight em segundo plano; só traz a aba à frente se a National Life pedir login. Se o portal alterar um valor, a geração para antes do PDF.
+            Você pode sair desta tela. O K-Bot continua em segundo plano e só pede sua atenção se a National Life solicitar login. Se o portal alterar um valor, a geração para antes do PDF.
           </p>
           <Button type="submit" variant="primary" disabled={submitting} className="w-full shrink-0 sm:w-auto">
             {submitting
-              ? <ForesightActivityIndicator label="Preparando no Foresight…" />
+              ? <ForesightActivityIndicator label="K-Bot está preparando o cenário…" />
               : 'Gerar ilustração oficial'}
           </Button>
         </div>

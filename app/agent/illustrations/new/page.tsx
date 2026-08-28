@@ -38,7 +38,7 @@ export default async function NewIllustrationPage() {
         <ContextPanel eyebrow="Dica rápida" title="O que enviar">
           <p>
             Informe os dados do segurado e escolha se o cenário será resolvido pelo capital ou
-            pelo prêmio mensal. O KeeproneConnect cria o caso FlexLife no Foresight, confere o
+            pelo prêmio mensal. O K-Bot cria o caso FlexLife no Foresight, confere o
             resultado calculado e devolve o PDF oficial.
           </p>
           <div className="mt-5 border-t border-white/10 pt-4">

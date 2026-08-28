@@ -1,4 +1,4 @@
-/// Classificação de falhas do KeeproneConnect.
+/// Classificação de falhas do K-Bot (pacote técnico KeeproneConnect).
 ///
 /// Um código interno nunca chega ao agente: ele é apenas a chave que escolhe a
 /// frase. O par (mensagem, ação) é o contrato — toda falha precisa dizer o que
@@ -106,7 +106,7 @@ export function connectorFailure(code: string | undefined | null): ConnectorFail
     return {
       action: 'update',
       message:
-        'This browser extension is out of date. Update KeeproneConnect in your browser, then start the sync again.',
+        'K-Bot is out of date. Update the extension in your browser, then start the task again.',
     }
   }
   if (typeof code === 'string' && PAUSED_CODES.includes(code)) {
@@ -134,7 +134,7 @@ export function connectorFailure(code: string | undefined | null): ConnectorFail
     return {
       action: 'retry',
       message:
-        'National Life stopped before this area was fully received. Saved batches are safe — resume the sync to collect the missing rows.',
+        'National Life stopped before this section was finished. Everything K-Bot already collected is safe — resume to bring in the rest.',
     }
   }
   if (typeof code === 'string' && PORTAL_CODES.includes(code)) {

@@ -105,7 +105,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
       : commandStatus?.state === 'FAILED'
         ? 'Revisão do cenário necessária'
         : commandStatus?.state === 'WORKING'
-          ? 'Em andamento'
+          ? 'Preenchendo, calculando e emitindo'
           : 'Aguardando início'
 
   return (
@@ -156,13 +156,13 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
         </div>
         <ol className="relative mt-6 grid gap-3 border-t border-border-steel pt-5 sm:grid-cols-3" aria-label="Progresso da ilustração">
           {[
-            ['Dados revisados', 'Cenário FlexLife aprovado', true],
-            ['Foresight', foresightStep, documentReady || commandStatus?.state === 'WORKING'],
-            ['PDF oficial', documentReady ? 'Arquivo disponível' : 'Aguardando confirmação', documentReady],
-          ].map(([title, detail, complete], index) => (
+            ['Dados revisados', 'Cenário aprovado no Keepr One', 'complete'],
+            ['K-Bot no Foresight', foresightStep, documentReady ? 'complete' : commandStatus?.state === 'WORKING' || commandStatus?.state === 'BLOCKED' ? 'current' : 'waiting'],
+            ['PDF oficial', documentReady ? 'Recebido e verificado' : 'Aguardando a National Life', documentReady ? 'complete' : 'waiting'],
+          ].map(([title, detail, stepState], index) => (
             <li key={title as string} className="flex items-start gap-3">
-              <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-mono font-semibold ${complete ? 'bg-teal text-paper' : index === 1 && commandStatus?.state === 'BLOCKED' ? 'bg-gold text-ink' : 'bg-panel text-ink-muted'}`}>
-                {complete ? '✓' : `0${index + 1}`}
+              <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-mono font-semibold ${stepState === 'complete' ? 'bg-teal text-paper' : stepState === 'current' ? 'bg-gold text-ink' : 'bg-panel text-ink-muted'}`}>
+                {stepState === 'complete' ? '✓' : `0${index + 1}`}
               </span>
               <span>
                 <strong className="block text-xs font-semibold text-ink">{title}</strong>

@@ -1,6 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="KeeproneConnect">
-  <rect width="128" height="128" rx="28" fill="#10261e"/>
-  <path d="M27 25.5c0-2.5 2-4.5 4.5-4.5H65L27 80.5V25.5Z" fill="#42c77d" stroke="#a8e7bf" stroke-width="1"/>
-  <path d="M27 87.5 84 21h31L27 108v-20.5Z" fill="#42c77d" stroke="#a8e7bf" stroke-width="1"/>
-  <path d="m68.5 85 17-17 27.5 39H81.5L68.5 85Z" fill="#f6f8f5" stroke="#c9d8cf" stroke-width="1"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="K-Bot by KeeprOne">
+  <rect width="128" height="128" rx="24" fill="#10291d"/>
+  <rect x="56" y="10" width="16" height="18" fill="#7ee2a8"/>
+  <rect x="50" y="4" width="28" height="8" fill="#dff7e7" opacity=".72"/>
+  <rect x="20" y="30" width="88" height="72" fill="#7ee2a8"/>
+  <rect x="28" y="38" width="72" height="48" fill="#173f2c"/>
+  <rect x="40" y="54" width="14" height="14" fill="#f4fff7"/>
+  <rect x="74" y="54" width="14" height="14" fill="#f4fff7"/>
+  <rect x="42" y="78" width="44" height="6" fill="#7ee2a8" opacity=".72"/>
+  <rect x="8" y="46" width="12" height="38" fill="#56bb7d"/>
+  <rect x="108" y="46" width="12" height="38" fill="#56bb7d"/>
+  <rect x="34" y="102" width="24" height="16" fill="#8dbaa0"/>
+  <rect x="70" y="102" width="24" height="16" fill="#8dbaa0"/>
 </svg>
