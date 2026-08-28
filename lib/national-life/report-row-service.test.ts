@@ -157,18 +157,42 @@ describe('National Life report row identity stability', () => {
     )
   })
 
-  it('keeps the same transaction identity separate for two statement links', () => {
-    const detail = { PolicyNumber: 'NL1', GrossCommEarned: '1.00', TransactionType: 'FYC' }
+  it('keeps one transaction identity when the carrier rotates only the statement id', () => {
+    const detail = {
+      PolicyNumber: 'NL1',
+      GrossCommEarned: '1.00',
+      TransactionType: 'FYC',
+      PaymentDate: '08/25/2026',
+      WritingAgtName: 'Agent One',
+      WritingAgtLevel: 'Personal',
+    }
     expect(
       deriveRowKey('COMMISSIONS_EARNING_REPORT', {
         ...detail,
         CommissionStatementId: 'statement-a',
       }),
-    ).not.toBe(
+    ).toBe(
       deriveRowKey('COMMISSIONS_EARNING_REPORT', {
         ...detail,
         CommissionStatementId: 'statement-b',
       }),
+    )
+  })
+
+  it('keeps otherwise identical earnings separate for different payees', () => {
+    const detail = {
+      PolicyNumber: 'NL1',
+      GrossCommEarned: '1.00',
+      TransactionType: 'FYC',
+      PaymentDate: '08/25/2026',
+      CommissionStatementId: 'statement-a',
+      WritingAgtLevel: 'Personal',
+    }
+
+    expect(
+      deriveRowKey('COMMISSIONS_EARNING_REPORT', { ...detail, WritingAgtName: 'Agent One' }),
+    ).not.toBe(
+      deriveRowKey('COMMISSIONS_EARNING_REPORT', { ...detail, WritingAgtName: 'Agent Two' }),
     )
   })
 })
