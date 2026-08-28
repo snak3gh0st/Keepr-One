@@ -100,6 +100,32 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(within(progress).getByText('Verified data')).toBeInTheDocument()
   })
 
+  it('shows K-Bot sad when the extension is installed but this computer is disconnected', async () => {
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({ ok: true, device: { status: 'UNPAIRED' }, sync: { status: 'IDLE' } })
+        return
+      }
+      callback({ ok: true })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    const presence = await screen.findByLabelText('K-Bot status')
+    await waitFor(() => expect(presence).toHaveTextContent('K-Bot is disconnected'))
+    expect(presence.querySelector('[data-kbot-character="true"]')).toHaveAttribute(
+      'data-expression',
+      'sad',
+    )
+  })
+
   it('pairs and starts sync automatically when the agent returns from the Store', async () => {
     let installed = false
     let installedChecks = 0

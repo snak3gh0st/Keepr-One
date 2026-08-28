@@ -219,6 +219,7 @@ export function NationalLifeLocalConnectorCard({
   const loginComplete = ['syncing', 'slow', 'partial', 'success'].includes(state)
   const syncComplete = state === 'partial' || state === 'success'
   const syncActive = state === 'syncing' || state === 'slow'
+  const disconnected = connectorPresence === 'installed' && !pairedDeviceId && state === 'idle'
   const extensionStepState: JourneyStepState = connectorPresence === 'installed' ? 'complete' : 'active'
   const loginStepState: JourneyStepState = loginComplete
     ? 'complete'
@@ -241,7 +242,7 @@ export function NationalLifeLocalConnectorCard({
         ? state === 'connecting' || state === 'checking' ? 'Opening portal' : 'Ready'
         : 'Next'
   const syncStepDetail = syncComplete ? 'Up to date' : syncActive ? 'Syncing' : 'Waiting'
-  const botState: KBotState = state === 'error'
+  const botState: KBotState = state === 'error' || disconnected
     ? 'error'
     : state === 'login-required' || state === 'partial'
       ? 'waiting'
@@ -256,6 +257,9 @@ export function NationalLifeLocalConnectorCard({
     }
     if (connectorPresence === 'missing') {
       return { title: 'Install K-Bot to begin', detail: 'Then it can work with National Life for you.' }
+    }
+    if (disconnected) {
+      return { title: 'K-Bot is disconnected', detail: 'Connect this computer when you want it to work for you.' }
     }
     if (state === 'login-required') {
       return { title: 'K-Bot is waiting for you', detail: 'Sign in to National Life and it will continue.' }

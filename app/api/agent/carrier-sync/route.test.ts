@@ -32,9 +32,14 @@ vi.mock('@/lib/national-life/plan-access', () => ({
 
 import { GET } from './route'
 
+const connector = {
+  enabled: true,
+  extensionTarget: 'abcdefghijklmnopabcdefghijklmnop',
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.localConnectorConfig.mockReturnValue({ enabled: true })
+  mocks.localConnectorConfig.mockReturnValue(connector)
   mocks.getStatus.mockResolvedValue(null)
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1' })
   mocks.sanitizeStatus.mockImplementation(async (_agentId, status) => status)
@@ -73,6 +78,7 @@ describe('carrier sync badge route', () => {
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
       state: { kind: 'WORKING', count: 2 },
+      connector,
     })
   })
 
@@ -83,6 +89,7 @@ describe('carrier sync badge route', () => {
 
     await expect(response.json()).resolves.toEqual({
       state: { kind: 'NEEDS_YOU', count: 1 },
+      connector,
     })
   })
 
@@ -100,6 +107,7 @@ describe('carrier sync badge route', () => {
 
     await expect(response.json()).resolves.toEqual({
       state: { kind: 'IN_SYNC' },
+      connector,
       illustration: {
         id: 'ill-1',
         state: 'WORKING',
@@ -128,14 +136,17 @@ describe('carrier sync badge route', () => {
     })
   })
 
-  it('renders no badge when the integration is not configured', async () => {
+  it('reports that the companion cannot connect when the integration is not configured', async () => {
     mocks.localConnectorConfig.mockReturnValue({ enabled: false })
 
     const response = await GET()
 
     expect(mocks.getCurrentAgent).not.toHaveBeenCalled()
     expect(mocks.count).not.toHaveBeenCalled()
-    await expect(response.json()).resolves.toEqual({ state: null })
+    await expect(response.json()).resolves.toEqual({
+      state: null,
+      connector: { enabled: false, extensionTarget: null },
+    })
   })
 
   it('renders no badge rather than guess when the agent lookup fails', async () => {
@@ -143,7 +154,7 @@ describe('carrier sync badge route', () => {
 
     const response = await GET()
 
-    await expect(response.json()).resolves.toEqual({ state: null })
+    await expect(response.json()).resolves.toEqual({ state: null, connector })
   })
 
   it('renders no badge rather than guess when the queue query fails', async () => {
@@ -151,6 +162,6 @@ describe('carrier sync badge route', () => {
 
     const response = await GET()
 
-    await expect(response.json()).resolves.toEqual({ state: null })
+    await expect(response.json()).resolves.toEqual({ state: null, connector })
   })
 })

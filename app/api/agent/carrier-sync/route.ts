@@ -56,9 +56,14 @@ async function illustrationActivity(agentId: string, command: {
 /// only polls this route while an operation is active, so idle accounts remain
 /// quiet while a running sync and illustration can be represented together.
 export async function GET() {
-  if (!getNationalLifeLocalConnectorConfig().enabled) {
+  const localConnector = getNationalLifeLocalConnectorConfig()
+  const connector = localConnector.enabled
+    ? { enabled: true, extensionTarget: localConnector.extensionTarget }
+    : { enabled: false, extensionTarget: null }
+
+  if (!localConnector.enabled) {
     // No integration, no badge. Not every agent connects one.
-    return NextResponse.json({ state: null })
+    return NextResponse.json({ state: null, connector })
   }
   try {
     const agent = await getCurrentAgent()
@@ -91,12 +96,13 @@ export async function GET() {
     const illustration = await illustrationActivity(agent.id, latestIllustrationCommand)
     return NextResponse.json({
       state: carrierSyncState({ working, blocked }),
+      connector,
       ...(sync ? { sync } : {}),
       ...(illustration ? { illustration } : {}),
     })
   } catch {
     // A badge that does not know what it is saying is worse than no badge —
     // that is how the illustration reachability flag lied for hours.
-    return NextResponse.json({ state: null })
+    return NextResponse.json({ state: null, connector })
   }
 }

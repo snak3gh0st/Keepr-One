@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, it } from 'vitest'
 import { KBotActivity, KBotAvatar, KBotCornerPresence, KBotTaskTrail } from './KBotAvatar'
+
+afterEach(cleanup)
 
 describe('KBotAvatar', () => {
   it('keeps the drawing decorative because adjacent text carries the state', () => {
@@ -33,7 +36,7 @@ describe('KBotAvatar', () => {
     expect(screen.getByText('Open').closest('li')).not.toHaveAttribute('aria-current')
   })
 
-  it('keeps a subtle animated presence in the corner without becoming a chat button', () => {
+  it('opens a compact activity panel without becoming a chat interface', async () => {
     render(
       <KBotCornerPresence
         state="working"
@@ -45,6 +48,30 @@ describe('KBotAvatar', () => {
     const status = screen.getByLabelText('K-Bot status')
     expect(status).toHaveAttribute('data-state', 'working')
     expect(status).toHaveTextContent('K-Bot is working')
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(status.querySelector('[data-kbot-character="true"]')).toHaveAttribute('data-state', 'working')
+    const trigger = screen.getByRole('button', { name: 'Show K-Bot activity' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('K-Bot activity')).not.toBeInTheDocument()
+
+    await userEvent.click(trigger)
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('K-Bot activity')).toBeInTheDocument()
+    expect(screen.queryByText(/chat|message/i)).not.toBeInTheDocument()
+  })
+
+  it('shows a sad pixel expression when K-Bot is disconnected', () => {
+    render(
+      <KBotCornerPresence
+        state="error"
+        title="K-Bot needs attention"
+        detail="Connect this computer again."
+      />,
+    )
+
+    expect(screen.getByLabelText('K-Bot status').querySelector('[data-kbot-character="true"]')).toHaveAttribute(
+      'data-expression',
+      'sad',
+    )
   })
 })

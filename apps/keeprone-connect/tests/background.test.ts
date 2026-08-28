@@ -479,6 +479,20 @@ describe('background plan executor', () => {
     expect(tabs.create).not.toHaveBeenCalled()
   })
 
+  it('opens Keepr One from the popup when this browser is not paired', async () => {
+    storage.device = { status: 'UNPAIRED' }
+    const keeprUrl = 'http://localhost:3000/agent/integrations/national-life'
+    tabs.query.mockResolvedValue([{ id: 21, active: false, url: keeprUrl }])
+    await bootBackground()
+    const sendResponse = vi.fn()
+
+    emit('runtime.onMessage', { type: 'OPEN_KEEPR' }, {}, sendResponse)
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }))
+    expect(tabs.update).toHaveBeenCalledWith(21, { active: true })
+    expect(tabs.create).not.toHaveBeenCalled()
+  })
+
   it('does not swallow an on-demand command while a background poll is in flight', async () => {
     const command = {
       protocolVersion: 1,
