@@ -10,7 +10,8 @@ import {
   requireAgencyCapability,
 } from "@/lib/agent-access";
 import {
-  AGENCY_MONTHLY_PRICE_CENTS,
+  AGENCY_INVITATION_DISCOUNT_CENTS,
+  INVITED_AGENCY_MONTHLY_PRICE_CENTS,
   INVITED_AGENT_MONTHLY_PRICE_CENTS,
 } from "@/lib/plans";
 import { prisma } from "@/lib/prisma";
@@ -19,6 +20,12 @@ import {
   RecruitmentStageForm,
   RevokeInvitationForm,
 } from "./AgencyInvitationForms";
+import { AgencyOverviewBento } from "./AgencyOverviewBento";
+import { AgencyRecruitmentPipeline } from "./AgencyRecruitmentPipeline";
+import {
+  AgencyTeamList,
+  type AgencyTeamMember,
+} from "./AgencyTeamList";
 import {
   AGENCY_RECRUITMENT_STAGE_LABEL,
   AGENCY_RECRUITMENT_STAGES,
@@ -27,13 +34,13 @@ import {
   sanitizeAgencyRecruitmentStage,
   type AgencyRecruitmentStageValue,
 } from "./recruitment-ui";
-
-type SubscriptionStatus =
-  | "TRIALING"
-  | "ACTIVE"
-  | "PAST_DUE"
-  | "CANCELED"
-  | "EXPIRED";
+import {
+  currentOrLatestAgencyPlanSubscription,
+  getActiveDirectInvitedSubagencySubscription,
+  INVITATION_VALIDITY_DAYS,
+  isCurrentAgencyPlanSubscription,
+  type AgencyPlanSubscriptionStatus as SubscriptionStatus,
+} from "./plan";
 
 const SUBSCRIPTION_STATUS_LABEL: Record<SubscriptionStatus, string> = {
   TRIALING: "Período de teste",
@@ -48,33 +55,20 @@ const ACTIVE_SUBSCRIPTION_STATUSES = new Set<SubscriptionStatus>([
   "ACTIVE",
 ]);
 
-type TeamSubscription = {
-  status: SubscriptionStatus;
-  unitAmountCents: number;
-  currentPeriodStart: Date | null;
-  currentPeriodEnd: Date | null;
+const AGENCY_RECRUITMENT_STAGE_SHORT_LABEL: Record<
+  AgencyRecruitmentStageValue,
+  string
+> = {
+  PROSPECT: "Prospecto",
+  CONTACTED: "Contato",
+  MEETING_SCHEDULED: "Reunião",
+  QUALIFIED: "Qualificado",
+  INVITED: "Convite",
+  ONBOARDING: "Onboarding",
+  ACTIVE: "Ativo",
+  PAUSED: "Pausado",
+  DECLINED: "Descartado",
 };
-
-function isCurrentSubscription(
-  subscription: TeamSubscription | null,
-  now: Date,
-): subscription is TeamSubscription {
-  return Boolean(
-    subscription
-      && ACTIVE_SUBSCRIPTION_STATUSES.has(subscription.status)
-      && (!subscription.currentPeriodStart || subscription.currentPeriodStart <= now)
-      && (!subscription.currentPeriodEnd || subscription.currentPeriodEnd > now),
-  );
-}
-
-function currentOrLatestSubscription(
-  subscriptions: readonly TeamSubscription[],
-  now: Date,
-): TeamSubscription | null {
-  return subscriptions.find((subscription) =>
-    isCurrentSubscription(subscription, now),
-  ) ?? subscriptions[0] ?? null;
-}
 
 function formatUsd(cents: number): string {
   return new Intl.NumberFormat("pt-BR", {
@@ -130,6 +124,37 @@ function StatusBadge({
   status: string | null;
   current?: boolean;
 }) {
+  const presentation = getSubscriptionStatusPresentation(status, current);
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+        presentation.active
+          ? "bg-success-pale text-success"
+          : presentation.warning
+            ? "bg-gold-pale text-gold-ink"
+            : "bg-panel text-ink-muted"
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`h-1.5 w-1.5 rounded-full ${
+          presentation.active
+            ? "bg-success"
+            : presentation.warning
+              ? "bg-gold-ink"
+              : "bg-ink-muted"
+        }`}
+      />
+      {presentation.label}
+    </span>
+  );
+}
+
+function getSubscriptionStatusPresentation(
+  status: string | null,
+  current = true,
+) {
   const knownStatus = status as SubscriptionStatus | null;
   const statusLooksActive = knownStatus
     ? ACTIVE_SUBSCRIPTION_STATUSES.has(knownStatus)
@@ -142,25 +167,12 @@ function StatusBadge({
       ? SUBSCRIPTION_STATUS_LABEL[knownStatus] ?? knownStatus
       : "Sem assinatura ativa";
 
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-        active
-          ? "bg-success-pale text-success"
-          : warning
-            ? "bg-gold-pale text-gold-ink"
-            : "bg-panel text-ink-muted"
-      }`}
-    >
-      <span
-        aria-hidden
-        className={`h-1.5 w-1.5 rounded-full ${
-          active ? "bg-success" : warning ? "bg-gold-ink" : "bg-ink-muted"
-        }`}
-      />
-      {label}
-    </span>
-  );
+  return {
+    active,
+    warning,
+    label,
+    tone: active ? "success" : warning ? "warning" : "neutral",
+  } as const;
 }
 
 function AccessItem({
@@ -218,7 +230,7 @@ function IndividualPlan({
         <section className="module-main-surface" aria-labelledby="individual-access-title">
           <div className="flex flex-col gap-4 border-b border-border-steel pb-5 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
+              <p className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-teal">
                 Operação independente
               </p>
               <h2 id="individual-access-title" className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">
@@ -261,11 +273,13 @@ function AgencyMemberPlan({
   subscriptionStatus,
   subscriptionCurrent,
   unitAmountCents,
+  canInviteAgents,
 }: {
   agencyName: string;
   subscriptionStatus: string | null;
   subscriptionCurrent: boolean;
   unitAmountCents: number | null;
+  canInviteAgents: boolean;
 }) {
   const price = unitAmountCents ?? INVITED_AGENT_MONTHLY_PRICE_CENTS;
 
@@ -284,7 +298,7 @@ function AgencyMemberPlan({
         <section className="module-main-surface" aria-labelledby="member-plan-title">
           <div className="flex flex-col gap-4 border-b border-border-steel pb-5 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Agente convidado</p>
+              <p className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-teal">Agente convidado</p>
               <h2 id="member-plan-title" className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">
                 Você está vinculado à {agencyName}.
               </h2>
@@ -293,7 +307,7 @@ function AgencyMemberPlan({
           </div>
 
           <div className="mt-6 rounded-2xl border border-teal/20 bg-teal-pale/55 p-5">
-            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-teal-deep">Regra do plano</p>
+            <p className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">Regra do plano</p>
             <p className="mt-2 text-sm leading-6 text-ink">
               O valor de {formatUsd(price)} por mês existe enquanto esta assinatura permanecer sob o convite da agência. O agente continua vinculado durante o plano; ao encerrá-lo, o preço especial e o acesso comercial deixam de valer.
             </p>
@@ -317,6 +331,31 @@ function AgencyMemberPlan({
           </div>
         </ContextPanel>
       </div>
+
+      {canInviteAgents ? (
+        <section
+          className="module-main-surface mt-8"
+          aria-labelledby="member-invitation-title"
+        >
+          <div className="border-b border-border-steel pb-5">
+            <p className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-teal">
+              Sua ramificação
+            </p>
+            <h2
+              id="member-invitation-title"
+              className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink"
+            >
+              Convide um agente ou uma agência.
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">
+              O novo vínculo permanece na {agencyName} e aparece abaixo de você
+              no mapa visto pelo responsável. Seu acesso continua individual e
+              não revela dados nem assinaturas de outras pessoas da equipe.
+            </p>
+          </div>
+          <AgencyInvitationForm agencyName={agencyName} />
+        </section>
+      ) : null}
     </>
   );
 }
@@ -333,7 +372,7 @@ function PausedAgencyOwnerPlan({
       <section className="module-main-surface" aria-labelledby="paused-agency-title">
         <div className="flex flex-col gap-4 border-b border-border-steel pb-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
+            <p className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-teal">
               Plano Agência
             </p>
             <h2 id="paused-agency-title" className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">
@@ -376,6 +415,42 @@ async function AgencyOwnerPlan({ agencyId }: { agencyId: string }) {
     select: {
       id: true,
       name: true,
+      childAgencies: {
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        select: {
+          id: true,
+          name: true,
+          memberships: {
+            where: { role: "OWNER", endedAt: null },
+            orderBy: [{ joinedAt: "desc" }, { id: "desc" }],
+            take: 1,
+            select: {
+              agent: {
+                select: {
+                  user: { select: { name: true, email: true } },
+                },
+              },
+              acceptedInvitation: {
+                select: {
+                  agencyId: true,
+                  status: true,
+                  acceptedPlan: true,
+                },
+              },
+            },
+          },
+          subscriptions: {
+            where: { plan: "AGENCY" },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            select: {
+              status: true,
+              unitAmountCents: true,
+              currentPeriodStart: true,
+              currentPeriodEnd: true,
+            },
+          },
+        },
+      },
       memberships: {
         // Billing visibility is broader than data access: an inactive account
         // with a current charge must remain visible to the agency owner.
@@ -438,14 +513,28 @@ async function AgencyOwnerPlan({ agencyId }: { agencyId: string }) {
   const agencySubscription = access.subscription;
   const subscribedMembers = agency.memberships.filter((membership) => {
     if (membership.role === "OWNER") {
-      return isCurrentSubscription(agencySubscription, now);
+      return isCurrentAgencyPlanSubscription(agencySubscription, now);
     }
-    return isCurrentSubscription(
-      currentOrLatestSubscription(membership.subscriptions, now),
+    return isCurrentAgencyPlanSubscription(
+      currentOrLatestAgencyPlanSubscription(membership.subscriptions, now),
       now,
     );
   });
-  const invitedSubscribers = subscribedMembers.filter((membership) => membership.role === "MEMBER");
+  const invitedSubagencyEntries = agency.childAgencies.flatMap((childAgency) => {
+    const owner = childAgency.memberships[0];
+    const subscription = getActiveDirectInvitedSubagencySubscription({
+      owner: owner
+        ? {
+            invitation: owner.acceptedInvitation,
+          }
+        : null,
+      subscriptions: childAgency.subscriptions,
+    }, agency.id, now);
+    return subscription ? [{ childAgency, owner, subscription }] : [];
+  });
+  const invitedSubagencySubscriptions = invitedSubagencyEntries.map(
+    (entry) => entry.subscription,
+  );
   const invitations = agency.invitations.map((invitation) => ({
     ...invitation,
     effectiveStatus: effectiveInvitationStatus(
@@ -472,25 +561,87 @@ async function AgencyOwnerPlan({ agencyId }: { agencyId: string }) {
     );
   }
 
+  const recruitmentStages = AGENCY_RECRUITMENT_STAGES.map((stage) => ({
+    id: stage,
+    label: AGENCY_RECRUITMENT_STAGE_LABEL[stage],
+    shortLabel: AGENCY_RECRUITMENT_STAGE_SHORT_LABEL[stage],
+    count: stageCounts.get(stage) ?? 0,
+  }));
+
+  const memberRoster: AgencyTeamMember[] = agency.memberships.map(
+    (membership) => {
+      const isOwner = membership.role === "OWNER";
+      const subscription = currentOrLatestAgencyPlanSubscription(
+        membership.subscriptions,
+        now,
+      );
+      const status = isOwner
+        ? agencySubscription?.status ?? null
+        : subscription?.status ?? null;
+      const current = isCurrentAgencyPlanSubscription(
+        isOwner ? agencySubscription : subscription,
+        now,
+      );
+      const statusPresentation = getSubscriptionStatusPresentation(
+        status,
+        current,
+      );
+      const price = isOwner
+        ? null
+        : subscription?.unitAmountCents
+          ?? INVITED_AGENT_MONTHLY_PRICE_CENTS;
+
+      return {
+        id: membership.id,
+        name: membership.agent.user.name,
+        email: membership.agent.user.email,
+        role: isOwner ? "Responsável" : "Agente convidado",
+        statusLabel: statusPresentation.label,
+        statusTone: statusPresentation.tone,
+        priceLabel: price === null
+          ? "Plano Agência"
+          : `${formatUsd(price)}/mês`,
+      };
+    },
+  );
+
+  const subagencyRoster: AgencyTeamMember[] = invitedSubagencyEntries.map(
+    ({ childAgency, owner, subscription }) => {
+      const statusPresentation = getSubscriptionStatusPresentation(
+        subscription.status,
+        isCurrentAgencyPlanSubscription(subscription, now),
+      );
+
+      return {
+        id: `agency:${childAgency.id}`,
+        name: childAgency.name,
+        email: owner?.agent.user.email ?? "Responsável não identificado",
+        role: "Subagência convidada",
+        statusLabel: statusPresentation.label,
+        statusTone: statusPresentation.tone,
+        priceLabel: `${formatUsd(subscription.unitAmountCents)}/mês`,
+      };
+    },
+  );
+  const roster = [...memberRoster, ...subagencyRoster];
+
   return (
     <>
-      <ModuleSummary
-        label="Resumo do plano Agência"
-        items={[
-          { label: "Vínculos diretos", value: agency.memberships.length, detail: "Responsável e membros desta agência" },
-          { label: "Histórico direto", value: invitations.length, detail: "Convites acompanhados" },
-          { label: "Convites pendentes", value: activePendingInvitations.length, detail: "Aguardando aceite" },
-          { label: "Entradas confirmadas", value: acceptedInvitations.length, detail: "Convites aceitos", tone: "green" },
-        ]}
+      <AgencyOverviewBento
+        directLinks={roster.length}
+        invitationHistory={invitations.length}
+        pendingInvitations={activePendingInvitations.length}
+        confirmedEntries={acceptedInvitations.length}
       />
 
-      <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="space-y-8">
-          <section className="module-main-surface" aria-labelledby="recruitment-pipeline-title">
+      <div className="agency-owner-sections">
+        <section
+          className="module-main-surface agency-pipeline-surface"
+          aria-labelledby="recruitment-pipeline-title"
+        >
             <div className="flex flex-col gap-3 border-b border-border-steel pb-5 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Recrutamento direto</p>
-                <h2 id="recruitment-pipeline-title" className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">Pipeline da equipe</h2>
+                <h2 id="recruitment-pipeline-title" className="text-2xl font-medium tracking-[-0.02em] text-ink">Pipeline da equipe</h2>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">
                   Acompanhe convites pendentes, entradas confirmadas e o histórico dos vínculos criados diretamente pela {agency.name}.
                 </p>
@@ -498,40 +649,17 @@ async function AgencyOwnerPlan({ agencyId }: { agencyId: string }) {
               <span className="font-mono text-xs text-ink-muted">{invitations.length} registros</span>
             </div>
 
-            <div
-              className="mt-5 overflow-x-auto rounded-xl border border-border-steel"
-              role="region"
-              aria-label="Contagem por etapa do recrutamento"
-              tabIndex={0}
-            >
-              <ol className="grid min-w-[920px] grid-cols-9 bg-panel/45">
-                {AGENCY_RECRUITMENT_STAGES.map((stage, index) => (
-                  <li
-                    key={stage}
-                    className="flex min-h-20 items-center justify-between gap-3 border-r border-border-steel px-3 py-3 last:border-r-0"
-                  >
-                    <span className="min-w-0">
-                      <span className="block font-mono text-[10px] text-ink-muted">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                      <span className="mt-1 block text-xs font-semibold text-ink">
-                        {AGENCY_RECRUITMENT_STAGE_LABEL[stage]}
-                      </span>
-                    </span>
-                    <strong className="font-mono text-lg font-medium tabular-nums text-ink">
-                      {stageCounts.get(stage) ?? 0}
-                    </strong>
-                  </li>
-                ))}
-              </ol>
-            </div>
+            <AgencyRecruitmentPipeline stages={recruitmentStages} />
 
             {invitations.length === 0 ? (
-              <div className="py-10 text-center">
-                <h3 className="text-base font-semibold text-ink">Nenhum recrutamento registrado.</h3>
-                <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-ink-muted">
-                  Use o formulário ao lado para convidar um agente ou uma agência e definir a etapa inicial.
-                </p>
+              <div className="agency-pipeline-empty">
+                <div>
+                  <strong>Nenhum recrutamento registrado.</strong>
+                  <span>Os novos convites aparecerão aqui.</span>
+                </div>
+                <Link className="agency-empty-action" href="#invite-agent-title">
+                  Convidar integrante
+                </Link>
               </div>
             ) : (
               <div className="mt-6">
@@ -543,7 +671,7 @@ async function AgencyOwnerPlan({ agencyId }: { agencyId: string }) {
                     "Convite",
                     "Ações",
                   ].map((label) => (
-                    <span key={label} className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
+                    <span key={label} className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
                       {label}
                     </span>
                   ))}
@@ -560,9 +688,17 @@ async function AgencyOwnerPlan({ agencyId }: { agencyId: string }) {
                           ? "AGENT"
                           : null);
                     const planDetail = resolvedType === "AGENT"
-                      ? `${formatUsd(invitation.monthlyPriceCents)}/mês`
+                      ? `${formatUsd(invitation.monthlyPriceCents)}/mês${
+                          invitation.monthlyPriceCents === INVITED_AGENT_MONTHLY_PRICE_CENTS
+                            ? ` · ${formatUsd(AGENCY_INVITATION_DISCOUNT_CENTS)} de desconto`
+                            : ""
+                        }`
                       : resolvedType === "AGENCY"
-                        ? `${formatUsd(AGENCY_MONTHLY_PRICE_CENTS)}/mês`
+                        ? `${formatUsd(invitation.monthlyPriceCents)}/mês${
+                            invitation.monthlyPriceCents === INVITED_AGENCY_MONTHLY_PRICE_CENTS
+                              ? ` · ${formatUsd(AGENCY_INVITATION_DISCOUNT_CENTS)} de desconto`
+                              : ""
+                          }`
                         : "Plano definido no aceite";
                     const statusDetail = invitation.effectiveStatus === "PENDING"
                       ? `Válido até ${formatDate(invitation.expiresAt)}`
@@ -580,7 +716,7 @@ async function AgencyOwnerPlan({ agencyId }: { agencyId: string }) {
                         <div className="min-w-0">
                           <strong className="block truncate text-sm font-semibold text-ink">{inviteeLabel}</strong>
                           <span className="mt-1 block truncate text-xs text-ink-muted">{invitation.email}</span>
-                          <span className="mt-2 inline-flex rounded-full bg-panel px-2.5 py-1 text-[10px] font-semibold text-ink-muted md:hidden">
+                          <span className="mt-2 inline-flex rounded-full bg-panel px-2.5 py-1 text-xs font-semibold text-ink-muted md:hidden">
                             {agencyRecruitmentStageLabel(invitation.sanitizedStage)}
                           </span>
                         </div>
@@ -624,95 +760,75 @@ async function AgencyOwnerPlan({ agencyId }: { agencyId: string }) {
             )}
           </section>
 
-          <section className="module-main-surface" aria-labelledby="team-subscriptions-title">
-            <div className="flex items-end justify-between gap-4 border-b border-border-steel pb-5">
+        <section
+          className="module-main-surface agency-roster-surface"
+          aria-labelledby="team-subscriptions-title"
+        >
+          <div className="agency-section-heading">
+            <div>
+              <h2 id="team-subscriptions-title">Equipe e assinaturas</h2>
+              <span>
+                Acompanhe os vínculos diretos e convide novos agentes ou
+                agências para a {agency.name}.
+              </span>
+            </div>
+            <strong>
+              {subscribedMembers.length + invitedSubagencySubscriptions.length}
+              /{roster.length} ativas
+            </strong>
+          </div>
+
+          <AgencyTeamList members={roster} agencyName={agency.name} />
+
+          <div
+            id="invite-agent-title"
+            className="agency-team-invite scroll-mt-24"
+            aria-labelledby="new-invitation-title"
+          >
+            <div className="agency-team-invite-heading">
               <div>
-                <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Equipe e assinaturas</p>
-                <h2 id="team-subscriptions-title" className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">Assinaturas diretas</h2>
+                <h3 id="new-invitation-title">Adicionar novo convite</h3>
+                <p>
+                  Informe o e-mail. O convidado cria ou acessa a conta e ativa
+                  o plano no próprio acesso.
+                </p>
               </div>
-              <span className="font-mono text-xs text-ink-muted">{subscribedMembers.length}/{agency.memberships.length} ativas</span>
-            </div>
-
-            <div className="mt-5 overflow-x-auto" role="region" aria-label="Assinaturas da equipe" tabIndex={0}>
-              <table className="w-full min-w-[680px] border-collapse text-left">
-                <caption className="sr-only">Agentes vinculados e situação de suas assinaturas</caption>
-                <thead>
-                  <tr className="border-b border-border-steel">
-                    <th className="px-3 py-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Agente</th>
-                    <th className="px-3 py-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Vínculo</th>
-                    <th className="px-3 py-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Assinatura</th>
-                    <th className="px-3 py-3 text-right text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Mensalidade</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {agency.memberships.map((membership) => {
-                    const isOwner = membership.role === "OWNER";
-                    const subscription = currentOrLatestSubscription(
-                      membership.subscriptions,
-                      now,
-                    );
-                    const status = isOwner
-                      ? agencySubscription?.status ?? null
-                      : subscription?.status ?? null;
-                    const price = isOwner ? null : subscription?.unitAmountCents ?? INVITED_AGENT_MONTHLY_PRICE_CENTS;
-
-                    return (
-                      <tr key={membership.id} className="border-b border-border-steel/75 last:border-b-0">
-                        <td className="px-3 py-4">
-                          <strong className="block text-sm font-semibold text-ink">{membership.agent.user.name}</strong>
-                          <span className="mt-1 block text-xs text-ink-muted">{membership.agent.user.email}</span>
-                          {membership.agent.status !== "ACTIVE" ? (
-                            <span className="mt-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-gold-ink">Conta inativa</span>
-                          ) : null}
-                        </td>
-                        <td className="px-3 py-4 text-sm text-ink-muted">{isOwner ? "Responsável" : "Agente convidado"}</td>
-                        <td className="px-3 py-4">
-                          <StatusBadge
-                            status={status}
-                            current={isCurrentSubscription(
-                              isOwner ? agencySubscription : subscription,
-                              now,
-                            )}
-                          />
-                        </td>
-                        <td className="px-3 py-4 text-right font-mono text-sm font-semibold tabular-nums text-ink">
-                          {price === null ? "Plano Agência" : `${formatUsd(price)}/mês`}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
-
-        <div className="space-y-8">
-          <section id="invite-agent-title" className="module-main-surface scroll-mt-24" aria-labelledby="new-invitation-title">
-            <div className="border-b border-border-steel pb-5">
-              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Novo vínculo direto</p>
-              <h2 id="new-invitation-title" className="mt-2 text-xl font-medium tracking-[-0.035em] text-ink">Convidar para a equipe</h2>
-              <p className="mt-2 text-sm leading-6 text-ink-muted">
-                Defina se a pessoa entrará como Agente ou Agência e em qual etapa do recrutamento ela está.
+              <p className="agency-invite-discount-note">
+                <strong>{formatUsd(AGENCY_INVITATION_DISCOUNT_CENTS)}</strong>
+                <span> de desconto por mês</span>
               </p>
             </div>
-            <AgencyInvitationForm agencyName={agency.name} />
-          </section>
 
-          <ContextPanel eyebrow="Lógica desta versão" title="Vínculo visível e controlado">
-            <p>
-              Você atualiza apenas as etapas dos vínculos diretos da {agency.name}. Subagências administram os próprios convites; a árvore mantém toda a ordem descendente visível.
-            </p>
-            <div className="mt-5 border-t border-white/10 pt-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Assinaturas convidadas</p>
-              <p className="mt-2 text-2xl font-medium text-paper">{invitedSubscribers.length}</p>
-              <p className="mt-1 text-xs text-paper/55">ativas por {formatUsd(INVITED_AGENT_MONTHLY_PRICE_CENTS)}/mês</p>
-            </div>
-            <Link href="/agent/hierarchy" className="mt-5 inline-flex min-h-10 items-center rounded-full border border-white/15 px-4 text-xs font-semibold text-paper transition-colors hover:bg-white/10">
-              Ver estrutura da equipe →
-            </Link>
-          </ContextPanel>
-        </div>
+            <ol className="agency-invite-flow" aria-label="Como o convite funciona">
+              <li>
+                <span aria-hidden="true">1</span>
+                <div>
+                  <strong>Convite por e-mail</strong>
+                  <p>
+                    Enviamos um link individual, válido por {INVITATION_VALIDITY_DAYS} dias.
+                  </p>
+                </div>
+              </li>
+              <li>
+                <span aria-hidden="true">2</span>
+                <div>
+                  <strong>Cadastro e ativação</strong>
+                  <p>O convidado cria ou acessa a conta e ativa o próprio plano.</p>
+                </div>
+              </li>
+              <li>
+                <span aria-hidden="true">3</span>
+                <div>
+                  <strong>Entrada na equipe</strong>
+                  <p>Com o plano ativo, o vínculo aparece na equipe e no mapa.</p>
+                </div>
+              </li>
+            </ol>
+
+            <AgencyInvitationForm agencyName={agency.name} />
+          </div>
+        </section>
+
       </div>
     </>
   );
@@ -726,7 +842,7 @@ export default async function AgencyPage() {
   });
   const agencyName = access.agency?.name ?? "sua agência";
   const subscriptionStatus = access.subscription?.status ?? null;
-  const subscriptionCurrent = isCurrentSubscription(
+  const subscriptionCurrent = isCurrentAgencyPlanSubscription(
     access.subscription,
     new Date(),
   );
@@ -776,6 +892,7 @@ export default async function AgencyPage() {
           subscriptionStatus={subscriptionStatus}
           subscriptionCurrent={subscriptionCurrent}
           unitAmountCents={access.subscription?.unitAmountCents ?? null}
+          canInviteAgents={access.canInviteAgents}
         />
       ) : (
         <IndividualPlan

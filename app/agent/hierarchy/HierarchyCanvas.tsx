@@ -89,8 +89,8 @@ function EmptyHierarchy({ name }: { name: string }) {
         <i />
       </span>
       <div>
-        <h3>Sua estrutura começa em {name}.</h3>
-        <p>Ainda não há agentes ou agências abaixo de você.</p>
+        <h3>O mapa da equipe começa em {name}.</h3>
+        <p>Ainda não há agentes ou subagências em nenhuma ramificação.</p>
       </div>
       <Link href="/agent/agency#invite-agent-title">Convidar para a equipe</Link>
     </div>
@@ -105,11 +105,11 @@ export function HierarchyCanvas({ agents }: { agents: readonly HierarchyViewNode
     <section className="module-main-surface module-hierarchy-surface hierarchy-workspace" aria-labelledby="hierarchy-tree-title">
       <header className="hierarchy-workspace-header">
         <div>
-          <h2 id="hierarchy-tree-title">Sua árvore descendente</h2>
-          <p>O primeiro nome é o seu. Cada ramo segue somente para quem está abaixo.</p>
+          <h2 id="hierarchy-tree-title">Mapa da equipe</h2>
+          <p>O mapa começa em você e organiza agentes e subagências dentro de cada ramificação.</p>
         </div>
-        <span aria-label={`${Math.max(0, agents.length - 1)} pessoas abaixo de você`}>
-          {Math.max(0, agents.length - 1)} abaixo de você
+        <span aria-label={`${Math.max(0, agents.length - 1)} pessoas na equipe abaixo de você`}>
+          {Math.max(0, agents.length - 1)} na equipe
         </span>
       </header>
 

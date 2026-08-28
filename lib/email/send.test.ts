@@ -108,6 +108,7 @@ describe('email send functions', () => {
       inviteeName: '<Maria>',
       agencyName: 'North & South\r\nBcc: attacker@example.com',
       intendedType: 'AGENCY',
+      monthlyPriceCents: 8_990,
       invitationUrl: 'https://app.keeprone.com/convites/agencia/safe-token',
       expiresAt: new Date('2026-09-09T12:00:00.000Z'),
     })
@@ -119,6 +120,8 @@ describe('email send functions', () => {
     expect(call.html).toContain('&lt;Maria&gt;')
     expect(call.html).toContain('North &amp; South')
     expect(call.html).toContain('como <strong style="color:#ffffff;">uma agência</strong>')
+    expect(call.html).toMatch(/US\$\s*89,90\/mês/)
+    expect(call.html).toMatch(/US\$\s*10,00 de desconto/)
     expect(call.html).not.toContain('escolha entre o plano')
     expect(call.html).toContain('https://app.keeprone.com/convites/agencia/safe-token')
     expect(call.html).toContain('9 de setembro de 2026')

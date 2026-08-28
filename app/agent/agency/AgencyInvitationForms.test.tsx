@@ -18,24 +18,28 @@ import {
 } from "./AgencyInvitationForms";
 
 describe("AgencyInvitationForm", () => {
-  it("collects the fixed invitee type and initial recruitment stage", () => {
+  it("collects only the information needed to send the invitation", () => {
     render(<AgencyInvitationForm agencyName="Agência Principal" />);
 
     expect(screen.getByLabelText(/Nome da pessoa ou responsável/i)).toHaveAttribute("autocomplete", "name");
     expect(screen.getByLabelText(/^E-mail/)).toBeRequired();
     expect(screen.getByRole("radio", { name: /^Agente/i })).toBeChecked();
     expect(screen.getByRole("radio", { name: /^Agência/i })).not.toBeChecked();
-    const initialStage = screen.getByRole("combobox", { name: /^Etapa atual/ });
-    expect(initialStage).toHaveValue("PROSPECT");
-    expect(within(initialStage).queryByRole("option", { name: "Ativo" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Agência Principal → novo agente/i)).toBeVisible();
+    expect(
+      screen.queryByRole("combobox", { name: /^Etapa atual/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Vínculo direto")).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: "Enviar convite",
+        name: "Enviar convite por e-mail",
       }),
     ).toBeEnabled();
+    expect(
+      screen.getByText(/ativar o próprio plano/i),
+    ).toBeVisible();
     expect(screen.getByText(/US\$\s*49,90\/mês/i)).toBeVisible();
-    expect(screen.getByText(/US\$\s*99,90\/mês/i)).toBeVisible();
+    expect(screen.getByText(/US\$\s*89,90\/mês/i)).toBeVisible();
+    expect(screen.getAllByText(/US\$\s*10,00 de desconto/i)).toHaveLength(2);
   });
 
   it("shows the one-time URL and copies exactly that invitation link", async () => {

@@ -1,5 +1,9 @@
 import 'server-only'
 import type { CreateEmailOptions } from 'resend'
+import {
+  AGENCY_INVITATION_DISCOUNT_CENTS,
+  formatPlanPrice,
+} from '@/lib/plans'
 import { getResendClient, EMAIL_FROM } from './client'
 import { renderEmailLayout } from './layout'
 
@@ -150,6 +154,7 @@ export async function sendAgencyInvitationEmail(options: {
   inviteeName?: string | null
   agencyName: string
   intendedType: 'AGENT' | 'AGENCY'
+  monthlyPriceCents: number
   invitationUrl: string
   expiresAt: Date
 }): Promise<void> {
@@ -160,6 +165,8 @@ export async function sendAgencyInvitationEmail(options: {
   const safeAgencyHeader = sanitizeEmailHeader(options.agencyName)
   const accountTypeLabel = options.intendedType === 'AGENCY' ? 'Agência' : 'Agente'
   const accountTypeArticle = options.intendedType === 'AGENCY' ? 'uma agência' : 'um agente'
+  const monthlyPriceLabel = escapeEmailText(formatPlanPrice(options.monthlyPriceCents))
+  const discountLabel = escapeEmailText(formatPlanPrice(AGENCY_INVITATION_DISCOUNT_CENTS))
   const expiresLabel = new Intl.DateTimeFormat('pt-BR', {
     dateStyle: 'long',
     timeZone: 'UTC',
@@ -169,6 +176,7 @@ export async function sendAgencyInvitationEmail(options: {
     heading: safeInviteeName,
     bodyHtml: `
       <p style="margin:0 0 16px;">A <strong style="color:#ffffff;">${safeAgencyName}</strong> convidou você para fazer parte da estrutura no Keepr One como <strong style="color:#ffffff;">${accountTypeArticle}</strong>.</p>
+      <p style="margin:0 0 16px;">A mensalidade pelo convite é <strong style="color:#ffffff;">${monthlyPriceLabel}/mês</strong>, já com <strong style="color:#ffffff;">${discountLabel} de desconto</strong>.</p>
       <p style="margin:0;">O tipo de acesso ${accountTypeLabel} já foi definido pela agência convidante. O link é individual e fica disponível até <strong style="color:#ffffff;">${expiresLabel}</strong>.</p>
     `,
     ctaLabel: 'Ver e aceitar o convite',

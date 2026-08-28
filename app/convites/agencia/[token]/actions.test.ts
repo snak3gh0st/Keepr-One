@@ -89,13 +89,17 @@ const token = 'a'.repeat(43)
 const now = new Date('2026-08-26T12:00:00.000Z')
 
 function invitation(overrides: Record<string, unknown> = {}) {
+  const intendedType = Object.hasOwn(overrides, 'intendedType')
+    ? overrides.intendedType
+    : null
   return {
     id: 'invitation-1',
     email: 'invitee@example.com',
     name: 'Maria Invitee',
     status: 'PENDING',
     expiresAt: new Date('2026-09-09T12:00:00.000Z'),
-    intendedType: null,
+    intendedType,
+    monthlyPriceCents: intendedType === 'AGENCY' ? 8_990 : 4_990,
     recruitmentStage: 'INVITED',
     stageUpdatedAt: new Date('2026-08-25T12:00:00.000Z'),
     agency: { id: 'parent-agency', name: 'Agência Principal' },
@@ -118,11 +122,14 @@ function form(plan: 'AGENT_AGENCY_MEMBER' | 'AGENCY', overrides: Record<string, 
   return data
 }
 
-function createdAgent(plan: 'AGENT_AGENCY_MEMBER' | 'AGENCY') {
+function createdAgent(
+  plan: 'AGENT_AGENCY_MEMBER' | 'AGENCY',
+  parentAgentId = 'parent-agent',
+) {
   return {
     id: 'new-agent',
     status: 'ACTIVE',
-    parentAgentId: 'parent-agent',
+    parentAgentId,
     founderEnrollment: null,
     agencyMemberships: [],
     plan,
@@ -246,13 +253,20 @@ beforeEach(() => {
   mocks.userFindFirst.mockResolvedValue(null)
   mocks.hashPassword.mockResolvedValue('hashed-password')
   mocks.userCreate.mockResolvedValue({ id: 'new-user', email: 'invitee@example.com' })
-  mocks.agentCreate.mockImplementation(async ({ data }: { data: { rank: string } }) =>
-    createdAgent(data.rank === 'AGENCY_OWNER' ? 'AGENCY' : 'AGENT_AGENCY_MEMBER'))
+  mocks.agentCreate.mockImplementation(async ({ data }: {
+    data: { rank: string; parentAgentId: string }
+  }) => createdAgent(
+    data.rank === 'AGENCY_OWNER' ? 'AGENCY' : 'AGENT_AGENCY_MEMBER',
+    data.parentAgentId,
+  ))
   mocks.agentFindMany.mockResolvedValue([
     { id: 'parent-agent', parentAgentId: null },
     { id: 'existing-agent', parentAgentId: null },
   ])
-  mocks.membershipFindFirst.mockResolvedValue({ id: 'parent-owner-membership' })
+  mocks.membershipFindFirst.mockResolvedValue({
+    id: 'parent-owner-membership',
+    role: 'OWNER',
+  })
   mocks.membershipUpdateMany.mockResolvedValue({ count: 1 })
   mocks.membershipCreate.mockImplementation(async ({ data }: { data: { role: string } }) => ({
     id: data.role === 'OWNER' ? 'owner-membership' : 'member-membership',
@@ -275,6 +289,11 @@ afterEach(() => {
 
 describe('acceptAgencyInvitationAction', () => {
   it('creates a new invited member, attaches it to the inviter and activates only the server-priced local plan', async () => {
+    mocks.membershipFindFirst.mockResolvedValue({
+      id: 'inviter-member-membership',
+      role: 'MEMBER',
+    })
+
     const result = await acceptAgencyInvitationAction(
       INITIAL_AGENCY_INVITATION_ACCEPTANCE_STATE,
       form('AGENT_AGENCY_MEMBER'),
@@ -292,22 +311,40 @@ describe('acceptAgencyInvitationAction', () => {
       where: {
         agencyId: 'parent-agency',
         agentId: 'parent-agent',
-        role: 'OWNER',
         endedAt: null,
-      },
-      select: { id: true },
-    })
-    expect(mocks.subscriptionFindFirst).toHaveBeenCalledWith({
-      where: {
-        agencyId: 'parent-agency',
-        plan: 'AGENCY',
-        status: { in: ['TRIALING', 'ACTIVE'] },
-        AND: [
-          { OR: [{ currentPeriodStart: null }, { currentPeriodStart: { lte: now } }] },
-          { OR: [{ currentPeriodEnd: null }, { currentPeriodEnd: { gt: now } }] },
+        agent: { status: 'ACTIVE' },
+        OR: [
+          {
+            role: 'OWNER',
+            agency: {
+              subscriptions: {
+                some: {
+                  plan: 'AGENCY',
+                  status: { in: ['TRIALING', 'ACTIVE'] },
+                  AND: [
+                    { OR: [{ currentPeriodStart: null }, { currentPeriodStart: { lte: now } }] },
+                    { OR: [{ currentPeriodEnd: null }, { currentPeriodEnd: { gt: now } }] },
+                  ],
+                },
+              },
+            },
+          },
+          {
+            role: 'MEMBER',
+            subscriptions: {
+              some: {
+                plan: 'AGENT_AGENCY_MEMBER',
+                status: { in: ['TRIALING', 'ACTIVE'] },
+                AND: [
+                  { OR: [{ currentPeriodStart: null }, { currentPeriodStart: { lte: now } }] },
+                  { OR: [{ currentPeriodEnd: null }, { currentPeriodEnd: { gt: now } }] },
+                ],
+              },
+            },
+          },
         ],
       },
-      select: { id: true },
+      select: { id: true, role: true },
     })
     expect(mocks.agentCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -353,6 +390,32 @@ describe('acceptAgencyInvitationAction', () => {
         requiredModules: expect.not.arrayContaining(['TEAM']),
       }),
     })
+    expect(mocks.invitationUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ monthlyPriceCents: 4_990 }),
+    }))
+  })
+
+  it('activates a typed agency invitation from its discounted price snapshot', async () => {
+    mocks.invitationFindUnique.mockResolvedValue(invitation({ intendedType: 'AGENCY' }))
+
+    const result = await acceptAgencyInvitationAction(
+      INITIAL_AGENCY_INVITATION_ACCEPTANCE_STATE,
+      form('AGENCY'),
+    )
+
+    expect(result.status).toBe('success')
+    expect(mocks.subscriptionCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        plan: 'AGENCY',
+        unitAmountCents: 8_990,
+      }),
+    })
+    expect(mocks.invitationUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        intendedType: 'AGENCY',
+        monthlyPriceCents: 8_990,
+      }),
+    }))
   })
 
   it('creates a child agency with its own OWNER and an AGENCY subscription, never a parent MEMBER', async () => {
@@ -380,7 +443,7 @@ describe('acceptAgencyInvitationAction', () => {
         plan: 'AGENCY',
         status: 'ACTIVE',
         agencyId: 'child-agency',
-        unitAmountCents: 9_990,
+        unitAmountCents: 8_990,
         currency: 'USD',
         currentPeriodStart: now,
         currentPeriodEnd: new Date('2026-09-25T12:00:00.000Z'),
@@ -395,6 +458,76 @@ describe('acceptAgencyInvitationAction', () => {
         requiredModules: expect.arrayContaining(['TEAM', 'INTEGRATIONS']),
       }),
     })
+    expect(mocks.invitationUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ monthlyPriceCents: 8_990 }),
+    }))
+  })
+
+  it('places a new subagency below the active member who issued the invitation', async () => {
+    mocks.invitationFindUnique.mockResolvedValue(invitation({
+      intendedType: 'AGENCY',
+      invitedBy: { id: 'member-inviter', status: 'ACTIVE' },
+    }))
+    mocks.membershipFindFirst.mockResolvedValue({
+      id: 'inviter-member-membership',
+      role: 'MEMBER',
+    })
+
+    const result = await acceptAgencyInvitationAction(
+      INITIAL_AGENCY_INVITATION_ACCEPTANCE_STATE,
+      form('AGENCY'),
+    )
+
+    expect(result.status).toBe('success')
+    expect(mocks.agentCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ parentAgentId: 'member-inviter' }),
+    }))
+    expect(mocks.membershipCreate).toHaveBeenCalledWith({
+      data: {
+        agencyId: 'child-agency',
+        agentId: 'new-agent',
+        role: 'OWNER',
+        invitedByAgentId: 'member-inviter',
+      },
+      select: { id: true },
+    })
+    expect(mocks.agentUpdate).toHaveBeenCalledWith({
+      where: { id: 'new-agent' },
+      data: {
+        parentAgentId: 'member-inviter',
+        rank: 'AGENCY_OWNER',
+        promotionAccessScope: 'AGENCY',
+      },
+    })
+  })
+
+  it('rejects an invitation sent to the issuer account before any transaction', async () => {
+    mocks.userFindFirst.mockResolvedValue({
+      id: 'inviter-user',
+      email: 'invitee@example.com',
+      role: 'AGENT',
+      agent: {
+        id: 'parent-agent',
+        status: 'ACTIVE',
+        parentAgentId: null,
+        founderEnrollment: null,
+        agencyMemberships: [],
+      },
+    })
+    mocks.getSession.mockResolvedValue({
+      user: { id: 'inviter-user', email: 'invitee@example.com' },
+    })
+
+    const result = await acceptAgencyInvitationAction(
+      INITIAL_AGENCY_INVITATION_ACCEPTANCE_STATE,
+      form('AGENT_AGENCY_MEMBER'),
+    )
+
+    expect(result).toEqual({
+      status: 'error',
+      message: 'Você não pode aceitar um convite enviado pela própria conta.',
+    })
+    expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
   it('derives the plan server-side for a typed invitation even when the client omits it', async () => {
@@ -436,6 +569,26 @@ describe('acceptAgencyInvitationAction', () => {
       fieldErrors: {
         plan: ['O tipo deste convite foi definido pela agência e não pode ser alterado.'],
       },
+    })
+    expect(mocks.userFindFirst).not.toHaveBeenCalled()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(mocks.subscriptionCreate).not.toHaveBeenCalled()
+  })
+
+  it('rejects a typed invitation whose stored price is not the current invitation price', async () => {
+    mocks.invitationFindUnique.mockResolvedValue(invitation({
+      intendedType: 'AGENCY',
+      monthlyPriceCents: 9_990,
+    }))
+
+    const result = await acceptAgencyInvitationAction(
+      INITIAL_AGENCY_INVITATION_ACCEPTANCE_STATE,
+      form('AGENCY'),
+    )
+
+    expect(result).toEqual({
+      status: 'error',
+      message: 'O preço deste convite não está mais disponível. Peça à agência para emitir um novo convite.',
     })
     expect(mocks.userFindFirst).not.toHaveBeenCalled()
     expect(mocks.transaction).not.toHaveBeenCalled()
@@ -519,7 +672,7 @@ describe('acceptAgencyInvitationAction', () => {
         plan: 'AGENCY',
         status: 'ACTIVE',
         agencyId: 'child-agency',
-        unitAmountCents: 9_990,
+        unitAmountCents: 8_990,
         currency: 'USD',
         currentPeriodStart: now,
         currentPeriodEnd: new Date('2026-09-25T12:00:00.000Z'),
@@ -585,6 +738,27 @@ describe('acceptAgencyInvitationAction', () => {
     }))
   })
 
+  it('does not let a member-issued invitation promote an existing member', async () => {
+    arrangeDirectMemberPromotion()
+    mocks.membershipFindFirst.mockResolvedValue({
+      id: 'inviter-member-membership',
+      role: 'MEMBER',
+    })
+
+    const result = await acceptAgencyInvitationAction(
+      INITIAL_AGENCY_INVITATION_ACCEPTANCE_STATE,
+      form('AGENCY'),
+    )
+
+    expect(result).toEqual({
+      status: 'error',
+      message: 'Este e-mail não está disponível para um novo convite.',
+    })
+    expect(mocks.subscriptionUpdateMany).not.toHaveBeenCalled()
+    expect(mocks.membershipUpdateMany).not.toHaveBeenCalled()
+    expect(mocks.agencyCreate).not.toHaveBeenCalled()
+  })
+
   it('requires the fresh typed invitation and the prior accepted member invitation before promotion', async () => {
     arrangeDirectMemberPromotion({ invitationIntendedType: null })
 
@@ -603,7 +777,10 @@ describe('acceptAgencyInvitationAction', () => {
 
     vi.clearAllMocks()
     mocks.headers.mockResolvedValue(new Headers())
-    mocks.membershipFindFirst.mockResolvedValue({ id: 'parent-owner-membership' })
+    mocks.membershipFindFirst.mockResolvedValue({
+      id: 'parent-owner-membership',
+      role: 'OWNER',
+    })
     mocks.membershipUpdateMany.mockResolvedValue({ count: 1 })
     mocks.invitationUpdateMany.mockResolvedValue({ count: 1 })
     mocks.transaction.mockImplementation(async (callback: (tx: typeof transactionClient) => unknown) =>
@@ -707,7 +884,7 @@ describe('acceptAgencyInvitationAction', () => {
       where: { id: 'existing-agency-subscription' },
       data: {
         status: 'ACTIVE',
-        unitAmountCents: 9_990,
+        unitAmountCents: 8_990,
         currency: 'USD',
         currentPeriodStart: now,
         currentPeriodEnd: new Date('2026-09-25T12:00:00.000Z'),
@@ -790,7 +967,7 @@ describe('acceptAgencyInvitationAction', () => {
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
-  it('fails closed when the inviter is no longer an active owner or the parent agency entitlement ended', async () => {
+  it('fails closed when the inviter no longer has an active invitation authority', async () => {
     mocks.membershipFindFirst.mockResolvedValue(null)
 
     const noOwner = await acceptAgencyInvitationAction(
@@ -811,8 +988,7 @@ describe('acceptAgencyInvitationAction', () => {
     mocks.invitationFindUnique.mockResolvedValue(invitation())
     mocks.userFindFirst.mockResolvedValue(null)
     mocks.hashPassword.mockResolvedValue('hashed-password')
-    mocks.membershipFindFirst.mockResolvedValue({ id: 'parent-owner-membership' })
-    mocks.subscriptionFindFirst.mockResolvedValue(null)
+    mocks.membershipFindFirst.mockResolvedValue(null)
     mocks.transaction.mockImplementation(async (callback: (tx: typeof transactionClient) => unknown) =>
       callback(transactionClient))
 

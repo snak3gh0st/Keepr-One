@@ -17,9 +17,6 @@ export const AGENCY_RECRUITMENT_STAGES = [
 export type AgencyRecruitmentStageValue =
   (typeof AGENCY_RECRUITMENT_STAGES)[number];
 
-export const AGENCY_INVITATION_INITIAL_STAGES =
-  AGENCY_RECRUITMENT_STAGES.filter((stage) => stage !== "ACTIVE");
-
 export const AGENCY_INVITEE_TYPE_LABEL: Record<AgencyInviteeTypeValue, string> = {
   AGENT: "Agente",
   AGENCY: "Agência",

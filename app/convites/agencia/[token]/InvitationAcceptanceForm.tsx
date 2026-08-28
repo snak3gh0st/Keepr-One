@@ -6,8 +6,10 @@ import { useFormStatus } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
 import {
-  AGENCY_MONTHLY_PRICE_CENTS,
+  AGENCY_INVITATION_DISCOUNT_CENTS,
   formatPlanPrice,
+  getAgencyInvitationPriceCents,
+  INVITED_AGENCY_MONTHLY_PRICE_CENTS,
   INVITED_AGENT_MONTHLY_PRICE_CENTS,
 } from '@/lib/plans'
 import {
@@ -28,7 +30,8 @@ export type {
 type AccountGate = 'NEW_ACCOUNT' | 'READY' | 'SIGN_IN' | 'WRONG_ACCOUNT'
 
 const memberPrice = formatPlanPrice(INVITED_AGENT_MONTHLY_PRICE_CENTS)
-const agencyPrice = formatPlanPrice(AGENCY_MONTHLY_PRICE_CENTS)
+const agencyPrice = formatPlanPrice(INVITED_AGENCY_MONTHLY_PRICE_CENTS)
+const invitationDiscount = formatPlanPrice(AGENCY_INVITATION_DISCOUNT_CENTS)
 
 function SubmitButton({
   disabled,
@@ -89,6 +92,7 @@ export function InvitationAcceptanceForm({
   ownedAgencyName,
   allowedPlans,
   intendedType = null,
+  monthlyPriceCents,
   planRestriction,
   simulationEnabled,
 }: {
@@ -98,6 +102,7 @@ export function InvitationAcceptanceForm({
   ownedAgencyName: string | null
   allowedPlans: AgencyInvitationAcceptedPlan[]
   intendedType?: AgencyInvitationIntendedType | null
+  monthlyPriceCents: number
   planRestriction: AgencyInvitationPlanRestriction
   simulationEnabled: boolean
 }) {
@@ -109,6 +114,12 @@ export function InvitationAcceptanceForm({
   const fixedPlan = intendedPlan && allowedPlans.includes(intendedPlan)
     ? intendedPlan
     : null
+  const fixedPrice = fixedPlan ? formatPlanPrice(monthlyPriceCents) : null
+  const fixedPlanHasDiscount = Boolean(
+    fixedPlan
+    && intendedType
+    && monthlyPriceCents === getAgencyInvitationPriceCents(intendedType),
+  )
   const [state, action] = useActionState(
     acceptAgencyInvitationAction,
     INITIAL_AGENCY_INVITATION_ACCEPTANCE_STATE,
@@ -201,9 +212,14 @@ export function InvitationAcceptanceForm({
               </small>
             </span>
             <strong className="mt-2 block text-xl tracking-[-0.04em] text-[#101512]">
-              {fixedPlan === 'AGENT_AGENCY_MEMBER' ? memberPrice : agencyPrice}
+              {fixedPrice}
               <small className="text-xs font-medium text-black/65"> / mês</small>
             </strong>
+            {fixedPlanHasDiscount ? (
+              <span className="mt-2 block text-xs font-semibold text-[#12693b]">
+                {invitationDiscount} de desconto mensal por ter vindo por convite.
+              </span>
+            ) : null}
             <span className="mt-2 block text-xs leading-5 text-black/55">
               {fixedPlan === 'AGENT_AGENCY_MEMBER'
                 ? 'Seu acesso individual ficará vinculado diretamente à agência que enviou o convite.'
@@ -229,6 +245,9 @@ export function InvitationAcceptanceForm({
                 {plan === 'AGENT_AGENCY_MEMBER' ? <small className="rounded-full bg-[#18864b] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-white">Selecionado</small> : null}
               </span>
               <strong className="mt-2 block text-xl tracking-[-0.04em] text-[#101512]">{memberPrice}<small className="text-xs font-medium text-black/65"> / mês</small></strong>
+              <span className="mt-2 block text-xs font-semibold text-[#12693b]">
+                {invitationDiscount} de desconto mensal por ter vindo por convite.
+              </span>
               <span className="mt-2 block text-xs leading-5 text-black/55">Acesso individual vinculado à agência que convidou você.</span>
             </label>
 
@@ -249,6 +268,9 @@ export function InvitationAcceptanceForm({
                 {plan === 'AGENCY' ? <small className="rounded-full bg-[#18864b] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-white">Selecionado</small> : null}
               </span>
               <strong className="mt-2 block text-xl tracking-[-0.04em] text-[#101512]">{agencyPrice}<small className="text-xs font-medium text-black/65"> / mês</small></strong>
+              <span className="mt-2 block text-xs font-semibold text-[#12693b]">
+                {invitationDiscount} de desconto mensal por ter vindo por convite.
+              </span>
               <span className="mt-2 block text-xs leading-5 text-black/55">Crie sua agência abaixo da atual e convide sua própria equipe.</span>
             </label>
           </div>

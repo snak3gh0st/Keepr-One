@@ -20,8 +20,9 @@ describe("HierarchyCanvas", () => {
   it("offers the invitation path when the signed-in agency has no descendants", () => {
     render(<HierarchyCanvas agents={[root]} />);
 
-    expect(screen.getByText("Sua estrutura começa em Felipe Lima.")).toBeInTheDocument();
-    expect(screen.getByText("Ainda não há agentes ou agências abaixo de você.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Mapa da equipe" })).toBeInTheDocument();
+    expect(screen.getByText("O mapa da equipe começa em Felipe Lima.")).toBeInTheDocument();
+    expect(screen.getByText("Ainda não há agentes ou subagências em nenhuma ramificação.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Convidar para a equipe" })).toHaveAttribute(
       "href",
       "/agent/agency#invite-agent-title",

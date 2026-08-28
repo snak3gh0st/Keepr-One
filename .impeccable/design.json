@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-21T00:00:00.000Z",
+  "generatedAt": "2026-08-27T23:05:01.000Z",
   "title": "Design System: Fyntra",
   "extensions": {
     "colorMeta": {
@@ -186,6 +186,7 @@
       "Don't usar dashboard escuro raso, cards idênticos ou azul/roxo genérico de SaaS.",
       "Don't usar box-shadow com blur >= 16px em card ou botão em repouso.",
       "Don't usar gradiente em texto, glassmorphism decorativo ou border-left/border-right colorido como acento de card.",
+      "Don't inserir imagens no meio de títulos, frases ou parágrafos. Quando uma imagem for necessária, ela ocupa um bloco próprio e não interrompe a leitura.",
       "Don't arredondar cards, seções ou inputs acima de 12px.",
       "Don't comunicar aprovado/pendente/cancelado só pela cor do pill."
     ]

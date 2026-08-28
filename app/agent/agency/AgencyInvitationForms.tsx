@@ -5,8 +5,9 @@ import { useFormStatus } from "react-dom";
 import { Button } from "@/components/Button";
 import { Field, Input, Select } from "@/components/Field";
 import {
-  AGENCY_MONTHLY_PRICE_CENTS,
+  AGENCY_INVITATION_DISCOUNT_CENTS,
   formatPlanPrice,
+  INVITED_AGENCY_MONTHLY_PRICE_CENTS,
   INVITED_AGENT_MONTHLY_PRICE_CENTS,
 } from "@/lib/plans";
 import {
@@ -21,7 +22,6 @@ import {
 } from "./plan";
 import {
   AGENCY_INVITEE_TYPE_LABEL,
-  AGENCY_INVITATION_INITIAL_STAGES,
   AGENCY_RECRUITMENT_STAGE_LABEL,
   AGENCY_RECRUITMENT_STAGES,
   type AgencyInviteeTypeValue,
@@ -31,7 +31,12 @@ import {
 const INVITED_AGENT_PRICE_LABEL = formatPlanPrice(
   INVITED_AGENT_MONTHLY_PRICE_CENTS,
 );
-const AGENCY_PRICE_LABEL = formatPlanPrice(AGENCY_MONTHLY_PRICE_CENTS);
+const INVITED_AGENCY_PRICE_LABEL = formatPlanPrice(
+  INVITED_AGENCY_MONTHLY_PRICE_CENTS,
+);
+const INVITATION_DISCOUNT_LABEL = formatPlanPrice(
+  AGENCY_INVITATION_DISCOUNT_CENTS,
+);
 
 function ActionMessage({ state }: { state: AgencyActionState }) {
   if (!state.message) return null;
@@ -60,7 +65,7 @@ function InviteSubmitButton() {
 
   return (
     <Button type="submit" variant="primary" disabled={pending} className="w-full sm:w-auto">
-      {pending ? "Enviando convite..." : "Enviar convite"}
+      {pending ? "Enviando convite..." : "Enviar convite por e-mail"}
     </Button>
   );
 }
@@ -81,10 +86,12 @@ export function InvitationLink({ url }: { url: string }) {
   return (
     <div className="rounded-xl border border-teal/25 bg-teal-pale/45 p-4 sm:col-span-2">
       <p className="text-xs font-semibold uppercase tracking-[0.1em] text-teal-deep">
-        Link individual — exibido agora
+        Link individual do convite
       </p>
       <p className="mt-2 text-xs leading-5 text-ink-muted">
-        Guarde ou envie este link. Por segurança, o token não fica armazenado em texto legível e não poderá ser recuperado depois.
+        Este é o mesmo acesso enviado por e-mail. Copie o link caso precise
+        reenviá-lo manualmente; por segurança, ele não poderá ser recuperado
+        depois.
       </p>
       <div className="mt-3 flex flex-col gap-2 sm:flex-row">
         <input
@@ -128,23 +135,27 @@ export function AgencyInvitationForm({
     useState<AgencyInviteeTypeValue>("AGENT");
 
   return (
-    <form action={action} className="mt-6 grid gap-5 sm:grid-cols-2">
-      <Field label="Nome da pessoa ou responsável (opcional)">
-        <Input name="name" autoComplete="name" maxLength={120} placeholder="Ex: Maria Silva" />
-      </Field>
-      <Field label="E-mail" required>
-        <Input
-          name="email"
-          type="email"
-          autoComplete="email"
-          required
-          aria-describedby={formHelpId}
-          placeholder="agente@exemplo.com"
-        />
-      </Field>
+    <form action={action} className="agency-invite-form mt-6">
+      <div className="agency-invite-name">
+        <Field label="Nome da pessoa ou responsável (opcional)">
+          <Input name="name" autoComplete="name" maxLength={120} placeholder="Ex: Maria Silva" />
+        </Field>
+      </div>
+      <div className="agency-invite-email">
+        <Field label="E-mail" required>
+          <Input
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            aria-describedby={formHelpId}
+            placeholder="agente@exemplo.com"
+          />
+        </Field>
+      </div>
 
-      <fieldset className="sm:col-span-2" aria-describedby={typeHelpId}>
-        <legend className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
+      <fieldset className="agency-invite-types" aria-describedby={typeHelpId}>
+        <legend className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
           Entrará como <span aria-hidden="true" className="text-danger">*</span>
         </legend>
         <div className="mt-2 grid gap-3 sm:grid-cols-2">
@@ -169,7 +180,7 @@ export function AgencyInvitationForm({
                 {AGENCY_INVITEE_TYPE_LABEL.AGENT}
               </strong>
               <span className="mt-1 block text-xs leading-5 text-ink-muted">
-                Acesso individual por {INVITED_AGENT_PRICE_LABEL}/mês, vinculado diretamente a esta agência.
+                Acesso individual por {INVITED_AGENT_PRICE_LABEL}/mês, com {INVITATION_DISCOUNT_LABEL} de desconto e vínculo direto com esta agência.
               </span>
             </span>
           </label>
@@ -195,7 +206,7 @@ export function AgencyInvitationForm({
                 {AGENCY_INVITEE_TYPE_LABEL.AGENCY}
               </strong>
               <span className="mt-1 block text-xs leading-5 text-ink-muted">
-                Plano de {AGENCY_PRICE_LABEL}/mês para formar um novo ramo com sua própria equipe.
+                Plano de {INVITED_AGENCY_PRICE_LABEL}/mês, com {INVITATION_DISCOUNT_LABEL} de desconto, para formar um novo ramo com sua própria equipe.
               </span>
             </span>
           </label>
@@ -205,44 +216,13 @@ export function AgencyInvitationForm({
         </p>
       </fieldset>
 
-      <Field
-        label="Etapa atual"
-        htmlFor="agency-invitation-stage"
-        required
-        hint="A etapa é interna e não aparece para a pessoa convidada."
-      >
-        <Select
-          id="agency-invitation-stage"
-          name="recruitmentStage"
-          defaultValue="PROSPECT"
-          required
-          aria-describedby="agency-invitation-stage-hint"
-        >
-          {AGENCY_INVITATION_INITIAL_STAGES.map((stage) => (
-            <option key={stage} value={stage}>
-              {AGENCY_RECRUITMENT_STAGE_LABEL[stage]}
-            </option>
-          ))}
-        </Select>
-      </Field>
-
-      <div className="rounded-xl border border-border-steel bg-panel/55 p-4" aria-live="polite">
-        <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-          Vínculo direto
-        </p>
-        <p className="mt-2 text-sm font-semibold text-ink">{agencyName}</p>
-        <p className="mt-1 text-xs leading-5 text-ink-muted">
-          {agencyName} → novo {intendedType === "AGENCY" ? "ramo de agência" : "agente"}
-        </p>
-      </div>
-
-      <div className="flex flex-col gap-3 border-t border-border-steel pt-5 sm:col-span-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="agency-invite-footer">
         <p id={formHelpId} className="max-w-xl text-xs leading-5 text-ink-muted">
-          O convite vale por {INVITATION_VALIDITY_DAYS} dias e cria um vínculo direto com {agencyName}. A pessoa precisará entrar ou criar a conta usando exatamente este e-mail.
+          O convite será enviado para este e-mail e vale por {INVITATION_VALIDITY_DAYS} dias. A pessoa usa o link para criar ou acessar a conta e ativar o próprio plano; quando ele estiver ativo, o vínculo é registrado na equipe da {agencyName}.
         </p>
         <InviteSubmitButton />
       </div>
-      <div className="sm:col-span-2">
+      <div className="agency-invite-message">
         <ActionMessage state={state} />
       </div>
       {state.status === "success" && state.invitationUrl ? (

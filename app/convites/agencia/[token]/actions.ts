@@ -13,8 +13,9 @@ import {
   isLocalBillingSimulationEnabled,
   isValidAgencyInvitationToken,
 } from '@/lib/agency-invitations'
+import { findActiveAgencyInvitationAuthority } from '@/lib/agency-invitation-authority'
 import { getDownlineIds } from '@/lib/hierarchy'
-import { getPlatformPlanPriceCents } from '@/lib/plans'
+import { getAgencyInvitationPriceCents } from '@/lib/plans'
 import { prisma } from '@/lib/prisma'
 
 type AcceptedPlan = 'AGENT_AGENCY_MEMBER' | 'AGENCY'
@@ -56,6 +57,7 @@ const invitationSelect = {
   status: true,
   expiresAt: true,
   intendedType: true,
+  monthlyPriceCents: true,
   recruitmentStage: true,
   stageUpdatedAt: true,
   agency: { select: { id: true, name: true } },
@@ -145,6 +147,34 @@ function resolveInvitationPlan(input: {
   return input.submittedPlan
 }
 
+function resolveInvitationMonthlyPrice(input: {
+  intendedType: AgencyInvitationIntendedType | null
+  plan: AcceptedPlan
+  monthlyPriceCents: number
+}): number {
+  // Legacy invitations predate a fixed type. Their stored 4,990 snapshot only
+  // represented the member option, so derive the discounted snapshot from the
+  // plan selected during acceptance. The atomic claim below persists 8,990
+  // when a legacy invitee chooses Agency.
+  if (input.intendedType === null) {
+    return getAgencyInvitationPriceCents(
+      input.plan === 'AGENCY' ? 'AGENCY' : 'AGENT',
+    )
+  }
+
+  const expectedPrice = getAgencyInvitationPriceCents(input.intendedType)
+  if (
+    !Number.isSafeInteger(input.monthlyPriceCents)
+    || input.monthlyPriceCents !== expectedPrice
+  ) {
+    throw new InvitationAcceptanceError(
+      'O preço deste convite não está mais disponível. Peça à agência para emitir um novo convite.',
+    )
+  }
+
+  return input.monthlyPriceCents
+}
+
 function validateRegistrationFields(input: {
   name: string
   password: string
@@ -230,10 +260,16 @@ export async function acceptAgencyInvitationAction(
   }
 
   let plan: AcceptedPlan
+  let unitAmountCents: number
   try {
     plan = resolveInvitationPlan({
       intendedType: invitation.intendedType,
       submittedPlan: input.plan,
+    })
+    unitAmountCents = resolveInvitationMonthlyPrice({
+      intendedType: invitation.intendedType,
+      plan,
+      monthlyPriceCents: invitation.monthlyPriceCents,
     })
   } catch (error) {
     if (error instanceof InvitationAcceptanceError) {
@@ -266,6 +302,9 @@ export async function acceptAgencyInvitationAction(
         'Nesta primeira versão, uma conta Founder deve escolher o plano Agência para mudar de estrutura.',
       )
     }
+    if (existingUser.agent.id === invitation.invitedBy.id) {
+      return actionError('Você não pode aceitar um convite enviado pela própria conta.')
+    }
   } else {
     if (session) {
       return actionError('Saia da conta atual antes de criar o acesso deste convite.')
@@ -282,7 +321,6 @@ export async function acceptAgencyInvitationAction(
   }
 
   const passwordHash = existingUser ? null : await hashPassword(input.password)
-  const unitAmountCents = getPlatformPlanPriceCents(plan)
   const currentPeriodEnd = subscriptionPeriodEnd(now)
 
   try {
@@ -309,32 +347,29 @@ export async function acceptAgencyInvitationAction(
           'plan',
         )
       }
+      const transactionUnitAmountCents = resolveInvitationMonthlyPrice({
+        intendedType: currentInvitation.intendedType,
+        plan: transactionPlan,
+        monthlyPriceCents: currentInvitation.monthlyPriceCents,
+      })
+      if (transactionUnitAmountCents !== unitAmountCents) {
+        throw new InvitationAcceptanceError(
+          'O preço deste convite mudou enquanto ele era confirmado. Atualize a página e tente novamente.',
+        )
+      }
 
       // The bearer token proves possession of the invitation, not that its
       // issuer still controls an entitled agency. Recheck both facts in the
       // same serializable transaction before creating any account or link.
-      const inviterOwnerMembership = await transaction.agencyMembership.findFirst({
-        where: {
+      const inviterAuthority = await findActiveAgencyInvitationAuthority(
+        transaction,
+        {
           agencyId: currentInvitation.agency.id,
           agentId: currentInvitation.invitedBy.id,
-          role: 'OWNER',
-          endedAt: null,
+          now,
         },
-        select: { id: true },
-      })
-      const inviterAgencySubscription = await transaction.platformSubscription.findFirst({
-        where: {
-          agencyId: currentInvitation.agency.id,
-          plan: 'AGENCY',
-          status: { in: ['TRIALING', 'ACTIVE'] },
-          AND: [
-            { OR: [{ currentPeriodStart: null }, { currentPeriodStart: { lte: now } }] },
-            { OR: [{ currentPeriodEnd: null }, { currentPeriodEnd: { gt: now } }] },
-          ],
-        },
-        select: { id: true },
-      })
-      if (!inviterOwnerMembership || !inviterAgencySubscription) {
+      )
+      if (!inviterAuthority) {
         throw new InvitationAcceptanceError(
           'A agência que enviou este convite não possui autorização e assinatura ativas.',
         )
@@ -418,6 +453,11 @@ export async function acceptAgencyInvitationAction(
       if (!agent) {
         throw new InvitationAcceptanceError('A conta convidada não possui um perfil de agente.')
       }
+      if (agent.id === currentInvitation.invitedBy.id) {
+        throw new InvitationAcceptanceError(
+          'Você não pode aceitar um convite enviado pela própria conta.',
+        )
+      }
       if (
         agent.parentAgentId !== null
         && agent.parentAgentId !== currentInvitation.invitedBy.id
@@ -437,6 +477,11 @@ export async function acceptAgencyInvitationAction(
       const activeMemberships = agent.agencyMemberships
       if (activeMemberships.length > 1) {
         throw new InvitationAcceptanceError('A conta possui mais de um vínculo ativo e precisa de revisão.')
+      }
+      if (inviterAuthority.role === 'MEMBER' && activeMemberships.length > 0) {
+        throw new InvitationAcceptanceError(
+          'Este e-mail não está disponível para um novo convite.',
+        )
       }
       if (agent.founderEnrollment && plan === 'AGENT_AGENCY_MEMBER') {
         throw new InvitationAcceptanceError(
@@ -481,7 +526,8 @@ export async function acceptAgencyInvitationAction(
         const existingMembership = activeMemberships[0]
         const isDirectMember = existingMembership?.role === 'MEMBER'
           && existingMembership.agencyId === currentInvitation.agency.id
-        const isDirectMemberPromotion = isDirectMember
+        const isDirectMemberPromotion = inviterAuthority.role === 'OWNER'
+          && isDirectMember
           && currentInvitation.intendedType === 'AGENCY'
 
         if (
@@ -667,7 +713,7 @@ export async function acceptAgencyInvitationAction(
           where: { id: existingAgencySubscription.id },
           data: {
             status: 'ACTIVE',
-            unitAmountCents,
+            unitAmountCents: transactionUnitAmountCents,
             currency: 'USD',
             currentPeriodStart: now,
             currentPeriodEnd,
@@ -682,7 +728,7 @@ export async function acceptAgencyInvitationAction(
                 plan,
                 status: 'ACTIVE',
                 agencyId: acceptedAgencyId,
-                unitAmountCents,
+                unitAmountCents: transactionUnitAmountCents,
                 currency: 'USD',
                 currentPeriodStart: now,
                 currentPeriodEnd,
@@ -691,7 +737,7 @@ export async function acceptAgencyInvitationAction(
                 plan,
                 status: 'ACTIVE',
                 agencyMembershipId: acceptedMembershipId,
-                unitAmountCents,
+                unitAmountCents: transactionUnitAmountCents,
                 currency: 'USD',
                 currentPeriodStart: now,
                 currentPeriodEnd,
@@ -743,6 +789,7 @@ export async function acceptAgencyInvitationAction(
           acceptedPlan: plan,
           acceptedMembershipId,
           intendedType: acceptedIntendedType,
+          monthlyPriceCents: transactionUnitAmountCents,
           recruitmentStage,
           stageUpdatedAt: now,
         },
@@ -783,6 +830,7 @@ export async function acceptAgencyInvitationAction(
             acceptedAgentId: agent.id,
             acceptedMembershipId,
             intendedType: acceptedIntendedType,
+            monthlyPriceCents: transactionUnitAmountCents,
             recruitmentStage,
             previousRecruitmentStage: currentInvitation.recruitmentStage,
             parentAgentId: currentInvitation.invitedBy.id,

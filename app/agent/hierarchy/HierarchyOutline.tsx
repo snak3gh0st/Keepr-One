@@ -64,10 +64,10 @@ export function HierarchyOutline({ nodes }: { nodes: readonly HierarchyViewNode[
     <section className="hierarchy-outline" aria-labelledby="hierarchy-outline-title">
       <div className="hierarchy-outline-heading">
         <div>
-          <h2 id="hierarchy-outline-title">Ordem da sua estrutura</h2>
-          <p>Cada pessoa aparece dentro do ramo de quem a convidou.</p>
+          <h2 id="hierarchy-outline-title">Mapa da equipe por ramificação</h2>
+          <p>Cada agente ou subagência aparece no ramo de quem criou o vínculo.</p>
         </div>
-        <span>{Math.max(0, nodes.length - 1)} abaixo de você</span>
+        <span>{Math.max(0, nodes.length - 1)} na equipe</span>
       </div>
       <ol className="hierarchy-outline-root">
         <BranchItem branch={root} />

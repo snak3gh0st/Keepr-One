@@ -9,7 +9,7 @@ import {
   createAgencyInvitationToken,
 } from "@/lib/agency-invitations";
 import { sendAgencyInvitationEmail } from "@/lib/email/send";
-import { getPlatformPlanPriceCents } from "@/lib/plans";
+import { getAgencyInvitationPriceCents } from "@/lib/plans";
 import { prisma } from "@/lib/prisma";
 import {
   INVITATION_VALIDITY_DAYS,
@@ -28,6 +28,7 @@ const AGENCY_RECRUITMENT_STAGES = [
   "PAUSED",
   "DECLINED",
 ] as const;
+const INITIAL_AGENCY_RECRUITMENT_STAGE = "PROSPECT" as const;
 
 type AgencyInvitationIntendedType =
   (typeof AGENCY_INVITATION_INTENDED_TYPES)[number];
@@ -46,17 +47,6 @@ const InviteAgentSchema = z.object({
   intendedType: z.enum(AGENCY_INVITATION_INTENDED_TYPES, {
     error: "Escolha se o convite é para um agente ou uma agência.",
   }),
-  recruitmentStage: z.enum(AGENCY_RECRUITMENT_STAGES, {
-    error: "Escolha uma etapa de recrutamento válida.",
-  }),
-}).superRefine((input, context) => {
-  if (input.recruitmentStage === "ACTIVE") {
-    context.addIssue({
-      code: "custom",
-      path: ["recruitmentStage"],
-      message: "A etapa Ativo só fica disponível depois que o convite for aceito.",
-    });
-  }
 });
 
 const RevokeInvitationSchema = z.object({
@@ -93,9 +83,7 @@ function actionError(message: string): AgencyActionState {
 function monthlyPriceForIntendedType(
   intendedType: AgencyInvitationIntendedType,
 ): number {
-  return getPlatformPlanPriceCents(
-    intendedType === "AGENCY" ? "AGENCY" : "AGENT_AGENCY_MEMBER",
-  );
+  return getAgencyInvitationPriceCents(intendedType);
 }
 
 async function getActorUserId(agentId: string): Promise<string | null> {
@@ -119,7 +107,7 @@ export async function createAgencyInvitationAction(
   try {
     access = await requireAgencyCapability("INVITE_AGENTS");
   } catch {
-    return actionError("Somente o responsável pelo plano Agência pode criar convites.");
+    return actionError("Uma assinatura ativa vinculada à agência é necessária para criar convites.");
   }
 
   if (!access.agency) {
@@ -131,7 +119,6 @@ export async function createAgencyInvitationAction(
     name: formData.get("name") || undefined,
     email: formData.get("email"),
     intendedType: formData.get("intendedType"),
-    recruitmentStage: formData.get("recruitmentStage"),
   });
 
   if (!parsed.success) {
@@ -141,7 +128,7 @@ export async function createAgencyInvitationAction(
   const now = new Date();
   const email = parsed.data.email;
   const intendedType = parsed.data.intendedType;
-  const recruitmentStage = parsed.data.recruitmentStage;
+  const recruitmentStage = INITIAL_AGENCY_RECRUITMENT_STAGE;
   const monthlyPriceCents = monthlyPriceForIntendedType(intendedType);
 
   const activeMembership = await prisma.agencyMembership.findFirst({
@@ -151,6 +138,7 @@ export async function createAgencyInvitationAction(
     },
     select: {
       id: true,
+      agentId: true,
       agencyId: true,
       role: true,
       agency: { select: { parentAgencyId: true } },
@@ -173,6 +161,17 @@ export async function createAgencyInvitationAction(
   });
 
   if (activeMembership) {
+    if (activeMembership.agentId === access.agentId) {
+      return actionError("Você não pode enviar um convite para a própria conta.");
+    }
+
+    // Members may grow a new branch, but cannot move, promote, or otherwise
+    // rewrite an existing commercial membership. Only the agency owner can
+    // initiate the explicit MEMBER -> AGENCY transition below.
+    if (access.kind === "AGENCY_MEMBER") {
+      return actionError("Este e-mail não está disponível para um novo convite.");
+    }
+
     // A fresh typed invitation is the direct member's explicit consent to
     // leave the discounted MEMBER plan and become a child-agency OWNER.
     const isDirectMember =
@@ -181,7 +180,8 @@ export async function createAgencyInvitationAction(
     const isRequestedDirectMemberPromotion =
       isDirectMember && intendedType === "AGENCY";
     const isDirectMemberPromotion =
-      isRequestedDirectMemberPromotion
+      access.kind === "AGENCY_OWNER"
+      && isRequestedDirectMemberPromotion
       && activeMembership.acceptedInvitation?.status === "ACCEPTED"
       && activeMembership.acceptedInvitation.intendedType === "AGENT"
       && activeMembership.acceptedInvitation.acceptedPlan === "AGENT_AGENCY_MEMBER"
@@ -309,6 +309,7 @@ export async function createAgencyInvitationAction(
       inviteeName: parsed.data.name || null,
       agencyName: access.agency.name,
       intendedType,
+      monthlyPriceCents,
       invitationUrl,
       expiresAt,
     });
@@ -341,7 +342,7 @@ export async function updateAgencyRecruitmentStageAction(
   try {
     access = await requireAgencyCapability("INVITE_AGENTS");
   } catch {
-    return actionError("Somente o responsável pelo plano Agência pode atualizar etapas.");
+    return actionError("Uma assinatura ativa vinculada à agência é necessária para atualizar etapas.");
   }
 
   if (!access.agency) {
@@ -366,12 +367,16 @@ export async function updateAgencyRecruitmentStageAction(
   }
 
   const { invitationId, recruitmentStage, expectedStageUpdatedAt } = parsed.data;
+  const invitationManagerScope = access.kind === "AGENCY_OWNER"
+    ? {}
+    : { invitedByAgentId: access.agentId };
   try {
     const changed = await prisma.$transaction(async (transaction) => {
       const invitation = await transaction.agencyInvitation.findFirst({
         where: {
           id: invitationId,
           agencyId,
+          ...invitationManagerScope,
         },
         select: {
           id: true,
@@ -413,6 +418,7 @@ export async function updateAgencyRecruitmentStageAction(
         where: {
           id: invitation.id,
           agencyId,
+          ...invitationManagerScope,
           stageUpdatedAt: expectedStageUpdatedAt,
         },
         data: {
@@ -480,7 +486,7 @@ export async function revokeAgencyInvitationAction(
   try {
     access = await requireAgencyCapability("INVITE_AGENTS");
   } catch {
-    return actionError("Somente o responsável pelo plano Agência pode revogar convites.");
+    return actionError("Uma assinatura ativa vinculada à agência é necessária para revogar convites.");
   }
 
   if (!access.agency) {
@@ -501,12 +507,17 @@ export async function revokeAgencyInvitationAction(
     return actionError("Não foi possível identificar o responsável pela revogação.");
   }
 
+  const invitationManagerScope = access.kind === "AGENCY_OWNER"
+    ? {}
+    : { invitedByAgentId: access.agentId };
+
   try {
     await prisma.$transaction(async (transaction) => {
       const invitation = await transaction.agencyInvitation.findFirst({
         where: {
           id: parsed.data.invitationId,
           agencyId,
+          ...invitationManagerScope,
           status: "PENDING",
         },
         select: {
@@ -526,6 +537,7 @@ export async function revokeAgencyInvitationAction(
         where: {
           id: invitation.id,
           agencyId,
+          ...invitationManagerScope,
           status: "PENDING",
         },
         data: {

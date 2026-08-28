@@ -36,6 +36,7 @@ type ActiveAgency = {
     membershipId: string
     agentId: string
     name: string
+    parentAgentId: string | null
     invitedByAgentId: string | null
     joinedAt: Date
     subscriptionStatus: AgencyTreeSubscriptionStatus
@@ -118,10 +119,10 @@ function compareOrderedNodes(left: OrderedNode, right: OrderedNode): number {
 /**
  * Returns the active, commercial name tree rooted at one agency owner.
  *
- * The traversal only follows Agency.parentAgencyId downward. It never follows
- * Agent.parentAgentId, Agency.parentAgency, or an invitation's inviter outside
- * the already-authorized subtree. Consequently a subagency sees itself and its
- * descendants, never its ancestors or sibling agencies.
+ * Agency.parentAgencyId is the commercial authorization boundary. Inside that
+ * already-authorized subtree, Agent.parentAgentId restores the inviter's named
+ * branch only when both agents belong to the expected agency. Corrupt, cyclic,
+ * or cross-agency links are normalized to that agency's owner.
  *
  * This is a roster helper, not a data-scope helper. Callers must not substitute
  * its agent IDs for AgentAccessContext.scopeAgentIds.
@@ -146,7 +147,10 @@ export async function getAgencyTreeForAgent(
       invitedByAgentId: true,
       joinedAt: true,
       agent: {
-        select: { user: { select: { name: true } } },
+        select: {
+          parentAgentId: true,
+          user: { select: { name: true } },
+        },
       },
       agency: {
         select: {
@@ -181,6 +185,7 @@ export async function getAgencyTreeForAgent(
       membershipId: rootMembership.id,
       agentId: rootMembership.agentId,
       name: rootMembership.agent.user.name,
+      parentAgentId: rootMembership.agent.parentAgentId,
       invitedByAgentId: rootMembership.invitedByAgentId,
       joinedAt: rootMembership.joinedAt,
       subscriptionStatus: rootSubscription.status,
@@ -194,6 +199,7 @@ export async function getAgencyTreeForAgent(
     [rootAgency.agencyId, rootAgency],
   ])
   const visitedAgencyIds = new Set<string>([rootAgency.agencyId])
+  const visibleOwnerAgentIds = new Set<string>([rootAgency.owner.agentId])
   let frontier = [rootAgency.agencyId]
 
   // Traverse one commercial generation at a time. Candidate child agencies
@@ -221,7 +227,10 @@ export async function getAgencyTreeForAgent(
             invitedByAgentId: true,
             joinedAt: true,
             agent: {
-              select: { user: { select: { name: true } } },
+              select: {
+                parentAgentId: true,
+                user: { select: { name: true } },
+              },
             },
             acceptedInvitation: {
               select: {
@@ -264,6 +273,7 @@ export async function getAgencyTreeForAgent(
       if (
         !parent
         || !owner
+        || visibleOwnerAgentIds.has(owner.agentId)
         || !invitation
         || invitation.status !== 'ACCEPTED'
         || invitation.acceptedPlan !== 'AGENCY'
@@ -282,6 +292,7 @@ export async function getAgencyTreeForAgent(
           membershipId: owner.id,
           agentId: owner.agentId,
           name: owner.agent.user.name,
+          parentAgentId: owner.agent.parentAgentId,
           invitedByAgentId: owner.invitedByAgentId,
           joinedAt: owner.joinedAt,
           subscriptionStatus: latestSubscriptionStatus(subscription, now),
@@ -291,6 +302,7 @@ export async function getAgencyTreeForAgent(
 
       agencies.set(activeAgency.agencyId, activeAgency)
       visitedAgencyIds.add(activeAgency.agencyId)
+      visibleOwnerAgentIds.add(activeAgency.owner.agentId)
       nextFrontier.push(activeAgency.agencyId)
     }
 
@@ -313,7 +325,10 @@ export async function getAgencyTreeForAgent(
       invitedByAgentId: true,
       joinedAt: true,
       agent: {
-        select: { user: { select: { name: true } } },
+        select: {
+          parentAgentId: true,
+          user: { select: { name: true } },
+        },
       },
       acceptedInvitation: {
         select: {
@@ -358,41 +373,16 @@ export async function getAgencyTreeForAgent(
     childrenByAgentId.set(parentAgentId, children)
   }
 
-  for (const agency of agencies.values()) {
-    if (agency.agencyId === rootAgency.agencyId) continue
-
-    const parent = agency.parentAgencyId
-      ? agencies.get(agency.parentAgencyId)
-      : undefined
-    if (!parent) continue
-
-    // invitedByAgentId is useful provenance, but it may be legacy or corrupt.
-    // Normalize it to the visible parent owner instead of following an ID that
-    // could point to an ancestor, sibling, or unrelated commercial tree.
-    const normalizedParentAgentId =
-      agency.owner.invitedByAgentId === parent.owner.agentId
-        ? agency.owner.invitedByAgentId
-        : parent.owner.agentId
-
-    addChild(normalizedParentAgentId, {
-      agentId: agency.owner.agentId,
-      name: agency.owner.name,
-      parentAgentId: normalizedParentAgentId,
-      depth: agency.depth,
-      kind: 'AGENCY',
-      agencyId: agency.agencyId,
-      agencyName: agency.agencyName,
-      subscriptionStatus: agency.owner.subscriptionStatus,
-      recruitmentStage: agency.owner.recruitmentStage,
-      sortAt: agency.owner.joinedAt,
-      sortId: agency.owner.membershipId,
-    })
-  }
-
+  // Each agent may occupy only one visible commercial node. If legacy or
+  // corrupt rows duplicate an active membership, keep the first deterministic
+  // row and never use the duplicate as hierarchy authority.
+  const claimedAgentIds = new Set(
+    [...agencies.values()].map((agency) => agency.owner.agentId),
+  )
+  const validMembers: typeof members = []
   for (const member of members) {
     const agency = agencies.get(member.agencyId)
-    const subscription = member.subscriptions[0]
-    if (!agency) continue
+    if (!agency || claimedAgentIds.has(member.agentId)) continue
 
     // New accepted memberships carry a one-to-one invitation. Rows created by
     // the pre-invitation rollout have no relation and remain visible; a present
@@ -410,7 +400,112 @@ export async function getAgencyTreeForAgent(
       continue
     }
 
-    const normalizedParentAgentId = agency.owner.agentId
+    claimedAgentIds.add(member.agentId)
+    validMembers.push(member)
+  }
+
+  const agentAgencyById = new Map<string, string>()
+  for (const agency of agencies.values()) {
+    agentAgencyById.set(agency.owner.agentId, agency.agencyId)
+  }
+  for (const member of validMembers) {
+    agentAgencyById.set(member.agentId, member.agencyId)
+  }
+
+  const requestedMemberParentById = new Map<string, string>()
+  for (const member of validMembers) {
+    const agency = agencies.get(member.agencyId)
+    if (!agency) continue
+
+    // Agent.parentAgentId is the durable hierarchy edge. invitedByAgentId is a
+    // compatibility fallback for rows created before that edge was persisted.
+    const requestedParentAgentId =
+      member.agent.parentAgentId ?? member.invitedByAgentId
+    const normalizedParentAgentId =
+      requestedParentAgentId
+      && requestedParentAgentId !== member.agentId
+      && agentAgencyById.get(requestedParentAgentId) === member.agencyId
+        ? requestedParentAgentId
+        : agency.owner.agentId
+    requestedMemberParentById.set(member.agentId, normalizedParentAgentId)
+  }
+
+  const memberChainReachesOwner = (memberAgentId: string): boolean => {
+    const agencyId = agentAgencyById.get(memberAgentId)
+    const agency = agencyId ? agencies.get(agencyId) : undefined
+    if (!agency) return false
+
+    const seen = new Set<string>()
+    let cursor = memberAgentId
+    while (cursor !== agency.owner.agentId) {
+      if (seen.has(cursor)) return false
+      seen.add(cursor)
+
+      const parentAgentId = requestedMemberParentById.get(cursor)
+      if (
+        !parentAgentId
+        || agentAgencyById.get(parentAgentId) !== agency.agencyId
+      ) {
+        return false
+      }
+      cursor = parentAgentId
+    }
+    return true
+  }
+
+  const normalizedMemberParentById = new Map<string, string>()
+  for (const member of validMembers) {
+    const agency = agencies.get(member.agencyId)
+    if (!agency) continue
+    normalizedMemberParentById.set(
+      member.agentId,
+      memberChainReachesOwner(member.agentId)
+        ? requestedMemberParentById.get(member.agentId) ?? agency.owner.agentId
+        : agency.owner.agentId,
+    )
+  }
+
+  for (const agency of agencies.values()) {
+    if (agency.agencyId === rootAgency.agencyId) continue
+
+    const parent = agency.parentAgencyId
+      ? agencies.get(agency.parentAgencyId)
+      : undefined
+    if (!parent) continue
+
+    const requestedParentAgentId =
+      agency.owner.parentAgentId ?? agency.owner.invitedByAgentId
+    // A subagency may hang below the exact member who invited it, but that
+    // inviter must belong to the immediate parent agency. Otherwise the edge
+    // is normalized to the parent owner and cannot escape the tenant boundary.
+    const normalizedParentAgentId =
+      requestedParentAgentId
+      && agentAgencyById.get(requestedParentAgentId) === parent.agencyId
+        ? requestedParentAgentId
+        : parent.owner.agentId
+
+    addChild(normalizedParentAgentId, {
+      agentId: agency.owner.agentId,
+      name: agency.owner.name,
+      parentAgentId: normalizedParentAgentId,
+      depth: agency.depth,
+      kind: 'AGENCY',
+      agencyId: agency.agencyId,
+      agencyName: agency.agencyName,
+      subscriptionStatus: agency.owner.subscriptionStatus,
+      recruitmentStage: agency.owner.recruitmentStage,
+      sortAt: agency.owner.joinedAt,
+      sortId: agency.owner.membershipId,
+    })
+  }
+
+  for (const member of validMembers) {
+    const agency = agencies.get(member.agencyId)
+    const subscription = member.subscriptions[0]
+    if (!agency) continue
+    const invitation = member.acceptedInvitation
+    const normalizedParentAgentId =
+      normalizedMemberParentById.get(member.agentId) ?? agency.owner.agentId
     addChild(normalizedParentAgentId, {
       agentId: member.agentId,
       name: member.agent.user.name,
@@ -432,7 +527,7 @@ export async function getAgencyTreeForAgent(
 
   const result: AgencyTreeNode[] = []
   const visitedAgentIds = new Set<string>()
-  const visit = (node: OrderedNode) => {
+  const visit = (node: OrderedNode, depth: number) => {
     if (visitedAgentIds.has(node.agentId)) return
     visitedAgentIds.add(node.agentId)
 
@@ -440,7 +535,7 @@ export async function getAgencyTreeForAgent(
       agentId: node.agentId,
       name: node.name,
       parentAgentId: node.parentAgentId,
-      depth: node.depth,
+      depth,
       kind: node.kind,
       agencyId: node.agencyId,
       agencyName: node.agencyName,
@@ -448,10 +543,10 @@ export async function getAgencyTreeForAgent(
       recruitmentStage: node.recruitmentStage,
     })
     for (const child of childrenByAgentId.get(node.agentId) ?? []) {
-      visit(child)
+      visit(child, depth + 1)
     }
   }
 
-  visit(rootNode)
+  visit(rootNode, 0)
   return result
 }
