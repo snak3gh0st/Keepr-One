@@ -114,6 +114,7 @@ describe('agent plan access boundary', () => {
       agencyName: 'Agência Exemplo',
       subscriptionStatus: 'ACTIVE',
       canManageTeam: false,
+      canInviteAgents: true,
       canViewTeamSubscriptions: false,
       canViewAgencyNationalLife: false,
       scopeAgentIds: ['agent-1'],
@@ -215,6 +216,7 @@ describe('agent plan access boundary', () => {
       subscriptionStatus: 'PAST_DUE',
       canManageTeam: false,
       canViewTeamData: false,
+      canInviteAgents: false,
       scopeAgentIds: ['agent-1'],
     })
   })
@@ -275,6 +277,14 @@ describe('agent plan access boundary', () => {
     await expect(
       requireAgencyCapability('VIEW_AGENCY_NATIONAL_LIFE', 'agent-1'),
     ).rejects.toThrow('Forbidden: agency capability VIEW_AGENCY_NATIONAL_LIFE required')
+    await expect(
+      requireAgencyCapability('INVITE_AGENTS', 'agent-1'),
+    ).resolves.toMatchObject({
+      kind: 'AGENCY_MEMBER',
+      canInviteAgents: true,
+      canViewTeamData: false,
+      scopeAgentIds: ['agent-1'],
+    })
 
     const scope = await getAgentScopeIds('agent-1')
     scope.push('not-authorized')

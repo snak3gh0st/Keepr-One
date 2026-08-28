@@ -29,6 +29,7 @@ describe('InvitationAcceptanceForm', () => {
         accountGate="NEW_ACCOUNT"
         ownedAgencyName={null}
         allowedPlans={['AGENT_AGENCY_MEMBER', 'AGENCY']}
+        monthlyPriceCents={4_990}
         planRestriction={null}
         simulationEnabled
       />,
@@ -37,7 +38,8 @@ describe('InvitationAcceptanceForm', () => {
     expect(screen.getByRole('radio', { name: /Agente convidado/i })).not.toBeChecked()
     expect(screen.getByRole('radio', { name: /Plano Agência/i })).not.toBeChecked()
     expect(screen.getByText(/US\$\s*49,90/)).toBeVisible()
-    expect(screen.getByText(/US\$\s*99,90/)).toBeVisible()
+    expect(screen.getByText(/US\$\s*89,90/)).toBeVisible()
+    expect(screen.getAllByText(/US\$\s*10,00 de desconto mensal/i)).toHaveLength(2)
     expect(screen.queryByLabelText('Nome da sua agência')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Nome completo')).toBeRequired()
     expect(screen.getByRole('button', { name: 'Confirmar plano e entrar na estrutura' })).toBeDisabled()
@@ -57,6 +59,7 @@ describe('InvitationAcceptanceForm', () => {
         ownedAgencyName={null}
         allowedPlans={['AGENT_AGENCY_MEMBER']}
         intendedType="AGENT"
+        monthlyPriceCents={4_990}
         planRestriction={null}
         simulationEnabled
       />,
@@ -79,6 +82,7 @@ describe('InvitationAcceptanceForm', () => {
         ownedAgencyName="Agência Existente"
         allowedPlans={[]}
         intendedType="AGENT"
+        monthlyPriceCents={4_990}
         planRestriction="OWNED_AGENCY"
         simulationEnabled
       />,
@@ -97,12 +101,15 @@ describe('InvitationAcceptanceForm', () => {
         ownedAgencyName={null}
         allowedPlans={['AGENCY']}
         intendedType="AGENCY"
+        monthlyPriceCents={8_990}
         planRestriction="PROMOTE_DIRECT_MEMBER"
         simulationEnabled
       />,
     )
 
     expect(screen.getByText(/vínculo atual de agente.*será convertido em uma subagência/i)).toBeVisible()
+    expect(screen.getByText(/US\$\s*89,90/)).toBeVisible()
+    expect(screen.getByText(/US\$\s*10,00 de desconto mensal/i)).toBeVisible()
     expect(screen.getByLabelText('Nome da sua agência')).toBeRequired()
     expect(screen.queryByRole('radio')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Confirmar acesso e entrar na estrutura' })).toBeEnabled()
@@ -116,6 +123,7 @@ describe('InvitationAcceptanceForm', () => {
         accountGate="READY"
         ownedAgencyName={null}
         allowedPlans={['AGENT_AGENCY_MEMBER', 'AGENCY']}
+        monthlyPriceCents={4_990}
         planRestriction={null}
         simulationEnabled={false}
       />,
@@ -133,6 +141,7 @@ describe('InvitationAcceptanceForm', () => {
         accountGate="SIGN_IN"
         ownedAgencyName={null}
         allowedPlans={['AGENT_AGENCY_MEMBER', 'AGENCY']}
+        monthlyPriceCents={4_990}
         planRestriction={null}
         simulationEnabled
       />,
@@ -152,6 +161,7 @@ describe('InvitationAcceptanceForm', () => {
         accountGate="READY"
         ownedAgencyName="Agência Existente"
         allowedPlans={['AGENCY']}
+        monthlyPriceCents={4_990}
         planRestriction="OWNED_AGENCY"
         simulationEnabled
       />,
@@ -172,6 +182,7 @@ describe('InvitationAcceptanceForm', () => {
         accountGate="READY"
         ownedAgencyName={null}
         allowedPlans={['AGENCY']}
+        monthlyPriceCents={4_990}
         planRestriction="FOUNDER"
         simulationEnabled
       />,

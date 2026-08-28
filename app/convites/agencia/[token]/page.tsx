@@ -9,6 +9,7 @@ import {
   isLocalBillingSimulationEnabled,
   isValidAgencyInvitationToken,
 } from '@/lib/agency-invitations'
+import { findActiveAgencyInvitationAuthority } from '@/lib/agency-invitation-authority'
 import { prisma } from '@/lib/prisma'
 import {
   InvitationAcceptanceForm,
@@ -64,6 +65,7 @@ export default async function AgencyInvitationPage({
       email: true,
       name: true,
       intendedType: true,
+      monthlyPriceCents: true,
       status: true,
       expiresAt: true,
       agency: { select: { id: true, name: true } },
@@ -85,30 +87,12 @@ export default async function AgencyInvitationPage({
   ) {
     return <InvitationUnavailable message="O convite expirou, foi revogado ou já foi utilizado. Peça à agência para gerar um novo link." />
   }
-  const [inviterOwnerMembership, inviterAgencySubscription] = await Promise.all([
-    prisma.agencyMembership.findFirst({
-      where: {
-        agencyId: invitation.agency.id,
-        agentId: invitation.invitedBy.id,
-        role: 'OWNER',
-        endedAt: null,
-      },
-      select: { id: true },
-    }),
-    prisma.platformSubscription.findFirst({
-      where: {
-        agencyId: invitation.agency.id,
-        plan: 'AGENCY',
-        status: { in: ['TRIALING', 'ACTIVE'] },
-        AND: [
-          { OR: [{ currentPeriodStart: null }, { currentPeriodStart: { lte: now } }] },
-          { OR: [{ currentPeriodEnd: null }, { currentPeriodEnd: { gt: now } }] },
-        ],
-      },
-      select: { id: true },
-    }),
-  ])
-  if (!inviterOwnerMembership || !inviterAgencySubscription) {
+  const inviterAuthority = await findActiveAgencyInvitationAuthority(prisma, {
+    agencyId: invitation.agency.id,
+    agentId: invitation.invitedBy.id,
+    now,
+  })
+  if (!inviterAuthority) {
     return <InvitationUnavailable message="A agência que enviou este convite não possui uma assinatura ativa. Peça um novo convite quando o acesso for regularizado." />
   }
 
@@ -222,6 +206,7 @@ export default async function AgencyInvitationPage({
               ownedAgencyName={ownedAgencyName}
               allowedPlans={allowedPlans}
               intendedType={intendedType}
+              monthlyPriceCents={invitation.monthlyPriceCents}
               planRestriction={planRestriction}
               simulationEnabled={isLocalBillingSimulationEnabled()}
             />

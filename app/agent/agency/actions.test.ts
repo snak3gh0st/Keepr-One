@@ -64,7 +64,9 @@ function invitationForm(
   formData.set("email", email);
   formData.set("name", options.name ?? "Agente Teste");
   formData.set("intendedType", options.intendedType ?? "AGENT");
-  formData.set("recruitmentStage", options.recruitmentStage ?? "PROSPECT");
+  if (options.recruitmentStage) {
+    formData.set("recruitmentStage", options.recruitmentStage);
+  }
   return formData;
 }
 
@@ -97,6 +99,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireAgencyCapability.mockResolvedValue({
     agentId: "agent-owner",
+    kind: "AGENCY_OWNER",
     agency: { id: "agency-1", name: "North Star" },
   });
   mocks.agentFindUnique.mockResolvedValue({ userId: "owner-user" });
@@ -119,7 +122,7 @@ afterEach(() => {
 });
 
 describe("createAgencyInvitationAction", () => {
-  it("persists a normalized, server-priced agent invitation and audits without the raw token", async () => {
+  it("persists a normalized, server-priced invitation at the server-defined initial stage", async () => {
     const result = await createAgencyInvitationAction(
       INITIAL_AGENCY_ACTION_STATE,
       invitationForm("  AGENT@Example.COM  ", {
@@ -143,7 +146,7 @@ describe("createAgencyInvitationAction", () => {
         email: "agent@example.com",
         name: "Maria Agent",
         intendedType: "AGENT",
-        recruitmentStage: "CONTACTED",
+        recruitmentStage: "PROSPECT",
         stageUpdatedAt: now,
         monthlyPriceCents: 4_990,
         status: "PENDING",
@@ -162,7 +165,7 @@ describe("createAgencyInvitationAction", () => {
         entityId: "invite-1",
         after: expect.objectContaining({
           intendedType: "AGENT",
-          recruitmentStage: "CONTACTED",
+          recruitmentStage: "PROSPECT",
           monthlyPriceCents: 4_990,
         }),
       }),
@@ -173,12 +176,13 @@ describe("createAgencyInvitationAction", () => {
       inviteeName: "Maria Agent",
       agencyName: "North Star",
       intendedType: "AGENT",
+      monthlyPriceCents: 4_990,
       invitationUrl: result.invitationUrl,
       expiresAt: new Date("2026-09-09T16:00:00.000Z"),
     });
   });
 
-  it("uses the agency price when the inviter chooses an agency", async () => {
+  it("applies the ten-dollar agency invitation discount", async () => {
     const result = await createAgencyInvitationAction(
       INITIAL_AGENCY_ACTION_STATE,
       invitationForm("owner@example.com", { intendedType: "AGENCY" }),
@@ -188,28 +192,9 @@ describe("createAgencyInvitationAction", () => {
     expect(mocks.invitationCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         intendedType: "AGENCY",
-        monthlyPriceCents: 9_990,
+        monthlyPriceCents: 8_990,
       }),
     }));
-  });
-
-  it("rejects ACTIVE and malformed stages before reading membership data", async () => {
-    const active = await createAgencyInvitationAction(
-      INITIAL_AGENCY_ACTION_STATE,
-      invitationForm("agent@example.com", { recruitmentStage: "ACTIVE" }),
-    );
-    const malformed = await createAgencyInvitationAction(
-      INITIAL_AGENCY_ACTION_STATE,
-      invitationForm("agent@example.com", { recruitmentStage: "OTHER" }),
-    );
-
-    expect(active).toEqual({
-      status: "error",
-      message: "A etapa Ativo só fica disponível depois que o convite for aceito.",
-    });
-    expect(malformed.status).toBe("error");
-    expect(mocks.membershipFindFirst).not.toHaveBeenCalled();
-    expect(mocks.invitationCreate).not.toHaveBeenCalled();
   });
 
   it("does not allow an individual account to invite", async () => {
@@ -222,6 +207,82 @@ describe("createAgencyInvitationAction", () => {
 
     expect(result.status).toBe("error");
     expect(mocks.membershipFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("lets an active member create a new branch invitation in the base agency", async () => {
+    mocks.requireAgencyCapability.mockResolvedValue({
+      agentId: "agent-member",
+      kind: "AGENCY_MEMBER",
+      agency: { id: "agency-1", name: "North Star" },
+    });
+    mocks.agentFindUnique.mockResolvedValue({ userId: "member-user" });
+
+    const result = await createAgencyInvitationAction(
+      INITIAL_AGENCY_ACTION_STATE,
+      invitationForm("new-branch@example.com", { intendedType: "AGENCY" }),
+    );
+
+    expect(result.status).toBe("success");
+    expect(mocks.invitationCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        agencyId: "agency-1",
+        invitedByAgentId: "agent-member",
+        email: "new-branch@example.com",
+        intendedType: "AGENCY",
+      }),
+    }));
+  });
+
+  it("blocks self-invites and any attempt by a member to move an active membership", async () => {
+    mocks.requireAgencyCapability.mockResolvedValue({
+      agentId: "agent-member",
+      kind: "AGENCY_MEMBER",
+      agency: { id: "agency-1", name: "North Star" },
+    });
+    mocks.membershipFindFirst.mockResolvedValue({
+      id: "self-membership",
+      agentId: "agent-member",
+      agencyId: "agency-1",
+      role: "MEMBER",
+      agency: { parentAgencyId: null },
+      acceptedInvitation: null,
+      subscriptions: [{ id: "member-subscription" }],
+    });
+
+    const selfInvite = await createAgencyInvitationAction(
+      INITIAL_AGENCY_ACTION_STATE,
+      invitationForm("member@example.com"),
+    );
+
+    expect(selfInvite).toEqual({
+      status: "error",
+      message: "Você não pode enviar um convite para a própria conta.",
+    });
+
+    mocks.membershipFindFirst.mockResolvedValue({
+      id: "other-membership",
+      agentId: "other-agent",
+      agencyId: "agency-1",
+      role: "MEMBER",
+      agency: { parentAgencyId: null },
+      acceptedInvitation: {
+        status: "ACCEPTED",
+        intendedType: "AGENT",
+        acceptedPlan: "AGENT_AGENCY_MEMBER",
+      },
+      subscriptions: [{ id: "other-subscription" }],
+    });
+
+    const promotion = await createAgencyInvitationAction(
+      INITIAL_AGENCY_ACTION_STATE,
+      invitationForm("other@example.com", { intendedType: "AGENCY" }),
+    );
+
+    expect(promotion).toEqual({
+      status: "error",
+      message: "Este e-mail não está disponível para um novo convite.",
+    });
+    expect(mocks.invitationCreate).not.toHaveBeenCalled();
   });
 
   it("uses a generic conflict for a target linked to another structure", async () => {
@@ -297,7 +358,7 @@ describe("createAgencyInvitationAction", () => {
       data: expect.objectContaining({
         email: "member@example.com",
         intendedType: "AGENCY",
-        monthlyPriceCents: 9_990,
+        monthlyPriceCents: 8_990,
       }),
     }));
   });
@@ -410,6 +471,31 @@ describe("updateAgencyRecruitmentStageAction", () => {
     expect(mocks.auditCreate).not.toHaveBeenCalled();
   });
 
+  it("restricts a member to invitations issued by that same member", async () => {
+    mocks.requireAgencyCapability.mockResolvedValue({
+      agentId: "agent-member",
+      kind: "AGENCY_MEMBER",
+      agency: { id: "agency-1", name: "North Star" },
+    });
+    mocks.invitationFindFirst.mockResolvedValue(null);
+
+    const result = await updateAgencyRecruitmentStageAction(
+      INITIAL_AGENCY_ACTION_STATE,
+      stageForm("QUALIFIED"),
+    );
+
+    expect(result.status).toBe("error");
+    expect(mocks.invitationFindFirst).toHaveBeenCalledWith({
+      where: {
+        id: "invite-1",
+        agencyId: "agency-1",
+        invitedByAgentId: "agent-member",
+      },
+      select: expect.any(Object),
+    });
+    expect(mocks.invitationUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("rejects a stale optimistic version without overwriting the newer stage", async () => {
     mocks.invitationFindFirst.mockResolvedValue(recruitmentInvitation({
       recruitmentStage: "QUALIFIED",
@@ -496,5 +582,40 @@ describe("revokeAgencyInvitationAction", () => {
     });
     expect(mocks.invitationUpdateMany).not.toHaveBeenCalled();
     expect(mocks.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("scopes a member revoke to invitations issued by that member", async () => {
+    mocks.requireAgencyCapability.mockResolvedValue({
+      agentId: "agent-member",
+      kind: "AGENCY_MEMBER",
+      agency: { id: "agency-1", name: "North Star" },
+    });
+    mocks.invitationFindFirst.mockResolvedValue(recruitmentInvitation());
+    mocks.invitationUpdateMany.mockResolvedValue({ count: 1 });
+    const formData = new FormData();
+    formData.set("invitationId", "invite-1");
+
+    const result = await revokeAgencyInvitationAction(
+      INITIAL_AGENCY_ACTION_STATE,
+      formData,
+    );
+
+    expect(result.status).toBe("success");
+    expect(mocks.invitationFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: "invite-1",
+        agencyId: "agency-1",
+        invitedByAgentId: "agent-member",
+        status: "PENDING",
+      },
+    }));
+    expect(mocks.invitationUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: "invite-1",
+        agencyId: "agency-1",
+        invitedByAgentId: "agent-member",
+        status: "PENDING",
+      },
+    }));
   });
 });

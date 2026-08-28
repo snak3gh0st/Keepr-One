@@ -8,7 +8,8 @@ describe("HierarchyMetrics", () => {
   it("summarizes only descendants, subagencies and layers", () => {
     render(<HierarchyMetrics peopleBelow={7} agenciesBelow={2} depth={3} />);
 
-    expect(screen.getByText("Pessoas abaixo")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Resumo do mapa da equipe" })).toBeInTheDocument();
+    expect(screen.getByText("Pessoas na equipe")).toBeInTheDocument();
     expect(screen.getByText("Subagências")).toBeInTheDocument();
     expect(screen.getByText("Camadas")).toBeInTheDocument();
     expect(screen.queryByText(/liderança/i)).not.toBeInTheDocument();

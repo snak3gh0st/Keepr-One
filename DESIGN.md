@@ -224,5 +224,6 @@ Sistema majoritariamente plano. Profundidade vem de camadas tonais (Paper Steel 
 - **Don't** usar dashboard escuro raso, cards idênticos ou azul/roxo genérico de SaaS — é exatamente a cara de CRM white-label (SparkLeads/GoHighLevel) que este produto rejeita.
 - **Don't** usar `box-shadow` com blur ≥16px em card ou botão em repouso — reservado só a overlay (dropdown/modal/toast).
 - **Don't** usar gradiente em texto, glassmorphism decorativo ou `border-left`/`border-right` colorido como "acento" de card.
+- **Don't** inserir imagens no meio de títulos, frases ou parágrafos. Quando uma imagem for necessária, ela ocupa um bloco próprio e não interrompe a leitura.
 - **Don't** arredondar cards, seções ou inputs acima de 12px — este sistema usa 6-8px, nunca 24-40px.
 - **Don't** comunicar aprovado/pendente/cancelado só pela cor do pill — sempre com o texto do status visível.

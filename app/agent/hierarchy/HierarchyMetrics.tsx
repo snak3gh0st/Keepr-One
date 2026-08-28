@@ -45,9 +45,9 @@ export function HierarchyMetrics({
   const metrics: HierarchyMetric[] = [
     {
       key: "people",
-      label: "Pessoas abaixo",
+      label: "Pessoas na equipe",
       value: peopleBelow,
-      detail: peopleBelow === 1 ? "1 pessoa na sua linha" : `${peopleBelow} pessoas na sua linha`,
+      detail: peopleBelow === 1 ? "1 agente ou responsável abaixo" : `${peopleBelow} agentes e responsáveis abaixo`,
     },
     {
       key: "agencies",
@@ -64,7 +64,7 @@ export function HierarchyMetrics({
   ];
 
   return (
-    <section className="hierarchy-metrics" aria-label="Resumo da estrutura descendente">
+    <section className="hierarchy-metrics" aria-label="Resumo do mapa da equipe">
       {metrics.map((metric) => (
         <div key={metric.key} className="hierarchy-metric" data-tone={metric.key}>
           <span className="hierarchy-metric-icon">

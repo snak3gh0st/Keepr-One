@@ -33,6 +33,22 @@ const invitationPriceMigration = readFileSync(
   'utf8',
 )
 
+const invitedAgencyDiscountMigration = readFileSync(
+  new URL(
+    '../prisma/migrations/20260827173000_discount_pending_agency_invitations/migration.sql',
+    import.meta.url,
+  ),
+  'utf8',
+)
+
+const legacyInvitationDiscountMigration = readFileSync(
+  new URL(
+    '../prisma/migrations/20260827180000_allow_legacy_invitation_discount_snapshot/migration.sql',
+    import.meta.url,
+  ),
+  'utf8',
+)
+
 describe('commercial agency hierarchy migration safety', () => {
   it('keeps the one-active-membership-per-agent commercial invariant', () => {
     expect(planMigration).toContain(
@@ -189,6 +205,51 @@ describe('commercial agency hierarchy migration safety', () => {
     )
     expect(invitationPriceMigration).toContain(
       '"monthlyPriceCents" = 9990',
+    )
+  })
+
+  it('discounts only pending agency invitations while preserving historical snapshots', () => {
+    expect(invitedAgencyDiscountMigration).toContain(
+      'DROP CONSTRAINT "AgencyInvitation_plan_price"',
+    )
+    expect(invitedAgencyDiscountMigration).toContain(
+      'SET "monthlyPriceCents" = 8990',
+    )
+    expect(invitedAgencyDiscountMigration).toContain(
+      'WHERE "intendedType" = \'AGENCY\'',
+    )
+    expect(invitedAgencyDiscountMigration).toContain(
+      'AND "status" = \'PENDING\'',
+    )
+    expect(invitedAgencyDiscountMigration).toContain(
+      '"status" <> \'PENDING\'',
+    )
+    expect(invitedAgencyDiscountMigration).toContain(
+      '"monthlyPriceCents" IN (8990, 9990)',
+    )
+  })
+
+  it('allows a legacy invitation to record the agency discount only when accepted', () => {
+    expect(legacyInvitationDiscountMigration).toContain(
+      'DROP CONSTRAINT "AgencyInvitation_plan_price"',
+    )
+    expect(legacyInvitationDiscountMigration).toContain(
+      '"intendedType" IS NULL',
+    )
+    expect(legacyInvitationDiscountMigration).toContain(
+      '"status" = \'ACCEPTED\'',
+    )
+    expect(legacyInvitationDiscountMigration).toContain(
+      '"monthlyPriceCents" = 8990',
+    )
+    expect(legacyInvitationDiscountMigration).toMatch(
+      /"intendedType" IS NULL[\s\S]*"monthlyPriceCents" = 4990[\s\S]*"status" = 'ACCEPTED'[\s\S]*"monthlyPriceCents" = 8990/,
+    )
+    expect(legacyInvitationDiscountMigration).not.toContain(
+      'UPDATE "AgencyInvitation"',
+    )
+    expect(legacyInvitationDiscountMigration).not.toContain(
+      '"PlatformSubscription"',
     )
   })
 })

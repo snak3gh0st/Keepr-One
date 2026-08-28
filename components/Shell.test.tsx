@@ -104,7 +104,7 @@ describe('Shell plan access', () => {
 
     expect(screen.getByText('Operação individual')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Equipe' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Plano e agência' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Agência' })).toBeInTheDocument()
     expect(screen.getAllByText('Plano Agente')).not.toHaveLength(0)
     expect(screen.queryByRole('timer')).toBeNull()
   })
@@ -121,6 +121,48 @@ describe('Shell plan access', () => {
     expect(screen.getByText('Agência Aurora')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Equipe' })).toBeInTheDocument()
     expect(screen.getAllByText('Plano Agência')).not.toHaveLength(0)
+  })
+
+  it('keeps agency and team in Gestão, then places integrations in Conta before settings', () => {
+    render(
+      <AgentAccessProvider access={AGENCY_OWNER_ACCESS}>
+        <Shell role="AGENT" userName="Ana">
+          <p>Conteúdo</p>
+        </Shell>
+      </AgentAccessProvider>,
+    )
+
+    const navigation = screen.getByRole('navigation', { name: 'Navegação principal' })
+    const moduleList = navigation.querySelector('ul')
+    expect(moduleList).not.toBeNull()
+    const groupLabels = Array.from(
+      moduleList!.querySelectorAll('li[role="presentation"] span'),
+    ).map((element) => element.textContent)
+    const navigationLabels = Array.from(
+      moduleList!.querySelectorAll('a[aria-label]'),
+    ).map((element) => element.getAttribute('aria-label'))
+
+    expect(groupLabels).toEqual(['Operação', 'Carteira', 'Gestão', 'Conta'])
+    expect(navigationLabels.slice(-4)).toEqual([
+      'Agência',
+      'Equipe',
+      'Integrações',
+      'Configurações',
+    ])
+  })
+
+  it('uses Agência as the current module name on the agency route', () => {
+    mocks.pathname = '/agent/agency'
+
+    const { container } = render(
+      <AgentAccessProvider access={AGENCY_OWNER_ACCESS}>
+        <Shell role="AGENT" userName="Ana">
+          <p>Conteúdo</p>
+        </Shell>
+      </AgentAccessProvider>,
+    )
+
+    expect(container.querySelector('.shell-topbar-title')).toHaveTextContent('Agência')
   })
 
   it('keeps account settings available in navigation and the account controls', () => {

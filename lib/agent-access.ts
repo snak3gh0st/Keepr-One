@@ -110,6 +110,7 @@ function agencyAccess(input: {
   scopeAgentIds: string[]
 }): AgentAccessContext {
   const isEntitledOwner = input.kind === 'AGENCY_OWNER' && input.entitled
+  const canInviteAgents = input.entitled
 
   return {
     agentId: input.agentId,
@@ -123,7 +124,9 @@ function agencyAccess(input: {
     subscription: input.subscription,
     canManageTeam: isEntitledOwner,
     canViewTeamData: isEntitledOwner,
-    canInviteAgents: isEntitledOwner,
+    // An entitled member may grow their own branch, but team data and
+    // management remain exclusive to the agency owner.
+    canInviteAgents,
     canViewTeamSubscriptions: isEntitledOwner,
     canViewAgencyNationalLife: isEntitledOwner,
     // Invited members keep an individual data boundary even though their

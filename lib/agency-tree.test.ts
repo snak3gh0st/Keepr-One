@@ -93,7 +93,7 @@ function rootMembership(
     agentId,
     invitedByAgentId: null,
     joinedAt: new Date('2026-01-01T00:00:00.000Z'),
-    agent: { user: { name } },
+    agent: { parentAgentId: null, user: { name } },
     agency: {
       id: agencyId,
       name: agencyName,
@@ -110,6 +110,7 @@ function childAgency(input: {
   agentId: string
   agentName: string
   invitedByAgentId: string
+  parentAgentId?: string | null
   joinedAt: string
   recruitmentStage?: 'ONBOARDING' | 'ACTIVE'
   subscriptionStatus?: 'TRIALING' | 'ACTIVE' | 'PAST_DUE' | 'CANCELED' | 'EXPIRED' | null
@@ -123,7 +124,12 @@ function childAgency(input: {
       agentId: input.agentId,
       invitedByAgentId: input.invitedByAgentId,
       joinedAt: new Date(input.joinedAt),
-      agent: { user: { name: input.agentName } },
+      agent: {
+        parentAgentId: input.parentAgentId === undefined
+          ? input.invitedByAgentId
+          : input.parentAgentId,
+        user: { name: input.agentName },
+      },
       acceptedInvitation: {
         agencyId: input.parentAgencyId,
         acceptedAgentId: input.agentId,
@@ -144,6 +150,7 @@ function member(input: {
   agentId: string
   name: string
   invitedByAgentId: string
+  parentAgentId?: string | null
   joinedAt: string
   recruitmentStage?: 'ONBOARDING' | 'ACTIVE'
   subscriptionStatus?: 'TRIALING' | 'ACTIVE' | 'PAST_DUE' | 'CANCELED' | 'EXPIRED' | null
@@ -154,7 +161,12 @@ function member(input: {
     agentId: input.agentId,
     invitedByAgentId: input.invitedByAgentId,
     joinedAt: new Date(input.joinedAt),
-    agent: { user: { name: input.name } },
+    agent: {
+      parentAgentId: input.parentAgentId === undefined
+        ? input.invitedByAgentId
+        : input.parentAgentId,
+      user: { name: input.name },
+    },
     acceptedInvitation: {
       agencyId: input.agencyId,
       acceptedAgentId: input.agentId,
@@ -357,6 +369,147 @@ describe('commercial agency name tree', () => {
         }),
       }),
     }))
+  })
+
+  it('keeps AGENT -> AGENT and AGENT -> subagency branches under the original member inviter', async () => {
+    const branchMembers = [
+      member({
+        id: 'membership-a-agent-1',
+        agencyId: 'agency-a',
+        agentId: 'agent-a-1',
+        name: 'Alice',
+        invitedByAgentId: 'agent-a',
+        joinedAt: '2026-01-01T06:00:00.000Z',
+      }),
+      member({
+        id: 'membership-a-agent-2',
+        agencyId: 'agency-a',
+        agentId: 'agent-a-2',
+        name: 'Amanda',
+        invitedByAgentId: 'agent-a-1',
+        joinedAt: '2026-01-01T12:00:00.000Z',
+      }),
+      ...durableMembers,
+    ]
+    mocks.findMembers.mockImplementation(({ where }) => {
+      const agencyIds = new Set(where.agencyId.in as string[])
+      return branchMembers.filter((item) => agencyIds.has(item.agencyId))
+    })
+    mocks.findChildAgencies.mockImplementation(({ where }) => {
+      const parentIds = new Set(where.parentAgencyId.in as string[])
+      return childAgencies
+        .filter((agency) => parentIds.has(agency.parentAgencyId))
+        .map((agency) => agency.id === 'agency-b'
+          ? {
+              ...agency,
+              memberships: [{
+                ...agency.memberships[0],
+                invitedByAgentId: 'agent-a-2',
+                agent: {
+                  ...agency.memberships[0].agent,
+                  parentAgentId: 'agent-a-2',
+                },
+              }],
+            }
+          : agency)
+    })
+
+    const tree = await getAgencyTreeForAgent('agent-a', now)
+
+    expect(tree.find(({ agentId }) => agentId === 'agent-a-1')).toMatchObject({
+      parentAgentId: 'agent-a',
+      depth: 1,
+      kind: 'AGENT',
+    })
+    expect(tree.find(({ agentId }) => agentId === 'agent-a-2')).toMatchObject({
+      parentAgentId: 'agent-a-1',
+      depth: 2,
+      kind: 'AGENT',
+    })
+    expect(tree.find(({ agentId }) => agentId === 'agent-b')).toMatchObject({
+      parentAgentId: 'agent-a-2',
+      depth: 3,
+      kind: 'AGENCY',
+    })
+  })
+
+  it('normalizes cyclic and cross-agency parents without duplicates or tenant escapes', async () => {
+    const corruptMembers = [
+      member({
+        id: 'cycle-membership-1',
+        agencyId: 'agency-a',
+        agentId: 'cycle-agent-1',
+        name: 'Cíclico Um',
+        invitedByAgentId: 'cycle-agent-2',
+        parentAgentId: 'cycle-agent-2',
+        joinedAt: '2026-01-01T06:00:00.000Z',
+      }),
+      member({
+        id: 'cycle-membership-2',
+        agencyId: 'agency-a',
+        agentId: 'cycle-agent-2',
+        name: 'Cíclico Dois',
+        invitedByAgentId: 'cycle-agent-1',
+        parentAgentId: 'cycle-agent-1',
+        joinedAt: '2026-01-01T07:00:00.000Z',
+      }),
+      member({
+        id: 'cross-membership',
+        agencyId: 'agency-a',
+        agentId: 'cross-agent',
+        name: 'Vínculo Corrompido',
+        invitedByAgentId: 'agent-b',
+        parentAgentId: 'agent-b',
+        joinedAt: '2026-01-01T08:00:00.000Z',
+      }),
+      member({
+        id: 'duplicate-membership',
+        agencyId: 'agency-b',
+        agentId: 'cycle-agent-1',
+        name: 'Duplicado',
+        invitedByAgentId: 'agent-b',
+        joinedAt: '2026-01-03T06:00:00.000Z',
+      }),
+      ...durableMembers,
+    ]
+    mocks.findMembers.mockImplementation(({ where }) => {
+      const agencyIds = new Set(where.agencyId.in as string[])
+      return corruptMembers.filter((item) => agencyIds.has(item.agencyId))
+    })
+    mocks.findChildAgencies.mockImplementation(({ where }) => {
+      const parentIds = new Set(where.parentAgencyId.in as string[])
+      return childAgencies
+        .filter((agency) => parentIds.has(agency.parentAgencyId))
+        .map((agency) => agency.id === 'agency-b'
+          ? {
+              ...agency,
+              memberships: [{
+                ...agency.memberships[0],
+                invitedByAgentId: 'agent-c-1',
+                agent: {
+                  ...agency.memberships[0].agent,
+                  parentAgentId: 'agent-c-1',
+                },
+              }],
+            }
+          : agency)
+    })
+
+    const tree = await getAgencyTreeForAgent('agent-a', now)
+    const ids = tree.map(({ agentId }) => agentId)
+
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids.filter((id) => id === 'cycle-agent-1')).toHaveLength(1)
+    for (const agentId of ['cycle-agent-1', 'cycle-agent-2', 'cross-agent']) {
+      expect(tree.find((node) => node.agentId === agentId)).toMatchObject({
+        parentAgentId: 'agent-a',
+        depth: 1,
+      })
+    }
+    expect(tree.find(({ agentId }) => agentId === 'agent-b')).toMatchObject({
+      parentAgentId: 'agent-a',
+      depth: 1,
+    })
   })
 
   it('prunes a child whose owner was not accepted by the exact parent agency', async () => {
