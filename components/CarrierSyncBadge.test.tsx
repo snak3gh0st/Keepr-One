@@ -61,6 +61,43 @@ describe('CarrierSyncBadge', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
   })
 
+  it('keeps an active connected sync above a stale carrier-login warning', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        state: { kind: 'NEEDS_YOU', count: 1 },
+        sync: { runId: 'run-1', state: 'RUNNING', completed: 2, total: 6, shouldPoll: true },
+      }),
+    })))
+
+    render(<CarrierSyncBadge />)
+
+    expect(await screen.findByText('Atualizando 2/6')).toBeTruthy()
+    const presence = screen.getByLabelText('K-Bot status')
+    expect(presence).toHaveAttribute('data-state', 'working')
+    expect(presence).toHaveTextContent('K-Bot is syncing National Life')
+    expect(presence).not.toHaveTextContent('waiting for you')
+  })
+
+  it('asks for login only when the current sync is actually paused', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        state: { kind: 'NEEDS_YOU', count: 1 },
+        sync: { runId: 'run-1', state: 'PAUSED', completed: 2, total: 6, shouldPoll: true },
+      }),
+    })))
+
+    render(<CarrierSyncBadge />)
+
+    await screen.findByLabelText('K-Bot status')
+    await waitFor(() => {
+      const presence = screen.getByLabelText('K-Bot status')
+      expect(presence).toHaveAttribute('data-state', 'waiting')
+      expect(presence).toHaveTextContent('K-Bot is waiting for you')
+    })
+  })
+
   it('shows sync and illustration as concurrent activities instead of hiding one', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,

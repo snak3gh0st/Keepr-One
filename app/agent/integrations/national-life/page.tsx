@@ -114,6 +114,7 @@ export default async function NationalLifeConnectionPage() {
               storeUrl={localConfig.storeUrl}
               installMode={localConfig.installMode}
               baseUrl={localConfig.baseUrl}
+              hideDuringActiveSync
             />
           )}
 

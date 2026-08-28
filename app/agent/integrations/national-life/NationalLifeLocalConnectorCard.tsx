@@ -182,11 +182,13 @@ export function NationalLifeLocalConnectorCard({
   storeUrl = null,
   installMode = 'store',
   baseUrl,
+  hideDuringActiveSync = false,
 }: {
   extensionId: string
   storeUrl?: string | null
   installMode?: 'pilot' | 'store'
   baseUrl: string
+  hideDuringActiveSync?: boolean
 }) {
   const router = useRouter()
   const installedFlowStarted = useRef(false)
@@ -701,11 +703,17 @@ export function NationalLifeLocalConnectorCard({
   }
 
   return (
-    <section
-      aria-labelledby="local-connector-title"
-      className="overflow-hidden rounded-xl border border-border-steel bg-paper"
-    >
+    <>
       <KBotCornerPresence state={botState} title={cornerCopy.title} detail={cornerCopy.detail} />
+      <section
+        aria-labelledby="local-connector-title"
+        // NationalLifeSyncProgress is the single visible progress surface on
+        // the integration page. Keep this controller mounted so its watcher,
+        // recovery and completion transitions continue running, but remove the
+        // duplicate card while that dedicated panel is active.
+        hidden={hideDuringActiveSync && syncActive}
+        className="overflow-hidden rounded-xl border border-border-steel bg-paper"
+      >
       <div className="relative border-b border-border-steel bg-panel/45 p-5 sm:p-7">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-3">
@@ -874,6 +882,7 @@ export function NationalLifeLocalConnectorCard({
           </Link>
         </div>
       )}
-    </section>
+      </section>
+    </>
   )
 }

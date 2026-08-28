@@ -428,13 +428,15 @@ describe('NationalLifeLocalConnectorCard', () => {
         storeUrl={storeUrl}
         installMode="store"
         baseUrl={baseUrl}
+        hideDuringActiveSync
       />,
     )
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Area 3 of 13')
+      expect(screen.queryByRole('heading', { name: 'Put K-Bot to work' })).not.toBeInTheDocument()
+      expect(screen.getByLabelText('K-Bot status')).toHaveTextContent('K-Bot is working')
     })
-    expect(screen.getByRole('button', { name: 'Syncing…' })).toBeDisabled()
+    expect(screen.getByLabelText('K-Bot status')).toHaveClass('md:bottom-4', 'md:right-5')
     await waitFor(
       () => expect(screen.getByRole('status')).toHaveTextContent('up to date'),
       { timeout: 3_000 },
