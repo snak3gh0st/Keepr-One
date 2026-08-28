@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../prisma'
+import { commissionEarningIdentity } from './commission-identity'
 import type { GridRow, NationalLifeGridKey } from './portal-grid-client'
 
 export type ReportRow = {
@@ -81,6 +82,16 @@ function extractAmounts(row: GridRow): Record<string, string> {
 /// Identity per report. Falls back to a hash of the whole row so an unmapped
 /// report still upserts deterministically instead of duplicating on every run.
 export function deriveRowKey(gridKey: NationalLifeGridKey, row: GridRow): string {
+  const gridKeyValue = gridKey as string
+  const isCommissionEarningDetail = gridKeyValue === 'COMMISSIONS_EARNING_REPORT' ||
+    gridKeyValue === 'COMMISSION_DETAIL_NLD_COMMISSION_EARNING'
+  const earningIdentity = isCommissionEarningDetail ? commissionEarningIdentity(row) : null
+  if (earningIdentity) {
+    const policyNumber = text(row, 'PolicyNumber')
+    const digest = createHash('sha256').update(earningIdentity).digest('hex').slice(0, 32)
+    return policyNumber ? `${policyNumber}|${digest}` : digest
+  }
+
   const parts: Array<string | null> = (() => {
     switch (gridKey) {
       case 'PAID_COMMISSIONS':
@@ -99,18 +110,6 @@ export function deriveRowKey(gridKey: NationalLifeGridKey, row: GridRow): string
       case 'PIP_PENDING':
         return [text(row, 'PolicyNo'), text(row, 'AgentNumber')]
       default:
-        // The per-statement earning detail repeats a policy across transactions,
-        // so the transaction type and dates are part of its identity.
-        if (row.PolicyNumber !== undefined && row.GrossCommEarned !== undefined) {
-          return [
-            text(row, 'CommissionStatementId'),
-            text(row, 'PolicyNumber'),
-            text(row, 'TransactionType'),
-            text(row, 'PremiumEffDate'),
-            text(row, 'ProcessDate'),
-            text(row, 'GrossCommEarned'),
-          ]
-        }
         return []
     }
   })()

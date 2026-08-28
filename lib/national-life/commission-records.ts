@@ -1,3 +1,5 @@
+import { commissionEarningIdentity } from './commission-identity'
+
 /// Turns the carrier's commission earning detail into the shape the app reports
 /// on, without writing it to `CommissionRecord`.
 ///
@@ -119,31 +121,40 @@ export function classifyCarrierCommissionLevel(
 export function toCarrierCommissionRecords(
   rows: readonly CarrierCommissionRow[],
 ): CarrierCommissionRecord[] {
-  return rows.flatMap((row) => {
+  const seen = new Set<string>()
+  const records: CarrierCommissionRecord[] = []
+
+  for (const row of rows) {
     const raw = asRecord(row.raw)
     const amounts = asRecord(row.amounts)
     const amount = parseCarrierAmount(amounts.GrossCommEarned ?? raw.GrossCommEarned)
-    if (amount === null) return []
+    if (amount === null) continue
 
     // Fail closed on missing or novel carrier labels. Treating every value
     // except "Override" as personal could expose a new team-level row after a
     // carrier schema change.
     const type = classifyCarrierCommissionLevel(raw.WritingAgtLevel)
-    if (type === null) return []
+    if (type === null) continue
     const isOverride = type === 'OVERRIDE'
+    const identity = commissionEarningIdentity(raw, amounts)
+    const scopedRow = row as CarrierCommissionRow & { agentId?: unknown }
+    const owner = typeof scopedRow.agentId === 'string' ? scopedRow.agentId : ''
+    const dedupeKey = identity ? `${owner}\u0000${identity}` : null
+    if (dedupeKey && seen.has(dedupeKey)) continue
+    if (dedupeKey) seen.add(dedupeKey)
 
-    return [
-      {
-        id: row.id,
-        period: toPeriod(raw.PaymentDate),
-        type,
-        level: isOverride ? 1 : 0,
-        amount,
-        policyNumber: asString(raw.PolicyNumber) ?? '—',
-        writingAgentName: asString(raw.WritingAgtName) ?? '',
-      },
-    ]
-  })
+    records.push({
+      id: row.id,
+      period: toPeriod(raw.PaymentDate),
+      type,
+      level: isOverride ? 1 : 0,
+      amount,
+      policyNumber: asString(raw.PolicyNumber) ?? '—',
+      writingAgentName: asString(raw.WritingAgtName) ?? '',
+    })
+  }
+
+  return records
 }
 
 /**

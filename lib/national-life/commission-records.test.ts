@@ -96,6 +96,26 @@ describe('toCarrierCommissionRecords', () => {
   it('survives rows whose payload is not an object', () => {
     expect(toCarrierCommissionRecords([{ id: 'a', raw: null, amounts: undefined }])).toEqual([])
   })
+
+  it('counts a transaction once when historical syncs stored rotating statement ids', () => {
+    const raw = {
+      PolicyNumber: 'NL1',
+      TransactionType: 'FYC',
+      PaymentDate: '08/25/2026',
+      ProcessDate: '08/24/2026',
+      PremiumEffDate: '08/01/2026',
+      WritingAgtName: 'Agent One',
+      WritingAgtLevel: 'Personal',
+    }
+    const records = toCarrierCommissionRecords([
+      { id: 'old-row', raw: { ...raw, CommissionStatementId: 'old' }, amounts: { GrossCommEarned: '$100' } },
+      { id: 'new-row', raw: { ...raw, CommissionStatementId: 'new' }, amounts: { GrossCommEarned: '$100' } },
+      { id: 'newest-row', raw: { ...raw, CommissionStatementId: 'newest' }, amounts: { GrossCommEarned: '$100' } },
+    ])
+
+    expect(records).toHaveLength(1)
+    expect(totalOf(records)).toBe(100)
+  })
 })
 
 describe('toVisibleCarrierCommissionRecords', () => {
@@ -135,6 +155,16 @@ describe('toVisibleCarrierCommissionRecords', () => {
       'MEMBER-DIRECT',
     ])
     expect(totalOf(records)).toBe(350)
+  })
+
+  it('does not collapse matching transactions owned by different agents', () => {
+    const records = toVisibleCarrierCommissionRecords([
+      scopedRow('owner', 'SHARED', 'Personal', '$100'),
+      scopedRow('member', 'SHARED', 'Personal', '$100'),
+    ], 'owner')
+
+    expect(records).toHaveLength(2)
+    expect(totalOf(records)).toBe(200)
   })
 })
 
