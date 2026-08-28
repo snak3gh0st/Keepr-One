@@ -3,6 +3,7 @@ import {
   currentCarrierChargebackSnapshot,
   NO_PERIOD,
   parseCarrierAmount,
+  preferCanonicalCarrierCommissionRows,
   projectedPayableSnapshotForPeriod,
   sumByPeriod,
   toCarrierCommissionRecords,
@@ -134,6 +135,39 @@ describe('toVisibleCarrierCommissionRecords', () => {
       'MEMBER-DIRECT',
     ])
     expect(totalOf(records)).toBe(350)
+  })
+})
+
+describe('preferCanonicalCarrierCommissionRows', () => {
+  const scoped = (
+    id: string,
+    agentId: string,
+    deploymentScope: string,
+    paymentDate: string,
+  ) => ({
+    ...row({ PaymentDate: paymentDate, WritingAgtLevel: 'Personal' }, { GrossCommEarned: '$10' }),
+    id,
+    agentId,
+    deploymentScope,
+  })
+
+  it('uses legacy history only for agent-months absent from the current connector', () => {
+    const selected = preferCanonicalCarrierCommissionRows([
+      scoped('legacy-jul', 'agent-1', 'legacy', '07/25/2026'),
+      scoped('legacy-aug', 'agent-1', 'legacy', '08/25/2026'),
+      scoped('current-aug', 'agent-1', 'current', '08/25/2026'),
+    ], 'current')
+
+    expect(selected.map((entry) => entry.id)).toEqual(['legacy-jul', 'current-aug'])
+  })
+
+  it('does not hide another entitled agent history', () => {
+    const selected = preferCanonicalCarrierCommissionRows([
+      scoped('owner-current', 'owner', 'current', '08/25/2026'),
+      scoped('member-legacy', 'member', 'legacy', '08/25/2026'),
+    ], 'current')
+
+    expect(selected.map((entry) => entry.id)).toEqual(['owner-current', 'member-legacy'])
   })
 })
 

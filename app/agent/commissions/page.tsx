@@ -10,12 +10,17 @@ import {
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
 import {
+  preferCanonicalCarrierCommissionRows,
   toCarrierCommissionRecords,
   toVisibleCarrierCommissionRecords,
 } from '@/lib/national-life/commission-records'
 import { getAgentScopeIds } from '@/lib/agent-access'
 import { CommissionsList } from './CommissionsList'
-import { COMMISSION_EARNING_GRID_KEYS } from '@/lib/national-life/commission-grid-keys'
+import {
+  COMMISSION_EARNING_GRID_KEYS,
+  LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
+  LEGACY_COMMISSION_EARNING_GRID_KEY,
+} from '@/lib/national-life/commission-grid-keys'
 
 export const dynamic = 'force-dynamic'
 
@@ -78,13 +83,27 @@ export default async function CommissionsPage() {
       const carrierRows = await prisma.nationalLifeReportRow.findMany({
         where: {
           agentId: { in: scopeAgentIds },
-          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-          gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
+          OR: [
+            {
+              deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+              gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
+            },
+            {
+              deploymentScope: LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
+              gridKey: LEGACY_COMMISSION_EARNING_GRID_KEY,
+            },
+          ],
         },
-        select: { id: true, agentId: true, raw: true, amounts: true },
+        select: {
+          id: true,
+          agentId: true,
+          deploymentScope: true,
+          raw: true,
+          amounts: true,
+        },
       })
       const visibleCarrierRecords = toVisibleCarrierCommissionRecords(
-        carrierRows,
+        preferCanonicalCarrierCommissionRows(carrierRows, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE),
         agent.id,
       )
 

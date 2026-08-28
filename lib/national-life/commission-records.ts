@@ -21,6 +21,10 @@ export type ScopedCarrierCommissionRow = CarrierCommissionRow & {
   agentId: string
 }
 
+export type ScopedCarrierCommissionSourceRow = ScopedCarrierCommissionRow & {
+  deploymentScope: string
+}
+
 export type ScopedCarrierFinancialRow = ScopedCarrierCommissionRow & {
   primaryDate?: unknown
   fetchedAt?: unknown
@@ -156,6 +160,30 @@ export function toVisibleCarrierCommissionRecords(
   return toCarrierCommissionRecords(rows).filter((record) =>
     record.type === 'DIRECT' || ownerByRecordId.get(record.id) === currentAgentId,
   )
+}
+
+/**
+ * Rows captured by the retired connector remain valid history. If the current
+ * connector has also captured the same agent-month, prefer that complete
+ * source for the whole month instead of adding both copies together.
+ */
+export function preferCanonicalCarrierCommissionRows<
+  T extends ScopedCarrierCommissionSourceRow,
+>(rows: readonly T[], canonicalDeploymentScope: string): T[] {
+  const canonicalAgentPeriods = new Set(
+    rows
+      .filter((row) => row.deploymentScope === canonicalDeploymentScope)
+      .map((row) => {
+        const raw = asRecord(row.raw)
+        return `${row.agentId}:${toPeriod(raw.PaymentDate)}`
+      }),
+  )
+
+  return rows.filter((row) => {
+    if (row.deploymentScope === canonicalDeploymentScope) return true
+    const raw = asRecord(row.raw)
+    return !canonicalAgentPeriods.has(`${row.agentId}:${toPeriod(raw.PaymentDate)}`)
+  })
 }
 
 export function totalOf(records: readonly CarrierCommissionRecord[]): number {

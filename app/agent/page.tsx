@@ -8,6 +8,7 @@ import { decimalToNumber } from '@/lib/decimal'
 import { periodFromDate, shiftPeriod, percentChange } from '@/lib/period'
 import {
   currentCarrierChargebackSnapshot,
+  preferCanonicalCarrierCommissionRows,
   projectedPayableSnapshotForPeriod,
   sumByPeriod,
   toVisibleCarrierCommissionRecords,
@@ -30,7 +31,11 @@ import { getAgentPromotionSnapshot } from '@/lib/agent-promotion'
 import { getLocalPromotionPreview } from '@/lib/promotion-preview'
 import { getPromotionIdentity, getPromotionJourney } from '@/lib/promotion-journey'
 import { JourneyDashboardPreview } from './JourneyDashboardPreview'
-import { COMMISSION_EARNING_GRID_KEYS } from '@/lib/national-life/commission-grid-keys'
+import {
+  COMMISSION_EARNING_GRID_KEYS,
+  LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
+  LEGACY_COMMISSION_EARNING_GRID_KEY,
+} from '@/lib/national-life/commission-grid-keys'
 import { FollowUpActionCard } from '@/components/crm/FollowUpActionCard'
 import { getDueFollowUpsForScope, nyDayBounds, type DueFollowUpView } from '@/lib/crm'
 import {
@@ -403,8 +408,16 @@ export default async function AgentDashboard({
       const carrierRows = await prisma.nationalLifeReportRow.findMany({
         where: {
           agentId: { in: scope },
-          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-          gridKey: { in: [...NATIONAL_LIFE_DASHBOARD_FINANCIAL_GRID_KEYS] },
+          OR: [
+            {
+              deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+              gridKey: { in: [...NATIONAL_LIFE_DASHBOARD_FINANCIAL_GRID_KEYS] },
+            },
+            {
+              deploymentScope: LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
+              gridKey: LEGACY_COMMISSION_EARNING_GRID_KEY,
+            },
+          ],
         },
         select: {
           id: true,
@@ -414,10 +427,14 @@ export default async function AgentDashboard({
           amounts: true,
           primaryDate: true,
           fetchedAt: true,
+          deploymentScope: true,
         },
       })
-      const carrierCommissionRows = carrierRows.filter((row) =>
-        COMMISSION_EARNING_GRID_KEYS.some((gridKey) => gridKey === row.gridKey),
+      const carrierCommissionRows = preferCanonicalCarrierCommissionRows(
+        carrierRows.filter((row) =>
+          COMMISSION_EARNING_GRID_KEYS.some((gridKey) => gridKey === row.gridKey),
+        ),
+        LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
       )
       const payableRows = carrierRows.filter((row) => row.gridKey === 'PAYABLE_GROSS_COMMISSIONS')
       const paidStatementRows = carrierRows.filter((row) => row.gridKey === 'PAID_COMMISSIONS')

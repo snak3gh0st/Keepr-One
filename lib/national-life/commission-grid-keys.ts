@@ -16,3 +16,7 @@ export const COMMISSION_EARNING_GRID_KEYS = [
   'COMMISSIONS_EARNING_REPORT',
   'COMMISSION_DETAIL_NLD_COMMISSION_EARNING',
 ] as const
+
+/** Historical rows written before KeeproneConnect became the canonical engine. */
+export const LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE = 'keepr-one-production-v1' as const
+export const LEGACY_COMMISSION_EARNING_GRID_KEY = 'COMMISSION_DETAIL_NLD_COMMISSION_EARNING' as const
