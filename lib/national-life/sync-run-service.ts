@@ -10,6 +10,8 @@ import {
 import { expireStaleLocalConnectorRuns } from './local-connector/run-service'
 import { NATIONAL_LIFE_DISCOVERY_PAGE_KEYS } from './read-coverage'
 import { CANONICAL_NATIONAL_LIFE_SYNC } from './sync-engine'
+import { addNationalLifeSyncInsights } from './sync-insights-prisma'
+import type { NationalLifeSyncDelta, NationalLifeSyncEstimate } from './sync-insights'
 
 export type StartNationalLifeSyncInput = {
   agentId: string
@@ -33,6 +35,7 @@ export type NationalLifeSyncStatus = {
   currentGridLabel: string | null
   safeErrorCode: string | null
   shouldPoll: boolean
+  startedAt?: Date | null
   completedAt: Date | null
   /// Linhas que o dispositivo entregou e linhas que sobreviveram à normalização.
   /// Nulo quando não há recibo nenhum para consultar — um run REMOTE não gera
@@ -50,6 +53,8 @@ export type NationalLifeSyncStatus = {
   /// The per-area truth behind the headline counter. A local run only becomes
   /// VERIFIED after the connector reconciles all its pages with recordsTotal.
   stageCoverage?: NationalLifeStageCoverage[]
+  estimate?: NationalLifeSyncEstimate | null
+  delta?: NationalLifeSyncDelta | null
 }
 
 export type NationalLifeStageCoverage = {
@@ -57,6 +62,7 @@ export type NationalLifeStageCoverage = {
   label: string | null
   state: 'PENDING' | 'READING' | 'CAPTURED' | 'VERIFIED' | 'REUSED' | 'FAILED'
   verifiedRecords: number | null
+  verifiedAt?: Date | null
 }
 
 /// Rótulos em inglês: quem lê é um agente americano.
@@ -129,6 +135,7 @@ export function localStageCoverage(input: {
           ? 'READING'
           : 'PENDING',
     verifiedRecords: completed.get(gridKey)?.expectedRecordCount ?? null,
+    verifiedAt: completed.get(gridKey)?.completedAt ?? null,
   }))
 }
 
@@ -306,7 +313,7 @@ export async function getNationalLifeSyncStatus(
   if (run.executionSource === 'LOCAL') {
     const completed = run.completedStages
     const total = run.totalStages
-    return {
+    const status: NationalLifeSyncStatus = {
       runId: run.id,
       state: run.state as NationalLifeSyncRunState,
       completed,
@@ -317,6 +324,7 @@ export async function getNationalLifeSyncStatus(
       currentGridLabel: nationalLifeSyncGridLabel(run.currentGridKey),
       safeErrorCode: run.safeErrorCode,
       shouldPoll: run.state === 'QUEUED' || run.state === 'RUNNING' || run.state === 'PAUSED',
+      startedAt: run.startedAt,
       completedAt: run.completedAt,
       ...totals,
       stageCoverage: localStageCoverage({
@@ -328,17 +336,19 @@ export async function getNationalLifeSyncStatus(
         completions: run.stageCompletions,
       }),
     }
+    return addNationalLifeSyncInsights(agentId, deploymentScope, status)
   }
 
   const progress = syncProgressFromJobs(run.jobs)
   const state = run.state as NationalLifeSyncRunState
-  return {
+  const status: NationalLifeSyncStatus = {
     runId: run.id,
     state,
     ...progress,
     currentGridLabel: nationalLifeSyncGridLabel(progress.currentGridKey),
     safeErrorCode: run.safeErrorCode,
     shouldPoll: state === 'QUEUED' || state === 'RUNNING' || state === 'PAUSED',
+    startedAt: run.startedAt,
     completedAt: run.completedAt,
     ...totals,
     stageCoverage: run.jobs.map((job) => ({
@@ -346,6 +356,8 @@ export async function getNationalLifeSyncStatus(
       label: nationalLifeSyncGridLabel(job.syncGridKey ?? null),
       state: job.state === 'SUCCEEDED' ? 'VERIFIED' : job.state === 'FAILED' ? 'FAILED' : job.syncGridKey === progress.currentGridKey ? 'READING' : 'PENDING',
       verifiedRecords: null,
+      verifiedAt: job.state === 'SUCCEEDED' ? run.completedAt : null,
     })),
   }
+  return addNationalLifeSyncInsights(agentId, deploymentScope, status)
 }

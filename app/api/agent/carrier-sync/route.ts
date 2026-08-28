@@ -13,9 +13,48 @@ import {
 import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
 import { sanitizeNationalLifeSyncStatusForAgent } from '@/lib/national-life/plan-access'
 
-/// What the top bar asks once, on mount. Deliberately not a poll: the badge is
-/// a reassurance, not a live monitor, and a request per agent per few seconds
-/// buys nothing an agent would notice.
+type IllustrationActivity = {
+  id: string
+  state: 'WORKING' | 'NEEDS_YOU' | 'READY' | 'FAILED'
+  updatedAt: Date
+}
+
+function illustrationTargetId(target: unknown): string | null {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return null
+  const candidate = target as Record<string, unknown>
+  return candidate.kind === 'ILLUSTRATION' && typeof candidate.id === 'string'
+    ? candidate.id
+    : null
+}
+
+async function illustrationActivity(agentId: string, command: {
+  state: string
+  target: unknown
+  updatedAt: Date
+} | null): Promise<IllustrationActivity | null> {
+  if (!command) return null
+  const id = illustrationTargetId(command.target)
+  if (!id) return null
+  if (command.state === 'AUTH_REQUIRED') return { id, state: 'NEEDS_YOU', updatedAt: command.updatedAt }
+  if (['QUEUED', 'RUNNING', 'WAITING_FOR_CONFIRMATION', 'PAUSED'].includes(command.state)) {
+    return { id, state: 'WORKING', updatedAt: command.updatedAt }
+  }
+  if (command.state === 'COMPLETED') {
+    const illustration = await prisma.illustration.findFirst({
+      where: { id, agentId, documentFetchedAt: { not: null } },
+      select: { documentFetchedAt: true },
+    })
+    return { id, state: illustration ? 'READY' : 'FAILED', updatedAt: command.updatedAt }
+  }
+  if (command.state === 'FAILED' || command.state === 'CANCELLED') {
+    return { id, state: 'FAILED', updatedAt: command.updatedAt }
+  }
+  return null
+}
+
+/// A compact, user-owned activity snapshot for the global shell. The client
+/// only polls this route while an operation is active, so idle accounts remain
+/// quiet while a running sync and illustration can be represented together.
 export async function GET() {
   if (!getNationalLifeLocalConnectorConfig().enabled) {
     // No integration, no badge. Not every agent connects one.
@@ -23,7 +62,7 @@ export async function GET() {
   }
   try {
     const agent = await getCurrentAgent()
-    const [working, blocked, rawSync] = await Promise.all([
+    const [working, blocked, rawSync, latestIllustrationCommand] = await Promise.all([
       prisma.browserAutomationJob.count({
         where: {
           agentId: agent.id,
@@ -42,11 +81,18 @@ export async function GET() {
         },
       }),
       getNationalLifeSyncStatus(agent.id, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE),
+      prisma.nationalLifeConnectorCommand.findFirst({
+        where: { agentId: agent.id, capability: 'GENERATE_ILLUSTRATION' },
+        orderBy: { createdAt: 'desc' },
+        select: { state: true, target: true, updatedAt: true },
+      }),
     ])
     const sync = await sanitizeNationalLifeSyncStatusForAgent(agent.id, rawSync)
+    const illustration = await illustrationActivity(agent.id, latestIllustrationCommand)
     return NextResponse.json({
       state: carrierSyncState({ working, blocked }),
       ...(sync ? { sync } : {}),
+      ...(illustration ? { illustration } : {}),
     })
   } catch {
     // A badge that does not know what it is saying is worse than no badge —

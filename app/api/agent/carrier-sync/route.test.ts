@@ -7,11 +7,17 @@ const mocks = vi.hoisted(() => ({
   localConnectorConfig: vi.fn(),
   getStatus: vi.fn(),
   sanitizeStatus: vi.fn(),
+  commandFindFirst: vi.fn(),
+  illustrationFindFirst: vi.fn(),
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
 vi.mock('@/lib/prisma', () => ({
-  prisma: { browserAutomationJob: { count: mocks.count } },
+  prisma: {
+    browserAutomationJob: { count: mocks.count },
+    nationalLifeConnectorCommand: { findFirst: mocks.commandFindFirst },
+    illustration: { findFirst: mocks.illustrationFindFirst },
+  },
 }))
 vi.mock('@/lib/national-life/local-connector/config', () => ({
   getNationalLifeLocalConnectorConfig: mocks.localConnectorConfig,
@@ -32,6 +38,8 @@ beforeEach(() => {
   mocks.getStatus.mockResolvedValue(null)
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1' })
   mocks.sanitizeStatus.mockImplementation(async (_agentId, status) => status)
+  mocks.commandFindFirst.mockResolvedValue(null)
+  mocks.illustrationFindFirst.mockResolvedValue(null)
 })
 
 describe('carrier sync badge route', () => {
@@ -75,6 +83,48 @@ describe('carrier sync badge route', () => {
 
     await expect(response.json()).resolves.toEqual({
       state: { kind: 'NEEDS_YOU', count: 1 },
+    })
+  })
+
+  it('reports an illustration independently from a simultaneous sync', async () => {
+    mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0)
+    mocks.commandFindFirst.mockResolvedValue({
+      state: 'RUNNING',
+      target: { kind: 'ILLUSTRATION', id: 'ill-1' },
+      safeErrorCode: null,
+      expiresAt: new Date('2026-08-27T17:00:00.000Z'),
+      updatedAt: new Date('2026-08-27T15:00:00.000Z'),
+    })
+
+    const response = await GET()
+
+    await expect(response.json()).resolves.toEqual({
+      state: { kind: 'IN_SYNC' },
+      illustration: {
+        id: 'ill-1',
+        state: 'WORKING',
+        updatedAt: '2026-08-27T15:00:00.000Z',
+      },
+    })
+  })
+
+  it('calls an illustration ready only after its official PDF is persisted', async () => {
+    mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0)
+    mocks.commandFindFirst.mockResolvedValue({
+      state: 'COMPLETED',
+      target: { kind: 'ILLUSTRATION', id: 'ill-1' },
+      safeErrorCode: null,
+      expiresAt: new Date('2026-08-27T17:00:00.000Z'),
+      updatedAt: new Date('2026-08-27T15:02:00.000Z'),
+    })
+    mocks.illustrationFindFirst.mockResolvedValue({ documentFetchedAt: new Date('2026-08-27T15:02:00.000Z') })
+
+    const response = await GET()
+
+    expect((await response.json()).illustration).toEqual({
+      id: 'ill-1',
+      state: 'READY',
+      updatedAt: '2026-08-27T15:02:00.000Z',
     })
   })
 

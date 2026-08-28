@@ -37,6 +37,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 describe('CarrierSyncBadge', () => {
@@ -45,6 +46,50 @@ describe('CarrierSyncBadge', () => {
     render(<CarrierSyncBadge />)
     expect(await screen.findByText('Atualizando 3/9')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('shows sync and illustration as concurrent activities instead of hiding one', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        state: { kind: 'IN_SYNC' },
+        sync: { runId: 'run-1', completed: 3, total: 9, shouldPoll: true },
+        illustration: { id: 'ill-1', state: 'WORKING', updatedAt: '2026-08-27T15:00:00.000Z' },
+      }),
+    })))
+
+    render(<CarrierSyncBadge />)
+
+    expect(await screen.findByRole('link', { name: 'National Life: sync 3 of 9; illustration in progress' })).toBeTruthy()
+  })
+
+  it('announces the official PDF only when a working illustration becomes ready', async () => {
+    vi.useFakeTimers()
+    const responses = [
+      {
+        state: { kind: 'IN_SYNC' },
+        illustration: { id: 'ill-1', state: 'WORKING', updatedAt: '2026-08-27T15:00:00.000Z' },
+      },
+      {
+        state: { kind: 'IN_SYNC' },
+        illustration: { id: 'ill-1', state: 'READY', updatedAt: '2026-08-27T15:02:00.000Z' },
+      },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => responses.shift() ?? responses[responses.length - 1],
+    })))
+
+    render(<CarrierSyncBadge />)
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.getByText('Generating illustration')).toBeTruthy()
+    await act(async () => vi.advanceTimersByTimeAsync(1_600))
+
+    expect(screen.getByRole('status')).toHaveTextContent('Official National Life PDF is ready')
+    expect(screen.getByRole('link', { name: 'View illustration' })).toHaveAttribute('href', '/agent/illustrations/ill-1')
   })
 
   it('is quiet when the account is up to date', async () => {

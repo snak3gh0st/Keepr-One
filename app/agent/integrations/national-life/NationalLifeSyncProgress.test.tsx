@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
 import {
+  NATIONAL_LIFE_RETRY_REMAINING_EVENT,
   NATIONAL_LIFE_SYNC_STARTED_EVENT,
   NationalLifeSyncProgress,
 } from './NationalLifeSyncProgress'
@@ -28,6 +29,7 @@ function status(overrides: Partial<NationalLifeSyncStatus> = {}): NationalLifeSy
     currentGridLabel: 'new business',
     safeErrorCode: null,
     shouldPoll: true,
+    startedAt: new Date('2026-08-27T15:00:00.000Z'),
     completedAt: null,
     receivedRecords: null,
     writtenRecords: null,
@@ -84,6 +86,64 @@ describe('NationalLifeSyncProgress', () => {
     expect(screen.getByText('Reading and saving correspondence.')).toBeTruthy()
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '3')
     expect(screen.getByRole('progressbar')).toHaveAttribute('max', '13')
+  })
+
+  it('shows an honest range based on comparable carrier runs', () => {
+    render(<NationalLifeSyncProgress initialStatus={status({
+      estimate: { lowerMinutes: 13, upperMinutes: 16, basisRuns: 2 },
+    })} />)
+
+    expect(screen.getByText('About 13–16 min remaining')).toBeTruthy()
+    expect(screen.getByText('Based on 2 recent syncs from this account')).toBeTruthy()
+  })
+
+  it('dates each completed source independently', () => {
+    render(<NationalLifeSyncProgress initialStatus={status({
+      state: 'PARTIAL',
+      shouldPoll: false,
+      stageCoverage: [{
+        gridKey: 'NEW_BUSINESS',
+        label: 'new business',
+        state: 'VERIFIED',
+        verifiedRecords: 856,
+        verifiedAt: new Date('2026-08-27T15:28:00.000Z'),
+      }, {
+        gridKey: 'INFORCE_CLIENTS',
+        label: 'in-force policies',
+        state: 'FAILED',
+        verifiedRecords: null,
+        verifiedAt: null,
+      }],
+    })} />)
+
+    expect(screen.getByText(/Confirmed by National Life/)).toBeTruthy()
+    expect(screen.getByText('Last attempt needs retry')).toBeTruthy()
+  })
+
+  it('summarizes new and reconfirmed data without calling every saved row new', () => {
+    render(<NationalLifeSyncProgress initialStatus={status({
+      state: 'COMPLETED',
+      shouldPoll: false,
+      completed: 13,
+      delta: { addedRecords: 5, refreshedRecords: 127, newCommissionAmount: 80.25 },
+    })} />)
+
+    expect(screen.getByText('5 new to Keepr One')).toBeTruthy()
+    expect(screen.getByText('127 reconfirmed')).toBeTruthy()
+    expect(screen.getByText('$80.25 in newly received commission entries')).toBeTruthy()
+  })
+
+  it('offers a one-click retry that keeps verified sources intact', () => {
+    const retry = vi.fn()
+    window.addEventListener(NATIONAL_LIFE_RETRY_REMAINING_EVENT, retry)
+    render(<NationalLifeSyncProgress initialStatus={status({
+      state: 'PARTIAL', shouldPoll: false, completed: 12, failed: 1,
+    })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry remaining source' }))
+
+    expect(retry).toHaveBeenCalledOnce()
+    window.removeEventListener(NATIONAL_LIFE_RETRY_REMAINING_EVENT, retry)
   })
 
   it('stops polling after the run reaches a terminal state', async () => {

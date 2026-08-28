@@ -24,6 +24,7 @@ const PERSONAL_STRUCTURED_PRIORITY_GRID_KEYS = STRUCTURED_PRIORITY_GRID_KEYS.fil
   (gridKey) => PERSONAL_GRID_KEYS.has(gridKey),
 )
 export const NATIONAL_LIFE_SYNC_STARTED_EVENT = 'national-life-sync-started'
+export const NATIONAL_LIFE_RETRY_REMAINING_EVENT = 'national-life-retry-remaining'
 
 function safeStatus(value: unknown): NationalLifeSyncStatus | null {
   if (!value || typeof value !== 'object') return null
@@ -48,6 +49,20 @@ function formatMoment(value: NationalLifeSyncStatus['completedAt']): string | nu
     hour: 'numeric',
     minute: '2-digit',
   })
+}
+
+function estimateLine(status: NationalLifeSyncStatus): string | null {
+  if (!status.shouldPoll || !status.estimate) return null
+  const { lowerMinutes, upperMinutes } = status.estimate
+  return lowerMinutes === upperMinutes
+    ? `About ${lowerMinutes} min remaining`
+    : `About ${lowerMinutes}–${upperMinutes} min remaining`
+}
+
+function money(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
+  }).format(value)
 }
 
 /// O que realmente entrou. `writtenRecords` nulo é "não sei" (um run remoto não
@@ -236,6 +251,7 @@ export function NationalLifeSyncProgress({
   // seriam a mesma mentira do "concluído" eterno, apontada para o outro lado.
   const outcome = terminal ? outcomeLine(status, snapshotRecords) : null
   const discards = terminal ? discardLine(status, snapshotRecords) : null
+  const estimate = estimateLine(status)
 
   return (
     <section
@@ -272,9 +288,19 @@ export function NationalLifeSyncProgress({
             </p>
           )}
         </div>
-        <span className="font-mono text-sm font-semibold tabular-nums text-teal">
-          {checked} of {status.total} portal areas checked
-        </span>
+        <div className="text-right">
+          <span className="block font-mono text-sm font-semibold tabular-nums text-teal">
+            {checked} of {status.total} portal areas checked
+          </span>
+          {estimate && status.estimate && (
+            <span className="mt-1 block text-xs text-ink-muted">
+              <strong className="font-semibold text-ink">{estimate}</strong>
+              <span className="block">
+                Based on {status.estimate.basisRuns} recent {status.estimate.basisRuns === 1 ? 'sync' : 'syncs'} from this account
+              </span>
+            </span>
+          )}
+        </div>
       </div>
 
       <progress
@@ -305,6 +331,35 @@ export function NationalLifeSyncProgress({
         <div className="mt-4 rounded-xl border border-gold/35 bg-gold-pale px-4 py-3 text-sm text-gold-ink">
           {status.failed} {status.failed === 1 ? 'area could' : 'areas could'} not be read. The sync is continuing with the remaining areas.
         </div>
+      )}
+
+      {terminal && status.delta && (
+        <div className="mt-5 rounded-xl border border-teal/20 bg-teal-pale/30 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">What changed in Keepr One</p>
+          <div className="mt-3 flex flex-wrap gap-2 text-sm">
+            <span className="rounded-full bg-paper px-3 py-1.5 font-semibold text-ink shadow-sm">
+              {status.delta.addedRecords.toLocaleString('en-US')} new to Keepr One
+            </span>
+            <span className="rounded-full bg-paper px-3 py-1.5 font-semibold text-ink shadow-sm">
+              {status.delta.refreshedRecords.toLocaleString('en-US')} reconfirmed
+            </span>
+            {status.delta.newCommissionAmount !== null && (
+              <span className="rounded-full bg-paper px-3 py-1.5 font-semibold text-ink shadow-sm">
+                {money(status.delta.newCommissionAmount)} in newly received commission entries
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {terminal && status.failed > 0 && (
+        <button
+          type="button"
+          className="mt-4 inline-flex min-h-10 items-center justify-center rounded-full bg-rail-strong px-4 py-2 text-sm font-semibold text-paper transition-colors hover:bg-rail"
+          onClick={() => window.dispatchEvent(new Event(NATIONAL_LIFE_RETRY_REMAINING_EVENT))}
+        >
+          Retry remaining {status.failed === 1 ? 'source' : 'sources'}
+        </button>
       )}
 
       <div className={`mt-5 grid overflow-hidden rounded-lg border border-border-steel bg-panel/55 divide-y divide-border-steel sm:divide-x sm:divide-y-0 ${snapshotRecords > 0 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
@@ -352,6 +407,14 @@ export function NationalLifeSyncProgress({
                     {stage.state === 'CAPTURED' ? 'snapshot records captured' : 'rows verified'}
                   </p>
                 )}
+                {stage.verifiedAt && (
+                  <p className="mt-1 text-[10px] opacity-80">
+                    Confirmed by National Life {formatMoment(stage.verifiedAt)}
+                  </p>
+                )}
+                {stage.state === 'FAILED' && (
+                  <p className="mt-1 text-[10px] font-semibold">Last attempt needs retry</p>
+                )}
               </li>
             ))}
           </ul>
@@ -369,7 +432,7 @@ export function NationalLifeSyncProgress({
 
       {active && (
         <p className="mt-4 text-xs leading-5 text-ink-muted">
-          Data is saved in batches as each area finishes. You can leave this page open while the portal is being read.
+          Data is saved in batches as each area finishes. You can keep working anywhere in Keepr One while National Life is being read.
         </p>
       )}
     </section>

@@ -176,6 +176,35 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
         )}
       </section>
 
+      {foresightResult && (
+        <section className="mt-6 overflow-hidden rounded-[1.35rem] border border-teal/25 bg-paper shadow-[0_18px_48px_rgba(15,29,19,0.045)]">
+          <div className="border-b border-border-steel px-5 py-4 sm:px-6">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Conferência oficial</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-[-0.025em] text-ink">Seu pedido e o resultado da National Life</h2>
+            <p className="mt-1 text-xs leading-5 text-ink-muted">Os valores confirmados abaixo vêm do Foresight e do PDF oficial, não de uma estimativa do Keepr One.</p>
+          </div>
+          <div className="grid md:grid-cols-2">
+            <div className="border-b border-border-steel p-5 md:border-b-0 md:border-r sm:p-6">
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Pedido do agente</p>
+              <p className="mt-3 text-xl font-semibold text-ink">
+                {foresightResult.solveBasis === 'PREMIUM'
+                  ? `Prêmio mensal solicitado: ${premiumCurrency(foresightResult.requestedAmount)}`
+                  : `${currency(foresightResult.requestedAmount)} de capital segurado`}
+              </p>
+              <p className="mt-1 text-xs text-ink-muted">Valor enviado ao Foresight para cálculo.</p>
+            </div>
+            <div className="bg-teal-pale/35 p-5 sm:p-6">
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-teal-deep">Confirmação da National Life</p>
+              <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+                <p className="text-xl font-semibold text-ink">{premiumCurrency(foresightResult.confirmedMonthlyPremium)} por mês</p>
+                <p className="text-sm font-semibold text-ink">{premiumCurrency(foresightResult.confirmedAnnualPremium)} por ano</p>
+              </div>
+              <p className="mt-2 text-xs text-ink-muted">Capital segurado confirmado: {currency(foresightResult.confirmedFaceAmount)}</p>
+            </div>
+          </div>
+        </section>
+      )}
+
       <div className="mt-8 grid gap-5 md:grid-cols-2">
         <section className="module-main-surface">
           <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Segurado</p>
