@@ -7,7 +7,12 @@ import {
   carrierSyncLabel,
   type CarrierSyncState,
 } from '@/lib/national-life/carrier-sync-state'
-import { KBotCornerPresence, type KBotState } from '@/components/kbot/KBotAvatar'
+import {
+  KBotCornerPresence,
+  type KBotActivityMode,
+  type KBotState,
+  type KBotTask,
+} from '@/components/kbot/KBotAvatar'
 import { sendConnectorMessage } from '@/app/agent/integrations/national-life/NationalLifeConnectorClient'
 
 type CompactSyncStatus = {
@@ -15,6 +20,10 @@ type CompactSyncStatus = {
   completed: number
   total: number
   shouldPoll: boolean
+  estimate?: {
+    lowerMinutes: number
+    upperMinutes: number
+  } | null
 }
 
 type IllustrationActivity = {
@@ -66,25 +75,25 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       if (previousIllustration && ['WORKING', 'NEEDS_YOU'].includes(previousIllustration)) {
         if (nextIllustration?.state === 'READY') {
           setNotice({
-            message: 'Official National Life PDF is ready',
+            message: 'Sua ilustração oficial está pronta.',
             href: `/agent/illustrations/${nextIllustration.id}`,
-            action: 'View illustration',
+            action: 'Ver ilustração',
           })
         } else if (nextIllustration?.state === 'FAILED') {
           setNotice({
-            message: 'National Life needs this illustration reviewed',
+            message: 'Não consegui concluir esta ilustração. O que já foi salvo está seguro.',
             href: `/agent/illustrations/${nextIllustration.id}`,
-            action: 'Review illustration',
+            action: 'Revisar ilustração',
           })
         }
       }
       if (previousSyncPolling.current && nextSync && !nextSync.shouldPoll) {
         setNotice({
           message: nextSync.state === 'COMPLETED'
-            ? 'National Life sync is complete'
-            : 'National Life sync finished with sources to retry',
+            ? 'Tudo pronto. Seus dados da National Life estão atualizados.'
+            : 'Atualizei parte dos seus dados. Algumas informações ainda precisam ser buscadas.',
           href: '/agent/integrations/national-life',
-          action: 'View sync',
+          action: 'Ver atualização',
         })
       }
     }
@@ -176,15 +185,26 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
     return () => window.clearTimeout(timer)
   }, [notice])
 
-  const activity = sync && illustration?.state === 'WORKING'
+  const activity = sync && illustration?.state === 'NEEDS_YOU'
     ? (
         <Link
           href={`/agent/illustrations/${illustration.id}`}
-          aria-label={`National Life: sync ${sync.completed} of ${sync.total}; illustration in progress`}
+          aria-label={`National Life: sync ${sync.completed} de ${sync.total}; ilustração precisa de login`}
+          className={`shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-gold ${separated ? 'shell-carrier-separated' : ''}`}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden="true" />
+          Sync {sync.completed}/{sync.total} · Login para ilustração
+        </Link>
+      )
+    : sync && illustration?.state === 'WORKING'
+    ? (
+        <Link
+          href={`/agent/illustrations/${illustration.id}`}
+          aria-label={`National Life: sync ${sync.completed} de ${sync.total}; ilustração em andamento`}
           className={`shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs text-ink-muted ${separated ? 'shell-carrier-separated' : ''}`}
         >
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal" aria-hidden="true" />
-          Sync {sync.completed}/{sync.total} · Illustration
+          Sync {sync.completed}/{sync.total} · Ilustração
         </Link>
       )
     : sync
@@ -201,7 +221,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
               className={`shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs text-ink-muted ${separated ? 'shell-carrier-separated' : ''}`}
             >
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal" aria-hidden="true" />
-              Generating illustration
+              Preparando ilustração
             </Link>
           )
         : illustration?.state === 'NEEDS_YOU'
@@ -211,23 +231,45 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
                 className={`inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-gold ${separated ? 'shell-carrier-separated' : ''}`}
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden="true" />
-                Illustration needs login
+                Ilustração precisa de login
               </Link>
             )
           : null
 
-  const toast = notice ? (
-    <span
-      role="status"
-      className="fixed right-4 top-20 z-50 flex max-w-sm items-center gap-3 rounded-xl border border-teal/25 bg-paper px-4 py-3 text-sm text-ink shadow-[0_18px_48px_rgba(15,29,19,0.16)]"
-    >
-      <span className="h-2 w-2 shrink-0 rounded-full bg-teal" aria-hidden="true" />
-      <span>{notice.message}</span>
-      <Link className="shrink-0 font-semibold text-teal-deep underline" href={notice.href}>{notice.action}</Link>
-    </span>
-  ) : null
-
   const browserConnectorState = extensionTarget === null ? 'missing' : connectorState
+
+  const syncProgress = sync && sync.total > 0 ? sync.completed / sync.total : null
+  const syncEstimate = sync?.estimate
+    ? sync.estimate.lowerMinutes === sync.estimate.upperMinutes
+      ? `Cerca de ${sync.estimate.lowerMinutes} min restantes`
+      : `Cerca de ${sync.estimate.lowerMinutes}–${sync.estimate.upperMinutes} min restantes`
+    : null
+  const tasks: KBotTask[] = []
+  if (sync) {
+    tasks.push({
+      id: 'sync',
+      label: 'Atualizando seus dados',
+      detail: `${sync.completed} de ${sync.total} áreas verificadas`,
+      state: sync.state === 'PAUSED' ? 'waiting' : 'working',
+      progress: syncProgress,
+      estimate: syncEstimate,
+    })
+  }
+  if (illustration?.state === 'WORKING') {
+    tasks.push({
+      id: 'illustration',
+      label: 'Preparando sua ilustração',
+      detail: 'A National Life está calculando os valores e preparando o PDF',
+      state: 'working',
+    })
+  } else if (illustration?.state === 'NEEDS_YOU') {
+    tasks.push({
+      id: 'illustration',
+      label: 'Preciso do seu login',
+      detail: 'Entre na National Life para eu continuar sua ilustração',
+      state: 'waiting',
+    })
+  }
 
   const kbot = (() => {
     // The integration page has its own richer K-Bot presence, including the
@@ -236,66 +278,80 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
     if (pathname === '/agent/integrations/national-life') return null
 
     let botState: KBotState = 'idle'
-    let title = 'K-Bot is ready'
-    let detail = 'Open K-Bot whenever you want to work with National Life.'
+    let title = 'Estou pronto quando você precisar'
+    let detail = 'Posso atualizar seus dados ou preparar uma ilustração oficial.'
     let actionHref = '/agent/integrations/national-life'
-    let actionLabel = 'Open K-Bot'
+    let actionLabel = 'Abrir K-Bot'
+    let activityMode: KBotActivityMode = 'idle'
 
     if (notice) {
       botState = 'success'
       title = notice.message
-      detail = 'The result is ready in Keepr One.'
+      detail = 'Já organizei o resultado no Keepr One.'
       actionHref = notice.href
       actionLabel = notice.action
     } else if (sync?.state === 'PAUSED') {
       botState = 'waiting'
-      title = 'K-Bot is waiting for you'
-      detail = 'National Life needs your login before K-Bot can continue.'
+      title = 'Preciso que você entre na National Life'
+      detail = 'Assim que o login estiver pronto, continuo de onde parei.'
       actionHref = '/agent/integrations/national-life'
-      actionLabel = 'Continue'
+      actionLabel = 'Continuar sync'
+      activityMode = 'sync'
+    } else if (sync && illustration?.state === 'NEEDS_YOU') {
+      botState = 'waiting'
+      title = 'O sync continua. Sua ilustração precisa de login.'
+      detail = 'Estou atualizando seus dados enquanto aguardo você entrar na National Life.'
+      actionHref = `/agent/illustrations/${illustration.id}`
+      actionLabel = 'Continuar ilustração'
+      activityMode = 'combined'
     } else if (sync && illustration?.state === 'WORKING') {
       botState = 'working'
-      title = 'K-Bot is handling two tasks'
-      detail = `Sync ${sync.completed} of ${sync.total} and the official illustration are moving together.`
+      title = 'Estou cuidando de duas tarefas'
+      detail = `Já verifiquei ${sync.completed} de ${sync.total} áreas e também estou preparando sua ilustração.`
       actionHref = `/agent/illustrations/${illustration.id}`
-      actionLabel = 'View activity'
+      actionLabel = 'Ver atividades'
+      activityMode = 'combined'
     } else if (sync) {
       botState = 'working'
-      title = 'K-Bot is syncing National Life'
-      detail = `${sync.completed} of ${sync.total} portal areas checked.`
-      actionLabel = 'View sync'
+      title = 'Estou atualizando seus dados da National Life'
+      detail = `${sync.completed} de ${sync.total} áreas verificadas.`
+      actionLabel = 'Ver atualização'
+      activityMode = 'sync'
     } else if (illustration?.state === 'NEEDS_YOU' || state?.kind === 'NEEDS_YOU') {
       botState = 'waiting'
-      title = 'K-Bot is waiting for you'
-      detail = 'National Life needs your login before K-Bot can continue.'
+      title = 'Preciso que você entre na National Life'
+      detail = 'Assim que o login estiver pronto, continuo de onde parei.'
       actionHref = illustration?.id
         ? `/agent/illustrations/${illustration.id}`
         : '/agent/integrations/national-life'
-      actionLabel = 'Continue'
+      actionLabel = 'Continuar'
+      activityMode = illustration ? 'illustration' : 'sync'
     } else if (illustration?.state === 'WORKING') {
       botState = 'working'
-      title = 'K-Bot is creating the official illustration'
-      detail = 'National Life is calculating the values and preparing the PDF.'
+      title = 'Estou preparando sua ilustração oficial'
+      detail = 'A National Life está calculando os valores e preparando o PDF.'
       actionHref = `/agent/illustrations/${illustration.id}`
-      actionLabel = 'View illustration'
+      actionLabel = 'Ver ilustração'
+      activityMode = 'illustration'
     } else if (browserConnectorState === 'missing') {
       botState = 'error'
-      title = 'K-Bot is not available in this browser'
-      detail = 'Install or reload the K-Bot extension so it can work with National Life.'
-      actionLabel = 'Connect K-Bot'
+      title = 'K-Bot não está disponível neste navegador'
+      detail = 'Instale ou recarregue a extensão para eu trabalhar com a National Life.'
+      actionLabel = 'Conectar K-Bot'
     } else if (browserConnectorState === 'disconnected') {
       botState = 'error'
-      title = 'K-Bot is disconnected'
-      detail = 'Connect this computer once and K-Bot will stay with you throughout Keepr One.'
-      actionLabel = 'Connect K-Bot'
+      title = 'K-Bot está desconectado'
+      detail = 'Conecte este computador uma vez e eu acompanho você em todo o Keepr One.'
+      actionLabel = 'Conectar K-Bot'
     } else if (browserConnectorState === 'checking') {
-      title = 'K-Bot is checking this browser'
-      detail = 'It will be ready in a moment.'
+      title = 'Estou verificando este navegador'
+      detail = 'Fico pronto em instantes.'
     } else if (state?.kind === 'WORKING') {
       botState = 'working'
-      title = 'K-Bot is organizing your National Life data'
-      detail = `${state.count} item${state.count === 1 ? '' : 's'} on the way.`
-      actionLabel = 'View activity'
+      title = 'Estou organizando seus dados da National Life'
+      detail = `${state.count} ${state.count === 1 ? 'item está' : 'itens estão'} a caminho.`
+      actionLabel = 'Ver atividade'
+      activityMode = 'sync'
     }
 
     return (
@@ -305,15 +361,24 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
         detail={detail}
         actionHref={actionHref}
         actionLabel={actionLabel}
+        activity={activityMode}
+        progress={syncProgress}
+        secondaryState={illustration?.state === 'WORKING'
+          ? 'working'
+          : illustration?.state === 'NEEDS_YOU'
+            ? 'waiting'
+            : null}
+        tasks={tasks}
+        announcement={notice?.message}
       />
     )
   })()
 
   if (!state && !illustration && !notice) return kbot
 
-  if (activity) return <>{activity}{toast}{kbot}</>
+  if (activity) return <>{activity}{kbot}</>
 
-  if (!state) return <>{activity}{toast}{kbot}</>
+  if (!state) return <>{activity}{kbot}</>
 
   const label = carrierSyncLabel(state)
   const dot =
@@ -336,7 +401,6 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
             {label}
           </Link>
         )}
-        {toast}
         {kbot}
       </>
     )
@@ -350,7 +414,6 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
           {label}
         </span>
       )}
-      {toast}
       {kbot}
     </>
   )

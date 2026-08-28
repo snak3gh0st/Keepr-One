@@ -5,6 +5,15 @@ import { useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
 export type KBotState = 'idle' | 'working' | 'waiting' | 'success' | 'error'
+export type KBotActivityMode = 'idle' | 'sync' | 'illustration' | 'combined'
+export type KBotTask = {
+  id: string
+  label: string
+  detail: string
+  state: 'working' | 'waiting' | 'done' | 'error'
+  progress?: number | null
+  estimate?: string | null
+}
 
 const sizeClass = {
   xs: 'h-6 w-6 rounded-[5px] p-1',
@@ -102,12 +111,21 @@ export function KBotActivity({
   )
 }
 
-function KBotCharacter({ state }: { state: KBotState }) {
+function KBotCharacter({
+  state,
+  activity = 'idle',
+}: {
+  state: KBotState
+  activity?: KBotActivityMode
+}) {
+  const carriesPaper = activity === 'illustration' || activity === 'combined'
+
   return (
     <span
       aria-hidden="true"
       data-kbot-character="true"
       data-state={state}
+      data-activity={activity}
       data-expression={state === 'error' ? 'sad' : state === 'success' ? 'happy' : 'focused'}
       className={`kbot-character relative block h-[88px] w-[70px] shrink-0 ${stateClass[state]}`}
     >
@@ -181,6 +199,13 @@ function KBotCharacter({ state }: { state: KBotState }) {
           <rect className="fill-mint/80" x="24" y="26" width="4" height="8" />
           <rect className="fill-mint" x="24" y="32" width="5" height="3" />
         </g>
+        {carriesPaper ? (
+          <g className="kbot-character-paper" data-kbot-paper="true">
+            <rect className="fill-paper" x="25" y="27" width="7" height="9" />
+            <rect className="fill-teal/55" x="27" y="29" width="3" height="1" />
+            <rect className="fill-teal/35" x="27" y="32" width="4" height="1" />
+          </g>
+        ) : null}
 
         <g className="kbot-character-leg kbot-character-leg-left">
           <rect className="fill-mint/80" x="10" y="35" width="5" height="4" />
@@ -195,6 +220,66 @@ function KBotCharacter({ state }: { state: KBotState }) {
   )
 }
 
+function KBotProgressRings({
+  progress,
+  secondaryState,
+}: {
+  progress?: number | null
+  secondaryState?: 'working' | 'waiting' | null
+}) {
+  const safeProgress = progress == null ? null : Math.min(1, Math.max(0, progress))
+  const percentage = safeProgress == null ? null : Math.round(safeProgress * 100)
+  const circumference = 2 * Math.PI * 34
+
+  if (safeProgress == null && !secondaryState) return null
+
+  return (
+    <span className="pointer-events-none absolute inset-0" data-kbot-progress="true">
+      {safeProgress != null ? (
+        <span role="img" aria-label={`Progresso do sync: ${percentage}%`} className="absolute inset-0">
+          <svg aria-hidden="true" viewBox="0 0 78 102" className="h-full w-full overflow-visible">
+            <circle cx="39" cy="50" r="34" fill="none" stroke="currentColor" strokeOpacity="0.12" strokeWidth="1.5" />
+            <circle
+              cx="39"
+              cy="50"
+              r="34"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeDasharray={`${safeProgress * circumference} ${circumference}`}
+              className="text-teal transition-[stroke-dasharray] duration-500"
+              transform="rotate(-90 39 50)"
+            />
+          </svg>
+        </span>
+      ) : null}
+      {secondaryState ? (
+        <span
+          role="img"
+          aria-label={secondaryState === 'working' ? 'Ilustração em andamento' : 'Ilustração aguardando login'}
+          className="absolute inset-0"
+        >
+          <svg aria-hidden="true" viewBox="0 0 78 102" className="h-full w-full overflow-visible">
+            <circle
+              cx="39"
+              cy="50"
+              r="38"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeDasharray="16 223"
+              className={`${secondaryState === 'working' ? 'kbot-secondary-progress' : ''} text-gold`}
+              transform="rotate(-90 39 50)"
+            />
+          </svg>
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
 /**
  * Persistent operational presence for pages where K-Bot can work. Clicking the
  * character reveals its current activity; this is a status panel, not a chat.
@@ -204,13 +289,23 @@ export function KBotCornerPresence({
   title,
   detail,
   actionHref,
-  actionLabel = 'View K-Bot',
+  actionLabel = 'Abrir K-Bot',
+  activity = 'idle',
+  progress,
+  secondaryState = null,
+  tasks = [],
+  announcement,
 }: {
   state: KBotState
   title: string
   detail?: string | null
   actionHref?: string | null
   actionLabel?: string
+  activity?: KBotActivityMode
+  progress?: number | null
+  secondaryState?: 'working' | 'waiting' | null
+  tasks?: KBotTask[]
+  announcement?: string | null
 }) {
   const [open, setOpen] = useState(false)
   const browserMounted = useSyncExternalStore(
@@ -224,7 +319,7 @@ export function KBotCornerPresence({
 
   return createPortal(
     <aside
-      aria-label="K-Bot status"
+      aria-label="Status do K-Bot"
       aria-live={state === 'working' || state === 'waiting' ? 'polite' : 'off'}
       aria-atomic="true"
       data-state={state}
@@ -232,6 +327,21 @@ export function KBotCornerPresence({
     >
       <span className="sr-only">{title}. {detail}</span>
       <div className="relative ml-auto h-[102px] w-[78px]">
+        {announcement ? (
+          <div
+            role="status"
+            aria-label="Atualização do K-Bot"
+            className="pointer-events-auto absolute bottom-[104px] right-0 w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl border border-paper/10 bg-rail-strong/95 px-4 py-3 text-[11px] leading-4 text-white shadow-[0_18px_48px_rgba(7,22,13,0.26)] backdrop-blur-xl"
+          >
+            <span className="font-medium">{announcement}</span>
+            {actionHref ? (
+              <Link href={actionHref} className="ml-2 font-semibold text-mint underline decoration-mint/40 underline-offset-2">
+                {actionLabel}
+              </Link>
+            ) : null}
+            <span aria-hidden="true" className="absolute -bottom-[7px] right-8 h-3.5 w-3.5 rotate-45 border-b border-r border-paper/10 bg-rail-strong/95" />
+          </div>
+        ) : null}
         {open ? (
           <div
             id={panelId}
@@ -252,11 +362,55 @@ export function KBotCornerPresence({
                           : 'bg-paper/35'
                 }`}
               />
-              K-Bot activity
+              O que estou fazendo
             </span>
             <span className="block text-xs font-semibold leading-4 text-white">{title}</span>
             {detail ? (
               <span className="mt-1 block text-[11px] leading-4 text-white/85">{detail}</span>
+            ) : null}
+            {tasks.length > 0 ? (
+              <ul className="mt-3 space-y-2 border-t border-white/10 pt-3" aria-label="Atividades do K-Bot">
+                {tasks.map((task) => {
+                  const safeTaskProgress = task.progress == null
+                    ? null
+                    : Math.min(1, Math.max(0, task.progress))
+                  return (
+                    <li key={task.id} className="rounded-xl bg-white/[0.055] px-3 py-2.5">
+                      <span className="flex items-start gap-2">
+                        <span
+                          aria-hidden="true"
+                          className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
+                            task.state === 'working'
+                              ? 'animate-pulse bg-mint'
+                              : task.state === 'waiting'
+                                ? 'bg-gold'
+                                : task.state === 'done'
+                                  ? 'bg-success'
+                                  : 'bg-danger'
+                          }`}
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-[11px] font-semibold leading-4 text-white">{task.label}</span>
+                          <span className="mt-0.5 block text-[10px] leading-4 text-white/75">{task.detail}</span>
+                          {task.estimate ? (
+                            <span className="mt-1 block font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-mint">
+                              {task.estimate}
+                            </span>
+                          ) : null}
+                        </span>
+                      </span>
+                      {safeTaskProgress != null ? (
+                        <span className="mt-2 block h-1 overflow-hidden rounded-full bg-white/10">
+                          <span
+                            className="block h-full rounded-full bg-mint transition-[width] duration-500"
+                            style={{ width: `${Math.round(safeTaskProgress * 100)}%` }}
+                          />
+                        </span>
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ul>
             ) : null}
             {actionHref ? (
               <Link
@@ -277,15 +431,16 @@ export function KBotCornerPresence({
           type="button"
           aria-expanded={open}
           aria-controls={panelId}
-          aria-label={open ? 'Hide K-Bot activity' : 'Show K-Bot activity'}
+          aria-label={open ? 'Ocultar atividade do K-Bot' : 'Ver atividade do K-Bot'}
           onClick={() => setOpen((current) => !current)}
-          className="kbot-character-stage pointer-events-auto relative grid h-[102px] w-[78px] place-items-end justify-items-center rounded-2xl outline-none transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+          className="kbot-character-stage pointer-events-auto relative grid h-[102px] w-[78px] place-items-end justify-items-center rounded-2xl outline-none transition-transform duration-150 hover:-translate-y-0.5 active:translate-y-px active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
         >
           <span
             aria-hidden="true"
             className="absolute bottom-0 h-2.5 w-14 rounded-[50%] bg-rail-strong/20 blur-[1px]"
           />
-          <KBotCharacter state={state} />
+          <KBotProgressRings progress={progress} secondaryState={secondaryState} />
+          <KBotCharacter state={state} activity={activity} />
         </button>
       </div>
     </aside>,

@@ -9,6 +9,7 @@ import {
   KBotCornerPresence,
   KBotTaskTrail,
   type KBotState,
+  type KBotTask,
 } from '@/components/kbot/KBotAvatar'
 import {
   DISCONNECT_FAILED,
@@ -255,33 +256,47 @@ export function NationalLifeLocalConnectorCard({
           : 'idle'
   const cornerCopy = (() => {
     if (connectorPresence === 'checking') {
-      return { title: 'K-Bot is checking this browser', detail: 'This takes only a moment.' }
+      return { title: 'Estou verificando este navegador', detail: 'Fico pronto em instantes.' }
     }
     if (connectorPresence === 'missing') {
-      return { title: 'Install K-Bot to begin', detail: 'Then it can work with National Life for you.' }
+      return { title: 'Instale o K-Bot para começar', detail: 'Depois disso, posso trabalhar com a National Life para você.' }
     }
     if (disconnected) {
-      return { title: 'K-Bot is disconnected', detail: 'Connect this computer when you want it to work for you.' }
+      return { title: 'K-Bot está desconectado', detail: 'Conecte este computador quando quiser que eu trabalhe para você.' }
     }
     if (state === 'login-required') {
-      return { title: 'K-Bot is waiting for you', detail: 'Sign in to National Life and it will continue.' }
+      return { title: 'Preciso que você entre na National Life', detail: 'Assim que o login estiver pronto, continuo de onde parei.' }
     }
     if (state === 'syncing' || state === 'slow') {
-      return { title: 'K-Bot is working', detail: 'Collecting and organizing your National Life information.' }
+      return { title: 'Estou buscando suas informações', detail: 'Já estou organizando tudo no Keepr One.' }
     }
     if (state === 'success') {
-      return { title: 'K-Bot finished', detail: 'Your National Life information is up to date.' }
+      return { title: 'Tudo pronto. Já organizei para você.', detail: 'Suas informações da National Life estão atualizadas.' }
     }
     if (state === 'partial') {
-      return { title: 'K-Bot saved what it found', detail: 'It can return later for the remaining information.' }
+      return { title: 'Salvei tudo o que encontrei', detail: 'Posso voltar depois para buscar as informações restantes.' }
     }
     if (state === 'error') {
-      return { title: 'K-Bot needs attention', detail: connectorFailure(errorCode).message }
+      return { title: 'Não consegui terminar esta parte', detail: 'O que já salvei está seguro. Abra os detalhes para continuar.' }
     }
     return pairedDeviceId
-      ? { title: 'K-Bot is ready', detail: 'Start a sync whenever you want.' }
-      : { title: 'K-Bot is ready to connect', detail: 'Connect National Life to get started.' }
+      ? { title: 'Estou pronto quando você precisar', detail: 'Comece uma atualização quando quiser.' }
+      : { title: 'Estou pronto para conectar', detail: 'Conecte a National Life para começar.' }
   })()
+  const cornerProgress = liveSync?.totalStages && liveSync.totalStages > 0
+    ? Math.min(1, Math.max(0, (liveSync.stageIndex ?? 0) / liveSync.totalStages))
+    : null
+  const cornerTasks: KBotTask[] = syncActive
+    ? [{
+        id: 'sync',
+        label: 'Atualizando seus dados',
+        detail: liveSync?.totalStages
+          ? `${Math.min(liveSync.stageIndex ?? 0, liveSync.totalStages)} de ${liveSync.totalStages} áreas verificadas`
+          : 'Buscando suas informações na National Life',
+        state: state === 'slow' ? 'waiting' : 'working',
+        progress: cornerProgress,
+      }]
+    : []
   const syncTrailIndex = (() => {
     if (state === 'success') return 5
     if (state === 'partial') return 4
@@ -704,7 +719,14 @@ export function NationalLifeLocalConnectorCard({
 
   return (
     <>
-      <KBotCornerPresence state={botState} title={cornerCopy.title} detail={cornerCopy.detail} />
+      <KBotCornerPresence
+        state={botState}
+        title={cornerCopy.title}
+        detail={cornerCopy.detail}
+        activity={syncActive ? 'sync' : 'idle'}
+        progress={cornerProgress}
+        tasks={cornerTasks}
+      />
       <section
         aria-labelledby="local-connector-title"
         // NationalLifeSyncProgress is the single visible progress surface on

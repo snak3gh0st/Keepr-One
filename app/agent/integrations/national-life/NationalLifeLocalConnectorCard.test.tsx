@@ -118,8 +118,8 @@ describe('NationalLifeLocalConnectorCard', () => {
       />,
     )
 
-    const presence = await screen.findByLabelText('K-Bot status')
-    await waitFor(() => expect(presence).toHaveTextContent('K-Bot is disconnected'))
+    const presence = await screen.findByLabelText('Status do K-Bot')
+    await waitFor(() => expect(presence).toHaveTextContent('K-Bot está desconectado'))
     expect(presence.querySelector('[data-kbot-character="true"]')).toHaveAttribute(
       'data-expression',
       'sad',
@@ -434,9 +434,9 @@ describe('NationalLifeLocalConnectorCard', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('heading', { name: 'Put K-Bot to work' })).not.toBeInTheDocument()
-      expect(screen.getByLabelText('K-Bot status')).toHaveTextContent('K-Bot is working')
+      expect(screen.getByLabelText('Status do K-Bot')).toHaveTextContent('Estou buscando suas informações')
     })
-    expect(screen.getByLabelText('K-Bot status')).toHaveClass('md:bottom-4', 'md:right-5')
+    expect(screen.getByLabelText('Status do K-Bot')).toHaveClass('md:bottom-4', 'md:right-5')
     await waitFor(
       () => expect(screen.getByRole('status')).toHaveTextContent('up to date'),
       { timeout: 3_000 },
