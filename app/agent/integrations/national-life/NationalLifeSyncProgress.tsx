@@ -9,6 +9,7 @@ import {
 } from '@/lib/national-life/read-coverage'
 import { NATIONAL_LIFE_PERSONAL_GRID_KEYS } from '@/lib/national-life/plan-access-catalog'
 import type { NationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
+import { KBotActivity, type KBotState } from '@/components/kbot/KBotAvatar'
 
 const POLL_INTERVAL_MS = 1_500
 const PORTAL_COVERAGE = nationalLifeReadCoverageSummary()
@@ -221,11 +222,11 @@ export function NationalLifeSyncProgress({
         aria-label="National Life sync progress"
         className="mb-6 rounded-xl border border-border-steel bg-paper p-5 sm:p-6"
       >
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Sync status</p>
-        <h2 className="mt-1 text-lg font-semibold text-ink">Ready to bring National Life into Keepr One</h2>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">
-          Start a sync above and this panel will show each area as it is read from National Life and saved here.
-        </p>
+        <KBotActivity
+          state="idle"
+          title="K-Bot is ready for the first sync"
+          detail="Start it above. This panel will show each National Life area only as it is received and saved."
+        />
         <div className="mt-5 flex items-center justify-between rounded-xl border border-border-steel bg-panel/55 px-4 py-3 text-sm">
           <span className="font-medium text-ink">No sync has started on this account yet.</span>
           <span className="text-ink-muted">Waiting for your first run</span>
@@ -252,6 +253,33 @@ export function NationalLifeSyncProgress({
   const outcome = terminal ? outcomeLine(status, snapshotRecords) : null
   const discards = terminal ? discardLine(status, snapshotRecords) : null
   const estimate = estimateLine(status)
+  const botState: KBotState = status.state === 'COMPLETED'
+    ? 'success'
+    : status.state === 'PAUSED' || status.state === 'PARTIAL'
+      ? 'waiting'
+      : status.state === 'FAILED'
+        ? 'error'
+        : active
+          ? 'working'
+          : 'idle'
+  const botTitle = status.state === 'COMPLETED'
+    ? currentPriorityPlan
+      ? 'K-Bot finished updating your priority data'
+      : 'K-Bot preserved your previous National Life sync'
+    : status.state === 'PAUSED'
+      ? 'K-Bot needs your National Life login'
+      : terminal
+        ? 'K-Bot saved the available areas'
+        : 'K-Bot is updating your National Life data'
+  const botDetail = status.state === 'PAUSED'
+    ? 'Sign in once and the same task continues from its last saved checkpoint.'
+    : active
+      ? status.currentGridLabel
+        ? `K-Bot is collecting your ${status.currentGridLabel} information from National Life. Everything already collected is safe.`
+        : 'K-Bot is opening the next place it needs in National Life.'
+      : status.state === 'COMPLETED'
+        ? 'Verified data is ready throughout Keepr One.'
+        : 'You can retry only the areas National Life did not return.'
 
   return (
     <section
@@ -261,29 +289,17 @@ export function NationalLifeSyncProgress({
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Sync</p>
-            {active && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-teal-pale px-2 py-1 text-[11px] font-semibold text-teal-deep">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal" aria-hidden="true" />
-                Live
-              </span>
-            )}
-          </div>
-          <h2 className="mt-1 text-lg font-semibold text-ink">
-            {status.state === 'COMPLETED'
-              ? currentPriorityPlan
-                ? 'Your priority National Life data is up to date'
-                : 'Your previous National Life sync is available'
-              : terminal
-                ? 'Sync finished with areas to retry'
-                : 'Updating your National Life data'}
-          </h2>
+          <KBotActivity
+            state={botState}
+            title={botTitle}
+            detail={botDetail}
+            estimate={estimate}
+          />
           {terminal && lastSynced && (
-            <p className="mt-1 text-sm text-ink-muted">Last synced {lastSynced}</p>
+            <p className="ml-[60px] mt-1 text-xs text-ink-muted">Last synced {lastSynced}</p>
           )}
           {historicalCompletedPlan && (
-            <p className="mt-1 max-w-2xl text-sm text-ink-muted">
+            <p className="ml-[60px] mt-1 max-w-2xl text-xs text-ink-muted">
               This was a broader portal run. Start a sync to refresh the current priority sources.
             </p>
           )}
@@ -292,9 +308,8 @@ export function NationalLifeSyncProgress({
           <span className="block font-mono text-sm font-semibold tabular-nums text-teal">
             {checked} of {status.total} portal areas checked
           </span>
-          {estimate && status.estimate && (
+          {status.estimate && (
             <span className="mt-1 block text-xs text-ink-muted">
-              <strong className="font-semibold text-ink">{estimate}</strong>
               <span className="block">
                 Based on {status.estimate.basisRuns} recent {status.estimate.basisRuns === 1 ? 'sync' : 'syncs'} from this account
               </span>

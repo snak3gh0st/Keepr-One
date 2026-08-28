@@ -2,6 +2,7 @@ import { ForesightExecutionError, executeForesightIllustration } from '../lib/fo
 import { executeForesightTermIllustration } from '../lib/foresight-term-executor'
 import { parseExecuteForesightIllustrationMessage } from '../lib/foresight-messages'
 import type { ForesightIllustrationSnapshot } from '../lib/foresight-contract'
+import type { ForesightProgressPhase } from '../lib/foresight-progress'
 
 function isFlexLifeSnapshot(snapshot: unknown): snapshot is ForesightIllustrationSnapshot {
   return typeof snapshot === 'object' && snapshot !== null &&
@@ -29,9 +30,12 @@ export default defineContentScript({
         return false
       }
       running = true
+      const onProgress = (phase: ForesightProgressPhase) => {
+        void chrome.runtime.sendMessage({ type: 'FORESIGHT_PROGRESS', phase }).catch(() => {})
+      }
       const execute = isFlexLifeSnapshot(message.snapshot)
-        ? executeForesightIllustration({ inputHash: message.inputHash, snapshot: message.snapshot })
-        : executeForesightTermIllustration({ inputHash: message.inputHash, snapshot: message.snapshot })
+        ? executeForesightIllustration({ inputHash: message.inputHash, snapshot: message.snapshot, onProgress })
+        : executeForesightTermIllustration({ inputHash: message.inputHash, snapshot: message.snapshot, onProgress })
       void execute.then(
         (result) => sendResponse({
           ok: true,

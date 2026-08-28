@@ -1,5 +1,47 @@
 @import "tailwindcss";
 
+/* K-Bot: a quiet operational signal, never a chat character. */
+@keyframes kbot-work-cycle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+@keyframes kbot-scan-cycle {
+  0% { opacity: 0; transform: translateY(0); }
+  18%, 78% { opacity: 0.72; }
+  100% { opacity: 0; transform: translateY(27px); }
+}
+
+@keyframes kbot-eye-cycle {
+  0%, 42%, 48%, 100% { opacity: 1; }
+  45% { opacity: 0.15; }
+}
+
+.kbot-avatar {
+  image-rendering: pixelated;
+}
+
+.kbot-avatar[data-state="working"] {
+  animation: kbot-work-cycle 1.45s steps(2, end) infinite;
+}
+
+.kbot-avatar[data-state="working"] .kbot-scan {
+  animation: kbot-scan-cycle 1.45s steps(5, end) infinite;
+}
+
+.kbot-avatar[data-state="working"] .kbot-eye,
+.kbot-avatar[data-state="waiting"] .kbot-eye {
+  animation: kbot-eye-cycle 2.8s steps(1, end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kbot-avatar,
+  .kbot-avatar .kbot-scan,
+  .kbot-avatar .kbot-eye {
+    animation: none !important;
+  }
+}
+
 @font-face {
   font-family: "Satoshi";
   src: url("/fonts/satoshi-300.woff2") format("woff2");

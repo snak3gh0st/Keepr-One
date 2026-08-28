@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { popupCanRetry, popupStatusText } from './popup-copy'
+import { popupCanRetry, popupCommandStatusText, popupStatusText, popupSyncStatusText } from './popup-copy'
 import type { DeviceState, SyncState } from './state'
 
 const ready: DeviceState = { deviceId: 'dev_1', baseUrl: 'https://keepr.test', status: 'READY' }
@@ -46,10 +46,23 @@ describe('popupStatusText', () => {
   it('shows resumable command authentication independently from daily sync', () => {
     expect(popupStatusText(ready, { status: 'IDLE' }, {
       commandId: 'cmd_1', status: 'MFA_REQUIRED',
-    })).toMatch(/verification.*resume automatically/i)
+    })).toMatch(/verification.*continue automatically/i)
     expect(popupStatusText(ready, { status: 'COMPLETED' }, {
       commandId: 'cmd_1', status: 'RUNNING',
-    })).toMatch(/requested National Life data/i)
+    })).toMatch(/requested work/i)
+  })
+
+  it('keeps sync and carrier command copy available as separate K-Bot jobs', () => {
+    expect(popupSyncStatusText(ready, { status: 'EXTRACTING' })).toMatch(/K-Bot.*reading/i)
+    expect(popupCommandStatusText({ commandId: 'cmd_1', status: 'RUNNING' })).toMatch(/requested work/i)
+  })
+
+  it('describes the exact Foresight step when the executor reports it', () => {
+    expect(popupCommandStatusText({ status: 'RUNNING', phase: 'GENERATING_PDF' })).toMatch(/official PDF/i)
+  })
+
+  it('asks for login instead of showing a stale work step', () => {
+    expect(popupCommandStatusText({ status: 'AUTH_REQUIRED', phase: 'OPENING_FORESIGHT' })).toMatch(/Sign in/i)
   })
 })
 

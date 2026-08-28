@@ -25,7 +25,7 @@ export async function requestIllustrationPdf(
   illustrationId: string,
 ): Promise<RequestIllustrationPdfResult> {
   if (!isNationalLifeLocalConnectorEnabled()) {
-    return { ok: false, message: 'Conecte o KeeproneConnect para gerar a ilustração oficial.' }
+    return { ok: false, message: 'Conecte o K-Bot neste navegador para gerar a ilustração oficial.' }
   }
   const agent = await getCurrentAgent()
   const illustration = await prisma.illustration.findFirst({

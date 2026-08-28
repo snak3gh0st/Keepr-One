@@ -117,7 +117,7 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
 
     await expect(requestForesightIllustration(form())).resolves.toEqual({
       ok: false,
-      message: 'Conecte o KeeproneConnect para gerar a ilustração oficial.',
+      message: 'Conecte o K-Bot neste navegador para gerar a ilustração oficial.',
     })
     expect(mocks.createIllustration).not.toHaveBeenCalled()
     expect(mocks.issue).not.toHaveBeenCalled()

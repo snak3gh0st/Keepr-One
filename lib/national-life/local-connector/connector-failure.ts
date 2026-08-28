@@ -1,4 +1,4 @@
-/// O que o agente lê quando o KeeproneConnect falha.
+/// O que o agente lê quando o K-Bot (pacote técnico KeeproneConnect) falha.
 ///
 /// O código interno é só a chave que escolhe a frase — ele nunca aparece. Cada
 /// classe de falha devolve, junto do texto, o rótulo do botão que resolve
@@ -116,7 +116,7 @@ export function connectorFailure(code: string | null | undefined): ConnectorFail
       action: 'update',
       actionLabel: "I've updated it — try again",
       message:
-        'Keepr One is newer than the KeeproneConnect extension on this computer. Update the extension in your browser, then try again.',
+        'Keepr One is newer than K-Bot on this computer. Update the extension in your browser, then try again.',
     }
   }
   if (typeof code === 'string' && PAUSED_CODES.includes(code)) {
@@ -150,7 +150,7 @@ export function connectorFailure(code: string | null | undefined): ConnectorFail
       action: 'retry',
       actionLabel: 'Resume sync',
       message:
-        'National Life stopped before this area was fully received. Saved batches are safe — resume the sync to collect the missing rows.',
+        'National Life stopped before this section was finished. Everything K-Bot already collected is safe — resume to bring in the rest.',
     }
   }
   if (typeof code === 'string' && PORTAL_CODES.includes(code)) {

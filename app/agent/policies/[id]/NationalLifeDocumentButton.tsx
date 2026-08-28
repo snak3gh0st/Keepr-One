@@ -12,13 +12,13 @@ function documentErrorMessage(code: string | undefined): string {
     return 'Entre na National Life na aba que foi aberta e tente novamente.'
   }
   if (code === 'CONNECTOR_NOT_PAIRED') {
-    return 'Conecte o KeeproneConnect antes de buscar este documento.'
+    return 'Conecte o K-Bot antes de buscar este documento.'
   }
   if (code === 'SYNC_IN_PROGRESS' || code === 'DOCUMENT_FETCH_IN_PROGRESS') {
     return 'O conector está ocupado. Aguarde a operação atual e tente novamente.'
   }
   if (code === 'CLIENT_TOO_OLD' || code === 'INVALID_MESSAGE') {
-    return 'Atualize e recarregue o KeeproneConnect para buscar documentos.'
+    return 'Atualize e recarregue o K-Bot para buscar documentos.'
   }
   if (code === 'CONNECTOR_PAUSED') {
     return 'A busca de documentos está pausada temporariamente.'

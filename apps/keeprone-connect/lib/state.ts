@@ -1,4 +1,5 @@
 import { parseStagePlan, type StagePlan } from './capabilities'
+import type { ForesightProgressPhase } from './foresight-progress'
 
 export type ConnectorStatus = 'UNPAIRED' | 'PAIRING' | 'READY' | 'ERROR'
 export type SyncStatus =
@@ -85,6 +86,9 @@ export type CommandState = {
   status: CommandStatus
   errorCode?: string
   updatedAt?: string
+  /// Fine-grained, non-sensitive progress for the active official illustration.
+  /// It is presentation state only; command events remain the audit authority.
+  phase?: ForesightProgressPhase
 }
 
 /// The plan round-trips through chrome.storage.local, which survives extension

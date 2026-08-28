@@ -81,7 +81,7 @@ describe('NationalLifeSyncProgress', () => {
       />,
     )
 
-    expect(screen.getByText('Updating your National Life data')).toBeTruthy()
+    expect(screen.getByText('K-Bot is updating your National Life data')).toBeTruthy()
     expect(screen.getByText('3 of 13 portal areas checked')).toBeTruthy()
     expect(screen.getByText('Reading and saving correspondence.')).toBeTruthy()
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '3')
@@ -156,7 +156,7 @@ describe('NationalLifeSyncProgress', () => {
     })
 
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(screen.getByText('Your priority National Life data is up to date')).toBeTruthy()
+    expect(screen.getByText('K-Bot finished updating your priority data')).toBeTruthy()
   })
 
   it('recognizes a completed personal-plan sync as current', () => {
@@ -182,7 +182,7 @@ describe('NationalLifeSyncProgress', () => {
       })),
     })} />)
 
-    expect(screen.getByText('Your priority National Life data is up to date')).toBeTruthy()
+    expect(screen.getByText('K-Bot finished updating your priority data')).toBeTruthy()
     expect(screen.queryByText(/broader portal run/i)).toBeNull()
   })
 
@@ -209,10 +209,10 @@ describe('NationalLifeSyncProgress', () => {
       ],
     })} />)
 
-    expect(screen.getByText('Your previous National Life sync is available')).toBeTruthy()
+    expect(screen.getByText('K-Bot preserved your previous National Life sync')).toBeTruthy()
     expect(screen.getByText(/broader portal run/i)).toBeTruthy()
     expect(document.body.textContent).toContain('Previous run plan: 1 structured + 1 snapshot sources')
-    expect(screen.queryByText('Your priority National Life data is up to date')).toBeNull()
+    expect(screen.queryByText('K-Bot finished updating your priority data')).toBeNull()
   })
 
   it('does not accept an arbitrary 13-source plan as the current priority plan', () => {
@@ -230,8 +230,8 @@ describe('NationalLifeSyncProgress', () => {
       })),
     })} />)
 
-    expect(screen.getByText('Your previous National Life sync is available')).toBeTruthy()
-    expect(screen.queryByText('Your priority National Life data is up to date')).toBeNull()
+    expect(screen.getByText('K-Bot preserved your previous National Life sync')).toBeTruthy()
+    expect(screen.queryByText('K-Bot finished updating your priority data')).toBeNull()
   })
 
   it('explains a paused run without exposing its internal error code', async () => {
@@ -328,7 +328,7 @@ describe('NationalLifeSyncProgress', () => {
     const fetchMock = answerWith(status({ completed: 1, percent: 11, currentGridLabel: 'new business' }))
     render(<NationalLifeSyncProgress initialStatus={null} />)
 
-    expect(screen.getByText('Ready to bring National Life into Keepr One')).toBeTruthy()
+    expect(screen.getByText('K-Bot is ready for the first sync')).toBeTruthy()
     expect(fetchMock).not.toHaveBeenCalled()
 
     window.dispatchEvent(new Event(NATIONAL_LIFE_SYNC_STARTED_EVENT))

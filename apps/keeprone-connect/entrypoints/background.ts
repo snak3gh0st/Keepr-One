@@ -78,6 +78,7 @@ import {
   type ForesightExecutionSnapshot,
   type ForesightExecutionResponse,
 } from '../lib/foresight-messages'
+import { parseForesightProgressPhase } from '../lib/foresight-progress'
 import {
   parseFlexLifeQuoteSnapshot,
   sha256FlexLifeQuoteSnapshot,
@@ -1012,6 +1013,7 @@ async function executeForesightCommand(
     carrierTabId,
     nextEventSequence: sequence,
     status: 'NAVIGATING',
+    phase: 'OPENING_FORESIGHT',
     updatedAt: new Date().toISOString(),
   })
 
@@ -1100,6 +1102,11 @@ async function executeForesightCommand(
     snapshot: approved.snapshot,
   })
   if (!response.ok) throw new Error(response.code)
+  await writeCommandState({
+    ...(await readCommandState()),
+    phase: 'UPLOADING_PDF',
+    updatedAt: new Date().toISOString(),
+  })
   await uploadForesightArtifact({ dispatch, device, response })
   sequence = await postCommandEvent({
     dispatch,
@@ -1121,6 +1128,7 @@ async function executeForesightCommand(
     carrierTabId: tab.id,
     nextEventSequence: sequence,
     status: 'COMPLETED',
+    phase: 'COMPLETED',
     updatedAt: new Date().toISOString(),
   })
 }
@@ -2762,6 +2770,22 @@ export default defineBackground(() => {
       return
     }
     const type = (value as { type: string }).type
+    if (type === 'FORESIGHT_PROGRESS' && Object.keys(value).length === 2) {
+      const phase = parseForesightProgressPhase((value as { phase?: unknown }).phase)
+      if (!phase || sender.tab?.id === undefined || !sender.url?.startsWith(`${NLG_ORIGIN}/NWI/`)) {
+        sendResponse({ ok: false, error: 'INVALID_PROGRESS' })
+        return
+      }
+      respond(sendResponse, (async () => {
+        const command = await readCommandState()
+        if (command.carrierTabId !== sender.tab!.id || command.status !== 'RUNNING') {
+          return { ok: false as const, error: 'COMMAND_MISMATCH' }
+        }
+        await writeCommandState({ ...command, phase, updatedAt: new Date().toISOString() })
+        return { ok: true as const }
+      })())
+      return true
+    }
     if (type === 'GET_STATUS' && Object.keys(value).length === 1) {
       respond(sendResponse, getConnectorStatus())
       return true

@@ -3,31 +3,53 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>KeeproneConnect</title>
+    <title>K-Bot by KeeprOne</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <main id="popup">
       <header class="header">
-        <div class="brand" aria-hidden="true">K</div>
+        <div class="brand" aria-hidden="true">
+          <svg viewBox="0 0 16 16" shape-rendering="crispEdges" focusable="false">
+            <rect class="antenna" x="7" y="0" width="2" height="3" />
+            <rect class="shell" x="2" y="4" width="12" height="9" />
+            <rect class="screen" x="3" y="5" width="10" height="6" />
+            <rect class="eye" x="5" y="7" width="2" height="2" />
+            <rect class="eye" x="9" y="7" width="2" height="2" />
+            <rect class="arm" x="0" y="6" width="2" height="4" />
+            <rect class="arm" x="14" y="6" width="2" height="4" />
+            <rect class="foot" x="4" y="13" width="3" height="2" />
+            <rect class="foot" x="9" y="13" width="3" height="2" />
+          </svg>
+          <span class="scan"></span>
+        </div>
         <div class="brand-copy">
-          <p class="eyebrow">Keepr One</p>
-          <h1>KeeproneConnect</h1>
+          <p class="eyebrow">KeeprOne operations</p>
+          <h1>K-Bot</h1>
         </div>
         <span id="connection" class="connection">Checking</span>
       </header>
       <section class="status-card" aria-labelledby="status-heading">
         <div class="status-topline">
           <span class="status-dot" aria-hidden="true"></span>
-          <p id="status-heading">National Life connection</p>
+          <p id="status-heading">K-Bot activity</p>
         </div>
-        <p id="status" class="status" role="status" aria-live="polite">Checking status…</p>
+        <div class="task-list">
+          <div class="task-row">
+            <span class="task-label">Sync</span>
+            <p id="sync-status" class="status" role="status" aria-live="polite">Checking status…</p>
+          </div>
+          <div id="command-row" class="task-row" hidden>
+            <span class="task-label">National Life task</span>
+            <p id="command-status" class="status" role="status" aria-live="polite"></p>
+          </div>
+        </div>
       </section>
       <div class="actions">
         <button id="open" type="button">Open National Life</button>
         <button id="retry" class="secondary" type="button">Try again</button>
       </div>
-      <p class="privacy"><span aria-hidden="true">↗</span> Data stays in this browser. Your National Life password is never stored by Keepr One.</p>
+      <p class="privacy"><span aria-hidden="true">↗</span> K-Bot works in your National Life session. Keepr One never stores your National Life password.</p>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

@@ -11,6 +11,7 @@ import type {
   ForesightExecutionDocument,
   ForesightTermExecutionReceipt,
 } from './foresight-messages'
+import type { ForesightProgressPhase } from './foresight-progress'
 
 const MAIN_FRAME_ID = 'ctl00_mobilityPH_iframeMain'
 const MODAL_FRAME_ID = 'ctl00_mobilityPH_modalDialog__Iframe'
@@ -306,19 +307,28 @@ async function saveCase(caseName: string): Promise<void> {
 export async function executeForesightTermIllustration(input: {
   inputHash: string
   snapshot: ForesightTermIllustrationSnapshotV1
+  onProgress?: (phase: ForesightProgressPhase) => void
 }): Promise<{ receipt: ForesightTermExecutionReceipt; document: ForesightExecutionDocument }> {
   if (classifyForesightLocation(location.href) !== 'FORESIGHT' || location.pathname !== '/NWI/Main/Layout.aspx') fail('FORESIGHT_LOCATION_UNEXPECTED')
   const independentHash = await sha256ForesightTermSnapshot(input.snapshot)
   if (independentHash !== input.inputHash) fail('FORESIGHT_INPUT_HASH_MISMATCH')
   const release = currentRelease()
+  input.onProgress?.('OPENING_CASE')
   const opened = await openTerm(input.snapshot)
+  input.onProgress?.('FILLING_CLIENT')
   const client = opened.existing ? readClient(opened.doc, input.snapshot) : await fillClient(opened.doc, input.snapshot)
+  input.onProgress?.('CONFIGURING_PRODUCT')
   const fundingDoc = await fundingDocument()
   const funding = opened.existing ? readFunding(fundingDoc) : await fillFunding(fundingDoc, input.snapshot)
   if (client.firstName !== input.snapshot.insured.firstName || client.lastName !== input.snapshot.insured.lastName || client.dateOfBirth !== input.snapshot.insured.dateOfBirth || client.issueState !== input.snapshot.insured.issueState || client.gender !== input.snapshot.underwriting.gender || client.rateClass !== input.snapshot.underwriting.rateClass || funding.designType !== 'Specify Face Amount' || funding.faceAmount.replace(/[$,]/g, '') !== String(input.snapshot.faceAmount) || funding.premiumMode !== 'Monthly' || funding.termDuration !== input.snapshot.termDuration) fail('FORESIGHT_TERM_READBACK_MISMATCH')
+  input.onProgress?.('VERIFYING_VALUES')
   const reports = await reportsDocument()
   await verifyReports(reports, input.snapshot.termDuration)
-  if (!opened.existing) await saveCase(input.snapshot.carrierCaseName)
+  if (!opened.existing) {
+    input.onProgress?.('SAVING_CASE')
+    await saveCase(input.snapshot.carrierCaseName)
+  }
+  input.onProgress?.('GENERATING_PDF')
   const document = await captureReport()
   const pdf = decodePdf(document)
   return {

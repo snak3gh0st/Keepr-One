@@ -83,10 +83,10 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
   if (status.state === 'WORKING') {
     // The number comes from measuring a full illustration opening in the
     // carrier's tool: minutes, not seconds. Without it, silence reads as broken.
-    return 'PDF a caminho — costuma levar de 2 a 5 minutos.'
+    return 'K-Bot está fazendo no Foresight o que você faria: preenchendo o cenário, aguardando o cálculo e preparando o PDF. Estimativa típica: 2–5 minutos.'
   }
   if (status.state === 'BLOCKED') {
-    return 'Aguardando você conectar na seguradora.'
+    return 'K-Bot está aguardando você entrar na National Life para continuar o mesmo pedido.'
   }
 
   switch (status.safeErrorCode) {
@@ -134,16 +134,16 @@ export function describeIllustrationDelivery(input: {
   }
   if (input.status?.state === 'BLOCKED') {
     return {
-      eyebrow: 'Ação necessária',
+      eyebrow: 'K-Bot · ação necessária',
       title: 'Conecte a National Life para continuar',
-      detail: 'A sessão do navegador expirou. Depois do login, a extensão retoma o mesmo pedido.',
+      detail: 'A sessão do navegador expirou. Depois do login, o K-Bot retoma o mesmo pedido.',
     }
   }
   if (input.status?.state === 'WORKING') {
     return {
-      eyebrow: 'Foresight em andamento',
-      title: 'Gerando a ilustração oficial',
-      detail: 'O caso está sendo salvo e o PDF será trazido automaticamente para esta página.',
+      eyebrow: 'K-Bot em operação',
+      title: 'K-Bot está gerando a ilustração oficial',
+      detail: 'K-Bot está preenchendo o caso, conferindo o cálculo da National Life e preparando o PDF. Estimativa típica: 2–5 minutos; você pode continuar trabalhando.',
     }
   }
   if (input.status?.state === 'FAILED') {

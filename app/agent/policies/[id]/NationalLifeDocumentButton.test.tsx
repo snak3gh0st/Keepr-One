@@ -72,7 +72,7 @@ describe('NationalLifeDocumentButton', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Trazer para o Keepr One' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Atualize e recarregue o KeeproneConnect')
+    expect(await screen.findByRole('status')).toHaveTextContent('Atualize e recarregue o K-Bot')
   })
 
   it.each([

@@ -28,6 +28,7 @@ main {
 }
 
 .brand {
+  position: relative;
   display: grid;
   width: 40px;
   height: 40px;
@@ -36,8 +37,23 @@ main {
   color: #f7fbf6;
   background: #174f36;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.24), 0 6px 16px rgba(23,79,54,.15);
-  font-size: 13px;
-  font-weight: 800;
+  overflow: hidden;
+  image-rendering: pixelated;
+}
+
+.brand svg { width: 24px; height: 24px; }
+.brand .antenna, .brand .shell, .brand .arm { fill: #7ee2a8; }
+.brand .screen { fill: #123c2a; }
+.brand .eye { fill: #effff4; }
+.brand .foot { fill: #8dbaa0; }
+.brand .scan {
+  position: absolute;
+  top: 8px;
+  left: 9px;
+  width: 22px;
+  height: 1px;
+  background: rgba(247, 255, 249, .82);
+  opacity: 0;
 }
 
 .eyebrow {
@@ -102,11 +118,33 @@ h1 {
 }
 
 .status {
-  margin: 8px 0 0;
+  margin: 3px 0 0;
   color: #173023;
   font-size: 13px;
   font-weight: 550;
   line-height: 1.38;
+}
+
+.task-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 9px;
+}
+
+.task-row {
+  padding-top: 9px;
+  border-top: 1px solid #e2e9e2;
+}
+
+.task-row:first-child { padding-top: 0; border-top: 0; }
+.task-row[hidden] { display: none; }
+
+.task-label {
+  color: #2b6e4b;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
 
 .actions {
@@ -188,6 +226,38 @@ main[data-sync="uploading"] .status-dot {
   animation: pulse 1.3s ease-in-out infinite;
 }
 
+main[data-sync="starting"] .brand,
+main[data-sync="navigating"] .brand,
+main[data-sync="extracting"] .brand,
+main[data-sync="uploading"] .brand,
+main[data-command="navigating"] .brand,
+main[data-command="running"] .brand {
+  animation: bot-work 1.45s steps(2, end) infinite;
+}
+
+main[data-sync="starting"] .brand .scan,
+main[data-sync="navigating"] .brand .scan,
+main[data-sync="extracting"] .brand .scan,
+main[data-sync="uploading"] .brand .scan,
+main[data-command="navigating"] .brand .scan,
+main[data-command="running"] .brand .scan {
+  animation: bot-scan 1.45s steps(5, end) infinite;
+}
+
 @keyframes pulse {
   50% { opacity: .42; transform: scale(.78); }
+}
+
+@keyframes bot-work {
+  50% { transform: translateY(-2px); }
+}
+
+@keyframes bot-scan {
+  0% { opacity: 0; transform: translateY(0); }
+  18%, 78% { opacity: .78; }
+  100% { opacity: 0; transform: translateY(24px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand, .brand .scan, .status-dot { animation: none !important; }
 }

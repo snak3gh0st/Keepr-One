@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/Button'
+import { KBotAvatar, KBotTaskTrail, type KBotState } from '@/components/kbot/KBotAvatar'
 import {
   DISCONNECT_FAILED,
   connectorFailure,
@@ -114,15 +115,15 @@ async function readDurableSync(runId: string) {
 }
 
 const storeStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
-  idle: 'Ready to connect.',
-  checking: 'Checking this browser…',
-  installing: 'Install KeeproneConnect in the Chrome Web Store, then return here. We will recognize it automatically.',
-  connecting: 'Connecting to Keepr One…',
-  'login-required': 'Sign in to the National Life portal to continue. Your sync picks up from there on its own.',
-  syncing: 'Reading National Life and saving each completed area to Keepr One. You can leave this page; the sync continues in the background.',
-  slow: 'Waiting for National Life to finish the current area. You can leave this page; completed areas remain saved.',
-  partial: 'The available areas were saved. Sync again to retry only the areas National Life did not return.',
-  success: 'Your National Life data is up to date.',
+  idle: 'K-Bot is ready for the next National Life task.',
+  checking: 'K-Bot is checking this browser…',
+  installing: 'Install K-Bot by KeeprOne from the Chrome Web Store, then return here. Keepr One will recognize it automatically.',
+  connecting: 'K-Bot is connecting this computer to Keepr One…',
+  'login-required': 'K-Bot needs you to sign in to National Life. The same task resumes automatically after login.',
+  syncing: 'K-Bot is reading National Life and saving each completed area. You can keep working anywhere in Keepr One.',
+  slow: 'K-Bot is waiting for National Life to finish the current area. Completed areas remain safely saved.',
+  partial: 'K-Bot saved every available area. Run it again to collect only what National Life did not return.',
+  success: 'K-Bot finished. Your National Life data is up to date.',
 }
 
 const pilotStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
@@ -235,6 +236,27 @@ export function NationalLifeLocalConnectorCard({
         ? state === 'connecting' || state === 'checking' ? 'Opening portal' : 'Ready'
         : 'Next'
   const syncStepDetail = syncComplete ? 'Up to date' : syncActive ? 'Syncing' : 'Waiting'
+  const botState: KBotState = state === 'error'
+    ? 'error'
+    : state === 'login-required' || state === 'partial'
+      ? 'waiting'
+      : state === 'success'
+        ? 'success'
+        : busy || state === 'slow'
+          ? 'working'
+          : 'idle'
+  const syncTrailIndex = (() => {
+    if (state === 'success') return 5
+    if (state === 'partial') return 4
+    switch (liveSync?.status) {
+      case 'STARTING': return 0
+      case 'NAVIGATING': return 1
+      case 'EXTRACTING': return 2
+      case 'UPLOADING': return 3
+      case 'COMPLETED': return 5
+      default: return state === 'syncing' || state === 'slow' ? 0 : -1
+    }
+  })()
 
   /// Toda tentativa nova começa sem o motivo da anterior. Sem isso a frase de um
   /// dispositivo revogado sobrevive por baixo do sucesso seguinte.
@@ -651,18 +673,13 @@ export function NationalLifeLocalConnectorCard({
       <div className="relative border-b border-border-steel bg-panel/45 p-5 sm:p-7">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-3">
-            <span
-              aria-hidden="true"
-              className="grid h-12 w-12 place-items-center rounded-lg bg-rail-strong text-sm font-bold tracking-[0.12em] text-paper"
-            >
-              NL
-            </span>
+            <KBotAvatar state={botState} />
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-teal-deep">
-                KeeproneConnect · on this computer
+                K-Bot · on this computer
               </p>
               <h2 id="local-connector-title" className="mt-1 text-2xl font-semibold tracking-[-0.04em] text-ink">
-                Connect this computer
+                Put K-Bot to work
               </h2>
             </div>
           </div>
@@ -672,7 +689,7 @@ export function NationalLifeLocalConnectorCard({
           </span>
         </div>
         <p className="mt-6 max-w-2xl text-sm leading-6 text-ink-muted">
-          Sign in on the official National Life portal. Your password never passes through Keepr One.
+          K-Bot operates the approved National Life steps in your browser session. Your password never passes through Keepr One.
           {installMode === 'pilot'
             ? ' In this pilot, load the unpacked extension using the ID configured for this environment.'
             : null}
@@ -700,9 +717,9 @@ export function NationalLifeLocalConnectorCard({
 
       <div className="border-b border-border-steel bg-paper px-5 py-4 sm:px-7">
         <ol aria-label="Connection progress" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <ConnectionJourneyStep label="Extension" detail={extensionStepDetail} state={extensionStepState} />
-          <ConnectionJourneyStep label="National Life" detail={loginStepDetail} state={loginStepState} />
-          <ConnectionJourneyStep label="Your data" detail={syncStepDetail} state={syncStepState} />
+          <ConnectionJourneyStep label="K-Bot" detail={extensionStepDetail} state={extensionStepState} />
+          <ConnectionJourneyStep label="National Life session" detail={loginStepDetail} state={loginStepState} />
+          <ConnectionJourneyStep label="Verified data" detail={syncStepDetail} state={syncStepState} />
         </ol>
       </div>
 
@@ -723,15 +740,24 @@ export function NationalLifeLocalConnectorCard({
               {!browserCapabilityResolved
                 ? 'Connecting on this computer needs Google Chrome or Microsoft Edge.'
                 : connectorPresence === 'checking' && state === 'idle'
-                  ? 'Checking whether KeeproneConnect is installed…'
+                  ? 'Checking whether K-Bot is installed…'
                   : connectorPresence === 'missing' && state !== 'installing'
-                    ? 'KeeproneConnect is not installed on this browser. Install it from the Chrome Web Store to connect National Life.'
+                    ? 'K-Bot is not installed on this browser. Install the browser extension to start National Life tasks.'
                 : state === 'error'
                   ? connectorFailure(errorCode).message
                   : state === 'idle' && pairedDeviceId
                     ? 'This computer is connected and ready to sync your National Life data.'
                     : liveProgressCopy(state, liveSync) ?? stateCopy[state]}
             </p>
+            {syncTrailIndex >= 0 && (
+              <div className="mt-3">
+                <KBotTaskTrail
+                  label="K-Bot sync steps"
+                  currentIndex={syncTrailIndex}
+                  steps={['Get ready', 'Open National Life', 'Collect information', 'Organize in Keepr One', 'Finished']}
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -742,7 +768,7 @@ export function NationalLifeLocalConnectorCard({
                 ? "I've installed it — connect"
                 : 'Check installation'
               : connectorPresence === 'missing'
-                ? 'Install KeeproneConnect'
+                ? 'Install K-Bot'
                 : failure
                   ? failure.actionLabel
                 : state === 'login-required'
@@ -798,7 +824,7 @@ export function NationalLifeLocalConnectorCard({
             rel="noopener noreferrer"
             className="text-sm font-semibold text-teal underline-offset-4 hover:underline"
           >
-            Download KeeproneConnect from the Chrome Web Store
+            Download K-Bot by KeeprOne from the Chrome Web Store
           </a>
         </div>
       )}
