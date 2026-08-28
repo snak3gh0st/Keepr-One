@@ -76,6 +76,15 @@
   50% { opacity: 0.1; transform: scaleX(0.82); }
 }
 
+@keyframes kbot-secondary-progress {
+  to { transform: rotate(270deg); }
+}
+
+@keyframes kbot-character-paper {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
 .kbot-avatar {
   image-rendering: pixelated;
 }
@@ -152,6 +161,18 @@
   animation: kbot-character-scan 1.25s steps(5, end) infinite;
 }
 
+.kbot-secondary-progress {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: kbot-secondary-progress 2.2s linear infinite;
+}
+
+.kbot-character-paper {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: kbot-character-paper 0.9s steps(2, end) infinite;
+}
+
 .kbot-character-stage > span:first-child {
   transform-origin: center;
   animation: kbot-character-shadow 3.2s steps(4, end) infinite;
@@ -170,6 +191,7 @@
 
   .kbot-character,
   .kbot-character *,
+  .kbot-secondary-progress,
   .kbot-character-stage > span:first-child {
     animation: none !important;
   }
