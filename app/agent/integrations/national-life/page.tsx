@@ -115,6 +115,7 @@ export default async function NationalLifeConnectionPage() {
               installMode={localConfig.installMode}
               baseUrl={localConfig.baseUrl}
               hideDuringActiveSync
+              latestRun={syncStatus ? { runId: syncStatus.runId, state: syncStatus.state } : null}
             />
           )}
 

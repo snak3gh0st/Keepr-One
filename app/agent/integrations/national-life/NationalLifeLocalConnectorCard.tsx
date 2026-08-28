@@ -184,12 +184,14 @@ export function NationalLifeLocalConnectorCard({
   installMode = 'store',
   baseUrl,
   hideDuringActiveSync = false,
+  latestRun = null,
 }: {
   extensionId: string
   storeUrl?: string | null
   installMode?: 'pilot' | 'store'
   baseUrl: string
   hideDuringActiveSync?: boolean
+  latestRun?: { runId: string; state: string } | null
 }) {
   const router = useRouter()
   const installedFlowStarted = useRef(false)
@@ -256,32 +258,32 @@ export function NationalLifeLocalConnectorCard({
           : 'idle'
   const cornerCopy = (() => {
     if (connectorPresence === 'checking') {
-      return { title: 'Estou verificando este navegador', detail: 'Fico pronto em instantes.' }
+      return { title: 'I am checking this browser', detail: 'I will be ready in a moment.' }
     }
     if (connectorPresence === 'missing') {
-      return { title: 'Instale o K-Bot para começar', detail: 'Depois disso, posso trabalhar com a National Life para você.' }
+      return { title: 'Install K-Bot to begin', detail: 'Then I can work with National Life for you.' }
     }
     if (disconnected) {
-      return { title: 'K-Bot está desconectado', detail: 'Conecte este computador quando quiser que eu trabalhe para você.' }
+      return { title: 'K-Bot is disconnected', detail: 'Connect this computer when you want me to work for you.' }
     }
     if (state === 'login-required') {
-      return { title: 'Preciso que você entre na National Life', detail: 'Assim que o login estiver pronto, continuo de onde parei.' }
+      return { title: 'I need you to sign in to National Life', detail: 'Once you are signed in, I will continue where I stopped.' }
     }
     if (state === 'syncing' || state === 'slow') {
-      return { title: 'Estou buscando suas informações', detail: 'Já estou organizando tudo no Keepr One.' }
+      return { title: 'I am collecting your information', detail: 'I am already organizing it in Keepr One.' }
     }
     if (state === 'success') {
-      return { title: 'Tudo pronto. Já organizei para você.', detail: 'Suas informações da National Life estão atualizadas.' }
+      return { title: 'All set. I organized everything for you.', detail: 'Your National Life information is up to date.' }
     }
     if (state === 'partial') {
-      return { title: 'Salvei tudo o que encontrei', detail: 'Posso voltar depois para buscar as informações restantes.' }
+      return { title: 'I saved the available areas', detail: 'You can ask me to collect the remaining areas.' }
     }
     if (state === 'error') {
-      return { title: 'Não consegui terminar esta parte', detail: 'O que já salvei está seguro. Abra os detalhes para continuar.' }
+      return { title: 'I could not finish this part', detail: 'Everything already saved is safe. Open the details to continue.' }
     }
     return pairedDeviceId
-      ? { title: 'Estou pronto quando você precisar', detail: 'Comece uma atualização quando quiser.' }
-      : { title: 'Estou pronto para conectar', detail: 'Conecte a National Life para começar.' }
+      ? { title: 'I am ready when you need me', detail: 'Start an update whenever you want.' }
+      : { title: 'I am ready to connect', detail: 'Connect National Life to get started.' }
   })()
   const cornerProgress = liveSync?.totalStages && liveSync.totalStages > 0
     ? Math.min(1, Math.max(0, (liveSync.stageIndex ?? 0) / liveSync.totalStages))
@@ -289,10 +291,10 @@ export function NationalLifeLocalConnectorCard({
   const cornerTasks: KBotTask[] = syncActive
     ? [{
         id: 'sync',
-        label: 'Atualizando seus dados',
+        label: 'Updating your data',
         detail: liveSync?.totalStages
-          ? `${Math.min(liveSync.stageIndex ?? 0, liveSync.totalStages)} de ${liveSync.totalStages} áreas verificadas`
-          : 'Buscando suas informações na National Life',
+          ? `${Math.min(liveSync.stageIndex ?? 0, liveSync.totalStages)} of ${liveSync.totalStages} areas checked`
+          : 'Collecting your information from National Life',
         state: state === 'slow' ? 'waiting' : 'working',
         progress: cornerProgress,
       }]
@@ -557,6 +559,16 @@ export function NationalLifeLocalConnectorCard({
         // stale error beside an up-to-date 13/13 panel makes a healthy sync look
         // broken after a reload.
         if (status.sync?.status === 'ERROR' && status.sync.runId) {
+          if (status.sync.runId === latestRun?.runId && latestRun.state === 'COMPLETED') {
+            setErrorCode(null)
+            setState('idle')
+            return
+          }
+          if (status.sync.runId === latestRun?.runId && latestRun.state === 'PARTIAL') {
+            setErrorCode(null)
+            setState('partial')
+            return
+          }
           const durable = await readDurableSync(status.sync.runId)
           if (durable?.state === 'COMPLETED') {
             setErrorCode(null)
@@ -584,7 +596,7 @@ export function NationalLifeLocalConnectorCard({
       .catch(() => {
         setConnectorPresence('missing')
       })
-  }, [browserIsCompatible, extensionId])
+  }, [browserIsCompatible, extensionId, latestRun?.runId, latestRun?.state])
 
   // The Store opens in a separate tab. When the agent returns, verify again so
   // the page recognizes the new installation without a reload or a technical

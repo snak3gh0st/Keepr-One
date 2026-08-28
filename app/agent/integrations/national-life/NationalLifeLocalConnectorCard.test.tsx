@@ -118,8 +118,8 @@ describe('NationalLifeLocalConnectorCard', () => {
       />,
     )
 
-    const presence = await screen.findByLabelText('Status do K-Bot')
-    await waitFor(() => expect(presence).toHaveTextContent('K-Bot está desconectado'))
+    const presence = await screen.findByLabelText('K-Bot status')
+    await waitFor(() => expect(presence).toHaveTextContent('K-Bot is disconnected'))
     expect(presence.querySelector('[data-kbot-character="true"]')).toHaveAttribute(
       'data-expression',
       'sad',
@@ -434,9 +434,9 @@ describe('NationalLifeLocalConnectorCard', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('heading', { name: 'Put K-Bot to work' })).not.toBeInTheDocument()
-      expect(screen.getByLabelText('Status do K-Bot')).toHaveTextContent('Estou buscando suas informações')
+      expect(screen.getByLabelText('K-Bot status')).toHaveTextContent('I am collecting your information')
     })
-    expect(screen.getByLabelText('Status do K-Bot')).toHaveClass('md:bottom-4', 'md:right-5')
+    expect(screen.getByLabelText('K-Bot status')).toHaveClass('md:bottom-4', 'md:right-5')
     await waitFor(
       () => expect(screen.getByRole('status')).toHaveTextContent('up to date'),
       { timeout: 3_000 },
@@ -570,6 +570,42 @@ describe('NationalLifeLocalConnectorCard', () => {
     await waitFor(() => expect(status).toHaveTextContent('connected and ready to sync'))
     expect(status).not.toHaveTextContent('National Life did not respond')
     expect(screen.getByRole('button', { name: 'Sync National Life' })).toBeEnabled()
+  })
+
+  it('keeps a server-confirmed partial sync recoverable when the extension retains an error', async () => {
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: {
+            runId: 'run-partial',
+            status: 'ERROR',
+            errorCode: 'PORTAL_REQUEST_FAILED',
+          },
+        })
+        return
+      }
+      callback({ ok: false, error: 'PORTAL_REQUEST_FAILED' })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+        latestRun={{ runId: 'run-partial', state: 'PARTIAL' }}
+      />,
+    )
+
+    const status = await screen.findByRole('status')
+    await waitFor(() => expect(status).toHaveTextContent('saved every available area'))
+    expect(status).not.toHaveTextContent('National Life did not respond')
+
+    const presence = screen.getByLabelText('K-Bot status')
+    expect(presence).toHaveAttribute('data-state', 'waiting')
+    expect(presence).toHaveTextContent('I saved the available areas')
   })
 
   it('tells an out-of-date extension to update instead of to retry', async () => {
