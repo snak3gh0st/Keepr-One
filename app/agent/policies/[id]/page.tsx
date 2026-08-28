@@ -20,9 +20,16 @@ import {
   toClientServiceEvents,
   type ClientServiceEvent,
 } from '@/lib/national-life/client-intelligence'
-import { toCarrierCommissionRecords } from '@/lib/national-life/commission-records'
+import {
+  preferCanonicalCarrierCommissionRows,
+  toCarrierCommissionRecords,
+} from '@/lib/national-life/commission-records'
 import { carrierPolicyNumberVariants } from '@/lib/national-life/policy-number'
-import { COMMISSION_EARNING_GRID_KEYS } from '@/lib/national-life/commission-grid-keys'
+import {
+  COMMISSION_EARNING_GRID_KEYS,
+  LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
+  LEGACY_COMMISSION_EARNING_GRID_KEY,
+} from '@/lib/national-life/commission-grid-keys'
 import {
   getNationalLifeLocalConnectorConfig,
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
@@ -91,11 +98,25 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       prisma.nationalLifeReportRow.findMany({
         where: {
           agentId: policy.agentId,
-          deploymentScope: scopeId,
-          gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
+          OR: [
+            {
+              deploymentScope: scopeId,
+              gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
+            },
+            {
+              deploymentScope: LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
+              gridKey: LEGACY_COMMISSION_EARNING_GRID_KEY,
+            },
+          ],
           raw: { path: ['PolicyNumber'], equals: policy.policyNumber },
         },
-        select: { id: true, raw: true, amounts: true },
+        select: {
+          id: true,
+          agentId: true,
+          deploymentScope: true,
+          raw: true,
+          amounts: true,
+        },
       }),
       prisma.nationalLifeReportRow.findMany({
         where: {
@@ -126,7 +147,9 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       }),
     ])
 
-    carrierCommissions = toCarrierCommissionRecords(commissionRows)
+    carrierCommissions = toCarrierCommissionRecords(
+      preferCanonicalCarrierCommissionRows(commissionRows, scopeId),
+    )
       .filter((record) => record.type === 'DIRECT')
       .map((record) => ({
         id: record.id,

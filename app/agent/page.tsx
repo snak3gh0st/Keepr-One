@@ -7,6 +7,9 @@ import { getCurrentAgentAccess } from '@/lib/agent-access'
 import { decimalToNumber } from '@/lib/decimal'
 import { periodFromDate, shiftPeriod, percentChange } from '@/lib/period'
 import {
+  currentCarrierChargebackSnapshot,
+  preferCanonicalCarrierCommissionRows,
+  projectedPayableSnapshotForPeriod,
   sumByPeriod,
   toVisibleCarrierCommissionRecords,
   totalForPeriod,
@@ -28,7 +31,11 @@ import { getAgentPromotionSnapshot } from '@/lib/agent-promotion'
 import { getLocalPromotionPreview } from '@/lib/promotion-preview'
 import { getPromotionIdentity, getPromotionJourney } from '@/lib/promotion-journey'
 import { JourneyDashboardPreview } from './JourneyDashboardPreview'
-import { COMMISSION_EARNING_GRID_KEYS } from '@/lib/national-life/commission-grid-keys'
+import {
+  COMMISSION_EARNING_GRID_KEYS,
+  LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
+  LEGACY_COMMISSION_EARNING_GRID_KEY,
+} from '@/lib/national-life/commission-grid-keys'
 import { FollowUpActionCard } from '@/components/crm/FollowUpActionCard'
 import { getDueFollowUpsForScope, nyDayBounds, type DueFollowUpView } from '@/lib/crm'
 import {
@@ -40,6 +47,12 @@ import { mapDomainCalendarConnectionToUi, mapDomainCalendarEventToUi } from '@/c
 import { TodayMeetingsSection } from '@/components/calendar/TodayMeetingsSection'
 import { UpcomingMeetingsSection } from '@/components/calendar/UpcomingMeetingsSection'
 import type { CalendarConnectionView, CalendarEventView, CalendarSourceView } from '@/components/calendar/types'
+
+const NATIONAL_LIFE_DASHBOARD_FINANCIAL_GRID_KEYS = [
+  ...COMMISSION_EARNING_GRID_KEYS,
+  'PAYABLE_GROSS_COMMISSIONS',
+  'PAID_COMMISSIONS',
+] as const
 
 function BreakdownList({
   title,
@@ -261,6 +274,9 @@ export default async function AgentDashboard({
   let txnExpected = 0
   let txnPaid = 0
   let txnChargeback = 0
+  let includesCarrierExpected = false
+  let includesCarrierPaid = false
+  let includesCarrierChargeback = false
   let calendarConnection: CalendarConnectionView = {
     status: 'DISCONNECTED', email: null, displayName: null, lastSyncAt: null, errorMessage: null,
   }
@@ -392,20 +408,54 @@ export default async function AgentDashboard({
       const carrierRows = await prisma.nationalLifeReportRow.findMany({
         where: {
           agentId: { in: scope },
-          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-          gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
+          OR: [
+            {
+              deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+              gridKey: { in: [...NATIONAL_LIFE_DASHBOARD_FINANCIAL_GRID_KEYS] },
+            },
+            {
+              deploymentScope: LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
+              gridKey: LEGACY_COMMISSION_EARNING_GRID_KEY,
+            },
+          ],
         },
-        select: { id: true, agentId: true, raw: true, amounts: true },
+        select: {
+          id: true,
+          agentId: true,
+          gridKey: true,
+          raw: true,
+          amounts: true,
+          primaryDate: true,
+          fetchedAt: true,
+          deploymentScope: true,
+        },
       })
+      const carrierCommissionRows = preferCanonicalCarrierCommissionRows(
+        carrierRows.filter((row) =>
+          COMMISSION_EARNING_GRID_KEYS.some((gridKey) => gridKey === row.gridKey),
+        ),
+        LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+      )
+      const payableRows = carrierRows.filter((row) => row.gridKey === 'PAYABLE_GROSS_COMMISSIONS')
+      const paidStatementRows = carrierRows.filter((row) => row.gridKey === 'PAID_COMMISSIONS')
       // The homepage headline is the authenticated agent's total commission,
       // not only direct production. Keep member direct production available to
       // entitled agency owners, but include overrides only from this agent's
       // own National Life session—the same tenant-safe rule as the statement.
-      const carrierRecords = toVisibleCarrierCommissionRecords(carrierRows, agent.id)
+      const carrierRecords = toVisibleCarrierCommissionRecords(carrierCommissionRows, agent.id)
+      const carrierPaidThisMonth = totalForPeriod(carrierRecords, currentP)
+      const projectedPayable = projectedPayableSnapshotForPeriod(payableRows, currentP)
+      const chargebackBalance = currentCarrierChargebackSnapshot(paidStatementRows)
 
       commissionTotalAmount += totalOf(carrierRecords)
-      commissionThisMonth += totalForPeriod(carrierRecords, currentP)
+      commissionThisMonth += carrierPaidThisMonth
       commissionLastMonth += totalForPeriod(carrierRecords, previousP)
+      txnExpected += projectedPayable.total
+      txnPaid += carrierPaidThisMonth
+      txnChargeback += chargebackBalance.total
+      includesCarrierExpected = projectedPayable.rowCount > 0
+      includesCarrierPaid = carrierRecords.some((record) => record.period === currentP)
+      includesCarrierChargeback = chargebackBalance.rowCount > 0
 
       const merged = new Map(commissionByPeriod.map((bucket) => [bucket.period, bucket.total]))
       for (const bucket of sumByPeriod(carrierRecords, { from: trendStartP, to: currentP })) {
@@ -627,13 +677,29 @@ export default async function AgentDashboard({
 
               <div data-hero-reveal className="mt-5 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-3">
                 {[
-                  { label: 'Esperada', value: txnExpected, tone: 'text-paper' },
-                  { label: 'Paga', value: txnPaid, tone: 'text-mint' },
-                  { label: 'Chargebacks', value: txnChargeback, tone: 'text-[oklch(0.78_0.12_68)]' },
+                  {
+                    label: 'Esperada',
+                    value: txnExpected,
+                    tone: 'text-paper',
+                    detail: includesCarrierExpected ? 'Projetada pela National Life' : null,
+                  },
+                  {
+                    label: 'Paga',
+                    value: txnPaid,
+                    tone: 'text-mint',
+                    detail: includesCarrierPaid ? 'Líquida confirmada pela National Life' : null,
+                  },
+                  {
+                    label: 'Chargebacks',
+                    value: txnChargeback,
+                    tone: 'text-[oklch(0.78_0.12_68)]',
+                    detail: includesCarrierChargeback ? 'Saldo mais recente da National Life' : null,
+                  },
                 ].map((metric) => (
                   <div key={metric.label} className="bg-rail-strong/80 px-4 py-3.5">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/38">{metric.label}</p>
                     <p className={`mt-1.5 font-mono text-lg font-medium tabular-nums ${metric.tone}`}>{moneyValue(metric.value)}</p>
+                    {metric.detail && <p className="mt-1 text-[10px] text-paper/38">{metric.detail}</p>}
                   </div>
                 ))}
               </div>

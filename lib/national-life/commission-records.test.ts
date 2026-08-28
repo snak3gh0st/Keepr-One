@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  currentCarrierChargebackSnapshot,
   NO_PERIOD,
   parseCarrierAmount,
+  preferCanonicalCarrierCommissionRows,
+  projectedPayableSnapshotForPeriod,
   sumByPeriod,
   toCarrierCommissionRecords,
   toVisibleCarrierCommissionRecords,
@@ -135,6 +138,39 @@ describe('toVisibleCarrierCommissionRecords', () => {
   })
 })
 
+describe('preferCanonicalCarrierCommissionRows', () => {
+  const scoped = (
+    id: string,
+    agentId: string,
+    deploymentScope: string,
+    paymentDate: string,
+  ) => ({
+    ...row({ PaymentDate: paymentDate, WritingAgtLevel: 'Personal' }, { GrossCommEarned: '$10' }),
+    id,
+    agentId,
+    deploymentScope,
+  })
+
+  it('uses legacy history only for agent-months absent from the current connector', () => {
+    const selected = preferCanonicalCarrierCommissionRows([
+      scoped('legacy-jul', 'agent-1', 'legacy', '07/25/2026'),
+      scoped('legacy-aug', 'agent-1', 'legacy', '08/25/2026'),
+      scoped('current-aug', 'agent-1', 'current', '08/25/2026'),
+    ], 'current')
+
+    expect(selected.map((entry) => entry.id)).toEqual(['legacy-jul', 'current-aug'])
+  })
+
+  it('does not hide another entitled agent history', () => {
+    const selected = preferCanonicalCarrierCommissionRows([
+      scoped('owner-current', 'owner', 'current', '08/25/2026'),
+      scoped('member-legacy', 'member', 'legacy', '08/25/2026'),
+    ], 'current')
+
+    expect(selected.map((entry) => entry.id)).toEqual(['owner-current', 'member-legacy'])
+  })
+})
+
 describe('totals', () => {
   const records = toCarrierCommissionRecords([
     row({ PaymentDate: '6/1/2026', PolicyNumber: 'A', WritingAgtLevel: 'Personal' }, { GrossCommEarned: '$100' }),
@@ -175,5 +211,90 @@ describe('totals', () => {
       row({ PaymentDate: '7/1/2026', WritingAgtLevel: 'Personal' }, { GrossCommEarned: '-$50' }),
     ])
     expect(totalOf(withChargeback)).toBe(150)
+  })
+})
+
+describe('projectedPayableSnapshotForPeriod', () => {
+  const payableRow = (
+    id: string,
+    paymentDate: string,
+    amount: string,
+    fetchedAt = '2026-08-27T16:40:08.568Z',
+  ) => ({
+    id,
+    agentId: 'agent-1',
+    primaryDate: new Date(paymentDate),
+    fetchedAt: new Date(fetchedAt),
+    raw: {
+      PaymentDate: paymentDate,
+      AgentNumber: 'A-1',
+      WritingAgentNumber: `W-${id}`,
+    },
+    amounts: { NLLifeAmount: amount },
+  })
+
+  it('sums the six payable carrier fields only for the requested month', () => {
+    const snapshot = projectedPayableSnapshotForPeriod([
+      {
+        ...payableRow('aug', '08/25/2026', '$10,000.00'),
+        amounts: {
+          NLLifeAmount: '$10,000.00',
+          NLAnnuitiesAmount: '$500.00',
+          NLMutualFundsAmount: '$100.00',
+          LSWLifeAmount: '$5,000.00',
+          LSWAnnuitiesAmount: '$300.00',
+          VariableProductAmount: '$6.00',
+        },
+      },
+      payableRow('jul', '07/25/2026', '$99,999.00'),
+    ], '2026-08')
+
+    expect(snapshot).toEqual({ total: 15_906, asOf: '2026-08-25', rowCount: 1 })
+  })
+
+  it('keeps only the newest version of the same carrier payable row', () => {
+    const older = payableRow('old', '08/25/2026', '$100.00', '2026-08-26T12:00:00Z')
+    const corrected = {
+      ...payableRow('new', '08/25/2026', '$125.00', '2026-08-27T12:00:00Z'),
+      raw: older.raw,
+    }
+
+    expect(projectedPayableSnapshotForPeriod([older, corrected], '2026-08')).toEqual({
+      total: 125,
+      asOf: '2026-08-25',
+      rowCount: 1,
+    })
+  })
+})
+
+describe('currentCarrierChargebackSnapshot', () => {
+  const statementRow = (
+    id: string,
+    agentId: string,
+    payDate: string,
+    balance: string,
+  ) => ({
+    id,
+    agentId,
+    primaryDate: new Date(payDate),
+    fetchedAt: new Date('2026-08-27T16:40:08.568Z'),
+    raw: { PayDate: payDate },
+    amounts: { CommChargebackBalance: balance },
+  })
+
+  it('uses the latest statement balance rather than adding historical balances', () => {
+    expect(currentCarrierChargebackSnapshot([
+      statementRow('old-a', 'agent-1', '08/18/2026', '$900.00'),
+      statementRow('new-a', 'agent-1', '08/25/2026', '$40.00'),
+      statementRow('new-b', 'agent-1', '08/25/2026', '$10.00'),
+    ])).toEqual({ total: 50, asOf: '2026-08-25', rowCount: 2 })
+  })
+
+  it('selects the latest statement independently for every entitled agent', () => {
+    expect(currentCarrierChargebackSnapshot([
+      statementRow('owner', 'owner', '08/25/2026', '$20.00'),
+      statementRow('member-old', 'member', '08/11/2026', '$70.00'),
+      statementRow('member-new', 'member', '08/18/2026', '$30.00'),
+    ])).toEqual({ total: 50, asOf: '2026-08-25', rowCount: 2 })
   })
 })
