@@ -17,7 +17,7 @@ describe('KBotAvatar', () => {
     render(
       <KBotActivity
         state="working"
-        title="K-Bot está sincronizando sua carteira"
+        title="K-Bot is syncing your book"
         detail="Lendo apólices vigentes"
         estimate="Estimativa: 12–16 minutos"
       />,
@@ -25,7 +25,7 @@ describe('KBotAvatar', () => {
 
     const status = screen.getByRole('status')
     expect(status).toHaveAttribute('aria-live', 'polite')
-    expect(status).toHaveTextContent('K-Bot está sincronizando sua carteira')
+    expect(status).toHaveTextContent('K-Bot is syncing your book')
     expect(status).not.toHaveTextContent(/mensagem|pergunte|chat/i)
   })
 
@@ -40,47 +40,47 @@ describe('KBotAvatar', () => {
     render(
       <KBotCornerPresence
         state="working"
-        title="K-Bot está trabalhando"
-        detail="Buscando suas informações na National Life"
+        title="K-Bot is working"
+        detail="Collecting your National Life information"
         activity="combined"
         progress={1 / 3}
         secondaryState="working"
         tasks={[
           {
             id: 'sync',
-            label: 'Atualizando seus dados',
-            detail: '3 de 9 áreas verificadas',
+            label: 'Updating your data',
+            detail: '3 of 9 areas checked',
             state: 'working',
             progress: 1 / 3,
           },
           {
             id: 'illustration',
-            label: 'Preparando sua ilustração',
-            detail: 'A National Life está calculando os valores e o PDF',
+            label: 'Preparing your illustration',
+            detail: 'National Life is calculating the values and the PDF',
             state: 'working',
           },
         ]}
       />,
     )
 
-    const status = screen.getByLabelText('Status do K-Bot')
+    const status = screen.getByLabelText('K-Bot status')
     expect(status).toHaveAttribute('data-state', 'working')
-    expect(status).toHaveTextContent('K-Bot está trabalhando')
+    expect(status).toHaveTextContent('K-Bot is working')
     expect(status.querySelector('[data-kbot-character="true"]')).toHaveAttribute('data-state', 'working')
     expect(status.querySelector('[data-kbot-character="true"]')).toHaveAttribute('data-activity', 'combined')
     expect(status.querySelector('[data-kbot-paper="true"]')).toBeInTheDocument()
-    expect(screen.getByLabelText('Progresso do sync: 33%')).toBeInTheDocument()
-    expect(screen.getByLabelText('Ilustração em andamento')).toBeInTheDocument()
-    const trigger = screen.getByRole('button', { name: 'Ver atividade do K-Bot' })
+    expect(screen.getByLabelText('Sync progress: 33%')).toBeInTheDocument()
+    expect(screen.getByLabelText('Illustration in progress')).toBeInTheDocument()
+    const trigger = screen.getByRole('button', { name: 'View K-Bot activity' })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByText('O que estou fazendo')).not.toBeInTheDocument()
+    expect(screen.queryByText('What I am doing')).not.toBeInTheDocument()
 
     await userEvent.click(trigger)
 
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByText('O que estou fazendo')).toBeInTheDocument()
-    expect(screen.getByText('Atualizando seus dados')).toBeInTheDocument()
-    expect(screen.getByText('Preparando sua ilustração')).toBeInTheDocument()
+    expect(screen.getByText('What I am doing')).toBeInTheDocument()
+    expect(screen.getByText('Updating your data')).toBeInTheDocument()
+    expect(screen.getByText('Preparing your illustration')).toBeInTheDocument()
     expect(screen.queryByText(/chat|message/i)).not.toBeInTheDocument()
   })
 
@@ -89,12 +89,12 @@ describe('KBotAvatar', () => {
       <KBotCornerPresence
         state="success"
         title="Tudo pronto"
-        announcement="Sua ilustração oficial já está disponível."
+        announcement="Your official illustration is ready."
       />,
     )
 
-    expect(screen.getByRole('status', { name: 'Atualização do K-Bot' })).toHaveTextContent(
-      'Sua ilustração oficial já está disponível.',
+    expect(screen.getByRole('status', { name: 'K-Bot update' })).toHaveTextContent(
+      'Your official illustration is ready.',
     )
   })
 
@@ -107,7 +107,7 @@ describe('KBotAvatar', () => {
       />,
     )
 
-    expect(screen.getByLabelText('Status do K-Bot').querySelector('[data-kbot-character="true"]')).toHaveAttribute(
+    expect(screen.getByLabelText('K-Bot status').querySelector('[data-kbot-character="true"]')).toHaveAttribute(
       'data-expression',
       'sad',
     )

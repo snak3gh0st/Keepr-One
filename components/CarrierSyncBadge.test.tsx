@@ -58,7 +58,7 @@ describe('CarrierSyncBadge', () => {
   it('shows the active National Life sync progress in the compact badge', async () => {
     const fetchMock = answerWithSync()
     render(<CarrierSyncBadge />)
-    expect(await screen.findByText('Atualizando 3/9')).toBeTruthy()
+    expect(await screen.findByText('Updating 3/9')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledOnce()
   })
 
@@ -73,11 +73,11 @@ describe('CarrierSyncBadge', () => {
 
     render(<CarrierSyncBadge />)
 
-    expect(await screen.findByText('Atualizando 2/6')).toBeTruthy()
-    const presence = screen.getByLabelText('Status do K-Bot')
+    expect(await screen.findByText('Updating 2/6')).toBeTruthy()
+    const presence = screen.getByLabelText('K-Bot status')
     expect(presence).toHaveAttribute('data-state', 'working')
-    expect(presence).toHaveTextContent('Estou atualizando seus dados da National Life')
-    expect(presence).not.toHaveTextContent('precisa do seu login')
+    expect(presence).toHaveTextContent('I am updating your National Life data')
+    expect(presence).not.toHaveTextContent('needs your login')
   })
 
   it('asks for login only when the current sync is actually paused', async () => {
@@ -91,11 +91,11 @@ describe('CarrierSyncBadge', () => {
 
     render(<CarrierSyncBadge />)
 
-    await screen.findByLabelText('Status do K-Bot')
+    await screen.findByLabelText('K-Bot status')
     await waitFor(() => {
-      const presence = screen.getByLabelText('Status do K-Bot')
+      const presence = screen.getByLabelText('K-Bot status')
       expect(presence).toHaveAttribute('data-state', 'waiting')
-      expect(presence).toHaveTextContent('Preciso que você entre na National Life')
+      expect(presence).toHaveTextContent('I need you to sign in to National Life')
     })
   })
 
@@ -111,10 +111,10 @@ describe('CarrierSyncBadge', () => {
 
     render(<CarrierSyncBadge />)
 
-    expect(await screen.findByRole('link', { name: 'National Life: sync 3 de 9; ilustração em andamento' })).toBeTruthy()
+    expect(await screen.findByRole('link', { name: 'National Life: sync 3 of 9; illustration in progress' })).toBeTruthy()
 
-    const presence = screen.getByLabelText('Status do K-Bot')
-    expect(presence).toHaveTextContent('Estou cuidando de duas tarefas')
+    const presence = screen.getByLabelText('K-Bot status')
+    expect(presence).toHaveTextContent('I am updating your data and preparing your illustration')
     expect(presence.querySelector('[data-activity="combined"]')).toBeInTheDocument()
   })
 
@@ -130,16 +130,16 @@ describe('CarrierSyncBadge', () => {
 
     render(<CarrierSyncBadge />)
 
-    expect(await screen.findByRole('link', { name: 'National Life: sync 4 de 9; ilustração precisa de login' })).toBeTruthy()
-    const presence = screen.getByLabelText('Status do K-Bot')
+    expect(await screen.findByRole('link', { name: 'National Life: sync 4 of 9; illustration needs login' })).toBeTruthy()
+    const presence = screen.getByLabelText('K-Bot status')
     expect(presence).toHaveAttribute('data-state', 'waiting')
-    expect(presence).toHaveTextContent('O sync continua. Sua ilustração precisa de login.')
-    expect(screen.getByLabelText('Ilustração aguardando login')).toBeInTheDocument()
+    expect(presence).toHaveTextContent('Your sync is still running. The illustration needs your login.')
+    expect(screen.getByLabelText('Illustration waiting for login')).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Ver atividade do K-Bot' }))
-    expect(screen.getByText('Atualizando seus dados')).toBeInTheDocument()
-    expect(screen.getByText('Preciso do seu login')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Continuar ilustração' })).toHaveAttribute(
+    await userEvent.click(screen.getByRole('button', { name: 'View K-Bot activity' }))
+    expect(screen.getByText('Updating your data')).toBeInTheDocument()
+    expect(screen.getByText('I need your login')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Continue illustration' })).toHaveAttribute(
       'href',
       '/agent/illustrations/ill-1',
     )
@@ -167,18 +167,18 @@ describe('CarrierSyncBadge', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
-    expect(screen.getByText('Preparando ilustração')).toBeTruthy()
+    expect(screen.getByText('Preparing illustration')).toBeTruthy()
     await act(async () => vi.advanceTimersByTimeAsync(1_600))
 
-    expect(screen.getByRole('status', { name: 'Atualização do K-Bot' })).toHaveTextContent('Sua ilustração oficial está pronta')
-    expect(screen.getByRole('link', { name: 'Ver ilustração' })).toHaveAttribute('href', '/agent/illustrations/ill-1')
+    expect(screen.getByRole('status', { name: 'K-Bot update' })).toHaveTextContent('Your official illustration is ready')
+    expect(screen.getByRole('link', { name: 'View illustration' })).toHaveAttribute('href', '/agent/illustrations/ill-1')
   })
 
   it('keeps K-Bot available when the account is up to date', async () => {
     answerWith({ kind: 'IN_SYNC' })
     render(<CarrierSyncBadge />)
     expect(await screen.findByText('Up to date')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Ver atividade do K-Bot' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'View K-Bot activity' })).toBeTruthy()
   })
 
   it('keeps K-Bot visible and sad on every page when this browser is disconnected', async () => {
@@ -197,12 +197,12 @@ describe('CarrierSyncBadge', () => {
 
     render(<CarrierSyncBadge />)
 
-    await screen.findByLabelText('Status do K-Bot')
+    await screen.findByLabelText('K-Bot status')
     await waitFor(() =>
-      expect(screen.getByLabelText('Status do K-Bot')).toHaveAttribute('data-state', 'error'),
+      expect(screen.getByLabelText('K-Bot status')).toHaveAttribute('data-state', 'error'),
     )
-    const presence = screen.getByLabelText('Status do K-Bot')
-    expect(presence).toHaveTextContent('K-Bot está desconectado')
+    const presence = screen.getByLabelText('K-Bot status')
+    expect(presence).toHaveTextContent('K-Bot is disconnected')
     expect(presence.querySelector('[data-kbot-character="true"]')).toHaveAttribute(
       'data-expression',
       'sad',
@@ -242,7 +242,7 @@ describe('CarrierSyncBadge', () => {
 
     await waitFor(() => {
       expect(json).toHaveBeenCalled()
-      expect(screen.getByRole('button', { name: 'Ver atividade do K-Bot' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'View K-Bot activity' })).toBeTruthy()
       expect(container).not.toHaveTextContent('Up to date')
     })
   })
