@@ -7,6 +7,8 @@ import {
   carrierSyncLabel,
   type CarrierSyncState,
 } from '@/lib/national-life/carrier-sync-state'
+import { KBotCornerPresence, type KBotState } from '@/components/kbot/KBotAvatar'
+import { sendConnectorMessage } from '@/app/agent/integrations/national-life/NationalLifeConnectorClient'
 
 type CompactSyncStatus = {
   state?: string
@@ -25,7 +27,13 @@ type BadgeResponse = {
   state?: CarrierSyncState | null
   sync?: CompactSyncStatus | null
   illustration?: IllustrationActivity | null
+  connector?: {
+    enabled: boolean
+    extensionTarget?: string | null
+  } | null
 }
+
+type BrowserConnectorState = 'checking' | 'missing' | 'disconnected' | 'ready'
 
 type Notice = {
   message: string
@@ -43,6 +51,8 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
   const [sync, setSync] = useState<CompactSyncStatus | null>(null)
   const [illustration, setIllustration] = useState<IllustrationActivity | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
+  const [extensionTarget, setExtensionTarget] = useState<string | null | undefined>(undefined)
+  const [connectorState, setConnectorState] = useState<BrowserConnectorState>('checking')
   const previousIllustrationState = useRef<IllustrationActivity['state'] | null>(null)
   const previousSyncPolling = useRef(false)
   const loadedOnce = useRef(false)
@@ -84,6 +94,9 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
     setState(body.state ?? null)
     setSync(nextSync?.shouldPoll ? nextSync : null)
     setIllustration(nextIllustration)
+    if ('connector' in body) {
+      setExtensionTarget(body.connector?.enabled ? body.connector.extensionTarget ?? null : null)
+    }
   }, [])
 
   useEffect(() => {
@@ -104,6 +117,36 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       alive = false
     }
   }, [pathname, applyBody])
+
+  useEffect(() => {
+    if (!extensionTarget) return
+
+    let alive = true
+    const probe = () => {
+      void sendConnectorMessage(extensionTarget, { type: 'GET_CONNECTOR_STATUS' })
+        .then((response) => {
+          if (!alive) return
+          setConnectorState(response.device?.status === 'READY' ? 'ready' : 'disconnected')
+        })
+        .catch(() => {
+          if (alive) setConnectorState('missing')
+        })
+    }
+    const recheckWhenVisible = () => {
+      if (document.visibilityState === 'visible') probe()
+    }
+
+    probe()
+    window.addEventListener('focus', probe)
+    document.addEventListener('visibilitychange', recheckWhenVisible)
+    const timer = window.setInterval(probe, 10_000)
+    return () => {
+      alive = false
+      window.removeEventListener('focus', probe)
+      document.removeEventListener('visibilitychange', recheckWhenVisible)
+      window.clearInterval(timer)
+    }
+  }, [extensionTarget])
 
   const shouldPoll = Boolean(sync?.shouldPoll) || illustration?.state === 'WORKING' || illustration?.state === 'NEEDS_YOU'
 
@@ -132,8 +175,6 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
     const timer = window.setTimeout(() => setNotice(null), 8_000)
     return () => window.clearTimeout(timer)
   }, [notice])
-
-  if (!state && !illustration && !notice) return null
 
   const activity = sync && illustration?.state === 'WORKING'
     ? (
@@ -186,9 +227,87 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
     </span>
   ) : null
 
-  if (activity) return <>{activity}{toast}</>
+  const browserConnectorState = extensionTarget === null ? 'missing' : connectorState
 
-  if (!state) return <>{activity}{toast}</>
+  const kbot = (() => {
+    // The integration page has its own richer K-Bot presence, including the
+    // browser pairing state. Everywhere else the global shell follows the
+    // durable sync and illustration activity returned by the server.
+    if (pathname === '/agent/integrations/national-life') return null
+
+    let botState: KBotState = 'idle'
+    let title = 'K-Bot is ready'
+    let detail = 'Open K-Bot whenever you want to work with National Life.'
+    let actionHref = '/agent/integrations/national-life'
+    let actionLabel = 'Open K-Bot'
+
+    if (notice) {
+      botState = 'success'
+      title = notice.message
+      detail = 'The result is ready in Keepr One.'
+      actionHref = notice.href
+      actionLabel = notice.action
+    } else if (illustration?.state === 'NEEDS_YOU' || state?.kind === 'NEEDS_YOU') {
+      botState = 'waiting'
+      title = 'K-Bot is waiting for you'
+      detail = 'National Life needs your login before K-Bot can continue.'
+      actionHref = illustration?.id
+        ? `/agent/illustrations/${illustration.id}`
+        : '/agent/integrations/national-life'
+      actionLabel = 'Continue'
+    } else if (sync && illustration?.state === 'WORKING') {
+      botState = 'working'
+      title = 'K-Bot is handling two tasks'
+      detail = `Sync ${sync.completed} of ${sync.total} and the official illustration are moving together.`
+      actionHref = `/agent/illustrations/${illustration.id}`
+      actionLabel = 'View activity'
+    } else if (sync) {
+      botState = 'working'
+      title = 'K-Bot is syncing National Life'
+      detail = `${sync.completed} of ${sync.total} portal areas checked.`
+      actionLabel = 'View sync'
+    } else if (illustration?.state === 'WORKING') {
+      botState = 'working'
+      title = 'K-Bot is creating the official illustration'
+      detail = 'National Life is calculating the values and preparing the PDF.'
+      actionHref = `/agent/illustrations/${illustration.id}`
+      actionLabel = 'View illustration'
+    } else if (browserConnectorState === 'missing') {
+      botState = 'error'
+      title = 'K-Bot is not available in this browser'
+      detail = 'Install or reload the K-Bot extension so it can work with National Life.'
+      actionLabel = 'Connect K-Bot'
+    } else if (browserConnectorState === 'disconnected') {
+      botState = 'error'
+      title = 'K-Bot is disconnected'
+      detail = 'Connect this computer once and K-Bot will stay with you throughout Keepr One.'
+      actionLabel = 'Connect K-Bot'
+    } else if (browserConnectorState === 'checking') {
+      title = 'K-Bot is checking this browser'
+      detail = 'It will be ready in a moment.'
+    } else if (state?.kind === 'WORKING') {
+      botState = 'working'
+      title = 'K-Bot is organizing your National Life data'
+      detail = `${state.count} item${state.count === 1 ? '' : 's'} on the way.`
+      actionLabel = 'View activity'
+    }
+
+    return (
+      <KBotCornerPresence
+        state={botState}
+        title={title}
+        detail={detail}
+        actionHref={actionHref}
+        actionLabel={actionLabel}
+      />
+    )
+  })()
+
+  if (!state && !illustration && !notice) return kbot
+
+  if (activity) return <>{activity}{toast}{kbot}</>
+
+  if (!state) return <>{activity}{toast}{kbot}</>
 
   const label = carrierSyncLabel(state)
   const dot =
@@ -212,6 +331,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
           </Link>
         )}
         {toast}
+        {kbot}
       </>
     )
   }
@@ -225,6 +345,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
         </span>
       )}
       {toast}
+      {kbot}
     </>
   )
 }

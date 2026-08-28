@@ -2790,6 +2790,13 @@ export default defineBackground(() => {
       respond(sendResponse, getConnectorStatus())
       return true
     }
+    if (type === 'OPEN_KEEPR' && Object.keys(value).length === 1) {
+      respond(
+        sendResponse,
+        handOffInstalledConnector().then(() => ({ ok: true as const })),
+      )
+      return true
+    }
     if (type === 'OPEN_NLG' && Object.keys(value).length === 1) {
       respond(
         sendResponse,

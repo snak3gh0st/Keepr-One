@@ -14,8 +14,10 @@ const popupElement = requiredElement<HTMLElement>('#popup')
 const connectionElement = requiredElement<HTMLSpanElement>('#connection')
 const openButton = requiredElement<HTMLButtonElement>('#open')
 const retryButton = requiredElement<HTMLButtonElement>('#retry')
+let deviceStatus: DeviceState['status'] = 'UNPAIRED'
 
 function render(device: DeviceState, sync: SyncState, command?: CommandState) {
+  deviceStatus = device.status
   syncStatusElement.textContent = popupSyncStatusText(device, sync)
   const showCommand = Boolean(command && command.status !== 'IDLE')
   commandRowElement.hidden = !showCommand
@@ -47,7 +49,7 @@ async function refresh() {
   render(response.device, response.sync, response.command)
 }
 
-async function act(button: HTMLButtonElement, type: 'OPEN_NLG' | 'RETRY_SYNC') {
+async function act(button: HTMLButtonElement, type: 'OPEN_KEEPR' | 'OPEN_NLG' | 'RETRY_SYNC') {
   button.disabled = true
   try {
     await chrome.runtime.sendMessage({ type })
@@ -57,7 +59,9 @@ async function act(button: HTMLButtonElement, type: 'OPEN_NLG' | 'RETRY_SYNC') {
   }
 }
 
-openButton.addEventListener('click', () => void act(openButton, 'OPEN_NLG'))
+openButton.addEventListener('click', () =>
+  void act(openButton, deviceStatus === 'READY' ? 'OPEN_NLG' : 'OPEN_KEEPR'),
+)
 retryButton.addEventListener('click', () => void act(retryButton, 'RETRY_SYNC'))
 
 void refresh()

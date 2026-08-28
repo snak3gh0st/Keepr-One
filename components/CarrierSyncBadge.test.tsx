@@ -3,10 +3,17 @@
 import { render, screen, waitFor, cleanup, act } from '@testing-library/react'
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ pathname: '/agent' }))
+const mocks = vi.hoisted(() => ({
+  pathname: '/agent',
+  sendConnectorMessage: vi.fn(),
+}))
 
 vi.mock('next/navigation', () => ({
   usePathname: () => mocks.pathname,
+}))
+
+vi.mock('@/app/agent/integrations/national-life/NationalLifeConnectorClient', () => ({
+  sendConnectorMessage: mocks.sendConnectorMessage,
 }))
 
 import { CarrierSyncBadge } from './CarrierSyncBadge'
@@ -31,7 +38,13 @@ function answerWithSync() {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   mocks.pathname = '/agent'
+  mocks.sendConnectorMessage.mockResolvedValue({
+    ok: true,
+    device: { status: 'READY', deviceId: 'device-1' },
+    sync: { status: 'IDLE' },
+  })
 })
 
 afterEach(() => {
@@ -92,18 +105,46 @@ describe('CarrierSyncBadge', () => {
     expect(screen.getByRole('link', { name: 'View illustration' })).toHaveAttribute('href', '/agent/illustrations/ill-1')
   })
 
-  it('is quiet when the account is up to date', async () => {
+  it('keeps K-Bot available when the account is up to date', async () => {
     answerWith({ kind: 'IN_SYNC' })
     render(<CarrierSyncBadge />)
     expect(await screen.findByText('Up to date')).toBeTruthy()
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Show K-Bot activity' })).toBeTruthy()
+  })
+
+  it('keeps K-Bot visible and sad on every page when this browser is disconnected', async () => {
+    mocks.sendConnectorMessage.mockResolvedValue({
+      ok: true,
+      device: { status: 'UNPAIRED' },
+      sync: { status: 'IDLE' },
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        state: { kind: 'IN_SYNC' },
+        connector: { enabled: true, extensionTarget: 'abcdefghijklmnopabcdefghijklmnop' },
+      }),
+    })))
+
+    render(<CarrierSyncBadge />)
+
+    await screen.findByLabelText('K-Bot status')
+    await waitFor(() =>
+      expect(screen.getByLabelText('K-Bot status')).toHaveAttribute('data-state', 'error'),
+    )
+    const presence = screen.getByLabelText('K-Bot status')
+    expect(presence).toHaveTextContent('K-Bot is disconnected')
+    expect(presence.querySelector('[data-kbot-character="true"]')).toHaveAttribute(
+      'data-expression',
+      'sad',
+    )
   })
 
   it('counts what is on its way, without offering an action', async () => {
     answerWith({ kind: 'WORKING', count: 2 })
     render(<CarrierSyncBadge />)
     expect(await screen.findByText('2 on the way')).toBeTruthy()
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Needs you' })).toBeNull()
   })
 
   // The only clickable state, because it is the only one that asks anything.
@@ -113,7 +154,8 @@ describe('CarrierSyncBadge', () => {
     expect(await screen.findByRole('button', { name: 'Needs you' })).toBeTruthy()
   })
 
-  // A badge that cannot read its state renders nothing rather than guessing.
+  // A badge that cannot read its carrier state does not guess a sync result,
+  // but K-Bot itself remains available throughout the agent workspace.
   //
   // Checking emptiness alone proves nothing: useState(null) already renders
   // nothing on the very first synchronous pass, before fetch has even
@@ -123,7 +165,7 @@ describe('CarrierSyncBadge', () => {
   // been called — which only happens once the fetch → json chain really ran —
   // before checking the DOM again, so a component that wrongly rendered
   // something on a null state would still be caught after settling.
-  it('renders nothing when the state is unknown', async () => {
+  it('keeps the idle K-Bot visible when the carrier state is unknown', async () => {
     const { fetchMock, json } = answerWith(null)
     const { container } = render(<CarrierSyncBadge />)
 
@@ -131,7 +173,8 @@ describe('CarrierSyncBadge', () => {
 
     await waitFor(() => {
       expect(json).toHaveBeenCalled()
-      expect(container.textContent).toBe('')
+      expect(screen.getByRole('button', { name: 'Show K-Bot activity' })).toBeTruthy()
+      expect(container).not.toHaveTextContent('Up to date')
     })
   })
 
@@ -200,6 +243,6 @@ describe('CarrierSyncBadge', () => {
     })
 
     expect(screen.getByText('Up to date')).toBeTruthy()
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Needs you' })).toBeNull()
   })
 })

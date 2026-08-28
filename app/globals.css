@@ -27,6 +27,55 @@
   50% { filter: drop-shadow(0 5px 10px rgba(107, 226, 156, 0.18)); }
 }
 
+@keyframes kbot-character-idle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes kbot-character-work {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(-1px, -3px); }
+  50% { transform: translate(0, -1px); }
+  75% { transform: translate(1px, -3px); }
+}
+
+@keyframes kbot-character-wait {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  50% { transform: translateY(-2px) rotate(-2deg); }
+}
+
+@keyframes kbot-character-success {
+  0%, 100% { transform: translateY(0) scale(1); }
+  45% { transform: translateY(-7px) scale(1.02); }
+  60% { transform: translateY(0) scale(1); }
+}
+
+@keyframes kbot-character-error {
+  0%, 100% { transform: translateY(1px) rotate(0); }
+  50% { transform: translateY(3px) rotate(-1deg); }
+}
+
+@keyframes kbot-character-arm-left {
+  0%, 100% { transform: rotate(5deg); }
+  50% { transform: rotate(-12deg); }
+}
+
+@keyframes kbot-character-arm-right {
+  0%, 100% { transform: rotate(-5deg); }
+  50% { transform: rotate(12deg); }
+}
+
+@keyframes kbot-character-scan {
+  0% { opacity: 0; transform: translateY(0); }
+  20%, 75% { opacity: 0.7; }
+  100% { opacity: 0; transform: translateY(9px); }
+}
+
+@keyframes kbot-character-shadow {
+  0%, 100% { opacity: 0.18; transform: scaleX(1); }
+  50% { opacity: 0.1; transform: scaleX(0.82); }
+}
+
 .kbot-avatar {
   image-rendering: pixelated;
 }
@@ -58,6 +107,56 @@
     kbot-presence-breathe 2.4s ease-in-out infinite;
 }
 
+.kbot-character {
+  image-rendering: pixelated;
+  transform-origin: center bottom;
+}
+
+.kbot-character[data-state="idle"] {
+  animation: kbot-character-idle 3.2s steps(4, end) infinite;
+}
+
+.kbot-character[data-state="working"] {
+  animation: kbot-character-work 1s steps(4, end) infinite;
+}
+
+.kbot-character[data-state="waiting"] {
+  animation: kbot-character-wait 2.4s steps(3, end) infinite;
+}
+
+.kbot-character[data-state="success"] {
+  animation: kbot-character-success 2.2s steps(5, end) infinite;
+}
+
+.kbot-character[data-state="error"] {
+  animation: kbot-character-error 3.2s steps(2, end) infinite;
+}
+
+.kbot-character-arm,
+.kbot-character-leg {
+  transform-box: fill-box;
+  transform-origin: center top;
+}
+
+.kbot-character[data-state="working"] .kbot-character-arm-left,
+.kbot-character[data-state="working"] .kbot-character-leg-right {
+  animation: kbot-character-arm-left 0.8s steps(2, end) infinite;
+}
+
+.kbot-character[data-state="working"] .kbot-character-arm-right,
+.kbot-character[data-state="working"] .kbot-character-leg-left {
+  animation: kbot-character-arm-right 0.8s steps(2, end) infinite;
+}
+
+.kbot-character[data-state="working"] .kbot-character-scan {
+  animation: kbot-character-scan 1.25s steps(5, end) infinite;
+}
+
+.kbot-character-stage > span:first-child {
+  transform-origin: center;
+  animation: kbot-character-shadow 3.2s steps(4, end) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .kbot-avatar,
   .kbot-avatar .kbot-scan,
@@ -66,6 +165,12 @@
   }
 
   .kbot-corner-presence {
+    animation: none !important;
+  }
+
+  .kbot-character,
+  .kbot-character *,
+  .kbot-character-stage > span:first-child {
     animation: none !important;
   }
 }
