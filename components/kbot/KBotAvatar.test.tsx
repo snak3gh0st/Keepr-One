@@ -2,7 +2,7 @@
 
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { KBotActivity, KBotAvatar, KBotTaskTrail } from './KBotAvatar'
+import { KBotActivity, KBotAvatar, KBotCornerPresence, KBotTaskTrail } from './KBotAvatar'
 
 describe('KBotAvatar', () => {
   it('keeps the drawing decorative because adjacent text carries the state', () => {
@@ -31,5 +31,20 @@ describe('KBotAvatar', () => {
     expect(screen.getByRole('list', { name: 'K-Bot progress' })).toBeTruthy()
     expect(screen.getByText('Read').closest('li')).toHaveAttribute('aria-current', 'step')
     expect(screen.getByText('Open').closest('li')).not.toHaveAttribute('aria-current')
+  })
+
+  it('keeps a subtle animated presence in the corner without becoming a chat button', () => {
+    render(
+      <KBotCornerPresence
+        state="working"
+        title="K-Bot is working"
+        detail="Collecting your National Life information"
+      />,
+    )
+
+    const status = screen.getByLabelText('K-Bot status')
+    expect(status).toHaveAttribute('data-state', 'working')
+    expect(status).toHaveTextContent('K-Bot is working')
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 })

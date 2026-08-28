@@ -94,6 +94,55 @@ export function KBotActivity({
   )
 }
 
+/**
+ * Persistent operational presence for pages where K-Bot can work. It is a
+ * passive status surface, not a chat launcher, and never captures pointer
+ * events from the page underneath it.
+ */
+export function KBotCornerPresence({
+  state,
+  title,
+  detail,
+}: {
+  state: KBotState
+  title: string
+  detail?: string | null
+}) {
+  return (
+    <aside
+      aria-label="K-Bot status"
+      aria-live={state === 'working' || state === 'waiting' ? 'polite' : 'off'}
+      aria-atomic="true"
+      data-state={state}
+      className="kbot-corner-presence pointer-events-none fixed bottom-4 left-4 z-[60] sm:left-auto sm:right-5"
+    >
+      <div className="flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-2xl border border-paper/10 bg-rail-strong/95 px-3 py-2.5 shadow-[0_18px_48px_rgba(7,22,13,0.28)] backdrop-blur-xl sm:max-w-[19rem]">
+        <KBotAvatar state={state} size="sm" />
+        <span className="min-w-0 pr-1">
+          <span className="block text-xs font-semibold leading-4 text-paper">{title}</span>
+          {detail ? (
+            <span className="mt-0.5 block text-[11px] leading-4 text-paper/65">{detail}</span>
+          ) : null}
+        </span>
+        <span
+          aria-hidden="true"
+          className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
+            state === 'working'
+              ? 'animate-pulse bg-mint'
+              : state === 'waiting'
+                ? 'bg-gold'
+                : state === 'success'
+                  ? 'bg-success'
+                  : state === 'error'
+                    ? 'bg-danger'
+                    : 'bg-paper/35'
+          }`}
+        />
+      </div>
+    </aside>
+  )
+}
+
 export function KBotTaskTrail({
   steps,
   currentIndex,

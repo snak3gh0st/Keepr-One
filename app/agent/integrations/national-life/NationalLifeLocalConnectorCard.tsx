@@ -4,7 +4,12 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/Button'
-import { KBotAvatar, KBotTaskTrail, type KBotState } from '@/components/kbot/KBotAvatar'
+import {
+  KBotAvatar,
+  KBotCornerPresence,
+  KBotTaskTrail,
+  type KBotState,
+} from '@/components/kbot/KBotAvatar'
 import {
   DISCONNECT_FAILED,
   connectorFailure,
@@ -245,6 +250,32 @@ export function NationalLifeLocalConnectorCard({
         : busy || state === 'slow'
           ? 'working'
           : 'idle'
+  const cornerCopy = (() => {
+    if (connectorPresence === 'checking') {
+      return { title: 'K-Bot is checking this browser', detail: 'This takes only a moment.' }
+    }
+    if (connectorPresence === 'missing') {
+      return { title: 'Install K-Bot to begin', detail: 'Then it can work with National Life for you.' }
+    }
+    if (state === 'login-required') {
+      return { title: 'K-Bot is waiting for you', detail: 'Sign in to National Life and it will continue.' }
+    }
+    if (state === 'syncing' || state === 'slow') {
+      return { title: 'K-Bot is working', detail: 'Collecting and organizing your National Life information.' }
+    }
+    if (state === 'success') {
+      return { title: 'K-Bot finished', detail: 'Your National Life information is up to date.' }
+    }
+    if (state === 'partial') {
+      return { title: 'K-Bot saved what it found', detail: 'It can return later for the remaining information.' }
+    }
+    if (state === 'error') {
+      return { title: 'K-Bot needs attention', detail: connectorFailure(errorCode).message }
+    }
+    return pairedDeviceId
+      ? { title: 'K-Bot is ready', detail: 'Start a sync whenever you want.' }
+      : { title: 'K-Bot is ready to connect', detail: 'Connect National Life to get started.' }
+  })()
   const syncTrailIndex = (() => {
     if (state === 'success') return 5
     if (state === 'partial') return 4
@@ -670,6 +701,7 @@ export function NationalLifeLocalConnectorCard({
       aria-labelledby="local-connector-title"
       className="overflow-hidden rounded-xl border border-border-steel bg-paper"
     >
+      <KBotCornerPresence state={botState} title={cornerCopy.title} detail={cornerCopy.detail} />
       <div className="relative border-b border-border-steel bg-panel/45 p-5 sm:p-7">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-3">
