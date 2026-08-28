@@ -247,13 +247,11 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       detail = 'The result is ready in Keepr One.'
       actionHref = notice.href
       actionLabel = notice.action
-    } else if (illustration?.state === 'NEEDS_YOU' || state?.kind === 'NEEDS_YOU') {
+    } else if (sync?.state === 'PAUSED') {
       botState = 'waiting'
       title = 'K-Bot is waiting for you'
       detail = 'National Life needs your login before K-Bot can continue.'
-      actionHref = illustration?.id
-        ? `/agent/illustrations/${illustration.id}`
-        : '/agent/integrations/national-life'
+      actionHref = '/agent/integrations/national-life'
       actionLabel = 'Continue'
     } else if (sync && illustration?.state === 'WORKING') {
       botState = 'working'
@@ -266,6 +264,14 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       title = 'K-Bot is syncing National Life'
       detail = `${sync.completed} of ${sync.total} portal areas checked.`
       actionLabel = 'View sync'
+    } else if (illustration?.state === 'NEEDS_YOU' || state?.kind === 'NEEDS_YOU') {
+      botState = 'waiting'
+      title = 'K-Bot is waiting for you'
+      detail = 'National Life needs your login before K-Bot can continue.'
+      actionHref = illustration?.id
+        ? `/agent/illustrations/${illustration.id}`
+        : '/agent/integrations/national-life'
+      actionLabel = 'Continue'
     } else if (illustration?.state === 'WORKING') {
       botState = 'working'
       title = 'K-Bot is creating the official illustration'
