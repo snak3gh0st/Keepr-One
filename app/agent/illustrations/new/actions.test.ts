@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   createIllustration: vi.fn(),
   issue: vi.fn(),
   approve: vi.fn(),
+  lock: vi.fn(),
+  findActiveCommand: vi.fn(),
   repository: {},
 }))
 
@@ -17,7 +19,9 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     illustration: { create: mocks.createIllustration },
     $transaction: async (callback: (tx: unknown) => unknown) => callback({
+      $queryRaw: mocks.lock,
       illustration: { create: mocks.createIllustration },
+      nationalLifeConnectorCommand: { findFirst: mocks.findActiveCommand },
     }),
   },
 }))
@@ -66,6 +70,25 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
       duplicate: false,
     })
     mocks.approve.mockResolvedValue(undefined)
+    mocks.lock.mockResolvedValue([{ locked: true }])
+    mocks.findActiveCommand.mockResolvedValue(null)
+  })
+
+  it('returns the illustration already in progress instead of creating another one', async () => {
+    mocks.findActiveCommand.mockResolvedValue({
+      id: 'cmd_in_progress',
+      target: { kind: 'ILLUSTRATION', id: 'ill_in_progress' },
+    })
+
+    await expect(requestForesightIllustration(form())).resolves.toEqual({
+      ok: true,
+      commandId: 'cmd_in_progress',
+      illustrationId: 'ill_in_progress',
+    })
+
+    expect(mocks.lock).toHaveBeenCalledTimes(1)
+    expect(mocks.createIllustration).not.toHaveBeenCalled()
+    expect(mocks.issue).not.toHaveBeenCalled()
   })
 
   it('issues the approved Foresight request to the local extension and never enqueues Steel', async () => {

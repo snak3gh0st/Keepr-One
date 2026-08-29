@@ -57,6 +57,7 @@ describe('carrier sync badge route', () => {
       where: {
         agentId: 'agent-1',
         provider: NATIONAL_LIFE_PROVIDER,
+        operation: { not: 'GET_RAPID_SOLVE_QUOTE' },
         state: { in: ['QUEUED', 'RUNNING', 'RETRYABLE'] },
       },
     })
@@ -69,6 +70,7 @@ describe('carrier sync badge route', () => {
       where: {
         agentId: 'agent-1',
         provider: NATIONAL_LIFE_PROVIDER,
+        operation: { not: 'GET_RAPID_SOLVE_QUOTE' },
         state: 'ACTION_REQUIRED',
         safeErrorCode: {
           in: ['FORESIGHT_SSO_EXPIRED', 'NATIONAL_LIFE_RECONNECT_REQUIRED'],
@@ -93,13 +95,30 @@ describe('carrier sync badge route', () => {
     })
   })
 
+  it('does not ask for login from an expired illustration command', async () => {
+    mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0)
+    mocks.commandFindFirst.mockResolvedValue({
+      state: 'AUTH_REQUIRED',
+      target: { kind: 'ILLUSTRATION', id: 'ill-expired' },
+      expiresAt: new Date('2020-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2020-01-01T00:00:00.000Z'),
+    })
+
+    const response = await GET()
+
+    await expect(response.json()).resolves.toEqual({
+      state: { kind: 'IN_SYNC' },
+      connector,
+    })
+  })
+
   it('reports an illustration independently from a simultaneous sync', async () => {
     mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0)
     mocks.commandFindFirst.mockResolvedValue({
       state: 'RUNNING',
       target: { kind: 'ILLUSTRATION', id: 'ill-1' },
       safeErrorCode: null,
-      expiresAt: new Date('2026-08-27T17:00:00.000Z'),
+      expiresAt: new Date('2027-08-27T17:00:00.000Z'),
       updatedAt: new Date('2026-08-27T15:00:00.000Z'),
     })
 

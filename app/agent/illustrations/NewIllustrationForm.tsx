@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/Button'
 import { Field, Input, Select } from '@/components/Field'
@@ -29,6 +29,7 @@ const TERM_DURATIONS = ['10-G', '15-G', '20-G', '30-G', 'ART'] as const
 
 export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
   const router = useRouter()
+  const submitLock = useRef(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [productFamily, setProductFamily] = useState<'IUL' | 'TERM'>('IUL')
@@ -36,12 +37,17 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
   const [iulSolveBasis, setIulSolveBasis] = useState<'DEATH_BENEFIT' | 'PREMIUM'>('DEATH_BENEFIT')
 
   async function handleSubmit(formData: FormData) {
+    // React state is not synchronous: two clicks in the same frame can both
+    // enter before the disabled button is painted. The ref closes that gap.
+    if (submitLock.current) return
+    submitLock.current = true
     setSubmitting(true)
     setSubmitError(null)
     const result = await requestForesightIllustration(formData)
     if (!result.ok) {
       setSubmitError(result.message)
       setSubmitting(false)
+      submitLock.current = false
       return
     }
     if (extensionId) {
