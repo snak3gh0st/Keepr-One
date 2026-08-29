@@ -109,7 +109,7 @@ describe('local connector config', () => {
     expect(getNationalLifeLocalConnectorConfig()).toEqual({
       enabled: true,
       extensionId: officialStoreId,
-      extensionTarget: `${officialStoreId},${extensionId}`,
+      extensionTarget: officialStoreId,
       installMode: 'store',
       storeUrl:
         `https://chromewebstore.google.com/detail/keeproneconnect/${officialStoreId}?hl=pt-BR`,

@@ -247,7 +247,7 @@ export function NationalLifeLocalConnectorCard({
         ? state === 'connecting' || state === 'checking' ? 'Opening portal' : 'Ready'
         : 'Next'
   const syncStepDetail = syncComplete ? 'Up to date' : syncActive ? 'Syncing' : 'Waiting'
-  const botState: KBotState = state === 'error' || disconnected
+  const botState: KBotState = state === 'error' || disconnected || connectorPresence === 'missing'
     ? 'error'
     : state === 'login-required' || state === 'partial'
       ? 'waiting'

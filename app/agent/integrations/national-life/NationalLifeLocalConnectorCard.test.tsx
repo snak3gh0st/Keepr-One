@@ -98,6 +98,12 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(within(progress).getByText('Install')).toBeInTheDocument()
     expect(within(progress).getByText('National Life session')).toBeInTheDocument()
     expect(within(progress).getByText('Verified data')).toBeInTheDocument()
+    const presence = screen.getByLabelText('K-Bot status')
+    expect(presence).toHaveTextContent('Install K-Bot to begin')
+    expect(presence.querySelector('[data-kbot-character="true"]')).toHaveAttribute(
+      'data-expression',
+      'sad',
+    )
   })
 
   it('shows K-Bot sad when the extension is installed but this computer is disconnected', async () => {
