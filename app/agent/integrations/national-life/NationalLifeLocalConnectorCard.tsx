@@ -669,6 +669,10 @@ export function NationalLifeLocalConnectorCard({
     try {
       const result = await sendConnectorMessage(extensionId, {
         type: 'START_NATIONAL_LIFE_SYNC',
+        // A 409 means the saved carrier cursor no longer describes the bytes
+        // already accepted by the server. Retrying that cursor can only repeat
+        // the same conflict. Start a new run; promoted rows remain deduplicated.
+        ...(errorCode === 'IDEMPOTENCY_CONFLICT' ? { forceRefresh: true as const } : {}),
       })
       if (result.ok) {
         notifySyncStarted()

@@ -541,6 +541,50 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(screen.getByRole('button', { name: 'Reconnect this computer' })).toBeEnabled()
   })
 
+  it('starts a clean run after a durable cursor conflict', async () => {
+    const refreshModes: Array<true | undefined> = []
+    let restarted = false
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        run: {
+          runId: 'run-conflicted',
+          state: 'FAILED',
+          safeErrorCode: 'IDEMPOTENCY_CONFLICT',
+        },
+      }), { status: 200 }),
+    )
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: restarted
+            ? { runId: 'run-clean', status: 'COMPLETED' }
+            : { runId: 'run-conflicted', status: 'ERROR', errorCode: 'IDEMPOTENCY_CONFLICT' },
+        })
+        return
+      }
+      if (message.type === 'START_NATIONAL_LIFE_SYNC') {
+        refreshModes.push(message.forceRefresh)
+        restarted = true
+      }
+      callback({ ok: true })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+        latestRun={{ runId: 'run-conflicted', state: 'FAILED' }}
+      />,
+    )
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(refreshModes).toEqual([true]))
+  })
+
   it('does not show a stale extension error after the server completed the run', async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(JSON.stringify({
