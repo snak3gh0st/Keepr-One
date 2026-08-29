@@ -30,11 +30,16 @@ function illustrationTargetId(target: unknown): string | null {
 async function illustrationActivity(agentId: string, command: {
   state: string
   target: unknown
+  expiresAt: Date
   updatedAt: Date
 } | null): Promise<IllustrationActivity | null> {
   if (!command) return null
   const id = illustrationTargetId(command.target)
   if (!id) return null
+  if (
+    command.expiresAt <= new Date() &&
+    ['QUEUED', 'RUNNING', 'AUTH_REQUIRED', 'WAITING_FOR_CONFIRMATION', 'PAUSED'].includes(command.state)
+  ) return null
   if (command.state === 'AUTH_REQUIRED') return { id, state: 'NEEDS_YOU', updatedAt: command.updatedAt }
   if (['QUEUED', 'RUNNING', 'WAITING_FOR_CONFIRMATION', 'PAUSED'].includes(command.state)) {
     return { id, state: 'WORKING', updatedAt: command.updatedAt }
@@ -72,6 +77,9 @@ export async function GET() {
         where: {
           agentId: agent.id,
           provider: NATIONAL_LIFE_PROVIDER,
+          // Rapid Solve was retired from the user flow. Historical jobs from
+          // that executor must not keep asking a connected K-Bot to reconnect.
+          operation: { not: 'GET_RAPID_SOLVE_QUOTE' },
           state: { in: ['QUEUED', 'RUNNING', 'RETRYABLE'] },
         },
       }),
@@ -79,6 +87,7 @@ export async function GET() {
         where: {
           agentId: agent.id,
           provider: NATIONAL_LIFE_PROVIDER,
+          operation: { not: 'GET_RAPID_SOLVE_QUOTE' },
           state: 'ACTION_REQUIRED',
           // Keep this filter identical to the transaction drain: every code
           // counted here is one a fresh carrier login actually revives.
@@ -89,7 +98,7 @@ export async function GET() {
       prisma.nationalLifeConnectorCommand.findFirst({
         where: { agentId: agent.id, capability: 'GENERATE_ILLUSTRATION' },
         orderBy: { createdAt: 'desc' },
-        select: { state: true, target: true, updatedAt: true },
+        select: { state: true, target: true, expiresAt: true, updatedAt: true },
       }),
     ])
     const sync = await sanitizeNationalLifeSyncStatusForAgent(agent.id, rawSync)

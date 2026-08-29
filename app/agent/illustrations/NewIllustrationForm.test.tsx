@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -10,6 +10,7 @@ vi.mock('@/app/agent/integrations/national-life/NationalLifeConnectorClient', ()
   sendConnectorMessage: vi.fn(),
 }))
 
+import { requestForesightIllustration } from './new/actions'
 import { NewIllustrationForm } from './NewIllustrationForm'
 
 afterEach(cleanup)
@@ -40,5 +41,17 @@ describe('NewIllustrationForm', () => {
     expect(screen.getByText('Prazo do Term')).toBeTruthy()
     expect(screen.queryByText('Prêmio mensal')).toBeNull()
     expect(screen.getByDisplayValue('LSW_TERM')).toBeTruthy()
+  })
+
+  it('accepts only the first submit while an illustration is being created', () => {
+    vi.mocked(requestForesightIllustration).mockReturnValue(new Promise(() => {}))
+    const { container } = render(<NewIllustrationForm />)
+    const form = container.querySelector('form')
+    expect(form).not.toBeNull()
+
+    fireEvent.submit(form!)
+    fireEvent.submit(form!)
+
+    expect(requestForesightIllustration).toHaveBeenCalledTimes(1)
   })
 })

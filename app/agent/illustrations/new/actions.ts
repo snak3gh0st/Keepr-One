@@ -45,6 +45,19 @@ const DEATH_BENEFIT_OPTIONS = new Set(['A_Level', 'B_Increasing'])
 const CAP_FOCUS = 'SP500PointToPointCapFocus'
 const TERM_DURATIONS = new Set(['10-G', '15-G', '20-G', '30-G', 'ART'])
 const IUL_SOLVE_BASES = new Set(['DEATH_BENEFIT', 'PREMIUM'])
+const ACTIVE_ILLUSTRATION_COMMAND_STATES = [
+  'QUEUED',
+  'RUNNING',
+  'AUTH_REQUIRED',
+  'WAITING_FOR_CONFIRMATION',
+  'PAUSED',
+] as const
+
+function targetIllustrationId(target: unknown): string | null {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return null
+  const value = target as Record<string, unknown>
+  return value.kind === 'ILLUSTRATION' && typeof value.id === 'string' ? value.id : null
+}
 
 /// Creates the exact, reviewable instruction that the Foresight executor will
 /// write into the carrier. It intentionally does not call Rapid Solve: capital
@@ -172,6 +185,27 @@ export async function requestForesightIllustration(
 
   try {
     const issued = await prisma.$transaction(async (tx) => {
+      // Serialize per agent inside Postgres. This protects every browser tab and
+      // survives two requests arriving before either UI can repaint.
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`foresight:${agent.id}`}, 0))`
+      const active = await tx.nationalLifeConnectorCommand.findFirst({
+        where: {
+          agentId: agent.id,
+          capability: 'GENERATE_ILLUSTRATION',
+          state: { in: [...ACTIVE_ILLUSTRATION_COMMAND_STATES] },
+          expiresAt: { gt: new Date() },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, target: true },
+      })
+      const activeIllustrationId = targetIllustrationId(active?.target)
+      if (active && activeIllustrationId) {
+        return {
+          command: { commandId: active.id },
+          illustrationId: activeIllustrationId,
+        }
+      }
+
       const repository = createPrismaConnectorCommandRepository(tx)
       const created = await tx.illustration.create({
         data: {

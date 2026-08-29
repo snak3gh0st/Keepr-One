@@ -7,6 +7,7 @@ import {
   type ForesightTermIllustrationSnapshotV1,
 } from './foresight-term-contract'
 import { ForesightExecutionError } from './foresight-executor'
+import { foresightClientBirthDate } from './foresight-target'
 import type {
   ForesightExecutionDocument,
   ForesightTermExecutionReceipt,
@@ -190,6 +191,14 @@ function currentRelease(): string {
   return release ?? fail('FORESIGHT_RELEASE_UNAPPROVED')
 }
 
+export function buildForesightTermClientTarget(snapshot: ForesightTermIllustrationSnapshotV1) {
+  return {
+    firstName: snapshot.insured.firstName,
+    lastName: snapshot.insured.lastName,
+    birthDate: foresightClientBirthDate(snapshot.insured.dateOfBirth),
+  }
+}
+
 async function openTerm(snapshot: ForesightTermIllustrationSnapshotV1): Promise<{ doc: Document; existing: boolean }> {
   const start = await waitForFramePath((path) => path === '/NWI/Main/StartPage.aspx')
   const existing = [...start.querySelectorAll<HTMLAnchorElement>('a')].filter((link) => link.textContent?.trim() === snapshot.carrierCaseName)
@@ -229,14 +238,15 @@ function readClient(doc: Document, snapshot: ForesightTermIllustrationSnapshotV1
 
 async function fillClient(doc: Document, snapshot: ForesightTermIllustrationSnapshotV1) {
   const fields = TERM_FIELDS.client
+  const target = buildForesightTermClientTarget(snapshot)
   await applyInMainWorld('APPLY_TERM_CLIENT', {
     jurisdiction: optionValue(doc, fields.jurisdiction, STATE_NAMES[snapshot.insured.issueState]!),
-    firstName: snapshot.insured.firstName, lastName: snapshot.insured.lastName,
-    gender: optionValue(doc, fields.gender, snapshot.underwriting.gender), birthDate: snapshot.insured.dateOfBirth,
+    firstName: target.firstName, lastName: target.lastName,
+    gender: optionValue(doc, fields.gender, snapshot.underwriting.gender), birthDate: target.birthDate,
     riskClass: optionValue(doc, fields.riskClass, snapshot.underwriting.rateClass === 'Standard_NT' ? 'Standard Non-Tobacco' : 'Standard Tobacco'),
   })
   doc = await waitForFramePath((path) => /\/NWI\/.*\/client\.aspx$/i.test(path))
-  await waitFor(() => input(doc, fields.firstName).value === snapshot.insured.firstName && input(doc, fields.lastName).value === snapshot.insured.lastName && input(doc, fields.birthDate).value === snapshot.insured.dateOfBirth ? true : null, 'FORESIGHT_CLIENT_READBACK_TIMEOUT')
+  await waitFor(() => input(doc, fields.firstName).value === target.firstName && input(doc, fields.lastName).value === target.lastName && input(doc, fields.birthDate).value === target.birthDate ? true : null, 'FORESIGHT_CLIENT_READBACK_TIMEOUT')
   return readClient(doc, snapshot)
 }
 
@@ -320,7 +330,7 @@ export async function executeForesightTermIllustration(input: {
   input.onProgress?.('CONFIGURING_PRODUCT')
   const fundingDoc = await fundingDocument()
   const funding = opened.existing ? readFunding(fundingDoc) : await fillFunding(fundingDoc, input.snapshot)
-  if (client.firstName !== input.snapshot.insured.firstName || client.lastName !== input.snapshot.insured.lastName || client.dateOfBirth !== input.snapshot.insured.dateOfBirth || client.issueState !== input.snapshot.insured.issueState || client.gender !== input.snapshot.underwriting.gender || client.rateClass !== input.snapshot.underwriting.rateClass || funding.designType !== 'Specify Face Amount' || funding.faceAmount.replace(/[$,]/g, '') !== String(input.snapshot.faceAmount) || funding.premiumMode !== 'Monthly' || funding.termDuration !== input.snapshot.termDuration) fail('FORESIGHT_TERM_READBACK_MISMATCH')
+  if (client.firstName !== input.snapshot.insured.firstName || client.lastName !== input.snapshot.insured.lastName || client.dateOfBirth !== foresightClientBirthDate(input.snapshot.insured.dateOfBirth) || client.issueState !== input.snapshot.insured.issueState || client.gender !== input.snapshot.underwriting.gender || client.rateClass !== input.snapshot.underwriting.rateClass || funding.designType !== 'Specify Face Amount' || funding.faceAmount.replace(/[$,]/g, '') !== String(input.snapshot.faceAmount) || funding.premiumMode !== 'Monthly' || funding.termDuration !== input.snapshot.termDuration) fail('FORESIGHT_TERM_READBACK_MISMATCH')
   input.onProgress?.('VERIFYING_VALUES')
   const reports = await reportsDocument()
   await verifyReports(reports, input.snapshot.termDuration)
