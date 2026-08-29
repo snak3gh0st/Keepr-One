@@ -123,13 +123,20 @@ export function getNationalLifeLocalConnectorConfig(): PublicLocalConnectorConfi
       : undefined
   )
   const baseUrl = parseAppOrigin(process.env.BETTER_AUTH_URL)
+  // Production has a published, signed identity now. Do not let an unpacked
+  // development build satisfy the browser probe or receive production work:
+  // that made multiple K-Bot instances compete for the same National Life tab.
+  // Development keeps the ordered fallback list so local builds remain testable.
+  const extensionTarget = process.env.NODE_ENV === 'production' && extensionId === OFFICIAL_CHROME_EXTENSION_ID
+    ? extensionId
+    : extensionIds.join(',')
 
   // Empty / unset Store URL = pilot (unpacked extension). Store listing is Phase 6.
   if (!rawStoreUrl) {
     return {
       enabled: true,
       extensionId,
-      extensionTarget: extensionIds.join(','),
+      extensionTarget,
       installMode: 'pilot',
       storeUrl: null,
       baseUrl,
@@ -139,7 +146,7 @@ export function getNationalLifeLocalConnectorConfig(): PublicLocalConnectorConfi
   return {
     enabled: true,
     extensionId,
-    extensionTarget: extensionIds.join(','),
+    extensionTarget,
     installMode: 'store',
     storeUrl: parseStoreUrl(rawStoreUrl, extensionId),
     baseUrl,
