@@ -51,6 +51,11 @@ export type SyncState = {
   /// the server's durable sequence cursor. Persisted to prevent retry loops
   /// across service-worker eviction.
   commissionDetailRecoveryAttempts?: number
+  /// A duplicated page reader can race the server cursor after Chrome restores
+  /// a tab or service worker. Reconcile one time per ordinary grid rather than
+  /// discarding the whole run and all remaining stages.
+  idempotencyRecoveryGridKey?: string
+  idempotencyRecoveryAttempts?: number
   /// True only while the carrier asks the agent to renew the browser session.
   /// No credential, cookie or MFA material is ever stored here.
   authRenewalPending?: boolean

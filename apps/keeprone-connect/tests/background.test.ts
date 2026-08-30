@@ -1509,6 +1509,68 @@ describe('background plan executor', () => {
     })
   })
 
+  it('resumes an ordinary grid from the server cursor after an idempotency race', async () => {
+    storage.sync = {
+      runId: 'run-grid-race',
+      carrierTabId: 11,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 0,
+      status: 'NAVIGATING',
+      resumeSequence: 0,
+      resumeOffset: 0,
+    }
+    tabs.query.mockResolvedValue([{
+      id: 11,
+      active: false,
+      url: `${NLG}${NEW_BUSINESS_PATH}`,
+    }])
+    await bootBackground()
+    const begin = beginGridMessage()
+    vi.mocked(signedJsonRequest).mockImplementation(async (input) => {
+      if (input.method === 'PUT') throw new SignedRequestError('IDEMPOTENCY_CONFLICT')
+      if (input.pathname === '/api/agent/integrations/national-life/local-connector/runs') {
+        return {
+          runId: 'run-grid-race',
+          stages: TWO_STAGE_PLAN,
+          completedStages: 0,
+          nextStageIndex: 0,
+          resume: { sequence: 1, offset: 100, recordCount: 100 },
+        } as never
+      }
+      return {} as never
+    })
+
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_CHUNK',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+        sequence: 0,
+        recordsTotal: 857,
+        truncated: false,
+        sourceOffset: 0,
+        nextOffset: 100,
+        records: [{ PolicyNumber: 'LS123' }],
+      },
+      { tab: { id: 11 }, url: `${NLG}${NEW_BUSINESS_PATH}` },
+      vi.fn(),
+    )
+
+    await vi.waitFor(() => expect(readSync()).toMatchObject({
+      runId: 'run-grid-race',
+      resumeSequence: 1,
+      resumeOffset: 100,
+      idempotencyRecoveryGridKey: 'NEW_BUSINESS',
+      idempotencyRecoveryAttempts: 1,
+    }))
+    expect(readSync().status).not.toBe('ERROR')
+    expect(signedJsonRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      pathname: expect.stringMatching(/\/fail$/),
+    }))
+  })
+
   it('accepts the redirected in-force route for a run with the legacy plan path', async () => {
     storage.sync = {
       runId: 'run-legacy-route',

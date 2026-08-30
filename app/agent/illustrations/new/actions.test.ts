@@ -91,6 +91,14 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
     expect(mocks.issue).not.toHaveBeenCalled()
   })
 
+  it('casts the advisory lock result to a Prisma-supported type', async () => {
+    await requestForesightIllustration(form())
+
+    const query = mocks.lock.mock.calls[0]?.[0] as unknown as readonly string[]
+    expect(query.join('')).toContain('pg_advisory_xact_lock')
+    expect(query.join('')).toContain('::text')
+  })
+
   it('issues the approved Foresight request to the local extension and never enqueues Steel', async () => {
     await expect(requestForesightIllustration(form())).resolves.toEqual({
       ok: true,

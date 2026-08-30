@@ -187,7 +187,10 @@ export async function requestForesightIllustration(
     const issued = await prisma.$transaction(async (tx) => {
       // Serialize per agent inside Postgres. This protects every browser tab and
       // survives two requests arriving before either UI can repaint.
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`foresight:${agent.id}`}, 0))`
+      // Postgres returns `void` from pg_advisory_xact_lock. Prisma cannot
+      // deserialize that type and raises P2010 after the lock was acquired, so
+      // expose the otherwise-unused result as text.
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`foresight:${agent.id}`}, 0))::text AS lock_result`
       const active = await tx.nationalLifeConnectorCommand.findFirst({
         where: {
           agentId: agent.id,
