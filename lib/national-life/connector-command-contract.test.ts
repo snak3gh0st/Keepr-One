@@ -79,6 +79,27 @@ describe('National Life connector command contract', () => {
     })).toBeNull()
   })
 
+  it('seals an iGO draft to the reviewed dossier hash', () => {
+    const command = {
+      protocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,
+      commandId: 'cmd_application_1',
+      runId: 'run_application_1',
+      capability: 'PREPARE_APPLICATION_DRAFT',
+      target: { kind: 'APPLICATION', id: 'application_1' },
+      params: { applicationId: 'application_1', payloadHash: 'c'.repeat(64) },
+      idempotencyKey: 'application_1:draft:hash',
+      issuedAt,
+      expiresAt,
+      requiresConfirmation: true,
+    }
+
+    expect(parseConnectorCommand(command)).toEqual(command)
+    expect(parseConnectorCommand({
+      ...command,
+      params: { applicationId: 'application_1' },
+    })).toBeNull()
+  })
+
   it('seals policy detail reads to the exact carrier detail path', () => {
     const navigatePath = '/agent/book-of-business/inforce-book/all-clients/policy-details?id=a73f1af893a94906b965e68d11db807b'
     const base = {

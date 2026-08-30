@@ -188,7 +188,7 @@ describe('connector command service', () => {
       agentId: 'agent_1',
       capability: 'PREPARE_APPLICATION_DRAFT',
       target: { kind: 'APPLICATION', id: 'application_1' },
-      params: { applicationId: 'application_1' },
+      params: { applicationId: 'application_1', payloadHash: 'b'.repeat(64) },
       idempotencyKey: 'application_1:draft:1',
       expiresAt: new Date(now.getTime() + 10 * 60_000),
       now,

@@ -19,11 +19,11 @@
 - Create: `apps/keeprone-connect/lib/command-executor.ts`
 - Test: `apps/keeprone-connect/lib/command-executor.test.ts`
 
-- [ ] Write a failing registry test showing `PREPARE_APPLICATION_DRAFT` cannot fall through to policy detail.
-- [ ] Add an explicit mapping for the currently implemented executors only.
-- [ ] Return `CAPABILITY_NOT_IMPLEMENTED` for declared-but-unimplemented capabilities.
-- [ ] Preserve the command event and local error behavior.
-- [ ] Run the new test and the extension suite.
+- [x] Write a failing registry test showing `PREPARE_APPLICATION_DRAFT` cannot fall through to policy detail.
+- [x] Add an explicit mapping for the currently implemented executors only.
+- [x] Return `CAPABILITY_NOT_IMPLEMENTED` for declared-but-unimplemented capabilities.
+- [x] Preserve the command event and local error behavior.
+- [x] Run the new test and the extension suite.
 
 ### Task 2: Persist paid Application entitlement
 
@@ -35,7 +35,7 @@
 - Modify: `lib/stripe/platform-subscription.ts`
 - Modify: `app/api/webhooks/stripe/route.ts`
 
-- [ ] Add a commercial capability/add-on subscription model with exactly one agent or agency subject.
+- [x] Add an explicit per-agent commercial capability/add-on subscription model.
 - [ ] Resolve active/trialing entitlement with paid-period bounds and fail closed for missing/canceled/expired rows.
 - [ ] Read dedicated Stripe product/price IDs without exposing secrets.
 - [ ] Sync matching Stripe subscriptions from webhook metadata.
@@ -52,10 +52,10 @@
 - Test: `lib/application-addon/dossier-service.test.ts`
 
 - [ ] Add intake version, draft state, snapshot hash, review/consent timestamps, carrier draft ID, and receipt metadata to `Application`.
-- [ ] Define strict field contracts for identity, contact, address, owner, beneficiary, product intent, replacement indication, and documents.
-- [ ] Compute readiness from required fields without treating blank/zero/unknown as complete.
+- [x] Define strict field contracts for identity, contact, address, owner, beneficiary, product intent, replacement indication, and documents.
+- [x] Compute readiness from required fields without treating blank/zero/unknown as complete.
 - [ ] Persist updates only after case ownership and add-on entitlement checks.
-- [ ] Freeze a reviewed snapshot hash so later edits invalidate prior approval.
+- [x] Freeze a reviewed snapshot hash so later edits invalidate prior approval.
 
 ### Task 4: Deliver the agent intake and review UX
 
@@ -67,9 +67,9 @@
 - Test: `app/agent/cases/[id]/ApplicationDossier.test.tsx`
 - Test: `app/agent/cases/[id]/actions.test.ts`
 
-- [ ] Replace the generic five-item checklist with a guided completeness view.
-- [ ] Show missing data in plain language and preserve fields as a draft.
-- [ ] Show add-on activation instead of a working button when not entitled.
+- [x] Replace the generic five-item checklist with a guided completeness view.
+- [x] Show missing data in plain language and preserve fields as a draft.
+- [x] Show add-on activation instead of a working button when not entitled.
 - [ ] Present the exact reviewed snapshot and consent before K-Bot is enabled.
 - [ ] Lock duplicate clicks immediately and display one durable active job.
 
@@ -158,4 +158,3 @@
 - [ ] After explicit approval, run one final-submit smoke and retain the carrier receipt.
 - [ ] Run sync and Illustration concurrently with the Application lane waiting for user action.
 - [ ] Package the new extension, record version/ID/SHA-256, and keep Store publication separate from server deployment evidence.
-

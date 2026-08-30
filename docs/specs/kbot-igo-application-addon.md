@@ -14,7 +14,7 @@ Let an entitled KeeprOne agent prepare and submit a National Life iGO applicatio
 
 ## Commercial model
 
-`K_BOT_APPLICATION` is a separately entitled monthly add-on. The server checks entitlement when an Application draft is created, when a K-Bot command is issued, and again before final submission. Browser-side UI is never an authorization boundary.
+`K_BOT_APPLICATION` is a separately entitled monthly add-on per agent. The server checks entitlement when an Application draft is created, when a K-Bot command is issued, and again before final submission. Browser-side UI is never an authorization boundary. Agency-wide licensing can be added later as a distinct commercial rule; it is not inferred from agency membership.
 
 Stripe product and price IDs come from dedicated environment variables. A missing or mismatched live recurring price fails closed. Subscription webhooks persist the add-on state, and cancellation removes access at the end of the paid period without deleting application history.
 
@@ -77,4 +77,3 @@ Application is not called live until all of these are proven:
 - an unknown iGO question pauses and appears in KeeprOne;
 - explicit submit confirmation produces exactly one carrier receipt;
 - Store package, deployed server commit, extension ID, and observed provider evidence are recorded separately.
-

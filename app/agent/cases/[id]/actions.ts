@@ -1,5 +1,8 @@
 "use server";
 
+import { randomUUID } from 'node:crypto'
+import { mkdir, rename, unlink, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { prisma } from '@/lib/prisma'
 import type { ApplicationStatus } from '@prisma/client'
 import { getCurrentAgent } from '@/lib/agent-context'
@@ -16,8 +19,17 @@ import {
   scheduleFollowUp as scheduleCrmFollowUp,
   parseCrmLocalDateTime,
 } from '@/lib/crm'
+import { saveApplicationDossier, reviewApplicationDossier } from '@/lib/application-addon/dossier-service'
+import { prismaApplicationDossierRepository } from '@/lib/application-addon/dossier-prisma'
+import { getKBotApplicationEntitlement } from '@/lib/application-addon/entitlement-prisma'
+import type { ApplicationDossierMissingItem } from '@/lib/application-addon/dossier-contract'
+import { validateApplicationDocument } from '@/lib/application-addon/document-service'
 
 type ActionResult = { ok: true } | { ok: false; message: string }
+
+export type ApplicationDossierActionResult =
+  | { ok: true; ready: boolean; missing: ApplicationDossierMissingItem[]; dossierHash?: string }
+  | { ok: false; message: string }
 
 async function agentScopeIds(): Promise<{ agentId: string; scope: string[] }> {
   const agent = await getCurrentAgent()
@@ -188,6 +200,204 @@ export async function startApplication(caseId: string): Promise<ActionResult> {
   revalidatePath('/agent')
   revalidatePath('/agent/activities')
   return result
+}
+
+export async function saveKBotApplicationDossier(
+  applicationId: string,
+  dossier: unknown,
+): Promise<ApplicationDossierActionResult> {
+  try {
+    const agent = await getCurrentAgent()
+    const reviewedDocuments = await prisma.applicationDocument.findMany({
+      where: {
+        applicationId,
+        reviewedAt: { not: null },
+        application: { insuranceCase: { assignedAgentId: agent.id } },
+      },
+      select: { id: true, type: true, contentHash: true },
+    })
+    const safeDossier = dossier && typeof dossier === 'object' && !Array.isArray(dossier)
+      ? {
+          ...(dossier as Record<string, unknown>),
+          documents: reviewedDocuments.map((document) => ({
+            documentId: document.id,
+            type: document.type,
+            contentHash: document.contentHash,
+          })),
+        }
+      : dossier
+    const result = await saveApplicationDossier(prismaApplicationDossierRepository, {
+      applicationId,
+      agentId: agent.id,
+      dossier: safeDossier,
+    })
+    const application = await prisma.application.findFirst({
+      where: { id: applicationId, insuranceCase: { assignedAgentId: agent.id } },
+      select: { caseId: true },
+    })
+    if (application) revalidatePath(`/agent/cases/${application.caseId}`)
+    return { ok: true, ready: result.readiness.ready, missing: result.readiness.missing }
+  } catch (error) {
+    console.error('K_BOT_APPLICATION_DOSSIER_SAVE_FAILED', {
+      code: error instanceof Error ? error.message : 'UNKNOWN',
+    })
+    return { ok: false, message: 'Não foi possível salvar estas informações agora.' }
+  }
+}
+
+export async function uploadKBotApplicationDocument(formData: FormData): Promise<ActionResult> {
+  const applicationId = String(formData.get('applicationId') ?? '')
+  const type = String(formData.get('type') ?? '')
+  const file = formData.get('file')
+  if (!(file instanceof File)) return { ok: false, message: 'Escolha um documento.' }
+  const agent = await getCurrentAgent()
+  const application = await prisma.application.findFirst({
+    where: { id: applicationId, insuranceCase: { assignedAgentId: agent.id } },
+    select: { id: true, caseId: true },
+  })
+  if (!application) return { ok: false, message: 'Aplicação não encontrada.' }
+
+  let temporaryPath: string | null = null
+  let finalPath: string | null = null
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const validated = validateApplicationDocument({
+      type,
+      filename: file.name,
+      mimeType: file.type,
+      bytes,
+    })
+    const documentId = `appdoc_${randomUUID()}`
+    const storageKey = join('applications', agent.id, application.id, `${documentId}-${validated.filename}`)
+    const uploadsDir = process.env.UPLOADS_DIR?.trim() || './uploads'
+    finalPath = join(uploadsDir, storageKey)
+    temporaryPath = `${finalPath}.uploading`
+    await mkdir(join(uploadsDir, 'applications', agent.id, application.id), { recursive: true })
+    await writeFile(temporaryPath, bytes, { flag: 'wx', mode: 0o600 })
+    await rename(temporaryPath, finalPath)
+    temporaryPath = null
+    await prisma.$transaction([
+      prisma.applicationDocument.create({
+        data: {
+          id: documentId,
+          applicationId: application.id,
+          type: validated.type,
+          filename: validated.filename,
+          storedPath: storageKey,
+          mimeType: validated.mimeType,
+          sizeBytes: validated.sizeBytes,
+          contentHash: validated.contentHash,
+          uploadedByUserId: agent.userId,
+        },
+      }),
+      prisma.application.update({
+        where: { id: application.id },
+        data: {
+          automationState: 'COLLECTING',
+          dossierHash: null,
+          reviewedAt: null,
+          reviewedByUserId: null,
+          consentedAt: null,
+        },
+      }),
+    ])
+    revalidatePath(`/agent/cases/${application.caseId}`)
+    return { ok: true }
+  } catch (error) {
+    if (temporaryPath) await unlink(temporaryPath).catch(() => undefined)
+    if (finalPath) await unlink(finalPath).catch(() => undefined)
+    const code = error instanceof Error ? error.message : 'UNKNOWN'
+    const message = code === 'APPLICATION_DOCUMENT_TOO_LARGE'
+      ? 'O documento deve ter no máximo 10 MB.'
+      : code === 'APPLICATION_DOCUMENT_TYPE_NOT_ALLOWED'
+        ? 'Envie um PDF, PNG ou JPG.'
+        : 'Não foi possível salvar o documento agora.'
+    return { ok: false, message }
+  }
+}
+
+export async function reviewKBotApplicationDocument(documentId: string): Promise<ActionResult> {
+  const agent = await getCurrentAgent()
+  const document = await prisma.applicationDocument.findFirst({
+    where: {
+      id: documentId,
+      application: { insuranceCase: { assignedAgentId: agent.id } },
+    },
+    select: { id: true, applicationId: true, application: { select: { caseId: true } } },
+  })
+  if (!document) return { ok: false, message: 'Documento não encontrado.' }
+  const now = new Date()
+  await prisma.$transaction([
+    prisma.applicationDocument.update({
+      where: { id: document.id },
+      data: { reviewedAt: now, reviewedByUserId: agent.userId },
+    }),
+    prisma.application.update({
+      where: { id: document.applicationId },
+      data: {
+        automationState: 'COLLECTING',
+        dossierHash: null,
+        reviewedAt: null,
+        reviewedByUserId: null,
+        consentedAt: null,
+      },
+    }),
+  ])
+  const refreshed = await prisma.application.findFirst({
+    where: { id: document.applicationId, insuranceCase: { assignedAgentId: agent.id } },
+    select: {
+      dossier: true,
+      documents: {
+        where: { reviewedAt: { not: null } },
+        select: { id: true, type: true, contentHash: true },
+      },
+    },
+  })
+  if (refreshed?.dossier && typeof refreshed.dossier === 'object' && !Array.isArray(refreshed.dossier)) {
+    await saveApplicationDossier(prismaApplicationDossierRepository, {
+      applicationId: document.applicationId,
+      agentId: agent.id,
+      dossier: {
+        ...(refreshed.dossier as Record<string, unknown>),
+        documents: refreshed.documents.map((item) => ({
+          documentId: item.id,
+          type: item.type,
+          contentHash: item.contentHash,
+        })),
+      },
+    })
+  }
+  revalidatePath(`/agent/cases/${document.application.caseId}`)
+  return { ok: true }
+}
+
+export async function reviewKBotApplicationDossier(
+  applicationId: string,
+): Promise<ApplicationDossierActionResult> {
+  try {
+    const agent = await getCurrentAgent()
+    const entitlement = await getKBotApplicationEntitlement(agent.id)
+    const reviewed = await reviewApplicationDossier(prismaApplicationDossierRepository, {
+      applicationId,
+      agentId: agent.id,
+      userId: agent.userId,
+      entitled: entitlement.entitled,
+    })
+    const application = await prisma.application.findFirst({
+      where: { id: applicationId, insuranceCase: { assignedAgentId: agent.id } },
+      select: { caseId: true },
+    })
+    if (application) revalidatePath(`/agent/cases/${application.caseId}`)
+    return { ok: true, ready: true, missing: [], dossierHash: reviewed.dossierHash }
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'UNKNOWN'
+    const message = code === 'K_BOT_APPLICATION_ADDON_REQUIRED'
+      ? 'Ative o add-on K-Bot Application para preparar este caso no iGO.'
+      : code === 'APPLICATION_DOSSIER_INCOMPLETE'
+        ? 'Complete as informações obrigatórias antes de revisar.'
+        : 'Não foi possível concluir a revisão agora.'
+    return { ok: false, message }
+  }
 }
 
 export async function addCaseNote(caseId: string, body: string): Promise<ActionResult> {

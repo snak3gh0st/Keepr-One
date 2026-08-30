@@ -12,6 +12,7 @@ import { CaseWorkspace } from './CaseWorkspace'
 import { getPipelineForAgent } from '@/lib/crm'
 import { getCalendarConnectionForUser, getCalendarEventsForCase } from '@/lib/calendar'
 import { mapDomainCalendarConnectionToUi, mapDomainCalendarEventToUi } from '@/components/calendar/server-adapter'
+import { getKBotApplicationEntitlement } from '@/lib/application-addon/entitlement-prisma'
 
 export default async function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -25,7 +26,13 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
       prospect: true,
       assignedAgent: { select: { userId: true, user: { select: { name: true } } } },
       illustrations: { orderBy: { createdAt: 'desc' } },
-      applications: { include: { requirements: { orderBy: { createdAt: 'asc' } } }, orderBy: { createdAt: 'desc' } },
+      applications: {
+        include: {
+          requirements: { orderBy: { createdAt: 'asc' } },
+          documents: { orderBy: { createdAt: 'asc' } },
+        },
+        orderBy: { createdAt: 'desc' },
+      },
       timelineEvents: { orderBy: { createdAt: 'desc' } },
       followUps: { orderBy: { createdAt: 'desc' } },
       crmStage: { select: { id: true, name: true, systemKey: true } },
@@ -36,6 +43,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   if (!c || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, c)) notFound()
   const pipeline = await getPipelineForAgent(c.assignedAgentId)
   const ownsCase = c.assignedAgentId === agent.id
+  const applicationAddon = ownsCase
+    ? await getKBotApplicationEntitlement(agent.id)
+    : { entitled: false, subscriptionId: null, status: null }
   let calendarConnectionDomain = null
   let calendarEventDomains: Awaited<ReturnType<typeof getCalendarEventsForCase>> = []
   // CRM hierarchy grants access to the lead, never to another agent's private
@@ -99,12 +109,28 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           applications: c.applications.map((app) => ({
             id: app.id,
             status: app.status,
+            automationState: app.automationState,
+            dossier: app.dossier,
+            dossierHash: app.dossierHash,
+            reviewedAt: app.reviewedAt?.toISOString() ?? null,
+            externalId: app.externalId,
+            documents: app.documents.map((document) => ({
+              id: document.id,
+              type: document.type,
+              filename: document.filename,
+              reviewedAt: document.reviewedAt?.toISOString() ?? null,
+            })),
             requirements: app.requirements.map((r) => ({
               id: r.id,
               title: r.title,
               status: r.status,
             })),
           })),
+          applicationAddon: {
+            entitled: applicationAddon.entitled,
+            status: applicationAddon.status,
+            canAutomate: ownsCase && applicationAddon.entitled,
+          },
           policies: c.policies.map((p) => ({
             id: p.id,
             policyNumber: p.policyNumber,

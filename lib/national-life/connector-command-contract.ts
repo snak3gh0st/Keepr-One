@@ -79,7 +79,7 @@ export type ConnectorCommandParams =
   | { policyNumber: string; navigatePath: string }
   | { illustrationId: string }
   | { illustrationId: string; inputHash: string }
-  | { applicationId: string }
+  | { applicationId: string; payloadHash: string }
   | { applicationId: string; documentId: string; contentHash: string }
   | { applicationId: string; payloadHash: string }
 
@@ -276,8 +276,9 @@ function parseParams(
         ? { illustrationId: value.illustrationId, inputHash: value.inputHash }
         : undefined
     case 'PREPARE_APPLICATION_DRAFT':
-      return has(['applicationId']) && isIdentifier(value.applicationId)
-        ? { applicationId: value.applicationId }
+      return has(['applicationId', 'payloadHash']) && isIdentifier(value.applicationId) &&
+        isHash(value.payloadHash)
+        ? { applicationId: value.applicationId, payloadHash: value.payloadHash }
         : undefined
     case 'UPLOAD_APPLICATION_DOCUMENT':
       return has(['applicationId', 'documentId', 'contentHash']) &&
