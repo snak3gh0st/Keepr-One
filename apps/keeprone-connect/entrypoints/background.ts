@@ -2503,22 +2503,37 @@ async function abortExtraction(tabId: number) {
   }
 }
 
-async function recoverCommissionDetailIdempotencyRace(tabId: number): Promise<boolean> {
+async function recoverIdempotencyRace(tabId: number): Promise<boolean> {
   const state = await readSyncState()
-  if (!isCommissionDetailStage(currentStage(state)) || (state.commissionDetailRecoveryAttempts ?? 0) >= 1) {
+  const stage = currentStage(state)
+  if (!stage) return false
+  const gridKey = stageKey(stage)
+  const detailStage = isCommissionDetailStage(stage)
+  const attempts = detailStage
+    ? state.commissionDetailRecoveryAttempts ?? 0
+    : state.idempotencyRecoveryGridKey === gridKey
+      ? state.idempotencyRecoveryAttempts ?? 0
+      : 0
+  if (attempts >= 1) {
     return false
   }
   await writeSyncState({
     ...state,
     status: 'STARTING',
     errorCode: undefined,
-    commissionDetailRecoveryAttempts: (state.commissionDetailRecoveryAttempts ?? 0) + 1,
+    ...(detailStage
+      ? { commissionDetailRecoveryAttempts: attempts + 1 }
+      : {
+          idempotencyRecoveryGridKey: gridKey,
+          idempotencyRecoveryAttempts: attempts + 1,
+        }),
   })
   try {
     // The run is still RUNNING: the 409 rejected the stale chunk before any
     // mutation. Re-entering the signed start endpoint returns its durable
-    // sequence; the details endpoint then resolves that global cursor to the
-    // exact statement and local offset.
+    // sequence. Detail pages additionally resolve that global cursor to the
+    // exact statement and local offset. Ordinary grids resume directly from
+    // the server-confirmed sequence and offset.
     await createRun()
     await navigatePendingGrid()
   } catch (error) {
@@ -2558,7 +2573,7 @@ async function processBridgeMessage(tabId: number, message: BridgeMessage) {
     await abortExtraction(tabId)
     activeNavigations.delete(tabId)
     const code = error instanceof Error ? error.message : 'UPLOAD_FAILED'
-    if (code === 'IDEMPOTENCY_CONFLICT' && await recoverCommissionDetailIdempotencyRace(tabId)) {
+    if (code === 'IDEMPOTENCY_CONFLICT' && await recoverIdempotencyRace(tabId)) {
       return
     }
     await failSync(code, tabId)
