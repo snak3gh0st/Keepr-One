@@ -52,6 +52,29 @@ const illustration = {
   },
 }
 
+const termIllustration = {
+  id: 'ill_term_1',
+  caseId: null,
+  createdAt: new Date('2026-08-30T17:00:00.000Z'),
+  productName: 'LSW Term',
+  documentFetchedAt: null,
+  rawPayload: {
+    foresightTermDraft: {
+      schemaVersion: 1,
+      carrierProduct: 'LSW Term',
+      firstName: 'KeeprOne',
+      lastName: 'Term',
+      dateOfBirth: '1990-01-01',
+      issueState: 'FL',
+      gender: 'Male',
+      rateClass: 'Standard_NT',
+      faceAmount: 500_000,
+      premiumMode: 'Monthly',
+      termDuration: '20-G',
+    },
+  },
+}
+
 describe('request official Foresight illustration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -103,6 +126,23 @@ describe('request official Foresight illustration', () => {
     await requestIllustrationPdf('ill_1')
     expect(mocks.issue).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       idempotencyKey: expect.stringMatching(/^foresight:ill_1:[a-f0-9]{64}:retry:cmd_failed$/),
+    }))
+  })
+
+  it('retries a Term illustration with the original Term contract', async () => {
+    mocks.illustrationFindFirst.mockResolvedValueOnce(termIllustration)
+    mocks.commandFindFirst.mockReset()
+    mocks.commandFindFirst.mockResolvedValueOnce({
+      id: 'cmd_term_failed', payloadHash: 'p'.repeat(64), state: 'FAILED',
+      confirmationState: 'APPROVED', expiresAt: new Date(Date.now() + 60_000),
+    }).mockResolvedValueOnce({ state: 'QUEUED', confirmationState: 'APPROVED' })
+
+    await expect(requestIllustrationPdf('ill_term_1')).resolves.toEqual({
+      ok: true, commandId: 'cmd_1', duplicate: false, completed: false,
+    })
+    expect(mocks.issue).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      target: { kind: 'ILLUSTRATION', id: 'ill_term_1' },
+      idempotencyKey: expect.stringMatching(/^foresight:ill_term_1:[a-f0-9]{64}:retry:cmd_term_failed$/),
     }))
   })
 

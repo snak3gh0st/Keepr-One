@@ -12,10 +12,17 @@ const commandWithEvents = {
   events: { select: { sequence: true, type: true }, orderBy: { sequence: 'asc' as const } },
 }
 
+// A command started from Keepr One is immediately requested by the extension
+// in that same browser. Keep generic background pollers away briefly so a
+// second active browser for the agent cannot steal the new command. If the
+// direct message is lost, the normal one-minute poll still recovers it.
+const DIRECT_COMMAND_CLAIM_GRACE_MS = 15_000
+
 function eligibleWhere(agentId: string, now: Date, commandId?: string) {
   return {
     agentId,
     ...(commandId ? { id: commandId } : {}),
+    ...(!commandId ? { createdAt: { lte: new Date(now.getTime() - DIRECT_COMMAND_CLAIM_GRACE_MS) } } : {}),
     state: 'QUEUED' as const,
     expiresAt: { gt: now },
     OR: [

@@ -12,6 +12,10 @@ import {
   buildForesightIllustrationSnapshot,
   foresightIllustrationInputHash,
 } from '@/lib/national-life/foresight-illustration-contract'
+import {
+  buildForesightTermIllustrationSnapshot,
+  foresightTermIllustrationInputHash,
+} from '@/lib/national-life/foresight-term-contract'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
 
 export type RequestIllustrationPdfResult =
@@ -45,8 +49,9 @@ export async function requestIllustrationPdf(
   }
 
   try {
-    const snapshot = buildForesightIllustrationSnapshot(illustration)
-    const inputHash = foresightIllustrationInputHash(snapshot)
+    const inputHash = illustration.productName === 'LSW Term' || illustration.productName === 'NL Term'
+      ? foresightTermIllustrationInputHash(buildForesightTermIllustrationSnapshot(illustration))
+      : foresightIllustrationInputHash(buildForesightIllustrationSnapshot(illustration))
     const baseIdempotencyKey = `foresight:${illustration.id}:${inputHash}`
     const now = new Date()
     const latest = await prisma.nationalLifeConnectorCommand.findFirst({

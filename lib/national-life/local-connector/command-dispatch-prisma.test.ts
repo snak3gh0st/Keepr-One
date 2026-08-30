@@ -66,6 +66,28 @@ describe('Prisma local connector command dispatch repository', () => {
       where: expect.objectContaining({ id: 'cmd_1', agentId: 'agent_1', deviceId: null, state: 'QUEUED' }),
       data: { deviceId: 'device_1' },
     }))
+    expect(model.findFirst).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({
+        createdAt: { lte: new Date(now.getTime() - 15_000) },
+      }),
+    }))
+  })
+
+  it('lets the browser that requested an exact command claim it immediately', async () => {
+    const unbound = command(null)
+    const owned = command('device_1')
+    const { db, model } = database([null, unbound, owned])
+    const repository = createPrismaLocalConnectorCommandDispatchRepository(db as never)
+
+    await expect(repository.claimNext({
+      agentId: 'agent_1',
+      deviceId: 'device_1',
+      commandId: 'cmd_1',
+      now,
+    })).resolves.toEqual(owned)
+    expect(model.findFirst).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.not.objectContaining({ createdAt: expect.anything() }),
+    }))
   })
 
   it('returns no command when another device wins the assignment race', async () => {
