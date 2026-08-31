@@ -260,6 +260,37 @@ describe('parseStagePlan', () => {
 })
 
 describe('parseExecutableConnectorCommand', () => {
+  it('accepts only a confirmed, sealed Application draft for the exact target', () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_application_1',
+      runId: 'run_application_1',
+      capability: 'PREPARE_APPLICATION_DRAFT',
+      target: { kind: 'APPLICATION', id: 'application_1' },
+      params: { applicationId: 'application_1', payloadHash: 'a'.repeat(64) },
+      idempotencyKey: 'application_1:draft:1',
+      issuedAt: '2026-08-31T16:00:00.000Z',
+      expiresAt: '2026-08-31T17:00:00.000Z',
+      requiresConfirmation: true,
+    }
+
+    expect(parseExecutableConnectorCommand(command)).toMatchObject({
+      capability: 'PREPARE_APPLICATION_DRAFT',
+    })
+    expect(() => parseExecutableConnectorCommand({
+      ...command,
+      target: { kind: 'APPLICATION', id: 'application_2' },
+    })).toThrow('INVALID_COMMAND')
+    expect(() => parseExecutableConnectorCommand({
+      ...command,
+      params: { applicationId: 'application_1', payloadHash: 'not-a-hash' },
+    })).toThrow('INVALID_COMMAND')
+    expect(() => parseExecutableConnectorCommand({
+      ...command,
+      requiresConfirmation: false,
+    })).toThrow('INVALID_COMMAND')
+  })
+
   it('accepts a sealed FlexLife quote and rejects a mutable request', () => {
     const command = {
       protocolVersion: 1,

@@ -24,6 +24,7 @@ import {
 } from '../lib/signed-client'
 import { sha256ForesightSnapshot } from '../lib/foresight-contract'
 import { sha256FlexLifeQuoteSnapshot } from '../lib/flexlife-quote-contract'
+import { sha256IgoApplicationDossier } from '../lib/igo-contract'
 
 const NLG = 'https://www.nationallife.com'
 const NLG_AUTH0 = 'https://nlg-prod.auth0.com'
@@ -110,6 +111,7 @@ async function defaultTabMessageResponse(tabId: number, message: unknown) {
     token?: string
     correlationId?: string
     inputHash?: string
+    payloadHash?: string
     snapshot?: { carrierCaseName?: string }
   }
   if (value.type === 'CAPTURE_PAGE') {
@@ -129,6 +131,14 @@ async function defaultTabMessageResponse(tabId: number, message: unknown) {
       token: value.token,
       correlationId: value.correlationId,
       authenticated: true,
+    }
+  }
+  if (value.type === 'OPEN_IGO_EAPP_FROM_TOOLS') {
+    return {
+      ok: true,
+      type: 'IGO_EAPP_OPENED_FROM_TOOLS',
+      token: value.token,
+      correlationId: value.correlationId,
     }
   }
   if (value.type === 'CAPTURE_POLICY_DETAIL') {
@@ -182,6 +192,48 @@ async function defaultTabMessageResponse(tabId: number, message: unknown) {
         AnnualPremium: '$4,200.00',
         MonthlyPremium: '$350.00',
         LapseYear: 0,
+      },
+    }
+  }
+  if (value.type === 'EXECUTE_IGO_APPLICATION_DRAFT') {
+    const applicationSnapshot = value.snapshot as unknown as {
+      applicationId: string
+      dossier: {
+        insured: { firstName: string; lastName: string; birthDate: string }
+        coverage: {
+          family: 'TERM' | 'IUL'; carrierProduct: string; termDuration?: string; issueState: string
+        }
+      }
+    }
+    return {
+      ok: true,
+      type: 'IGO_APPLICATION_DRAFT_SAVED',
+      token: value.token,
+      correlationId: value.correlationId,
+      receipt: {
+        schemaVersion: 2,
+        applicationId: applicationSnapshot.applicationId,
+        payloadHash: value.payloadHash,
+        draftReadBackHash: 'd'.repeat(64),
+        externalApplicationId: 'igo-case-1',
+        carrierStatus: 'Started',
+        progress: 'CASE_CREATED',
+        confirmedValues: {
+          insuredName: `${applicationSnapshot.dossier.insured.firstName} ${applicationSnapshot.dossier.insured.lastName}`,
+          birthDate: applicationSnapshot.dossier.insured.birthDate,
+          family: applicationSnapshot.dossier.coverage.family,
+          carrierProduct: applicationSnapshot.dossier.coverage.carrierProduct,
+          termDuration: applicationSnapshot.dossier.coverage.family === 'TERM'
+            ? applicationSnapshot.dossier.coverage.termDuration
+            : null,
+          issueState: applicationSnapshot.dossier.coverage.issueState,
+        },
+        changes: [],
+        missingQuestions: [{
+          section: 'Pre-Qualification',
+          label: 'Do any of these conditions apply?',
+          allowedValues: ['Yes', 'No'],
+        }],
       },
     }
   }
@@ -610,6 +662,89 @@ describe('background plan executor', () => {
         },
       },
     })
+  })
+
+  it('opens iGO and writes only the sealed Application draft, never a submission', async () => {
+    const snapshot = {
+      schemaVersion: 2,
+      applicationId: 'application_1',
+      payloadHash: '0'.repeat(64),
+      dossier: {
+        version: 2,
+        insured: { firstName: 'Alex', lastName: 'Test', birthDate: '1990-01-01', sexAtBirth: 'MALE', email: 'alex@example.com', phone: '+13055550123' },
+        address: { line1: '100 Main St', city: 'Miami', state: 'FL', postalCode: '33101' },
+        owner: { sameAsInsured: true, relationship: 'SELF' },
+        beneficiaries: [{ fullName: 'Taylor Test', relationship: 'SPOUSE', sharePercent: 100 }],
+        coverage: { family: 'IUL', carrierProduct: 'FlexLife (25)(LSW)', issueState: 'FL', applicationType: 'FULL', illustrationId: 'illustration_1', illustrationInputHash: 'b'.repeat(64), faceAmount: 500_000, premiumMode: 'MONTHLY', plannedPremium: 300 },
+        agent: { carrierNumber: 'AGENT123' },
+        existingCoverage: { hasExisting: false, replacementExpected: false },
+        documents: [{ documentId: 'doc_1', type: 'IDENTITY', contentHash: 'c'.repeat(64) }],
+        consent: { clientAuthorizedCollection: true, agentAttestedAccuracy: true },
+      },
+    } as const
+    const payloadHash = await sha256IgoApplicationDossier({ ...snapshot, payloadHash: 'a'.repeat(64) })
+    const sealedSnapshot = { ...snapshot, payloadHash }
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_application_1',
+      runId: 'run_application_1',
+      capability: 'PREPARE_APPLICATION_DRAFT',
+      target: { kind: 'APPLICATION', id: snapshot.applicationId },
+      params: { applicationId: snapshot.applicationId, payloadHash },
+      idempotencyKey: `application:${snapshot.applicationId}:${payloadHash}`,
+      issuedAt: '2026-08-31T16:00:00.000Z',
+      expiresAt: '2026-08-31T17:00:00.000Z',
+      requiresConfirmation: true,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+      } as never
+      if (request.pathname.endsWith('/commands/cmd_application_1/input')) {
+        return { inputHash: payloadHash, snapshot: sealedSnapshot } as never
+      }
+      return undefined as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
+      url: `${NLG}/agent/tools/business-tools/national-life-tools`,
+    })
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4,
+      active: false,
+      url: `${NLG}/agent/tools/business-tools/national-life-tools`,
+    })
+    await flush()
+    expect(tabs.sendMessage).toHaveBeenCalledWith(4, expect.objectContaining({
+      type: 'OPEN_IGO_EAPP_FROM_TOOLS',
+    }))
+
+    emit('tabs.onUpdated', 5, { status: 'complete' }, {
+      id: 5,
+      active: false,
+      url: 'https://igoforms2.ipipeline.com/CossEnterpriseSuite/session/WebForms/CaseListResp.aspx',
+    })
+    await flush()
+
+    await vi.waitFor(() => expect(tabs.sendMessage).toHaveBeenCalledWith(5, expect.objectContaining({
+      type: 'EXECUTE_IGO_APPLICATION_DRAFT', payloadHash, snapshot: sealedSnapshot,
+    })))
+    const events = vi.mocked(signedJsonRequest).mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.pathname.endsWith('/commands/cmd_application_1/events'))
+      .map((request) => request.body as { type: string; payload?: unknown })
+    expect(events.map((event) => event.type)).toEqual([
+      'COMMAND_STARTED', 'DATA_BATCH', 'COMMAND_COMPLETED',
+    ])
+    expect(events[1]?.payload).toMatchObject({
+      applicationDraft: { applicationId: snapshot.applicationId, progress: 'CASE_CREATED' },
+    })
+    expect(JSON.stringify(tabs.sendMessage.mock.calls)).not.toContain('SUBMIT_APPLICATION')
   })
 
   it('marks a carrier quote command failed when the page bridge refuses it', async () => {

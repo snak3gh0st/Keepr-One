@@ -56,8 +56,8 @@ function estimateLine(status: NationalLifeSyncStatus): string | null {
   if (!status.shouldPoll || !status.estimate) return null
   const { lowerMinutes, upperMinutes } = status.estimate
   return lowerMinutes === upperMinutes
-    ? `About ${lowerMinutes} min remaining`
-    : `About ${lowerMinutes}–${upperMinutes} min remaining`
+    ? `Typically about ${lowerMinutes} min for the remaining areas`
+    : `Typically about ${lowerMinutes}–${upperMinutes} min for the remaining areas`
 }
 
 function money(value: number): string {
@@ -275,7 +275,7 @@ export function NationalLifeSyncProgress({
     ? 'Sign in once and the same task continues from its last saved checkpoint.'
     : active
       ? status.currentGridLabel
-        ? `K-Bot is collecting your ${status.currentGridLabel} information from National Life. Everything already collected is safe.`
+        ? `K-Bot is collecting ${status.currentGridLabel} from National Life. Everything already collected is safe.`
         : 'K-Bot is opening the next place it needs in National Life.'
       : status.state === 'COMPLETED'
         ? 'Verified data is ready throughout Keepr One.'

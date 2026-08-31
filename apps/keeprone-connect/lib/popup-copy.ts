@@ -22,6 +22,9 @@ const COMMAND_STATUS_TEXT: Partial<Record<CommandState['status'], string>> = {
 }
 
 const FORESIGHT_PHASE_TEXT: Record<string, string> = {
+  OPENING_IGO: 'K-Bot is opening iGO…',
+  WAITING_IGO_HANDOFF: 'K-Bot selected iGO e-App and is waiting for the secure handoff…',
+  WRITING_IGO_DRAFT: 'K-Bot is creating the iGO draft and checking its read-back…',
   OPENING_FORESIGHT: 'K-Bot is opening Foresight…',
   OPENING_CASE: 'K-Bot is opening the illustration case…',
   FILLING_CLIENT: 'K-Bot is entering the insured details…',

@@ -55,7 +55,95 @@ const dossierSchema = z.strictObject({
   }),
 })
 
+export const IGO_TERM_PRODUCTS = [
+  'LSW 10-G', 'LSW 15-G', 'LSW 20-G', 'LSW 30-G', 'LSW ART',
+  'NL 10-G', 'NL 15-G', 'NL 20-G', 'NL 30-G', 'NL ART',
+] as const
+
+export const IGO_IUL_PRODUCTS = [
+  '2019 PeakLife NL',
+  'FlexLife (25)(LSW)',
+  'RapidProtect (LSW)',
+  'RapidProtect NL',
+  'SummitLife (LSW)',
+] as const
+
+export const IGO_TERM_DURATIONS = ['10-G', '15-G', '20-G', '30-G', 'ART'] as const
+
+const hash = z.string().regex(/^[a-f0-9]{64}$/i)
+const identifier = z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/)
+const coverageExecutionBase = {
+  issueState: z.string().regex(/^[A-Z]{2}$/),
+  applicationType: z.enum(['FULL', 'TERM_CONVERSION']),
+  illustrationId: identifier,
+  illustrationInputHash: hash,
+  faceAmount: z.number().finite().positive().max(100_000_000),
+  premiumMode: z.enum(['MONTHLY', 'ANNUAL']),
+  plannedPremium: z.number().finite().positive().max(10_000_000),
+}
+
+const termCoverageV2Schema = z.strictObject({
+  family: z.literal('TERM'),
+  carrierProduct: z.enum(IGO_TERM_PRODUCTS),
+  termDuration: z.enum(IGO_TERM_DURATIONS),
+  ...coverageExecutionBase,
+}).superRefine((coverage, context) => {
+  if (!coverage.carrierProduct.endsWith(coverage.termDuration)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['termDuration'],
+      message: 'TERM_PRODUCT_DURATION_MISMATCH',
+    })
+  }
+})
+
+const iulCoverageV2Schema = z.strictObject({
+  family: z.literal('IUL'),
+  carrierProduct: z.enum(IGO_IUL_PRODUCTS),
+  ...coverageExecutionBase,
+})
+
+const dossierV2Schema = z.strictObject({
+  version: z.literal(2),
+  insured: dossierSchema.shape.insured,
+  address: dossierSchema.shape.address,
+  owner: dossierSchema.shape.owner,
+  beneficiaries: dossierSchema.shape.beneficiaries,
+  coverage: z.union([termCoverageV2Schema, iulCoverageV2Schema]),
+  agent: z.strictObject({ carrierNumber: identifier }),
+  existingCoverage: dossierSchema.shape.existingCoverage,
+  documents: dossierSchema.shape.documents,
+  consent: dossierSchema.shape.consent,
+})
+
+const coverageDraftV2Schema = z.strictObject({
+  family: z.enum(['TERM', 'IUL']).optional(),
+  carrierProduct: z.enum([...IGO_TERM_PRODUCTS, ...IGO_IUL_PRODUCTS]).optional(),
+  termDuration: z.enum(IGO_TERM_DURATIONS).optional(),
+  issueState: coverageExecutionBase.issueState.optional(),
+  applicationType: coverageExecutionBase.applicationType.optional(),
+  illustrationId: coverageExecutionBase.illustrationId.optional(),
+  illustrationInputHash: coverageExecutionBase.illustrationInputHash.optional(),
+  faceAmount: coverageExecutionBase.faceAmount.optional(),
+  premiumMode: coverageExecutionBase.premiumMode.optional(),
+  plannedPremium: coverageExecutionBase.plannedPremium.optional(),
+})
+
+const dossierDraftV2Schema = z.strictObject({
+  version: z.literal(2),
+  insured: dossierSchema.shape.insured.partial().optional(),
+  address: dossierSchema.shape.address.partial().optional(),
+  owner: dossierSchema.shape.owner.partial().optional(),
+  beneficiaries: dossierSchema.shape.beneficiaries.optional(),
+  coverage: coverageDraftV2Schema.optional(),
+  agent: z.strictObject({ carrierNumber: identifier.optional() }).optional(),
+  existingCoverage: dossierSchema.shape.existingCoverage.partial().optional(),
+  documents: dossierSchema.shape.documents.optional(),
+  consent: dossierSchema.shape.consent.partial().optional(),
+})
+
 export type ApplicationDossierV1 = z.infer<typeof dossierSchema>
+export type ApplicationDossierV2 = z.infer<typeof dossierV2Schema>
 
 const dossierDraftSchema = z.strictObject({
   version: z.literal(1),
@@ -70,6 +158,7 @@ const dossierDraftSchema = z.strictObject({
 })
 
 export type ApplicationDossierDraftV1 = z.infer<typeof dossierDraftSchema>
+export type ApplicationDossierDraftV2 = z.infer<typeof dossierDraftV2Schema>
 
 export type ApplicationDossierMissingItem =
   | 'INSURED_NAME'
@@ -87,12 +176,28 @@ export type ApplicationDossierMissingItem =
   | 'CLIENT_AUTHORIZATION'
   | 'AGENT_ATTESTATION'
 
+export type ApplicationDossierMissingItemV2 = ApplicationDossierMissingItem
+  | 'CARRIER_PRODUCT'
+  | 'TERM_DURATION'
+  | 'ISSUE_STATE'
+  | 'APPLICATION_TYPE'
+  | 'ILLUSTRATION_LINK'
+  | 'AGENT_NUMBER'
+
 export function parseApplicationDossier(value: unknown): ApplicationDossierV1 {
   return dossierSchema.parse(value)
 }
 
+export function parseApplicationDossierV2(value: unknown): ApplicationDossierV2 {
+  return dossierV2Schema.parse(value)
+}
+
 export function parseApplicationDossierDraft(value: unknown): ApplicationDossierDraftV1 {
   return dossierDraftSchema.parse(value)
+}
+
+export function parseApplicationDossierDraftV2(value: unknown): ApplicationDossierDraftV2 {
+  return dossierDraftV2Schema.parse(value)
 }
 
 export function applicationDossierReadiness(
@@ -128,6 +233,45 @@ export function applicationDossierReadiness(
   return { ready: missing.length === 0, missing }
 }
 
+export function applicationDossierReadinessV2(
+  dossier: ApplicationDossierDraftV2,
+): { ready: boolean; missing: ApplicationDossierMissingItemV2[] } {
+  const missing: ApplicationDossierMissingItemV2[] = []
+  if (!dossier.insured?.firstName || !dossier.insured.lastName) missing.push('INSURED_NAME')
+  if (!dossier.insured?.birthDate) missing.push('INSURED_BIRTH_DATE')
+  if (!dossier.insured?.sexAtBirth) missing.push('INSURED_SEX')
+  if (!dossier.insured?.email || !dossier.insured.phone) missing.push('INSURED_CONTACT')
+  if (!dossier.address?.line1 || !dossier.address.city || !dossier.address.state || !dossier.address.postalCode) {
+    missing.push('ADDRESS')
+  }
+  if (dossier.owner?.sameAsInsured === undefined || !dossier.owner.relationship) missing.push('OWNER')
+  if (dossier.owner?.sameAsInsured === false && !dossier.owner.fullName) missing.push('OWNER_NAME')
+  if (!dossier.beneficiaries?.length) missing.push('BENEFICIARIES')
+  const beneficiaryTotal = (dossier.beneficiaries ?? []).reduce(
+    (sum, beneficiary) => sum + beneficiary.sharePercent,
+    0,
+  )
+  if (dossier.beneficiaries?.length && Math.abs(beneficiaryTotal - 100) > 0.001) {
+    missing.push('BENEFICIARY_SHARES')
+  }
+  if (!dossier.coverage?.carrierProduct) missing.push('CARRIER_PRODUCT')
+  if (dossier.coverage?.family === 'TERM' && !dossier.coverage.termDuration) missing.push('TERM_DURATION')
+  if (!dossier.coverage?.issueState) missing.push('ISSUE_STATE')
+  if (!dossier.coverage?.applicationType) missing.push('APPLICATION_TYPE')
+  if (!dossier.coverage?.illustrationId || !dossier.coverage.illustrationInputHash) missing.push('ILLUSTRATION_LINK')
+  if (!dossier.coverage?.family || !dossier.coverage.faceAmount || !dossier.coverage.premiumMode ||
+    !dossier.coverage.plannedPremium) missing.push('COVERAGE_VALUES')
+  if (!dossier.agent?.carrierNumber) missing.push('AGENT_NUMBER')
+  if (dossier.existingCoverage?.hasExisting === undefined ||
+    dossier.existingCoverage.replacementExpected === undefined) missing.push('EXISTING_COVERAGE')
+  if (!(dossier.documents ?? []).some((document) => document.type === 'IDENTITY')) {
+    missing.push('IDENTITY_DOCUMENT')
+  }
+  if (!dossier.consent?.clientAuthorizedCollection) missing.push('CLIENT_AUTHORIZATION')
+  if (!dossier.consent?.agentAttestedAccuracy) missing.push('AGENT_ATTESTATION')
+  return { ready: missing.length === 0, missing }
+}
+
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
   if (value && typeof value === 'object') {
@@ -140,5 +284,9 @@ function canonicalJson(value: unknown): string {
 }
 
 export function sha256ApplicationDossier(dossier: ApplicationDossierV1): string {
+  return createHash('sha256').update(canonicalJson(dossier)).digest('hex')
+}
+
+export function sha256ApplicationDossierV2(dossier: ApplicationDossierV2): string {
   return createHash('sha256').update(canonicalJson(dossier)).digest('hex')
 }

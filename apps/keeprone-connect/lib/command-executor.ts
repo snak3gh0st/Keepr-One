@@ -1,4 +1,4 @@
-export type CommandExecutorKind = 'POLICY_DETAIL' | 'FLEXLIFE_QUOTE' | 'FORESIGHT'
+export type CommandExecutorKind = 'POLICY_DETAIL' | 'FLEXLIFE_QUOTE' | 'FORESIGHT' | 'IGO_APPLICATION_DRAFT'
 
 /**
  * Browser commands are an allow-list. A capability declared by the shared
@@ -14,6 +14,8 @@ export function commandExecutorFor(capability: string): CommandExecutorKind {
       return 'FLEXLIFE_QUOTE'
     case 'GENERATE_ILLUSTRATION':
       return 'FORESIGHT'
+    case 'PREPARE_APPLICATION_DRAFT':
+      return 'IGO_APPLICATION_DRAFT'
     default:
       throw new Error('CAPABILITY_NOT_IMPLEMENTED')
   }

@@ -1,9 +1,9 @@
 import {
-  applicationDossierReadiness,
-  parseApplicationDossier,
-  parseApplicationDossierDraft,
-  sha256ApplicationDossier,
-  type ApplicationDossierDraftV1,
+  applicationDossierReadinessV2,
+  parseApplicationDossierV2,
+  parseApplicationDossierDraftV2,
+  sha256ApplicationDossierV2,
+  type ApplicationDossierDraftV2,
 } from './dossier-contract'
 
 type ApplicationAutomationState = 'COLLECTING' | 'READY_FOR_REVIEW' | 'READY_TO_PREPARE'
@@ -12,8 +12,8 @@ export type ApplicationDossierRepository = {
   update(input: {
     applicationId: string
     agentId: string
-    intakeVersion: 1
-    dossier: ApplicationDossierDraftV1
+    intakeVersion: 2
+    dossier: ApplicationDossierDraftV2
     automationState: ApplicationAutomationState
     reviewedAt: null
     reviewedByUserId: null
@@ -42,12 +42,12 @@ export async function saveApplicationDossier(
   repository: ApplicationDossierRepository,
   input: { applicationId: string; agentId: string; dossier: unknown },
 ) {
-  const dossier = parseApplicationDossierDraft(input.dossier)
-  const readiness = applicationDossierReadiness(dossier)
+  const dossier = parseApplicationDossierDraftV2(input.dossier)
+  const readiness = applicationDossierReadinessV2(dossier)
   await repository.update({
     applicationId: input.applicationId,
     agentId: input.agentId,
-    intakeVersion: 1,
+    intakeVersion: 2,
     dossier,
     automationState: readiness.ready ? 'READY_FOR_REVIEW' : 'COLLECTING',
     reviewedAt: null,
@@ -74,10 +74,10 @@ export async function reviewApplicationDossier(
     agentId: input.agentId,
   })
   if (!application) throw new Error('APPLICATION_NOT_FOUND')
-  const dossier = parseApplicationDossier(application.dossier)
-  const readiness = applicationDossierReadiness(dossier)
+  const dossier = parseApplicationDossierV2(application.dossier)
+  const readiness = applicationDossierReadinessV2(dossier)
   if (!readiness.ready) throw new Error('APPLICATION_DOSSIER_INCOMPLETE')
-  const dossierHash = sha256ApplicationDossier(dossier)
+  const dossierHash = sha256ApplicationDossierV2(dossier)
   const now = input.now ?? new Date()
   await repository.updateReview({
     applicationId: input.applicationId,

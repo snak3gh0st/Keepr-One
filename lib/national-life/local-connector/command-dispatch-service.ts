@@ -38,9 +38,9 @@ import {
   type FlexLifeQuoteSnapshotV1,
 } from '../flexlife-quote-contract'
 import {
-  parseApplicationDossier,
-  sha256ApplicationDossier,
-  type ApplicationDossierV1,
+  parseApplicationDossierV2,
+  sha256ApplicationDossierV2,
+  type ApplicationDossierV2,
 } from '@/lib/application-addon/dossier-contract'
 import {
   parseIgoApplicationDraftReceipt,
@@ -106,11 +106,11 @@ export type ApplicationDraftInputRepository = {
   } | null>
 }
 
-export type ApplicationDraftSnapshotV1 = {
-  schemaVersion: 1
+export type ApplicationDraftSnapshotV2 = {
+  schemaVersion: 2
   applicationId: string
   payloadHash: string
-  dossier: ApplicationDossierV1
+  dossier: ApplicationDossierV2
 }
 
 export type ForesightArtifactRepository = {
@@ -225,7 +225,7 @@ export async function readDeviceConnectorCommandInput(
 ): Promise<{
   inputHash: string
   snapshot: ForesightIllustrationSnapshot | ForesightTermIllustrationSnapshotV1 |
-    FlexLifeQuoteSnapshotV1 | ApplicationDraftSnapshotV1
+    FlexLifeQuoteSnapshotV1 | ApplicationDraftSnapshotV2
 }> {
   const command = await repository.findDeviceOwned(input)
   const now = input.now ?? new Date()
@@ -254,20 +254,20 @@ export async function readDeviceConnectorCommandInput(
       !application.reviewedAt || !application.dossierHash) {
       throw new ConnectorCommandError('COMMAND_NOT_FOUND')
     }
-    let dossier: ApplicationDossierV1
+    let dossier: ApplicationDossierV2
     try {
-      dossier = parseApplicationDossier(application.dossier)
+      dossier = parseApplicationDossierV2(application.dossier)
     } catch {
       throw new ConnectorCommandError('COMMAND_INVALID')
     }
-    const payloadHash = sha256ApplicationDossier(dossier)
+    const payloadHash = sha256ApplicationDossierV2(dossier)
     if (payloadHash !== application.dossierHash || payloadHash !== publicCommand.params.payloadHash) {
       throw new ConnectorCommandError('COMMAND_INVALID')
     }
     return {
       inputHash: payloadHash,
       snapshot: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         applicationId: application.id,
         payloadHash,
         dossier,

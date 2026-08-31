@@ -82,6 +82,9 @@ describe('NationalLifeSyncProgress', () => {
     )
 
     expect(screen.getByText('K-Bot is updating your National Life data')).toBeTruthy()
+    expect(screen.getByText(
+      'K-Bot is collecting correspondence from National Life. Everything already collected is safe.',
+    )).toBeTruthy()
     expect(screen.getByText('3 of 13 portal areas checked')).toBeTruthy()
     expect(screen.getByText('Reading and saving correspondence.')).toBeTruthy()
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '3')
@@ -93,7 +96,7 @@ describe('NationalLifeSyncProgress', () => {
       estimate: { lowerMinutes: 13, upperMinutes: 16, basisRuns: 2 },
     })} />)
 
-    expect(screen.getByText('About 13–16 min remaining')).toBeTruthy()
+    expect(screen.getByText('Typically about 13–16 min for the remaining areas')).toBeTruthy()
     expect(screen.getByText('Based on 2 recent syncs from this account')).toBeTruthy()
   })
 

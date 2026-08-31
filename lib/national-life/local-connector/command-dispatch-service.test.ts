@@ -228,9 +228,9 @@ describe('local connector command dispatch', () => {
   })
 
   it('returns only the reviewed Application dossier sealed to the approved hash', async () => {
-    const { sha256ApplicationDossier } = await import('@/lib/application-addon/dossier-contract')
+    const { sha256ApplicationDossierV2 } = await import('@/lib/application-addon/dossier-contract')
     const dossier = {
-      version: 1 as const,
+      version: 2 as const,
       insured: {
         firstName: 'Keepr', lastName: 'Test', birthDate: '1990-01-01',
         sexAtBirth: 'MALE' as const, email: 'keepr@example.com', phone: '+13055550123',
@@ -238,12 +238,18 @@ describe('local connector command dispatch', () => {
       address: { line1: '1 Main St', city: 'Miami', state: 'FL', postalCode: '33101' },
       owner: { sameAsInsured: true, relationship: 'SELF' as const },
       beneficiaries: [{ fullName: 'Test Beneficiary', relationship: 'Spouse', sharePercent: 100 }],
-      coverage: { product: 'IUL' as const, faceAmount: 250_000, premiumMode: 'MONTHLY' as const, plannedPremium: 500 },
+      coverage: {
+        family: 'IUL' as const, carrierProduct: 'FlexLife (25)(LSW)' as const,
+        issueState: 'FL', applicationType: 'FULL' as const,
+        illustrationId: 'illustration_1', illustrationInputHash: 'b'.repeat(64),
+        faceAmount: 250_000, premiumMode: 'MONTHLY' as const, plannedPremium: 500,
+      },
+      agent: { carrierNumber: 'AGENT123' },
       existingCoverage: { hasExisting: false, replacementExpected: false },
       documents: [{ documentId: 'doc_1', type: 'IDENTITY' as const, contentHash: 'c'.repeat(64) }],
       consent: { clientAuthorizedCollection: true, agentAttestedAccuracy: true },
     }
-    const payloadHash = sha256ApplicationDossier(dossier)
+    const payloadHash = sha256ApplicationDossierV2(dossier)
     const repo = repository(candidate({
       capability: 'PREPARE_APPLICATION_DRAFT',
       target: { kind: 'APPLICATION', id: 'application_1' },
@@ -265,7 +271,7 @@ describe('local connector command dispatch', () => {
       { agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now },
     )).resolves.toEqual({
       inputHash: payloadHash,
-      snapshot: { schemaVersion: 1, applicationId: 'application_1', payloadHash, dossier },
+      snapshot: { schemaVersion: 2, applicationId: 'application_1', payloadHash, dossier },
     })
   })
 
@@ -522,9 +528,15 @@ describe('local connector command dispatch', () => {
   it('persists an iGO draft read-back and carrier questions before accepting the event', async () => {
     const payloadHash = 'a'.repeat(64)
     const receipt = {
+      schemaVersion: 2,
       applicationId: 'application_1', payloadHash, draftReadBackHash: 'b'.repeat(64),
-      externalApplicationId: 'IGO-123', carrierStatus: 'Draft',
-      confirmedValues: { insuredName: 'Keepr Test', birthDate: '1990-01-01', product: 'IUL', faceAmount: 250_000, plannedPremium: 500, premiumMode: 'MONTHLY' },
+      externalApplicationId: 'IGO-123', carrierStatus: 'Draft', progress: 'APPLICATION_PARTIAL',
+      confirmedValues: {
+        insuredName: 'Keepr Test', birthDate: '1990-01-01', family: 'IUL',
+        carrierProduct: 'FlexLife (25)(LSW)', termDuration: null, issueState: 'FL',
+        applicationType: 'FULL', agentNumber: 'AGENT123', illustrationId: 'illustration_1',
+        faceAmount: 250_000, plannedPremium: 500, premiumMode: 'MONTHLY',
+      },
       changes: [],
       missingQuestions: [{ section: 'Medical', label: 'Has the client used tobacco?' }],
     }

@@ -16,6 +16,7 @@ import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
 import { isAuthenticatedAgentResponse } from '../lib/auth-probe'
 import { capturePageSnapshot } from '../lib/page-snapshot'
 import { captureNationalLifePolicyDetail } from '../lib/policy-detail'
+import { exactIgoEAppHref, parseOpenIgoEAppMessage } from '../lib/nlg-tool-launcher'
 
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
 
@@ -35,6 +36,33 @@ export default defineContentScript({
     }>()
 
     chrome.runtime.onMessage.addListener((value, _sender, sendResponse) => {
+      const openIgo = parseOpenIgoEAppMessage(value)
+      if (openIgo) {
+        try {
+          const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
+          const href = exactIgoEAppHref(location.href, anchors.map((anchor) => anchor.getAttribute('href') ?? ''))
+          const link = anchors.find((anchor) => anchor.getAttribute('href') === href)
+          if (!link) throw new Error('IGO_TOOL_LINK_UNAVAILABLE')
+          link.click()
+          sendResponse({
+            ok: true,
+            type: 'IGO_EAPP_OPENED_FROM_TOOLS',
+            token: openIgo.token,
+            correlationId: openIgo.correlationId,
+          })
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            type: 'IGO_EAPP_OPEN_FAILED',
+            token: openIgo.token,
+            correlationId: openIgo.correlationId,
+            code: error instanceof Error && /^[A-Z0-9_]{1,80}$/.test(error.message)
+              ? error.message
+              : 'IGO_TOOL_LAUNCH_FAILED',
+          })
+        }
+        return false
+      }
       const probe = parseProbeAuthMessage(value)
       if (probe) {
         void fetch(`${NLG_ORIGIN}/agent/`, {

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   applicationDossierReadiness,
+  applicationDossierReadinessV2,
   parseApplicationDossier,
+  parseApplicationDossierV2,
   parseApplicationDossierDraft,
+  parseApplicationDossierDraftV2,
+  sha256ApplicationDossierV2,
   sha256ApplicationDossier,
 } from './dossier-contract'
 
@@ -37,6 +41,24 @@ const completeDossier = {
     { documentId: 'doc_1', type: 'IDENTITY', contentHash: 'a'.repeat(64) },
   ],
   consent: { clientAuthorizedCollection: true, agentAttestedAccuracy: true },
+} as const
+
+const completeDossierV2 = {
+  ...completeDossier,
+  version: 2,
+  coverage: {
+    family: 'TERM',
+    carrierProduct: 'NL 20-G',
+    termDuration: '20-G',
+    issueState: 'FL',
+    applicationType: 'FULL',
+    illustrationId: 'illustration_1',
+    illustrationInputHash: 'b'.repeat(64),
+    faceAmount: 500_000,
+    premiumMode: 'MONTHLY',
+    plannedPremium: 300,
+  },
+  agent: { carrierNumber: 'AGENT123' },
 } as const
 
 describe('application dossier contract', () => {
@@ -110,5 +132,63 @@ describe('application dossier contract', () => {
       ...completeDossier,
       coverage: { ...completeDossier.coverage, faceAmount: -1 },
     })).toThrow()
+  })
+
+  it('requires an exact Term carrier product, matching duration, state, agent, and Illustration', () => {
+    expect(parseApplicationDossierV2(completeDossierV2)).toEqual(completeDossierV2)
+    expect(() => parseApplicationDossierV2({
+      ...completeDossierV2,
+      coverage: { ...completeDossierV2.coverage, termDuration: '30-G' },
+    })).toThrow()
+    expect(() => parseApplicationDossierV2({
+      ...completeDossierV2,
+      coverage: { product: 'TERM', faceAmount: 500_000, premiumMode: 'MONTHLY', plannedPremium: 300 },
+    })).toThrow()
+  })
+
+  it('requires an exact IUL product and rejects Term duration on IUL', () => {
+    const iul = {
+      ...completeDossierV2,
+      coverage: {
+        ...completeDossierV2.coverage,
+        family: 'IUL',
+        carrierProduct: 'FlexLife (25)(LSW)',
+        termDuration: undefined,
+      },
+    }
+    delete iul.coverage.termDuration
+    expect(parseApplicationDossierV2(iul)).toEqual(iul)
+    expect(() => parseApplicationDossierV2({
+      ...iul,
+      coverage: { ...iul.coverage, termDuration: '20-G' },
+    })).toThrow()
+  })
+
+  it('hashes the exact carrier execution target', () => {
+    const hash = sha256ApplicationDossierV2(parseApplicationDossierV2(completeDossierV2))
+    const changed = sha256ApplicationDossierV2(parseApplicationDossierV2({
+      ...completeDossierV2,
+      coverage: { ...completeDossierV2.coverage, carrierProduct: 'NL 30-G', termDuration: '30-G' },
+    }))
+    expect(changed).not.toBe(hash)
+  })
+
+  it('keeps product target gaps visible while collecting a v2 draft', () => {
+    const draft = parseApplicationDossierDraftV2({
+      version: 2,
+      insured: { firstName: 'Alex', lastName: 'Test' },
+      coverage: { family: 'TERM' },
+    })
+    expect(applicationDossierReadinessV2(draft)).toEqual(expect.objectContaining({
+      ready: false,
+      missing: expect.arrayContaining([
+        'INSURED_BIRTH_DATE',
+        'CARRIER_PRODUCT',
+        'TERM_DURATION',
+        'ISSUE_STATE',
+        'ILLUSTRATION_LINK',
+        'AGENT_NUMBER',
+      ]),
+    }))
   })
 })
