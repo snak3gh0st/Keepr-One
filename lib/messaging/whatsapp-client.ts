@@ -82,7 +82,7 @@ export function createWhatsappClient(config: {
     connectionState: async ({ agentId }) => {
       const body = await call(`/instance/connectionState/${instanceNameFor(agentId)}`, { method: 'GET' })
       const instance = asRecord(body.instance)
-      return typeof instance.state === 'string' ? instance.state : 'close'
+      return typeof instance.state === 'string' ? instance.state : 'unknown'
     },
 
     connectionIdentity: async ({ agentId }) => {

@@ -62,6 +62,13 @@ describe('createWhatsappClient', () => {
     expect(state).toBe('open')
   })
 
+  it('fails closed when the provider response has no connection state', async () => {
+    const { http } = recorder([{ instance: {} }])
+    const state = await createWhatsappClient(config(http)).connectionState({ agentId: 'a1' })
+
+    expect(state).toBe('unknown')
+  })
+
   it('logs out the agent session without deleting its reconnectable instance', async () => {
     const { http, calls } = recorder([{ status: 'SUCCESS' }])
 
