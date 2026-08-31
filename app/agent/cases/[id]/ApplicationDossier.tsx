@@ -240,7 +240,7 @@ export function ApplicationDossier({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
           <div>
             <p>Você pode organizar o dossiê agora. Para o K-Bot preparar e enviar no iGO, ative o add-on Application.</p>
-            <p className="mt-1 text-xs text-amber-800">US$ 9,99/mês por agente · primeiros 14 dias grátis.</p>
+            <p className="mt-1 text-xs text-amber-800">US$ 12,99/mês por agente · primeiros 14 dias grátis.</p>
           </div>
           <form action="/api/billing/application-addon/checkout" method="post">
             <Button type="submit" variant="secondary">Ativar Application</Button>

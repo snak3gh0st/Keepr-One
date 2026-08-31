@@ -1,6 +1,6 @@
 import type Stripe from 'stripe'
 
-export const K_BOT_APPLICATION_MONTHLY_CENTS = 999
+export const K_BOT_APPLICATION_MONTHLY_CENTS = 1_299
 export const K_BOT_APPLICATION_TRIAL_DAYS = 14
 
 const DEFAULT_PRODUCT_ID = 'prod_VAdcDhsg3cIDLa'

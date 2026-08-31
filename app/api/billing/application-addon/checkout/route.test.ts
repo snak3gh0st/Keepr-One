@@ -39,7 +39,7 @@ vi.mock('@/lib/stripe/client', () => ({
 }))
 vi.mock('@/lib/stripe/application-addon-catalog', () => ({
   getKBotApplicationCatalog: () => ({
-    productId: 'prod_addon', priceId: 'price_addon', unitAmountCents: 999,
+    productId: 'prod_addon', priceId: 'price_addon', unitAmountCents: 1_299,
     currency: 'usd', trialDays: 14,
   }),
   assertKBotApplicationPrice: mocks.assertPrice,
