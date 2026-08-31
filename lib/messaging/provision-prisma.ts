@@ -47,7 +47,7 @@ export function prismaProvisionDeps(
         // for this agent across server instances. Once the first request commits,
         // the next request sees and reuses its unique local account link.
         await transaction.$queryRaw(
-          Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`keepr-agent-inbox:${agentId}`}, 0))`,
+          Prisma.sql`SELECT 1 AS lock_acquired FROM pg_advisory_xact_lock(hashtextextended(${`keepr-agent-inbox:${agentId}`}, 0))`,
         )
         return operation(prismaProvisionOperationDeps(transaction, config))
       },

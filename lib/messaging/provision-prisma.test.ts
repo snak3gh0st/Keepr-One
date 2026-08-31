@@ -50,7 +50,9 @@ describe('Prisma messaging provision coordinator', () => {
       strings: string[]
       values: unknown[]
     }
-    expect(query.strings.join('?')).toContain('pg_advisory_xact_lock(hashtextextended')
+    expect(query.strings.join('?')).toContain(
+      'SELECT 1 AS lock_acquired FROM pg_advisory_xact_lock(hashtextextended',
+    )
     expect(query.values).toEqual(['keepr-agent-inbox:agent-1'])
   })
 })
