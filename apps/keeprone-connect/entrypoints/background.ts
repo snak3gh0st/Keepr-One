@@ -1931,6 +1931,20 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
   const pathname = `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}/stages/${encodeURIComponent(message.gridKey)}`
   const baseUrl = device.baseUrl
   const deviceId = device.deviceId
+  const uploadBody = {
+    // Raw carrier rows, exactly as the portal returned them. Field names and
+    // meanings are the server's business now.
+    schemaVersion: CONNECTOR_SCHEMA_VERSION,
+    runId: state.runId,
+    gridKey: message.gridKey,
+    sequence: message.sequence,
+    sourceOffset,
+    nextOffset,
+    observedAt: new Date().toISOString(),
+    recordsTotal: message.recordsTotal,
+    truncated: message.truncated,
+    records,
+  }
   let uploadResult: { duplicate?: unknown } | undefined
   try {
     uploadResult = await retryIdempotentSignedRequest({
@@ -1943,20 +1957,7 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
         // stages naming the same grid would otherwise share an idempotency key and
         // silently collide. Retries of the same chunk still reuse the same key.
         idempotencyKey: `nlc:${state.runId}:${state.stageIndex ?? 0}:${message.gridKey}:${message.sequence}`,
-        body: {
-          // Raw carrier rows, exactly as the portal returned them. Field names and
-          // meanings are the server's business now.
-          schemaVersion: CONNECTOR_SCHEMA_VERSION,
-          runId: state.runId,
-          gridKey: message.gridKey,
-          sequence: message.sequence,
-          sourceOffset,
-          nextOffset,
-          observedAt: new Date().toISOString(),
-          recordsTotal: message.recordsTotal,
-          truncated: message.truncated,
-          records,
-        },
+        body: uploadBody,
       }),
     })
   } catch (error) {

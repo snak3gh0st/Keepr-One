@@ -16,7 +16,12 @@ vi.mock('../lib/key-store', () => ({
   getOrCreateDeviceKey: vi.fn(),
 }))
 
-import { SignedRequestError, signedBinaryRequest, signedJsonRequest } from '../lib/signed-client'
+import {
+  retryIdempotentSignedRequest,
+  SignedRequestError,
+  signedBinaryRequest,
+  signedJsonRequest,
+} from '../lib/signed-client'
 import { sha256ForesightSnapshot } from '../lib/foresight-contract'
 import { sha256FlexLifeQuoteSnapshot } from '../lib/flexlife-quote-contract'
 
@@ -1277,6 +1282,67 @@ describe('background plan executor', () => {
     }
 
     expect(readSync()).toMatchObject({ status: 'UPLOADING', stageIndex: 0, uploads: 2 })
+  })
+
+  it('keeps an idempotent chunk body stable across a transient retry', async () => {
+    vi.useFakeTimers({ now: new Date('2026-08-31T14:08:43.000Z') })
+    try {
+      storage.sync = {
+        runId: 'run-retry', carrierTabId: 7, plan: TWO_STAGE_PLAN,
+        stageIndex: 0, status: 'NAVIGATING',
+      }
+      tabs.query.mockResolvedValue([{
+        id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}`,
+      }])
+
+      const attempts: Array<{ idempotencyKey?: string; body: unknown }> = []
+      vi.mocked(signedJsonRequest).mockImplementation(async (input) => {
+        if (input.method !== 'PUT') return {} as never
+        attempts.push({ idempotencyKey: input.idempotencyKey, body: input.body })
+        if (attempts.length === 1) {
+          throw new SignedRequestError('DEVICE_REQUEST_FAILED')
+        }
+        return { duplicate: true } as never
+      })
+      vi.mocked(retryIdempotentSignedRequest).mockImplementationOnce(async ({ request }) => {
+        try {
+          await request()
+        } catch {
+          vi.advanceTimersByTime(1_000)
+        }
+        return request()
+      })
+
+      await bootBackground()
+      const begin = beginGridMessage()
+      emit(
+        'runtime.onMessage',
+        {
+          type: 'GRID_CHUNK',
+          gridKey: 'NEW_BUSINESS',
+          token: begin.token,
+          correlationId: begin.correlationId,
+          sequence: 0,
+          sourceOffset: 0,
+          nextOffset: 100,
+          recordsTotal: 841,
+          truncated: false,
+          records: [{ PolicyNumber: 'LS123' }],
+        },
+        { tab: { id: 7 }, url: `${NLG}${NEW_BUSINESS_PATH}` },
+        vi.fn(),
+      )
+      await flush()
+
+      expect(attempts.map((attempt) => attempt.idempotencyKey)).toEqual([
+        'nlc:run-retry:0:NEW_BUSINESS:0',
+        'nlc:run-retry:0:NEW_BUSINESS:0',
+      ])
+      expect(JSON.stringify(attempts[1]?.body)).toBe(JSON.stringify(attempts[0]?.body))
+      expect(readSync()).toMatchObject({ status: 'UPLOADING', uploads: 1 })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('resumes mid-plan after the service worker is evicted', async () => {
