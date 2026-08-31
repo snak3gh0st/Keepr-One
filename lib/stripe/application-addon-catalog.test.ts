@@ -10,7 +10,7 @@ describe('K-Bot Application Stripe catalog', () => {
     expect(getKBotApplicationCatalog()).toEqual({
       productId: 'prod_VAdcDhsg3cIDLa',
       priceId: 'price_1UAILRGJWjOaP9iw7U9oIyes',
-      unitAmountCents: 999,
+      unitAmountCents: 1_299,
       currency: 'usd',
       trialDays: 14,
     })

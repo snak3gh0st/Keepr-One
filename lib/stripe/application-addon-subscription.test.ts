@@ -37,7 +37,7 @@ const providerSubscription = {
         livemode: true,
         product: 'prod_VAdcDhsg3cIDLa',
         currency: 'usd',
-        unit_amount: 999,
+        unit_amount: 1_299,
         recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' },
       },
     }],
@@ -64,7 +64,7 @@ describe('K-Bot Application subscription reconciliation', () => {
         stripeSubscriptionId: 'sub_addon_1',
         stripeProductId: 'prod_VAdcDhsg3cIDLa',
         stripePriceId: 'price_1UAILRGJWjOaP9iw7U9oIyes',
-        unitAmountCents: 999,
+        unitAmountCents: 1_299,
         currency: 'USD',
       }),
     })

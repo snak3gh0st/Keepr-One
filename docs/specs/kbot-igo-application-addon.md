@@ -1,6 +1,6 @@
 # K-Bot iGO Application Add-on
 
-Commercial contract: US$ 9.99 per month per agent, with a 14-day Stripe trial.
+Commercial contract: US$ 12.99 per month per agent, with a 14-day Stripe trial.
 The add-on is a separate licensed subscription; opening Checkout never grants
 access before Stripe reports the subscription as trialing or active.
 

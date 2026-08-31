@@ -80,6 +80,25 @@ export function ApplicationDossier({
   illustrations: IllustrationOption[];
 }) {
   const { copy, locale } = useI18n();
+  const stateCopy: Record<string, string> = {
+    COLLECTING: copy("Reunindo informações", "Collecting information"),
+    READY_FOR_REVIEW: copy("Pronto para sua revisão", "Ready for your review"),
+    READY_TO_PREPARE: copy("Autorizado para preparar no iGO", "Authorized to prepare in iGO"),
+    PREPARING_DRAFT: copy("K-Bot está preparando o rascunho", "K-Bot is preparing the draft"),
+    NEEDS_INFORMATION: copy("Falta uma resposta do cliente", "A client answer is missing"),
+    DRAFT_READY: copy("Rascunho da National Life pronto", "National Life draft ready"),
+    READY_TO_SUBMIT: copy("Pronto para confirmação final", "Ready for final confirmation"),
+    SUBMITTING: copy("Enviando à National Life", "Submitting to National Life"),
+    SUBMITTED: copy("Enviado à National Life", "Submitted to National Life"),
+    FAILED: copy("Precisa de atenção", "Needs attention"),
+  };
+  const documentTypeCopy: Record<string, string> = {
+    IDENTITY: copy("Identidade", "Identity"),
+    AUTHORIZATION: copy("Autorização", "Authorization"),
+    FINANCIAL: copy("Financeiro", "Financial"),
+    REPLACEMENT: copy("Substituição", "Replacement"),
+    OTHER: copy("Outro", "Other"),
+  };
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
@@ -229,7 +248,7 @@ export function ApplicationDossier({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
           <div>
             <p>{copy("Você pode organizar o dossiê agora. Para o K-Bot preparar e enviar no iGO, ative o add-on Application.", "You can organize the dossier now. Activate the Application add-on so K-Bot can prepare and send it through iGO.")}</p>
-            <p className="mt-1 text-xs text-amber-800">{copy("US$ 9,99/mês por agente · primeiros 14 dias grátis.", "US$9.99/month per agent · first 14 days free.")}</p>
+            <p className="mt-1 text-xs text-amber-800">{copy("US$ 12,99/mês por agente · primeiros 14 dias grátis.", "US$12.99/month per agent · first 14 days free.")}</p>
           </div>
           <form action="/api/billing/application-addon/checkout" method="post">
             <Button type="submit" variant="secondary">{copy("Ativar Application", "Activate Application")}</Button>
@@ -241,20 +260,20 @@ export function ApplicationDossier({
         <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-900">Lido de volta do iGO</p>
-              <p className="mt-1 text-sm text-emerald-950">Rascunho {application.externalId} · {text(carrierReceipt.carrierStatus, "Recebido")}</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-900">{copy("Lido de volta do iGO", "Read back from iGO")}</p>
+              <p className="mt-1 text-sm text-emerald-950">{copy("Rascunho", "Draft")} {application.externalId} · {text(carrierReceipt.carrierStatus, copy("Recebido", "Received"))}</p>
             </div>
             <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-900">
               {carrierProgress === "DRAFT_READY"
-                ? (text(confirmedValues.premiumMode) === "MONTHLY" ? "Mensal" : "Anual")
-                : "Rascunho parcial"}
+                ? (text(confirmedValues.premiumMode) === "MONTHLY" ? copy("Mensal", "Monthly") : copy("Anual", "Annual"))
+                : copy("Rascunho parcial", "Partial draft")}
             </span>
           </div>
           <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <div><dt className="text-xs text-emerald-800">Cliente</dt><dd className="font-semibold text-emerald-950">{text(confirmedValues.insuredName)}</dd></div>
-            <div><dt className="text-xs text-emerald-800">Produto</dt><dd className="font-semibold text-emerald-950">{text(confirmedValues.carrierProduct, text(confirmedValues.family))}{text(confirmedValues.termDuration) ? ` · ${text(confirmedValues.termDuration)}` : ""}</dd></div>
-            <div><dt className="text-xs text-emerald-800">Capital confirmado</dt><dd className="font-semibold text-emerald-950">{typeof confirmedValues.faceAmount === "number" ? `US$ ${confirmedValues.faceAmount.toLocaleString("en-US")}` : "Ainda não preenchido no iGO"}</dd></div>
-            <div><dt className="text-xs text-emerald-800">Prêmio confirmado</dt><dd className="font-semibold text-emerald-950">{typeof confirmedValues.plannedPremium === "number" ? `US$ ${confirmedValues.plannedPremium.toLocaleString("en-US")}` : "Ainda não preenchido no iGO"}</dd></div>
+            <div><dt className="text-xs text-emerald-800">{copy("Cliente", "Client")}</dt><dd className="font-semibold text-emerald-950">{text(confirmedValues.insuredName)}</dd></div>
+            <div><dt className="text-xs text-emerald-800">{copy("Produto", "Product")}</dt><dd className="font-semibold text-emerald-950">{text(confirmedValues.carrierProduct, text(confirmedValues.family))}{text(confirmedValues.termDuration) ? ` · ${text(confirmedValues.termDuration)}` : ""}</dd></div>
+            <div><dt className="text-xs text-emerald-800">{copy("Capital confirmado", "Confirmed face amount")}</dt><dd className="font-semibold text-emerald-950">{typeof confirmedValues.faceAmount === "number" ? `US$ ${confirmedValues.faceAmount.toLocaleString(locale)}` : copy("Ainda não preenchido no iGO", "Not filled in iGO yet")}</dd></div>
+            <div><dt className="text-xs text-emerald-800">{copy("Prêmio confirmado", "Confirmed premium")}</dt><dd className="font-semibold text-emerald-950">{typeof confirmedValues.plannedPremium === "number" ? `US$ ${confirmedValues.plannedPremium.toLocaleString(locale)}` : copy("Ainda não preenchido no iGO", "Not filled in iGO yet")}</dd></div>
           </dl>
           {carrierChanges.length ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -310,19 +329,19 @@ export function ApplicationDossier({
         <fieldset disabled={pending} className="space-y-4">
           <legend className="text-sm font-semibold text-ink">{copy("3. Beneficiário e cobertura", "3. Beneficiary and coverage")}</legend>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <label className={labelClass}>Beneficiário principal<input name="beneficiaryName" className={fieldClass} defaultValue={text(beneficiary.fullName)} /></label>
-            <label className={labelClass}>Relação<input name="beneficiaryRelationship" className={fieldClass} defaultValue={text(beneficiary.relationship)} /></label>
-            <label className={labelClass}>Participação %<input name="beneficiaryShare" type="number" min="0.01" max="100" step="0.01" className={fieldClass} defaultValue={typeof beneficiary.sharePercent === "number" ? beneficiary.sharePercent : 100} /></label>
-            <label className={labelClass}>Família do produto<select name="family" className={fieldClass} value={productFamily} onChange={(event) => setProductFamily(event.target.value)}><option value="">Selecione</option><option value="IUL">IUL</option><option value="TERM">Term</option></select></label>
-            <label className={labelClass}>Produto exato no iGO<select name="carrierProduct" className={fieldClass} defaultValue={text(coverage.carrierProduct)}><option value="">Selecione</option>{(productFamily === "TERM" ? TERM_PRODUCTS : IUL_PRODUCTS).map((product) => <option key={product} value={product}>{product}</option>)}</select></label>
-            {productFamily === "TERM" ? <label className={labelClass}>Prazo do Term<select name="termDuration" className={fieldClass} defaultValue={text(coverage.termDuration)}><option value="">Selecione</option><option value="10-G">10 anos</option><option value="15-G">15 anos</option><option value="20-G">20 anos</option><option value="30-G">30 anos</option><option value="ART">ART</option></select></label> : null}
-            <label className={labelClass}>Estado da proposta<input name="issueState" maxLength={2} className={fieldClass} defaultValue={text(coverage.issueState, text(address.state, prospect.state ?? ""))} /></label>
-            <label className={labelClass}>Tipo de Application<select name="applicationType" className={fieldClass} defaultValue={text(coverage.applicationType, "FULL")}><option value="FULL">Application completa</option><option value="TERM_CONVERSION">Conversão de Term</option></select></label>
-            <label className={labelClass}>Illustration revisada<select name="illustrationId" className={fieldClass} defaultValue={text(coverage.illustrationId)}><option value="">Selecione</option>{illustrations.filter((illustration) => illustration.kind !== "PRELIMINARY").map((illustration) => <option key={illustration.id} value={illustration.id}>{illustration.productName ?? "Illustration oficial"}</option>)}</select></label>
-            <label className={labelClass}>Número do agente na National Life<input name="carrierNumber" className={fieldClass} defaultValue={text(record(dossier.agent).carrierNumber)} /></label>
-            <label className={labelClass}>Capital segurado<input name="faceAmount" type="number" min="1" step="0.01" className={fieldClass} defaultValue={typeof coverage.faceAmount === "number" ? coverage.faceAmount : ""} /></label>
-            <label className={labelClass}>Prêmio planejado<input name="plannedPremium" type="number" min="1" step="0.01" className={fieldClass} defaultValue={typeof coverage.plannedPremium === "number" ? coverage.plannedPremium : ""} /></label>
-            <label className={labelClass}>Frequência<select name="premiumMode" className={fieldClass} defaultValue={text(coverage.premiumMode, "MONTHLY")}><option value="MONTHLY">Mensal</option><option value="ANNUAL">Anual</option></select></label>
+            <label className={labelClass}>{copy("Beneficiário principal", "Primary beneficiary")}<input name="beneficiaryName" className={fieldClass} defaultValue={text(beneficiary.fullName)} /></label>
+            <label className={labelClass}>{copy("Relação", "Relationship")}<input name="beneficiaryRelationship" className={fieldClass} defaultValue={text(beneficiary.relationship)} /></label>
+            <label className={labelClass}>{copy("Participação %", "Share %")}<input name="beneficiaryShare" type="number" min="0.01" max="100" step="0.01" className={fieldClass} defaultValue={typeof beneficiary.sharePercent === "number" ? beneficiary.sharePercent : 100} /></label>
+            <label className={labelClass}>{copy("Família do produto", "Product family")}<select name="family" className={fieldClass} value={productFamily} onChange={(event) => setProductFamily(event.target.value)}><option value="">{copy("Selecione", "Select")}</option><option value="IUL">IUL</option><option value="TERM">Term</option></select></label>
+            <label className={labelClass}>{copy("Produto exato no iGO", "Exact product in iGO")}<select name="carrierProduct" className={fieldClass} defaultValue={text(coverage.carrierProduct)}><option value="">{copy("Selecione", "Select")}</option>{(productFamily === "TERM" ? TERM_PRODUCTS : IUL_PRODUCTS).map((product) => <option key={product} value={product}>{product}</option>)}</select></label>
+            {productFamily === "TERM" ? <label className={labelClass}>{copy("Prazo do Term", "Term duration")}<select name="termDuration" className={fieldClass} defaultValue={text(coverage.termDuration)}><option value="">{copy("Selecione", "Select")}</option><option value="10-G">{copy("10 anos", "10 years")}</option><option value="15-G">{copy("15 anos", "15 years")}</option><option value="20-G">{copy("20 anos", "20 years")}</option><option value="30-G">{copy("30 anos", "30 years")}</option><option value="ART">ART</option></select></label> : null}
+            <label className={labelClass}>{copy("Estado da proposta", "Application state")}<input name="issueState" maxLength={2} className={fieldClass} defaultValue={text(coverage.issueState, text(address.state, prospect.state ?? ""))} /></label>
+            <label className={labelClass}>{copy("Tipo de Application", "Application type")}<select name="applicationType" className={fieldClass} defaultValue={text(coverage.applicationType, "FULL")}><option value="FULL">{copy("Application completa", "Full application")}</option><option value="TERM_CONVERSION">{copy("Conversão de Term", "Term conversion")}</option></select></label>
+            <label className={labelClass}>{copy("Illustration revisada", "Reviewed illustration")}<select name="illustrationId" className={fieldClass} defaultValue={text(coverage.illustrationId)}><option value="">{copy("Selecione", "Select")}</option>{illustrations.filter((illustration) => illustration.kind !== "PRELIMINARY").map((illustration) => <option key={illustration.id} value={illustration.id}>{illustration.productName ?? copy("Illustration oficial", "Official illustration")}</option>)}</select></label>
+            <label className={labelClass}>{copy("Número do agente na National Life", "National Life agent number")}<input name="carrierNumber" className={fieldClass} defaultValue={text(record(dossier.agent).carrierNumber)} /></label>
+            <label className={labelClass}>{copy("Capital segurado", "Face amount")}<input name="faceAmount" type="number" min="1" step="0.01" className={fieldClass} defaultValue={typeof coverage.faceAmount === "number" ? coverage.faceAmount : ""} /></label>
+            <label className={labelClass}>{copy("Prêmio planejado", "Planned premium")}<input name="plannedPremium" type="number" min="1" step="0.01" className={fieldClass} defaultValue={typeof coverage.plannedPremium === "number" ? coverage.plannedPremium : ""} /></label>
+            <label className={labelClass}>{copy("Frequência", "Frequency")}<select name="premiumMode" className={fieldClass} defaultValue={text(coverage.premiumMode, "MONTHLY")}><option value="MONTHLY">{copy("Mensal", "Monthly")}</option><option value="ANNUAL">{copy("Anual", "Annual")}</option></select></label>
           </div>
           <div className="flex flex-wrap gap-5">
             <label className="flex items-center gap-2 text-sm text-ink"><input name="hasExisting" type="checkbox" defaultChecked={existing.hasExisting === true} /> {copy("Já possui seguro de vida", "Has existing life insurance")}</label>

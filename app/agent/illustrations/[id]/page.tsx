@@ -38,8 +38,25 @@ type ForesightResult = {
 }
 
 function foresightResultFrom(rawPayload: unknown): ForesightResult | null {
-  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload) ||
-    !('foresightResult' in rawPayload)) return null
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return null
+  if ('foresightTermResult' in rawPayload) {
+    const result = rawPayload.foresightTermResult
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return null
+    const candidate = result as Record<string, unknown>
+    if (candidate.source !== 'OFFICIAL_PDF' || candidate.premiumMode !== 'Monthly' ||
+      !['confirmedFaceAmount', 'confirmedMonthlyPremium', 'confirmedAnnualPremium']
+        .every((key) => typeof candidate[key] === 'number' && Number.isFinite(candidate[key]) && Number(candidate[key]) > 0)) {
+      return null
+    }
+    return {
+      solveBasis: 'DEATH_BENEFIT',
+      requestedAmount: candidate.confirmedFaceAmount as number,
+      confirmedFaceAmount: candidate.confirmedFaceAmount as number,
+      confirmedMonthlyPremium: candidate.confirmedMonthlyPremium as number,
+      confirmedAnnualPremium: candidate.confirmedAnnualPremium as number,
+    }
+  }
+  if (!('foresightResult' in rawPayload)) return null
   const result = rawPayload.foresightResult
   if (!result || typeof result !== 'object' || Array.isArray(result)) return null
   const candidate = result as Record<string, unknown>
@@ -99,6 +116,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
   const commandStatus = (await getIllustrationCommandStatuses(agent.id)).get(illustration.id)
   const documentReady = illustration.documentFetchedAt && illustration.documentMimeType === 'application/pdf'
   const foresightResult = documentReady ? foresightResultFrom(illustration.rawPayload) : null
+  const isTermProduct = illustration.productName === 'NL Term' || illustration.productName === 'LSW Term'
   const hasCarrierPremium = Boolean(documentReady && illustration.premium)
   const premiumValue = hasCarrierPremium ? illustration.premium : illustration.targetPremium
   const carrierAdjustedPremium = foresightResult?.solveBasis === 'PREMIUM' &&
@@ -245,7 +263,12 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
             <Fact label={copy('Capital segurado', 'Face amount')} value={illustration.faceAmount ? currency(Number(illustration.faceAmount), locale) : null} />
             <Fact label={hasCarrierPremium ? copy('Prêmio mensal confirmado', 'Confirmed monthly premium') : copy('Prêmio mensal informado', 'Entered monthly premium')} value={premiumValue ? premiumCurrency(Number(premiumValue), locale) : null} />
             {foresightResult && (
-              <Fact label={copy('Prêmio anual confirmado', 'Confirmed annual premium')} value={premiumCurrency(foresightResult.confirmedAnnualPremium, locale)} />
+              <Fact
+                label={isTermProduct
+                  ? copy('Total anual no modo mensal', 'Annual total in monthly mode')
+                  : copy('Prêmio anual confirmado', 'Confirmed annual premium')}
+                value={premiumCurrency(foresightResult.confirmedAnnualPremium, locale)}
+              />
             )}
             <Fact label={copy('Origem do prêmio', 'Premium source')} value={
               hasCarrierPremium

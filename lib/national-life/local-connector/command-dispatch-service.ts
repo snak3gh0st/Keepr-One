@@ -30,6 +30,7 @@ import {
   buildForesightTermIllustrationSnapshot,
   foresightTermIllustrationInputHash,
   parseForesightTermIllustrationReceipt,
+  type ForesightTermIllustrationReceipt,
   type ForesightTermIllustrationSnapshotV1,
 } from '../foresight-term-contract'
 import {
@@ -129,6 +130,12 @@ export type ForesightArtifactRepository = {
     monthlyPremium: number
     annualPremium: number
   }) => Promise<void>
+  persistTermResult?: (input: {
+    agentId: string
+    illustrationId: string
+    monthlyPremium: number
+    annualPremium: number
+  }) => Promise<void>
 }
 
 export type FlexLifeQuoteResultRepository = {
@@ -157,6 +164,12 @@ function isForesightSolvedIllustrationReceipt(
   receipt: unknown,
 ): receipt is ForesightSolvedIllustrationReceipt {
   return parseForesightSolvedIllustrationReceipt(receipt) !== null
+}
+
+function isForesightTermIllustrationReceipt(
+  receipt: unknown,
+): receipt is ForesightTermIllustrationReceipt {
+  return parseForesightTermIllustrationReceipt(receipt) !== null
 }
 
 function toPublicCommand(candidate: LocalConnectorCommandCandidate): ConnectorCommand {
@@ -322,6 +335,10 @@ export async function recordDeviceConnectorCommandEvent(
     foresightArtifactRepository?: ForesightArtifactRepository
     flexLifeQuoteRepository?: FlexLifeQuoteResultRepository
     applicationDraftReceiptRepository?: ApplicationDraftReceiptRepository
+    extractTermPremiums?: (documentBytes: Uint8Array) => Promise<{
+      monthlyPremium: number
+      annualPremium: number
+    }>
     deploymentScope?: string
   },
 ): Promise<void> {
@@ -395,6 +412,27 @@ export async function recordDeviceConnectorCommandEvent(
         faceAmount: receipt.faceAmount,
         monthlyPremium: receipt.monthlyPremium,
         annualPremium: receipt.annualPremium,
+      })
+    } else if (isForesightTermIllustrationReceipt(receipt)) {
+      if (!input.extractTermPremiums || !input.foresightArtifactRepository.persistTermResult) {
+        throw new ConnectorCommandError('EVENT_INVALID')
+      }
+      let premiums
+      try {
+        premiums = await input.extractTermPremiums(artifact.documentBytes)
+      } catch {
+        throw new ConnectorCommandError('EVENT_INVALID')
+      }
+      if (!Number.isFinite(premiums.monthlyPremium) || premiums.monthlyPremium <= 0 ||
+        !Number.isFinite(premiums.annualPremium) || premiums.annualPremium <= 0 ||
+        Math.abs((premiums.monthlyPremium * 12) - premiums.annualPremium) > 0.01) {
+        throw new ConnectorCommandError('EVENT_INVALID')
+      }
+      await input.foresightArtifactRepository.persistTermResult({
+        agentId: input.agentId,
+        illustrationId: publicCommand.target.id,
+        monthlyPremium: premiums.monthlyPremium,
+        annualPremium: premiums.annualPremium,
       })
     }
   }

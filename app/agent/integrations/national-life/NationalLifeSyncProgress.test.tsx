@@ -92,7 +92,7 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.getByText('K-Bot is updating your National Life data')).toBeTruthy()
     expect(screen.getByText(
-      'K-Bot is collecting correspondence from National Life. Everything already collected is safe.',
+      'K-Bot is collecting your correspondence information from National Life. Everything already collected is safe.',
     )).toBeTruthy()
     expect(screen.getByText('3 of 13 portal areas checked')).toBeTruthy()
     expect(screen.getByText('Reading and saving correspondence.')).toBeTruthy()
@@ -333,6 +333,8 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.queryByText(/nothing new to send/)).toBeNull()
     expect(screen.queryByText(/could be saved/)).toBeNull()
+    expect(screen.getByText('K-Bot is opening the next place it needs in National Life.')).toBeTruthy()
+    expect(screen.queryByText(/undefined/)).toBeNull()
     expect(screen.getByText('0 of 13 areas checked.')).toBeTruthy()
   })
 

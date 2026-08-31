@@ -508,6 +508,11 @@ describe('local connector command dispatch', () => {
       confirmationState: 'APPROVED',
       events: [{ sequence: 0 }, { sequence: 1 }],
     }))
+    const extractTermPremiums = vi.fn().mockResolvedValue({
+      monthlyPremium: 62.92,
+      annualPremium: 755.04,
+    })
+    const persistTermResult = vi.fn().mockResolvedValue(undefined)
     const event = {
       protocolVersion: 1, eventId: 'event_term_illustration_1', commandId: 'cmd_1', runId: 'run_1',
       sequence: 2, type: 'DATA_BATCH', emittedAt: now.toISOString(),
@@ -520,8 +525,15 @@ describe('local connector command dispatch', () => {
           provider: 'NATIONAL_LIFE_FORESIGHT', externalId: `agent_1:${carrierCaseName}`,
           productName: 'NL Term', documentBytes: bytes, documentMimeType: 'application/pdf',
         }),
+        persistTermResult,
       },
+      extractTermPremiums,
     })).resolves.toBeUndefined()
+    expect(extractTermPremiums).toHaveBeenCalledWith(bytes)
+    expect(persistTermResult).toHaveBeenCalledWith({
+      agentId: 'agent_1', illustrationId: 'illustration_term_1',
+      monthlyPremium: 62.92, annualPremium: 755.04,
+    })
     expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ payload: { illustration: receipt } }))
   })
 

@@ -59,8 +59,16 @@ function estimateLine(status: NationalLifeSyncStatus, copy: Copy): string | null
   if (!status.shouldPoll || !status.estimate) return null
   const { lowerMinutes, upperMinutes } = status.estimate
   return lowerMinutes === upperMinutes
-    ? `Typically about ${lowerMinutes} min for the remaining areas`
-    : `Typically about ${lowerMinutes}–${upperMinutes} min for the remaining areas`
+    ? copy(
+        'Normalmente, cerca de {minutes} min para as áreas restantes',
+        'Typically about {minutes} min for the remaining areas',
+        { minutes: lowerMinutes },
+      )
+    : copy(
+        'Normalmente, cerca de {lower}–{upper} min para as áreas restantes',
+        'Typically about {lower}–{upper} min for the remaining areas',
+        { lower: lowerMinutes, upper: upperMinutes },
+      )
 }
 
 function money(value: number, locale: string): string {
@@ -285,8 +293,6 @@ export function NationalLifeSyncProgress({
       ? status.currentGridLabel
         ? copy('O K-Bot está coletando suas informações de {area} na National Life. Tudo que já foi coletado está seguro.', 'K-Bot is collecting your {area} information from National Life. Everything already collected is safe.', { area: status.currentGridLabel })
         : copy('O K-Bot está abrindo a próxima área necessária na National Life.', 'K-Bot is opening the next place it needs in National Life.')
-        ? `K-Bot is collecting ${status.currentGridLabel} from National Life. Everything already collected is safe.`
-        : 'K-Bot is opening the next place it needs in National Life.'
       : status.state === 'COMPLETED'
         ? copy('Os dados verificados estão disponíveis em toda a Keepr One.', 'Verified data is ready throughout Keepr One.')
         : copy('Você pode tentar novamente apenas as áreas que a National Life não retornou.', 'You can retry only the areas National Life did not return.')
