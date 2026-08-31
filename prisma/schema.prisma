@@ -166,6 +166,19 @@ enum CalendarSyncJobStatus {
   DEAD_LETTER
 }
 
+enum SchedulingBookingStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+enum SchedulingEmailJobStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  DEAD_LETTER
+  CANCELLED
+}
+
 enum IllustrationKind {
   PRELIMINARY
   OFFICIAL
@@ -444,6 +457,8 @@ model User {
   calendarIntegrations CalendarIntegration[]
   calendarEvents       CalendarEvent[]       @relation("CalendarEventOwner")
   calendarOAuthStates  CalendarOAuthState[]
+  schedulingPage       SchedulingPage?       @relation("SchedulingPageOwner")
+  schedulingBookings   SchedulingBooking[]   @relation("SchedulingBookingOwner")
 
   @@map("user")
 }
@@ -589,27 +604,27 @@ model AgencyInvitation {
 /// agency plans to an Agency, and discounted invited-agent plans to the durable
 /// AgencyMembership so the agency link cannot be lost while that plan exists.
 model PlatformSubscription {
-  id                 String                     @id @default(cuid())
-  plan               PlatformPlan
-  status             PlatformSubscriptionStatus @default(TRIALING)
-  agentId            String?
-  agencyId           String?
-  agencyMembershipId String?
-  unitAmountCents    Int
-  currency           String                     @default("USD")
-  currentPeriodStart DateTime?
-  currentPeriodEnd   DateTime?
-  cancelAtPeriodEnd  Boolean                    @default(false)
-  canceledAt         DateTime?
+  id                   String                     @id @default(cuid())
+  plan                 PlatformPlan
+  status               PlatformSubscriptionStatus @default(TRIALING)
+  agentId              String?
+  agencyId             String?
+  agencyMembershipId   String?
+  unitAmountCents      Int
+  currency             String                     @default("USD")
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean                    @default(false)
+  canceledAt           DateTime?
   /// Provider references are stored on the commercial subject, never on a
   /// National Life row. This keeps billing identity separate from carrier
   /// data while giving each agent/agency tenant one traceable Stripe link.
   stripeCustomerId     String?
-  stripeSubscriptionId String?                  @unique
+  stripeSubscriptionId String?                    @unique
   stripeProductId      String?
   stripePriceId        String?
-  createdAt          DateTime                   @default(now())
-  updatedAt          DateTime                   @updatedAt
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
 
   agent            Agent?            @relation("AgentPlatformSubscriptions", fields: [agentId], references: [id], onDelete: Restrict)
   agency           Agency?           @relation(fields: [agencyId], references: [id], onDelete: Restrict)
@@ -1382,9 +1397,10 @@ model CalendarEvent {
   createdAt         DateTime            @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
 
-  attendees     CalendarEventAttendee[]
-  syncJobs      CalendarSyncJob[]
-  notifications Notification[]
+  attendees         CalendarEventAttendee[]
+  syncJobs          CalendarSyncJob[]
+  notifications     Notification[]
+  schedulingBooking SchedulingBooking?
 
   @@unique([calendarId, providerEventId])
   @@index([ownerUserId, startsAt, status])
@@ -1486,6 +1502,106 @@ model CalendarOAuthState {
 
   @@index([userId, expiresAt])
   @@index([expiresAt, consumedAt])
+}
+
+/// Public, agent-owned booking page. Google Calendar remains the source used
+/// for live availability and the current CRM-default CalendarSource receives
+/// every confirmed booking.
+model SchedulingPage {
+  id                   String   @id @default(cuid())
+  ownerUserId          String   @unique
+  ownerUser            User     @relation("SchedulingPageOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  slug                 String   @unique
+  enabled              Boolean  @default(false)
+  title                String   @default("Reunião")
+  description          String?
+  durationMinutes      Int      @default(30)
+  slotIntervalMinutes  Int      @default(30)
+  bufferBeforeMinutes  Int      @default(0)
+  bufferAfterMinutes   Int      @default(0)
+  minimumNoticeMinutes Int      @default(120)
+  maximumAdvanceDays   Int      @default(60)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime @updatedAt @db.Timestamptz(3)
+
+  weeklyWindows SchedulingWeeklyWindow[]
+  bookings      SchedulingBooking[]
+
+  @@index([enabled, slug])
+}
+
+/// Minute offsets are interpreted in the page owner's IANA timezone. Multiple
+/// windows on one weekday are allowed as long as each individual window is
+/// valid; the application normalizes overlaps before persisting preferences.
+model SchedulingWeeklyWindow {
+  id          String         @id @default(cuid())
+  pageId      String
+  page        SchedulingPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  weekday     Int
+  startMinute Int
+  endMinute   Int
+  createdAt   DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@unique([pageId, weekday, startMinute, endMinute])
+  @@index([pageId, weekday])
+}
+
+/// Immutable guest and schedule snapshot for one public booking. The linked
+/// CalendarEvent and its Google outbox job are created in the same transaction.
+model SchedulingBooking {
+  id                 String                  @id @default(cuid())
+  pageId             String
+  page               SchedulingPage          @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  ownerUserId        String
+  ownerUser          User                    @relation("SchedulingBookingOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  calendarEventId    String?                 @unique
+  calendarEvent      CalendarEvent?          @relation(fields: [calendarEventId], references: [id], onDelete: SetNull)
+  inviteeName        String
+  inviteeEmail       String
+  inviteePhone       String?
+  inviteeTimeZone    String
+  notes              String?
+  startsAt           DateTime                @db.Timestamptz(3)
+  endsAt             DateTime                @db.Timestamptz(3)
+  blockedStartsAt    DateTime                @db.Timestamptz(3)
+  blockedEndsAt      DateTime                @db.Timestamptz(3)
+  status             SchedulingBookingStatus @default(CONFIRMED)
+  idempotencyKeyHash String                  @unique
+  manageTokenHash    String                  @unique
+  cancelledAt        DateTime?               @db.Timestamptz(3)
+  createdAt          DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime                @updatedAt @db.Timestamptz(3)
+
+  confirmationEmailJob SchedulingEmailJob?
+
+  @@index([ownerUserId, startsAt, status])
+  @@index([pageId, startsAt, status])
+  @@index([inviteeEmail, createdAt])
+}
+
+/// Durable confirmation-email outbox. The job is committed with the booking,
+/// while the Resend network call runs after the HTTP response and retries with
+/// a lease so provider downtime never rolls back a reserved time slot.
+model SchedulingEmailJob {
+  id                String                   @id @default(cuid())
+  bookingId         String                   @unique
+  booking           SchedulingBooking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  status            SchedulingEmailJobStatus @default(PENDING)
+  attempts          Int                      @default(0)
+  availableAt       DateTime                 @default(now()) @db.Timestamptz(3)
+  leaseOwner        String?
+  leaseExpiresAt    DateTime?                @db.Timestamptz(3)
+  idempotencyKey    String                   @unique
+  payloadVersion    Int                      @default(1)
+  payload           Json
+  providerMessageId String?
+  lastErrorCode     String?
+  sentAt            DateTime?                @db.Timestamptz(3)
+  createdAt         DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime                 @updatedAt @db.Timestamptz(3)
+
+  @@index([status, availableAt])
+  @@index([leaseExpiresAt])
 }
 
 model AgentIntegrationCredential {

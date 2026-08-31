@@ -7,8 +7,6 @@ import { isGoogleCalendarConfigured } from "@/lib/calendar/google/env";
 
 export const dynamic = "force-dynamic";
 
-const calcomUrl = process.env.CALCOM_URL?.trim() || "https://cal.keeprone.com";
-
 export default async function IntegrationsPage() {
   const agent = await getCurrentAgent();
   const [user, calendar] = await Promise.all([
@@ -29,27 +27,21 @@ export default async function IntegrationsPage() {
           <article className="integration-product-card" data-connected={calendar?.status === "CONNECTED" || undefined}>
             <div className="integration-product-icon" aria-hidden="true">31</div>
             <div>
-              <span>Agenda</span>
-              <h2>Google Calendar</h2>
-              <p>Compromissos, convites e reuniões conectados ao CRM.</p>
+              <span>Agenda e reservas</span>
+              <h2>Google Agenda</h2>
+              <p>Sincronize compromissos e publique um link para clientes escolherem data e horário.</p>
             </div>
             <div className="integration-product-state">
               <i />
               <span>{calendar?.status === "CONNECTED" ? `Conectado a ${calendar.providerEmail}` : calendar?.status === "RECONNECT_REQUIRED" ? "Reconexão necessária" : calendar?.status === "ERROR" ? "Sincronização pausada" : googleConfigured ? "Pronto para conectar" : "Configuração pendente"}</span>
             </div>
-            <Link href="/agent/integrations/google-calendar">{calendar?.status === "CONNECTED" ? "Gerenciar conexão" : calendar?.status === "RECONNECT_REQUIRED" || calendar?.status === "ERROR" ? "Resolver conexão" : "Configurar agenda"}<span aria-hidden="true">↗</span></Link>
+            <Link href="/agent/integrations/google-calendar">{calendar?.status === "CONNECTED" ? "Gerenciar agenda e link" : calendar?.status === "RECONNECT_REQUIRED" || calendar?.status === "ERROR" ? "Resolver conexão" : "Ativar Google Agenda"}<span aria-hidden="true">↗</span></Link>
           </article>
           <article className="integration-product-card" data-connected>
             <div className="integration-product-icon integration-nl-icon" aria-hidden="true">NL</div>
             <div><span>Produção</span><h2>National Life</h2><p>Apólices, ilustrações e produção sincronizadas com a operação.</p></div>
             <div className="integration-product-state"><i /><span>Integração da carteira</span></div>
             <Link href="/agent/integrations/national-life">Abrir integração<span aria-hidden="true">↗</span></Link>
-          </article>
-          <article className="integration-product-card">
-            <div className="integration-product-icon integration-cal-icon" aria-hidden="true">cal</div>
-            <div><span>Agenda de reservas</span><h2>Cal.com</h2><p>Disponibilidade, páginas de agendamento e reuniões em uma agenda própria para cada agente.</p></div>
-            <div className="integration-product-state"><i /><span>Cal.com self-hosted disponível</span></div>
-            <a href={calcomUrl} target="_blank" rel="noreferrer">Conectar Cal.com<span aria-hidden="true">↗</span></a>
           </article>
         </div>
       </div>

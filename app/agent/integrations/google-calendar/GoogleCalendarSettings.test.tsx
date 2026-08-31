@@ -23,7 +23,7 @@ describe("GoogleCalendarSettings", () => {
       "href",
       expect.stringContaining("/api/agent/integrations/google-calendar/authorize"),
     );
-    expect(screen.getByText("Agenda unificada")).toBeInTheDocument();
+    expect(screen.getByText("Link de agendamento")).toBeInTheDocument();
     expect(screen.getByText("Tokens criptografados")).toBeInTheDocument();
   });
 
@@ -64,6 +64,10 @@ describe("GoogleCalendarSettings", () => {
     expect(screen.getByText("Conexão ativa")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "agente@example.com" })).toBeInTheDocument();
     expect(screen.getByText("Padrão para novos compromissos")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Configurar link de agendamento/ })).toHaveAttribute(
+      "href",
+      "/agent/integrations/google-calendar/scheduling",
+    );
     expect(screen.getByRole("button", { name: "Desconectar conta" })).toBeInTheDocument();
   });
 

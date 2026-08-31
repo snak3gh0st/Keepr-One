@@ -78,7 +78,7 @@ export function GoogleCalendarSettings({
             <p>{connectionCopy}</p>
           </div>
           <div className="google-calendar-identity-action">
-            {connected && !sourceFailed ? <button type="button" onClick={disconnect} disabled={disconnecting}>{disconnecting ? "Desconectando…" : "Desconectar conta"}</button> : configured ? <a href={authorizeHref}>{reconnectRequired || failed ? "Reconectar Google" : sourceFailed ? "Tentar novamente" : "Conectar Google Calendar"} <span aria-hidden="true">↗</span></a> : <div className="google-calendar-environment-note" role="status"><strong>Configuração do ambiente pendente</strong><span>Adicione as credenciais do Google para liberar a conexão.</span></div>}
+            {connected && !sourceFailed ? <><a href="/agent/integrations/google-calendar/scheduling">Configurar link de agendamento <span aria-hidden="true">→</span></a><button type="button" onClick={disconnect} disabled={disconnecting}>{disconnecting ? "Desconectando…" : "Desconectar conta"}</button></> : configured ? <a href={authorizeHref}>{reconnectRequired || failed ? "Reconectar Google" : sourceFailed ? "Tentar novamente" : "Conectar Google Calendar"} <span aria-hidden="true">↗</span></a> : <div className="google-calendar-environment-note" role="status"><strong>Configuração do ambiente pendente</strong><span>Adicione as credenciais do Google para liberar a conexão.</span></div>}
           </div>
           <footer className="google-calendar-identity-footer">
             <span><small>Privacidade</small><strong>Conta e agenda individuais</strong></span>
@@ -95,7 +95,7 @@ export function GoogleCalendarSettings({
         <section className="google-calendar-benefits">
           <header><span>Dentro da operação</span><h2>Agenda, atendimento e histórico no mesmo fluxo.</h2></header>
           <ul>
-            <li><span className="google-calendar-benefit-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 3v3M17 3v3M4 9h16M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" /></svg></span><div><h3>Agenda unificada</h3><p>Eventos Google e compromissos do CRM no mesmo lugar.</p></div></li>
+            <li><span className="google-calendar-benefit-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 3v3M17 3v3M4 9h16M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" /></svg></span><div><h3>Link de agendamento</h3><p>O cliente escolhe um horário livre sem acessar sua agenda.</p></div></li>
             <li><span className="google-calendar-benefit-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="m15 10 5-3v10l-5-3v3H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h10v3Z" /></svg></span><div><h3>Meet e convites</h3><p>Crie o link e convide o cliente durante o agendamento.</p></div></li>
             <li><span className="google-calendar-benefit-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M8 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM2 21v-2a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v2M16 11l2 2 4-5" /></svg></span><div><h3>Histórico do CRM</h3><p>Associe reuniões ao lead e preserve cada avanço da relação.</p></div></li>
           </ul>

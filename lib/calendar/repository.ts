@@ -38,7 +38,8 @@ import type {
 
 type CalendarReadDb = Pick<PrismaClient, 'calendarIntegration' | 'calendarEvent' | 'insuranceCase' | 'user'>
 type CalendarWriteDb = Pick<PrismaClient, '$transaction'>
-type Transaction = Prisma.TransactionClient
+export type CalendarTransaction = Prisma.TransactionClient
+type Transaction = CalendarTransaction
 
 const calendarConnectionSelect = {
   id: true,
@@ -360,35 +361,59 @@ export async function getUpcomingCalendarEvents(
 }
 
 export async function createCalendarEvent(input: CreateCalendarEventInput, db: CalendarWriteDb = prisma) {
+  return db.$transaction((tx) => createCalendarEventInTransaction(input, tx))
+}
+
+/**
+ * Shared transaction-scoped lock for all local writes that can claim time in
+ * one user's agenda. Public bookings acquire it before their final conflict
+ * recheck, then call the transaction-safe event creator below.
+ */
+export async function lockCalendarSchedulingOwner(
+  tx: CalendarTransaction,
+  ownerUserId: string,
+) {
+  if (!ownerUserId.trim()) throw new CalendarDomainError('VALIDATION_ERROR', 'ownerUserId is required')
+  await tx.$queryRaw(Prisma.sql`
+    SELECT pg_advisory_xact_lock(
+      hashtextextended(${`keepr-calendar-scheduling:${ownerUserId}`}, 0)
+    )
+  `)
+}
+
+/** Creates the local event, attendees and Google outbox job atomically. */
+export async function createCalendarEventInTransaction(
+  input: CreateCalendarEventInput,
+  tx: CalendarTransaction,
+) {
   const title = normalizeEventTitle(input.title)
   const attendees = normalizeAttendees(input.attendees)
   const schedule = scheduleData(input.schedule)
-  return db.$transaction(async (tx) => {
-    const calendar = await writableCalendar(tx, input.ownerUserId, input.calendarId)
-    if (input.caseId) await assertOwnedCase(tx, input.ownerUserId, input.caseId)
-    const event = await tx.calendarEvent.create({
-      data: {
-        ownerUserId: input.ownerUserId,
-        integrationId: calendar.integrationId,
-        calendarId: calendar.id,
-        insuranceCaseId: input.caseId ?? null,
-        title,
-        description: optionalText(input.description),
-        ...schedule,
-        location: optionalText(input.location),
-        conferenceData: input.createGoogleMeet ? { createMeetRequested: true } : Prisma.JsonNull,
-        recurrence: input.recurrence ?? [],
-        reminders: input.reminders === undefined || input.reminders === null ? Prisma.JsonNull : input.reminders,
-        source: 'CRM',
-        syncStatus: 'PENDING',
-        attendees: { create: attendees.map((attendee) => ({ email: attendee.email, name: attendee.name })) },
-      },
-      select: calendarEventSelect,
-    })
-    await enqueueEventSync(tx, event, 'CREATE_EVENT', input.sendInvites)
-    if (event.insuranceCaseId) await createTimelineEntry(tx, event, CALENDAR_TIMELINE_TYPES.created)
-    return toCalendarEventView(event)
+  await lockCalendarSchedulingOwner(tx, input.ownerUserId)
+  const calendar = await writableCalendar(tx, input.ownerUserId, input.calendarId)
+  if (input.caseId) await assertOwnedCase(tx, input.ownerUserId, input.caseId)
+  const event = await tx.calendarEvent.create({
+    data: {
+      ownerUserId: input.ownerUserId,
+      integrationId: calendar.integrationId,
+      calendarId: calendar.id,
+      insuranceCaseId: input.caseId ?? null,
+      title,
+      description: optionalText(input.description),
+      ...schedule,
+      location: optionalText(input.location),
+      conferenceData: input.createGoogleMeet ? { createMeetRequested: true } : Prisma.JsonNull,
+      recurrence: input.recurrence ?? [],
+      reminders: input.reminders === undefined || input.reminders === null ? Prisma.JsonNull : input.reminders,
+      source: 'CRM',
+      syncStatus: 'PENDING',
+      attendees: { create: attendees.map((attendee) => ({ email: attendee.email, name: attendee.name })) },
+    },
+    select: calendarEventSelect,
   })
+  await enqueueEventSync(tx, event, 'CREATE_EVENT', input.sendInvites)
+  if (event.insuranceCaseId) await createTimelineEntry(tx, event, CALENDAR_TIMELINE_TYPES.created)
+  return toCalendarEventView(event)
 }
 
 export async function updateCalendarEvent(input: UpdateCalendarEventInput, db: CalendarWriteDb = prisma) {
@@ -397,17 +422,32 @@ export async function updateCalendarEvent(input: UpdateCalendarEventInput, db: C
   const attendees = input.attendees === undefined ? undefined : normalizeAttendees(input.attendees)
   const schedule = input.schedule === undefined ? undefined : scheduleData(input.schedule)
   return db.$transaction(async (tx) => {
+    await lockCalendarSchedulingOwner(tx, input.ownerUserId)
     const current = await tx.calendarEvent.findFirst({
       where: ownedCalendarEventWhere(input.ownerUserId, input.eventId),
       select: {
         id: true, calendarId: true, providerEventId: true, localRevision: true,
         status: true, insuranceCaseId: true, allDay: true, startsAt: true,
         endsAt: true, startDate: true, endDate: true, timeZone: true,
+        schedulingBooking: {
+          select: {
+            id: true,
+            status: true,
+            blockedStartsAt: true,
+            blockedEndsAt: true,
+          },
+        },
       },
     })
     if (!current) throw new CalendarDomainError('EVENT_NOT_FOUND', 'Compromisso não encontrado.')
     if (current.status === 'CANCELLED') throw new CalendarDomainError('EVENT_NOT_FOUND', 'Esse compromisso já foi cancelado.')
     if (current.localRevision !== input.baseRevision) throw revisionConflict()
+    if (current.schedulingBooking?.status === 'CONFIRMED' && schedule?.allDay) {
+      throw new CalendarDomainError(
+        'VALIDATION_ERROR',
+        'Uma reserva pública não pode ser convertida em compromisso de dia inteiro.',
+      )
+    }
     const calendar = await writableCalendar(tx, input.ownerUserId, input.calendarId ?? current.calendarId)
     if (input.caseId) await assertOwnedCase(tx, input.ownerUserId, input.caseId)
     const nextRevision = input.baseRevision + 1
@@ -442,6 +482,24 @@ export async function updateCalendarEvent(input: UpdateCalendarEventInput, db: C
       where: ownedCalendarEventWhere(input.ownerUserId, input.eventId),
       select: calendarEventSelect,
     })
+    if (
+      current.schedulingBooking?.status === 'CONFIRMED' &&
+      current.startsAt && current.endsAt && event.startsAt && event.endsAt
+    ) {
+      const bufferBeforeMs = current.startsAt.getTime() -
+        current.schedulingBooking.blockedStartsAt.getTime()
+      const bufferAfterMs = current.schedulingBooking.blockedEndsAt.getTime() -
+        current.endsAt.getTime()
+      await tx.schedulingBooking.update({
+        where: { id: current.schedulingBooking.id },
+        data: {
+          startsAt: event.startsAt,
+          endsAt: event.endsAt,
+          blockedStartsAt: new Date(event.startsAt.getTime() - bufferBeforeMs),
+          blockedEndsAt: new Date(event.endsAt.getTime() + bufferAfterMs),
+        },
+      })
+    }
     await enqueueEventSync(
       tx,
       event,
@@ -468,6 +526,10 @@ export async function cancelCalendarEvent(input: CancelCalendarEventInput, db: C
     if (!current) throw new CalendarDomainError('EVENT_NOT_FOUND', 'Compromisso não encontrado.')
     if (current.status === 'CANCELLED') {
       const cancelled = await tx.calendarEvent.findFirstOrThrow({ where: ownedCalendarEventWhere(input.ownerUserId, input.eventId), select: calendarEventSelect })
+      await tx.schedulingBooking.updateMany({
+        where: { calendarEventId: cancelled.id, ownerUserId: input.ownerUserId, status: 'CONFIRMED' },
+        data: { status: 'CANCELLED', cancelledAt: new Date() },
+      })
       return toCalendarEventView(cancelled)
     }
     if (current.localRevision !== input.baseRevision) throw revisionConflict()
@@ -489,6 +551,10 @@ export async function cancelCalendarEvent(input: CancelCalendarEventInput, db: C
       { recurrenceScope: input.recurrenceScope ?? 'THIS_EVENT' },
     )
     await tx.notification.updateMany({ where: { calendarEventId: event.id, recipientUserId: input.ownerUserId, readAt: null }, data: { readAt: cancelledAt } })
+    await tx.schedulingBooking.updateMany({
+      where: { calendarEventId: event.id, ownerUserId: input.ownerUserId, status: 'CONFIRMED' },
+      data: { status: 'CANCELLED', cancelledAt },
+    })
     if (event.insuranceCaseId) await createTimelineEntry(tx, event, CALENDAR_TIMELINE_TYPES.cancelled)
     return toCalendarEventView(event)
   })

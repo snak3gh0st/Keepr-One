@@ -8,11 +8,13 @@ vi.mock('./client', () => ({
 }))
 
 import {
+  EmailDeliveryError,
   sendAgencyInvitationEmail,
   sendChangeEmailConfirmationEmail,
   sendFounderWelcomeEmail,
   sendNoticeEmail,
   sendResetPasswordEmail,
+  sendSchedulingConfirmationEmail,
   sendVerificationEmail,
   sendWelcomeEmail,
 } from './send'
@@ -139,5 +141,71 @@ describe('email send functions', () => {
     expect(call.subject).toBe('Aviso de manutenção')
     expect(call.html).toContain('Manutenção programada')
     expect(call.html).toContain('O sistema ficará indisponível às 22h.')
+  })
+
+  it('sends an idempotent scheduling confirmation with a universal calendar attachment', async () => {
+    await sendSchedulingConfirmationEmail({
+      bookingId: 'booking-1',
+      to: 'cliente@example.com',
+      inviteeName: 'Ana Cliente',
+      ownerName: 'Maria Silva',
+      title: 'Conversa de 30 minutos',
+      startsAt: new Date('2026-08-29T13:00:00.000Z'),
+      endsAt: new Date('2026-08-29T13:30:00.000Z'),
+      generatedAt: new Date('2026-08-28T17:00:00.000Z'),
+      inviteeTimeZone: 'America/New_York',
+      idempotencyKey: 'scheduling-confirmation-booking-1-v1',
+    })
+
+    expect(emailsSend).toHaveBeenCalledOnce()
+    const [payload, requestOptions] = emailsSend.mock.calls[0]
+    expect(payload).toMatchObject({
+      from: 'Keepr One <notificacoes@keeprone.com>',
+      to: 'cliente@example.com',
+      subject: 'Agendamento confirmado: Conversa de 30 minutos',
+      attachments: [{
+        filename: 'conversa-de-30-minutos.ics',
+        contentType: 'text/calendar; charset=utf-8; method=PUBLISH',
+      }],
+    })
+    expect(requestOptions).toEqual({
+      idempotencyKey: 'scheduling-confirmation-booking-1-v1',
+    })
+    const encodedCalendar = payload.attachments?.[0]?.content
+    expect(typeof encodedCalendar).toBe('string')
+    const calendar = Buffer.from(String(encodedCalendar), 'base64').toString('utf8')
+    expect(calendar).toContain('UID:booking-1@calendar.keeprone.com')
+    expect(calendar).toContain('DTSTAMP:20260828T170000Z')
+    expect(payload.html).toContain('Adicionar ao Google Agenda')
+    expect(payload.text).toContain('Microsoft Outlook')
+  })
+
+  it('keeps a concurrent Resend idempotency request eligible for retry', async () => {
+    emailsSend.mockResolvedValueOnce({
+      data: null,
+      error: {
+        name: 'concurrent_idempotent_requests',
+        message: 'Another request with this key is still being processed',
+        statusCode: 409,
+      },
+    })
+
+    const delivery = sendSchedulingConfirmationEmail({
+      bookingId: 'booking-1',
+      to: 'cliente@example.com',
+      inviteeName: 'Ana Cliente',
+      ownerName: 'Maria Silva',
+      title: 'Conversa de 30 minutos',
+      startsAt: new Date('2026-08-29T13:00:00.000Z'),
+      endsAt: new Date('2026-08-29T13:30:00.000Z'),
+      generatedAt: new Date('2026-08-28T17:00:00.000Z'),
+      inviteeTimeZone: 'America/New_York',
+      idempotencyKey: 'scheduling-confirmation-booking-1-v1',
+    })
+
+    await expect(delivery).rejects.toEqual(expect.objectContaining<Partial<EmailDeliveryError>>({
+      code: 'concurrent_idempotent_requests',
+      retryable: true,
+    }))
   })
 })

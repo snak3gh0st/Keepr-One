@@ -50,6 +50,18 @@ export async function register() {
     } catch (error) {
       Sentry.captureException(error);
     }
+
+    // Booking confirmation e-mails use their own durable outbox. It is kept
+    // independent from Google Calendar because a valid reservation still needs
+    // a confirmation when Google is disabled or temporarily unavailable.
+    try {
+      const { startSchedulingEmailScheduler } = await import(
+        "./lib/scheduling/email-scheduler"
+      );
+      startSchedulingEmailScheduler();
+    } catch (error) {
+      Sentry.captureException(error);
+    }
   }
 
   if (process.env.NEXT_RUNTIME === "edge") {

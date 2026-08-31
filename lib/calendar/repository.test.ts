@@ -185,6 +185,7 @@ describe('calendar repository mutations', () => {
     const timelineCreate = vi.fn(async () => ({ id: 'timeline-1' }))
     const calendarEventCreate = vi.fn(async () => eventRecord())
     const tx = {
+      $queryRaw: vi.fn(async () => []),
       calendarSource: { findFirst: vi.fn(async () => writableCalendar()) },
       insuranceCase: { findFirst: vi.fn(async () => ({ id: 'case-1', assignedAgentId: 'agent-1' })) },
       calendarEvent: { create: calendarEventCreate },
@@ -224,6 +225,7 @@ describe('calendar repository mutations', () => {
     const updateMany = vi.fn(async () => ({ count: 1 }))
     const outboxCreate = vi.fn(async () => ({ id: 'job-2' }))
     const tx = {
+      $queryRaw: vi.fn(async () => []),
       calendarEvent: {
         findFirst: vi.fn(async () => ({
           id: 'event-1', calendarId: 'calendar-1', providerEventId: 'google-event',
@@ -283,6 +285,7 @@ describe('calendar repository mutations', () => {
   it('rejects stale edits before mutating data', async () => {
     const updateMany = vi.fn()
     const tx = {
+      $queryRaw: vi.fn(async () => []),
       calendarEvent: { findFirst: vi.fn(async () => ({ id: 'event-1', localRevision: 2, status: 'CONFIRMED' })), updateMany },
     }
     const db = { $transaction: async (run: (value: typeof tx) => unknown) => run(tx) }
@@ -302,6 +305,7 @@ describe('calendar repository mutations', () => {
       },
       calendarSyncJob: { create: vi.fn(async () => ({ id: 'job-3' })) },
       notification: { updateMany: readAtUpdate },
+      schedulingBooking: { updateMany: vi.fn(async () => ({ count: 1 })) },
       caseTimelineEvent: { create: vi.fn(async () => ({ id: 'timeline-3' })) },
     }
     const db = { $transaction: async (run: (value: typeof tx) => unknown) => run(tx) }
@@ -312,6 +316,10 @@ describe('calendar repository mutations', () => {
     expect(readAtUpdate).toHaveBeenCalledWith(expect.objectContaining({
       where: { calendarEventId: 'event-1', recipientUserId: 'user-1', readAt: null },
     }))
+    expect(tx.schedulingBooking.updateMany).toHaveBeenCalledWith({
+      where: { calendarEventId: 'event-1', ownerUserId: 'user-1', status: 'CONFIRMED' },
+      data: { status: 'CANCELLED', cancelledAt: expect.any(Date) },
+    })
   })
 
   it('associates only an individually owned case and does not enqueue a provider write', async () => {

@@ -10,6 +10,8 @@ vi.mock('./sentry.edge.config', () => ({}))
 const ORIGINAL_RUNTIME = process.env.NEXT_RUNTIME
 const ORIGINAL_INTERVAL = process.env.NATIONAL_LIFE_JANITOR_INTERVAL_SECONDS
 const ORIGINAL_CRM_INTERVAL = process.env.CRM_FOLLOW_UP_INTERVAL_SECONDS
+const ORIGINAL_RESEND_API_KEY = process.env.RESEND_API_KEY
+const ORIGINAL_SCHEDULING_EMAIL_INTERVAL = process.env.SCHEDULING_EMAIL_INTERVAL_SECONDS
 
 afterEach(async () => {
   const { stopLocalConnectorJanitor } = await import(
@@ -24,12 +26,20 @@ afterEach(async () => {
     './lib/calendar/google/scheduler'
   )
   stopGoogleCalendarScheduler()
+  const { stopSchedulingEmailScheduler } = await import(
+    './lib/scheduling/email-scheduler'
+  )
+  stopSchedulingEmailScheduler()
   if (ORIGINAL_RUNTIME === undefined) delete process.env.NEXT_RUNTIME
   else process.env.NEXT_RUNTIME = ORIGINAL_RUNTIME
   if (ORIGINAL_INTERVAL === undefined) delete process.env.NATIONAL_LIFE_JANITOR_INTERVAL_SECONDS
   else process.env.NATIONAL_LIFE_JANITOR_INTERVAL_SECONDS = ORIGINAL_INTERVAL
   if (ORIGINAL_CRM_INTERVAL === undefined) delete process.env.CRM_FOLLOW_UP_INTERVAL_SECONDS
   else process.env.CRM_FOLLOW_UP_INTERVAL_SECONDS = ORIGINAL_CRM_INTERVAL
+  if (ORIGINAL_RESEND_API_KEY === undefined) delete process.env.RESEND_API_KEY
+  else process.env.RESEND_API_KEY = ORIGINAL_RESEND_API_KEY
+  if (ORIGINAL_SCHEDULING_EMAIL_INTERVAL === undefined) delete process.env.SCHEDULING_EMAIL_INTERVAL_SECONDS
+  else process.env.SCHEDULING_EMAIL_INTERVAL_SECONDS = ORIGINAL_SCHEDULING_EMAIL_INTERVAL
   vi.clearAllMocks()
 })
 
@@ -63,6 +73,18 @@ describe('server boot', () => {
     process.env.NEXT_RUNTIME = 'nodejs'
     process.env.NATIONAL_LIFE_JANITOR_INTERVAL_SECONDS = '900'
     process.env.CRM_FOLLOW_UP_INTERVAL_SECONDS = 'instant'
+
+    const { register } = await import('./instrumentation')
+    const Sentry = await import('@sentry/nextjs')
+
+    await expect(register()).resolves.toBeUndefined()
+    expect(Sentry.captureException).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not fail to boot when the scheduling email interval is misconfigured', async () => {
+    process.env.NEXT_RUNTIME = 'nodejs'
+    process.env.RESEND_API_KEY = 're_test'
+    process.env.SCHEDULING_EMAIL_INTERVAL_SECONDS = 'immediately'
 
     const { register } = await import('./instrumentation')
     const Sentry = await import('@sentry/nextjs')

@@ -32,8 +32,10 @@ export function renderEmailLayout(options: {
   bodyHtml: string
   ctaLabel?: string
   ctaUrl?: string
+  copyrightYear?: number
 }): string {
   const { preheader, heading, bodyHtml, ctaLabel, ctaUrl } = options
+  const copyrightYear = options.copyrightYear ?? new Date().getUTCFullYear()
 
   const cta =
     ctaLabel && ctaUrl
@@ -95,7 +97,7 @@ export function renderEmailLayout(options: {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px; margin-top:20px;">
             <tr>
               <td style="padding: 0 8px; font-size:11px; letter-spacing:0.04em; text-transform:uppercase; color:${TEXT_FAINT};">
-                © ${new Date().getUTCFullYear()} Keepr One · Privacidade por padrão
+                © ${copyrightYear} Keepr One · Privacidade por padrão
               </td>
             </tr>
           </table>

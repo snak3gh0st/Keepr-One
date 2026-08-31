@@ -165,6 +165,18 @@ describe('Shell plan access', () => {
     expect(container.querySelector('.shell-topbar-title')).toHaveTextContent('Agência')
   })
 
+  it('names the Google scheduling settings route', () => {
+    mocks.pathname = '/agent/integrations/google-calendar/scheduling'
+
+    const { container } = render(
+      <Shell role="AGENT" userName="Ana">
+        <p>Conteúdo</p>
+      </Shell>,
+    )
+
+    expect(container.querySelector('.shell-topbar-title')).toHaveTextContent('Link de agendamento')
+  })
+
   it('keeps account settings available in navigation and the account controls', () => {
     mocks.pathname = '/agent/settings'
 
