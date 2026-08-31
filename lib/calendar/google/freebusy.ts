@@ -52,7 +52,10 @@ export async function getGoogleFreeBusyForUser(
       status: true,
       grantedScopes: true,
       calendars: {
-        where: { visible: true },
+        // `visible` is the user's explicit conflict-calendar selection. Keep
+        // the CRM default in the live check as a fail-safe for legacy or
+        // partially migrated preference rows where it was hidden by mistake.
+        where: { OR: [{ visible: true }, { crmDefault: true }] },
         select: { id: true, providerCalendarId: true },
       },
     },
@@ -83,7 +86,14 @@ export async function getGoogleFreeBusyForUser(
       timeZone: input.timeZone,
       calendarIds: providerIds,
     })
-    for (const [providerCalendarId, calendar] of Object.entries(response.calendars)) {
+    // FreeBusy is a safety boundary for public scheduling. A partial response
+    // cannot be interpreted as "free": every requested source must have an
+    // explicit, error-free result.
+    for (const providerCalendarId of providerIds) {
+      const calendar = response.calendars[providerCalendarId]
+      if (!calendar) {
+        throw new Error(`Google FreeBusy omitted calendar ${providerCalendarId}`)
+      }
       if (calendar.errors?.length) {
         throw new Error(`Google FreeBusy failed for calendar ${providerCalendarId}`)
       }

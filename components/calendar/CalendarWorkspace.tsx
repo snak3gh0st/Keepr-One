@@ -552,6 +552,9 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
         )}
       >
         <div className="calendar-header-actions">
+          <Link href="/agent/integrations/google-calendar/scheduling">
+            Link de agendamento <span aria-hidden="true">→</span>
+          </Link>
           {data.connection.status === "CONNECTED" || data.connection.status === "SYNCING" ? (
             <button type="button" onClick={async () => { try { setData(await props.onRefresh(data.range)); } catch { setMessage("Não foi possível recarregar a agenda."); } }}>
               {data.connection.status === "SYNCING" ? "Atualizar status" : "Recarregar"} <span aria-hidden="true">↻</span>

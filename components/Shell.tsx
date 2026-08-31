@@ -124,6 +124,7 @@ const PAGE_NAMES: Record<string, string> = {
   "/agent/integrations/national-life": "Conexão National Life",
   "/agent/integrations": "Integrações",
   "/agent/integrations/google-calendar": "Google Calendar",
+  "/agent/integrations/google-calendar/scheduling": "Link de agendamento",
   "/agent/settings": "Configurações da conta",
   "/client": "Minhas apólices",
 };

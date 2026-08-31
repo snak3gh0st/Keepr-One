@@ -1,17 +1,64 @@
 import 'server-only'
-import type { CreateEmailOptions } from 'resend'
+import type { CreateEmailOptions, CreateEmailRequestOptions } from 'resend'
 import {
   AGENCY_INVITATION_DISCOUNT_CENTS,
   formatPlanPrice,
 } from '@/lib/plans'
 import { getResendClient, EMAIL_FROM } from './client'
 import { renderEmailLayout } from './layout'
+import {
+  renderSchedulingConfirmationEmail,
+  type SchedulingConfirmationEmailContentInput,
+} from './scheduling-confirmation'
 
-async function deliverEmail(payload: CreateEmailOptions): Promise<void> {
-  const result = await getResendClient().emails.send(payload)
-  if (result.error) {
-    throw new Error(`Email provider rejected the message: ${result.error.name}`)
+export class EmailDeliveryError extends Error {
+  readonly code: string
+  readonly retryable: boolean
+
+  constructor(code: string, retryable: boolean, cause?: unknown) {
+    super(`Email provider rejected the message: ${code}`, { cause })
+    this.name = 'EmailDeliveryError'
+    this.code = code
+    this.retryable = retryable
   }
+}
+
+async function deliverEmail(
+  payload: CreateEmailOptions,
+  requestOptions?: CreateEmailRequestOptions,
+): Promise<string> {
+  const client = getResendClient()
+  const result = requestOptions
+    ? await client.emails.send(payload, requestOptions)
+    : await client.emails.send(payload)
+  if (result.error) {
+    const statusCode = result.error.statusCode
+    const retryable = result.error.name === 'concurrent_idempotent_requests' ||
+      statusCode === null || statusCode === 429 || statusCode >= 500
+    throw new EmailDeliveryError(result.error.name, retryable, result.error)
+  }
+  if (!result.data?.id) throw new EmailDeliveryError('missing_message_id', true)
+  return result.data.id
+}
+
+export async function sendSchedulingConfirmationEmail(
+  options: SchedulingConfirmationEmailContentInput & { to: string; idempotencyKey: string },
+) {
+  const content = renderSchedulingConfirmationEmail(options)
+  const providerMessageId = await deliverEmail({
+    from: EMAIL_FROM,
+    to: options.to,
+    subject: content.subject,
+    html: content.html,
+    text: content.text,
+    attachments: [{
+      filename: content.calendarFilename,
+      content: Buffer.from(content.calendarAttachment, 'utf8').toString('base64'),
+      contentType: 'text/calendar; charset=utf-8; method=PUBLISH',
+    }],
+    tags: [{ name: 'category', value: 'scheduling-confirmation' }],
+  }, { idempotencyKey: options.idempotencyKey })
+  return { providerMessageId }
 }
 
 export async function sendResetPasswordEmail(options: {
