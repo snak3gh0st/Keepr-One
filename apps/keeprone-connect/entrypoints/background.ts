@@ -93,6 +93,7 @@ import {
   writeCommandState,
   writeSyncState,
 } from '../lib/state'
+import { commandExecutorFor } from '../lib/command-executor'
 
 type ActiveNavigation = {
   type: 'BEGIN_GRID' | 'CAPTURE_PAGE' | 'BEGIN_EXPORT'
@@ -1161,9 +1162,10 @@ async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?
         return
       }
       dispatch = parseConnectorCommandDispatch(raw)
-      const executor = dispatch.command.capability === 'GENERATE_ILLUSTRATION'
+      const executorKind = commandExecutorFor(dispatch.command.capability)
+      const executor = executorKind === 'FORESIGHT'
         ? executeForesightCommand
-        : dispatch.command.capability === 'FLEXLIFE_QUOTE'
+        : executorKind === 'FLEXLIFE_QUOTE'
           ? executeFlexLifeQuoteCommand
           : executePolicyDetailCommand
       await executor(dispatch, {

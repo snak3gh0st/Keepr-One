@@ -118,6 +118,26 @@ describe('CarrierSyncBadge', () => {
     expect(presence.querySelector('[data-activity="combined"]')).toBeInTheDocument()
   })
 
+  it('keeps Application visible as an independent third activity', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        state: { kind: 'IN_SYNC' },
+        sync: { runId: 'run-1', completed: 3, total: 9, shouldPoll: true },
+        illustration: { id: 'ill-1', state: 'WORKING', updatedAt: '2026-08-27T15:00:00.000Z' },
+        application: { id: 'app-1', caseId: 'case-1', state: 'WORKING', updatedAt: '2026-08-27T15:01:00.000Z' },
+      }),
+    })))
+
+    render(<CarrierSyncBadge />)
+    await screen.findByLabelText('K-Bot status')
+    expect(screen.getByLabelText('K-Bot status')).toHaveTextContent('I am handling more than one task for you')
+    await userEvent.click(screen.getByRole('button', { name: 'View K-Bot activity' }))
+    expect(screen.getByText('Updating your data')).toBeInTheDocument()
+    expect(screen.getByText('Preparing your illustration')).toBeInTheDocument()
+    expect(screen.getByText('Preparing your Application')).toBeInTheDocument()
+  })
+
   it('keeps the sync moving while clearly asking for the illustration login', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,

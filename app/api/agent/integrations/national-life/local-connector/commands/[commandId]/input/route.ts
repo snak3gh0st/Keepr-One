@@ -62,6 +62,23 @@ export async function POST(
           })
         },
       },
+      {
+        async findOwnedApplication(input) {
+          return prisma.application.findFirst({
+            where: {
+              id: input.applicationId,
+              insuranceCase: { assignedAgentId: input.agentId },
+            },
+            select: {
+              id: true,
+              automationState: true,
+              dossier: true,
+              dossierHash: true,
+              reviewedAt: true,
+            },
+          })
+        },
+      },
       { ...device, commandId, now: new Date() },
     )
     return Response.json(result, { status: 200, headers: NO_STORE })

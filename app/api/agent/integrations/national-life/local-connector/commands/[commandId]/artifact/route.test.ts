@@ -64,7 +64,7 @@ describe('local connector illustration artifact route', () => {
     expect(mocks.verify).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       method: 'PUT', body: pdf,
     }))
-    expect(mocks.read).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+    expect(mocks.read).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), {
       agentId: 'agent_1', deviceId: 'device_1', commandId, now: expect.any(Date),
     })
     expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({

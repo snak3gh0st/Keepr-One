@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getStripeClient } from '@/lib/stripe/client'
 import { syncStripePlatformSubscription } from '@/lib/stripe/platform-subscription'
+import { syncStripeApplicationAddonSubscription } from '@/lib/stripe/application-addon-subscription'
 
 export const runtime = 'nodejs'
 
@@ -10,6 +11,15 @@ function subscriptionIdFromCheckout(value: unknown): string | null {
     return value.id
   }
   return null
+}
+
+async function syncSubscription(stripeSubscriptionId: string): Promise<void> {
+  const subscription = await getStripeClient().subscriptions.retrieve(stripeSubscriptionId)
+  if (subscription.metadata.keeprOnePlatformAddonSubscriptionId) {
+    await syncStripeApplicationAddonSubscription(stripeSubscriptionId)
+    return
+  }
+  await syncStripePlatformSubscription(stripeSubscriptionId)
 }
 
 export async function POST(request: Request) {
@@ -33,7 +43,7 @@ export async function POST(request: Request) {
   try {
     if (event.type === 'checkout.session.completed') {
       const subscriptionId = subscriptionIdFromCheckout(event.data.object.subscription)
-      if (subscriptionId) await syncStripePlatformSubscription(subscriptionId)
+      if (subscriptionId) await syncSubscription(subscriptionId)
     } else if (
       event.type === 'customer.subscription.created' ||
       event.type === 'customer.subscription.updated' ||
@@ -41,7 +51,7 @@ export async function POST(request: Request) {
       event.type === 'customer.subscription.paused' ||
       event.type === 'customer.subscription.resumed'
     ) {
-      await syncStripePlatformSubscription(event.data.object.id)
+      await syncSubscription(event.data.object.id)
     }
   } catch (error) {
     console.error('Stripe subscription webhook failed', {

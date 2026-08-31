@@ -37,6 +37,15 @@ import {
   flexLifeQuoteInputHash,
   type FlexLifeQuoteSnapshotV1,
 } from '../flexlife-quote-contract'
+import {
+  parseApplicationDossier,
+  sha256ApplicationDossier,
+  type ApplicationDossierV1,
+} from '@/lib/application-addon/dossier-contract'
+import {
+  parseIgoApplicationDraftReceipt,
+  type IgoApplicationDraftReceipt,
+} from '@/lib/application-addon/igo-receipt'
 
 export type LocalConnectorCommandCandidate = {
   id: string
@@ -84,6 +93,26 @@ export type ForesightIllustrationInputRepository = {
   } | null>
 }
 
+export type ApplicationDraftInputRepository = {
+  findOwnedApplication(input: {
+    agentId: string
+    applicationId: string
+  }): Promise<{
+    id: string
+    automationState: string
+    dossier: unknown
+    dossierHash: string | null
+    reviewedAt: Date | null
+  } | null>
+}
+
+export type ApplicationDraftSnapshotV1 = {
+  schemaVersion: 1
+  applicationId: string
+  payloadHash: string
+  dossier: ApplicationDossierV1
+}
+
 export type ForesightArtifactRepository = {
   findOwnedArtifact(input: { agentId: string; illustrationId: string }): Promise<{
     provider: string | null
@@ -108,6 +137,19 @@ export type FlexLifeQuoteResultRepository = {
     illustrationId: string
     inputHash: string
     response: Record<string, unknown>
+  }): Promise<void>
+}
+
+export type ApplicationDraftReceiptRepository = {
+  persistOwnedDraftReceipt(input: {
+    agentId: string
+    applicationId: string
+    receipt: IgoApplicationDraftReceipt
+  }): Promise<void>
+  persistOwnedDraftFailure?(input: {
+    agentId: string
+    applicationId: string
+    safeErrorCode: string
   }): Promise<void>
 }
 
@@ -178,10 +220,12 @@ export async function claimNextConnectorCommand(
 export async function readDeviceConnectorCommandInput(
   repository: LocalConnectorCommandDispatchRepository,
   illustrationRepository: ForesightIllustrationInputRepository,
+  applicationRepository: Partial<ApplicationDraftInputRepository>,
   input: { agentId: string; deviceId: string; commandId: string; now?: Date },
 ): Promise<{
   inputHash: string
-  snapshot: ForesightIllustrationSnapshot | ForesightTermIllustrationSnapshotV1 | FlexLifeQuoteSnapshotV1
+  snapshot: ForesightIllustrationSnapshot | ForesightTermIllustrationSnapshotV1 |
+    FlexLifeQuoteSnapshotV1 | ApplicationDraftSnapshotV1
 }> {
   const command = await repository.findDeviceOwned(input)
   const now = input.now ?? new Date()
@@ -189,12 +233,50 @@ export async function readDeviceConnectorCommandInput(
     throw new ConnectorCommandError('COMMAND_NOT_FOUND')
   }
   if (command.expiresAt <= now) throw new ConnectorCommandError('COMMAND_EXPIRED')
-  if (
-    !['GENERATE_ILLUSTRATION', 'FLEXLIFE_QUOTE'].includes(command.capability) ||
-    command.confirmationState !== 'APPROVED' ||
-    !['QUEUED', 'RUNNING', 'AUTH_REQUIRED'].includes(command.state)
-  ) throw new ConnectorCommandError('COMMAND_NOT_FOUND')
+  if (command.confirmationState !== 'APPROVED' ||
+    !['QUEUED', 'RUNNING', 'AUTH_REQUIRED'].includes(command.state)) {
+    throw new ConnectorCommandError('COMMAND_NOT_FOUND')
+  }
   const publicCommand = toPublicCommand(command)
+  if (command.capability === 'PREPARE_APPLICATION_DRAFT') {
+    if (
+      publicCommand.target?.kind !== 'APPLICATION' ||
+      !('applicationId' in publicCommand.params) ||
+      !('payloadHash' in publicCommand.params) ||
+      publicCommand.params.applicationId !== publicCommand.target.id ||
+      !applicationRepository.findOwnedApplication
+    ) throw new ConnectorCommandError('COMMAND_INVALID')
+    const application = await applicationRepository.findOwnedApplication({
+      agentId: input.agentId,
+      applicationId: publicCommand.target.id,
+    })
+    if (!application || application.automationState !== 'PREPARING_DRAFT' ||
+      !application.reviewedAt || !application.dossierHash) {
+      throw new ConnectorCommandError('COMMAND_NOT_FOUND')
+    }
+    let dossier: ApplicationDossierV1
+    try {
+      dossier = parseApplicationDossier(application.dossier)
+    } catch {
+      throw new ConnectorCommandError('COMMAND_INVALID')
+    }
+    const payloadHash = sha256ApplicationDossier(dossier)
+    if (payloadHash !== application.dossierHash || payloadHash !== publicCommand.params.payloadHash) {
+      throw new ConnectorCommandError('COMMAND_INVALID')
+    }
+    return {
+      inputHash: payloadHash,
+      snapshot: {
+        schemaVersion: 1,
+        applicationId: application.id,
+        payloadHash,
+        dossier,
+      },
+    }
+  }
+  if (!['GENERATE_ILLUSTRATION', 'FLEXLIFE_QUOTE'].includes(command.capability)) {
+    throw new ConnectorCommandError('COMMAND_NOT_FOUND')
+  }
   if (
     publicCommand.target?.kind !== 'ILLUSTRATION' ||
     !('illustrationId' in publicCommand.params) ||
@@ -239,6 +321,7 @@ export async function recordDeviceConnectorCommandEvent(
     policyDetailRepository?: PolicyDetailRepository
     foresightArtifactRepository?: ForesightArtifactRepository
     flexLifeQuoteRepository?: FlexLifeQuoteResultRepository
+    applicationDraftReceiptRepository?: ApplicationDraftReceiptRepository
     deploymentScope?: string
   },
 ): Promise<void> {
@@ -334,6 +417,43 @@ export async function recordDeviceConnectorCommandEvent(
       illustrationId: publicCommand.target.id,
       inputHash: publicCommand.params.inputHash,
       response: (quote as Record<string, unknown>).response as Record<string, unknown>,
+    })
+  }
+  if (event.type === 'DATA_BATCH' && command.capability === 'PREPARE_APPLICATION_DRAFT') {
+    const publicCommand = toPublicCommand(command)
+    const payload = event.payload
+    const receipt = payload && Object.keys(payload).length === 1 &&
+      Object.hasOwn(payload, 'applicationDraft')
+      ? parseIgoApplicationDraftReceipt(payload.applicationDraft)
+      : null
+    if (
+      publicCommand.target?.kind !== 'APPLICATION' ||
+      !('payloadHash' in publicCommand.params) ||
+      !receipt ||
+      receipt.applicationId !== publicCommand.target.id ||
+      receipt.payloadHash !== publicCommand.params.payloadHash ||
+      !input.applicationDraftReceiptRepository
+    ) throw new ConnectorCommandError('EVENT_INVALID')
+    await input.applicationDraftReceiptRepository.persistOwnedDraftReceipt({
+      agentId: input.agentId,
+      applicationId: publicCommand.target.id,
+      receipt,
+    })
+  }
+  if (command.capability === 'PREPARE_APPLICATION_DRAFT' && event.type === 'COMMAND_COMPLETED' &&
+    !command.events.some((existing) => existing.type === 'DATA_BATCH')) {
+    throw new ConnectorCommandError('EVENT_INVALID')
+  }
+  if (command.capability === 'PREPARE_APPLICATION_DRAFT' && event.type === 'COMMAND_FAILED') {
+    const publicCommand = toPublicCommand(command)
+    if (publicCommand.target?.kind !== 'APPLICATION' ||
+      !input.applicationDraftReceiptRepository?.persistOwnedDraftFailure) {
+      throw new ConnectorCommandError('EVENT_INVALID')
+    }
+    await input.applicationDraftReceiptRepository.persistOwnedDraftFailure({
+      agentId: input.agentId,
+      applicationId: publicCommand.target.id,
+      safeErrorCode: event.error?.code ?? 'IGO_DRAFT_FAILED',
     })
   }
 

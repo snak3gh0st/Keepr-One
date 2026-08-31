@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   sanitizeStatus: vi.fn(),
   commandFindFirst: vi.fn(),
   illustrationFindFirst: vi.fn(),
+  applicationFindFirst: vi.fn(),
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
@@ -17,6 +18,7 @@ vi.mock('@/lib/prisma', () => ({
     browserAutomationJob: { count: mocks.count },
     nationalLifeConnectorCommand: { findFirst: mocks.commandFindFirst },
     illustration: { findFirst: mocks.illustrationFindFirst },
+    application: { findFirst: mocks.applicationFindFirst },
   },
 }))
 vi.mock('@/lib/national-life/local-connector/config', () => ({
@@ -45,6 +47,7 @@ beforeEach(() => {
   mocks.sanitizeStatus.mockImplementation(async (_agentId, status) => status)
   mocks.commandFindFirst.mockResolvedValue(null)
   mocks.illustrationFindFirst.mockResolvedValue(null)
+  mocks.applicationFindFirst.mockResolvedValue(null)
 })
 
 describe('carrier sync badge route', () => {
@@ -152,6 +155,30 @@ describe('carrier sync badge route', () => {
       id: 'ill-1',
       state: 'READY',
       updatedAt: '2026-08-27T15:02:00.000Z',
+    })
+  })
+
+  it('reports an Application independently from a simultaneous sync and illustration', async () => {
+    mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0)
+    mocks.commandFindFirst
+      .mockResolvedValueOnce({
+        state: 'RUNNING', target: { kind: 'ILLUSTRATION', id: 'ill-1' },
+        expiresAt: new Date('2027-08-27T17:00:00.000Z'),
+        updatedAt: new Date('2026-08-27T15:00:00.000Z'),
+      })
+      .mockResolvedValueOnce({
+        state: 'RUNNING', target: { kind: 'APPLICATION', id: 'app-1' },
+        expiresAt: new Date('2027-08-27T17:00:00.000Z'),
+        updatedAt: new Date('2026-08-27T15:01:00.000Z'),
+      })
+    mocks.applicationFindFirst.mockResolvedValue({ caseId: 'case-1', automationState: 'PREPARING_DRAFT' })
+
+    const body = await (await GET()).json()
+
+    expect(body.illustration.state).toBe('WORKING')
+    expect(body.application).toEqual({
+      id: 'app-1', caseId: 'case-1', state: 'WORKING',
+      updatedAt: '2026-08-27T15:01:00.000Z',
     })
   })
 

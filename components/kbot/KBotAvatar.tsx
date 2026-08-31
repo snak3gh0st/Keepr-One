@@ -5,7 +5,7 @@ import { useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
 export type KBotState = 'idle' | 'working' | 'waiting' | 'success' | 'error'
-export type KBotActivityMode = 'idle' | 'sync' | 'illustration' | 'combined'
+export type KBotActivityMode = 'idle' | 'sync' | 'illustration' | 'application' | 'combined'
 export type KBotTask = {
   id: string
   label: string
@@ -118,7 +118,7 @@ function KBotCharacter({
   state: KBotState
   activity?: KBotActivityMode
 }) {
-  const carriesPaper = activity === 'illustration' || activity === 'combined'
+  const carriesPaper = activity === 'illustration' || activity === 'application' || activity === 'combined'
 
   return (
     <span

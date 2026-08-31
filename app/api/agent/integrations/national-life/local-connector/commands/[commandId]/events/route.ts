@@ -26,6 +26,8 @@ import {
 import { prisma } from '@/lib/prisma'
 import { createPrismaPolicyDetailRepository } from '@/lib/national-life/policy-detail-prisma'
 import { createFlexLifeQuoteResultRepository } from '@/lib/national-life/flexlife-quote-result'
+import type { IgoApplicationDraftReceipt } from '@/lib/application-addon/igo-receipt'
+import { createHash } from 'node:crypto'
 
 const MAX_BODY_BYTES = 64 * 1024
 const NO_STORE = { 'Cache-Control': 'no-store' }
@@ -90,6 +92,84 @@ const foresightArtifactRepository = {
     if (updated.count !== 1) throw new ConnectorCommandError('EVENT_INVALID')
   },
 }
+const applicationDraftReceiptRepository = {
+  async persistOwnedDraftReceipt(input: {
+    agentId: string
+    applicationId: string
+    receipt: IgoApplicationDraftReceipt
+  }) {
+    await prisma.$transaction(async (tx) => {
+      const application = await tx.application.findFirst({
+        where: {
+          id: input.applicationId,
+          insuranceCase: { assignedAgentId: input.agentId },
+        },
+        select: { id: true, dossierHash: true, automationState: true },
+      })
+      if (!application || application.dossierHash !== input.receipt.payloadHash ||
+        application.automationState !== 'PREPARING_DRAFT') {
+        throw new ConnectorCommandError('EVENT_INVALID')
+      }
+      await tx.application.update({
+        where: { id: application.id },
+        data: {
+          provider: 'IPIPELINE_IGO',
+          externalId: input.receipt.externalApplicationId,
+          carrierReceipt: input.receipt,
+          automationState: input.receipt.missingQuestions.length
+            ? 'NEEDS_INFORMATION'
+            : 'DRAFT_READY',
+          safeErrorCode: null,
+          sourceUpdatedAt: new Date(),
+        },
+      })
+      for (const question of input.receipt.missingQuestions) {
+        const externalId = createHash('sha256')
+          .update(`${input.receipt.externalApplicationId}:${question.section}:${question.label}`)
+          .digest('hex')
+        await tx.applicationRequirement.upsert({
+          where: { provider_externalId: { provider: 'IPIPELINE_IGO', externalId } },
+          create: {
+            applicationId: application.id,
+            provider: 'IPIPELINE_IGO',
+            externalId,
+            title: question.label,
+            description: question.allowedValues?.length
+              ? `${question.section} · Opções: ${question.allowedValues.join(', ')}`
+              : question.section,
+            sourceUpdatedAt: new Date(),
+          },
+          update: {
+            status: 'OPEN',
+            title: question.label,
+            description: question.allowedValues?.length
+              ? `${question.section} · Opções: ${question.allowedValues.join(', ')}`
+              : question.section,
+            sourceUpdatedAt: new Date(),
+          },
+        })
+      }
+    })
+  },
+  async persistOwnedDraftFailure(input: {
+    agentId: string
+    applicationId: string
+    safeErrorCode: string
+  }) {
+    const updated = await prisma.application.updateMany({
+      where: {
+        id: input.applicationId,
+        insuranceCase: { assignedAgentId: input.agentId },
+        automationState: 'PREPARING_DRAFT',
+      },
+      data: {
+        automationState: 'FAILED',
+        safeErrorCode: input.safeErrorCode.slice(0, 80),
+      },
+    })
+    if (updated.count !== 1) throw new ConnectorCommandError('EVENT_INVALID')
+  },
+}
 
 function commandErrorResponse(error: ConnectorCommandError): Response {
   const status = error.code === 'COMMAND_NOT_FOUND' ? 404
@@ -129,6 +209,7 @@ export async function POST(
         policyDetailRepository,
         foresightArtifactRepository,
         flexLifeQuoteRepository,
+        applicationDraftReceiptRepository,
         deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
       },
     )

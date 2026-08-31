@@ -19,6 +19,13 @@ type IllustrationActivity = {
   updatedAt: Date
 }
 
+type ApplicationActivity = {
+  id: string
+  caseId: string
+  state: 'WORKING' | 'NEEDS_YOU' | 'READY' | 'FAILED'
+  updatedAt: Date
+}
+
 function illustrationTargetId(target: unknown): string | null {
   if (!target || typeof target !== 'object' || Array.isArray(target)) return null
   const candidate = target as Record<string, unknown>
@@ -57,6 +64,45 @@ async function illustrationActivity(agentId: string, command: {
   return null
 }
 
+async function applicationActivity(agentId: string, command: {
+  state: string
+  target: unknown
+  expiresAt: Date
+  updatedAt: Date
+} | null): Promise<ApplicationActivity | null> {
+  if (!command) return null
+  const target = command.target && typeof command.target === 'object' && !Array.isArray(command.target)
+    ? command.target as Record<string, unknown>
+    : null
+  const id = target?.kind === 'APPLICATION' && typeof target.id === 'string' ? target.id : null
+  if (!id) return null
+  if (command.expiresAt <= new Date() &&
+    ['QUEUED', 'RUNNING', 'AUTH_REQUIRED', 'WAITING_FOR_CONFIRMATION', 'PAUSED'].includes(command.state)) {
+    return null
+  }
+  const application = await prisma.application.findFirst({
+    where: { id, insuranceCase: { assignedAgentId: agentId } },
+    select: { caseId: true, automationState: true },
+  })
+  if (!application) return null
+  const base = { id, caseId: application.caseId, updatedAt: command.updatedAt }
+  if (command.state === 'AUTH_REQUIRED') return { ...base, state: 'NEEDS_YOU' }
+  if (['QUEUED', 'RUNNING', 'WAITING_FOR_CONFIRMATION', 'PAUSED'].includes(command.state)) {
+    return { ...base, state: 'WORKING' }
+  }
+  if (command.state === 'COMPLETED') {
+    return {
+      ...base,
+      state: ['DRAFT_READY', 'NEEDS_INFORMATION', 'READY_TO_SUBMIT', 'SUBMITTED']
+        .includes(application.automationState) ? 'READY' : 'FAILED',
+    }
+  }
+  if (command.state === 'FAILED' || command.state === 'CANCELLED') {
+    return { ...base, state: 'FAILED' }
+  }
+  return null
+}
+
 /// A compact, user-owned activity snapshot for the global shell. The client
 /// only polls this route while an operation is active, so idle accounts remain
 /// quiet while a running sync and illustration can be represented together.
@@ -72,7 +118,7 @@ export async function GET() {
   }
   try {
     const agent = await getCurrentAgent()
-    const [working, blocked, rawSync, latestIllustrationCommand] = await Promise.all([
+    const [working, blocked, rawSync, latestIllustrationCommand, latestApplicationCommand] = await Promise.all([
       prisma.browserAutomationJob.count({
         where: {
           agentId: agent.id,
@@ -100,14 +146,24 @@ export async function GET() {
         orderBy: { createdAt: 'desc' },
         select: { state: true, target: true, expiresAt: true, updatedAt: true },
       }),
+      prisma.nationalLifeConnectorCommand.findFirst({
+        where: {
+          agentId: agent.id,
+          capability: { in: ['PREPARE_APPLICATION_DRAFT', 'SUBMIT_APPLICATION'] },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { state: true, target: true, expiresAt: true, updatedAt: true },
+      }),
     ])
     const sync = await sanitizeNationalLifeSyncStatusForAgent(agent.id, rawSync)
     const illustration = await illustrationActivity(agent.id, latestIllustrationCommand)
+    const application = await applicationActivity(agent.id, latestApplicationCommand)
     return NextResponse.json({
       state: carrierSyncState({ working, blocked }),
       connector,
       ...(sync ? { sync } : {}),
       ...(illustration ? { illustration } : {}),
+      ...(application ? { application } : {}),
     })
   } catch {
     // A badge that does not know what it is saying is worse than no badge —

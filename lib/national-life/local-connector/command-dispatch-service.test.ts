@@ -144,14 +144,14 @@ describe('local connector command dispatch', () => {
     }))
     const illustrationRepository = { findOwnedIllustration: vi.fn().mockResolvedValue(illustration) }
 
-    await expect(readDeviceConnectorCommandInput(repo, illustrationRepository, {
+    await expect(readDeviceConnectorCommandInput(repo, illustrationRepository, {}, {
       agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
     })).resolves.toMatchObject({ inputHash: hash, snapshot: { illustrationId: illustration.id } })
     expect(illustrationRepository.findOwnedIllustration).toHaveBeenCalledWith({
       agentId: 'agent_1', illustrationId: illustration.id,
     })
 
-    await expect(readDeviceConnectorCommandInput(repo, illustrationRepository, {
+    await expect(readDeviceConnectorCommandInput(repo, illustrationRepository, {}, {
       agentId: 'agent_1', deviceId: 'device_2', commandId: 'cmd_1', now,
     })).rejects.toThrow('COMMAND_NOT_FOUND')
   })
@@ -187,7 +187,7 @@ describe('local connector command dispatch', () => {
 
     await expect(readDeviceConnectorCommandInput(repo, {
       findOwnedIllustration: vi.fn().mockResolvedValue(illustration),
-    }, {
+    }, {}, {
       agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
     })).resolves.toEqual({ inputHash, snapshot })
   })
@@ -222,9 +222,51 @@ describe('local connector command dispatch', () => {
     }))
     const illustrationRepository = { findOwnedIllustration: vi.fn().mockResolvedValue(illustration) }
 
-    await expect(readDeviceConnectorCommandInput(repo, illustrationRepository, {
+    await expect(readDeviceConnectorCommandInput(repo, illustrationRepository, {}, {
       agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
     })).resolves.toEqual({ inputHash, snapshot })
+  })
+
+  it('returns only the reviewed Application dossier sealed to the approved hash', async () => {
+    const { sha256ApplicationDossier } = await import('@/lib/application-addon/dossier-contract')
+    const dossier = {
+      version: 1 as const,
+      insured: {
+        firstName: 'Keepr', lastName: 'Test', birthDate: '1990-01-01',
+        sexAtBirth: 'MALE' as const, email: 'keepr@example.com', phone: '+13055550123',
+      },
+      address: { line1: '1 Main St', city: 'Miami', state: 'FL', postalCode: '33101' },
+      owner: { sameAsInsured: true, relationship: 'SELF' as const },
+      beneficiaries: [{ fullName: 'Test Beneficiary', relationship: 'Spouse', sharePercent: 100 }],
+      coverage: { product: 'IUL' as const, faceAmount: 250_000, premiumMode: 'MONTHLY' as const, plannedPremium: 500 },
+      existingCoverage: { hasExisting: false, replacementExpected: false },
+      documents: [{ documentId: 'doc_1', type: 'IDENTITY' as const, contentHash: 'c'.repeat(64) }],
+      consent: { clientAuthorizedCollection: true, agentAttestedAccuracy: true },
+    }
+    const payloadHash = sha256ApplicationDossier(dossier)
+    const repo = repository(candidate({
+      capability: 'PREPARE_APPLICATION_DRAFT',
+      target: { kind: 'APPLICATION', id: 'application_1' },
+      params: { applicationId: 'application_1', payloadHash },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+    }))
+    const applicationRepository = {
+      findOwnedApplication: vi.fn().mockResolvedValue({
+        id: 'application_1', automationState: 'PREPARING_DRAFT', dossier,
+        dossierHash: payloadHash, reviewedAt: now,
+      }),
+    }
+
+    await expect(readDeviceConnectorCommandInput(
+      repo,
+      { findOwnedIllustration: vi.fn() },
+      applicationRepository,
+      { agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now },
+    )).resolves.toEqual({
+      inputHash: payloadHash,
+      snapshot: { schemaVersion: 1, applicationId: 'application_1', payloadHash, dossier },
+    })
   })
 
   it('refuses an expired or cross-device candidate even if a repository returns it', async () => {
@@ -475,6 +517,93 @@ describe('local connector command dispatch', () => {
       },
     })).resolves.toBeUndefined()
     expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ payload: { illustration: receipt } }))
+  })
+
+  it('persists an iGO draft read-back and carrier questions before accepting the event', async () => {
+    const payloadHash = 'a'.repeat(64)
+    const receipt = {
+      applicationId: 'application_1', payloadHash, draftReadBackHash: 'b'.repeat(64),
+      externalApplicationId: 'IGO-123', carrierStatus: 'Draft',
+      confirmedValues: { insuredName: 'Keepr Test', birthDate: '1990-01-01', product: 'IUL', faceAmount: 250_000, plannedPremium: 500, premiumMode: 'MONTHLY' },
+      changes: [],
+      missingQuestions: [{ section: 'Medical', label: 'Has the client used tobacco?' }],
+    }
+    const repo = repository(candidate({
+      capability: 'PREPARE_APPLICATION_DRAFT',
+      target: { kind: 'APPLICATION', id: 'application_1' },
+      params: { applicationId: 'application_1', payloadHash },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+      events: [{ sequence: 0 }, { sequence: 1 }],
+    }))
+    const applicationDraftReceiptRepository = {
+      persistOwnedDraftReceipt: vi.fn().mockResolvedValue(undefined),
+    }
+
+    await recordDeviceConnectorCommandEvent(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
+      event: {
+        protocolVersion: 1, eventId: 'event_application_1', commandId: 'cmd_1', runId: 'run_1',
+        sequence: 2, type: 'DATA_BATCH', emittedAt: now.toISOString(),
+        payload: { applicationDraft: receipt }, error: null,
+      },
+      applicationDraftReceiptRepository,
+    })
+
+    expect(applicationDraftReceiptRepository.persistOwnedDraftReceipt).toHaveBeenCalledWith({
+      agentId: 'agent_1', applicationId: 'application_1', receipt,
+    })
+    expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      sequence: 2, type: 'DATA_BATCH', payload: { applicationDraft: receipt },
+    }))
+  })
+
+  it('does not complete an Application command without a carrier read-back', async () => {
+    const repo = repository(candidate({
+      capability: 'PREPARE_APPLICATION_DRAFT',
+      target: { kind: 'APPLICATION', id: 'application_1' },
+      params: { applicationId: 'application_1', payloadHash: 'a'.repeat(64) },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+      events: [{ sequence: 0, type: 'COMMAND_ACCEPTED' }, { sequence: 1, type: 'COMMAND_STARTED' }],
+    }))
+
+    await expect(recordDeviceConnectorCommandEvent(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
+      event: {
+        protocolVersion: 1, eventId: 'event_application_done', commandId: 'cmd_1', runId: 'run_1',
+        sequence: 2, type: 'COMMAND_COMPLETED', emittedAt: now.toISOString(), payload: null, error: null,
+      },
+    })).rejects.toThrow('EVENT_INVALID')
+  })
+
+  it('moves only the owned Application to a safe failed state after executor failure', async () => {
+    const repo = repository(candidate({
+      capability: 'PREPARE_APPLICATION_DRAFT',
+      target: { kind: 'APPLICATION', id: 'application_1' },
+      params: { applicationId: 'application_1', payloadHash: 'a'.repeat(64) },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+      events: [{ sequence: 0, type: 'COMMAND_ACCEPTED' }, { sequence: 1, type: 'COMMAND_STARTED' }],
+    }))
+    const applicationDraftReceiptRepository = {
+      persistOwnedDraftReceipt: vi.fn(),
+      persistOwnedDraftFailure: vi.fn().mockResolvedValue(undefined),
+    }
+
+    await recordDeviceConnectorCommandEvent(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
+      event: {
+        protocolVersion: 1, eventId: 'event_application_failed', commandId: 'cmd_1', runId: 'run_1',
+        sequence: 2, type: 'COMMAND_FAILED', emittedAt: now.toISOString(), payload: null,
+        error: { code: 'IGO_REQUIRED_FIELD_UNKNOWN', safeMessage: 'O iGO pediu uma resposta que ainda não foi mapeada.' },
+      },
+      applicationDraftReceiptRepository,
+    })
+
+    expect(applicationDraftReceiptRepository.persistOwnedDraftFailure).toHaveBeenCalledWith({
+      agentId: 'agent_1', applicationId: 'application_1', safeErrorCode: 'IGO_REQUIRED_FIELD_UNKNOWN',
+    })
   })
 
   it('refuses a Term receipt when it names a carrier other than the persisted illustration', async () => {

@@ -41,6 +41,7 @@ import {
   rescheduleCaseFollowUp,
   scheduleCaseFollowUp,
 } from "./actions";
+import { ApplicationDossier } from "./ApplicationDossier";
 
 const CalendarEventModal = dynamic(
   () =>
@@ -51,7 +52,23 @@ const CalendarEventModal = dynamic(
 );
 
 type Requirement = { id: string; title: string; status: string };
-type Application = { id: string; status: string; requirements: Requirement[] };
+type Application = {
+  id: string;
+  status: string;
+  automationState: string;
+  dossier: unknown;
+  dossierHash: string | null;
+  reviewedAt: string | null;
+  externalId: string | null;
+  carrierReceipt: unknown;
+  documents: Array<{
+    id: string;
+    type: string;
+    filename: string;
+    reviewedAt: string | null;
+  }>;
+  requirements: Requirement[];
+};
 
 type CaseData = {
   id: string;
@@ -78,6 +95,11 @@ type CaseData = {
   agentName: string;
   illustrations: { id: string; kind: string; productName: string | null; faceAmount: string | null; premium: string | null }[];
   applications: Application[];
+  applicationAddon: {
+    entitled: boolean;
+    status: string | null;
+    canAutomate: boolean;
+  };
   policies: { id: string; policyNumber: string; carrier: string; product: string; status: string }[];
   timeline: {
     id: string;
@@ -420,11 +442,16 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
             </Button>
           </div>
         ) : (
-          <ul className="space-y-2">
+          <div className="space-y-4">
             {c.applications.map((app) => (
-              <li key={app.id} className="text-sm text-ink">Aplicação · {app.status}</li>
+              <ApplicationDossier
+                key={app.id}
+                application={app}
+                addon={c.applicationAddon}
+                prospect={c.prospect}
+              />
             ))}
-          </ul>
+          </div>
         )}
       </Section>
 

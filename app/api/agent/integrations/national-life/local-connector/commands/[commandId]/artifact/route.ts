@@ -60,6 +60,7 @@ export async function PUT(
           })
         },
       },
+      {},
       { ...device, commandId: params.commandId, now: new Date() },
     )
     if (!('carrierCaseName' in approved.snapshot)) {
