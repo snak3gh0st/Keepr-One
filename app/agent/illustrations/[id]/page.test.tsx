@@ -186,6 +186,45 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('$4,200.00 por ano')).toBeTruthy()
   })
 
+  it('shows the official Term premium instead of empty IUL input fields', async () => {
+    mocks.findFirstIllustration.mockResolvedValue({
+      id: 'illustration-term-result',
+      createdAt: new Date('2026-08-31T18:27:54.748Z'),
+      insuredName: 'KBot Illustration Term Test',
+      insuredDateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+      productName: 'LSW Term',
+      faceAmount: 500_000,
+      premium: 62.92,
+      targetPremium: 62.92,
+      targetPremiumSource: 'CARRIER_CALCULATED_FOR_TERM',
+      documentFetchedAt: new Date('2026-08-31T20:46:47.317Z'),
+      documentMimeType: 'application/pdf',
+      caseId: null,
+      rawPayload: {
+        foresightTermDraft: {
+          schemaVersion: 1, carrierProduct: 'LSW Term', firstName: 'KBot',
+          lastName: 'Illustration Term Test', dateOfBirth: '1990-01-01', issueState: 'FL',
+          gender: 'Male', rateClass: 'Standard_NT', faceAmount: 500_000,
+          premiumMode: 'Monthly', termDuration: '20-G',
+        },
+        foresightTermResult: {
+          source: 'OFFICIAL_PDF', premiumMode: 'Monthly', confirmedFaceAmount: 500_000,
+          confirmedMonthlyPremium: 62.92, confirmedAnnualPremium: 755.04,
+        },
+      },
+    })
+
+    render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-term-result' }) }))
+
+    expect(screen.getByText('Resultado confirmado pela National')).toBeTruthy()
+    expect(screen.getByText('Prêmio mensal confirmado')).toBeTruthy()
+    expect(screen.getAllByText('$62.92').length).toBeGreaterThan(0)
+    expect(screen.getByText('Total anual no modo mensal')).toBeTruthy()
+    expect(screen.getByText('$755.04')).toBeTruthy()
+    expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
+    expect(screen.queryByText('Prêmio mensal informado')).toBeNull()
+  })
+
   it('explains when the carrier confirms values different from the agent input', async () => {
     mocks.findFirstIllustration.mockResolvedValue({
       id: 'illustration-adjusted-iul', createdAt: new Date('2026-08-27T12:00:00.000Z'),

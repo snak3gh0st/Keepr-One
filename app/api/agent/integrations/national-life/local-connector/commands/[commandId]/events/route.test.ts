@@ -75,7 +75,11 @@ describe('local connector command event route', () => {
       event,
       now: expect.any(Date),
       policyDetailRepository: { kind: 'policy-detail-repository' },
-      foresightArtifactRepository: expect.objectContaining({ findOwnedArtifact: expect.any(Function) }),
+      foresightArtifactRepository: expect.objectContaining({
+        findOwnedArtifact: expect.any(Function),
+        persistTermResult: expect.any(Function),
+      }),
+      extractTermPremiums: expect.any(Function),
       flexLifeQuoteRepository: expect.objectContaining({ persistOwnedQuoteResult: expect.any(Function) }),
       applicationDraftReceiptRepository: expect.objectContaining({ persistOwnedDraftReceipt: expect.any(Function) }),
       deploymentScope: 'national-life-local-connector',
