@@ -26,6 +26,7 @@ import {
 import { prisma } from '@/lib/prisma'
 import { createPrismaPolicyDetailRepository } from '@/lib/national-life/policy-detail-prisma'
 import { createFlexLifeQuoteResultRepository } from '@/lib/national-life/flexlife-quote-result'
+import { extractForesightTermPremiums } from '@/lib/national-life/foresight-term-pdf'
 import type { IgoApplicationDraftReceipt } from '@/lib/application-addon/igo-receipt'
 import { createHash } from 'node:crypto'
 
@@ -87,6 +88,50 @@ const foresightArtifactRepository = {
               targetPremiumSource: 'FORESIGHT_CALCULATED_FROM_DEATH_BENEFIT',
             }
           : {}),
+      },
+    })
+    if (updated.count !== 1) throw new ConnectorCommandError('EVENT_INVALID')
+  },
+  async persistTermResult(input: {
+    agentId: string
+    illustrationId: string
+    monthlyPremium: number
+    annualPremium: number
+  }) {
+    const existing = await prisma.illustration.findFirst({
+      where: {
+        id: input.illustrationId,
+        agentId: input.agentId,
+        productName: { in: ['NL Term', 'LSW Term'] },
+      },
+      select: { rawPayload: true, faceAmount: true },
+    })
+    const faceAmount = Number(existing?.faceAmount)
+    if (!existing || !Number.isFinite(faceAmount) || faceAmount <= 0) {
+      throw new ConnectorCommandError('EVENT_INVALID')
+    }
+    const rawPayload = existing.rawPayload && typeof existing.rawPayload === 'object' &&
+      !Array.isArray(existing.rawPayload) ? existing.rawPayload : {}
+    const updated = await prisma.illustration.updateMany({
+      where: {
+        id: input.illustrationId,
+        agentId: input.agentId,
+        productName: { in: ['NL Term', 'LSW Term'] },
+      },
+      data: {
+        premium: input.monthlyPremium,
+        targetPremium: input.monthlyPremium,
+        targetPremiumSource: 'CARRIER_CALCULATED_FOR_TERM',
+        rawPayload: {
+          ...rawPayload,
+          foresightTermResult: {
+            source: 'OFFICIAL_PDF',
+            premiumMode: 'Monthly',
+            confirmedFaceAmount: faceAmount,
+            confirmedMonthlyPremium: input.monthlyPremium,
+            confirmedAnnualPremium: input.annualPremium,
+          },
+        },
       },
     })
     if (updated.count !== 1) throw new ConnectorCommandError('EVENT_INVALID')
@@ -208,6 +253,7 @@ export async function POST(
         now: new Date(),
         policyDetailRepository,
         foresightArtifactRepository,
+        extractTermPremiums: extractForesightTermPremiums,
         flexLifeQuoteRepository,
         applicationDraftReceiptRepository,
         deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
