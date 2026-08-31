@@ -44,6 +44,7 @@ CREATE INDEX "PlatformAddonSubscription_stripeCustomerId_idx"
   ON "PlatformAddonSubscription"("stripeCustomerId");
 CREATE INDEX "PlatformAddonSubscription_stripePriceId_idx"
   ON "PlatformAddonSubscription"("stripePriceId");
+
 CREATE UNIQUE INDEX "PlatformAddonSubscription_one_current_agent_addon"
   ON "PlatformAddonSubscription"("agentId", "addon")
   WHERE "status" IN ('TRIALING', 'ACTIVE', 'PAST_DUE');

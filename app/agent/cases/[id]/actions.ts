@@ -24,6 +24,13 @@ import { prismaApplicationDossierRepository } from '@/lib/application-addon/doss
 import { getKBotApplicationEntitlement } from '@/lib/application-addon/entitlement-prisma'
 import type { ApplicationDossierMissingItem } from '@/lib/application-addon/dossier-contract'
 import { validateApplicationDocument } from '@/lib/application-addon/document-service'
+import { planApplicationDraftCommand } from '@/lib/application-addon/command-plan'
+import {
+  approveConnectorCommand,
+  issueConnectorCommand,
+  prismaConnectorCommandRepository,
+} from '@/lib/national-life/connector-command-service'
+import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
 
 type ActionResult = { ok: true } | { ok: false; message: string }
 
@@ -396,6 +403,76 @@ export async function reviewKBotApplicationDossier(
       : code === 'APPLICATION_DOSSIER_INCOMPLETE'
         ? 'Complete as informações obrigatórias antes de revisar.'
         : 'Não foi possível concluir a revisão agora.'
+    return { ok: false, message }
+  }
+}
+
+export async function prepareKBotApplicationDraft(
+  applicationId: string,
+): Promise<ActionResult> {
+  if (!isNationalLifeLocalConnectorEnabled()) {
+    return { ok: false, message: 'Conecte o K-Bot neste navegador para preparar a Application.' }
+  }
+  const agent = await getCurrentAgent()
+  try {
+    const [entitlement, application] = await Promise.all([
+      getKBotApplicationEntitlement(agent.id),
+      prisma.application.findFirst({
+        where: { id: applicationId, insuranceCase: { assignedAgentId: agent.id } },
+        select: {
+          id: true,
+          caseId: true,
+          automationState: true,
+          dossierHash: true,
+          reviewedAt: true,
+          externalId: true,
+          carrierReceipt: true,
+        },
+      }),
+    ])
+    if (!application) return { ok: false, message: 'Aplicação não encontrada.' }
+
+    const commandInput = planApplicationDraftCommand(application, {
+      agentId: agent.id,
+      entitled: entitlement.entitled,
+      expiresAt: new Date(Date.now() + 60 * 60_000),
+    })
+    const issued = await issueConnectorCommand(prismaConnectorCommandRepository, commandInput)
+    const moved = await prisma.application.updateMany({
+      where: {
+        id: application.id,
+        insuranceCase: { assignedAgentId: agent.id },
+        automationState: 'READY_TO_PREPARE',
+        dossierHash: application.dossierHash,
+      },
+      data: { automationState: 'PREPARING_DRAFT', safeErrorCode: null },
+    })
+    if (moved.count !== 1) throw new Error('APPLICATION_STATE_CHANGED')
+
+    await approveConnectorCommand(prismaConnectorCommandRepository, {
+      agentId: agent.id,
+      commandId: issued.command.commandId,
+      payloadHash: issued.payloadHash,
+      confirmedByUserId: agent.userId,
+    })
+    revalidatePath(`/agent/cases/${application.caseId}`)
+    return { ok: true }
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'UNKNOWN'
+    console.error('K_BOT_APPLICATION_PREPARE_FAILED', { code, applicationId })
+    await prisma.application.updateMany({
+      where: {
+        id: applicationId,
+        insuranceCase: { assignedAgentId: agent.id },
+        automationState: 'PREPARING_DRAFT',
+      },
+      data: { automationState: 'READY_TO_PREPARE', safeErrorCode: code.slice(0, 80) },
+    })
+    const message = code === 'K_BOT_APPLICATION_ADDON_REQUIRED'
+      ? 'Ative o add-on K-Bot Application antes de preparar no iGO.'
+      : code === 'APPLICATION_NOT_REVIEWED' || code === 'APPLICATION_NOT_READY'
+        ? 'Revise novamente as informações antes de preparar no iGO.'
+        : 'Não foi possível iniciar a preparação no iGO agora.'
     return { ok: false, message }
   }
 }

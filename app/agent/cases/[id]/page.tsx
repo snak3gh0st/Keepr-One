@@ -114,6 +114,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             dossierHash: app.dossierHash,
             reviewedAt: app.reviewedAt?.toISOString() ?? null,
             externalId: app.externalId,
+            carrierReceipt: app.carrierReceipt,
             documents: app.documents.map((document) => ({
               id: document.id,
               type: document.type,

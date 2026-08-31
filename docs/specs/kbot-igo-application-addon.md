@@ -1,5 +1,9 @@
 # K-Bot iGO Application Add-on
 
+Commercial contract: US$ 9.99 per month per agent, with a 14-day Stripe trial.
+The add-on is a separate licensed subscription; opening Checkout never grants
+access before Stripe reports the subscription as trialing or active.
+
 ## Goal
 
 Let an entitled KeeprOne agent prepare and submit a National Life iGO application through K-Bot without coupling that work to National Life sync or Foresight illustration execution.

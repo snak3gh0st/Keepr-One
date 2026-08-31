@@ -52,7 +52,7 @@ describe('local connector illustration command input route', () => {
     await expect(response.json()).resolves.toEqual({
       inputHash: 'a'.repeat(64), snapshot: { schemaVersion: 1 },
     })
-    expect(mocks.read).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+    expect(mocks.read).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), {
       agentId: 'agent_1', deviceId: 'device_1', commandId, now: expect.any(Date),
     })
   })

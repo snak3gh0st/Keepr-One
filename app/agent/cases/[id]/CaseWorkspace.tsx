@@ -60,6 +60,7 @@ type Application = {
   dossierHash: string | null;
   reviewedAt: string | null;
   externalId: string | null;
+  carrierReceipt: unknown;
   documents: Array<{
     id: string;
     type: string;

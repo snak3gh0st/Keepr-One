@@ -32,10 +32,18 @@ type IllustrationActivity = {
   updatedAt: string
 }
 
+type ApplicationActivity = {
+  id: string
+  caseId: string
+  state: 'WORKING' | 'NEEDS_YOU' | 'READY' | 'FAILED'
+  updatedAt: string
+}
+
 type BadgeResponse = {
   state?: CarrierSyncState | null
   sync?: CompactSyncStatus | null
   illustration?: IllustrationActivity | null
+  application?: ApplicationActivity | null
   connector?: {
     enabled: boolean
     extensionTarget?: string | null
@@ -59,10 +67,12 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
   const [state, setState] = useState<CarrierSyncState | null>(null)
   const [sync, setSync] = useState<CompactSyncStatus | null>(null)
   const [illustration, setIllustration] = useState<IllustrationActivity | null>(null)
+  const [application, setApplication] = useState<ApplicationActivity | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [extensionTarget, setExtensionTarget] = useState<string | null | undefined>(undefined)
   const [connectorState, setConnectorState] = useState<BrowserConnectorState>('checking')
   const previousIllustrationState = useRef<IllustrationActivity['state'] | null>(null)
+  const previousApplicationState = useRef<ApplicationActivity['state'] | null>(null)
   const previousSyncPolling = useRef(false)
   const loadedOnce = useRef(false)
   const pathname = usePathname()
@@ -70,6 +80,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
   const applyBody = useCallback((body: BadgeResponse) => {
     const nextSync = body.sync ?? null
     const nextIllustration = body.illustration ?? null
+    const nextApplication = body.application ?? null
     if (loadedOnce.current) {
       const previousIllustration = previousIllustrationState.current
       if (previousIllustration && ['WORKING', 'NEEDS_YOU'].includes(previousIllustration)) {
@@ -96,13 +107,31 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
           action: 'View update',
         })
       }
+      const previousApplication = previousApplicationState.current
+      if (previousApplication && ['WORKING', 'NEEDS_YOU'].includes(previousApplication)) {
+        if (nextApplication?.state === 'READY') {
+          setNotice({
+            message: 'The iGO draft is ready for your review.',
+            href: `/agent/cases/${nextApplication.caseId}`,
+            action: 'Review application',
+          })
+        } else if (nextApplication?.state === 'FAILED') {
+          setNotice({
+            message: 'I could not finish this Application draft. Your reviewed information is safe.',
+            href: `/agent/cases/${nextApplication.caseId}`,
+            action: 'Review application',
+          })
+        }
+      }
     }
     loadedOnce.current = true
     previousIllustrationState.current = nextIllustration?.state ?? null
+    previousApplicationState.current = nextApplication?.state ?? null
     previousSyncPolling.current = Boolean(nextSync?.shouldPoll)
     setState(body.state ?? null)
     setSync(nextSync?.shouldPoll ? nextSync : null)
     setIllustration(nextIllustration)
+    setApplication(nextApplication)
     if ('connector' in body) {
       setExtensionTarget(body.connector?.enabled ? body.connector.extensionTarget ?? null : null)
     }
@@ -121,6 +150,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
         setState(null)
         setSync(null)
         setIllustration(null)
+        setApplication(null)
       })
     return () => {
       alive = false
@@ -157,7 +187,9 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
     }
   }, [extensionTarget])
 
-  const shouldPoll = Boolean(sync?.shouldPoll) || illustration?.state === 'WORKING' || illustration?.state === 'NEEDS_YOU'
+  const shouldPoll = Boolean(sync?.shouldPoll) || illustration?.state === 'WORKING' ||
+    illustration?.state === 'NEEDS_YOU' || application?.state === 'WORKING' ||
+    application?.state === 'NEEDS_YOU'
 
   useEffect(() => {
     if (!shouldPoll) return
@@ -270,6 +302,21 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       state: 'waiting',
     })
   }
+  if (application?.state === 'WORKING') {
+    tasks.push({
+      id: 'application',
+      label: 'Preparing your Application',
+      detail: 'I am filling the reviewed information in iGO and checking what comes back',
+      state: 'working',
+    })
+  } else if (application?.state === 'NEEDS_YOU') {
+    tasks.push({
+      id: 'application',
+      label: 'Application needs your login',
+      detail: 'Sign in to National Life so I can continue the same iGO draft',
+      state: 'waiting',
+    })
+  }
 
   const kbot = (() => {
     // The integration page has its own richer K-Bot presence, including the
@@ -290,6 +337,29 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       detail = 'I organized the result in Keepr One.'
       actionHref = notice.href
       actionLabel = notice.action
+    } else if (application?.state === 'NEEDS_YOU') {
+      botState = 'waiting'
+      title = sync || illustration?.state === 'WORKING'
+        ? 'I am continuing the other work. Your Application needs your login.'
+        : 'I need you to sign in to continue the Application'
+      detail = 'The reviewed dossier is safe. After login, I continue the same iGO draft.'
+      actionHref = `/agent/cases/${application.caseId}`
+      actionLabel = 'Continue Application'
+      activityMode = sync || illustration?.state === 'WORKING' ? 'combined' : 'application'
+    } else if (application?.state === 'WORKING' && (sync || illustration?.state === 'WORKING')) {
+      botState = 'working'
+      title = 'I am handling more than one task for you'
+      detail = 'Your National Life work is moving independently. Open the panel to see each step.'
+      actionHref = `/agent/cases/${application.caseId}`
+      actionLabel = 'View activities'
+      activityMode = 'combined'
+    } else if (application?.state === 'WORKING') {
+      botState = 'working'
+      title = 'I am preparing your Application in iGO'
+      detail = 'I am filling the reviewed information and checking the carrier response.'
+      actionHref = `/agent/cases/${application.caseId}`
+      actionLabel = 'View Application'
+      activityMode = 'application'
     } else if (sync?.state === 'PAUSED') {
       botState = 'waiting'
       title = 'I need you to sign in to National Life'
@@ -367,6 +437,10 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
           ? 'working'
           : illustration?.state === 'NEEDS_YOU'
             ? 'waiting'
+            : application?.state === 'WORKING'
+              ? 'working'
+              : application?.state === 'NEEDS_YOU'
+                ? 'waiting'
             : null}
         tasks={tasks}
         announcement={notice?.message}
@@ -374,7 +448,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
     )
   })()
 
-  if (!state && !illustration && !notice) return kbot
+  if (!state && !illustration && !application && !notice) return kbot
 
   if (activity) return <>{activity}{kbot}</>
 

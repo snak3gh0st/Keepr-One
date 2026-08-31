@@ -6,6 +6,7 @@ import { Button } from "@/components/Button";
 import {
   reviewKBotApplicationDocument,
   reviewKBotApplicationDossier,
+  prepareKBotApplicationDraft,
   saveKBotApplicationDossier,
   uploadKBotApplicationDocument,
 } from "./actions";
@@ -17,6 +18,7 @@ type ApplicationView = {
   dossierHash: string | null;
   reviewedAt: string | null;
   externalId: string | null;
+  carrierReceipt: unknown;
   documents: Array<{ id: string; type: string; filename: string; reviewedAt: string | null }>;
 };
 
@@ -78,6 +80,14 @@ export function ApplicationDossier({
   const coverage = record(dossier.coverage);
   const existing = record(dossier.existingCoverage);
   const consent = record(dossier.consent);
+  const carrierReceipt = record(application.carrierReceipt);
+  const confirmedValues = record(carrierReceipt.confirmedValues);
+  const carrierChanges = Array.isArray(carrierReceipt.changes)
+    ? carrierReceipt.changes.map(record).filter((change) => text(change.field))
+    : [];
+  const carrierQuestions = Array.isArray(carrierReceipt.missingQuestions)
+    ? carrierReceipt.missingQuestions.map(record).filter((question) => text(question.label))
+    : [];
   const beneficiary = Array.isArray(dossier.beneficiaries)
     ? record(dossier.beneficiaries[0])
     : {};
@@ -168,6 +178,18 @@ export function ApplicationDossier({
     });
   }
 
+  function prepareDraft() {
+    setMessage(null);
+    startTransition(async () => {
+      const result = await prepareKBotApplicationDraft(application.id);
+      if (!result.ok) setMessage(result.message);
+      else {
+        setMessage("K-Bot começou a preparar o rascunho no iGO. Você pode continuar trabalhando.");
+        router.refresh();
+      }
+    });
+  }
+
   return (
     <div className="space-y-5 rounded-2xl border border-border-steel bg-white/70 p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -182,8 +204,55 @@ export function ApplicationDossier({
       </div>
 
       {!addon.entitled ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-          Você pode organizar o dossiê agora. Para o K-Bot preparar e enviar no iGO, esta conta precisará ativar o add-on Application.
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+          <div>
+            <p>Você pode organizar o dossiê agora. Para o K-Bot preparar e enviar no iGO, ative o add-on Application.</p>
+            <p className="mt-1 text-xs text-amber-800">US$ 9,99/mês por agente · primeiros 14 dias grátis.</p>
+          </div>
+          <form action="/api/billing/application-addon/checkout" method="post">
+            <Button type="submit" variant="secondary">Ativar Application</Button>
+          </form>
+        </div>
+      ) : null}
+
+      {application.externalId && Object.keys(confirmedValues).length ? (
+        <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-900">Confirmado no iGO</p>
+              <p className="mt-1 text-sm text-emerald-950">Rascunho {application.externalId} · {text(carrierReceipt.carrierStatus, "Recebido")}</p>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-900">
+              {text(confirmedValues.premiumMode) === "MONTHLY" ? "Mensal" : "Anual"}
+            </span>
+          </div>
+          <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div><dt className="text-xs text-emerald-800">Cliente</dt><dd className="font-semibold text-emerald-950">{text(confirmedValues.insuredName)}</dd></div>
+            <div><dt className="text-xs text-emerald-800">Produto</dt><dd className="font-semibold text-emerald-950">{text(confirmedValues.product)}</dd></div>
+            <div><dt className="text-xs text-emerald-800">Capital confirmado</dt><dd className="font-semibold text-emerald-950">US$ {Number(confirmedValues.faceAmount ?? 0).toLocaleString("en-US")}</dd></div>
+            <div><dt className="text-xs text-emerald-800">Prêmio confirmado</dt><dd className="font-semibold text-emerald-950">US$ {Number(confirmedValues.plannedPremium ?? 0).toLocaleString("en-US")}</dd></div>
+          </dl>
+          {carrierChanges.length ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm font-semibold text-amber-950">A National Life ajustou {carrierChanges.length} informação(ões)</p>
+              <ul className="mt-2 space-y-1 text-xs text-amber-900">
+                {carrierChanges.map((change, index) => (
+                  <li key={`${text(change.field)}-${index}`}>{text(change.field)}: {text(change.requested, "—")} → {text(change.carrier, "—")}</li>
+                ))}
+              </ul>
+            </div>
+          ) : <p className="text-xs text-emerald-800">Os valores conferem com o dossiê enviado.</p>}
+        </div>
+      ) : null}
+
+      {carrierQuestions.length ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-950">O iGO precisa de mais {carrierQuestions.length} resposta(s)</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
+            {carrierQuestions.map((question, index) => (
+              <li key={`${text(question.label)}-${index}`}>{text(question.label)} <span className="text-amber-700">· {text(question.section)}</span></li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
@@ -237,7 +306,14 @@ export function ApplicationDossier({
           <label className="flex items-start gap-2 text-sm text-ink"><input name="agentAttestedAccuracy" type="checkbox" defaultChecked={consent.agentAttestedAccuracy === true} className="mt-1" /> Revisei os dados acima e confirmo que representam as respostas recebidas do cliente.</label>
         </fieldset>
 
-        <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Salvando…" : "Salvar informações"}</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Salvando…" : "Salvar informações"}</Button>
+          {addon.entitled && application.automationState === "READY_TO_PREPARE" ? (
+            <Button type="button" onClick={prepareDraft} disabled={pending}>
+              {pending ? "Preparando…" : "Preparar rascunho no iGO"}
+            </Button>
+          ) : null}
+        </div>
       </form>
 
       <div className="space-y-3 border-t border-border-steel pt-5">
