@@ -23,6 +23,7 @@ export type WhatsappClient = {
   fetchQrCode: (input: { agentId: string }) => Promise<{ image: string } | null>
   connectionState: (input: { agentId: string }) => Promise<string>
   connectionIdentity: (input: { agentId: string }) => Promise<WhatsappIdentity | null>
+  logoutInstance: (input: { agentId: string }) => Promise<void>
   enforcePrivateChatSettings: (input: { agentId: string }) => Promise<void>
   linkToInbox: (input: {
     agentId: string
@@ -81,7 +82,7 @@ export function createWhatsappClient(config: {
     connectionState: async ({ agentId }) => {
       const body = await call(`/instance/connectionState/${instanceNameFor(agentId)}`, { method: 'GET' })
       const instance = asRecord(body.instance)
-      return typeof instance.state === 'string' ? instance.state : 'close'
+      return typeof instance.state === 'string' ? instance.state : 'unknown'
     },
 
     connectionIdentity: async ({ agentId }) => {
@@ -98,6 +99,10 @@ export function createWhatsappClient(config: {
         externalPhoneNumberId: ownerJid,
         normalizedPhoneE164: `+${match[1]}`,
       }
+    },
+
+    logoutInstance: async ({ agentId }) => {
+      await call(`/instance/logout/${instanceNameFor(agentId)}`, { method: 'DELETE' })
     },
 
     enforcePrivateChatSettings: async ({ agentId }) => {

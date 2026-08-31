@@ -33,6 +33,63 @@ async function recordChannelFailure(agentId: string, errorCode: string) {
   }).catch(() => undefined)
 }
 
+export async function GET() {
+  const agent = await getCurrentAgentWithoutOnboarding()
+  if (whatsappChannelModeFromEnv(process.env) !== 'EVOLUTION') {
+    return Response.json({ error: 'LEGACY_CHANNEL_DISABLED' }, { status: 409, headers: NO_STORE })
+  }
+  const config = whatsappConfigFromEnv(process.env)
+  if (!config) return Response.json({ error: 'UNAVAILABLE' }, { status: 503, headers: NO_STORE })
+
+  const client = createWhatsappClient({ ...config, http: (url, init) => fetch(url, init) })
+  try {
+    const state = await client.connectionState({ agentId: agent.id })
+    const identity = state === 'open'
+      ? await client.connectionIdentity({ agentId: agent.id })
+      : null
+    const connected = state === 'open' && identity !== null
+    const channel = await prisma.agentMessagingChannel.findUnique({
+      where: { agentId_kind: { agentId: agent.id, kind: 'WHATSAPP' } },
+      select: {
+        provider: true,
+        status: true,
+        normalizedPhoneE164: true,
+        evolutionInstanceName: true,
+      },
+    })
+    const status = connected
+      ? 'CONNECTED'
+      : state === 'close'
+        ? 'DISCONNECTED'
+        : state === 'open'
+          ? 'DEGRADED'
+          : 'WAITING_FOR_USER'
+    const recorded = connected
+      && channel?.provider === 'EVOLUTION'
+      && channel.status === 'CONNECTED'
+      && channel.normalizedPhoneE164 === identity.normalizedPhoneE164
+      && channel.evolutionInstanceName === instanceNameFor(agent.id)
+
+    return Response.json({
+      state,
+      status,
+      phone: connected ? identity.normalizedPhoneE164 : null,
+      recorded,
+    }, { headers: NO_STORE })
+  } catch (error) {
+    if (error instanceof WhatsappRequestError && error.status === 404) {
+      return Response.json({
+        state: 'close',
+        status: 'DISCONNECTED',
+        phone: null,
+        recorded: false,
+      }, { headers: NO_STORE })
+    }
+    console.error('[whatsapp] status failed', error)
+    return Response.json({ error: 'STATUS_UNAVAILABLE' }, { status: 502, headers: NO_STORE })
+  }
+}
+
 /// The agent connects; nothing is provisioned on their behalf beforehand. Creating
 /// a session they never asked for leaves an instance nobody can point a camera at,
 /// which is exactly what happened when this was automatic.
@@ -90,6 +147,7 @@ export async function POST(request: Request) {
       client.connectionIdentity({ agentId: agent.id }),
     ])
     const connected = state === 'open' && identity !== null
+    const connectedIdentity = connected ? identity : null
     const now = new Date()
     await prisma.agentMessagingChannel.upsert({
       where: { agentId_kind: { agentId: agent.id, kind: 'WHATSAPP' } },
@@ -99,8 +157,8 @@ export async function POST(request: Request) {
         provider: 'EVOLUTION',
         status: connected ? 'CONNECTED' : 'WAITING_FOR_USER',
         evolutionInstanceName: instanceNameFor(agent.id),
-        normalizedPhoneE164: identity?.normalizedPhoneE164,
-        externalPhoneNumberId: identity?.externalPhoneNumberId,
+        normalizedPhoneE164: connectedIdentity?.normalizedPhoneE164,
+        externalPhoneNumberId: connectedIdentity?.externalPhoneNumberId,
         verifiedAt: connected ? now : null,
         lastHealthCheckAt: now,
       },
@@ -108,8 +166,8 @@ export async function POST(request: Request) {
         provider: 'EVOLUTION',
         status: connected ? 'CONNECTED' : 'WAITING_FOR_USER',
         evolutionInstanceName: instanceNameFor(agent.id),
-        normalizedPhoneE164: identity?.normalizedPhoneE164,
-        externalPhoneNumberId: identity?.externalPhoneNumberId,
+        normalizedPhoneE164: connectedIdentity?.normalizedPhoneE164 ?? null,
+        externalPhoneNumberId: connectedIdentity?.externalPhoneNumberId ?? null,
         externalInboxId: null,
         verifiedAt: connected ? now : undefined,
         lastHealthCheckAt: now,
@@ -121,7 +179,7 @@ export async function POST(request: Request) {
         qr: qr?.image ?? null,
         state,
         status: connected ? 'CONNECTED' : 'WAITING_FOR_USER',
-        phone: identity?.normalizedPhoneE164 ?? null,
+        phone: connectedIdentity?.normalizedPhoneE164 ?? null,
       },
       { headers: NO_STORE },
     )
@@ -142,5 +200,68 @@ export async function POST(request: Request) {
       : 'CONNECT_FAILED'
     await recordChannelFailure(agent.id, errorCode)
     return Response.json({ error: errorCode }, { status: 502, headers: NO_STORE })
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    assertSameOriginAction({
+      origin: request.headers.get('origin'),
+      host: request.headers.get('host'),
+      forwardedHost: request.headers.get('x-forwarded-host'),
+      forwardedProto: request.headers.get('x-forwarded-proto'),
+    })
+  } catch {
+    return Response.json({ error: 'FORBIDDEN' }, { status: 403, headers: NO_STORE })
+  }
+
+  const agent = await getCurrentAgentWithoutOnboarding()
+  if (whatsappChannelModeFromEnv(process.env) !== 'EVOLUTION') {
+    return Response.json({ error: 'LEGACY_CHANNEL_DISABLED' }, { status: 409, headers: NO_STORE })
+  }
+  const config = whatsappConfigFromEnv(process.env)
+  if (!config) return Response.json({ error: 'UNAVAILABLE' }, { status: 503, headers: NO_STORE })
+
+  const client = createWhatsappClient({ ...config, http: (url, init) => fetch(url, init) })
+  let logoutError: unknown = null
+  try {
+    await client.logoutInstance({ agentId: agent.id })
+  } catch (error) {
+    // Evolution 2.3.7 can return 500 after Baileys has already closed the
+    // session. Provider state, not the response code alone, decides success.
+    logoutError = error
+  }
+
+  try {
+    const state = await client.connectionState({ agentId: agent.id })
+    if (state !== 'close') throw logoutError ?? new Error('PROVIDER_STILL_CONNECTED')
+
+    const now = new Date()
+    await prisma.agentMessagingChannel.upsert({
+      where: { agentId_kind: { agentId: agent.id, kind: 'WHATSAPP' } },
+      create: {
+        agentId: agent.id,
+        kind: 'WHATSAPP',
+        provider: 'EVOLUTION',
+        status: 'DISCONNECTED',
+        evolutionInstanceName: instanceNameFor(agent.id),
+        lastHealthCheckAt: now,
+      },
+      update: {
+        provider: 'EVOLUTION',
+        status: 'DISCONNECTED',
+        evolutionInstanceName: instanceNameFor(agent.id),
+        normalizedPhoneE164: null,
+        externalPhoneNumberId: null,
+        verifiedAt: null,
+        lastHealthCheckAt: now,
+        lastErrorCode: null,
+      },
+    })
+    return Response.json({ state: 'close', status: 'DISCONNECTED' }, { headers: NO_STORE })
+  } catch (error) {
+    console.error('[whatsapp] disconnect failed', error)
+    await recordChannelFailure(agent.id, 'DISCONNECT_FAILED')
+    return Response.json({ error: 'DISCONNECT_FAILED' }, { status: 502, headers: NO_STORE })
   }
 }
