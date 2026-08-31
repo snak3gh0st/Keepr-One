@@ -23,6 +23,7 @@ export type WhatsappClient = {
   fetchQrCode: (input: { agentId: string }) => Promise<{ image: string } | null>
   connectionState: (input: { agentId: string }) => Promise<string>
   connectionIdentity: (input: { agentId: string }) => Promise<WhatsappIdentity | null>
+  logoutInstance: (input: { agentId: string }) => Promise<void>
   enforcePrivateChatSettings: (input: { agentId: string }) => Promise<void>
   linkToInbox: (input: {
     agentId: string
@@ -98,6 +99,10 @@ export function createWhatsappClient(config: {
         externalPhoneNumberId: ownerJid,
         normalizedPhoneE164: `+${match[1]}`,
       }
+    },
+
+    logoutInstance: async ({ agentId }) => {
+      await call(`/instance/logout/${instanceNameFor(agentId)}`, { method: 'DELETE' })
     },
 
     enforcePrivateChatSettings: async ({ agentId }) => {
