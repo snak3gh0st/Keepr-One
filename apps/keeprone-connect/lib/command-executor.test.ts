@@ -6,11 +6,10 @@ describe('commandExecutorFor', () => {
     expect(commandExecutorFor('READ_POLICY_DETAIL')).toBe('POLICY_DETAIL')
     expect(commandExecutorFor('FLEXLIFE_QUOTE')).toBe('FLEXLIFE_QUOTE')
     expect(commandExecutorFor('GENERATE_ILLUSTRATION')).toBe('FORESIGHT')
+    expect(commandExecutorFor('PREPARE_APPLICATION_DRAFT')).toBe('IGO_APPLICATION_DRAFT')
   })
 
-  it('fails closed for Application capabilities until their executor exists', () => {
-    expect(() => commandExecutorFor('PREPARE_APPLICATION_DRAFT'))
-      .toThrow('CAPABILITY_NOT_IMPLEMENTED')
+  it('keeps document upload and final submission disabled', () => {
     expect(() => commandExecutorFor('UPLOAD_APPLICATION_DOCUMENT'))
       .toThrow('CAPABILITY_NOT_IMPLEMENTED')
     expect(() => commandExecutorFor('SUBMIT_APPLICATION'))

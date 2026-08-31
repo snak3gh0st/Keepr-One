@@ -81,6 +81,11 @@ export type CommandStatus =
   | 'COMPLETED'
   | 'ERROR'
 
+export type CommandProgressPhase = ForesightProgressPhase |
+  'OPENING_IGO' |
+  'WAITING_IGO_HANDOFF' |
+  'WRITING_IGO_DRAFT'
+
 /// Independent from the daily sync cursor. Only safe coordination metadata is
 /// durable here; command payloads, carrier cookies and credentials never are.
 export type CommandState = {
@@ -93,7 +98,7 @@ export type CommandState = {
   updatedAt?: string
   /// Fine-grained, non-sensitive progress for the active official illustration.
   /// It is presentation state only; command events remain the audit authority.
-  phase?: ForesightProgressPhase
+  phase?: CommandProgressPhase
 }
 
 /// The plan round-trips through chrome.storage.local, which survives extension

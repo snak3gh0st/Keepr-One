@@ -44,6 +44,40 @@ beforeEach(() => {
 })
 
 describe('National Life isolated-world bridge', () => {
+  it('clicks the exact iGO e-App link from National Life Tools', async () => {
+    const click = vi.fn()
+    const anchors = [
+      { getAttribute: () => '/agent/sso/foresight', click: vi.fn() },
+      { getAttribute: () => '/agent/sso/igo-eapp', click },
+    ]
+    vi.stubGlobal('location', {
+      pathname: '/agent/tools/business-tools/national-life-tools',
+      href: 'https://www.nationallife.com/agent/tools/business-tools/national-life-tools',
+      origin: 'https://www.nationallife.com',
+    })
+    vi.stubGlobal('document', { querySelectorAll: () => anchors })
+    const content = (await import('../entrypoints/nlg-bridge.content')).default as unknown as {
+      main: () => void
+    }
+    content.main()
+
+    const response = await new Promise<unknown>((resolve) => {
+      expect(listener?.({
+        type: 'OPEN_IGO_EAPP_FROM_TOOLS',
+        token: 't'.repeat(32),
+        correlationId: 'c'.repeat(32),
+      }, {}, resolve)).toBe(false)
+    })
+
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(response).toEqual({
+      ok: true,
+      type: 'IGO_EAPP_OPENED_FROM_TOOLS',
+      token: 't'.repeat(32),
+      correlationId: 'c'.repeat(32),
+    })
+  })
+
   it('relays one correlated FlexLife quote between the extension and page worlds', async () => {
     const content = (await import('../entrypoints/nlg-bridge.content')).default as unknown as {
       main: () => void

@@ -13,6 +13,10 @@ import type {
   ForesightTermExecutionReceipt,
 } from './foresight-messages'
 import type { ForesightProgressPhase } from './foresight-progress'
+import {
+  FORESIGHT_TERM_OPTIONAL_REPORT_SELECTOR,
+  isForesightTermNaicReportGroup,
+} from './foresight-term-reports'
 
 const MAIN_FRAME_ID = 'ctl00_mobilityPH_iframeMain'
 const MODAL_FRAME_ID = 'ctl00_mobilityPH_modalDialog__Iframe'
@@ -23,7 +27,7 @@ const SAVE_NAME_ID = 'ctl00_mobilityPH_panelContent_txtItemName'
 const SAVE_FOLDER_ID = 'ctl00_mobilityPH_panelContent_cboFolder'
 const SAVE_CONFIRM_ID = 'ctl00_mobilityPH_panelContent_cmdSave'
 const REPORT_MENU_ID = 'ctl00_mobilityPH_verticalMenu_Reportselection_2'
-const PRODUCT_MENU_ID = 'ctl00_mobilityPH_verticalMenu_Product_0'
+export const FORESIGHT_TERM_FUNDING_MENU_ID = 'ctl00_mobilityPH_verticalMenu_Ledger_0'
 
 const PRODUCT_SELECTION = {
   jurisdiction: 'ctl00_mobilityPH_WebpanelGeneral_cboJurisdiction',
@@ -251,7 +255,7 @@ async function fillClient(doc: Document, snapshot: ForesightTermIllustrationSnap
 }
 
 async function fundingDocument(): Promise<Document> {
-  click(document, PRODUCT_MENU_ID)
+  click(document, FORESIGHT_TERM_FUNDING_MENU_ID)
   return waitFor(() => {
     const doc = frameDocument(MAIN_FRAME_ID)
     return doc?.getElementById(TERM_FIELDS.funding.designType) ? doc : null
@@ -294,8 +298,10 @@ async function verifyReports(doc: Document, duration: string): Promise<void> {
   await applyInMainWorld('APPLY_TERM_REPORTS', { duration })
   doc = await reportsDocument()
   const groups = [...doc.querySelectorAll<HTMLInputElement>('input[type="checkbox"][id$="_chkGroup"]')].filter((checkbox) => checkbox.checked)
-  if (groups.length !== 1 || !groups[0]!.parentElement?.parentElement?.textContent?.includes(`Term ${duration}`) || !groups[0]!.parentElement?.parentElement?.textContent?.includes('NAIC Illustration')) fail('FORESIGHT_REPORT_SELECTION_MISMATCH')
-  const extras = [...doc.querySelectorAll<HTMLInputElement>('input[type="checkbox"][id*="rptOptionalReports"]')].filter((checkbox) => checkbox.checked)
+  if (groups.length !== 1 || !isForesightTermNaicReportGroup(groups[0]!, duration)) fail('FORESIGHT_REPORT_SELECTION_MISMATCH')
+  const extras = [...doc.querySelectorAll<HTMLInputElement>(
+    FORESIGHT_TERM_OPTIONAL_REPORT_SELECTOR,
+  )].filter((checkbox) => checkbox.checked)
   if (extras.length) fail('FORESIGHT_REPORT_SELECTION_MISMATCH')
 }
 

@@ -320,6 +320,11 @@ export function KBotCornerPresence({
     () => false,
   )
   const panelId = 'kbot-corner-activity'
+  const trimmedTitle = title.trim()
+  const trimmedDetail = detail?.trim()
+  const spokenCopy = trimmedDetail
+    ? `${trimmedTitle}${/[.!?…]$/.test(trimmedTitle) ? ' ' : '. '}${trimmedDetail}`
+    : trimmedTitle
 
   if (!browserMounted) return null
 
@@ -331,7 +336,7 @@ export function KBotCornerPresence({
       data-state={state}
       className="kbot-corner-presence pointer-events-none fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] left-3 right-3 z-[60] md:bottom-4 md:left-auto md:right-5 md:w-auto"
     >
-      <span className="sr-only">{title}. {detail}</span>
+      <span className="sr-only">{spokenCopy}</span>
       <div className="relative ml-auto h-[102px] w-[78px]">
         {announcement ? (
           <div

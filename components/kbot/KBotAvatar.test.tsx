@@ -107,6 +107,22 @@ describe('KBotAvatar', () => {
     )
   })
 
+  it('announces title and detail without duplicate punctuation', () => {
+    render(
+      <KBotCornerPresence
+        state="success"
+        title="All set. I organized everything for you."
+        detail="Your National Life information is up to date."
+      />,
+    )
+
+    const status = screen.getByLabelText('K-Bot status')
+    expect(status).toHaveTextContent(
+      'All set. I organized everything for you. Your National Life information is up to date.',
+    )
+    expect(status).not.toHaveTextContent('you.. Your')
+  })
+
   it('shows a sad pixel expression when K-Bot is disconnected', () => {
     render(
       <KBotCornerPresence

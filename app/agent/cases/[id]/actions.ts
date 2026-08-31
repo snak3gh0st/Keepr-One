@@ -22,7 +22,8 @@ import {
 import { saveApplicationDossier, reviewApplicationDossier } from '@/lib/application-addon/dossier-service'
 import { prismaApplicationDossierRepository } from '@/lib/application-addon/dossier-prisma'
 import { getKBotApplicationEntitlement } from '@/lib/application-addon/entitlement-prisma'
-import type { ApplicationDossierMissingItem } from '@/lib/application-addon/dossier-contract'
+import type { ApplicationDossierMissingItemV2 } from '@/lib/application-addon/dossier-contract'
+import { resolveApplicationIllustrationLink } from '@/lib/application-addon/illustration-link'
 import { validateApplicationDocument } from '@/lib/application-addon/document-service'
 import { planApplicationDraftCommand } from '@/lib/application-addon/command-plan'
 import {
@@ -37,7 +38,7 @@ type ActionResult = { ok: true } | { ok: false; message: string }
 type FailureResult = { ok: false; message: string }
 
 export type ApplicationDossierActionResult =
-  | { ok: true; ready: boolean; missing: ApplicationDossierMissingItem[]; dossierHash?: string }
+  | { ok: true; ready: boolean; missing: ApplicationDossierMissingItemV2[]; dossierHash?: string }
   | { ok: false; message: string }
 
 async function agentScopeIds(): Promise<{ agentId: string; scope: string[] }> {
@@ -236,17 +237,55 @@ export async function saveKBotApplicationDossier(
 ): Promise<ApplicationDossierActionResult> {
   try {
     const agent = await getCurrentAgent()
-    const reviewedDocuments = await prisma.applicationDocument.findMany({
-      where: {
-        applicationId,
-        reviewedAt: { not: null },
-        application: { insuranceCase: { assignedAgentId: agent.id } },
-      },
-      select: { id: true, type: true, contentHash: true },
+    const application = await prisma.application.findFirst({
+      where: { id: applicationId, insuranceCase: { assignedAgentId: agent.id } },
+      select: { caseId: true },
     })
+    if (!application) throw new Error('APPLICATION_NOT_FOUND')
+    const dossierRecord = dossier && typeof dossier === 'object' && !Array.isArray(dossier)
+      ? dossier as Record<string, unknown> : null
+    const coverageRecord = dossierRecord?.coverage && typeof dossierRecord.coverage === 'object' &&
+      !Array.isArray(dossierRecord.coverage)
+      ? dossierRecord.coverage as Record<string, unknown> : null
+    const illustrationId = typeof coverageRecord?.illustrationId === 'string'
+      ? coverageRecord.illustrationId : ''
+    const [reviewedDocuments, illustration] = await Promise.all([
+      prisma.applicationDocument.findMany({
+        where: {
+          applicationId,
+          reviewedAt: { not: null },
+          application: { insuranceCase: { assignedAgentId: agent.id } },
+        },
+        select: { id: true, type: true, contentHash: true },
+      }),
+      illustrationId ? prisma.illustration.findFirst({
+        where: { id: illustrationId, caseId: application.caseId, agentId: agent.id },
+        select: { id: true, caseId: true, createdAt: true, productName: true, rawPayload: true },
+      }) : Promise.resolve(null),
+    ])
+    const illustrationLink = illustration && coverageRecord
+      ? resolveApplicationIllustrationLink(illustration, {
+          expectedCaseId: application.caseId,
+          family: coverageRecord.family === 'TERM' ? 'TERM' : 'IUL',
+          carrierProduct: String(coverageRecord.carrierProduct ?? ''),
+          ...(typeof coverageRecord.termDuration === 'string'
+            ? { termDuration: coverageRecord.termDuration } : {}),
+          issueState: String(coverageRecord.issueState ?? ''),
+          ...(typeof coverageRecord.faceAmount === 'number' ? { faceAmount: coverageRecord.faceAmount } : {}),
+          ...(typeof coverageRecord.plannedPremium === 'number'
+            ? { plannedPremium: coverageRecord.plannedPremium } : {}),
+          ...(coverageRecord.premiumMode === 'MONTHLY' || coverageRecord.premiumMode === 'ANNUAL'
+            ? { premiumMode: coverageRecord.premiumMode } : {}),
+        })
+      : null
+    if (illustrationId && !illustrationLink) throw new Error('APPLICATION_ILLUSTRATION_MISMATCH')
+    const safeCoverage = coverageRecord
+      ? Object.fromEntries(Object.entries(coverageRecord).filter(([key]) => key !== 'illustrationInputHash'))
+      : coverageRecord
     const safeDossier = dossier && typeof dossier === 'object' && !Array.isArray(dossier)
       ? {
           ...(dossier as Record<string, unknown>),
+          ...(safeCoverage ? { coverage: { ...safeCoverage, ...(illustrationLink ?? {}) } } : {}),
           documents: reviewedDocuments.map((document) => ({
             documentId: document.id,
             type: document.type,
@@ -259,11 +298,7 @@ export async function saveKBotApplicationDossier(
       agentId: agent.id,
       dossier: safeDossier,
     })
-    const application = await prisma.application.findFirst({
-      where: { id: applicationId, insuranceCase: { assignedAgentId: agent.id } },
-      select: { caseId: true },
-    })
-    if (application) revalidatePath(`/agent/cases/${application.caseId}`)
+    revalidatePath(`/agent/cases/${application.caseId}`)
     return { ok: true, ready: result.readiness.ready, missing: result.readiness.missing }
   } catch (error) {
     console.error('K_BOT_APPLICATION_DOSSIER_SAVE_FAILED', {

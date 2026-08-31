@@ -516,6 +516,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
                 application={app}
                 addon={c.applicationAddon}
                 prospect={c.prospect}
+                illustrations={c.illustrations}
               />
             ))}
           </div>

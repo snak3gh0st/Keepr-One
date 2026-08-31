@@ -3,7 +3,7 @@ import { hasExactKeys } from './messages'
 import { parseConnectorCommand, type ConnectorCommand } from './command-contract'
 
 export type Capability = 'READ_GRID' | 'READ_PAGE' | 'READ_EXPORT' | 'READ_POLICY_DETAIL' |
-  'FLEXLIFE_QUOTE' | 'GENERATE_ILLUSTRATION'
+  'FLEXLIFE_QUOTE' | 'GENERATE_ILLUSTRATION' | 'PREPARE_APPLICATION_DRAFT'
 
 export type ConnectorCommandDispatch = {
   command: ConnectorCommand
@@ -22,7 +22,7 @@ export type StagePlan =
 
 const IMPLEMENTED_CAPABILITIES = [
   'READ_GRID', 'READ_PAGE', 'READ_EXPORT', 'READ_POLICY_DETAIL', 'FLEXLIFE_QUOTE',
-  'GENERATE_ILLUSTRATION',
+  'GENERATE_ILLUSTRATION', 'PREPARE_APPLICATION_DRAFT',
 ] as const
 // A plan is server-authorized and each stage is independently bounded. Leave
 // room for the source inventory to grow without making the 33rd source a hard
@@ -165,6 +165,16 @@ export function parseExecutableConnectorCommand(value: unknown): ConnectorComman
       !('inputHash' in command.params) ||
       command.params.illustrationId !== command.target.id ||
       !/^[a-f0-9]{64}$/.test(command.params.inputHash)
+    ) throw new Error('INVALID_COMMAND')
+    return command
+  }
+  if (command.capability === 'PREPARE_APPLICATION_DRAFT') {
+    if (
+      command.target?.kind !== 'APPLICATION' ||
+      !('applicationId' in command.params) ||
+      !('payloadHash' in command.params) ||
+      command.params.applicationId !== command.target.id ||
+      !/^[a-f0-9]{64}$/.test(command.params.payloadHash)
     ) throw new Error('INVALID_COMMAND')
     return command
   }
