@@ -121,6 +121,7 @@ describe('scheduling confirmation email outbox', () => {
       bookingId: 'booking-1',
       to: 'joao@example.com',
       inviteeName: 'João Souza',
+      language: 'PT',
       ownerName: 'Maria Silva',
       title: 'Conversa inicial',
       startsAt: new Date('2026-08-29T13:00:00.000Z'),

@@ -6,6 +6,7 @@ import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { EmptyState } from "@/components/Table";
 import { IllustrationPdfButton } from "./IllustrationPdfButton";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 export type IllustrationDocumentState =
   | "READY"
@@ -33,24 +34,6 @@ type SortMode = "recent" | "insured-asc" | "capital-desc" | "premium-asc";
 type MetricKey = "all" | "ready" | "open";
 
 const PAGE_SIZE = 8;
-const COUNT = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
-const USD = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
-
-const DOCUMENT_LABEL: Record<IllustrationDocumentState, string> = {
-  READY: "PDF pronto",
-  WORKING: "K-Bot trabalhando",
-  ATTENTION: "Pede atenção",
-  NOT_REQUESTED: "PDF não solicitado",
-};
-
-function formatMoney(value: number | null) {
-  return value === null || !Number.isFinite(value) ? "—" : USD.format(value);
-}
-
 function paginationItems(page: number, pageCount: number) {
   const pages = Array.from(
     new Set(
@@ -77,6 +60,27 @@ export function IllustrationsWorkspace({
   illustrations: IllustrationWorkspaceItem[];
   isLimited?: boolean;
 }) {
+  const { copy, locale } = useI18n();
+  const count = useMemo(
+    () => new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }),
+    [locale],
+  );
+  const usd = useMemo(
+    () => new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0,
+    }),
+    [locale],
+  );
+  const documentLabel: Record<IllustrationDocumentState, string> = {
+    READY: copy("PDF pronto", "PDF ready"),
+    WORKING: copy("K-Bot trabalhando", "K-Bot working"),
+    ATTENTION: copy("Pede atenção", "Needs attention"),
+    NOT_REQUESTED: copy("PDF não solicitado", "PDF not requested"),
+  };
+  const formatMoney = (value: number | null) =>
+    value === null || !Number.isFinite(value) ? "—" : usd.format(value);
   const root = useRef<HTMLDivElement>(null);
   const listStart = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
@@ -104,7 +108,7 @@ export function IllustrationsWorkspace({
   }, [illustrations]);
 
   const filteredIllustrations = useMemo(() => {
-    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase("pt-BR");
+    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase(locale);
     const result = illustrations.filter((illustration) => {
       if (
         documentFilter === "ready" &&
@@ -129,13 +133,13 @@ export function IllustrationsWorkspace({
       ]
         .filter(Boolean)
         .join(" ")
-        .toLocaleLowerCase("pt-BR")
+        .toLocaleLowerCase(locale)
         .includes(normalizedQuery);
     });
 
     if (sortMode === "insured-asc") {
       return result.sort((left, right) =>
-        left.insuredName.localeCompare(right.insuredName, "pt-BR"),
+        left.insuredName.localeCompare(right.insuredName, locale),
       );
     }
     if (sortMode === "capital-desc") {
@@ -150,7 +154,7 @@ export function IllustrationsWorkspace({
       );
     }
     return result;
-  }, [deferredQuery, documentFilter, illustrations, sortMode]);
+  }, [deferredQuery, documentFilter, illustrations, locale, sortMode]);
 
   const pageCount = Math.max(
     1,
@@ -328,29 +332,29 @@ export function IllustrationsWorkspace({
   const metrics = [
     {
       key: "all" as const,
-      label: "Ilustrações",
-      value: COUNT.format(summary.total),
+      label: copy("Ilustrações", "Illustrations"),
+      value: count.format(summary.total),
       detail: isLimited
-        ? "Últimas 100 cotações da sua operação"
-        : "Cotações preservadas na sua operação",
-      action: "Ver histórico",
+        ? copy("Últimas 100 cotações da sua operação", "Latest 100 quotes in your operation")
+        : copy("Cotações preservadas na sua operação", "Quotes saved in your operation"),
+      action: copy("Ver histórico", "View history"),
     },
     {
       key: "ready" as const,
-      label: "PDFs prontos",
-      value: COUNT.format(summary.ready),
-      detail: "Documentos disponíveis para consulta",
-      action: "Abrir documentos",
+      label: copy("PDFs prontos", "PDFs ready"),
+      value: count.format(summary.ready),
+      detail: copy("Documentos disponíveis para consulta", "Documents available to review"),
+      action: copy("Abrir documentos", "Open documents"),
     },
     {
       key: "open" as const,
-      label: "A concluir",
-      value: COUNT.format(summary.open),
+      label: copy("A concluir", "To complete"),
+      value: count.format(summary.open),
       detail:
         summary.open === 1
-          ? "Documento ainda sem PDF final"
-          : "Documentos ainda sem PDF final",
-      action: "Revisar fila",
+          ? copy("Documento ainda sem PDF final", "Document still awaiting its final PDF")
+          : copy("Documentos ainda sem PDF final", "Documents still awaiting their final PDFs"),
+      action: copy("Revisar fila", "Review queue"),
     },
   ];
 
@@ -367,10 +371,12 @@ export function IllustrationsWorkspace({
     return (
       <section className="illustration-empty module-main-surface">
         <EmptyState>
-          Nenhuma ilustração ainda. Comece uma cotação para registrar o cenário,
-          o capital e o prêmio devolvidos pela seguradora.
+          {copy(
+            "Nenhuma ilustração ainda. Comece uma cotação para registrar o cenário, o capital e o prêmio devolvidos pela seguradora.",
+            "No illustrations yet. Start a quote to record the scenario, face amount, and premium returned by the carrier.",
+          )}
         </EmptyState>
-        <Link href="/agent/illustrations/new">Criar primeira ilustração</Link>
+        <Link href="/agent/illustrations/new">{copy("Criar primeira ilustração", "Create first illustration")}</Link>
       </section>
     );
   }
@@ -379,7 +385,7 @@ export function IllustrationsWorkspace({
     <div ref={root} className="illustrations-workspace">
       <nav
         className="illustration-metrics"
-        aria-label="Atalhos das ilustrações"
+        aria-label={copy("Atalhos das ilustrações", "Illustration shortcuts")}
       >
         {metrics.map((metric) => (
           <button
@@ -414,7 +420,7 @@ export function IllustrationsWorkspace({
         <header data-illustration-control>
           <div>
             <h2 id="illustration-browser-title">
-              Encontre a cotação certa
+              {copy("Encontre a cotação certa", "Find the right quote")}
               <span className="illustration-inline-document" aria-hidden="true">
                 <svg viewBox="0 0 34 18" fill="none">
                   <path d="M8 3h13l5 5v7H8V3Z" />
@@ -422,17 +428,17 @@ export function IllustrationsWorkspace({
                 </svg>
               </span>
             </h2>
-            <p>Localize pelo segurado, cliente, produto ou estratégia.</p>
+            <p>{copy("Localize pelo segurado, cliente, produto ou estratégia.", "Search by insured, client, product, or strategy.")}</p>
           </div>
           <p className="illustration-result-count" role="status" aria-live="polite">
             <strong>{pageStart}–{pageEnd}</strong>
-            <span>de {COUNT.format(filteredIllustrations.length)}</span>
+            <span>{copy("de {count}", "of {count}", { count: count.format(filteredIllustrations.length) })}</span>
           </p>
         </header>
 
         <div className="illustration-command-grid" data-illustration-control>
           <label className="illustration-command-search" htmlFor="illustration-search">
-            <span>Buscar ilustração</span>
+            <span>{copy("Buscar ilustração", "Search illustrations")}</span>
             <span>
               <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
                 <circle cx="8.6" cy="8.6" r="5.1" />
@@ -442,7 +448,7 @@ export function IllustrationsWorkspace({
                 id="illustration-search"
                 type="search"
                 value={query}
-                placeholder="Segurado, cliente, produto ou estratégia"
+                placeholder={copy("Segurado, cliente, produto ou estratégia", "Insured, client, product, or strategy")}
                 aria-controls="illustration-results"
                 onChange={(event) => {
                   setQuery(event.target.value);
@@ -458,7 +464,7 @@ export function IllustrationsWorkspace({
               {query ? (
                 <button
                   type="button"
-                  aria-label="Limpar busca"
+                  aria-label={copy("Limpar busca", "Clear search")}
                   onClick={() => {
                     setQuery("");
                     setPage(1);
@@ -473,7 +479,7 @@ export function IllustrationsWorkspace({
           </label>
 
           <label className="illustration-command-sort" htmlFor="illustration-sort">
-            <span>Ordenar resultados</span>
+            <span>{copy("Ordenar resultados", "Sort results")}</span>
             <select
               id="illustration-sort"
               value={sortMode}
@@ -482,10 +488,10 @@ export function IllustrationsWorkspace({
                 setPage(1);
               }}
             >
-              <option value="recent">Mais recentes</option>
-              <option value="insured-asc">Segurado: A–Z</option>
-              <option value="capital-desc">Maior capital</option>
-              <option value="premium-asc">Menor prêmio</option>
+              <option value="recent">{copy("Mais recentes", "Most recent")}</option>
+              <option value="insured-asc">{copy("Segurado: A–Z", "Insured: A–Z")}</option>
+              <option value="capital-desc">{copy("Maior capital", "Highest face amount")}</option>
+              <option value="premium-asc">{copy("Menor prêmio", "Lowest premium")}</option>
             </select>
           </label>
 
@@ -498,20 +504,20 @@ export function IllustrationsWorkspace({
             <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
               <path d="M4.2 5.7h9.6M7 5.7V4.1h4v1.6m-5.8 0 .6 8.2h6.4l.6-8.2" />
             </svg>
-            Limpar
+            {copy("Limpar", "Clear")}
           </button>
         </div>
 
         <div className="illustration-filter-bar" data-illustration-control>
-          <span>Documento</span>
-          <div role="group" aria-label="Filtrar por situação do documento">
+          <span>{copy("Documento", "Document")}</span>
+          <div role="group" aria-label={copy("Filtrar por situação do documento", "Filter by document status")}>
             <button
               type="button"
               aria-pressed={documentFilter === "all"}
               aria-controls="illustration-results"
               onClick={() => chooseFilter("all")}
             >
-              Todos <small>{COUNT.format(summary.total)}</small>
+              {copy("Todos", "All")} <small>{count.format(summary.total)}</small>
             </button>
             <button
               type="button"
@@ -519,7 +525,7 @@ export function IllustrationsWorkspace({
               aria-controls="illustration-results"
               onClick={() => chooseFilter("ready")}
             >
-              PDF pronto <small>{COUNT.format(summary.ready)}</small>
+              {copy("PDF pronto", "PDF ready")} <small>{count.format(summary.ready)}</small>
             </button>
             <button
               type="button"
@@ -527,7 +533,7 @@ export function IllustrationsWorkspace({
               aria-controls="illustration-results"
               onClick={() => chooseFilter("open")}
             >
-              A concluir <small>{COUNT.format(summary.open)}</small>
+              {copy("A concluir", "To complete")} <small>{count.format(summary.open)}</small>
             </button>
           </div>
         </div>
@@ -535,10 +541,10 @@ export function IllustrationsWorkspace({
 
       {filteredIllustrations.length === 0 ? (
         <section id="illustration-results" className="illustration-no-results">
-          <h3>Nenhuma cotação corresponde a esta busca.</h3>
-          <p>Tente outro segurado, produto ou situação do documento.</p>
+          <h3>{copy("Nenhuma cotação corresponde a esta busca.", "No quotes match this search.")}</h3>
+          <p>{copy("Tente outro segurado, produto ou situação do documento.", "Try another insured, product, or document status.")}</p>
           <button type="button" onClick={clearControls}>
-            Ver todas as ilustrações
+            {copy("Ver todas as ilustrações", "View all illustrations")}
           </button>
         </section>
       ) : (
@@ -547,11 +553,11 @@ export function IllustrationsWorkspace({
             {selected ? (
               <div data-illustration-preview-content>
                 <header>
-                  <span>Cotação selecionada</span>
+                  <span>{copy("Cotação selecionada", "Selected quote")}</span>
                   <div>
                     <button
                       type="button"
-                      aria-label="Ilustração anterior"
+                      aria-label={copy("Ilustração anterior", "Previous illustration")}
                       disabled={activeIndex <= 0}
                       onClick={() => changeSelection(-1)}
                     >
@@ -562,7 +568,7 @@ export function IllustrationsWorkspace({
                     <small>{activeIndex + 1} / {filteredIllustrations.length}</small>
                     <button
                       type="button"
-                      aria-label="Próxima ilustração"
+                      aria-label={copy("Próxima ilustração", "Next illustration")}
                       disabled={activeIndex >= filteredIllustrations.length - 1}
                       onClick={() => changeSelection(1)}
                     >
@@ -579,32 +585,32 @@ export function IllustrationsWorkspace({
                   <i />
                   <i />
                   <strong>{formatMoney(selected.faceAmount)}</strong>
-                  <small>capital simulado</small>
+                  <small>{copy("capital simulado", "illustrated face amount")}</small>
                 </div>
 
                 <div className="illustration-preview-title" aria-live="polite">
                   <span data-state={selected.documentState}>
-                    {DOCUMENT_LABEL[selected.documentState]}
+                    {documentLabel[selected.documentState]}
                   </span>
                   <h3>{selected.insuredName}</h3>
-                  <p>{selected.insuredDetails || "Dados do segurado não informados"}</p>
+                  <p>{selected.insuredDetails || copy("Dados do segurado não informados", "Insured details not provided")}</p>
                 </div>
 
                 <dl>
                   <div>
-                    <dt>Produto</dt>
+                    <dt>{copy("Produto", "Product")}</dt>
                     <dd>{selected.productName}</dd>
                   </div>
                   <div>
-                    <dt>Prêmio mensal</dt>
+                    <dt>{copy("Prêmio mensal", "Monthly premium")}</dt>
                     <dd>{formatMoney(selected.premium)}</dd>
                   </div>
                   <div>
-                    <dt>Prêmio anual</dt>
+                    <dt>{copy("Prêmio anual", "Annual premium")}</dt>
                     <dd>{formatMoney(selected.annualPremium)}</dd>
                   </div>
                   <div>
-                    <dt>Data da cotação</dt>
+                    <dt>{copy("Data da cotação", "Quote date")}</dt>
                     <dd>{selected.dateLabel}</dd>
                   </div>
                 </dl>
@@ -615,7 +621,7 @@ export function IllustrationsWorkspace({
                     href={`/agent/clients/${selected.client.id}`}
                   >
                     <span>
-                      Cliente vinculado
+                      {copy("Cliente vinculado", "Linked client")}
                       <strong>{selected.client.name}</strong>
                     </span>
                     <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
@@ -624,7 +630,7 @@ export function IllustrationsWorkspace({
                   </Link>
                 ) : (
                   <div className="illustration-prospect-note">
-                    Cotação de pré-venda ainda sem cliente vinculado.
+                    {copy("Cotação de pré-venda ainda sem cliente vinculado.", "Pre-sale quote with no linked client yet.")}
                   </div>
                 )}
 
@@ -634,9 +640,13 @@ export function IllustrationsWorkspace({
                       href={`/api/illustrations/${selected.id}/document`}
                       target="_blank"
                       rel="noreferrer"
-                      aria-label={`Abrir PDF da ilustração de ${selected.insuredName} em nova aba`}
+                      aria-label={copy(
+                        "Abrir PDF da ilustração de {name} em nova aba",
+                        "Open {name}'s illustration PDF in a new tab",
+                        { name: selected.insuredName },
+                      )}
                     >
-                      Abrir PDF
+                      {copy("Abrir PDF", "Open PDF")}
                       <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
                         <path d="M5 13 13 5M7 5h6v6" />
                       </svg>
@@ -655,13 +665,13 @@ export function IllustrationsWorkspace({
             ) : null}
           </aside>
 
-          <section className="illustration-results-list" aria-label="Ilustrações encontradas">
+          <section className="illustration-results-list" aria-label={copy("Ilustrações encontradas", "Illustrations found")}>
             <header>
-              <span>{isLimited ? "Cotações mais recentes" : "Histórico de cotações"}</span>
+              <span>{isLimited ? copy("Cotações mais recentes", "Most recent quotes") : copy("Histórico de cotações", "Quote history")}</span>
               <small>
                 {isLimited
-                  ? "Exibindo as últimas 100. Use a busca para refinar."
-                  : "Selecione uma linha para ver o documento."}
+                  ? copy("Exibindo as últimas 100. Use a busca para refinar.", "Showing the latest 100. Use search to narrow the results.")
+                  : copy("Selecione uma linha para ver o documento.", "Select a row to view the document.")}
               </small>
             </header>
             <ul>
@@ -671,7 +681,11 @@ export function IllustrationsWorkspace({
                     type="button"
                     data-active={selected?.id === illustration.id || undefined}
                     aria-pressed={selected?.id === illustration.id}
-                    aria-label={`Ver cotação de ${illustration.insuredName}, ${illustration.dateLabel}`}
+                    aria-label={copy(
+                      "Ver cotação de {name}, {date}",
+                      "View quote for {name}, {date}",
+                      { name: illustration.insuredName, date: illustration.dateLabel },
+                    )}
                     onClick={() => setSelectedId(illustration.id)}
                   >
                     <span className="illustration-row-date">
@@ -679,14 +693,14 @@ export function IllustrationsWorkspace({
                     </span>
                     <span className="illustration-row-person">
                       <strong>{illustration.insuredName}</strong>
-                      <small>{illustration.client?.name ?? "Prospect"}</small>
+                      <small>{illustration.client?.name ?? copy("Prospect", "Prospect")}</small>
                     </span>
                     <span className="illustration-row-product">
                       <strong>{illustration.productName}</strong>
                       <small>{illustration.strategy ?? illustration.insuredDetails}</small>
                     </span>
                     <span className="illustration-row-money">
-                      <small>Prêmio mensal</small>
+                      <small>{copy("Prêmio mensal", "Monthly premium")}</small>
                       <strong>{formatMoney(illustration.premium)}</strong>
                     </span>
                     <span
@@ -694,7 +708,7 @@ export function IllustrationsWorkspace({
                       data-state={illustration.documentState}
                     >
                       <i />
-                      {DOCUMENT_LABEL[illustration.documentState]}
+                      {documentLabel[illustration.documentState]}
                     </span>
                     <span className="illustration-row-arrow" aria-hidden="true">
                       <svg viewBox="0 0 18 18" fill="none">
@@ -707,15 +721,15 @@ export function IllustrationsWorkspace({
             </ul>
 
             {pageCount > 1 ? (
-              <nav className="illustration-pagination" aria-label="Paginação das ilustrações">
+              <nav className="illustration-pagination" aria-label={copy("Paginação das ilustrações", "Illustration pagination")}>
                 <p>
                   <strong>{pageStart}–{pageEnd}</strong>
-                  <span>de {COUNT.format(filteredIllustrations.length)}</span>
+                  <span>{copy("de {count}", "of {count}", { count: count.format(filteredIllustrations.length) })}</span>
                 </p>
                 <div>
                   <button
                     type="button"
-                    aria-label="Página anterior"
+                    aria-label={copy("Página anterior", "Previous page")}
                     disabled={currentPage <= 1}
                     onClick={() => changePage(currentPage - 1)}
                   >
@@ -730,7 +744,7 @@ export function IllustrationsWorkspace({
                       <button
                         key={item}
                         type="button"
-                        aria-label={`Ir para a página ${item}`}
+                        aria-label={copy("Ir para a página {page}", "Go to page {page}", { page: item })}
                         aria-current={item === currentPage ? "page" : undefined}
                         onClick={() => changePage(item)}
                       >
@@ -740,7 +754,7 @@ export function IllustrationsWorkspace({
                   )}
                   <button
                     type="button"
-                    aria-label="Próxima página"
+                    aria-label={copy("Próxima página", "Next page")}
                     disabled={currentPage >= pageCount}
                     onClick={() => changePage(currentPage + 1)}
                   >
@@ -761,8 +775,10 @@ export function IllustrationsWorkspace({
           <path d="M10 8.5v4M10 6.2v.2" />
         </svg>
         <p>
-          Uso interno do agente. A ilustração apoia uma cotação verbal, mas não
-          substitui a proposta aprovada nem deve ser entregue ao cliente.
+          {copy(
+            "Uso interno do agente. A ilustração apoia uma cotação verbal, mas não substitui a proposta aprovada nem deve ser entregue ao cliente.",
+            "For agent internal use. The illustration supports a verbal quote, but does not replace the approved application and must not be delivered to the client.",
+          )}
         </p>
       </aside>
     </div>

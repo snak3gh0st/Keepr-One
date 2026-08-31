@@ -6,15 +6,16 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentScopeIds } from '@/lib/agent-access'
 import { canAccessCase } from '@/lib/case-access'
 import { decimalToNumber } from '@/lib/decimal'
-import { formatMoney } from '@/lib/format'
 import { Shell } from '@/components/Shell'
 import { CaseWorkspace } from './CaseWorkspace'
 import { getPipelineForAgent } from '@/lib/crm'
 import { getCalendarConnectionForUser, getCalendarEventsForCase } from '@/lib/calendar'
 import { mapDomainCalendarConnectionToUi, mapDomainCalendarEventToUi } from '@/components/calendar/server-adapter'
 import { getKBotApplicationEntitlement } from '@/lib/application-addon/entitlement-prisma'
+import { getServerI18n } from '@/lib/i18n/server'
 
 export default async function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { language } = await getServerI18n()
   const { id } = await params
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId }, select: { name: true, timeZone: true } })
@@ -68,9 +69,14 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
     name: `${c.prospect.firstName} ${c.prospect.lastName}`.trim(),
     email: c.prospect.email,
     stage: c.crmStage?.name ?? null,
+    stageSystemKey: c.crmStage?.systemKey ?? null,
   }
 
-  const money = (v: unknown) => (v != null ? formatMoney(decimalToNumber(v)) : null)
+  const money = (v: unknown) => (v != null ? new Intl.NumberFormat(language === 'PT' ? 'pt-BR' : 'en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: Number.isInteger(decimalToNumber(v)) ? 0 : 2,
+  }).format(decimalToNumber(v)) : null)
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>

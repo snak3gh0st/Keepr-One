@@ -21,6 +21,7 @@ import {
   LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
   LEGACY_COMMISSION_EARNING_GRID_KEY,
 } from '@/lib/national-life/commission-grid-keys'
+import { getServerI18n } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,6 +60,7 @@ function toCommissionRecords(
 }
 
 export default async function CommissionsPage() {
+  const { copy } = await getServerI18n()
   const agent = await getCurrentAgent()
   const [user, scopeAgentIds] = await Promise.all([
     prisma.user.findUnique({ where: { id: agent.userId } }),
@@ -149,15 +151,15 @@ export default async function CommissionsPage() {
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <PageHeader
-        title="Comissões"
-        eyebrow="Extrato financeiro"
-        description="Acompanhe o valor de cada lançamento, identifique a apólice de origem e diferencie sua produção dos repasses da equipe."
+        title={copy("Comissões", "Commissions")}
+        eyebrow={copy("Extrato financeiro", "Financial statement")}
+        description={copy("Acompanhe o valor de cada lançamento, identifique a apólice de origem e diferencie sua produção dos repasses da equipe.", "Track every entry, identify its source policy, and distinguish your production from team overrides.")}
       >
         <Link
           href="/agent/policies"
           className="commission-header-link"
         >
-          Ver apólices
+          {copy("Ver apólices", "View policies")}
           <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
             <path d="M4.5 9h9M10 5.5 13.5 9 10 12.5" />
           </svg>
@@ -165,7 +167,7 @@ export default async function CommissionsPage() {
       </PageHeader>
       {loadError && (
         <ErrorBanner>
-          Não foi possível carregar seu extrato agora. Tente atualizar a página.
+          {copy("Não foi possível carregar seu extrato agora. Tente atualizar a página.", "We couldn't load your statement right now. Try refreshing the page.")}
         </ErrorBanner>
       )}
       {!loadError && (
@@ -176,7 +178,7 @@ export default async function CommissionsPage() {
               id: record.id,
               policyNumber: record.policy?.policyNumber ?? null,
               policyId: record.policy?.id ?? null,
-              agentName: record.policy?.agent.user.name ?? 'Não informado',
+              agentName: record.policy?.agent.user.name ?? copy('Não informado', 'Not provided'),
               type: record.type === 'DIRECT' ? 'DIRECT' : 'OVERRIDE',
               level: record.level,
               amount: decimalToNumber(record.amount).toFixed(2),

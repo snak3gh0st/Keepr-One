@@ -19,49 +19,67 @@ import {
   type OnboardingOptionalDecisionName,
 } from '@/lib/agent-onboarding'
 import { auth } from '@/lib/auth'
+import { getServerI18n } from '@/lib/i18n/server'
 import { prisma } from '@/lib/prisma'
 import { requireRoleWithoutOnboarding } from '@/lib/require-role'
 import type { OnboardingActionState } from './state'
 
-const profileSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(2, 'Informe seu nome completo.')
-    .max(100, 'O nome deve ter no máximo 100 caracteres.'),
-  phone: z
-    .string()
-    .trim()
-    .min(1, 'Informe seu telefone.')
-    .max(32, 'O telefone informado é muito longo.')
-    .refine(
-      (value) => /^\+?[0-9\s().-]+$/.test(value),
-      'Informe um telefone válido.',
-    )
-    .transform(normalizePhone)
-    .refine(
-      (value) => /^\+?[0-9]{7,15}$/.test(value),
-      'Informe um telefone com 7 a 15 dígitos.',
-    ),
-  timeZone: z
-    .string()
-    .trim()
-    .min(1, 'Selecione seu fuso horário.')
-    .max(100, 'O fuso horário informado é inválido.')
-    .refine(isValidTimeZone, 'Selecione um fuso horário válido.'),
-  npn: z
-    .string()
-    .trim()
-    .min(1, 'Informe seu NPN.')
-    .max(20, 'O NPN deve ter no máximo 20 dígitos.')
-    .refine(
-      (value) => /^\d{4,20}$/.test(value),
-      'Use de 4 a 20 números no NPN.',
-    ),
-})
+type OnboardingCopy = (
+  portuguese: string,
+  english: string,
+  values?: Record<string, string | number>,
+) => string
 
-const optionalDecisionSchema = z.enum(ONBOARDING_OPTIONAL_DECISIONS)
-const moduleSchema = z.enum(ONBOARDING_MODULES)
+function createOptionalDecisionSchema(copy: OnboardingCopy) {
+  return z.enum(ONBOARDING_OPTIONAL_DECISIONS, {
+    error: copy('Escolha uma opção válida.', 'Choose a valid option.'),
+  })
+}
+
+function createModuleSchema(copy: OnboardingCopy) {
+  return z.enum(ONBOARDING_MODULES, {
+    error: copy('Selecione um módulo válido.', 'Select a valid module.'),
+  })
+}
+
+function createProfileSchema(copy: OnboardingCopy) {
+  return z.object({
+    name: z
+      .string()
+      .trim()
+      .min(2, copy('Informe seu nome completo.', 'Enter your full name.'))
+      .max(100, copy('O nome deve ter no máximo 100 caracteres.', 'Name must be at most 100 characters.')),
+    phone: z
+      .string()
+      .trim()
+      .min(1, copy('Informe seu telefone.', 'Enter your phone number.'))
+      .max(32, copy('O telefone informado é muito longo.', 'The phone number is too long.'))
+      .refine(
+        (value) => /^\+?[0-9\s().-]+$/.test(value),
+        copy('Informe um telefone válido.', 'Enter a valid phone number.'),
+      )
+      .transform(normalizePhone)
+      .refine(
+        (value) => /^\+?[0-9]{7,15}$/.test(value),
+        copy('Informe um telefone com 7 a 15 dígitos.', 'Enter a phone number with 7 to 15 digits.'),
+      ),
+    timeZone: z
+      .string()
+      .trim()
+      .min(1, copy('Selecione seu fuso horário.', 'Select your time zone.'))
+      .max(100, copy('O fuso horário informado é inválido.', 'The selected time zone is invalid.'))
+      .refine(isValidTimeZone, copy('Selecione um fuso horário válido.', 'Select a valid time zone.')),
+    npn: z
+      .string()
+      .trim()
+      .min(1, copy('Informe seu NPN.', 'Enter your NPN.'))
+      .max(20, copy('O NPN deve ter no máximo 20 dígitos.', 'NPN must be at most 20 digits.'))
+      .refine(
+        (value) => /^\d{4,20}$/.test(value),
+        copy('Use de 4 a 20 números no NPN.', 'Use 4 to 20 digits for the NPN.'),
+      ),
+  })
+}
 
 type OnboardingActor = {
   agentId: string
@@ -102,7 +120,10 @@ function isValidTimeZone(value: string): boolean {
   }
 }
 
-function validationFailure(error: z.ZodError): OnboardingActionState {
+function validationFailure(
+  error: z.ZodError,
+  copy: OnboardingCopy,
+): OnboardingActionState {
   const fieldErrors: Record<string, string> = {}
   for (const issue of error.issues) {
     const field = issue.path[0]
@@ -112,12 +133,16 @@ function validationFailure(error: z.ZodError): OnboardingActionState {
   }
   return {
     status: 'error',
-    message: 'Revise os campos destacados.',
+    message: copy('Revise os campos destacados.', 'Review the highlighted fields.'),
     fieldErrors,
   }
 }
 
-function actionFailure(error: unknown, fallback: string): OnboardingActionState {
+function actionFailure(
+  error: unknown,
+  fallback: string,
+  copy: OnboardingCopy,
+): OnboardingActionState {
   if (error instanceof OnboardingActionError) {
     return {
       status: 'error',
@@ -128,18 +153,24 @@ function actionFailure(error: unknown, fallback: string): OnboardingActionState 
   console.error(fallback, error)
   return {
     status: 'error',
-    message: 'Não foi possível salvar esta etapa agora. Tente novamente.',
+    message: copy(
+      'Não foi possível salvar esta etapa agora. Tente novamente.',
+      "We couldn't save this step right now. Please try again.",
+    ),
   }
 }
 
-async function getOnboardingActor(): Promise<OnboardingActor> {
+async function getOnboardingActor(copy: OnboardingCopy): Promise<OnboardingActor> {
   const session = await requireRoleWithoutOnboarding('AGENT')
   const agent = await prisma.agent.findUnique({
     where: { userId: session.user.id },
     select: { id: true, userId: true, status: true },
   })
   if (!agent || agent.status !== 'ACTIVE') {
-    throw new OnboardingActionError('Não foi possível localizar seu perfil de agente.')
+    throw new OnboardingActionError(copy(
+      'Não foi possível localizar seu perfil de agente.',
+      "We couldn't find your agent profile.",
+    ))
   }
   return { agentId: agent.id, userId: agent.userId }
 }
@@ -147,16 +178,23 @@ async function getOnboardingActor(): Promise<OnboardingActor> {
 async function requireInProgressOnboarding(
   transaction: Prisma.TransactionClient,
   agentId: string,
+  copy: OnboardingCopy,
 ): Promise<AgentOnboardingRecord> {
   const onboarding = await transaction.agentOnboarding.findUnique({
     where: { agentId },
     select: AGENT_ONBOARDING_SELECT,
   })
   if (!onboarding) {
-    throw new OnboardingActionError('Esta conta não precisa realizar o onboarding.')
+    throw new OnboardingActionError(copy(
+      'Esta conta não precisa realizar o onboarding.',
+      'This account does not need to complete onboarding.',
+    ))
   }
   if (onboarding.status !== 'IN_PROGRESS') {
-    throw new OnboardingActionError('O onboarding desta conta já foi concluído.')
+    throw new OnboardingActionError(copy(
+      'O onboarding desta conta já foi concluído.',
+      'Onboarding for this account has already been completed.',
+    ))
   }
   return onboarding
 }
@@ -171,10 +209,14 @@ function nextStep(
 function requireCurrentStep(
   onboarding: AgentOnboardingRecord,
   expectedStep: AgentOnboardingRecord['currentStep'],
+  copy: OnboardingCopy,
 ) {
   const actualStep = deriveAgentOnboardingStep(onboarding)
   if (actualStep !== expectedStep || onboarding.currentStep !== expectedStep) {
-    throw new OnboardingActionError('Conclua a etapa atual antes de continuar.')
+    throw new OnboardingActionError(copy(
+      'Conclua a etapa atual antes de continuar.',
+      'Complete the current step before continuing.',
+    ))
   }
 }
 
@@ -199,12 +241,13 @@ export async function acknowledgeOnboardingWelcomeAction(
 ): Promise<OnboardingActionState> {
   void _previousState
   void _formData
+  const { copy } = await getServerI18n()
   try {
-    const actor = await getOnboardingActor()
+    const actor = await getOnboardingActor(copy)
     const now = new Date()
     const updated = await prisma.$transaction(async (transaction) => {
-      const current = await requireInProgressOnboarding(transaction, actor.agentId)
-      requireCurrentStep(current, 'WELCOME')
+      const current = await requireInProgressOnboarding(transaction, actor.agentId, copy)
+      requireCurrentStep(current, 'WELCOME', copy)
       const welcomeCompletedAt = current.welcomeCompletedAt ?? now
       const currentStep = nextStep(current, { welcomeCompletedAt })
       const onboarding = await transaction.agentOnboarding.update({
@@ -226,9 +269,9 @@ export async function acknowledgeOnboardingWelcomeAction(
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     })
     refreshOnboarding()
-    return success(updated, 'Vamos completar seu perfil.')
+    return success(updated, copy('Vamos completar seu perfil.', "Let's complete your profile."))
   } catch (error) {
-    return actionFailure(error, 'Onboarding welcome acknowledgement failed')
+    return actionFailure(error, 'Onboarding welcome acknowledgement failed', copy)
   }
 }
 
@@ -236,16 +279,17 @@ export async function saveOnboardingProfileAction(
   _previousState: OnboardingActionState,
   formData: FormData,
 ): Promise<OnboardingActionState> {
-  const parsed = profileSchema.safeParse({
+  const { copy } = await getServerI18n()
+  const parsed = createProfileSchema(copy).safeParse({
     name: formString(formData, 'name'),
     phone: formString(formData, 'phone'),
     timeZone: formString(formData, 'timeZone'),
     npn: formString(formData, 'npn'),
   })
-  if (!parsed.success) return validationFailure(parsed.error)
+  if (!parsed.success) return validationFailure(parsed.error, copy)
 
   try {
-    const actor = await getOnboardingActor()
+    const actor = await getOnboardingActor(copy)
     const currentProfile = await prisma.user.findUnique({
       where: { id: actor.userId },
       select: {
@@ -255,7 +299,10 @@ export async function saveOnboardingProfileAction(
       },
     })
     if (!currentProfile?.agent) {
-      throw new OnboardingActionError('Não foi possível localizar seu perfil.')
+      throw new OnboardingActionError(copy(
+        'Não foi possível localizar seu perfil.',
+        "We couldn't find your profile.",
+      ))
     }
     const previousProfile = {
       name: currentProfile.name,
@@ -268,8 +315,8 @@ export async function saveOnboardingProfileAction(
 
     const now = new Date()
     const updated = await prisma.$transaction(async (transaction) => {
-      const current = await requireInProgressOnboarding(transaction, actor.agentId)
-      requireCurrentStep(current, 'PROFILE')
+      const current = await requireInProgressOnboarding(transaction, actor.agentId, copy)
+      requireCurrentStep(current, 'PROFILE', copy)
       const profileCompletedAt = now
       const currentStep = nextStep(current, { profileCompletedAt })
       await transaction.user.update({
@@ -327,7 +374,10 @@ export async function saveOnboardingProfileAction(
 
     refreshOnboarding()
     revalidatePath('/agent/settings')
-    return success(updated, 'Perfil salvo. Agora conecte a National Life.')
+    return success(updated, copy(
+      'Perfil salvo. Agora conecte a National Life.',
+      'Profile saved. Now connect National Life.',
+    ))
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError
@@ -335,11 +385,16 @@ export async function saveOnboardingProfileAction(
     ) {
       return {
         status: 'error',
-        message: 'Revise os campos destacados.',
-        fieldErrors: { npn: 'Este NPN já está vinculado a outra conta.' },
+        message: copy('Revise os campos destacados.', 'Review the highlighted fields.'),
+        fieldErrors: {
+          npn: copy(
+            'Este NPN já está vinculado a outra conta.',
+            'This NPN is already linked to another account.',
+          ),
+        },
       }
     }
-    return actionFailure(error, 'Onboarding profile save failed')
+    return actionFailure(error, 'Onboarding profile save failed', copy)
   }
 }
 
@@ -349,21 +404,28 @@ export async function verifyNationalLifeOnboardingAction(
 ): Promise<OnboardingActionState> {
   void _previousState
   void _formData
+  const { copy } = await getServerI18n()
   try {
-    const actor = await getOnboardingActor()
+    const actor = await getOnboardingActor(copy)
     const integrations = await detectOnboardingIntegrations(actor)
     if (integrations.nationalLife !== 'VERIFIED_SYNC') {
       throw new OnboardingActionError(
         integrations.nationalLife === 'CONNECTOR_PAIRED'
-          ? 'O K-Bot está conectado, mas ainda falta concluir uma sincronização verificada da National Life.'
-          : 'Conecte o K-Bot e conclua a primeira sincronização da National Life.',
+          ? copy(
+              'O K-Bot está conectado, mas ainda falta concluir uma sincronização verificada da National Life.',
+              'K-Bot is connected, but you still need to complete a verified National Life sync.',
+            )
+          : copy(
+              'Conecte o K-Bot e conclua a primeira sincronização da National Life.',
+              'Connect K-Bot and complete the first National Life sync.',
+            ),
       )
     }
 
     const now = new Date()
     const updated = await prisma.$transaction(async (transaction) => {
-      const current = await requireInProgressOnboarding(transaction, actor.agentId)
-      requireCurrentStep(current, 'NATIONAL_LIFE')
+      const current = await requireInProgressOnboarding(transaction, actor.agentId, copy)
+      requireCurrentStep(current, 'NATIONAL_LIFE', copy)
       const nationalLifeVerifiedAt = current.nationalLifeVerifiedAt ?? now
       const nationalLifeVerificationSource = 'LOCAL_CONNECTOR_SYNC' as const
       const currentStep = nextStep(current, {
@@ -397,18 +459,23 @@ export async function verifyNationalLifeOnboardingAction(
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     })
     refreshOnboarding()
-    return success(updated, 'Conexão National Life verificada.')
+    return success(updated, copy(
+      'Conexão National Life verificada.',
+      'National Life connection verified.',
+    ))
   } catch (error) {
-    return actionFailure(error, 'National Life onboarding verification failed')
+    return actionFailure(error, 'National Life onboarding verification failed', copy)
   }
 }
 
 async function saveOptionalIntegrationDecision(input: {
   kind: 'CALENDAR' | 'WHATSAPP'
   decision: OnboardingOptionalDecisionName
+  copy: OnboardingCopy
 }): Promise<OnboardingActionState> {
+  const { copy } = input
   try {
-    const actor = await getOnboardingActor()
+    const actor = await getOnboardingActor(copy)
     if (input.decision === 'CONNECTED') {
       const integrations = await detectOnboardingIntegrations(actor)
       const connected = input.kind === 'CALENDAR'
@@ -417,8 +484,14 @@ async function saveOptionalIntegrationDecision(input: {
       if (!connected) {
         throw new OnboardingActionError(
           input.kind === 'CALENDAR'
-            ? 'Conclua a conexão real com o Google Calendar antes de continuar.'
-            : 'Conclua a verificação real do WhatsApp antes de continuar.',
+            ? copy(
+                'Conclua a conexão real com o Google Calendar antes de continuar.',
+                'Complete the actual Google Calendar connection before continuing.',
+              )
+            : copy(
+                'Conclua a verificação real do WhatsApp antes de continuar.',
+                'Complete the actual WhatsApp verification before continuing.',
+              ),
           'decision',
         )
       }
@@ -426,8 +499,8 @@ async function saveOptionalIntegrationDecision(input: {
 
     const now = new Date()
     const updated = await prisma.$transaction(async (transaction) => {
-      const current = await requireInProgressOnboarding(transaction, actor.agentId)
-      requireCurrentStep(current, input.kind)
+      const current = await requireInProgressOnboarding(transaction, actor.agentId, copy)
+      requireCurrentStep(current, input.kind, copy)
       const changes = input.kind === 'CALENDAR'
         ? { calendarDecision: input.decision, calendarDecidedAt: now }
         : { whatsappDecision: input.decision, whatsappDecidedAt: now }
@@ -461,11 +534,14 @@ async function saveOptionalIntegrationDecision(input: {
     return success(
       updated,
       input.decision === 'CONNECTED'
-        ? 'Integração conectada e confirmada.'
-        : 'Você poderá configurar esta integração mais tarde.',
+        ? copy('Integração conectada e confirmada.', 'Integration connected and confirmed.')
+        : copy(
+            'Você poderá configurar esta integração mais tarde.',
+            'You can set up this integration later.',
+          ),
     )
   } catch (error) {
-    return actionFailure(error, 'Optional onboarding integration decision failed')
+    return actionFailure(error, 'Optional onboarding integration decision failed', copy)
   }
 }
 
@@ -473,42 +549,48 @@ export async function setCalendarOnboardingDecisionAction(
   _previousState: OnboardingActionState,
   formData: FormData,
 ): Promise<OnboardingActionState> {
-  const parsed = optionalDecisionSchema.safeParse(formString(formData, 'decision'))
-  if (!parsed.success) return validationFailure(parsed.error)
-  return saveOptionalIntegrationDecision({ kind: 'CALENDAR', decision: parsed.data })
+  const { copy } = await getServerI18n()
+  const parsed = createOptionalDecisionSchema(copy).safeParse(formString(formData, 'decision'))
+  if (!parsed.success) return validationFailure(parsed.error, copy)
+  return saveOptionalIntegrationDecision({ kind: 'CALENDAR', decision: parsed.data, copy })
 }
 
 export async function setWhatsAppOnboardingDecisionAction(
   _previousState: OnboardingActionState,
   formData: FormData,
 ): Promise<OnboardingActionState> {
-  const parsed = optionalDecisionSchema.safeParse(formString(formData, 'decision'))
-  if (!parsed.success) return validationFailure(parsed.error)
-  return saveOptionalIntegrationDecision({ kind: 'WHATSAPP', decision: parsed.data })
+  const { copy } = await getServerI18n()
+  const parsed = createOptionalDecisionSchema(copy).safeParse(formString(formData, 'decision'))
+  if (!parsed.success) return validationFailure(parsed.error, copy)
+  return saveOptionalIntegrationDecision({ kind: 'WHATSAPP', decision: parsed.data, copy })
 }
 
 export async function markOnboardingModuleAction(
   _previousState: OnboardingActionState,
   formData: FormData,
 ): Promise<OnboardingActionState> {
-  const parsed = moduleSchema.safeParse(formString(formData, 'module'))
-  if (!parsed.success) return validationFailure(parsed.error)
+  const { copy } = await getServerI18n()
+  const parsed = createModuleSchema(copy).safeParse(formString(formData, 'module'))
+  if (!parsed.success) return validationFailure(parsed.error, copy)
 
   try {
-    const actor = await getOnboardingActor()
+    const actor = await getOnboardingActor(copy)
     const requiredModules = await getRequiredOnboardingModulesForAgent(actor.agentId)
     const onboardingModule = parsed.data satisfies OnboardingModuleName
     if (!requiredModules.includes(onboardingModule)) {
       throw new OnboardingActionError(
-        'Este módulo não está disponível para o seu plano.',
+        copy(
+          'Este módulo não está disponível para o seu plano.',
+          'This module is not available with your plan.',
+        ),
         'module',
       )
     }
 
     const updated = await prisma.$transaction(async (transaction) => {
-      const current = await requireInProgressOnboarding(transaction, actor.agentId)
+      const current = await requireInProgressOnboarding(transaction, actor.agentId, copy)
       const reconciled = reconcileAgentOnboardingModules(current, requiredModules)
-      requireCurrentStep(reconciled, 'MODULES')
+      requireCurrentStep(reconciled, 'MODULES', copy)
       const requiredSet = new Set(requiredModules)
       const completedModules = [
         ...new Set([
@@ -536,9 +618,12 @@ export async function markOnboardingModuleAction(
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     })
     refreshOnboarding()
-    return success(updated, 'Módulo marcado como conhecido.')
+    return success(updated, copy(
+      'Módulo marcado como conhecido.',
+      'Module marked as reviewed.',
+    ))
   } catch (error) {
-    return actionFailure(error, 'Onboarding module completion failed')
+    return actionFailure(error, 'Onboarding module completion failed', copy)
   }
 }
 
@@ -548,20 +633,24 @@ export async function completeOnboardingAction(
 ): Promise<OnboardingActionState> {
   void _previousState
   void _formData
+  const { copy } = await getServerI18n()
   let completed = false
   try {
-    const actor = await getOnboardingActor()
+    const actor = await getOnboardingActor(copy)
     const requiredModules = await getRequiredOnboardingModulesForAgent(actor.agentId)
     const now = new Date()
     await prisma.$transaction(async (transaction) => {
-      const current = await requireInProgressOnboarding(transaction, actor.agentId)
+      const current = await requireInProgressOnboarding(transaction, actor.agentId, copy)
       const candidate = reconcileAgentOnboardingModules(current, requiredModules)
-      requireCurrentStep(candidate, 'REVIEW')
+      requireCurrentStep(candidate, 'REVIEW', copy)
       const completedModules = candidate.completedModules
       const incompleteStep = deriveAgentOnboardingStep(candidate)
       if (incompleteStep !== 'REVIEW') {
         throw new OnboardingActionError(
-          'Conclua todas as etapas obrigatórias antes de finalizar.',
+          copy(
+            'Conclua todas as etapas obrigatórias antes de finalizar.',
+            'Complete every required step before finishing.',
+          ),
         )
       }
 
@@ -610,7 +699,7 @@ export async function completeOnboardingAction(
     })
     completed = true
   } catch (error) {
-    return actionFailure(error, 'Onboarding completion failed')
+    return actionFailure(error, 'Onboarding completion failed', copy)
   }
 
   if (completed) {
@@ -622,6 +711,9 @@ export async function completeOnboardingAction(
   }
   return {
     status: 'error',
-    message: 'Não foi possível concluir o onboarding.',
+    message: copy(
+      'Não foi possível concluir o onboarding.',
+      "We couldn't complete onboarding.",
+    ),
   }
 }

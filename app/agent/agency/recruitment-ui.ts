@@ -37,6 +37,26 @@ export const AGENCY_RECRUITMENT_STAGE_LABEL: Record<
   DECLINED: "Não seguirá",
 };
 
+export const AGENCY_RECRUITMENT_STAGE_LABEL_EN: Record<
+  AgencyRecruitmentStageValue,
+  string
+> = {
+  PROSPECT: "Prospect",
+  CONTACTED: "Contacted",
+  MEETING_SCHEDULED: "Meeting scheduled",
+  QUALIFIED: "Qualified",
+  INVITED: "Invitation sent",
+  ONBOARDING: "Onboarding",
+  ACTIVE: "Active",
+  PAUSED: "Paused",
+  DECLINED: "Not moving forward",
+};
+
+export const AGENCY_INVITEE_TYPE_LABEL_EN: Record<AgencyInviteeTypeValue, string> = {
+  AGENT: "Agent",
+  AGENCY: "Agency",
+};
+
 const RECRUITMENT_STAGE_SET = new Set<string>(AGENCY_RECRUITMENT_STAGES);
 
 export function sanitizeAgencyRecruitmentStage(

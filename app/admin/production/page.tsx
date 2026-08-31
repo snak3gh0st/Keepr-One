@@ -10,6 +10,8 @@ import { Select } from '@/components/Field'
 import { Button } from '@/components/Button'
 import { ContextPanel } from '@/components/ContextPanel'
 import { ProductionTable } from './ProductionTable'
+import { getServerI18n } from '@/lib/i18n/server'
+import { formatDate, formatNumber } from '@/lib/i18n/format'
 
 export default async function ProductionPage({
   searchParams,
@@ -17,6 +19,7 @@ export default async function ProductionPage({
   searchParams: Promise<{ period?: string }>
 }) {
   const session = await requireRole('ADMIN')
+  const { copy, language } = await getServerI18n()
   const { period: periodParam } = await searchParams
 
   const distinctPeriods = await prisma.commissionRecord.findMany({
@@ -29,6 +32,11 @@ export default async function ProductionPage({
   ).sort((a, b) => b.localeCompare(a))
 
   const period = periodParam && periods.includes(periodParam) ? periodParam : periods[0]
+  const periodLabel = (value: string) => formatDate(`${value}-01T00:00:00.000Z`, language, {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
   const bounds = getMonthBounds(period)
 
   const [agents, policyStats, commissionStats] = await Promise.all([
@@ -61,16 +69,16 @@ export default async function ProductionPage({
 
   return (
     <Shell role="ADMIN" userName={session.user.name}>
-      <PageHeader title="Produção por agente" eyebrow="Desempenho" description="Compare apólices, prêmio e comissão por período." />
+      <PageHeader title={copy('Produção por agente', 'Production by agent')} eyebrow={copy('Desempenho', 'Performance')} description={copy('Compare apólices, prêmio e comissão por período.', 'Compare policies, premium, and commission by period.')} />
 
       <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">
         <section>
-          <div className="mb-4 flex items-baseline justify-between"><h2 className="text-base font-semibold text-ink">Ranking do período</h2><span className="text-xs text-ink-muted">{rows.length} agentes</span></div>
+          <div className="mb-4 flex items-baseline justify-between"><h2 className="text-base font-semibold text-ink">{copy('Ranking do período', 'Period ranking')}</h2><span className="text-xs text-ink-muted">{rows.length === 1 ? copy('1 agente', '1 agent') : copy(`${formatNumber(rows.length, language)} agentes`, `${formatNumber(rows.length, language)} agents`)}</span></div>
         <ProductionTable rows={rows} />
         </section>
         <aside className="space-y-5 lg:sticky lg:top-6">
-          <form method="GET" className="rounded-lg border border-border-steel bg-paper p-5"><h2 className="text-base font-semibold text-ink">Filtrar período</h2><p className="mt-1 text-sm text-ink-muted">Escolha o mês que deseja comparar.</p><label className="mt-4 flex flex-col gap-2"><span className="text-xs font-semibold text-ink-muted">Mês</span><Select name="period" defaultValue={period}>{periods.map((p) => <option key={p} value={p}>{p}</option>)}</Select></label><Button type="submit" variant="primary" className="mt-4 w-full">Aplicar filtro</Button></form>
-          <ContextPanel eyebrow="Leitura" title="Como usar"><p>O ranking combina apólices criadas, prêmio total e comissão no mês selecionado.</p></ContextPanel>
+          <form method="GET" className="rounded-lg border border-border-steel bg-paper p-5"><h2 className="text-base font-semibold text-ink">{copy('Filtrar período', 'Filter period')}</h2><p className="mt-1 text-sm text-ink-muted">{copy('Escolha o mês que deseja comparar.', 'Choose the month you want to compare.')}</p><label className="mt-4 flex flex-col gap-2"><span className="text-xs font-semibold text-ink-muted">{copy('Mês', 'Month')}</span><Select name="period" defaultValue={period}>{periods.map((p) => <option key={p} value={p}>{periodLabel(p)}</option>)}</Select></label><Button type="submit" variant="primary" className="mt-4 w-full">{copy('Aplicar filtro', 'Apply filter')}</Button></form>
+          <ContextPanel eyebrow={copy('Leitura', 'Insights')} title={copy('Como usar', 'How to use')}><p>{copy('O ranking combina apólices criadas, prêmio total e comissão no mês selecionado.', 'The ranking combines policies created, total premium, and commission in the selected month.')}</p></ContextPanel>
         </aside>
       </div>
     </Shell>

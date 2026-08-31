@@ -5,21 +5,24 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getIllustrationCommandStatuses } from '@/lib/national-life/illustration-command-status'
 import { illustrationPdfMessage } from '@/lib/national-life/illustration-pdf-status'
-import { formatCarrierInstant } from '@/lib/national-life/carrier-instant'
 import { IllustrationPdfButton } from './IllustrationPdfButton'
 import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
+import { getServerI18n } from '@/lib/i18n/server'
+import { localeFor } from '@/lib/i18n/config'
 
-const currency = (value: number) =>
-  new Intl.NumberFormat('en-US', {
+const currency = (value: number, locale: string) =>
+  new Intl.NumberFormat(locale, {
     style: 'currency',
     currency: 'USD',
     maximumFractionDigits: 0,
   }).format(value)
 
 export default async function IllustrationsPage() {
+  const { copy, language } = await getServerI18n()
+  const locale = localeFor(language)
   const agent = await getCurrentAgent()
   const localConnector = getNationalLifeLocalConnectorConfig()
   const [user, illustrations, pdfStatus] = await Promise.all([
@@ -46,19 +49,57 @@ export default async function IllustrationsPage() {
     // One query for the whole list, so every item can say where its render stands.
     getIllustrationCommandStatuses(agent.id),
   ])
+  const instant = (value: Date) => new Intl.DateTimeFormat(locale, { dateStyle: 'short' }).format(value)
+  const pdfMessage = (status: Parameters<typeof illustrationPdfMessage>[0]) => {
+    if (language === 'PT') return illustrationPdfMessage(status)
+    if (status.state === 'WORKING') {
+      return 'K-Bot is doing in Foresight what you would do: entering the scenario, waiting for the calculation, and preparing the PDF. Typical estimate: 2–5 minutes.'
+    }
+    if (status.state === 'BLOCKED') {
+      return 'K-Bot is waiting for you to sign in to National Life before continuing the same request.'
+    }
+    switch (status.safeErrorCode) {
+      case 'FORESIGHT_SSO_EXPIRED':
+        return 'The carrier requested a new sign-in. Reconnect the integration and request it again.'
+      case 'CARRIER_BROWSER_BUSY':
+        return 'The carrier was busy. You can request it again.'
+      case 'FORESIGHT_REPORT_FAILED':
+        return 'The carrier did not finish generating the document. You can request it again.'
+      case 'FORESIGHT_REPORT_TIMEOUT':
+        return 'The carrier took longer than expected. You can request it again.'
+      case 'FORESIGHT_ARTIFACT_MISSING':
+        return 'The case was completed without a verifiable PDF. Generate it again.'
+      case 'COMMAND_EXPIRED':
+        return 'The attempt expired before it finished. You can request it again.'
+      case 'FORESIGHT_PREMIUM_WRITE_MISMATCH':
+        return 'Foresight did not accept the monthly premium entered for this scenario. Review the premium and generate a new illustration; no PDF was issued.'
+      case 'FORESIGHT_CALCULATION_UNAVAILABLE':
+        return 'Foresight could not calculate a valid scenario with this source amount. Review the face amount or premium and generate a new illustration; no PDF was issued.'
+      case 'FORESIGHT_CLIENT_READBACK_TIMEOUT':
+        return 'Foresight did not confirm the insured data. Review the date of birth, state, and risk profile before trying again; no PDF was issued.'
+      case 'FORESIGHT_SOLVE_READBACK_TIMEOUT':
+      case 'FORESIGHT_SOLVE_READBACK_MISMATCH':
+      case 'FORESIGHT_RESPONSE_INVALID':
+        return 'Foresight did not return a verifiable result for this scenario. Review the source amount and generate a new illustration; no PDF was issued.'
+      case null:
+        return 'The PDF could not be generated.'
+      default:
+        return copy('Não foi possível gerar ({code}).', 'The PDF could not be generated ({code}).', { code: status.safeErrorCode })
+    }
+  }
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <PageHeader
-        title="Ilustrações"
-        eyebrow="Pré-venda"
-        description="Crie o cenário, acompanhe o Foresight em segundo plano e guarde o PDF oficial no histórico do segurado."
+        title={copy("Ilustrações", "Illustrations")}
+        eyebrow={copy("Pré-venda", "Pre-sale")}
+        description={copy("Crie o cenário, acompanhe o Foresight em segundo plano e guarde o PDF oficial no histórico do segurado.", "Create the scenario, follow Foresight in the background, and keep the official PDF in the insured's history.")}
       >
         <Link
           href="/agent/illustrations/new"
           className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
         >
-          Nova ilustração
+          {copy("Nova ilustração", "New illustration")}
         </Link>
       </PageHeader>
 
@@ -66,13 +107,13 @@ export default async function IllustrationsPage() {
         <Table>
           <Thead>
             <tr>
-              <Th>Data</Th>
-              <Th>Segurado</Th>
-              <Th>Cliente</Th>
-              <Th>Produto</Th>
-              <Th className="text-right">Capital segurado</Th>
-              <Th className="text-right">Prêmio mensal</Th>
-              <Th>Documento</Th>
+              <Th>{copy("Data", "Date")}</Th>
+              <Th>{copy("Segurado", "Insured")}</Th>
+              <Th>{copy("Cliente", "Client")}</Th>
+              <Th>{copy("Produto", "Product")}</Th>
+              <Th className="text-right">{copy("Capital segurado", "Face amount")}</Th>
+              <Th className="text-right">{copy("Prêmio mensal", "Monthly premium")}</Th>
+              <Th>{copy("Documento", "Document")}</Th>
             </tr>
           </Thead>
           <tbody>
@@ -82,7 +123,7 @@ export default async function IllustrationsPage() {
               const premium = hasCarrierPremium ? illustration.premium : illustration.targetPremium
               return (
               <Tr key={illustration.id}>
-                <Td>{formatCarrierInstant(illustration.createdAt)}</Td>
+                <Td>{instant(illustration.createdAt)}</Td>
                 <Td>
                   <Link
                     href={`/agent/illustrations/${illustration.id}`}
@@ -101,25 +142,25 @@ export default async function IllustrationsPage() {
                       {illustration.client.name}
                     </Link>
                   ) : (
-                    <span className="text-ink-muted">Prospect</span>
+                    <span className="text-ink-muted">{copy("Prospect", "Prospect")}</span>
                   )}
                 </Td>
                 <Td>
                   <span className="block">{illustration.productName ?? '—'}</span>
-                  <span className="mt-0.5 block text-xs text-ink-muted">S&P 500 · foco em teto</span>
+                  <span className="mt-0.5 block text-xs text-ink-muted">{copy("S&P 500 · foco em teto", "S&P 500 · cap focus")}</span>
                 </Td>
                 <TdNum>
-                  {illustration.faceAmount ? currency(Number(illustration.faceAmount)) : '—'}
+                  {illustration.faceAmount ? currency(Number(illustration.faceAmount), locale) : '—'}
                 </TdNum>
                 <TdNum>
-                  {premium ? currency(Number(premium)) : '—'}
+                  {premium ? currency(Number(premium), locale) : '—'}
                   <span className="mt-0.5 block text-xs font-normal text-ink-muted">
                     {hasCarrierPremium
-                      ? 'confirmado no Foresight'
+                      ? copy('confirmado no Foresight', 'confirmed in Foresight')
                       : illustration.targetPremiumSource === 'AGENT_INPUT_FOR_FORESIGHT'
-                        ? 'para a ilustração'
+                        ? copy('para a ilustração', 'for the illustration')
                         : illustration.targetPremiumSource === 'FORESIGHT_CALCULATES_PREMIUM_FROM_DEATH_BENEFIT'
-                          ? 'a calcular pela National Life'
+                          ? copy('a calcular pela National Life', 'to be calculated by National Life')
                           : null}
                   </span>
                 </TdNum>
@@ -133,7 +174,7 @@ export default async function IllustrationsPage() {
                       rel="noreferrer"
                       className="text-teal hover:text-teal-deep"
                     >
-                      Abrir PDF
+                      {copy("Abrir PDF", "Open PDF")}
                     </a>
                   ) : (
                     <>
@@ -153,7 +194,7 @@ export default async function IllustrationsPage() {
                           is not a broken quote — it is "connect again". */}
                       {status && (
                         <p className="mt-1 text-xs text-ink-muted">
-                          {illustrationPdfMessage(status)}
+                          {pdfMessage(status)}
                         </p>
                       )}
                     </>
@@ -166,7 +207,7 @@ export default async function IllustrationsPage() {
         </Table>
 
         {illustrations.length === 0 && (
-            <EmptyState>Nenhuma ilustração oficial pedida ainda.</EmptyState>
+            <EmptyState>{copy("Nenhuma ilustração oficial pedida ainda.", "No official illustrations have been requested yet.")}</EmptyState>
         )}
       </section>
     </Shell>

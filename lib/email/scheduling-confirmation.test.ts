@@ -64,4 +64,17 @@ describe('scheduling confirmation email', () => {
     expect(failed.text).not.toContain('será enviado pelo convite oficial')
     expect(failed.calendarAttachment).not.toContain('URL:https://meet.google.com')
   })
+
+  it('renders the complete confirmation in English when the owner selected EN', () => {
+    const content = renderSchedulingConfirmationEmail({
+      ...input,
+      language: 'EN',
+    })
+
+    expect(content.subject).toBe('Booking confirmed: Conversa, proteção & renda')
+    expect(content.html).toContain('Saturday, August 29, 2026')
+    expect(content.html).toContain('Add to Google Calendar')
+    expect(content.html).toContain('Your time is reserved')
+    expect(content.text).toContain('compatible with Apple Calendar and other calendars')
+  })
 })

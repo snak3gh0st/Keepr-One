@@ -6,31 +6,41 @@ import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import { useRouter } from 'next/navigation'
 import { Logo } from '@/components/Logo'
+import { useI18n } from '@/components/i18n/LanguageProvider'
 import { authClient } from '@/lib/auth-client'
 
 gsap.registerPlugin(useGSAP, ScrollTrigger)
 
-const securitySignals = [
+const securitySignalCopy = [
   {
-    title: 'Acesso por perfil',
-    description: 'Cada pessoa vê apenas o que precisa para trabalhar.',
+    title: ['Acesso por perfil', 'Role-based access'],
+    description: [
+      'Cada pessoa vê apenas o que precisa para trabalhar.',
+      'Each person sees only what they need to do their work.',
+    ],
   },
   {
-    title: 'Histórico preservado',
-    description: 'Movimentos importantes permanecem organizados e rastreáveis.',
+    title: ['Histórico preservado', 'Preserved history'],
+    description: [
+      'Movimentos importantes permanecem organizados e rastreáveis.',
+      'Important activity stays organized and traceable.',
+    ],
   },
   {
-    title: 'Operação unificada',
-    description: 'Carteira, clientes e pendências vivem na mesma perspectiva.',
+    title: ['Operação unificada', 'Unified operations'],
+    description: [
+      'Carteira, clientes e pendências vivem na mesma perspectiva.',
+      'Your book, clients, and pending work share one clear view.',
+    ],
   },
-]
+] as const
 
-const marqueeItems = [
-  'Acesso monitorado',
-  'Dados organizados',
-  'Sessões protegidas',
-  'Decisões com clareza',
-]
+const marqueeItemCopy = [
+  ['Acesso monitorado', 'Monitored access'],
+  ['Dados organizados', 'Organized data'],
+  ['Sessões protegidas', 'Protected sessions'],
+  ['Decisões com clareza', 'Clear decisions'],
+] as const
 
 function EyeIcon({ crossed = false }: { crossed?: boolean }) {
   return (
@@ -73,6 +83,7 @@ function EnterIcon() {
 
 export default function LoginPage() {
   const router = useRouter()
+  const { copy } = useI18n()
   const scope = useRef<HTMLElement>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -83,6 +94,11 @@ export default function LoginPage() {
   const [founderCreated, setFounderCreated] = useState(false)
   const [agencyInvitationLogin, setAgencyInvitationLogin] = useState(false)
   const [postLoginPath, setPostLoginPath] = useState('/')
+  const securitySignals = securitySignalCopy.map((signal) => ({
+    title: copy(signal.title[0], signal.title[1]),
+    description: copy(signal.description[0], signal.description[1]),
+  }))
+  const marqueeItems = marqueeItemCopy.map((item) => copy(item[0], item[1]))
 
   useEffect(() => {
     const search = new URLSearchParams(window.location.search)
@@ -197,14 +213,20 @@ export default function LoginPage() {
       const { error: signInError } = await authClient.signIn.email({ email, password })
 
       if (signInError) {
-        setError('Não foi possível entrar. Confira seu e-mail e sua senha.')
+        setError(copy(
+          'Não foi possível entrar. Confira seu e-mail e sua senha.',
+          "We couldn't sign you in. Check your email and password.",
+        ))
         return
       }
 
       router.replace(postLoginPath)
       router.refresh()
     } catch {
-      setError('A conexão falhou. Tente novamente em alguns instantes.')
+      setError(copy(
+        'A conexão falhou. Tente novamente em alguns instantes.',
+        'The connection failed. Please try again in a moment.',
+      ))
     } finally {
       setSubmitting(false)
     }
@@ -225,7 +247,7 @@ export default function LoginPage() {
               <Logo size={32} wordmark={false} className="text-[1.05rem] text-white" />
               <div className="flex items-center gap-2 text-[0.68rem] font-medium uppercase tracking-[0.15em] text-white/55">
                 <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-mint shadow-[0_0_14px_rgba(91,216,144,0.75)]" />
-                Acesso protegido
+                {copy('Acesso protegido', 'Protected access')}
               </div>
             </header>
 
@@ -233,10 +255,13 @@ export default function LoginPage() {
               <div className="mb-10">
                 <div data-login-reveal className="mb-7 h-px w-12 bg-mint" />
                 <h1 data-login-reveal className="max-w-xl text-[clamp(2.7rem,4.2vw,4.7rem)] font-medium leading-[0.98] tracking-[-0.065em] text-white">
-                  Bem-vindo de volta.
+                  {copy('Bem-vindo de volta.', 'Welcome back.')}
                 </h1>
                 <p data-login-reveal className="mt-5 max-w-sm text-[0.95rem] leading-7 text-white/52">
-                  Entre para acessar uma visão clara da sua operação financeira.
+                  {copy(
+                    'Entre para acessar uma visão clara da sua operação financeira.',
+                    'Sign in for a clear view of your financial operations.',
+                  )}
                 </p>
               </div>
 
@@ -245,7 +270,10 @@ export default function LoginPage() {
                   role="status"
                   className="mb-6 border-l-2 border-mint bg-mint/10 px-4 py-3 text-sm leading-6 text-white/76"
                 >
-                  Seu acesso Founder foi criado. Entre com a senha cadastrada para começar os 30 dias.
+                  {copy(
+                    'Seu acesso Founder foi criado. Entre com a senha cadastrada para começar os 30 dias.',
+                    'Your Founder access is ready. Sign in with your password to begin your 30 days.',
+                  )}
                 </div>
               )}
 
@@ -254,7 +282,10 @@ export default function LoginPage() {
                   role="status"
                   className="mb-6 border-l-2 border-mint bg-mint/10 px-4 py-3 text-sm leading-6 text-white/76"
                 >
-                  Entre com o e-mail que recebeu o convite. Depois do acesso, você voltará à escolha do plano.
+                  {copy(
+                    'Entre com o e-mail que recebeu o convite. Depois do acesso, você voltará à escolha do plano.',
+                    'Sign in with the email that received the invitation. You will return to plan selection afterward.',
+                  )}
                 </div>
               )}
 
@@ -277,14 +308,14 @@ export default function LoginPage() {
                     inputMode="email"
                     aria-invalid={Boolean(error)}
                     aria-describedby={error ? 'login-error' : undefined}
-                    placeholder="voce@email.com"
+                    placeholder={copy('voce@email.com', 'you@example.com')}
                     className="login-input h-14 w-full rounded-xl border border-white/[0.18] bg-white/[0.035] px-4 text-base text-white outline-none transition-[border-color,background-color,box-shadow] duration-300 placeholder:text-white/38 hover:border-white/35 focus-visible:border-mint/70 focus-visible:bg-white/[0.055] focus-visible:ring-4 focus-visible:ring-mint/10"
                   />
                 </label>
 
                 <label data-login-reveal htmlFor="login-password" className="block">
                   <span className="mb-2.5 block text-xs font-medium tracking-[0.08em] text-white/58">
-                    Senha
+                    {copy('Senha', 'Password')}
                   </span>
                   <span className="relative block">
                     <input
@@ -300,13 +331,15 @@ export default function LoginPage() {
                       autoComplete="current-password"
                       aria-invalid={Boolean(error)}
                       aria-describedby={error ? 'login-error' : undefined}
-                      placeholder="Digite sua senha"
+                      placeholder={copy('Digite sua senha', 'Enter your password')}
                       className="login-input h-14 w-full rounded-xl border border-white/[0.18] bg-white/[0.035] px-4 pr-14 text-base text-white outline-none transition-[border-color,background-color,box-shadow] duration-300 placeholder:text-white/38 hover:border-white/35 focus-visible:border-mint/70 focus-visible:bg-white/[0.055] focus-visible:ring-4 focus-visible:ring-mint/10"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword((visible) => !visible)}
-                      aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                      aria-label={showPassword
+                        ? copy('Ocultar senha', 'Hide password')
+                        : copy('Mostrar senha', 'Show password')}
                       aria-pressed={showPassword}
                       className="absolute inset-y-0 right-0 flex w-14 items-center justify-center text-white/58 transition-colors duration-200 hover:text-white focus-visible:text-mint"
                     >
@@ -317,7 +350,10 @@ export default function LoginPage() {
 
                 <div data-login-reveal className="flex min-h-6 items-center justify-between gap-4">
                   <p className="text-xs leading-5 text-white/48">
-                    Use o acesso fornecido pela sua operação.
+                    {copy(
+                      'Use o acesso fornecido pela sua operação.',
+                      'Use the access provided by your organization.',
+                    )}
                   </p>
                   <span className="shrink-0 font-mono text-[0.65rem] tracking-[0.14em] text-white/42">
                     TLS 1.3
@@ -340,7 +376,11 @@ export default function LoginPage() {
                   disabled={submitting}
                   className="group flex h-14 w-full items-center justify-between rounded-xl bg-white px-5 text-sm font-semibold text-black transition-[background-color,transform] duration-300 hover:bg-[#e9e9e6] active:translate-y-px focus-visible:ring-4 focus-visible:ring-mint/30 disabled:cursor-not-allowed disabled:opacity-55"
                 >
-                  <span>{submitting ? 'Verificando acesso…' : 'Entrar no Keepr One'}</span>
+                  <span>
+                    {submitting
+                      ? copy('Verificando acesso…', 'Checking access…')
+                      : copy('Entrar no Keepr One', 'Sign in to Keepr One')}
+                  </span>
                   {submitting ? (
                     <span aria-hidden className="h-4 w-4 animate-spin rounded-full border-2 border-black/25 border-t-black" />
                   ) : (
@@ -352,13 +392,16 @@ export default function LoginPage() {
               </form>
 
               <p data-login-reveal className="mt-6 text-center text-xs leading-5 text-white/48">
-                Esqueceu sua senha? Fale com seu agente ou administrador.
+                {copy(
+                  'Esqueceu sua senha? Fale com seu agente ou administrador.',
+                  'Forgot your password? Contact your agent or administrator.',
+                )}
               </p>
             </div>
 
             <footer data-login-reveal className="flex items-center justify-between gap-5 text-[0.68rem] text-white/42">
               <span>© {new Date().getFullYear()} Keepr One</span>
-              <span>Privacidade por padrão</span>
+              <span>{copy('Privacidade por padrão', 'Privacy by default')}</span>
             </footer>
           </section>
 
@@ -373,10 +416,10 @@ export default function LoginPage() {
 
             <div className="relative z-10 flex h-full min-h-[580px] flex-col justify-between px-6 py-8 sm:px-10 sm:py-10 lg:min-h-full lg:px-14 lg:py-8 xl:px-20 xl:py-10">
               <header data-login-reveal className="flex items-center justify-between gap-5 text-[0.68rem] uppercase tracking-[0.16em] text-white/48 lg:min-h-8">
-                <span>Perspectiva financeira</span>
+                <span>{copy('Perspectiva financeira', 'Financial perspective')}</span>
                 <span className="flex items-center gap-2">
                   <span aria-hidden className="h-1 w-1 rounded-full bg-mint" />
-                  Sistema online
+                  {copy('Sistema online', 'System online')}
                 </span>
               </header>
 
@@ -386,15 +429,18 @@ export default function LoginPage() {
                   data-login-message
                   className="mx-auto w-full max-w-3xl text-center text-[clamp(2.65rem,5.3vw,5.8rem)] font-medium leading-[0.96] tracking-[-0.068em] text-white"
                 >
-                  {'Sua operação. Sob controle.'.split(' ').map((word) => (
-                    <span key={word} data-login-word className="mr-[0.22em] inline-block last:mr-0">
+                  {copy('Sua operação. Sob controle.', 'Your operations. Under control.').split(' ').map((word, index) => (
+                    <span key={`${word}-${index}`} data-login-word className="mr-[0.22em] inline-block last:mr-0">
                       {word}
                       {' '}
                     </span>
                   ))}
                 </h2>
                 <p data-login-reveal className="mx-auto mt-6 max-w-2xl text-center text-sm leading-7 text-white/55 sm:text-base">
-                  Uma visão única para o agente financeiro conduzir clientes, pendências e resultados — do primeiro contato à gestão da carteira.
+                  {copy(
+                    'Uma visão única para o agente financeiro conduzir clientes, pendências e resultados — do primeiro contato à gestão da carteira.',
+                    'One clear view for financial agents to manage clients, pending work, and results — from first contact to book management.',
+                  )}
                 </p>
 
                 <div
@@ -417,11 +463,11 @@ export default function LoginPage() {
                   <div className="absolute left-1/2 top-1/2 w-[min(88%,390px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/[0.18] bg-black/55 p-5 text-left shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-6">
                     <div className="mb-7 flex items-center justify-between gap-4">
                       <span className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-white/48">
-                        Controle operacional
+                        {copy('Controle operacional', 'Operational control')}
                       </span>
                       <span className="flex items-center gap-2 text-[0.68rem] text-white/56">
                         <span className="h-1.5 w-1.5 rounded-full bg-mint" />
-                        Ativo
+                        {copy('Ativo', 'Active')}
                       </span>
                     </div>
 
@@ -442,7 +488,7 @@ export default function LoginPage() {
                         <button
                           type="button"
                           onClick={() => changeSignal(-1)}
-                          aria-label="Sinal anterior"
+                          aria-label={copy('Sinal anterior', 'Previous signal')}
                           className="flex h-11 w-11 items-center justify-center rounded-full border border-white/15 text-white/60 transition-[border-color,color,transform] duration-300 hover:scale-105 hover:border-white/35 hover:text-white focus-visible:text-mint"
                         >
                           <ArrowIcon direction="left" />
@@ -450,7 +496,7 @@ export default function LoginPage() {
                         <button
                           type="button"
                           onClick={() => changeSignal(1)}
-                          aria-label="Próximo sinal"
+                          aria-label={copy('Próximo sinal', 'Next signal')}
                           className="flex h-11 w-11 items-center justify-center rounded-full border border-white/15 text-white/60 transition-[border-color,color,transform] duration-300 hover:scale-105 hover:border-white/35 hover:text-white focus-visible:text-mint"
                         >
                           <ArrowIcon direction="right" />

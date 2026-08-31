@@ -1,32 +1,14 @@
 import Link from "next/link";
 import type { DueFollowUpView } from "@/lib/crm";
 import { CrmStagePill } from "@/components/StatusPill";
-
-const DUE_TIME = new Intl.DateTimeFormat("pt-BR", {
-  hour: "2-digit",
-  minute: "2-digit",
-  timeZone: "America/New_York",
-});
-
-const DUE_DATE = new Intl.DateTimeFormat("pt-BR", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  timeZone: "America/New_York",
-});
+import { getServerI18n } from "@/lib/i18n/server";
+import { localeFor } from "@/lib/i18n/config";
+import { localizedCrmStage } from "./i18n";
 
 const DATE_KEY = new Intl.DateTimeFormat("en-CA", {
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
-  timeZone: "America/New_York",
-});
-
-const INTERACTION_DATE = new Intl.DateTimeFormat("pt-BR", {
-  day: "2-digit",
-  month: "short",
-  hour: "2-digit",
-  minute: "2-digit",
   timeZone: "America/New_York",
 });
 
@@ -39,32 +21,49 @@ function initials(name: string) {
     .join("");
 }
 
-function dueLabel(item: DueFollowUpView) {
+function dueLabel(
+  item: DueFollowUpView,
+  locale: string,
+  copy: (pt: string, en: string, values?: Record<string, string | number>) => string,
+) {
   if (item.overdue) {
     const amount = Math.max(1, item.overdueDays);
-    return `Atrasado há ${amount} ${amount === 1 ? "dia" : "dias"}`;
+    return amount === 1
+      ? copy("Atrasado há {count} dia", "{count} day overdue", { count: amount })
+      : copy("Atrasado há {count} dias", "{count} days overdue", { count: amount });
   }
 
+  const dueTime = new Intl.DateTimeFormat(locale, {
+    hour: "2-digit", minute: "2-digit", timeZone: "America/New_York",
+  });
   if (DATE_KEY.format(item.scheduledAt) === DATE_KEY.format(new Date())) {
-    return `Hoje · ${DUE_TIME.format(item.scheduledAt)}`;
+    return copy("Hoje · {time}", "Today · {time}", { time: dueTime.format(item.scheduledAt) });
   }
 
-  return DUE_DATE.format(item.scheduledAt);
+  return new Intl.DateTimeFormat(locale, {
+    day: "2-digit", month: "short", year: "numeric", timeZone: "America/New_York",
+  }).format(item.scheduledAt);
 }
 
 function contactDigits(phone: string) {
   return phone.replace(/\D/g, "");
 }
 
-export function FollowUpActionCard({
+export async function FollowUpActionCard({
   item,
   compact = false,
 }: {
   item: DueFollowUpView;
   compact?: boolean;
 }) {
+  const { copy, language } = await getServerI18n();
+  const locale = localeFor(language);
   const digits = item.prospect.phone ? contactDigits(item.prospect.phone) : "";
-  const nextDate = dueLabel(item);
+  const nextDate = dueLabel(item, locale, copy);
+  const interactionDate = new Intl.DateTimeFormat(locale, {
+    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+    timeZone: "America/New_York",
+  });
 
   return (
     <article
@@ -114,15 +113,17 @@ export function FollowUpActionCard({
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-ink-muted">
-            <CrmStagePill stage={item.stage} />
+            <CrmStagePill stage={localizedCrmStage(copy, item.stage)} />
             {!compact ? (
               item.lastInteraction ? (
                 <span className="min-w-0 truncate">
-                  Última interação: {item.lastInteraction.title} ·{" "}
-                  {INTERACTION_DATE.format(item.lastInteraction.createdAt)}
+                  {copy("Última interação: {title} · {date}", "Last interaction: {title} · {date}", {
+                    title: item.lastInteraction.title,
+                    date: interactionDate.format(item.lastInteraction.createdAt),
+                  })}
                 </span>
               ) : (
-                <span>Sem interação anterior registrada</span>
+                <span>{copy("Sem interação anterior registrada", "No previous interaction recorded")}</span>
               )
             ) : null}
           </div>
@@ -132,15 +133,15 @@ export function FollowUpActionCard({
               href={item.href}
               className="inline-flex min-h-9 items-center justify-center rounded-full bg-rail-strong px-3 text-[11px] font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5"
             >
-              Abrir lead <span aria-hidden="true" className="ml-1">↗</span>
+              {copy("Abrir lead", "Open lead")} <span aria-hidden="true" className="ml-1">↗</span>
             </Link>
             {item.prospect.phone ? (
               <a
                 href={`tel:${item.prospect.phone}`}
-                aria-label={`Ligar para ${item.prospect.name}`}
+                aria-label={copy("Ligar para {name}", "Call {name}", { name: item.prospect.name })}
                 className="inline-flex min-h-9 items-center justify-center rounded-full border border-border-steel bg-paper px-3 text-[11px] font-semibold text-ink transition-colors hover:border-teal/40 hover:bg-teal-pale"
               >
-                Ligar
+                {copy("Ligar", "Call")}
               </a>
             ) : null}
             {digits ? (
@@ -148,7 +149,7 @@ export function FollowUpActionCard({
                 href={`https://wa.me/${digits}`}
                 target="_blank"
                 rel="noreferrer"
-                aria-label={`Abrir WhatsApp de ${item.prospect.name}`}
+                aria-label={copy("Abrir WhatsApp de {name}", "Open {name}'s WhatsApp", { name: item.prospect.name })}
                 className="inline-flex min-h-9 items-center justify-center rounded-full border border-border-steel bg-paper px-3 text-[11px] font-semibold text-ink transition-colors hover:border-teal/40 hover:bg-teal-pale"
               >
                 WhatsApp
@@ -157,10 +158,10 @@ export function FollowUpActionCard({
             {item.prospect.email ? (
               <a
                 href={`mailto:${item.prospect.email}`}
-                aria-label={`Enviar e-mail para ${item.prospect.name}`}
+                aria-label={copy("Enviar e-mail para {name}", "Email {name}", { name: item.prospect.name })}
                 className="inline-flex min-h-9 items-center justify-center rounded-full border border-border-steel bg-paper px-3 text-[11px] font-semibold text-ink transition-colors hover:border-teal/40 hover:bg-teal-pale"
               >
-                E-mail
+                {copy("E-mail", "Email")}
               </a>
             ) : null}
           </div>

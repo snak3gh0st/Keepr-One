@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import { Table, Thead, Th, ThSort, Tr, Td, TdNum, EmptyState } from "@/components/Table";
 import { Pagination, clampPage } from "@/components/Pagination";
-import { formatCompactMoney } from "@/lib/format";
+import { formatCurrency, formatNumber } from "@/lib/i18n/format";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 type Row = {
   agentId: string;
@@ -18,6 +19,7 @@ type SortKey = "open" | "placed" | "winRate" | "inFlightCoverage";
 const PAGE_SIZE = 20;
 
 export function AgentPipelineTable({ rows }: { rows: Row[] }) {
+  const { copy, language } = useI18n();
   const [sortKey, setSortKey] = useState<SortKey>("open");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
@@ -49,25 +51,25 @@ export function AgentPipelineTable({ rows }: { rows: Row[] }) {
     }
   }
 
-  if (rows.length === 0) return <EmptyState>Nenhum caso atribuído ainda.</EmptyState>;
+  if (rows.length === 0) return <EmptyState>{copy('Nenhum caso atribuído ainda.', 'No cases have been assigned yet.')}</EmptyState>;
 
   return (
     <>
-      <Table>
+      <Table label={copy('Funil por agente', 'Pipeline by agent')}>
         <Thead>
           <tr>
-            <Th>Agente</Th>
+            <Th>{copy('Agente', 'Agent')}</Th>
             <ThSort numeric active={sortKey === "open"} direction={direction} onClick={() => toggleSort("open")}>
-              Em andamento
+              {copy('Em andamento', 'In progress')}
             </ThSort>
             <ThSort numeric active={sortKey === "placed"} direction={direction} onClick={() => toggleSort("placed")}>
-              Emitidos
+              {copy('Emitidos', 'Issued')}
             </ThSort>
             <ThSort numeric active={sortKey === "winRate"} direction={direction} onClick={() => toggleSort("winRate")}>
-              Win rate
+              {copy('Taxa de conversão', 'Win rate')}
             </ThSort>
             <ThSort numeric active={sortKey === "inFlightCoverage"} direction={direction} onClick={() => toggleSort("inFlightCoverage")}>
-              Cobertura em pipeline
+              {copy('Cobertura no funil', 'Coverage in pipeline')}
             </ThSort>
           </tr>
         </Thead>
@@ -75,10 +77,14 @@ export function AgentPipelineTable({ rows }: { rows: Row[] }) {
           {pageRows.map((r, i) => (
             <Tr key={r.agentId} index={i}>
               <Td>{r.agentName}</Td>
-              <TdNum>{r.open}</TdNum>
-              <TdNum>{r.placed}</TdNum>
-              <TdNum>{(r.winRate * 100).toFixed(0)}%</TdNum>
-              <TdNum>{formatCompactMoney(r.inFlightCoverage)}</TdNum>
+              <TdNum>{formatNumber(r.open, language)}</TdNum>
+              <TdNum>{formatNumber(r.placed, language)}</TdNum>
+              <TdNum>{formatNumber(r.winRate * 100, language, { maximumFractionDigits: 0 })}%</TdNum>
+              <TdNum>{formatCurrency(r.inFlightCoverage, language, 'USD', {
+                notation: 'compact',
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 2,
+              })}</TdNum>
             </Tr>
           ))}
         </tbody>

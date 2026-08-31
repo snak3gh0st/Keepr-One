@@ -18,6 +18,11 @@ enum Role {
   CLIENT
 }
 
+enum UserLanguage {
+  PT
+  EN
+}
+
 enum AgentStatus {
   ACTIVE
   INACTIVE
@@ -437,6 +442,7 @@ model User {
   email     String   @unique
   name      String
   role      Role
+  language  UserLanguage @default(PT)
   createdAt DateTime @default(now())
   /// IANA zone used by Agenda, reminders and local wall-clock input. Existing
   /// users retain the product's historical New York behavior after migration.

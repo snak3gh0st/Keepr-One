@@ -4,35 +4,36 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/Button'
 import { sendConnectorMessage } from '@/app/agent/integrations/national-life/NationalLifeConnectorClient'
+import { useI18n } from '@/components/i18n/LanguageProvider'
 
 type FetchState = 'idle' | 'fetching' | 'auth-required' | 'error'
 
-function documentErrorMessage(code: string | undefined): string {
+function documentErrorMessage(code: string | undefined, copy: (pt: string, en: string) => string): string {
   if (code === 'AUTH_REQUIRED') {
-    return 'Entre na National Life na aba que foi aberta e tente novamente.'
+    return copy('Entre na National Life na aba que foi aberta e tente novamente.', 'Sign in to National Life in the tab that opened, then try again.')
   }
   if (code === 'CONNECTOR_NOT_PAIRED') {
-    return 'Conecte o K-Bot antes de buscar este documento.'
+    return copy('Conecte o K-Bot antes de buscar este documento.', 'Connect K-Bot before retrieving this document.')
   }
   if (code === 'SYNC_IN_PROGRESS' || code === 'DOCUMENT_FETCH_IN_PROGRESS') {
-    return 'O conector está ocupado. Aguarde a operação atual e tente novamente.'
+    return copy('O conector está ocupado. Aguarde a operação atual e tente novamente.', 'The connector is busy. Wait for the current operation and try again.')
   }
   if (code === 'CLIENT_TOO_OLD' || code === 'INVALID_MESSAGE') {
-    return 'Atualize e recarregue o K-Bot para buscar documentos.'
+    return copy('Atualize e recarregue o K-Bot para buscar documentos.', 'Update and reload K-Bot to retrieve documents.')
   }
   if (code === 'CONNECTOR_PAUSED') {
-    return 'A busca de documentos está pausada temporariamente.'
+    return copy('A busca de documentos está pausada temporariamente.', 'Document retrieval is temporarily paused.')
   }
   if (code === 'BRIDGE_UNAVAILABLE') {
-    return 'Recarregue a aba da National Life e tente trazer o documento novamente.'
+    return copy('Recarregue a aba da National Life e tente trazer o documento novamente.', 'Reload the National Life tab and try retrieving the document again.')
   }
   if (code === 'PORTAL_REQUEST_FAILED') {
-    return 'A National Life não conseguiu entregar este documento agora. Tente novamente.'
+    return copy('A National Life não conseguiu entregar este documento agora. Tente novamente.', 'National Life could not provide this document right now. Try again.')
   }
   if (code === 'INVALID_DOCUMENT_RESPONSE') {
-    return 'A National Life devolveu um arquivo inesperado. Tente novamente mais tarde.'
+    return copy('A National Life devolveu um arquivo inesperado. Tente novamente mais tarde.', 'National Life returned an unexpected file. Try again later.')
   }
-  return 'Não foi possível trazer o documento agora. Tente novamente.'
+  return copy('Não foi possível trazer o documento agora. Tente novamente.', 'Could not retrieve the document right now. Try again.')
 }
 
 export function NationalLifeDocumentButton({
@@ -42,6 +43,7 @@ export function NationalLifeDocumentButton({
   extensionId: string
   reportRowId: string
 }) {
+  const { copy } = useI18n()
   const router = useRouter()
   const [state, setState] = useState<FetchState>('idle')
   const [message, setMessage] = useState<string | null>(null)
@@ -57,7 +59,7 @@ export function NationalLifeDocumentButton({
       )
       if (!result.ok) {
         setState(result.error === 'AUTH_REQUIRED' ? 'auth-required' : 'error')
-        setMessage(documentErrorMessage(result.error))
+        setMessage(documentErrorMessage(result.error, copy))
         return
       }
       setState('idle')
@@ -65,7 +67,7 @@ export function NationalLifeDocumentButton({
     } catch (error) {
       const code = error instanceof Error ? error.message : undefined
       setState('error')
-      setMessage(documentErrorMessage(code))
+      setMessage(documentErrorMessage(code, copy))
     }
   }
 
@@ -77,7 +79,11 @@ export function NationalLifeDocumentButton({
         disabled={state === 'fetching'}
         onClick={() => void fetchDocument()}
       >
-        {state === 'fetching' ? 'Trazendo…' : state === 'auth-required' ? 'Tentar após entrar' : 'Trazer para o Keepr One'}
+        {state === 'fetching'
+          ? copy('Trazendo…', 'Retrieving…')
+          : state === 'auth-required'
+            ? copy('Tentar após entrar', 'Try after signing in')
+            : copy('Trazer para a Keepr One', 'Bring into Keepr One')}
       </Button>
       {message && (
         <p role="status" className="max-w-xs text-xs leading-5 text-ink-muted sm:text-right">

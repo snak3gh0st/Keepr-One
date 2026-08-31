@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, IBM_Plex_Mono, IBM_Plex_Sans, Inter, Outfit } from "next/font/google";
+import { LanguageProvider } from "@/components/i18n/LanguageProvider";
+import { localeFor } from "@/lib/i18n/config";
+import { getServerLanguage } from "@/lib/i18n/server";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -40,27 +43,35 @@ const metadataBase = new URL(
     "http://localhost:3000",
 );
 
-export const metadata: Metadata = {
-  metadataBase,
-  title: {
-    default: "Keepr One",
-    template: "%s · Keepr One",
-  },
-  description: "Keepr One — a visão conectada da sua operação financeira.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const language = await getServerLanguage();
+  return {
+    metadataBase,
+    title: {
+      default: "Keepr One",
+      template: "%s · Keepr One",
+    },
+    description:
+      language === "PT"
+        ? "Keepr One — a visão conectada da sua operação financeira."
+        : "Keepr One — a connected view of your financial operations.",
+  };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const language = await getServerLanguage();
+
   return (
     <html
-      lang="pt-BR"
+      lang={localeFor(language)}
       className={`${geistSans.variable} ${geistMono.variable} ${inter.variable} ${outfit.variable} ${ibmPlexSans.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-paper text-ink font-sans">
-        {children}
+        <LanguageProvider initialLanguage={language}>{children}</LanguageProvider>
       </body>
     </html>
   );

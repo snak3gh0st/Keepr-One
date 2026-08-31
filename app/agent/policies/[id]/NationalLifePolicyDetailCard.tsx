@@ -1,3 +1,8 @@
+"use client"
+
+import { useI18n } from '@/components/i18n/LanguageProvider'
+import { NationalLifePolicyRefreshButton } from './NationalLifePolicyRefreshButton'
+
 export type NationalLifePolicyDetailCardValue = {
   totalFaceAmount: string | null
   netDeathBenefit: string | null
@@ -7,13 +12,11 @@ export type NationalLifePolicyDetailCardValue = {
   observedAt: string
 }
 
-const MONEY = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-})
-
-function money(value: string | null): string {
-  return value === null ? '—' : MONEY.format(Number(value))
+function money(value: string | null, locale: string): string {
+  return value === null ? '—' : new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency: 'USD',
+  }).format(Number(value))
 }
 
 export function NationalLifePolicyDetailCard({
@@ -23,13 +26,13 @@ export function NationalLifePolicyDetailCard({
   detail: NationalLifePolicyDetailCardValue | null
   refresh?: { policyId: string; extensionId: string }
 }) {
+  const { copy, locale } = useI18n()
   if (!detail) {
     return (
       <section className="module-main-surface">
-        <h2 className="text-base font-semibold text-ink">Dados da National Life</h2>
+        <h2 className="text-base font-semibold text-ink">{copy('Dados da National Life', 'National Life data')}</h2>
         <p className="mt-2 text-sm text-ink-muted">
-          A National Life disponibiliza cobertura e pagamentos no detalhe da apólice.
-          Esses campos ainda não foram sincronizados para esta apólice.
+          {copy('A National Life disponibiliza cobertura e pagamentos no detalhe da apólice. Esses campos ainda não foram sincronizados para esta apólice.', 'National Life provides coverage and payment information in the policy details. These fields have not been synced for this policy yet.')}
         </p>
         {refresh && <NationalLifePolicyRefreshButton {...refresh} />}
       </section>
@@ -38,31 +41,31 @@ export function NationalLifePolicyDetailCard({
 
   return (
     <section className="module-main-surface">
-      <h2 className="text-base font-semibold text-ink">Dados da National Life</h2>
+      <h2 className="text-base font-semibold text-ink">{copy('Dados da National Life', 'National Life data')}</h2>
       <dl className="mt-3 space-y-2 text-sm">
         <div className="flex items-baseline justify-between gap-3">
-          <dt className="text-ink-muted">Capital segurado</dt>
-          <dd className="font-mono text-ink">{money(detail.totalFaceAmount)}</dd>
+          <dt className="text-ink-muted">{copy('Capital segurado', 'Face amount')}</dt>
+          <dd className="font-mono text-ink">{money(detail.totalFaceAmount, locale)}</dd>
         </div>
         <div className="flex items-baseline justify-between gap-3">
-          <dt className="text-ink-muted">Benefício líquido</dt>
-          <dd className="font-mono text-ink">{money(detail.netDeathBenefit)}</dd>
+          <dt className="text-ink-muted">{copy('Benefício líquido', 'Net death benefit')}</dt>
+          <dd className="font-mono text-ink">{money(detail.netDeathBenefit, locale)}</dd>
         </div>
         <div className="flex items-baseline justify-between gap-3">
-          <dt className="text-ink-muted">Pagamento planejado</dt>
+          <dt className="text-ink-muted">{copy('Pagamento planejado', 'Planned payment')}</dt>
           <dd className="font-mono text-ink">
-            {money(detail.plannedPeriodicPayment)}
+            {money(detail.plannedPeriodicPayment, locale)}
             {detail.paymentFrequency ? ` · ${detail.paymentFrequency}` : ''}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-3">
-          <dt className="text-ink-muted">Prêmio anual antecipado</dt>
-          <dd className="font-mono text-ink">{money(detail.anticipatedAnnualPremium)}</dd>
+          <dt className="text-ink-muted">{copy('Prêmio anual antecipado', 'Anticipated annual premium')}</dt>
+          <dd className="font-mono text-ink">{money(detail.anticipatedAnnualPremium, locale)}</dd>
         </div>
       </dl>
       <p className="mt-3 text-xs text-ink-muted">
-        Fonte: detalhe da apólice na National Life · atualizado em{' '}
-        {new Date(detail.observedAt).toLocaleString('pt-BR', {
+        {copy('Fonte: detalhe da apólice na National Life · atualizado em', 'Source: National Life policy details · updated on')}{' '}
+        {new Date(detail.observedAt).toLocaleString(locale, {
           dateStyle: 'medium',
           timeStyle: 'short',
           timeZone: 'America/New_York',
@@ -72,4 +75,3 @@ export function NationalLifePolicyDetailCard({
     </section>
   )
 }
-import { NationalLifePolicyRefreshButton } from './NationalLifePolicyRefreshButton'

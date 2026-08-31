@@ -1,4 +1,5 @@
 import 'server-only'
+import { localeFor, type UserLanguage } from '@/lib/i18n/config'
 
 /// Estas cores espelham as reais do site (app/globals.css, components/Logo.tsx),
 /// não uma paleta inventada pro e-mail. `--color-mint` é `oklch(0.82 0.15 151)`,
@@ -33,9 +34,11 @@ export function renderEmailLayout(options: {
   ctaLabel?: string
   ctaUrl?: string
   copyrightYear?: number
+  language?: UserLanguage
 }): string {
   const { preheader, heading, bodyHtml, ctaLabel, ctaUrl } = options
   const copyrightYear = options.copyrightYear ?? new Date().getUTCFullYear()
+  const language = options.language ?? 'PT'
 
   const cta =
     ctaLabel && ctaUrl
@@ -50,7 +53,7 @@ export function renderEmailLayout(options: {
       : ''
 
   return `<!doctype html>
-<html lang="pt-BR">
+<html lang="${localeFor(language)}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -88,7 +91,9 @@ export function renderEmailLayout(options: {
               <td style="padding: 8px 32px 28px;">
                 <div style="border-top:1px solid ${BORDER}; padding-top:20px;">
                   <p style="margin:0; font-size:12px; line-height:1.6; color:${TEXT_FAINT};">
-                    Este é um e-mail automático do Keepr One. Se você não reconhece esta ação, ignore esta mensagem ou entre em contato com o suporte.
+                    ${language === 'PT'
+                      ? 'Este é um e-mail automático do Keepr One. Se você não reconhece esta ação, ignore esta mensagem ou entre em contato com o suporte.'
+                      : 'This is an automated email from Keepr One. If you do not recognize this action, ignore this message or contact support.'}
                   </p>
                 </div>
               </td>
@@ -97,7 +102,7 @@ export function renderEmailLayout(options: {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px; margin-top:20px;">
             <tr>
               <td style="padding: 0 8px; font-size:11px; letter-spacing:0.04em; text-transform:uppercase; color:${TEXT_FAINT};">
-                © ${copyrightYear} Keepr One · Privacidade por padrão
+                © ${copyrightYear} Keepr One · ${language === 'PT' ? 'Privacidade por padrão' : 'Privacy by default'}
               </td>
             </tr>
           </table>

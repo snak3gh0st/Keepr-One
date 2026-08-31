@@ -4,18 +4,20 @@ import { useRef } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { PageTitle } from "@/components/PageTitle";
-
-const HEADER_SIGNALS = [
-  "Visão atualizada",
-  "Próxima ação",
-  "Dados organizados",
-  "Operação conectada",
-];
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 function HeaderSignalGroup({ hidden = false }: { hidden?: boolean }) {
+  const { copy } = useI18n();
+  const signals = [
+    copy("Visão atualizada", "Updated view"),
+    copy("Próxima ação", "Next action"),
+    copy("Dados organizados", "Organized data"),
+    copy("Operação conectada", "Connected operation"),
+  ];
+
   return (
     <div className="module-header-signal-group" aria-hidden={hidden || undefined}>
-      {HEADER_SIGNALS.map((signal) => (
+      {signals.map((signal) => (
         <span key={signal}>
           {signal}
           <i />

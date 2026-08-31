@@ -20,13 +20,14 @@ function futureSlot(offsetDays = 1, offsetMinutes = 0) {
   return { startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() };
 }
 
-function page(ownerTimeZone = "America/New_York") {
+function page(ownerTimeZone = "America/New_York", ownerLanguage: "PT" | "EN" = "PT") {
   return {
     slug: "maria-silva",
     title: "Conversa de 30 minutos",
     description: "Escolha o horário mais conveniente.",
     durationMinutes: 30,
     ownerName: "Maria Silva",
+    ownerLanguage,
     ownerTimeZone,
   };
 }
@@ -55,6 +56,26 @@ describe("public scheduling timezone helpers", () => {
 });
 
 describe("PublicScheduling", () => {
+  it("uses the owner language while preserving the agent-created event copy", async () => {
+    const slot = futureSlot(1, 0);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      page: page("America/New_York", "EN"),
+      slots: [slot],
+    })));
+    const user = userEvent.setup();
+
+    render(<PublicScheduling slug="maria-silva" initialLanguage="EN" />);
+
+    expect(await screen.findByRole("heading", { name: "Conversa de 30 minutos" })).toBeVisible();
+    expect(screen.getByText("Meeting with Maria Silva")).toBeVisible();
+    expect(screen.getByRole("group", { name: "Available dates" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Previous week" })).toBeDisabled();
+    await user.click(timeButton()!);
+    expect(await screen.findByRole("heading", { name: "Confirm your details" })).toHaveFocus();
+    expect(screen.getByLabelText("Full name")).toBeVisible();
+    expect(screen.getByLabelText("Email")).toBeVisible();
+  });
+
   it("shows one week at a time and keeps the navigation within fourteen days", async () => {
     const firstWeekSlot = futureSlot(1, 0);
     const secondWeekSlot = futureSlot(8, 30);

@@ -6,11 +6,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   requireRole: vi.fn(),
   listHealth: vi.fn(),
+  language: 'PT' as 'PT' | 'EN',
 }))
 
 vi.mock('@/lib/require-role', () => ({ requireRole: mocks.requireRole }))
 vi.mock('@/lib/national-life/interactive-connection-service', () => ({
   listAgentSessionHealthForAdmin: mocks.listHealth,
+}))
+vi.mock('@/lib/i18n/server', () => ({
+  getServerI18n: vi.fn(async () => ({
+    language: mocks.language,
+    copy: (portuguese: string, english: string) =>
+      mocks.language === 'PT' ? portuguese : english,
+  })),
 }))
 vi.mock('@/components/Shell', () => ({
   Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -28,6 +36,7 @@ import NationalLifeAdminPage from './page'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.language = 'PT'
   mocks.requireRole.mockResolvedValue({ user: { name: 'Admin Keepr' } })
   mocks.listHealth.mockResolvedValue([
     {
@@ -60,5 +69,16 @@ describe('National Life admin health page', () => {
     expect(screen.queryByRole('button', { name: /conectar|desconectar/i })).not.toBeInTheDocument()
     expect(screen.queryByTitle(/portal/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/viewer|exportar contexto|impersonar/i)).not.toBeInTheDocument()
+  })
+
+  it('renders operational status and dates in English when EN is selected', async () => {
+    mocks.language = 'EN'
+
+    render(await NationalLifeAdminPage())
+
+    expect(screen.getByRole('heading', { name: 'National Life integration health' })).toBeVisible()
+    expect(screen.getByText('Connected')).toBeVisible()
+    expect(screen.getByText('Last connection')).toBeVisible()
+    expect(screen.getByText('New sign-in required')).toBeVisible()
   })
 })

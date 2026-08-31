@@ -9,9 +9,16 @@ const mocks = vi.hoisted(() => ({
   lock: vi.fn(),
   findActiveCommand: vi.fn(),
   repository: {},
+  language: { current: 'PT' as 'PT' | 'EN' },
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getAgent }))
+vi.mock('@/lib/i18n/server', () => ({
+  getServerI18n: async () => ({
+    language: mocks.language.current,
+    copy: (pt: string, en: string) => mocks.language.current === 'PT' ? pt : en,
+  }),
+}))
 vi.mock('@/lib/national-life/local-connector/config', () => ({
   isNationalLifeLocalConnectorEnabled: mocks.enabled,
 }))
@@ -59,6 +66,7 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.enabled.mockReturnValue(true)
+    mocks.language.current = 'PT'
     mocks.getAgent.mockResolvedValue({ id: 'agent_1', userId: 'user_1' })
     mocks.createIllustration.mockResolvedValue({
       id: 'ill_foresight_1',
@@ -152,6 +160,17 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
     })
     expect(mocks.createIllustration).not.toHaveBeenCalled()
     expect(mocks.issue).not.toHaveBeenCalled()
+  })
+
+  it('returns validation errors in the selected English language', async () => {
+    mocks.language.current = 'EN'
+    const missingPremium = form()
+    missingPremium.delete('monthlyPremium')
+
+    await expect(requestForesightIllustration(missingPremium)).resolves.toEqual({
+      ok: false,
+      message: 'Enter a monthly premium greater than zero.',
+    })
   })
 
   it('requires a monthly premium before it creates any carrier work', async () => {

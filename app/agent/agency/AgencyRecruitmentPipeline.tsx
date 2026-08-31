@@ -6,6 +6,7 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 export type AgencyRecruitmentPipelineStage<StageId extends string = string> = {
   id: StageId;
@@ -15,33 +16,47 @@ export type AgencyRecruitmentPipelineStage<StageId extends string = string> = {
   description?: string;
 };
 
-function relationshipCountLabel(count: number): string {
-  return count === 1 ? "1 vínculo" : `${count} vínculos`;
-}
-
 function stageDescription(
   stage: AgencyRecruitmentPipelineStage,
+  copy: (portuguese: string, english: string) => string,
 ): string {
   if (stage.description) return stage.description;
 
   if (stage.count === 0) {
-    return "Nenhum vínculo direto está nesta etapa agora.";
+    return copy(
+      "Nenhum vínculo direto está nesta etapa agora.",
+      "No direct connection is in this stage right now.",
+    );
   }
 
   if (stage.count === 1) {
-    return "Um vínculo direto está avançando por esta etapa.";
+    return copy(
+      "Um vínculo direto está avançando por esta etapa.",
+      "One direct connection is moving through this stage.",
+    );
   }
 
-  return `${stage.count} vínculos diretos estão avançando por esta etapa.`;
+  return copy(
+    `${stage.count} vínculos diretos estão avançando por esta etapa.`,
+    `${stage.count} direct connections are moving through this stage.`,
+  );
 }
 
 export function AgencyRecruitmentPipeline<StageId extends string>({
   stages,
-  ariaLabel = "Etapas do recrutamento direto",
+  ariaLabel,
 }: {
   stages: readonly AgencyRecruitmentPipelineStage<StageId>[];
   ariaLabel?: string;
 }) {
+  const { copy } = useI18n();
+  const resolvedAriaLabel = ariaLabel ?? copy(
+    "Etapas do recrutamento direto",
+    "Direct recruitment stages",
+  );
+  const relationshipCountLabel = (count: number) => count === 1
+    ? copy("1 vínculo", "1 connection")
+    : copy(`${count} vínculos`, `${count} connections`);
   const navigationId = useId();
   const triggerRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const preferredStageId =
@@ -100,11 +115,11 @@ export function AgencyRecruitmentPipeline<StageId extends string>({
   }
 
   return (
-    <section className="agency-pipeline-navigation" aria-label={ariaLabel}>
+    <section className="agency-pipeline-navigation" aria-label={resolvedAriaLabel}>
       <div
         className="agency-pipeline-tabs"
         role="tablist"
-        aria-label={ariaLabel}
+        aria-label={resolvedAriaLabel}
         aria-orientation="horizontal"
       >
         {stages.map((stage, index) => {
@@ -122,7 +137,11 @@ export function AgencyRecruitmentPipeline<StageId extends string>({
               role="tab"
               className="agency-pipeline-tab"
               data-active={active || undefined}
-              aria-label={`${stage.label}. ${relationshipCountLabel(stage.count)} nesta etapa.`}
+              aria-label={copy(
+                "{stage}. {count} nesta etapa.",
+                "{stage}. {count} in this stage.",
+                { stage: stage.label, count: relationshipCountLabel(stage.count) },
+              )}
               aria-selected={active}
               aria-controls={panelId}
               tabIndex={active ? 0 : -1}
@@ -145,7 +164,7 @@ export function AgencyRecruitmentPipeline<StageId extends string>({
       >
         <div>
           <strong>{activeStage.label}</strong>
-          <p>{stageDescription(activeStage)}</p>
+          <p>{stageDescription(activeStage, copy)}</p>
         </div>
         <span>{relationshipCountLabel(activeStage.count)}</span>
       </div>

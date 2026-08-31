@@ -46,6 +46,10 @@ describe("CaseMeetingsSection helpers", () => {
     expect(caseMeetingCopy("RESCHEDULE_ILLUSTRATION", "Ana").actionLabel).toBe("Reagendar reunião");
     expect(caseMeetingCopy("APPLICATION", "Ana").defaultTitle).toBe("Revisão da aplicação · Ana");
     expect(caseMeetingCopy(null, "Ana").defaultTitle).toBe("Reunião com Ana");
+    expect(caseMeetingCopy("APPLICATION", "Ana", "EN")).toMatchObject({
+      defaultTitle: "Application review · Ana",
+      actionLabel: "Schedule meeting",
+    });
   });
 
   it("places the nearest active commitment first and keeps completed/cancelled history", () => {

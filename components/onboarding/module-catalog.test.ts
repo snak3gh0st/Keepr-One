@@ -21,8 +21,10 @@ describe("onboarding module catalog", () => {
 
     for (const definition of Object.values(ONBOARDING_MODULE_CATALOG)) {
       expect(definition.href).toMatch(/^\/agent(?:\/|$)/);
-      expect(definition.description.length).toBeGreaterThan(30);
-      expect(definition.outcome.length).toBeGreaterThan(20);
+      expect(definition.description.PT.length).toBeGreaterThan(30);
+      expect(definition.description.EN.length).toBeGreaterThan(30);
+      expect(definition.outcome.PT.length).toBeGreaterThan(20);
+      expect(definition.outcome.EN.length).toBeGreaterThan(20);
     }
   });
 
@@ -31,6 +33,17 @@ describe("onboarding module catalog", () => {
       "TODAY",
       "CRM",
       "TEAM",
+    ]);
+  });
+
+  it("returns localized module copy without changing routes or business keys", () => {
+    expect(onboardingModulesFor(["TODAY", "CALENDAR"], "EN")).toMatchObject([
+      { key: "TODAY", title: "Today", href: "/agent" },
+      { key: "CALENDAR", title: "Calendar", href: "/agent/calendar" },
+    ]);
+    expect(onboardingModulesFor(["TODAY", "CALENDAR"], "PT")).toMatchObject([
+      { key: "TODAY", title: "Hoje", href: "/agent" },
+      { key: "CALENDAR", title: "Agenda", href: "/agent/calendar" },
     ]);
   });
 });

@@ -6,6 +6,7 @@ import { Avatar } from "@/components/Avatar";
 import { Select } from "@/components/Field";
 import { RANKS } from "@/lib/ranks";
 import { NODE_WIDTH } from "@/lib/hierarchy-layout";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 export type AgentNodeData = {
   name: string;
@@ -22,6 +23,7 @@ export type AgentNodeData = {
 export type AgentFlowNode = Node<AgentNodeData, "agent">;
 
 export function AgentNode({ data }: NodeProps<AgentFlowNode>) {
+  const { copy } = useI18n();
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -32,9 +34,12 @@ export function AgentNode({ data }: NodeProps<AgentFlowNode>) {
     const rank = formData.get("rank") as string;
     try {
       await data.onSave(parentAgentId, rank);
-      setMessage({ ok: true, text: "Salvo." });
+      setMessage({ ok: true, text: copy("Salvo.", "Saved.") });
     } catch (err) {
-      setMessage({ ok: false, text: err instanceof Error ? err.message : "Erro ao salvar." });
+      setMessage({
+        ok: false,
+        text: err instanceof Error ? err.message : copy("Erro ao salvar.", "We couldn't save your changes."),
+      });
     } finally {
       setSubmitting(false);
     }
@@ -56,7 +61,9 @@ export function AgentNode({ data }: NodeProps<AgentFlowNode>) {
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium text-ink">{data.name}</p>
           <p className="truncate text-xs text-ink-muted">
-            {data.parentName ? `Reporta para ${data.parentName}` : "Topo da hierarquia"}
+            {data.parentName
+              ? copy(`Reporta para ${data.parentName}`, `Reports to ${data.parentName}`)
+              : copy("Topo da hierarquia", "Top of hierarchy")}
           </p>
         </div>
         <button
@@ -64,7 +71,7 @@ export function AgentNode({ data }: NodeProps<AgentFlowNode>) {
           onClick={data.onToggleEdit}
           className="nodrag shrink-0 text-xs font-semibold text-teal opacity-100 transition-opacity duration-150 hover:text-teal-deep sm:opacity-0 sm:focus-visible:opacity-100 sm:group-hover:opacity-100"
         >
-          {data.editing ? "Fechar" : "Editar"}
+          {data.editing ? copy("Fechar", "Close") : copy("Editar", "Edit")}
         </button>
       </div>
 
@@ -74,15 +81,15 @@ export function AgentNode({ data }: NodeProps<AgentFlowNode>) {
             <span className="rounded-full bg-panel px-2 py-[3px] text-[11px] font-semibold text-ink-muted">{data.rank}</span>
           </div>
           <form action={handleSubmit} className="flex flex-col gap-2">
-            <Select name="parentAgentId" defaultValue={data.currentParentAgentId ?? ""}>
-              <option value="">— nenhum —</option>
+            <Select name="parentAgentId" defaultValue={data.currentParentAgentId ?? ""} aria-label={copy('Gerente', 'Manager')}>
+              <option value="">{copy('— nenhum —', '— none —')}</option>
               {data.parentOptions.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>
               ))}
             </Select>
-            <Select name="rank" defaultValue={data.rank}>
+            <Select name="rank" defaultValue={data.rank} aria-label={copy('Cargo', 'Rank')}>
               {!RANKS.includes(data.rank as (typeof RANKS)[number]) && <option value={data.rank}>{data.rank}</option>}
               {RANKS.map((r) => (
                 <option key={r} value={r}>
@@ -95,7 +102,7 @@ export function AgentNode({ data }: NodeProps<AgentFlowNode>) {
               disabled={submitting}
               className="inline-flex items-center justify-center rounded-md border border-border-steel bg-paper px-3 py-1.5 text-xs font-semibold text-ink hover:border-teal disabled:opacity-50"
             >
-              {submitting ? "Salvando…" : "Salvar"}
+              {submitting ? copy("Salvando…", "Saving…") : copy("Salvar", "Save")}
             </button>
             {message && (
               <span role="alert" className={`text-xs ${message.ok ? "text-success" : "text-danger"}`}>
@@ -115,6 +122,7 @@ export type RootZoneData = { active: boolean };
 export type RootZoneFlowNode = Node<RootZoneData, "rootzone">;
 
 export function RootZoneNode({ data }: NodeProps<RootZoneFlowNode>) {
+  const { copy } = useI18n();
   return (
     <div
       style={{ width: NODE_WIDTH }}
@@ -122,7 +130,7 @@ export function RootZoneNode({ data }: NodeProps<RootZoneFlowNode>) {
         data.active ? "border-teal bg-teal-pale text-teal" : "border-border-steel text-ink-muted"
       }`}
     >
-      Solte aqui para remover o gerente
+      {copy('Solte aqui para remover o gerente', 'Drop here to remove the manager')}
     </div>
   );
 }

@@ -57,6 +57,12 @@
   gap: 1.5rem;
 }
 
+.onboarding-brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .onboarding-progress-copy {
   display: flex;
   align-items: center;

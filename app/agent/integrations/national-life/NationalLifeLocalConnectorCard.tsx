@@ -24,6 +24,7 @@ import {
   sendConnectorMessage,
   type ConnectorResponse,
 } from './NationalLifeConnectorClient'
+import { useI18n } from '@/components/i18n/LanguageProvider'
 
 type ConnectorState =
   | 'idle'
@@ -138,6 +139,18 @@ const pilotStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
     'Load the unpacked extension at chrome://extensions (developer mode), then click again.',
 }
 
+const stateCopyPt: Record<Exclude<ConnectorState, 'error'>, string> = {
+  idle: 'O K-Bot está pronto para a próxima tarefa da National Life.',
+  checking: 'O K-Bot está verificando este navegador…',
+  installing: 'Instale o K-Bot by KeeprOne pela Chrome Web Store e volte aqui. A Keepr One o reconhecerá automaticamente.',
+  connecting: 'O K-Bot está conectando este computador à Keepr One…',
+  'login-required': 'O K-Bot precisa que você entre na National Life. A mesma tarefa continua automaticamente depois do login.',
+  syncing: 'O K-Bot está lendo a National Life e salvando cada área concluída. Você pode continuar trabalhando em qualquer parte da Keepr One.',
+  slow: 'O K-Bot está aguardando a National Life concluir a área atual. As áreas concluídas continuam salvas com segurança.',
+  partial: 'O K-Bot salvou todas as áreas disponíveis. Execute novamente para coletar apenas o que a National Life não retornou.',
+  success: 'O K-Bot concluiu. Seus dados da National Life estão atualizados.',
+}
+
 /// Quantas rodadas sem qualquer sinal de vida antes de suavizar a frase. O
 /// relógio zera a cada progresso, então uma grade grande subindo lote a lote
 /// nunca chega aqui — e mesmo chegando, o que se diz é "ainda rodando", não
@@ -162,18 +175,20 @@ function humanizeSourceKey(value: string | undefined): string | null {
 function liveProgressCopy(
   state: ConnectorState,
   sync: ConnectorResponse['sync'],
+  copy: (pt: string, en: string, values?: Record<string, string | number>) => string,
+  locale: string,
 ): string | null {
   if ((state !== 'syncing' && state !== 'slow') || !sync) return null
   const stageNumber = typeof sync.stageIndex === 'number' ? sync.stageIndex + 1 : null
   const total = typeof sync.totalStages === 'number' ? sync.totalStages : null
   const source = humanizeSourceKey(sync.stageKey)
-  const position = stageNumber && total ? `Area ${Math.min(stageNumber, total)} of ${total}` : null
-  const action = source ? `Reading ${source}.` : 'Reading National Life.'
+  const position = stageNumber && total ? copy('Área {current} de {total}', 'Area {current} of {total}', { current: Math.min(stageNumber, total), total }) : null
+  const action = source ? copy('Lendo {source}.', 'Reading {source}.', { source }) : copy('Lendo a National Life.', 'Reading National Life.')
   const batches = typeof sync.uploads === 'number' && sync.uploads > 0
-    ? ` ${sync.uploads.toLocaleString('en-US')} batches saved so far.`
+    ? copy(' {count} lotes salvos até agora.', ' {count} batches saved so far.', { count: sync.uploads.toLocaleString(locale) })
     : ''
   const wait = state === 'slow'
-    ? ' Waiting for the portal response; completed areas remain saved.'
+    ? copy(' Aguardando a resposta do portal; as áreas concluídas permanecem salvas.', ' Waiting for the portal response; completed areas remain saved.')
     : ''
   return `${position ? `${position} · ` : ''}${action}${batches}${wait}`
 }
@@ -193,6 +208,7 @@ export function NationalLifeLocalConnectorCard({
   hideDuringActiveSync?: boolean
   latestRun?: { runId: string; state: string } | null
 }) {
+  const { copy, locale } = useI18n()
   const router = useRouter()
   const installedFlowStarted = useRef(false)
   const watchAbort = useRef(0)
@@ -220,7 +236,30 @@ export function NationalLifeLocalConnectorCard({
     state === 'installing'
   const busy = !recoverable
   const stateCopy = installMode === 'pilot' ? pilotStateCopy : storeStateCopy
-  const failure = state === 'error' ? connectorFailure(errorCode) : null
+  const rawFailure = state === 'error' ? connectorFailure(errorCode) : null
+  const failure = rawFailure ? {
+    ...rawFailure,
+    actionLabel: copy(({
+      reconnect: 'Reconectar este computador',
+      pairing: 'Recomeçar',
+      update: 'Já atualizei — tentar novamente',
+      retry: 'Tentar novamente',
+      paused: 'Verificar novamente',
+      subscription: 'Verificar assinatura',
+      disconnect: 'Tentar desconectar novamente',
+      support: 'Tentar novamente',
+    } as Record<string, string>)[rawFailure.action], rawFailure.actionLabel),
+    message: copy(({
+      reconnect: 'Este computador não está mais conectado à sua conta Keepr One. Reconecte-o para sincronizar novamente — você entrará na National Life normalmente.',
+      pairing: 'Não foi possível concluir a conexão deste computador. Recomeçar gera uma nova conexão — se falhar de novo, fale com o suporte da Keepr One.',
+      update: 'A Keepr One está mais atualizada que o K-Bot neste computador. Atualize a extensão no navegador e tente novamente.',
+      retry: 'A National Life interrompeu ou não respondeu durante esta etapa. Tudo que o K-Bot já coletou está seguro — aguarde um instante e tente novamente.',
+      paused: 'A sincronização com a National Life está pausada pela Keepr One agora. Nada está errado com este computador e nada foi perdido — verifique novamente em breve.',
+      subscription: 'Seu acesso à Keepr One precisa de uma assinatura ativa. Ative a assinatura do seu plano para sincronizar novamente — este computador permanece vinculado.',
+      disconnect: 'Não foi possível desconectar este computador agora. Nada mudou — tente novamente e seus dados permanecerão como estão.',
+      support: 'Sua sincronização parou antes de concluir. Nada foi perdido — tente novamente. Se continuar acontecendo, fale com o suporte da Keepr One.',
+    } as Record<string, string>)[rawFailure.action], rawFailure.message),
+  } : null
   const loginComplete = ['syncing', 'slow', 'partial', 'success'].includes(state)
   const syncComplete = state === 'partial' || state === 'success'
   const syncActive = state === 'syncing' || state === 'slow'
@@ -233,20 +272,20 @@ export function NationalLifeLocalConnectorCard({
       : 'waiting'
   const syncStepState: JourneyStepState = syncComplete ? 'complete' : syncActive ? 'active' : 'waiting'
   const extensionStepDetail = connectorPresence === 'installed'
-    ? 'Installed'
+    ? copy('Instalado', 'Installed')
     : connectorPresence === 'checking'
-      ? 'Checking'
+      ? copy('Verificando', 'Checking')
       : state === 'installing'
-        ? 'Installing'
-        : 'Install'
+        ? copy('Instalando', 'Installing')
+        : copy('Instalar', 'Install')
   const loginStepDetail = loginComplete
-    ? 'Connected'
+    ? copy('Conectado', 'Connected')
     : state === 'login-required'
-      ? 'Waiting for sign-in'
+      ? copy('Aguardando login', 'Waiting for sign-in')
       : connectorPresence === 'installed'
-        ? state === 'connecting' || state === 'checking' ? 'Opening portal' : 'Ready'
-        : 'Next'
-  const syncStepDetail = syncComplete ? 'Up to date' : syncActive ? 'Syncing' : 'Waiting'
+        ? state === 'connecting' || state === 'checking' ? copy('Abrindo portal', 'Opening portal') : copy('Pronto', 'Ready')
+        : copy('Próximo', 'Next')
+  const syncStepDetail = syncComplete ? copy('Atualizado', 'Up to date') : syncActive ? copy('Sincronizando', 'Syncing') : copy('Aguardando', 'Waiting')
   const botState: KBotState = state === 'error' || disconnected || connectorPresence === 'missing'
     ? 'error'
     : state === 'login-required' || state === 'partial'
@@ -258,32 +297,32 @@ export function NationalLifeLocalConnectorCard({
           : 'idle'
   const cornerCopy = (() => {
     if (connectorPresence === 'checking') {
-      return { title: 'I am checking this browser', detail: 'I will be ready in a moment.' }
+      return { title: copy('Estou verificando este navegador', 'I am checking this browser'), detail: copy('Estarei pronto em instantes.', 'I will be ready in a moment.') }
     }
     if (connectorPresence === 'missing') {
-      return { title: 'Install K-Bot to begin', detail: 'Then I can work with National Life for you.' }
+      return { title: copy('Instale o K-Bot para começar', 'Install K-Bot to begin'), detail: copy('Depois poderei trabalhar com a National Life para você.', 'Then I can work with National Life for you.') }
     }
     if (disconnected) {
-      return { title: 'K-Bot is disconnected', detail: 'Connect this computer when you want me to work for you.' }
+      return { title: copy('O K-Bot está desconectado', 'K-Bot is disconnected'), detail: copy('Conecte este computador quando quiser que eu trabalhe para você.', 'Connect this computer when you want me to work for you.') }
     }
     if (state === 'login-required') {
-      return { title: 'I need you to sign in to National Life', detail: 'Once you are signed in, I will continue where I stopped.' }
+      return { title: copy('Preciso que você entre na National Life', 'I need you to sign in to National Life'), detail: copy('Assim que você entrar, continuarei de onde parei.', 'Once you are signed in, I will continue where I stopped.') }
     }
     if (state === 'syncing' || state === 'slow') {
-      return { title: 'I am collecting your information', detail: 'I am already organizing it in Keepr One.' }
+      return { title: copy('Estou coletando suas informações', 'I am collecting your information'), detail: copy('Já estou organizando tudo na Keepr One.', 'I am already organizing it in Keepr One.') }
     }
     if (state === 'success') {
-      return { title: 'All set. I organized everything for you.', detail: 'Your National Life information is up to date.' }
+      return { title: copy('Tudo pronto. Organizei tudo para você.', 'All set. I organized everything for you.'), detail: copy('Suas informações da National Life estão atualizadas.', 'Your National Life information is up to date.') }
     }
     if (state === 'partial') {
-      return { title: 'I saved the available areas', detail: 'You can ask me to collect the remaining areas.' }
+      return { title: copy('Salvei as áreas disponíveis', 'I saved the available areas'), detail: copy('Você pode pedir que eu colete as áreas restantes.', 'You can ask me to collect the remaining areas.') }
     }
     if (state === 'error') {
-      return { title: 'I could not finish this part', detail: 'Everything already saved is safe. Open the details to continue.' }
+      return { title: copy('Não consegui concluir esta parte', 'I could not finish this part'), detail: copy('Tudo que já foi salvo está seguro. Abra os detalhes para continuar.', 'Everything already saved is safe. Open the details to continue.') }
     }
     return pairedDeviceId
-      ? { title: 'I am ready when you need me', detail: 'Start an update whenever you want.' }
-      : { title: 'I am ready to connect', detail: 'Connect National Life to get started.' }
+      ? { title: copy('Estou pronto quando você precisar', 'I am ready when you need me'), detail: copy('Inicie uma atualização quando quiser.', 'Start an update whenever you want.') }
+      : { title: copy('Estou pronto para conectar', 'I am ready to connect'), detail: copy('Conecte a National Life para começar.', 'Connect National Life to get started.') }
   })()
   const cornerProgress = liveSync?.totalStages && liveSync.totalStages > 0
     ? Math.min(1, Math.max(0, (liveSync.stageIndex ?? 0) / liveSync.totalStages))
@@ -291,10 +330,10 @@ export function NationalLifeLocalConnectorCard({
   const cornerTasks: KBotTask[] = syncActive
     ? [{
         id: 'sync',
-        label: 'Updating your data',
+        label: copy('Atualizando seus dados', 'Updating your data'),
         detail: liveSync?.totalStages
-          ? `${Math.min(liveSync.stageIndex ?? 0, liveSync.totalStages)} of ${liveSync.totalStages} areas checked`
-          : 'Collecting your information from National Life',
+          ? copy('{current} de {total} áreas verificadas', '{current} of {total} areas checked', { current: Math.min(liveSync.stageIndex ?? 0, liveSync.totalStages), total: liveSync.totalStages })
+          : copy('Coletando suas informações da National Life', 'Collecting your information from National Life'),
         state: state === 'slow' ? 'waiting' : 'working',
         progress: cornerProgress,
       }]
@@ -758,26 +797,26 @@ export function NationalLifeLocalConnectorCard({
             <KBotAvatar state={botState} />
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-teal-deep">
-                K-Bot · on this computer
+                K-Bot · {copy('neste computador', 'on this computer')}
               </p>
               <h2 id="local-connector-title" className="mt-1 text-2xl font-semibold tracking-[-0.04em] text-ink">
-                Put K-Bot to work
+                {copy('Coloque o K-Bot para trabalhar', 'Put K-Bot to work')}
               </h2>
             </div>
           </div>
           <span className="inline-flex w-fit items-center gap-2 rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal-deep">
             <span className="h-1.5 w-1.5 rounded-full bg-teal" aria-hidden="true" />
-            {installMode === 'pilot' ? 'Pilot' : 'One click'}
+            {installMode === 'pilot' ? copy('Piloto', 'Pilot') : copy('Um clique', 'One click')}
           </span>
         </div>
         <p className="mt-6 max-w-2xl text-sm leading-6 text-ink-muted">
-          K-Bot operates the approved National Life steps in your browser session. Your password never passes through Keepr One.
+          {copy('O K-Bot executa as etapas aprovadas da National Life na sua sessão do navegador. Sua senha nunca passa pela Keepr One.', 'K-Bot operates the approved National Life steps in your browser session. Your password never passes through Keepr One.')}
           {installMode === 'pilot'
-            ? ' In this pilot, load the unpacked extension using the ID configured for this environment.'
+            ? copy(' Neste piloto, carregue a extensão descompactada usando o ID configurado para este ambiente.', ' In this pilot, load the unpacked extension using the ID configured for this environment.')
             : null}
         </p>
         <p className="mt-2 max-w-2xl text-xs leading-5 text-ink-muted">
-          On a private, trusted computer, selecting “Remember this device” on National Life can reduce repeated MFA prompts. National Life controls how long that trusted session lasts; Keepr One never bypasses MFA and pauses safely when sign-in is required again.
+          {copy('Em um computador particular e confiável, selecionar “Remember this device” na National Life pode reduzir solicitações repetidas de MFA. A National Life controla a duração dessa sessão confiável; a Keepr One nunca ignora o MFA e pausa com segurança quando um novo login é necessário.', 'On a private, trusted computer, selecting “Remember this device” on National Life can reduce repeated MFA prompts. National Life controls how long that trusted session lasts; Keepr One never bypasses MFA and pauses safely when sign-in is required again.')}
         </p>
         {pairedDeviceId && state === 'idle' && (
           <div className="mt-5 inline-flex items-center gap-2 rounded-xl border border-teal/25 bg-paper/80 px-3 py-2 text-sm font-semibold text-teal-deep">
@@ -792,16 +831,16 @@ export function NationalLifeLocalConnectorCard({
                 />
               </svg>
             </span>
-            This computer is ready
+            {copy('Este computador está pronto', 'This computer is ready')}
           </div>
         )}
       </div>
 
       <div className="border-b border-border-steel bg-paper px-5 py-4 sm:px-7">
-        <ol aria-label="Connection progress" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <ol aria-label={copy('Progresso da conexão', 'Connection progress')} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <ConnectionJourneyStep label="K-Bot" detail={extensionStepDetail} state={extensionStepState} />
-          <ConnectionJourneyStep label="National Life session" detail={loginStepDetail} state={loginStepState} />
-          <ConnectionJourneyStep label="Verified data" detail={syncStepDetail} state={syncStepState} />
+          <ConnectionJourneyStep label={copy('Sessão da National Life', 'National Life session')} detail={loginStepDetail} state={loginStepState} />
+          <ConnectionJourneyStep label={copy('Dados verificados', 'Verified data')} detail={syncStepDetail} state={syncStepState} />
         </ol>
       </div>
 
@@ -820,23 +859,29 @@ export function NationalLifeLocalConnectorCard({
               className={`text-sm leading-6 ${state === 'error' ? 'text-danger' : state === 'success' ? 'text-success' : state === 'partial' ? 'text-gold-ink' : 'text-ink-muted'}`}
             >
               {!browserCapabilityResolved
-                ? 'Connecting on this computer needs Google Chrome or Microsoft Edge.'
+                ? copy('A conexão neste computador precisa do Google Chrome ou Microsoft Edge.', 'Connecting on this computer needs Google Chrome or Microsoft Edge.')
                 : connectorPresence === 'checking' && state === 'idle'
-                  ? 'Checking whether K-Bot is installed…'
+                  ? copy('Verificando se o K-Bot está instalado…', 'Checking whether K-Bot is installed…')
                   : connectorPresence === 'missing' && state !== 'installing'
-                    ? 'K-Bot is not installed on this browser. Install the browser extension to start National Life tasks.'
+                    ? copy('O K-Bot não está instalado neste navegador. Instale a extensão para iniciar tarefas da National Life.', 'K-Bot is not installed on this browser. Install the browser extension to start National Life tasks.')
                 : state === 'error'
-                  ? connectorFailure(errorCode).message
+                  ? failure?.message
                   : state === 'idle' && pairedDeviceId
-                    ? 'This computer is connected and ready to sync your National Life data.'
-                    : liveProgressCopy(state, liveSync) ?? stateCopy[state]}
+                    ? copy('Este computador está conectado e pronto para sincronizar seus dados da National Life.', 'This computer is connected and ready to sync your National Life data.')
+                    : liveProgressCopy(state, liveSync, copy, locale) ?? copy(stateCopyPt[state], stateCopy[state])}
             </p>
             {syncTrailIndex >= 0 && (
               <div className="mt-3">
                 <KBotTaskTrail
-                  label="K-Bot sync steps"
+                  label={copy('Etapas de sincronização do K-Bot', 'K-Bot sync steps')}
                   currentIndex={syncTrailIndex}
-                  steps={['Get ready', 'Open National Life', 'Collect information', 'Organize in Keepr One', 'Finished']}
+                  steps={[
+                    copy('Preparar', 'Get ready'),
+                    copy('Abrir National Life', 'Open National Life'),
+                    copy('Coletar informações', 'Collect information'),
+                    copy('Organizar na Keepr One', 'Organize in Keepr One'),
+                    copy('Concluído', 'Finished'),
+                  ]}
                 />
               </div>
             )}
@@ -847,41 +892,41 @@ export function NationalLifeLocalConnectorCard({
           <Button type="button" variant="primary" disabled={busy} onClick={handlePrimaryAction}>
             {state === 'installing'
               ? installMode === 'pilot'
-                ? "I've installed it — connect"
-                : 'Check installation'
+                ? copy('Já instalei — conectar', "I've installed it — connect")
+                : copy('Verificar instalação', 'Check installation')
               : connectorPresence === 'missing'
-                ? 'Install K-Bot'
+                ? copy('Instalar K-Bot', 'Install K-Bot')
                 : failure
                   ? failure.actionLabel
                 : state === 'login-required'
-                  ? 'Waiting for login…'
+                  ? copy('Aguardando login…', 'Waiting for login…')
                   : state === 'slow'
-                    ? 'Check again'
+                    ? copy('Verificar novamente', 'Check again')
                     : busy
                       ? state === 'syncing'
-                        ? 'Syncing…'
-                        : 'Connecting…'
+                        ? copy('Sincronizando…', 'Syncing…')
+                        : copy('Conectando…', 'Connecting…')
                       : state === 'success'
-                        ? 'Sync again'
+                        ? copy('Sincronizar novamente', 'Sync again')
                         : state === 'partial'
-                          ? 'Retry remaining areas'
+                          ? copy('Tentar áreas restantes', 'Retry remaining areas')
                         : pairedDeviceId
-                          ? 'Sync National Life'
-                          : 'Connect National Life'}
+                          ? copy('Sincronizar National Life', 'Sync National Life')
+                          : copy('Conectar National Life', 'Connect National Life')}
           </Button>
           {pairedDeviceId && !busy && !failure && ['idle', 'success', 'partial'].includes(state) && (
             <Button
               type="button"
               variant="secondary"
               onClick={handleFullRefresh}
-              title="Read every portal area again instead of reusing verified areas"
+              title={copy('Ler novamente todas as áreas do portal em vez de reutilizar as áreas verificadas', 'Read every portal area again instead of reusing verified areas')}
             >
-              Refresh all areas
+              {copy('Atualizar todas as áreas', 'Refresh all areas')}
             </Button>
           )}
           {pairedDeviceId && !busy && (
             <Button type="button" variant="secondary" onClick={handleDisconnect}>
-              Disconnect
+              {copy('Desconectar', 'Disconnect')}
             </Button>
           )}
         </div>
@@ -894,7 +939,7 @@ export function NationalLifeLocalConnectorCard({
             rel="noopener noreferrer"
             className="text-sm font-semibold text-teal underline-offset-4 hover:underline"
           >
-            Open the extension page to update it
+            {copy('Abrir a página da extensão para atualizá-la', 'Open the extension page to update it')}
           </a>
         </div>
       )}
@@ -906,7 +951,7 @@ export function NationalLifeLocalConnectorCard({
             rel="noopener noreferrer"
             className="text-sm font-semibold text-teal underline-offset-4 hover:underline"
           >
-            Download K-Bot by KeeprOne from the Chrome Web Store
+            {copy('Baixar K-Bot by KeeprOne pela Chrome Web Store', 'Download K-Bot by KeeprOne from the Chrome Web Store')}
           </a>
         </div>
       )}
@@ -916,7 +961,7 @@ export function NationalLifeLocalConnectorCard({
             href="/agent/integrations/national-life/data"
             className="text-sm font-semibold text-teal underline-offset-4 hover:underline"
           >
-            View synced data
+            {copy('Ver dados sincronizados', 'View synced data')}
           </Link>
         </div>
       )}

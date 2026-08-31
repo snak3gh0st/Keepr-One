@@ -6,10 +6,12 @@ import { Shell } from '@/components/Shell'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { CasesBoard } from './CasesBoard'
 import { getPipelineForAgent } from '@/lib/crm'
+import { getServerI18n } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
 export default async function CasesPage() {
+  const { copy } = await getServerI18n()
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
   const scopeAgentIds = await getAgentScopeIds(agent.id)
@@ -51,7 +53,7 @@ export default async function CasesPage() {
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
-      {loadError && <ErrorBanner>Não foi possível carregar suas oportunidades agora. Tente atualizar a página.</ErrorBanner>}
+      {loadError && <ErrorBanner>{copy('Não foi possível carregar suas oportunidades agora. Tente atualizar a página.', 'Your opportunities could not be loaded right now. Try refreshing the page.')}</ErrorBanner>}
       {!loadError && currentPipeline && (
         <CasesBoard
           cases={boardCases}

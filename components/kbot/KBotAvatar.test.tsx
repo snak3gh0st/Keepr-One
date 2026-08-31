@@ -2,8 +2,17 @@
 
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KBotActivity, KBotAvatar, KBotCornerPresence, KBotTaskTrail } from './KBotAvatar'
+
+vi.mock('@/components/i18n/LanguageProvider', () => ({
+  useI18n: () => ({
+    language: 'EN',
+    locale: 'en-US',
+    copy: (_pt: string, en: string, values: Record<string, string | number> = {}) =>
+      en.replace(/\{(\w+)\}/g, (_match, token: string) => String(values[token] ?? `{${token}}`)),
+  }),
+}))
 
 afterEach(cleanup)
 

@@ -11,6 +11,13 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
+vi.mock('@/lib/i18n/server', () => ({
+  getServerI18n: async () => ({
+    language: 'EN',
+    copy: (_pt: string, en: string, values: Record<string, string | number> = {}) =>
+      en.replace(/\{(\w+)\}/g, (_match, token: string) => String(values[token] ?? `{${token}}`)),
+  }),
+}))
 vi.mock('next/headers', () => ({ headers: mocks.headers }))
 vi.mock('@/lib/national-life/interactive-connection-service', () => ({
   startConnectionAttempt: mocks.start,

@@ -7,10 +7,12 @@ import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { PoliciesList } from './PoliciesList'
+import { getServerI18n } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
 export default async function PoliciesPage() {
+  const { copy } = await getServerI18n()
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
   const scopeAgentIds = await getAgentScopeIds(agent.id)
@@ -45,24 +47,24 @@ export default async function PoliciesPage() {
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
-      <PageHeader title="Apólices" eyebrow="Proteção em curso" description="Vigência, prêmio e sinais de atenção organizados para cuidar da carteira antes do próximo ciclo.">
+      <PageHeader title={copy("Apólices", "Policies")} eyebrow={copy("Proteção em curso", "Protection in force")} description={copy("Vigência, prêmio e sinais de atenção organizados para cuidar da carteira antes do próximo ciclo.", "Coverage dates, premiums, and attention signals organized so you can care for the portfolio before the next cycle.")}>
         <div className="flex flex-wrap gap-3">
           <Link
             href="/agent/cases/new"
             className="inline-flex items-center bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-transform duration-300 hover:-translate-y-0.5"
           >
-            Novo atendimento
+            {copy("Novo atendimento", "New case")}
           </Link>
           <Link
             href="/agent/illustrations/new"
             className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
           >
-            Nova ilustração
+            {copy("Nova ilustração", "New illustration")}
           </Link>
         </div>
       </PageHeader>
       {loadError && (
-        <ErrorBanner>Não foi possível carregar suas apólices agora. Tente atualizar a página.</ErrorBanner>
+        <ErrorBanner>{copy("Não foi possível carregar suas apólices agora. Tente atualizar a página.", "We couldn't load your policies right now. Try refreshing the page.")}</ErrorBanner>
       )}
 
       {!loadError && (

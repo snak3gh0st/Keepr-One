@@ -13,10 +13,12 @@ import { EmptyState } from '@/components/Table'
 import { NationalLifeLocalConnectorCard } from './NationalLifeLocalConnectorCard'
 import { NationalLifeSyncProgress } from './NationalLifeSyncProgress'
 import { KBotAvatar } from '@/components/kbot/KBotAvatar'
+import { getServerI18n } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
 export default async function NationalLifeConnectionPage() {
+  const { copy } = await getServerI18n()
   const agent = await getCurrentAgent()
   const localConfig = getNationalLifeLocalConnectorConfig()
   const syncStatus = localConfig.enabled
@@ -38,15 +40,15 @@ export default async function NationalLifeConnectionPage() {
   return (
     <Shell role={role} userName={user?.name ?? ''}>
       <PageHeader
-        title="Put K-Bot to work"
-        eyebrow="Integrations"
-        description="K-Bot operates the National Life steps you approve while Keepr One validates and saves the result."
+        title={copy('Coloque o K-Bot para trabalhar', 'Put K-Bot to work')}
+        eyebrow={copy('Integrações', 'Integrations')}
+        description={copy('O K-Bot executa as etapas da National Life que você aprovar, enquanto a Keepr One valida e salva o resultado.', 'K-Bot operates the National Life steps you approve while Keepr One validates and saves the result.')}
       >
         <Link
           href={backHref}
           className="inline-flex min-h-10 items-center rounded-md border border-teal px-4 py-2.5 text-sm font-semibold text-teal transition-[background-color,border-color,color,transform] duration-150 hover:border-teal-deep hover:bg-teal-pale focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
         >
-          ← Back to operations
+          ← {copy('Voltar às operações', 'Back to operations')}
         </Link>
       </PageHeader>
 
@@ -63,36 +65,36 @@ export default async function NationalLifeConnectionPage() {
                   <KBotAvatar state="idle" />
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-teal-deep">
-                      K-Bot · National Life operations
+                      K-Bot · {copy('operações National Life', 'National Life operations')}
                     </p>
-                    <p className="mt-1 text-sm text-ink-muted">Your browser session. Verified data in Keepr One.</p>
+                    <p className="mt-1 text-sm text-ink-muted">{copy('Sua sessão no navegador. Dados verificados na Keepr One.', 'Your browser session. Verified data in Keepr One.')}</p>
                   </div>
                 </div>
                 <h2 className="mt-8 max-w-xl text-balance text-3xl font-semibold tracking-[-0.045em] text-ink sm:text-4xl">
-                  One bot for the repetitive work. You stay in control.
+                  {copy('Um bot para o trabalho repetitivo. Você mantém o controle.', 'One bot for the repetitive work. You stay in control.')}
                 </h2>
                 <p className="mt-4 max-w-xl text-base leading-7 text-ink-muted">
-                  Start syncs and official illustrations from Keepr One. K-Bot works through the carrier pages and tells you only when National Life needs your login.
+                  {copy('Inicie sincronizações e ilustrações oficiais pela Keepr One. O K-Bot percorre as páginas da operadora e avisa apenas quando a National Life precisar do seu login.', 'Start syncs and official illustrations from Keepr One. K-Bot works through the carrier pages and tells you only when National Life needs your login.')}
                 </p>
                 <div className="mt-7 flex flex-wrap gap-2">
                   <span className="inline-flex items-center gap-2 rounded-full bg-teal-pale px-3 py-2 text-xs font-semibold text-teal-deep">
                     <span className="h-1.5 w-1.5 rounded-full bg-teal" aria-hidden="true" />
-                    Password stays on National Life
+                    {copy('Sua senha permanece na National Life', 'Password stays on National Life')}
                   </span>
                   <span className="inline-flex items-center gap-2 rounded-full bg-panel px-3 py-2 text-xs font-semibold text-ink-muted">
-                    Sync and illustration stay independent
+                    {copy('Sincronização e ilustração permanecem independentes', 'Sync and illustration stay independent')}
                   </span>
                 </div>
               </div>
 
-              <ol aria-label="Connection steps" className="grid content-center gap-3">
+              <ol aria-label={copy('Etapas da conexão', 'Connection steps')} className="grid content-center gap-3">
                 {[
-                  ['01', 'You choose the work', 'Start a sync or an official illustration from Keepr One.'],
-                  ['02', 'K-Bot gets to work', 'K-Bot opens the places it needs in National Life and follows the same steps you would.'],
-                  ['03', 'You sign in when needed', 'Your login always happens directly on the National Life website.'],
-                  ['04', 'K-Bot checks the result', 'The information is checked and organized before it appears in Keepr One.'],
-                  ['05', 'Everything is ready here', 'See your updated information or open the official illustration PDF.'],
-                ].map(([number, title, copy]) => (
+                  ['01', copy('Você escolhe o trabalho', 'You choose the work'), copy('Inicie uma sincronização ou ilustração oficial pela Keepr One.', 'Start a sync or an official illustration from Keepr One.')],
+                  ['02', copy('O K-Bot começa a trabalhar', 'K-Bot gets to work'), copy('O K-Bot abre os locais necessários na National Life e segue as mesmas etapas que você seguiria.', 'K-Bot opens the places it needs in National Life and follows the same steps you would.')],
+                  ['03', copy('Você entra quando necessário', 'You sign in when needed'), copy('Seu login sempre acontece diretamente no site da National Life.', 'Your login always happens directly on the National Life website.')],
+                  ['04', copy('O K-Bot confere o resultado', 'K-Bot checks the result'), copy('As informações são verificadas e organizadas antes de aparecerem na Keepr One.', 'The information is checked and organized before it appears in Keepr One.')],
+                  ['05', copy('Tudo fica pronto aqui', 'Everything is ready here'), copy('Veja as informações atualizadas ou abra o PDF oficial da ilustração.', 'See your updated information or open the official illustration PDF.')],
+                ].map(([number, title, description]) => (
                   <li
                     key={number}
                     className="grid grid-cols-[2.25rem_1fr] gap-3 rounded-2xl border border-border-steel bg-panel/55 p-4"
@@ -100,7 +102,7 @@ export default async function NationalLifeConnectionPage() {
                     <span className="font-mono text-sm font-semibold tabular-nums text-teal">{number}</span>
                     <span>
                       <strong className="block text-sm font-semibold text-ink">{title}</strong>
-                      <span className="mt-1 block text-sm leading-5 text-ink-muted">{copy}</span>
+                      <span className="mt-1 block text-sm leading-5 text-ink-muted">{description}</span>
                     </span>
                   </li>
                 ))}
@@ -122,16 +124,16 @@ export default async function NationalLifeConnectionPage() {
           <NationalLifeSyncProgress initialStatus={syncStatus} />
 
           <p className="border-t border-border-steel pt-5 text-sm leading-6 text-ink-muted">
-            National Life data is copied into Keepr One as a read-only snapshot.{' '}
+            {copy('Os dados da National Life são copiados para a Keepr One como um snapshot somente para leitura.', 'National Life data is copied into Keepr One as a read-only snapshot.')}{' '}
             <Link href="/agent/integrations/national-life/data" className="font-semibold text-teal underline-offset-4 hover:underline">
-              View saved data
+              {copy('Ver dados salvos', 'View saved data')}
             </Link>
           </p>
           </div>
       ) : (
         <div className="mt-8 max-w-5xl">
           <EmptyState>
-            This integration is not enabled yet. Contact Keepr One support before trying to connect a National Life account.
+            {copy('Esta integração ainda não está habilitada. Fale com o suporte da Keepr One antes de tentar conectar uma conta National Life.', 'This integration is not enabled yet. Contact Keepr One support before trying to connect a National Life account.')}
           </EmptyState>
         </div>
       )}

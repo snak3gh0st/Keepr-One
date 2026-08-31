@@ -3,24 +3,25 @@
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 gsap.registerPlugin(useGSAP);
 
 const DAYS = [
-  { value: 0, label: "Domingo", short: "Dom" },
-  { value: 1, label: "Segunda-feira", short: "Seg" },
-  { value: 2, label: "Terça-feira", short: "Ter" },
-  { value: 3, label: "Quarta-feira", short: "Qua" },
-  { value: 4, label: "Quinta-feira", short: "Qui" },
-  { value: 5, label: "Sexta-feira", short: "Sex" },
-  { value: 6, label: "Sábado", short: "Sáb" },
+  { value: 0, pt: "Domingo", en: "Sunday", shortPt: "Dom", shortEn: "Sun" },
+  { value: 1, pt: "Segunda-feira", en: "Monday", shortPt: "Seg", shortEn: "Mon" },
+  { value: 2, pt: "Terça-feira", en: "Tuesday", shortPt: "Ter", shortEn: "Tue" },
+  { value: 3, pt: "Quarta-feira", en: "Wednesday", shortPt: "Qua", shortEn: "Wed" },
+  { value: 4, pt: "Quinta-feira", en: "Thursday", shortPt: "Qui", shortEn: "Thu" },
+  { value: 5, pt: "Sexta-feira", en: "Friday", shortPt: "Sex", shortEn: "Fri" },
+  { value: 6, pt: "Sábado", en: "Saturday", shortPt: "Sáb", shortEn: "Sat" },
 ] as const;
 
 const EDITOR_SECTIONS = [
-  { id: "public", targetId: "scheduling-public-section", label: "Página pública", shortLabel: "Página" },
-  { id: "meeting", targetId: "scheduling-rules-section", label: "Reunião", shortLabel: "Reunião" },
-  { id: "availability", targetId: "scheduling-hours-section", label: "Disponibilidade", shortLabel: "Horários" },
-  { id: "publication", targetId: "scheduling-publication-section", label: "Publicação", shortLabel: "Publicar" },
+  { id: "public", targetId: "scheduling-public-section", pt: "Página pública", en: "Public page", shortPt: "Página", shortEn: "Page" },
+  { id: "meeting", targetId: "scheduling-rules-section", pt: "Reunião", en: "Meeting", shortPt: "Reunião", shortEn: "Meeting" },
+  { id: "availability", targetId: "scheduling-hours-section", pt: "Disponibilidade", en: "Availability", shortPt: "Horários", shortEn: "Hours" },
+  { id: "publication", targetId: "scheduling-publication-section", pt: "Publicação", en: "Publication", shortPt: "Publicar", shortEn: "Publish" },
 ] as const;
 
 type EditorSectionId = (typeof EDITOR_SECTIONS)[number]["id"];
@@ -90,12 +91,12 @@ function defaultWindows() {
   }));
 }
 
-function defaultDraft(): Draft {
+function defaultDraft(language: "PT" | "EN" = "PT"): Draft {
   return {
     slug: "",
     enabled: false,
-    title: "Reunião de 30 minutos",
-    description: "Escolha o melhor horário para conversarmos.",
+    title: language === "PT" ? "Reunião de 30 minutos" : "30-minute meeting",
+    description: language === "PT" ? "Escolha o melhor horário para conversarmos." : "Choose the best time for us to talk.",
     durationMinutes: 30,
     slotIntervalMinutes: 30,
     bufferBeforeMinutes: 0,
@@ -106,8 +107,8 @@ function defaultDraft(): Draft {
   };
 }
 
-function draftFromPage(page: SchedulingPageRecord | null): Draft {
-  if (!page) return defaultDraft();
+function draftFromPage(page: SchedulingPageRecord | null, language: "PT" | "EN" = "PT"): Draft {
+  if (!page) return defaultDraft(language);
   return {
     slug: page.slug,
     enabled: page.enabled,
@@ -156,17 +157,18 @@ export function timeToMinutes(value: string) {
   return hours * 60 + minutes;
 }
 
-export function validateSchedulingDraft(draft: Draft) {
+export function validateSchedulingDraft(draft: Draft, language: "PT" | "EN" = "PT") {
+  const local = (pt: string, en: string) => language === "PT" ? pt : en;
   const errors: Record<string, string> = {};
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(draft.slug) || draft.slug.length < 3 || draft.slug.length > 64) {
-    errors.slug = "Use de 3 a 64 caracteres minúsculos, números e hífens.";
+    errors.slug = local("Use de 3 a 64 caracteres minúsculos, números e hífens.", "Use 3 to 64 lowercase letters, numbers, and hyphens.");
   }
   if (draft.title.trim().length < 1 || draft.title.trim().length > 120) {
-    errors.title = "Informe um título de até 120 caracteres.";
+    errors.title = local("Informe um título de até 120 caracteres.", "Enter a title up to 120 characters.");
   }
-  if (draft.description.length > 1000) errors.description = "Use no máximo 1.000 caracteres.";
+  if (draft.description.length > 1000) errors.description = local("Use no máximo 1.000 caracteres.", "Use no more than 1,000 characters.");
   if (draft.enabled && draft.weeklyWindows.length === 0) {
-    errors.weeklyWindows = "Adicione pelo menos um período disponível antes de publicar.";
+    errors.weeklyWindows = local("Adicione pelo menos um período disponível antes de publicar.", "Add at least one available period before publishing.");
   }
   for (const day of DAYS) {
     const windows = draft.weeklyWindows
@@ -175,11 +177,11 @@ export function validateSchedulingDraft(draft: Draft) {
     for (let index = 0; index < windows.length; index += 1) {
       const window = windows[index];
       if (window.startMinute >= window.endMinute) {
-        errors.weeklyWindows = `Revise o horário de ${day.label.toLowerCase()}.`;
+        errors.weeklyWindows = local(`Revise o horário de ${day.pt.toLowerCase()}.`, `Review the hours for ${day.en}.`);
         break;
       }
       if (index > 0 && windows[index - 1].endMinute > window.startMinute) {
-        errors.weeklyWindows = `Existem períodos sobrepostos em ${day.label.toLowerCase()}.`;
+        errors.weeklyWindows = local(`Existem períodos sobrepostos em ${day.pt.toLowerCase()}.`, `There are overlapping periods on ${day.en}.`);
         break;
       }
     }
@@ -197,11 +199,12 @@ async function responseMessage(response: Response, fallback: string) {
 }
 
 export function SchedulingSettings() {
+  const { copy, language } = useI18n();
   const formRef = useRef<HTMLFormElement>(null);
   const navIndicatorRef = useRef<HTMLSpanElement>(null);
   const manualNavigationRef = useRef(false);
   const manualNavigationTimeoutRef = useRef<number | null>(null);
-  const [draft, setDraft] = useState<Draft>(() => defaultDraft());
+  const [draft, setDraft] = useState<Draft>(() => defaultDraft(language));
   const [persistedLink, setPersistedLink] = useState<{ slug: string; enabled: boolean } | null>(null);
   const [savedSignature, setSavedSignature] = useState<string | null>();
   const [readiness, setReadiness] = useState(DEFAULT_READINESS);
@@ -225,9 +228,9 @@ export function SchedulingSettings() {
           headers: { Accept: "application/json" },
           signal: controller.signal,
         });
-        if (!response.ok) throw new Error(await responseMessage(response, "Não foi possível carregar o agendamento."));
+        if (!response.ok) throw new Error(await responseMessage(response, copy("Não foi possível carregar o agendamento.", "Could not load scheduling.")));
         const data = (await response.json()) as SchedulingPageResponse;
-        const nextDraft = draftFromPage(data.page);
+        const nextDraft = draftFromPage(data.page, language);
         setDraft(nextDraft);
         setSavedSignature(data.page ? draftSignature(nextDraft) : null);
         setPersistedLink(data.page ? { slug: data.page.slug, enabled: data.page.enabled } : null);
@@ -236,14 +239,14 @@ export function SchedulingSettings() {
       } catch (error) {
         if (controller.signal.aborted) return;
         setLoadFailed(true);
-        setFeedback({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível carregar o agendamento." });
+        setFeedback({ kind: "error", message: error instanceof Error ? error.message : copy("Não foi possível carregar o agendamento.", "Could not load scheduling.") });
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
     }
     void load();
     return () => controller.abort();
-  }, [reloadKey]);
+  }, [copy, language, reloadKey]);
 
   useEffect(() => {
     if (loading || typeof IntersectionObserver === "undefined") return;
@@ -340,18 +343,18 @@ export function SchedulingSettings() {
     if (!canShare || !persistedPath) return;
     try {
       await navigator.clipboard.writeText(`${window.location.origin}${persistedPath}`);
-      setFeedback({ kind: "success", message: "Link copiado." });
+      setFeedback({ kind: "success", message: copy("Link copiado.", "Link copied.") });
     } catch {
-      setFeedback({ kind: "error", message: "Não foi possível copiar. Selecione o endereço manualmente." });
+      setFeedback({ kind: "error", message: copy("Não foi possível copiar. Selecione o endereço manualmente.", "Could not copy the link. Select the address manually.") });
     }
   }
 
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const nextErrors = validateSchedulingDraft(draft);
+    const nextErrors = validateSchedulingDraft(draft, language);
     if (Object.keys(nextErrors).length) {
       setErrors(nextErrors);
-      setFeedback({ kind: "error", message: "Revise os campos indicados." });
+      setFeedback({ kind: "error", message: copy("Revise os campos indicados.", "Review the highlighted fields.") });
       goToSection(nextErrors.slug || nextErrors.title || nextErrors.description ? "public" : "availability");
       window.requestAnimationFrame(() => formRef.current?.querySelector<HTMLElement>("[aria-invalid='true']")?.focus());
       return;
@@ -376,33 +379,38 @@ export function SchedulingSettings() {
           weeklyWindows: draft.weeklyWindows.map(({ weekday, startMinute, endMinute }) => ({ weekday, startMinute, endMinute })),
         }),
       });
-      if (!response.ok) throw new Error(await responseMessage(response, "Não foi possível salvar agora."));
+      if (!response.ok) throw new Error(await responseMessage(response, copy("Não foi possível salvar agora.", "Could not save right now.")));
       const data = (await response.json()) as SchedulingPageResponse;
-      const nextDraft = draftFromPage(data.page);
+      const nextDraft = draftFromPage(data.page, language);
       setDraft(nextDraft);
       setSavedSignature(data.page ? draftSignature(nextDraft) : null);
       setPersistedLink(data.page ? { slug: data.page.slug, enabled: data.page.enabled } : null);
       setReadiness(data.readiness);
       setOwnerTimeZone(data.ownerTimeZone);
       setErrors({});
-      setFeedback({ kind: "success", message: data.page?.enabled ? "Link publicado e atualizado." : "Configurações salvas." });
+      setFeedback({
+        kind: "success",
+        message: data.page?.enabled
+          ? copy("Link publicado e atualizado.", "Link published and updated.")
+          : copy("Configurações salvas.", "Settings saved."),
+      });
     } catch (error) {
-      setFeedback({ kind: "error", message: error instanceof Error ? error.message : "Não foi possível salvar agora." });
+      setFeedback({ kind: "error", message: error instanceof Error ? error.message : copy("Não foi possível salvar agora.", "Could not save right now.") });
     } finally {
       setSaving(false);
     }
   }
 
   if (loading) {
-    return <div className="scheduling-settings-loading" role="status"><span />Carregando configurações…</div>;
+    return <div className="scheduling-settings-loading" role="status"><span />{copy("Carregando configurações…", "Loading settings…")}</div>;
   }
 
   if (loadFailed) {
     return (
       <div className="scheduling-settings-load-error" role="alert">
-        <strong>Não foi possível abrir esta configuração.</strong>
-        <p>{feedback?.message ?? "Não foi possível carregar o agendamento."}</p>
-        <button type="button" onClick={() => setReloadKey((value) => value + 1)}>Tentar novamente</button>
+        <strong>{copy("Não foi possível abrir esta configuração.", "Could not open these settings.")}</strong>
+        <p>{feedback?.message ?? copy("Não foi possível carregar o agendamento.", "Could not load scheduling.")}</p>
+        <button type="button" onClick={() => setReloadKey((value) => value + 1)}>{copy("Tentar novamente", "Try again")}</button>
       </div>
     );
   }
@@ -411,19 +419,19 @@ export function SchedulingSettings() {
     <div className="scheduling-settings-shell">
       <form ref={formRef} onSubmit={save} noValidate>
         <div className="scheduling-workspace-toolbar">
-          <nav className="scheduling-section-nav" aria-label="Seções da configuração">
+          <nav className="scheduling-section-nav" aria-label={copy("Seções da configuração", "Settings sections")}>
             <div className="scheduling-section-nav-track">
               {EDITOR_SECTIONS.map((section) => (
                 <button
                   key={section.id}
                   type="button"
-                  aria-label={section.label}
+                  aria-label={copy(section.pt, section.en)}
                   aria-controls={section.targetId}
                   aria-current={activeSection === section.id ? "step" : undefined}
                   onClick={() => goToSection(section.id)}
                 >
-                  <span className="scheduling-section-nav-label-long" aria-hidden="true">{section.label}</span>
-                  <span className="scheduling-section-nav-label-short" aria-hidden="true">{section.shortLabel}</span>
+                  <span className="scheduling-section-nav-label-long" aria-hidden="true">{copy(section.pt, section.en)}</span>
+                  <span className="scheduling-section-nav-label-short" aria-hidden="true">{copy(section.shortPt, section.shortEn)}</span>
                 </button>
               ))}
               <span ref={navIndicatorRef} className="scheduling-section-nav-indicator" aria-hidden="true" />
@@ -433,10 +441,16 @@ export function SchedulingSettings() {
             <div aria-live="polite">
               {feedback
                 ? <p data-kind={feedback.kind}>{feedback.message}</p>
-                : <p>{isDirty ? "Alterações não salvas." : "Tudo salvo."}</p>}
+                : <p>{isDirty ? copy("Alterações não salvas.", "Unsaved changes.") : copy("Tudo salvo.", "Everything is saved.")}</p>}
             </div>
             <button type="submit" disabled={saving || !isDirty}>
-              {saving ? "Salvando…" : isDirty ? draft.enabled ? "Salvar e publicar" : "Salvar rascunho" : "Salvo"}
+              {saving
+                ? copy("Salvando…", "Saving…")
+                : isDirty
+                  ? draft.enabled
+                    ? copy("Salvar e publicar", "Save and publish")
+                    : copy("Salvar rascunho", "Save draft")
+                  : copy("Salvo", "Saved")}
             </button>
           </div>
         </div>
@@ -445,25 +459,25 @@ export function SchedulingSettings() {
           <section id="scheduling-public-section" className="scheduling-editor-section" aria-labelledby="scheduling-public-title" tabIndex={-1}>
             <header>
               <div>
-                <h2 id="scheduling-public-title">Página pública</h2>
-                <p>Defina o conteúdo e o endereço que seu cliente verá.</p>
+                <h2 id="scheduling-public-title">{copy("Página pública", "Public page")}</h2>
+                <p>{copy("Defina o conteúdo e o endereço que seu cliente verá.", "Define the content and address your client will see.")}</p>
               </div>
             </header>
             <div className="scheduling-field-grid">
               <label className="scheduling-field scheduling-field-wide">
-                <span>Título</span>
+                <span>{copy("Título", "Title")}</span>
                 <input value={draft.title} maxLength={120} onChange={(event) => update("title", event.target.value)} aria-invalid={Boolean(errors.title)} aria-describedby={errors.title ? "scheduling-title-error" : undefined} />
                 {errors.title ? <small id="scheduling-title-error" role="alert">{errors.title}</small> : null}
               </label>
               <label className="scheduling-field scheduling-field-wide">
-                <span>Descrição</span>
+                <span>{copy("Descrição", "Description")}</span>
                 <textarea value={draft.description} maxLength={1000} rows={3} onChange={(event) => update("description", event.target.value)} aria-invalid={Boolean(errors.description)} aria-describedby={errors.description ? "scheduling-description-error" : undefined} />
                 {errors.description ? <small id="scheduling-description-error" role="alert">{errors.description}</small> : <small>{draft.description.length}/1.000</small>}
               </label>
               <label className="scheduling-field scheduling-field-wide">
-                <span>Endereço do link</span>
-                <div className="scheduling-slug-input"><i aria-hidden="true">/agendar/</i><input aria-label="Endereço do link" value={draft.slug} minLength={3} maxLength={64} autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={(event) => update("slug", event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} aria-invalid={Boolean(errors.slug)} aria-describedby={errors.slug ? "scheduling-slug-error" : "scheduling-slug-hint"} /></div>
-                {errors.slug ? <small id="scheduling-slug-error" role="alert">{errors.slug}</small> : <small id="scheduling-slug-hint">Use um endereço curto e fácil de compartilhar.</small>}
+                <span>{copy("Endereço do link", "Link address")}</span>
+                <div className="scheduling-slug-input"><i aria-hidden="true">/agendar/</i><input aria-label={copy("Endereço do link", "Link address")} value={draft.slug} minLength={3} maxLength={64} autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={(event) => update("slug", event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} aria-invalid={Boolean(errors.slug)} aria-describedby={errors.slug ? "scheduling-slug-error" : "scheduling-slug-hint"} /></div>
+                {errors.slug ? <small id="scheduling-slug-error" role="alert">{errors.slug}</small> : <small id="scheduling-slug-hint">{copy("Use um endereço curto e fácil de compartilhar.", "Use a short, easy-to-share address.")}</small>}
               </label>
             </div>
           </section>
@@ -471,25 +485,25 @@ export function SchedulingSettings() {
           <section id="scheduling-rules-section" className="scheduling-editor-section" aria-labelledby="scheduling-rules-title" tabIndex={-1}>
             <header>
               <div>
-                <h2 id="scheduling-rules-title">Reunião</h2>
-                <p>Configure duração, antecedência e intervalos entre compromissos.</p>
+                <h2 id="scheduling-rules-title">{copy("Reunião", "Meeting")}</h2>
+                <p>{copy("Configure duração, antecedência e intervalos entre compromissos.", "Set duration, notice, and buffers between appointments.")}</p>
               </div>
             </header>
             <div className="scheduling-field-grid scheduling-field-grid-compact">
-              <label className="scheduling-field"><span>Duração</span><select value={draft.durationMinutes} onChange={(event) => update("durationMinutes", Number(event.target.value))}>{[15, 30, 45, 60, 90].map((value) => <option key={value} value={value}>{value} minutos</option>)}</select></label>
-              <label className="scheduling-field"><span>Intervalo entre opções</span><select value={draft.slotIntervalMinutes} onChange={(event) => update("slotIntervalMinutes", Number(event.target.value))}>{[15, 30, 45, 60].map((value) => <option key={value} value={value}>{value} minutos</option>)}</select></label>
-              <label className="scheduling-field"><span>Antecedência mínima</span><select value={draft.minimumNoticeMinutes} onChange={(event) => update("minimumNoticeMinutes", Number(event.target.value))}><option value={0}>Sem antecedência</option><option value={60}>1 hora</option><option value={120}>2 horas</option><option value={720}>12 horas</option><option value={1440}>1 dia</option><option value={2880}>2 dias</option></select></label>
-              <label className="scheduling-field"><span>Agenda aberta por</span><select value={draft.maximumAdvanceDays} onChange={(event) => update("maximumAdvanceDays", Number(event.target.value))}>{[7, 14, 30, 60, 90].map((value) => <option key={value} value={value}>{value} dias</option>)}</select></label>
-              <label className="scheduling-field"><span>Preparo antes</span><select value={draft.bufferBeforeMinutes} onChange={(event) => update("bufferBeforeMinutes", Number(event.target.value))}>{[0, 5, 10, 15, 30].map((value) => <option key={value} value={value}>{value === 0 ? "Sem intervalo" : `${value} minutos`}</option>)}</select></label>
-              <label className="scheduling-field"><span>Intervalo depois</span><select value={draft.bufferAfterMinutes} onChange={(event) => update("bufferAfterMinutes", Number(event.target.value))}>{[0, 5, 10, 15, 30].map((value) => <option key={value} value={value}>{value === 0 ? "Sem intervalo" : `${value} minutos`}</option>)}</select></label>
+              <label className="scheduling-field"><span>{copy("Duração", "Duration")}</span><select value={draft.durationMinutes} onChange={(event) => update("durationMinutes", Number(event.target.value))}>{[15, 30, 45, 60, 90].map((value) => <option key={value} value={value}>{copy("{value} minutos", "{value} minutes", { value })}</option>)}</select></label>
+              <label className="scheduling-field"><span>{copy("Intervalo entre opções", "Time between slots")}</span><select value={draft.slotIntervalMinutes} onChange={(event) => update("slotIntervalMinutes", Number(event.target.value))}>{[15, 30, 45, 60].map((value) => <option key={value} value={value}>{copy("{value} minutos", "{value} minutes", { value })}</option>)}</select></label>
+              <label className="scheduling-field"><span>{copy("Antecedência mínima", "Minimum notice")}</span><select value={draft.minimumNoticeMinutes} onChange={(event) => update("minimumNoticeMinutes", Number(event.target.value))}><option value={0}>{copy("Sem antecedência", "No notice")}</option><option value={60}>{copy("1 hora", "1 hour")}</option><option value={120}>{copy("2 horas", "2 hours")}</option><option value={720}>{copy("12 horas", "12 hours")}</option><option value={1440}>{copy("1 dia", "1 day")}</option><option value={2880}>{copy("2 dias", "2 days")}</option></select></label>
+              <label className="scheduling-field"><span>{copy("Agenda aberta por", "Booking window")}</span><select value={draft.maximumAdvanceDays} onChange={(event) => update("maximumAdvanceDays", Number(event.target.value))}>{[7, 14, 30, 60, 90].map((value) => <option key={value} value={value}>{copy("{value} dias", "{value} days", { value })}</option>)}</select></label>
+              <label className="scheduling-field"><span>{copy("Preparo antes", "Buffer before")}</span><select value={draft.bufferBeforeMinutes} onChange={(event) => update("bufferBeforeMinutes", Number(event.target.value))}>{[0, 5, 10, 15, 30].map((value) => <option key={value} value={value}>{value === 0 ? copy("Sem intervalo", "No buffer") : copy("{value} minutos", "{value} minutes", { value })}</option>)}</select></label>
+              <label className="scheduling-field"><span>{copy("Intervalo depois", "Buffer after")}</span><select value={draft.bufferAfterMinutes} onChange={(event) => update("bufferAfterMinutes", Number(event.target.value))}>{[0, 5, 10, 15, 30].map((value) => <option key={value} value={value}>{value === 0 ? copy("Sem intervalo", "No buffer") : copy("{value} minutos", "{value} minutes", { value })}</option>)}</select></label>
             </div>
           </section>
 
           <section id="scheduling-hours-section" className="scheduling-editor-section" aria-labelledby="scheduling-hours-title" tabIndex={-1}>
             <header>
               <div>
-                <h2 id="scheduling-hours-title">Disponibilidade</h2>
-                <p>Defina quando você atende. Os horários usam o fuso {ownerTimeZone}.</p>
+                <h2 id="scheduling-hours-title">{copy("Disponibilidade", "Availability")}</h2>
+                <p>{copy("Defina quando você atende. Os horários usam o fuso {timeZone}.", "Set when you are available. Times use the {timeZone} time zone.", { timeZone: ownerTimeZone })}</p>
               </div>
             </header>
             {errors.weeklyWindows ? <p className="scheduling-section-error" role="alert">{errors.weeklyWindows}</p> : null}
@@ -498,18 +512,18 @@ export function SchedulingSettings() {
                 const dayWindows = windowsByDay.get(day.value) ?? [];
                 return (
                   <div className="scheduling-day-row" key={day.value}>
-                    <div className="scheduling-day-name"><strong>{day.short}</strong><span>{day.label}</span></div>
+                    <div className="scheduling-day-name"><strong>{copy(day.shortPt, day.shortEn)}</strong><span>{copy(day.pt, day.en)}</span></div>
                     <div className="scheduling-day-windows">
                       {dayWindows.length ? dayWindows.map((window, index) => (
                         <div className="scheduling-window-row" key={window.clientId}>
-                          <label><span className="sr-only">Início de {day.label}, período {index + 1}</span><input type="time" step={300} value={minutesToTime(window.startMinute)} onChange={(event) => updateWindow(window.clientId, "startMinute", event.target.value)} /></label>
-                          <span aria-hidden="true">até</span>
-                          <label><span className="sr-only">Fim de {day.label}, período {index + 1}</span><input type="time" step={300} value={minutesToTime(window.endMinute)} onChange={(event) => updateWindow(window.clientId, "endMinute", event.target.value)} /></label>
-                          <button type="button" onClick={() => removeWindow(window.clientId)} aria-label={`Remover período de ${day.label}`}>×</button>
+                          <label><span className="sr-only">{copy("Início de {day}, período {period}", "Start of {day}, period {period}", { day: copy(day.pt, day.en), period: index + 1 })}</span><input type="time" step={300} value={minutesToTime(window.startMinute)} onChange={(event) => updateWindow(window.clientId, "startMinute", event.target.value)} /></label>
+                          <span aria-hidden="true">{copy("até", "to")}</span>
+                          <label><span className="sr-only">{copy("Fim de {day}, período {period}", "End of {day}, period {period}", { day: copy(day.pt, day.en), period: index + 1 })}</span><input type="time" step={300} value={minutesToTime(window.endMinute)} onChange={(event) => updateWindow(window.clientId, "endMinute", event.target.value)} /></label>
+                          <button type="button" onClick={() => removeWindow(window.clientId)} aria-label={copy("Remover período de {day}", "Remove period from {day}", { day: copy(day.pt, day.en) })}>×</button>
                         </div>
-                      )) : <span className="scheduling-unavailable-day">Indisponível</span>}
+                      )) : <span className="scheduling-unavailable-day">{copy("Indisponível", "Unavailable")}</span>}
                     </div>
-                    <button type="button" className="scheduling-add-window" onClick={() => addWindow(day.value)} aria-label={`Adicionar período em ${day.label}`}>Adicionar</button>
+                    <button type="button" className="scheduling-add-window" onClick={() => addWindow(day.value)} aria-label={copy("Adicionar período em {day}", "Add a period on {day}", { day: copy(day.pt, day.en) })}>{copy("Adicionar", "Add")}</button>
                   </div>
                 );
               })}
@@ -520,8 +534,8 @@ export function SchedulingSettings() {
         <aside id="scheduling-publication-section" className="scheduling-settings-side" aria-labelledby="scheduling-publication-title" tabIndex={-1}>
           <header className="scheduling-publication-header">
             <div>
-              <h2 id="scheduling-publication-title">Publicação</h2>
-              <p>Revise a conexão e compartilhe quando estiver pronto.</p>
+              <h2 id="scheduling-publication-title">{copy("Publicação", "Publication")}</h2>
+              <p>{copy("Revise a conexão e compartilhe quando estiver pronto.", "Review the connection and share when you are ready.")}</p>
             </div>
             <label className="scheduling-publish-toggle">
               <input
@@ -531,35 +545,35 @@ export function SchedulingSettings() {
                 disabled={!readiness.canEnable && !draft.enabled}
               />
               <span aria-hidden="true" />
-              {draft.enabled ? "Publicado" : "Rascunho"}
+              {draft.enabled ? copy("Publicado", "Published") : copy("Rascunho", "Draft")}
             </label>
           </header>
           <section className="scheduling-readiness" aria-labelledby="scheduling-readiness-title">
-            <div><h3 id="scheduling-readiness-title">Pronto para publicar</h3></div>
+            <div><h3 id="scheduling-readiness-title">{copy("Pronto para publicar", "Ready to publish")}</h3></div>
             <ul>
-              <li data-ready={readiness.googleConnected || undefined}><span><i aria-hidden="true" />Google conectado</span><strong>{readiness.googleConnected ? "Concluído" : "Pendente"}</strong></li>
-              <li data-ready={readiness.freeBusyGranted || undefined}><span><i aria-hidden="true" />Permissão de disponibilidade</span><strong>{readiness.freeBusyGranted ? "Concluído" : "Pendente"}</strong></li>
-              <li data-ready={readiness.writableDefaultCalendar || undefined}><span><i aria-hidden="true" />Calendário padrão gravável</span><strong>{readiness.writableDefaultCalendar ? "Concluído" : "Pendente"}</strong></li>
-              <li data-ready={readiness.confirmationEmailReady || undefined}><span><i aria-hidden="true" />Confirmação por e-mail</span><strong>{readiness.confirmationEmailReady ? "Concluído" : "Pendente"}</strong></li>
+              <li data-ready={readiness.googleConnected || undefined}><span><i aria-hidden="true" />{copy("Google conectado", "Google connected")}</span><strong>{readiness.googleConnected ? copy("Concluído", "Complete") : copy("Pendente", "Pending")}</strong></li>
+              <li data-ready={readiness.freeBusyGranted || undefined}><span><i aria-hidden="true" />{copy("Permissão de disponibilidade", "Availability permission")}</span><strong>{readiness.freeBusyGranted ? copy("Concluído", "Complete") : copy("Pendente", "Pending")}</strong></li>
+              <li data-ready={readiness.writableDefaultCalendar || undefined}><span><i aria-hidden="true" />{copy("Calendário padrão gravável", "Writable default calendar")}</span><strong>{readiness.writableDefaultCalendar ? copy("Concluído", "Complete") : copy("Pendente", "Pending")}</strong></li>
+              <li data-ready={readiness.confirmationEmailReady || undefined}><span><i aria-hidden="true" />{copy("Confirmação por e-mail", "Email confirmation")}</span><strong>{readiness.confirmationEmailReady ? copy("Concluído", "Complete") : copy("Pendente", "Pending")}</strong></li>
             </ul>
             {!readiness.canEnable ? <>
               <p>{
                 readiness.googleConnected && readiness.freeBusyGranted && readiness.writableDefaultCalendar && !readiness.confirmationEmailReady
-                  ? "O envio de confirmação ainda não está disponível neste ambiente. Solicite a configuração do Resend à administração."
-                  : "Conclua as pendências do Google Agenda e do envio de e-mail antes de publicar o link."
+                  ? copy("O envio de confirmação ainda não está disponível neste ambiente. Solicite a configuração do Resend à administração.", "Confirmation emails are not available in this environment yet. Ask an administrator to configure Resend.")
+                  : copy("Conclua as pendências do Google Agenda e do envio de e-mail antes de publicar o link.", "Resolve the Google Calendar and email setup items before publishing the link.")
               }</p>
               {!readiness.googleConnected || !readiness.freeBusyGranted || !readiness.writableDefaultCalendar
-                ? <a className="scheduling-readiness-link" href="/agent/integrations/google-calendar">Revisar conexão Google</a>
+                ? <a className="scheduling-readiness-link" href="/agent/integrations/google-calendar">{copy("Revisar conexão Google", "Review Google connection")}</a>
                 : null}
-            </> : <p>Sua agenda pode receber reservas.</p>}
+            </> : <p>{copy("Sua agenda pode receber reservas.", "Your calendar can accept bookings.")}</p>}
           </section>
           <section className="scheduling-link-preview" aria-labelledby="scheduling-link-title">
-            <div><h3 id="scheduling-link-title">Link do cliente</h3></div>
+            <div><h3 id="scheduling-link-title">{copy("Link do cliente", "Client link")}</h3></div>
             <output>{previewPath}</output>
-            {draft.slug !== persistedLink?.slug || draft.enabled !== persistedLink?.enabled ? <p>Salve as alterações para atualizar o link compartilhável.</p> : null}
+            {draft.slug !== persistedLink?.slug || draft.enabled !== persistedLink?.enabled ? <p>{copy("Salve as alterações para atualizar o link compartilhável.", "Save your changes to update the shareable link.")}</p> : null}
             <div>
-              <button type="button" onClick={copyLink} disabled={!canShare}>Copiar link publicado</button>
-              {canShare && persistedPath ? <a href={persistedPath} target="_blank" rel="noreferrer">Abrir</a> : null}
+              <button type="button" onClick={copyLink} disabled={!canShare}>{copy("Copiar link publicado", "Copy published link")}</button>
+              {canShare && persistedPath ? <a href={persistedPath} target="_blank" rel="noreferrer">{copy("Abrir", "Open")}</a> : null}
             </div>
           </section>
         </aside>

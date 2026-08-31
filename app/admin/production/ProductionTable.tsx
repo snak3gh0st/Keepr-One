@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { Table, Thead, Th, ThSort, Tr, Td, TdNum } from "@/components/Table";
 import { Pagination, clampPage } from "@/components/Pagination";
+import { useI18n } from "@/components/i18n/LanguageProvider";
+import { formatCurrency, formatNumber } from "@/lib/i18n/format";
 
 type Row = { agentId: string; agentName: string; policyCount: number; premiumTotal: number; commissionTotal: number };
 type SortKey = "policyCount" | "premiumTotal" | "commissionTotal";
@@ -11,6 +13,7 @@ const RANK_TONE = ["bg-gold text-paper", "bg-ink-muted/25 text-ink", "bg-ink-mut
 const PAGE_SIZE = 15;
 
 export function ProductionTable({ rows }: { rows: Row[] }) {
+  const { copy, language } = useI18n();
   const [sortKey, setSortKey] = useState<SortKey>("commissionTotal");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
@@ -48,19 +51,19 @@ export function ProductionTable({ rows }: { rows: Row[] }) {
 
   return (
     <>
-    <Table>
+    <Table label={copy('Ranking de produção por agente', 'Production ranking by agent')}>
       <Thead>
         <tr>
           <Th>#</Th>
-          <Th>Agente</Th>
+          <Th>{copy('Agente', 'Agent')}</Th>
           <ThSort numeric active={sortKey === "policyCount"} direction={direction} onClick={() => toggleSort("policyCount")}>
-            Apólices
+            {copy('Apólices', 'Policies')}
           </ThSort>
           <ThSort numeric active={sortKey === "premiumTotal"} direction={direction} onClick={() => toggleSort("premiumTotal")}>
-            Prêmio total
+            {copy('Prêmio total', 'Total premium')}
           </ThSort>
           <ThSort numeric active={sortKey === "commissionTotal"} direction={direction} onClick={() => toggleSort("commissionTotal")}>
-            Comissão total
+            {copy('Comissão total', 'Total commission')}
           </ThSort>
         </tr>
       </Thead>
@@ -69,13 +72,13 @@ export function ProductionTable({ rows }: { rows: Row[] }) {
           <Tr key={row.agentId} index={i}>
             <Td>
               <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full font-mono text-xs font-semibold ${RANK_TONE[rank] ?? "text-ink-muted"}`}>
-                {rank + 1}
+                {formatNumber(rank + 1, language)}
               </span>
             </Td>
             <Td className="font-medium">{row.agentName}</Td>
-            <TdNum>{row.policyCount}</TdNum>
-            <TdNum>${row.premiumTotal.toFixed(2)}</TdNum>
-            <TdNum>${row.commissionTotal.toFixed(2)}</TdNum>
+            <TdNum>{formatNumber(row.policyCount, language)}</TdNum>
+            <TdNum>{formatCurrency(row.premiumTotal, language, 'USD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TdNum>
+            <TdNum>{formatCurrency(row.commissionTotal, language, 'USD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TdNum>
           </Tr>
         ))}
       </tbody>

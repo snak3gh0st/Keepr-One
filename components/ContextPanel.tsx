@@ -1,3 +1,5 @@
+import { ContextPanelStatus } from "@/components/ContextPanelStatus";
+
 export function ContextPanel({
   eyebrow,
   title,
@@ -22,10 +24,7 @@ export function ContextPanel({
       </div>
       <div className="module-context-body">{children}</div>
       <div className="module-context-status" aria-hidden="true">
-        <span>
-          <i />
-          Operação conectada
-        </span>
+        <ContextPanelStatus />
         <b>keepr one</b>
       </div>
     </Component>

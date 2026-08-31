@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/Button'
 import { sendConnectorMessage } from '@/app/agent/integrations/national-life/NationalLifeConnectorClient'
 import { refreshNationalLifePolicyDetail } from './actions'
+import { useI18n } from '@/components/i18n/LanguageProvider'
 
 type RefreshState = 'idle' | 'starting' | 'queued' | 'error'
 
@@ -14,6 +15,7 @@ export function NationalLifePolicyRefreshButton({
   policyId: string
   extensionId: string
 }) {
+  const { copy } = useI18n()
   const [state, setState] = useState<RefreshState>('idle')
   const [message, setMessage] = useState<string | null>(null)
 
@@ -33,12 +35,12 @@ export function NationalLifePolicyRefreshButton({
       })
       if (!wake.ok) throw new Error(wake.error ?? 'COMMAND_UNAVAILABLE')
       setState('queued')
-      setMessage('Atualização iniciada em segundo plano. Você pode sair desta página.')
+      setMessage(copy('Atualização iniciada em segundo plano. Você pode sair desta página.', 'Update started in the background. You can leave this page.'))
     } catch {
       // The command is already durable on the server. Chrome's one-minute alarm
       // is the fallback when the direct wake-up channel is unavailable.
       setState('queued')
-      setMessage('Atualização agendada. O K-Bot continuará em segundo plano.')
+      setMessage(copy('Atualização agendada. O K-Bot continuará em segundo plano.', 'Update scheduled. K-Bot will continue in the background.'))
     }
   }
 
@@ -50,7 +52,7 @@ export function NationalLifePolicyRefreshButton({
         disabled={state === 'starting'}
         onClick={() => void refresh()}
       >
-        {state === 'starting' ? 'Iniciando…' : 'Atualizar da National Life'}
+        {state === 'starting' ? copy('Iniciando…', 'Starting…') : copy('Atualizar pela National Life', 'Refresh from National Life')}
       </Button>
       {message && <p role="status" className="text-xs leading-5 text-ink-muted">{message}</p>}
     </div>

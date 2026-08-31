@@ -44,4 +44,16 @@ describe('renderEmailLayout', () => {
 
     expect(html).toContain('Texto de pré-visualização')
   })
+
+  it('sets the document language and footer copy for English emails', () => {
+    const html = renderEmailLayout({
+      heading: 'Account update',
+      bodyHtml: '<p>Your account was updated.</p>',
+      language: 'EN',
+    })
+
+    expect(html).toContain('<html lang="en-US">')
+    expect(html).toContain('This is an automated email from Keepr One.')
+    expect(html).toContain('Privacy')
+  })
 })

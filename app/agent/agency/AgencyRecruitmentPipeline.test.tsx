@@ -2,8 +2,17 @@
 
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { LanguageProvider } from "@/components/i18n/LanguageProvider";
 import { AgencyRecruitmentPipeline } from "./AgencyRecruitmentPipeline";
+
+vi.mock("@/lib/auth-client", () => ({
+  authClient: { updateUser: vi.fn() },
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 afterEach(cleanup);
 
@@ -103,5 +112,21 @@ describe("AgencyRecruitmentPipeline", () => {
     const { container } = render(<AgencyRecruitmentPipeline stages={[]} />);
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("localizes the complete accessible stage label in English", () => {
+    render(
+      <LanguageProvider initialLanguage="EN">
+        <AgencyRecruitmentPipeline
+          stages={[{ id: "PROSPECT", label: "Prospect", count: 0 }]}
+        />
+      </LanguageProvider>,
+    );
+
+    expect(
+      screen.getByRole("tab", {
+        name: "Prospect. 0 connections in this stage.",
+      }),
+    ).toBeInTheDocument();
   });
 });

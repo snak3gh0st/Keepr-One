@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react'
+import { useI18n } from '@/components/i18n/LanguageProvider'
 
 /// Mirrors `RapidSolveQuoteStatus` on the server. The three cases are kept
 /// apart here for the same reason they are kept apart there: a carrier refusal
@@ -36,6 +37,7 @@ const POLL_INTERVAL_MS = 2_000
 const GIVE_UP_AFTER_MS = 6 * 60_000
 
 export function useRapidSolveQuote(jobId: string | null) {
+  const { copy } = useI18n()
   const [status, setStatus] = useState<QuoteStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [polledJobId, setPolledJobId] = useState(jobId)
@@ -86,7 +88,7 @@ export function useRapidSolveQuote(jobId: string | null) {
           // queued behind another carrier browser; what ran out is this
           // screen's patience, not the request.
           setError(
-            'A seguradora ainda não respondeu. A cotação continua na fila — recarregue em alguns minutos.',
+            copy('A seguradora ainda não respondeu. A cotação continua na fila — recarregue em alguns minutos.', 'The carrier has not responded yet. The quote remains in the queue — reload in a few minutes.'),
           )
         }
       } catch (pollError) {
@@ -97,7 +99,7 @@ export function useRapidSolveQuote(jobId: string | null) {
         setError(
           pollError instanceof Error && pollError.message !== 'QUOTE_STATUS_UNAVAILABLE'
             ? pollError.message
-            : 'Não foi possível acompanhar esta cotação.',
+            : copy('Não foi possível acompanhar esta cotação.', 'Could not track this quote.'),
         )
       }
     }
@@ -114,7 +116,7 @@ export function useRapidSolveQuote(jobId: string | null) {
       abortController.abort()
       window.clearInterval(interval)
     }
-  }, [jobId])
+  }, [copy, jobId])
 
   return { status, error }
 }

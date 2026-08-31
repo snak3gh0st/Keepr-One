@@ -54,4 +54,35 @@ describe('access-required presentation', () => {
     expect(presentation.description).toContain('30 de agosto de 2026')
     expect(formatPlatformPlanPrice(presentation.plan, 'en-US')).toBe('$59.90')
   })
+
+  it('localizes invitation and Founder presentations in English', () => {
+    const invited = buildAccessRequiredPresentation({
+      source: 'AGENCY_INVITATION',
+      requiredPlan: 'AGENT_AGENCY_MEMBER',
+      accountType: 'AGENT',
+      invitingAgencyName: 'Aurora Agency',
+    }, 'unused', 'EN')
+
+    expect(invited).toMatchObject({
+      programLabel: 'Invitation access',
+      eyebrow: 'Subscription needs attention',
+      planLabel: 'Invited agent plan',
+    })
+    expect(invited.description).toContain('by Aurora Agency')
+    expect(invited.profileBenefit).toContain('inviting agency')
+
+    const founder = buildAccessRequiredPresentation({
+      source: 'FOUNDER',
+      requiredPlan: 'AGENT_INDIVIDUAL',
+      accountType: 'AGENT',
+      invitingAgencyName: null,
+    }, 'August 30, 2026', 'EN')
+
+    expect(founder).toMatchObject({
+      programLabel: 'Founders Program',
+      eyebrow: '30 days completed',
+      planLabel: 'Agent plan',
+    })
+    expect(founder.description).toContain('August 30, 2026')
+  })
 })

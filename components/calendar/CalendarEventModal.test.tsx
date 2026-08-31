@@ -163,14 +163,22 @@ describe("CalendarEventModal", () => {
       />,
     );
 
+    // OverlaySurface settles focus on the next animation frame. Wait for that
+    // accessibility setup before simulating typing so a slow test worker does
+    // not move focus between individual keystrokes.
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+
     await user.clear(screen.getByLabelText("Título"));
     await user.click(screen.getByLabelText("Título"));
     await user.type(screen.getByLabelText("Título"), "Revisar proposta");
+    expect(screen.getByLabelText("Título")).toHaveValue("Revisar proposta");
 
     const attendeeInput = screen.getByPlaceholderText("email@cliente.com");
     await user.type(attendeeInput, "Alice@Example.COM");
     await user.click(screen.getByRole("button", { name: "Adicionar" }));
+    expect(screen.getByLabelText("Título")).toHaveValue("Revisar proposta");
     await user.type(attendeeInput, "bob@example.com{Enter}");
+    expect(screen.getByLabelText("Título")).toHaveValue("Revisar proposta");
 
     expect(screen.getByText("alice@example.com")).toBeInTheDocument();
     expect(screen.getByText("bob@example.com")).toBeInTheDocument();
@@ -179,6 +187,7 @@ describe("CalendarEventModal", () => {
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("checkbox", { name: /Criar Google Meet/i }));
+    expect(screen.getByLabelText("Título")).toHaveValue("Revisar proposta");
     await user.click(screen.getByRole("checkbox", { name: /Enviar convites/i }));
     await user.selectOptions(screen.getByLabelText("Lembrete"), "30");
     await user.click(screen.getByRole("button", { name: /Criar compromisso/i }));

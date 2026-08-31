@@ -12,23 +12,11 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { CrmStagePill, PolicyStatusPill } from "@/components/StatusPill";
 import { FollowUpActionCard } from "@/components/crm/FollowUpActionCard";
 import { getOpenFollowUpsForScope, type DueFollowUpView } from "@/lib/crm";
+import { getServerI18n } from "@/lib/i18n/server";
+import { localeFor } from "@/lib/i18n/config";
+import { localizedCrmStage, localizedCrmTimelineTitle } from "@/components/crm/i18n";
 
 export const dynamic = "force-dynamic";
-
-const DUE_DATE = new Intl.DateTimeFormat("pt-BR", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  timeZone: "America/New_York",
-});
-
-const EVENT_DATE = new Intl.DateTimeFormat("pt-BR", {
-  day: "2-digit",
-  month: "short",
-  hour: "2-digit",
-  minute: "2-digit",
-  timeZone: "America/New_York",
-});
 
 const TODAY_KEY_FORMATTER = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
@@ -45,19 +33,47 @@ function dateKeyInNewYork(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function dueState(dueAt: Date | null, todayKey: string) {
-  if (!dueAt) return { label: "Sem prazo", tone: "neutral" as const };
+function dueState(
+  dueAt: Date | null,
+  todayKey: string,
+  dueDate: Intl.DateTimeFormat,
+  copy: (pt: string, en: string) => string,
+) {
+  if (!dueAt) return { label: copy("Sem prazo", "No due date"), tone: "neutral" as const };
   const dueKey = dateKeyInNewYork(dueAt);
-  if (dueKey < todayKey) return { label: "Atrasado", tone: "danger" as const };
-  if (dueKey === todayKey) return { label: "Hoje", tone: "gold" as const };
-  return { label: DUE_DATE.format(dueAt), tone: "neutral" as const };
+  if (dueKey < todayKey) return { label: copy("Atrasado", "Overdue"), tone: "danger" as const };
+  if (dueKey === todayKey) return { label: copy("Hoje", "Today"), tone: "gold" as const };
+  return { label: dueDate.format(dueAt), tone: "neutral" as const };
 }
 
-function activityTitle(type: string, title: string) {
-  if (title === "Caso criado") return "Atendimento iniciado";
-  if (title === "Needs analysis atualizada") return "Análise de necessidades atualizada";
-  if (type === "STAGE_CHANGED") return title.replace("Etapa alterada", "Etapa atualizada");
-  return title;
+function activityTitle(type: string, title: string, copy: (pt: string, en: string, values?: Record<string, string | number>) => string) {
+  if (title === "Caso criado") return copy("Atendimento iniciado", "Case started");
+  if (title === "Needs analysis atualizada") return copy("Análise de necessidades atualizada", "Needs analysis updated");
+  if (title === "Aplicação iniciada") return copy("Aplicação iniciada", "Application started");
+  if (type === "NOTE" && title === "Nota") return copy("Nota", "Note");
+  const calendarTitles: Record<string, readonly [string, string]> = {
+    CALENDAR_EVENT_CREATED: ["Compromisso criado", "Event created"],
+    CALENDAR_EVENT_UPDATED: ["Compromisso atualizado", "Event updated"],
+    CALENDAR_EVENT_CANCELLED: ["Compromisso cancelado", "Event canceled"],
+    CALENDAR_EVENT_ASSOCIATED: ["Compromisso associado ao lead", "Event linked to lead"],
+    MEETING_CANCELLED_FROM_GOOGLE: ["Reunião cancelada pelo Google Calendar", "Meeting canceled in Google Calendar"],
+    MEETING_UPDATED_FROM_GOOGLE: ["Reunião atualizada pelo Google Calendar", "Meeting updated in Google Calendar"],
+    MEETING_ATTENDEE_RESPONSE: ["Participante respondeu ao convite", "Guest responded to the invitation"],
+  };
+  const calendarTitle = calendarTitles[type];
+  if (calendarTitle) return copy(calendarTitle[0], calendarTitle[1]);
+  return localizedCrmTimelineTitle(copy, type, title);
+}
+
+function requirementTitle(title: string, copy: (pt: string, en: string) => string) {
+  const standard: Record<string, string> = {
+    "Formulário de aplicação assinado": copy("Formulário de aplicação assinado", "Signed application form"),
+    "Documento de identidade": copy("Documento de identidade", "Identity document"),
+    "Exame médico / paramédico": copy("Exame médico / paramédico", "Medical / paramedical exam"),
+    "Autorização HIPAA": copy("Autorização HIPAA", "HIPAA authorization"),
+    "Comprovante de pagamento inicial": copy("Comprovante de pagamento inicial", "Initial payment receipt"),
+  };
+  return standard[title] ?? title;
 }
 
 function personName(firstName: string, lastName: string) {
@@ -65,6 +81,10 @@ function personName(firstName: string, lastName: string) {
 }
 
 export default async function ActivitiesPage() {
+  const { copy, language } = await getServerI18n();
+  const locale = localeFor(language);
+  const dueDate = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", timeZone: "America/New_York" });
+  const eventDate = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "America/New_York" });
   const agent = await getCurrentAgent();
   const user = await prisma.user.findUnique({ where: { id: agent.userId } });
   const scopeAgentIds = await getAgentScopeIds(agent.id);
@@ -102,55 +122,55 @@ export default async function ActivitiesPage() {
       <div className="space-y-4">
         <CrmNavigation active="activities" />
         <PageHeader
-          title="Atividades"
-          eyebrow="CRM · Próximas ações"
-          description="Retornos, pendências e revisões organizados para você saber o que fazer agora."
+          title={copy("Atividades", "Activities")}
+          eyebrow={copy("CRM · Próximas ações", "CRM · Next actions")}
+          description={copy("Retornos, pendências e revisões organizados para você saber o que fazer agora.", "Follow-ups, pending items, and reviews organized so you know what to do next.")}
         >
           <Link
             href="/agent/cases/new"
             className="inline-flex items-center gap-2 bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-transform duration-300 hover:-translate-y-0.5"
           >
             <span className="text-success" aria-hidden="true">+</span>
-            Novo atendimento
+            {copy("Novo atendimento", "New case")}
           </Link>
           <span className="inline-flex rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal">
-            {openCount} {openCount === 1 ? "ação aberta" : "ações abertas"}
+            {openCount === 1 ? copy("1 ação aberta", "1 open action") : copy("{count} ações abertas", "{count} open actions", { count: openCount })}
           </span>
         </PageHeader>
       </div>
 
       {loadError && (
         <ErrorBanner>
-          Não foi possível carregar as atividades agora. Tente atualizar a página.
+          {copy("Não foi possível carregar as atividades agora. Tente atualizar a página.", "Activities could not be loaded right now. Try refreshing the page.")}
         </ErrorBanner>
       )}
 
       {!loadError && (
         <>
           <ModuleSummary
-            label="Resumo das atividades"
+            label={copy("Resumo das atividades", "Activity summary")}
             items={[
               {
-                label: "Retornos",
+                label: copy("Retornos", "Follow-ups"),
                 value: followUps.length,
-                detail: "Contatos ainda não concluídos",
+                detail: copy("Contatos ainda não concluídos", "Contacts not yet completed"),
                 tone: "green",
               },
               {
-                label: "Pendências",
+                label: copy("Pendências", "Pending items"),
                 value: data?.requirementCount ?? 0,
-                detail: "Documentos ou respostas em aberto",
+                detail: copy("Documentos ou respostas em aberto", "Open documents or responses"),
                 tone: "gold",
               },
               {
-                label: "Revisões",
+                label: copy("Revisões", "Reviews"),
                 value: data?.reviewCount ?? 0,
-                detail: "Revisões anuais ainda abertas",
+                detail: copy("Revisões anuais ainda abertas", "Annual reviews still open"),
               },
               {
-                label: "Atrasadas",
+                label: copy("Atrasadas", "Overdue"),
                 value: overdueCount,
-                detail: "Ações exibidas que passaram do prazo",
+                detail: copy("Ações exibidas que passaram do prazo", "Displayed actions past their due date"),
                 tone: overdueCount > 0 ? "danger" : "neutral",
               },
             ]}
@@ -161,17 +181,17 @@ export default async function ActivitiesPage() {
               <div className="flex flex-col gap-3 border-b border-border-steel pb-5 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
-                    Prioridades do CRM
+                    {copy("Prioridades do CRM", "CRM priorities")}
                   </p>
                   <h2
                     id="activities-priority-title"
                     className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink sm:text-3xl"
                   >
-                    Comece pelo que pede ação.
+                    {copy("Comece pelo que pede ação.", "Start with what needs action.")}
                   </h2>
                 </div>
                 <p className="max-w-sm text-sm leading-6 text-ink-muted">
-                  Abra a oportunidade ou apólice para concluir a atividade sem criar um fluxo paralelo.
+                  {copy("Abra a oportunidade ou apólice para concluir a atividade sem criar um fluxo paralelo.", "Open the opportunity or policy to complete the activity without creating a separate workflow.")}
                 </p>
               </div>
 
@@ -179,9 +199,9 @@ export default async function ActivitiesPage() {
                 <ActivitySection
                   id="follow-ups"
                   index="01"
-                  title="Retornos"
-                  description="Contatos combinados com clientes e novos contatos."
-                  empty="Nenhum retorno aberto. Sua agenda de contatos está em dia."
+                  title={copy("Retornos", "Follow-ups")}
+                  description={copy("Contatos combinados com clientes e novos contatos.", "Planned contacts with clients and new prospects.")}
+                  empty={copy("Nenhum retorno aberto. Sua agenda de contatos está em dia.", "No open follow-ups. Your contact schedule is up to date.")}
                 >
                   {followUps.map((item) => (
                     <li key={item.id}>
@@ -193,19 +213,19 @@ export default async function ActivitiesPage() {
                 <ActivitySection
                   id="requirements"
                   index="02"
-                  title="Pendências"
-                  description="Itens solicitados durante a aplicação e análise."
-                  empty="Nenhuma pendência aberta nas oportunidades da sua área."
+                  title={copy("Pendências", "Pending items")}
+                  description={copy("Itens solicitados durante a aplicação e análise.", "Items requested during application and underwriting.")}
+                  empty={copy("Nenhuma pendência aberta nas oportunidades da sua área.", "No open pending items in your opportunities.")}
                 >
                   {requirements.map((item) => {
                     const insuranceCase = item.application.insuranceCase;
-                    const status = dueState(item.dueAt, todayKey);
+                    const status = dueState(item.dueAt, todayKey, dueDate, copy);
                     return (
                       <ActivityLink
                         key={item.id}
                         href={`/agent/cases/${item.application.caseId}`}
-                        type="Pendência"
-                        title={item.title}
+                        type={copy("Pendência", "Pending item")}
+                        title={requirementTitle(item.title, copy)}
                         subject={personName(
                           insuranceCase.prospect.firstName,
                           insuranceCase.prospect.lastName,
@@ -213,7 +233,7 @@ export default async function ActivitiesPage() {
                         owner={insuranceCase.assignedAgent.user.name}
                         status={status}
                       >
-                        <CrmStagePill stage={insuranceCase.crmStage} />
+                        <CrmStagePill stage={localizedCrmStage(copy, insuranceCase.crmStage)} />
                       </ActivityLink>
                     );
                   })}
@@ -222,18 +242,18 @@ export default async function ActivitiesPage() {
                 <ActivitySection
                   id="reviews"
                   index="03"
-                  title="Revisões"
-                  description="Acompanhamentos anuais da carteira emitida."
-                  empty="Nenhuma revisão anual aberta na sua carteira."
+                  title={copy("Revisões", "Reviews")}
+                  description={copy("Acompanhamentos anuais da carteira emitida.", "Annual follow-ups for issued policies.")}
+                  empty={copy("Nenhuma revisão anual aberta na sua carteira.", "No open annual reviews in your book.")}
                 >
                   {reviews.map((item) => {
-                    const status = dueState(item.dueAt, todayKey);
+                    const status = dueState(item.dueAt, todayKey, dueDate, copy);
                     return (
                       <ActivityLink
                         key={item.id}
                         href={`/agent/policies/${item.policy.id}`}
-                        type="Revisão anual"
-                        title={`Apólice ${item.policy.policyNumber}`}
+                        type={copy("Revisão anual", "Annual review")}
+                        title={copy("Apólice {number}", "Policy {number}", { number: item.policy.policyNumber })}
                         subject={item.policy.client.name}
                         owner={item.policy.agent.user.name}
                         status={status}
@@ -246,12 +266,12 @@ export default async function ActivitiesPage() {
               </div>
             </section>
 
-            <ContextPanel eyebrow="Como usar" title="Uma ordem simples para agir">
+            <ContextPanel eyebrow={copy("Como usar", "How to use")} title={copy("Uma ordem simples para agir", "A simple order of action")}>
               <ol className="space-y-5">
                 {[
-                  ["01", "Retorne", "Comece pelos contatos com prazo vencido ou marcado para hoje."],
-                  ["02", "Destrave", "Revise documentos e respostas que impedem a oportunidade de avançar."],
-                  ["03", "Acompanhe", "Use o histórico para entender o que mudou antes de agir."],
+                  ["01", copy("Retorne", "Follow up"), copy("Comece pelos contatos com prazo vencido ou marcado para hoje.", "Start with contacts that are overdue or scheduled for today.")],
+                  ["02", copy("Destrave", "Unblock"), copy("Revise documentos e respostas que impedem a oportunidade de avançar.", "Review documents and responses preventing the opportunity from moving forward.")],
+                  ["03", copy("Acompanhe", "Review"), copy("Use o histórico para entender o que mudou antes de agir.", "Use the history to understand what changed before acting.")],
                 ].map(([index, title, description]) => (
                   <li key={index} className="grid grid-cols-[2rem_1fr] gap-3 border-t border-white/10 pt-4 first:border-t-0 first:pt-0">
                     <span className="font-mono text-[10px] text-mint">{index}</span>
@@ -269,24 +289,24 @@ export default async function ActivitiesPage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
-                  Histórico recente
+                  {copy("Histórico recente", "Recent history")}
                 </p>
                 <h2
                   id="recent-activity-title"
                   className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink"
                 >
-                  O que mudou nas oportunidades.
+                  {copy("O que mudou nas oportunidades.", "What changed in your opportunities.")}
                 </h2>
               </div>
               <p className="text-xs text-ink-muted">
-                Últimos {recentEvents.length} registros exibidos
+                {copy("Últimos {count} registros exibidos", "Showing the latest {count} records", { count: recentEvents.length })}
               </p>
             </div>
 
             {recentEvents.length === 0 ? (
               <div className="mt-6">
                 <EmptyState>
-                  O histórico aparecerá quando um atendimento avançar, receber uma nota ou ganhar uma próxima ação.
+                  {copy("O histórico aparecerá quando um atendimento avançar, receber uma nota ou ganhar uma próxima ação.", "History will appear when a case moves forward, receives a note, or gets a next action.")}
                 </EmptyState>
               </div>
             ) : (
@@ -299,17 +319,17 @@ export default async function ActivitiesPage() {
                     >
                       <span className="min-w-0">
                         <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.13em] text-teal">
-                          {event.type.startsWith("FOLLOW_UP") ? "Retorno" : "Movimentação"}
+                          {event.type.startsWith("FOLLOW_UP") ? copy("Retorno", "Follow-up") : copy("Movimentação", "Update")}
                         </span>
                         <strong className="mt-1.5 block truncate text-sm font-medium text-ink">
-                          {activityTitle(event.type, event.title)}
+                          {activityTitle(event.type, event.title, copy)}
                         </strong>
                         <small className="mt-1 block truncate text-xs text-ink-muted">
                           {personName(
                             event.insuranceCase.prospect.firstName,
                             event.insuranceCase.prospect.lastName,
                           )}{" "}
-                          · {EVENT_DATE.format(event.createdAt)}
+                          · {eventDate.format(event.createdAt)}
                         </small>
                       </span>
                       <i className="text-sm not-italic text-ink-muted transition-transform duration-300 group-hover:translate-x-1" aria-hidden="true">

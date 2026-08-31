@@ -45,6 +45,7 @@ const confirmationPayloadSchema = z.strictObject({
   endsAt: instantSchema,
   inviteeTimeZone: z.string().min(1).max(100).refine(isValidIanaTimeZone),
   generatedAt: instantSchema,
+  language: z.enum(['PT', 'EN']).default('PT'),
 }).refine((value) => new Date(value.endsAt) > new Date(value.startsAt), {
   message: 'The email snapshot must end after it starts',
 })
@@ -193,6 +194,7 @@ export async function processNextSchedulingEmailJob(
       startsAt: new Date(payload.startsAt),
       endsAt: new Date(payload.endsAt),
       generatedAt: new Date(payload.generatedAt),
+      language: payload.language,
       inviteeTimeZone: payload.inviteeTimeZone,
       meetingUrl: calendarEvent?.meetingUrl ?? null,
       calendarSyncFailed,

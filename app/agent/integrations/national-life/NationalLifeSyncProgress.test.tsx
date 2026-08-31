@@ -5,6 +5,15 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
+
+const i18n = vi.hoisted(() => ({
+  copy: (_pt: string, en: string, values: Record<string, string | number> = {}) =>
+    en.replace(/\{(\w+)\}/g, (_match, token: string) => String(values[token] ?? `{${token}}`)),
+}))
+
+vi.mock('@/components/i18n/LanguageProvider', () => ({
+  useI18n: () => ({ language: 'EN', locale: 'en-US', copy: i18n.copy }),
+}))
 import {
   NATIONAL_LIFE_RETRY_REMAINING_EVENT,
   NATIONAL_LIFE_SYNC_STARTED_EVENT,

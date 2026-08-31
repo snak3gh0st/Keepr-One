@@ -26,6 +26,7 @@ export type CalendarCaseOption = {
   name: string;
   email?: string | null;
   stage?: string | null;
+  stageSystemKey?: string | null;
 };
 
 export type CalendarEventView = {

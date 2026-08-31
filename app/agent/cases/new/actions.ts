@@ -5,14 +5,15 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { revalidatePath } from 'next/cache'
 import { getOrCreateNewLeadStageId } from '@/lib/crm'
+import { getServerI18n } from '@/lib/i18n/server'
 
-const NewCaseSchema = z.object({
-  firstName: z.string().trim().min(1, 'Informe o nome.'),
-  lastName: z.string().trim().min(1, 'Informe o sobrenome.'),
-  email: z.union([z.literal(''), z.string().trim().email('Informe um e-mail válido.')]),
+const newCaseSchema = (copy: (pt: string, en: string) => string) => z.object({
+  firstName: z.string().trim().min(1, copy('Informe o nome.', 'Enter the first name.')),
+  lastName: z.string().trim().min(1, copy('Informe o sobrenome.', 'Enter the last name.')),
+  email: z.union([z.literal(''), z.string().trim().email(copy('Informe um e-mail válido.', 'Enter a valid email address.'))]),
   phone: z.string().trim().optional(),
   dateOfBirth: z.union([z.literal(''), z.iso.date()]),
-  state: z.string().trim().length(2, 'Selecione o estado.'),
+  state: z.string().trim().length(2, copy('Selecione o estado.', 'Select the state.')),
   tobaccoStatus: z.enum(['NO', 'FORMER', 'YES']),
   objective: z.enum(['PROTECTION', 'ACCUMULATION', 'RETIREMENT', 'LEGACY']),
   productType: z.enum(['TERM', 'IUL', 'UNDECIDED']),
@@ -25,9 +26,10 @@ export type CreateCaseResult =
   | { ok: false; message: string }
 
 export async function createInsuranceCase(formData: FormData): Promise<CreateCaseResult> {
+  const { copy } = await getServerI18n()
   const agent = await getCurrentAgent()
 
-  const parsed = NewCaseSchema.safeParse({
+  const parsed = newCaseSchema(copy).safeParse({
     firstName: formData.get('firstName'),
     lastName: formData.get('lastName'),
     email: formData.get('email') ?? '',
@@ -42,7 +44,7 @@ export async function createInsuranceCase(formData: FormData): Promise<CreateCas
   })
 
   if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? 'Dados inválidos.' }
+    return { ok: false, message: parsed.error.issues[0]?.message ?? copy('Dados inválidos.', 'Invalid data.') }
   }
 
   const data = parsed.data

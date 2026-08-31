@@ -4,16 +4,15 @@ import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/require-role'
 import { buildPipelineFunnel, buildAgentPipeline } from '@/lib/pipeline-bi'
 import { buildCycleTimes, type StageTransition } from '@/lib/cycle-time'
-import { caseStageLabel, caseStageTone, type CaseStage } from '@/lib/case-workflow'
+import { caseStageTone, type CaseStage } from '@/lib/case-workflow'
 import { bucketByMonth } from '@/lib/dashboard'
-import { formatCompactMoney } from '@/lib/format'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { StatCard } from '@/components/StatCard'
 import { TrendChart } from '@/components/TrendChart'
 import { AgentPipelineTable } from './AgentPipelineTable'
-
-const usd = formatCompactMoney
+import { getServerI18n } from '@/lib/i18n/server'
+import { formatCurrency, formatNumber } from '@/lib/i18n/format'
 
 const BAR_TONE: Record<string, string> = {
   success: 'bg-success',
@@ -24,6 +23,26 @@ const BAR_TONE: Record<string, string> = {
 
 export default async function PipelinePage() {
   const session = await requireRole('ADMIN')
+  const { copy, language } = await getServerI18n()
+  const usd = (value: number) => formatCurrency(value, language, 'USD', {
+    notation: 'compact',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
+  const stageLabels: Record<CaseStage, string> = {
+    LEAD: 'Lead',
+    DISCOVERY: copy('Descoberta', 'Discovery'),
+    DESIGN: copy('Desenho', 'Design'),
+    ILLUSTRATION_READY: copy('Ilustração pronta', 'Illustration ready'),
+    APPLICATION_STARTED: copy('Aplicação iniciada', 'Application started'),
+    SUBMITTED: copy('Enviado', 'Submitted'),
+    UNDERWRITING: copy('Em análise', 'Underwriting'),
+    APPROVED: copy('Aprovado', 'Approved'),
+    ISSUED: copy('Emitido', 'Issued'),
+    PLACED: copy('Em vigor', 'Active'),
+    DECLINED: copy('Recusado', 'Declined'),
+    WITHDRAWN: copy('Retirado', 'Withdrawn'),
+  }
 
   const cases = await prisma.insuranceCase.findMany({
     select: {
@@ -82,64 +101,68 @@ export default async function PipelinePage() {
   return (
     <Shell role="ADMIN" userName={session.user.name}>
       <PageHeader
-        title="Pipeline de casos"
-        eyebrow="Gestão"
-        description="Visão executiva do funil de casos, conversão e valor em andamento."
+        title={copy('Funil de casos', 'Case pipeline')}
+        eyebrow={copy('Gestão', 'Management')}
+        description={copy('Visão executiva do funil de casos, conversão e valor em andamento.', 'Executive view of the case funnel, conversion, and value in progress.')}
       />
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total de casos" value={funnel.total} />
-        <StatCard label="Em andamento" value={funnel.open} />
-        <StatCard label="Win rate" value={`${(funnel.winRate * 100).toFixed(0)}%`} emphasis />
-        <StatCard label="Emitidos" value={funnel.placed} />
-        <StatCard label="Cobertura em pipeline" value={usd(funnel.inFlightCoverage)} />
-        <StatCard label="Orçamento mensal em pipeline" value={`${usd(funnel.inFlightBudget)}/m`} />
-        <StatCard label="Recusados" value={funnel.declined} />
-        <StatCard label="Retirados" value={funnel.withdrawn} />
+        <StatCard label={copy('Total de casos', 'Total cases')} value={formatNumber(funnel.total, language)} />
+        <StatCard label={copy('Em andamento', 'In progress')} value={formatNumber(funnel.open, language)} />
+        <StatCard label={copy('Taxa de conversão', 'Win rate')} value={`${formatNumber(funnel.winRate * 100, language, { maximumFractionDigits: 0 })}%`} emphasis />
+        <StatCard label={copy('Emitidos', 'Issued')} value={formatNumber(funnel.placed, language)} />
+        <StatCard label={copy('Cobertura no funil', 'Coverage in pipeline')} value={usd(funnel.inFlightCoverage)} />
+        <StatCard label={copy('Orçamento mensal no funil', 'Monthly budget in pipeline')} value={`${usd(funnel.inFlightBudget)}${copy('/mês', '/mo')}`} />
+        <StatCard label={copy('Recusados', 'Declined')} value={formatNumber(funnel.declined, language)} />
+        <StatCard label={copy('Retirados', 'Withdrawn')} value={formatNumber(funnel.withdrawn, language)} />
       </div>
 
       <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section className="rounded-lg border border-border-steel bg-paper p-6">
-          <h2 className="text-base font-semibold text-ink">Funil por etapa</h2>
+          <h2 className="text-base font-semibold text-ink">{copy('Funil por etapa', 'Funnel by stage')}</h2>
           <ul className="mt-5 space-y-2.5">
             {funnel.byStage.map((s) => (
               <li key={s.stage} className="grid grid-cols-[150px_1fr_2.5rem] items-center gap-3">
-                <span className="text-sm text-ink-muted">{caseStageLabel[s.stage]}</span>
+                <span className="text-sm text-ink-muted">{stageLabels[s.stage]}</span>
                 <div className="h-5 rounded bg-panel">
                   <div
                     className={`h-5 rounded ${BAR_TONE[caseStageTone(s.stage)]}`}
                     style={{ width: `${Math.round((s.count / maxStage) * 100)}%` }}
                   />
                 </div>
-                <span className="text-right font-mono text-sm tabular-nums text-ink">{s.count}</span>
+                <span className="text-right font-mono text-sm tabular-nums text-ink">{formatNumber(s.count, language)}</span>
               </li>
             ))}
           </ul>
         </section>
 
         <aside className="rounded-lg border border-border-steel bg-paper p-6">
-          <h2 className="text-base font-semibold text-ink">Novos casos por mês</h2>
-          <p className="mt-1 text-sm text-ink-muted">Últimos 6 meses.</p>
+          <h2 className="text-base font-semibold text-ink">{copy('Novos casos por mês', 'New cases by month')}</h2>
+          <p className="mt-1 text-sm text-ink-muted">{copy('Últimos 6 meses.', 'Last 6 months.')}</p>
           <div className="mt-4">
-            <TrendChart data={trend} format="count" />
+            <TrendChart
+              data={trend}
+              format="count"
+              ariaLabel={copy('Novos casos nos últimos seis meses', 'New cases in the last six months')}
+            />
           </div>
         </aside>
       </div>
 
       <section className="mt-8 rounded-lg border border-border-steel bg-paper p-6">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-base font-semibold text-ink">Tempo médio por etapa</h2>
-          <span className="text-xs text-ink-muted">Dias entre entrar e sair da etapa</span>
+          <h2 className="text-base font-semibold text-ink">{copy('Tempo médio por etapa', 'Average time by stage')}</h2>
+          <span className="text-xs text-ink-muted">{copy('Dias entre entrar e sair da etapa', 'Days between entering and leaving the stage')}</span>
         </div>
         {cycleTimes.length === 0 ? (
           <p className="mt-4 text-sm text-ink-muted">
-            Ainda sem transições registradas para medir. O tempo por etapa aparece conforme os casos avançam.
+            {copy('Ainda sem transições registradas para medir. O tempo por etapa aparece conforme os casos avançam.', 'There are no recorded transitions to measure yet. Time by stage will appear as cases progress.')}
           </p>
         ) : (
           <ul className="mt-5 space-y-2.5">
             {cycleTimes.map((s) => (
               <li key={s.stage} className="grid grid-cols-[150px_1fr_5rem] items-center gap-3">
-                <span className="text-sm text-ink-muted">{caseStageLabel[s.stage]}</span>
+                <span className="text-sm text-ink-muted">{stageLabels[s.stage]}</span>
                 <div className="h-5 rounded bg-panel">
                   <div
                     className="h-5 rounded bg-teal"
@@ -147,8 +170,8 @@ export default async function PipelinePage() {
                   />
                 </div>
                 <span className="text-right font-mono text-sm tabular-nums text-ink">
-                  {s.avgDays.toFixed(1)}d
-                  <span className="ml-1 text-xs text-ink-muted">·{s.samples}</span>
+                  {formatNumber(s.avgDays, language, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}{copy('d', 'd')}
+                  <span className="ml-1 text-xs text-ink-muted">·{formatNumber(s.samples, language)}</span>
                 </span>
               </li>
             ))}
@@ -158,8 +181,8 @@ export default async function PipelinePage() {
 
       <section className="mt-8">
         <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="text-base font-semibold text-ink">Pipeline por agente</h2>
-          <span className="text-xs text-ink-muted">{agentRows.length} agentes com casos</span>
+          <h2 className="text-base font-semibold text-ink">{copy('Funil por agente', 'Pipeline by agent')}</h2>
+          <span className="text-xs text-ink-muted">{agentRows.length === 1 ? copy('1 agente com casos', '1 agent with cases') : copy(`${formatNumber(agentRows.length, language)} agentes com casos`, `${formatNumber(agentRows.length, language)} agents with cases`)}</span>
         </div>
         <AgentPipelineTable rows={agentRows} />
       </section>

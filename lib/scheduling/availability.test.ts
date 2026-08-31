@@ -22,6 +22,7 @@ function pageRecord(overrides: Record<string, unknown> = {}) {
     weeklyWindows: [{ weekday: 1, startMinute: 540, endMinute: 660 }],
     ownerUser: {
       name: 'Maria Silva',
+      language: 'PT',
       timeZone: 'America/New_York',
       agent: { status: 'ACTIVE' },
       calendarIntegrations: [{
@@ -74,6 +75,7 @@ describe('public scheduling availability', () => {
       description: 'Escolha o melhor horário.',
       durationMinutes: 30,
       ownerName: 'Maria Silva',
+      ownerLanguage: 'PT',
       ownerTimeZone: 'America/New_York',
     })
     expect(result.slots.map((slot) => slot.startsAt)).toEqual([

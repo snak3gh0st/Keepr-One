@@ -1,3 +1,7 @@
+"use client";
+
+import { useI18n } from "@/components/i18n/LanguageProvider";
+
 type HierarchyMetric = {
   key: "people" | "agencies" | "depth";
   label: string;
@@ -42,29 +46,36 @@ export function HierarchyMetrics({
   agenciesBelow: number;
   depth: number;
 }) {
+  const { copy, locale } = useI18n();
   const metrics: HierarchyMetric[] = [
     {
       key: "people",
-      label: "Pessoas na equipe",
+      label: copy("Pessoas na equipe", "People on the team"),
       value: peopleBelow,
-      detail: peopleBelow === 1 ? "1 agente ou responsável abaixo" : `${peopleBelow} agentes e responsáveis abaixo`,
+      detail: peopleBelow === 1
+        ? copy("1 agente ou responsável abaixo", "1 agent or owner below")
+        : copy("{count} agentes e responsáveis abaixo", "{count} agents and owners below", { count: peopleBelow }),
     },
     {
       key: "agencies",
-      label: "Subagências",
+      label: copy("Subagências", "Sub-agencies"),
       value: agenciesBelow,
-      detail: agenciesBelow === 1 ? "1 agência descendente" : `${agenciesBelow} agências descendentes`,
+      detail: agenciesBelow === 1
+        ? copy("1 agência descendente", "1 downstream agency")
+        : copy("{count} agências descendentes", "{count} downstream agencies", { count: agenciesBelow }),
     },
     {
       key: "depth",
-      label: "Camadas",
+      label: copy("Camadas", "Levels"),
       value: depth,
-      detail: depth === 1 ? "1 nível depois de você" : `${depth} níveis depois de você`,
+      detail: depth === 1
+        ? copy("1 nível depois de você", "1 level below you")
+        : copy("{count} níveis depois de você", "{count} levels below you", { count: depth }),
     },
   ];
 
   return (
-    <section className="hierarchy-metrics" aria-label="Resumo do mapa da equipe">
+    <section className="hierarchy-metrics" aria-label={copy("Resumo do mapa da equipe", "Team map summary")}>
       {metrics.map((metric) => (
         <div key={metric.key} className="hierarchy-metric" data-tone={metric.key}>
           <span className="hierarchy-metric-icon">
@@ -75,7 +86,7 @@ export function HierarchyMetrics({
             <small>{metric.detail}</small>
           </span>
           <span className="hierarchy-metric-value">
-            {metric.value.toLocaleString("pt-BR")}
+            {metric.value.toLocaleString(locale)}
           </span>
         </div>
       ))}

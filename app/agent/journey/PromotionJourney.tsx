@@ -8,18 +8,11 @@ import {
   getPromotionJourney,
   type PromotionMode,
 } from "@/lib/promotion-journey";
+import { useI18n } from "@/components/i18n/LanguageProvider";
+import { formatDate, formatNumber } from "@/lib/i18n/format";
+import type { UserLanguage } from "@/lib/i18n/config";
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
-
-const PC = new Intl.NumberFormat("en-US", {
-  maximumFractionDigits: 0,
-});
-const WINDOW_DATE = new Intl.DateTimeFormat("pt-BR", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
 
 const JACKET_SEQUENCE = [
   { name: "Blue Jacket", tone: "blue" },
@@ -29,18 +22,22 @@ const JACKET_SEQUENCE = [
   { name: "Black Jacket", tone: "black" },
 ] as const;
 
-const JOURNEY_INTRO =
-  "Cada apólice avança pela produção reconhecida no Target Premium. A Jornada soma os PC confirmados dos últimos 12 meses.";
-
 const BLACK_JACKET_SILHOUETTE =
   "M74 38 116 18 143 50 177 50 204 18 246 38 294 125 260 145 238 108 246 326 160 348 74 326 82 108 60 145 26 125Z";
 
-function formatPc(value: number) {
-  return `${PC.format(Math.max(0, value))} PC`;
+function formatPcNumber(value: number, language: UserLanguage) {
+  return formatNumber(Math.max(0, value), language, { maximumFractionDigits: 0 });
 }
 
-function progressLabel(value: number) {
-  return `${Math.round(value * 100)}%`;
+function formatPc(value: number, language: UserLanguage) {
+  return `${formatPcNumber(value, language)} PC`;
+}
+
+function progressLabel(value: number, language: UserLanguage) {
+  return formatNumber(value, language, {
+    style: "percent",
+    maximumFractionDigits: 0,
+  });
 }
 
 function ratio(value: number, target: number) {
@@ -48,8 +45,14 @@ function ratio(value: number, target: number) {
   return Math.min(Math.max(value / target, 0), 1);
 }
 
-function formatWindow(windowStart: string, windowEnd: string) {
-  return `${WINDOW_DATE.format(new Date(windowStart))} — ${WINDOW_DATE.format(new Date(windowEnd))}`;
+function formatWindow(windowStart: string, windowEnd: string, language: UserLanguage) {
+  const options: Intl.DateTimeFormatOptions = {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  };
+  return `${formatDate(windowStart, language, options)} — ${formatDate(windowEnd, language, options)}`;
 }
 
 export function PromotionJourney({
@@ -79,6 +82,7 @@ export function PromotionJourney({
   windowEnd: string;
   highestAchievementRankId: string | null;
 }) {
+  const { copy, language } = useI18n();
   const root = useRef<HTMLElement>(null);
   const marquee = useRef<HTMLDivElement>(null);
   const jacketId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
@@ -100,8 +104,8 @@ export function PromotionJourney({
   const nextPromotionStage =
     journey.stages.find((stage) => stage.status === "current") ??
     journey.stages.at(-1);
-  const currentName = journey.currentRank?.title ?? "Agente";
-  const nextName = journey.nextRank?.title ?? "Black Jacket conquistada";
+  const currentName = journey.currentRank?.title ?? copy("Agente", "Agent");
+  const nextName = journey.nextRank?.title ?? copy("Black Jacket conquistada", "Black Jacket achieved");
   const rankSignature = journey.currentRank?.jacket ?? currentName;
   const highestAchievement = highestAchievementRankId
     ? journey.stages.find((stage) => stage.id === highestAchievementRankId)
@@ -114,7 +118,6 @@ export function PromotionJourney({
     highestAchievement?.jacket ?? highestAchievement?.title ?? null;
   const blackStage = journey.stages.at(-1);
   const blackProgress = blackStage?.progress ?? 0;
-  const blackPercent = Math.round(blackProgress * 100);
   const blackReached = blackStage?.qualifies ?? false;
   const blackPersonalTarget = blackStage?.personalTarget ?? 156_000;
   const blackAgencyPersonalTarget =
@@ -144,7 +147,7 @@ export function PromotionJourney({
       : estimatedPersonalPc;
   const displayedPendingPc =
     strongestBlackRoute === "agency" ? pendingAgencyPc : pendingPersonalPc;
-  const productionWindow = formatWindow(windowStart, windowEnd);
+  const productionWindow = formatWindow(windowStart, windowEnd, language);
   const blackMilestones = journey.stages.flatMap((stage, index) => {
     if (!stage.jacketTone) return [];
     const stageTarget =
@@ -160,14 +163,33 @@ export function PromotionJourney({
     ];
   });
   const blackProgressMessage = blackReached
-    ? "Meta final validada. A Black Jacket está conquistada."
+    ? copy(
+        "Meta final validada. A Black Jacket está conquistada.",
+        "Final goal validated. You have earned the Black Jacket.",
+      )
     : strongestBlackRoute === "personal"
-      ? `${formatPc(blackPersonalRemaining)} restantes pela rota pessoal.`
+      ? copy(
+          `${formatPc(blackPersonalRemaining, language)} restantes pela rota pessoal.`,
+          `${formatPc(blackPersonalRemaining, language)} remaining on the personal path.`,
+        )
       : blackAgencyRemaining > 0 && blackAgencyPersonalRemaining > 0
-        ? `${formatPc(blackAgencyRemaining)} na agência e ${formatPc(blackAgencyPersonalRemaining)} pessoais.`
+        ? copy(
+            `${formatPc(blackAgencyRemaining, language)} na agência e ${formatPc(blackAgencyPersonalRemaining, language)} pessoais.`,
+            `${formatPc(blackAgencyRemaining, language)} in agency production and ${formatPc(blackAgencyPersonalRemaining, language)} in personal production.`,
+          )
         : blackAgencyRemaining > 0
-          ? `${formatPc(blackAgencyRemaining)} restantes na produção da agência.`
-          : `${formatPc(blackAgencyPersonalRemaining)} restantes no mínimo pessoal.`;
+          ? copy(
+              `${formatPc(blackAgencyRemaining, language)} restantes na produção da agência.`,
+              `${formatPc(blackAgencyRemaining, language)} remaining in agency production.`,
+            )
+          : copy(
+              `${formatPc(blackAgencyPersonalRemaining, language)} restantes no mínimo pessoal.`,
+              `${formatPc(blackAgencyPersonalRemaining, language)} remaining in the personal minimum.`,
+            );
+  const journeyIntro = copy(
+    "Cada apólice avança pela produção reconhecida no Target Premium. A Jornada soma os PC confirmados dos últimos 12 meses.",
+    "Each policy advances through production recognized in Target Premium. The Journey totals confirmed PC from the last 12 months.",
+  );
 
   useGSAP(
     () => {
@@ -436,16 +458,16 @@ export function PromotionJourney({
         aria-hidden="true"
       />
       <p className="sr-only" aria-live="polite">
-        Identidade da jornada: {rankSignature}.
+        {copy(`Identidade da jornada: ${rankSignature}.`, `Journey identity: ${rankSignature}.`)}
       </p>
       <header className="promotion-journey-header">
         <div className="promotion-journey-copy" data-promotion-intro>
-          <span>Jornada de promoção</span>
+          <span>{copy("Jornada de promoção", "Promotion journey")}</span>
           <h2 id="promotion-journey-title">
-            Sua jornada ao <em>Black Jacket.</em>
+            {copy("Sua jornada ao", "Your journey to the")} <em>Black Jacket.</em>
           </h2>
-          <p aria-label={JOURNEY_INTRO}>
-            {JOURNEY_INTRO.split(" ").map((word, index) => (
+          <p aria-label={journeyIntro}>
+            {journeyIntro.split(" ").map((word, index) => (
               <span key={`${word}-${index}`} data-promotion-word aria-hidden="true">
                 {word}{" "}
               </span>
@@ -455,12 +477,16 @@ export function PromotionJourney({
 
         <div className="promotion-scope" data-promotion-intro>
           <header className="promotion-scope-heading">
-            <span>{canViewAgencyJourney ? "Escolha sua visão" : "Sua visão"}</span>
+            <span>
+              {canViewAgencyJourney
+                ? copy("Escolha sua visão", "Choose your view")
+                : copy("Sua visão", "Your view")}
+            </span>
             <strong>{rankSignature}</strong>
           </header>
           <div
             role="group"
-            aria-label="Visão da jornada de promoção"
+            aria-label={copy("Visão da jornada de promoção", "Promotion journey view")}
             data-single={!canViewAgencyJourney || undefined}
           >
             <button
@@ -469,7 +495,7 @@ export function PromotionJourney({
               data-active={mode === "individual" || undefined}
               onClick={() => selectMode("individual")}
             >
-              Minha produção
+              {copy("Minha produção", "My production")}
             </button>
             {canViewAgencyJourney ? (
               <button
@@ -478,18 +504,30 @@ export function PromotionJourney({
                 data-active={mode === "agency" || undefined}
                 onClick={() => selectMode("agency")}
               >
-                Minha agência
+                {copy("Minha agência", "My agency")}
               </button>
             ) : null}
           </div>
           <p>
             {historicalAchievementIsAhead && historicalAchievementLabel
-              ? `Maior conquista histórica: ${historicalAchievementLabel}. Qualificação da janela atual: ${currentName}.`
+              ? copy(
+                  `Maior conquista histórica: ${historicalAchievementLabel}. Qualificação da janela atual: ${currentName}.`,
+                  `Highest historical achievement: ${historicalAchievementLabel}. Current window qualification: ${currentName}.`,
+                )
               : mode === "agency"
                 ? hasAgencyStructure
-                  ? "Você avança pela melhor rota: produção pessoal ou agência com mínimo pessoal."
-                  : "Uma projeção para quando sua estrutura estiver conectada."
-                : "Seu avanço considera somente PC pessoais confirmados."}
+                  ? copy(
+                      "Você avança pela melhor rota: produção pessoal ou agência com mínimo pessoal.",
+                      "You advance through the strongest path: personal production or agency production with a personal minimum.",
+                    )
+                  : copy(
+                      "Uma projeção para quando sua estrutura estiver conectada.",
+                      "A projection for when your structure is connected.",
+                    )
+                : copy(
+                    "Seu avanço considera somente PC pessoais confirmados.",
+                    "Your progress considers only confirmed personal PC.",
+                  )}
           </p>
         </div>
       </header>
@@ -497,37 +535,42 @@ export function PromotionJourney({
       <div className="promotion-pc-summary" data-promotion-dynamic>
         <article data-promotion-summary data-tone="personal">
           <header>
-            <span>PC pessoais confirmados</span>
+            <span>{copy("PC pessoais confirmados", "Confirmed personal PC")}</span>
             <i aria-hidden="true" />
           </header>
-          <strong>{PC.format(journey.personalPc)}</strong>
+          <strong>{formatPcNumber(journey.personalPc, language)}</strong>
           {nextPromotionStage ? (
             <div className="promotion-personal-next">
               <span>
-                {journey.finalReached ? "Conquista atual" : "Próxima promoção"}
+                {journey.finalReached
+                  ? copy("Conquista atual", "Current achievement")
+                  : copy("Próxima promoção", "Next promotion")}
               </span>
               <strong>{nextPromotionStage.title}</strong>
               <div>
                 <span aria-hidden="true">
                   <i style={{ width: `${nextPromotionStage.progress * 100}%` }} />
                 </span>
-                <small>{progressLabel(nextPromotionStage.progress)}</small>
+                <small>{progressLabel(nextPromotionStage.progress, language)}</small>
               </div>
             </div>
           ) : null}
-          <div className="promotion-pc-evidence" aria-label="Qualidade dos créditos de promoção">
+          <div
+            className="promotion-pc-evidence"
+            aria-label={copy("Qualidade dos créditos de promoção", "Promotion credit quality")}
+          >
             <span>
-              Previstos
-              <strong>{PC.format(estimatedPersonalPc)}</strong>
+              {copy("Previstos", "Estimated")}
+              <strong>{formatPcNumber(estimatedPersonalPc, language)}</strong>
             </span>
             <span>
-              Em validação
-              <strong>{PC.format(pendingPersonalPc)}</strong>
+              {copy("Em validação", "Pending validation")}
+              <strong>{formatPcNumber(pendingPersonalPc, language)}</strong>
             </span>
           </div>
           <footer>
-            <span>Target Premium reconhecido</span>
-            <small>Dias inclusivos em UTC · {productionWindow}</small>
+            <span>{copy("Target Premium reconhecido", "Recognized Target Premium")}</span>
+            <small>{copy("Dias inclusivos em UTC", "Inclusive days in UTC")} · {productionWindow}</small>
           </footer>
         </article>
         <article
@@ -541,8 +584,11 @@ export function PromotionJourney({
             <header>
               <span>
                 {mode === "agency"
-                  ? `Melhor rota: ${strongestBlackRoute === "agency" ? "agência" : "pessoal"}`
-                  : "Rota individual"}
+                  ? copy(
+                      `Melhor rota: ${strongestBlackRoute === "agency" ? "agência" : "pessoal"}`,
+                      `Strongest path: ${strongestBlackRoute === "agency" ? "agency" : "personal"}`,
+                    )
+                  : copy("Rota individual", "Individual path")}
               </span>
               <span
                 className="promotion-black-target"
@@ -554,19 +600,22 @@ export function PromotionJourney({
             </header>
 
             <div className="promotion-black-quest-heading">
-              <strong data-black-progress-number>{blackPercent}%</strong>
+              <strong data-black-progress-number>{progressLabel(blackProgress, language)}</strong>
               <div>
                 <h3>
                   {blackReached
-                    ? "Conquista desbloqueada"
+                    ? copy("Conquista desbloqueada", "Achievement unlocked")
                     : hasPromotionData
-                      ? "Complete a jaqueta"
-                      : "Aguardando o primeiro PC"}
+                      ? copy("Complete a jaqueta", "Complete the jacket")
+                      : copy("Aguardando o primeiro PC", "Waiting for the first PC")}
                 </h3>
                 <p>
                   {hasPromotionData
                     ? blackProgressMessage
-                    : "A promoção começa quando o Target Premium for reconhecido pela seguradora."}
+                    : copy(
+                        "A promoção começa quando o Target Premium for reconhecido pela seguradora.",
+                        "Promotion progress begins when the carrier recognizes the Target Premium.",
+                      )}
                 </p>
               </div>
             </div>
@@ -576,7 +625,10 @@ export function PromotionJourney({
                 className="sr-only"
                 max={1}
                 value={blackProgress}
-                aria-label={`Progresso total até a Black Jacket: ${blackPercent}%`}
+                aria-label={copy(
+                  `Progresso total até a Black Jacket: ${progressLabel(blackProgress, language)}`,
+                  `Overall progress toward the Black Jacket: ${progressLabel(blackProgress, language)}`,
+                )}
               />
               <div className="promotion-black-roadmap-track" aria-hidden="true">
                 <i
@@ -584,7 +636,7 @@ export function PromotionJourney({
                   style={{ width: `${blackProgress * 100}%` }}
                 />
               </div>
-              <ol aria-label="Marcos até a Black Jacket">
+              <ol aria-label={copy("Marcos até a Black Jacket", "Milestones toward the Black Jacket")}>
                 {blackMilestones.map(({ index, position, stage }) => (
                   <li
                     key={stage.id}
@@ -595,7 +647,7 @@ export function PromotionJourney({
                   >
                     <button
                       type="button"
-                      aria-label={`Ver ${stage.title}`}
+                      aria-label={copy(`Ver ${stage.title}`, `View ${stage.title}`)}
                       aria-pressed={selectedIndex === index}
                       data-selected={selectedIndex === index || undefined}
                       onClick={() => setSelectedIndex(index)}
@@ -619,15 +671,22 @@ export function PromotionJourney({
 
             <dl className="promotion-black-requirements">
               <div>
-                <dt>{mode === "agency" ? "Rota pessoal" : "Produção pessoal"}</dt>
+                <dt>
+                  {mode === "agency"
+                    ? copy("Rota pessoal", "Personal path")
+                    : copy("Produção pessoal", "Personal production")}
+                </dt>
                 <dd>
-                  <strong>{PC.format(journey.personalPc)}</strong>
-                  <span>/ {formatPc(blackPersonalTarget)}</span>
+                  <strong>{formatPcNumber(journey.personalPc, language)}</strong>
+                  <span>/ {formatPc(blackPersonalTarget, language)}</span>
                 </dd>
                 <small className="promotion-requirement-note">
                   {blackPersonalRemaining > 0
-                    ? `Faltam ${formatPc(blackPersonalRemaining)}`
-                    : "Rota pessoal concluída"}
+                    ? copy(
+                        `Faltam ${formatPc(blackPersonalRemaining, language)}`,
+                        `${formatPc(blackPersonalRemaining, language)} remaining`,
+                      )
+                    : copy("Rota pessoal concluída", "Personal path completed")}
                 </small>
                 <span aria-hidden="true">
                   <i style={{ width: `${blackPersonalProgress * 100}%` }} />
@@ -635,14 +694,13 @@ export function PromotionJourney({
               </div>
               {mode === "agency" ? (
                 <div>
-                  <dt>Rota da agência</dt>
+                  <dt>{copy("Rota da agência", "Agency path")}</dt>
                   <dd>
-                    <strong>{PC.format(journey.agencyPc)}</strong>
-                    <span>/ {formatPc(blackAgencyTarget)}</span>
+                    <strong>{formatPcNumber(journey.agencyPc, language)}</strong>
+                    <span>/ {formatPc(blackAgencyTarget, language)}</span>
                   </dd>
                   <small className="promotion-requirement-note">
-                    Produção {progressLabel(blackAgencyProductionProgress)} · mínimo
-                    pessoal {PC.format(journey.personalPc)} / {PC.format(blackAgencyPersonalTarget)} PC
+                    {copy("Produção", "Production")} {progressLabel(blackAgencyProductionProgress, language)} · {copy("mínimo pessoal", "personal minimum")} {formatPcNumber(journey.personalPc, language)} / {formatPcNumber(blackAgencyPersonalTarget, language)} PC
                   </small>
                   <span aria-hidden="true">
                     <i style={{ width: `${blackAgencyProgress * 100}%` }} />
@@ -650,9 +708,9 @@ export function PromotionJourney({
                 </div>
               ) : (
                 <div>
-                  <dt>Falta para a conquista</dt>
+                  <dt>{copy("Falta para a conquista", "Remaining to achievement")}</dt>
                   <dd>
-                    <strong>{PC.format(blackPersonalRemaining)}</strong>
+                    <strong>{formatPcNumber(blackPersonalRemaining, language)}</strong>
                     <span>PC</span>
                   </dd>
                   <span aria-hidden="true">
@@ -668,7 +726,14 @@ export function PromotionJourney({
             data-black-jacket-visual
             aria-hidden="true"
           >
-            <span>{blackReached ? "Conquistada" : `${blackPercent}% revelada`}</span>
+            <span>
+              {blackReached
+                ? copy("Conquistada", "Achieved")
+                : copy(
+                    `${progressLabel(blackProgress, language)} revelada`,
+                    `${progressLabel(blackProgress, language)} revealed`,
+                  )}
+            </span>
             <svg viewBox="0 0 320 360" focusable="false">
               <defs>
                 <clipPath id={`black-jacket-clip-${jacketId}`}>
@@ -743,9 +808,9 @@ export function PromotionJourney({
 
       <div className="promotion-jacket-marquee" aria-hidden="true">
         <div ref={marquee} className="promotion-jacket-track">
-          {[0, 1].flatMap((copy) =>
+          {[0, 1].flatMap((cycle) =>
             JACKET_SEQUENCE.map((jacket) => (
-              <span key={`${copy}-${jacket.tone}`} data-tone={jacket.tone}>
+              <span key={`${cycle}-${jacket.tone}`} data-tone={jacket.tone}>
                 <i />
                 {jacket.name}
               </span>
@@ -765,56 +830,67 @@ export function PromotionJourney({
               <span>
                 {selected.status === "achieved"
                   ? selected.achievement === "inherited"
-                    ? "Marco reconhecido pelo nível superior"
-                    : "Conquista alcançada pelos próprios requisitos"
+                    ? copy("Marco reconhecido pelo nível superior", "Milestone recognized through a higher level")
+                    : copy("Conquista alcançada pelos próprios requisitos", "Achievement earned through its own requirements")
                   : selected.status === "current"
-                    ? "Próxima conquista"
-                    : "Marco futuro"}
+                    ? copy("Próxima conquista", "Next achievement")
+                    : copy("Marco futuro", "Future milestone")}
               </span>
-              <small>Etapa {String(selected.step).padStart(2, "0")}</small>
+              <small>
+                {copy(
+                  `Etapa ${String(selected.step).padStart(2, "0")}`,
+                  `Stage ${String(selected.step).padStart(2, "0")}`,
+                )}
+              </small>
             </header>
 
             <div className="promotion-preview-rank">
-              <p>{selected.jacket ?? "Liderança em construção"}</p>
+              <p>{selected.jacket ?? copy("Liderança em construção", "Leadership in progress")}</p>
               <h3>{selected.title}</h3>
             </div>
 
             <div className="promotion-preview-progress">
               <span>
-                <strong>{progressLabel(selected.progress)}</strong>
-                pela rota mais avançada
+                <strong>{progressLabel(selected.progress, language)}</strong>
+                {copy("pela rota mais avançada", "through the most advanced path")}
               </span>
               <progress
                 max={1}
                 value={selected.progress}
-                aria-label={`Progresso para ${selected.title}`}
+                aria-label={copy(`Progresso para ${selected.title}`, `Progress toward ${selected.title}`)}
               />
             </div>
 
             <dl>
               <div>
-                <dt>Meta pessoal</dt>
-                <dd>{formatPc(selected.personalTarget)}</dd>
+                <dt>{copy("Meta pessoal", "Personal goal")}</dt>
+                <dd>{formatPc(selected.personalTarget, language)}</dd>
               </div>
               <div>
-                <dt>Falta na rota pessoal</dt>
-                <dd>{formatPc(selected.personalRemaining)}</dd>
+                <dt>{copy("Falta na rota pessoal", "Remaining on personal path")}</dt>
+                <dd>{formatPc(selected.personalRemaining, language)}</dd>
               </div>
               {mode === "agency" ? (
                 <>
                   <div>
-                    <dt>Meta da agência</dt>
+                    <dt>{copy("Meta da agência", "Agency goal")}</dt>
                     <dd>
-                      {formatPc(selected.agencyTarget)}
-                      <small>Faltam {formatPc(selected.agencyRemaining ?? 0)}</small>
+                      {formatPc(selected.agencyTarget, language)}
+                      <small>{copy(
+                        `Faltam ${formatPc(selected.agencyRemaining ?? 0, language)}`,
+                        `${formatPc(selected.agencyRemaining ?? 0, language)} remaining`,
+                      )}</small>
                     </dd>
                   </div>
                   <div>
-                    <dt>Mínimo pessoal da agência</dt>
+                    <dt>{copy("Mínimo pessoal da agência", "Agency personal minimum")}</dt>
                     <dd>
-                      {formatPc(selected.agencyPersonalMinimum)}
+                      {formatPc(selected.agencyPersonalMinimum, language)}
                       <small>
-                        Faltam {formatPc(selected.agencyPersonalRemaining ?? 0)}
+                        {copy(
+                          `Faltam ${formatPc(selected.agencyPersonalRemaining ?? 0, language)}`,
+                          `${formatPc(selected.agencyPersonalRemaining ?? 0, language)} remaining`,
+                        )}
                       </small>
                     </dd>
                   </div>
@@ -824,13 +900,13 @@ export function PromotionJourney({
 
             <footer>
               <div>
-                <span>Posição atual</span>
+                <span>{copy("Posição atual", "Current position")}</span>
                 <strong>{currentName}</strong>
               </div>
               <div className="promotion-preview-controls">
                 <button
                   type="button"
-                  aria-label="Ver promoção anterior"
+                  aria-label={copy("Ver promoção anterior", "View previous promotion")}
                   onClick={() => changeSelected(-1)}
                 >
                   <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
@@ -839,7 +915,7 @@ export function PromotionJourney({
                 </button>
                 <button
                   type="button"
-                  aria-label="Ver próxima promoção"
+                  aria-label={copy("Ver próxima promoção", "View next promotion")}
                   onClick={() => changeSelected(1)}
                 >
                   <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
@@ -854,12 +930,12 @@ export function PromotionJourney({
         <div className="promotion-stage-list" data-promotion-stage-list>
           <header>
             <div>
-              <span>Seu caminho</span>
+              <span>{copy("Seu caminho", "Your path")}</span>
               <h3>{nextName}</h3>
             </div>
             <div>
-              <strong>{progressLabel(journey.overallProgress)}</strong>
-              <small>até o Black Jacket</small>
+              <strong>{progressLabel(journey.overallProgress, language)}</strong>
+              <small>{copy("até o Black Jacket", "to the Black Jacket")}</small>
             </div>
           </header>
 
@@ -879,20 +955,20 @@ export function PromotionJourney({
                     {String(stage.step).padStart(2, "0")}
                   </span>
                   <span className="promotion-stage-name">
-                    <small>{stage.jacket ?? "Liderança"}</small>
+                    <small>{stage.jacket ?? copy("Liderança", "Leadership")}</small>
                     <strong>{stage.title}</strong>
                   </span>
                   <span className="promotion-stage-meta">
                     <small>
                       {stage.status === "achieved"
                         ? stage.achievement === "inherited"
-                          ? "Reconhecido pelo nível superior"
-                          : "Requisitos concluídos"
+                          ? copy("Reconhecido pelo nível superior", "Recognized through a higher level")
+                          : copy("Requisitos concluídos", "Requirements completed")
                         : stage.status === "current"
-                          ? "Em progresso"
-                          : "Próximo marco"}
+                          ? copy("Em progresso", "In progress")
+                          : copy("Próximo marco", "Next milestone")}
                     </small>
-                    <strong>{progressLabel(stage.progress)}</strong>
+                    <strong>{progressLabel(stage.progress, language)}</strong>
                   </span>
                   <span className="promotion-stage-track" aria-hidden="true">
                     <i
@@ -908,14 +984,12 @@ export function PromotionJourney({
       </div>
 
       <footer className="promotion-method-note">
-        <span>Como calculamos</span>
+        <span>{copy("Como calculamos", "How we calculate it")}</span>
         <p>
-          PC confirmado usa o menor valor entre o Commissionable Target Premium
-          e o AAP, multiplicado pelo peso aplicável do produto. A janela é móvel
-          de 12 meses e inclui integralmente, em UTC, as duas datas exibidas
-          ({productionWindow}). {formatPc(displayedEstimatedPc)} estão previstos e{" "}
-          {formatPc(displayedPendingPc)} aguardam validação nessa mesma rota;
-          nenhum deles concede promoção antes do reconhecimento da seguradora.
+          {copy(
+            `PC confirmado usa o menor valor entre o Commissionable Target Premium e o AAP, multiplicado pelo peso aplicável do produto. A janela é móvel de 12 meses e inclui integralmente, em UTC, as duas datas exibidas (${productionWindow}). ${formatPc(displayedEstimatedPc, language)} estão previstos e ${formatPc(displayedPendingPc, language)} aguardam validação nessa mesma rota; nenhum deles concede promoção antes do reconhecimento da seguradora.`,
+            `Confirmed PC uses the lower of Commissionable Target Premium and AAP, multiplied by the applicable product weight. The rolling 12-month window fully includes both displayed dates in UTC (${productionWindow}). ${formatPc(displayedEstimatedPc, language)} are estimated and ${formatPc(displayedPendingPc, language)} await validation on this same path; neither grants a promotion before carrier recognition.`,
+          )}
         </p>
       </footer>
     </section>

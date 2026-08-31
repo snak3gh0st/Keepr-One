@@ -20,6 +20,7 @@ import { useReducedMotion } from "motion/react";
 import { updateAgentHierarchy } from "./actions";
 import { AgentNode, RootZoneNode, type AgentFlowNode, type RootZoneFlowNode } from "./nodes";
 import { layoutHierarchy, ROOT_ZONE_ID } from "@/lib/hierarchy-layout";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 type Agent = { id: string; name: string; rank: string; parentAgentId: string | null };
 type FlowNode = AgentFlowNode | RootZoneFlowNode;
@@ -44,6 +45,7 @@ function isDescendant(agents: Agent[], candidateId: string, ofId: string): boole
 }
 
 function HierarchyCanvas({ agents }: { agents: Agent[] }) {
+  const { copy } = useI18n();
   const reducedMotion = useReducedMotion() ?? false;
   const rf = useReactFlow<FlowNode>();
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
@@ -104,7 +106,7 @@ function HierarchyCanvas({ agents }: { agents: Agent[] }) {
         onToggleEdit: () => setEditingId((id) => (id === agent.id ? null : agent.id)),
         onSave: async (parentAgentId: string | null, rank: string) => {
           await reassign(agent.id, parentAgentId, rank);
-          setBanner({ ok: true, text: `${agent.name} atualizado.` });
+          setBanner({ ok: true, text: copy(`${agent.name} atualizado.`, `${agent.name} updated.`) });
           setEditingId(null);
         },
       },
@@ -144,9 +146,10 @@ function HierarchyCanvas({ agents }: { agents: Agent[] }) {
       },
     });
     stopAnimRef.current = () => controls.stop();
-    // agents is the only input that should re-trigger a layout pass.
+    // Agent data and the active language are the only inputs that should
+    // re-trigger a layout pass; translated callbacks must not stay stale.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents]);
+  }, [agents, copy]);
 
   const onNodeDragStart: OnNodeDrag<FlowNode> = useCallback((_e, node) => {
     if (node.type !== "agent") return;
@@ -186,19 +189,30 @@ function HierarchyCanvas({ agents }: { agents: Agent[] }) {
         return;
       }
       if (newParentId && isDescendant(agents, newParentId, agent.id)) {
-        setBanner({ ok: false, text: "Não é possível mover um agente para dentro da própria downline." });
+        setBanner({
+          ok: false,
+          text: copy(
+            "Não é possível mover um agente para dentro da própria rede descendente.",
+            "An agent cannot be moved into their own downline.",
+          ),
+        });
         snapBack();
         return;
       }
       try {
         await reassign(agent.id, newParentId, agent.rank);
-        setBanner({ ok: true, text: `${agent.name} atualizado.` });
+        setBanner({ ok: true, text: copy(`${agent.name} atualizado.`, `${agent.name} updated.`) });
       } catch (err) {
-        setBanner({ ok: false, text: err instanceof Error ? err.message : "Erro ao mover agente." });
+        setBanner({
+          ok: false,
+          text: err instanceof Error
+            ? err.message
+            : copy("Erro ao mover agente.", "We couldn't move the agent."),
+        });
         snapBack();
       }
     },
-    [overId, byId, agents, reassign, setNodes],
+    [overId, byId, agents, reassign, setNodes, copy],
   );
 
   const displayNodes = useMemo<FlowNode[]>(

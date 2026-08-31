@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 import {
   getPromotionJourney,
   type JacketTone,
@@ -13,14 +14,6 @@ import {
 } from "@/lib/promotion-journey";
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
-
-const PC = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const WINDOW_DATE = new Intl.DateTimeFormat("pt-BR", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
 
 const BLACK_JACKET_SILHOUETTE =
   "M74 38 116 18 143 50 177 50 204 18 246 38 294 125 260 145 238 108 246 326 160 348 74 326 82 108 60 145 26 125Z";
@@ -56,12 +49,18 @@ const JACKET_NODE_TONES: Record<
   },
 };
 
-function formatPc(value: number) {
-  return `${PC.format(Math.max(0, value))} PC`;
+function formatPc(value: number, locale: string) {
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(Math.max(0, value))} PC`;
 }
 
-function formatWindow(windowStart: string, windowEnd: string) {
-  return `${WINDOW_DATE.format(new Date(windowStart))} — ${WINDOW_DATE.format(new Date(windowEnd))}`;
+function formatWindow(windowStart: string, windowEnd: string, locale: string) {
+  const formatter = new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  return `${formatter.format(new Date(windowStart))} — ${formatter.format(new Date(windowEnd))}`;
 }
 
 function getRemainingLabel({
@@ -69,35 +68,56 @@ function getRemainingLabel({
   hasPromotionData,
   mode,
   stage,
+  locale,
+  copy,
 }: {
   loadError: boolean;
   hasPromotionData: boolean;
   mode: PromotionMode;
   stage: PromotionStage | undefined;
+  locale: string;
+  copy: (portuguese: string, english: string) => string;
 }) {
-  if (loadError) return "Progresso indisponível";
-  if (!hasPromotionData) return "Aguardando Target Premium reconhecido";
-  if (!stage) return "Requisitos atingidos";
+  if (loadError) return copy("Progresso indisponível", "Progress unavailable");
+  if (!hasPromotionData) return copy("Aguardando Target Premium reconhecido", "Waiting for recognized Target Premium");
+  if (!stage) return copy("Requisitos atingidos", "Requirements met");
 
   if (mode === "individual") {
-    return `${formatPc(stage.personalRemaining)} para avançar pela produção pessoal`;
+    return copy(
+      `${formatPc(stage.personalRemaining, locale)} para avançar pela produção pessoal`,
+      `${formatPc(stage.personalRemaining, locale)} to advance through personal production`,
+    );
   }
 
   const agencyProgress = stage.agencyProgress ?? 0;
   if (stage.personalProgress >= agencyProgress) {
-    return `${formatPc(stage.personalRemaining)} para avançar pela rota pessoal`;
+    return copy(
+      `${formatPc(stage.personalRemaining, locale)} para avançar pela rota pessoal`,
+      `${formatPc(stage.personalRemaining, locale)} to advance through the personal route`,
+    );
   }
 
   const agency = stage.agencyRemaining ?? 0;
   const agencyPersonal = stage.agencyPersonalRemaining ?? 0;
   if (agency > 0 && agencyPersonal > 0) {
-    return `${formatPc(agency)} na agência + ${formatPc(agencyPersonal)} pessoais`;
+    return copy(
+      `${formatPc(agency, locale)} na agência + ${formatPc(agencyPersonal, locale)} pessoais`,
+      `${formatPc(agency, locale)} agency + ${formatPc(agencyPersonal, locale)} personal`,
+    );
   }
-  if (agency > 0) return `${formatPc(agency)} na agência para avançar`;
+  if (agency > 0) {
+    return copy(
+      `${formatPc(agency, locale)} na agência para avançar`,
+      `${formatPc(agency, locale)} in agency production to advance`,
+    );
+  }
   if (agencyPersonal > 0) {
-    return `${formatPc(agencyPersonal)} pessoais para validar a rota da agência`;
+    return copy(
+      `${formatPc(agencyPersonal, locale)} pessoais para validar a rota da agência`,
+      `${formatPc(agencyPersonal, locale)} personal to validate the agency route`,
+    );
   }
-  return "Requisitos atingidos";
+  return copy("Requisitos atingidos", "Requirements met");
 }
 
 export function JourneyDashboardPreview({
@@ -129,6 +149,7 @@ export function JourneyDashboardPreview({
   loadError: boolean;
   journeyHref?: string;
 }) {
+  const { copy, locale } = useI18n();
   const root = useRef<HTMLElement>(null);
   const journey = getPromotionJourney({ personalPc, agencyPc, mode });
   const nextStage = journey.stages.find((stage) => stage.status === "current");
@@ -161,18 +182,22 @@ export function JourneyDashboardPreview({
   const currentPosition =
     journey.currentRank?.jacket ??
     journey.currentRank?.title ??
-    (hasPromotionData ? "Início da jornada" : "Aguardando produção reconhecida");
-  const nextPromotion = journey.nextRank?.title ?? "Black Jacket conquistada";
+    (hasPromotionData
+      ? copy("Início da jornada", "Journey started")
+      : copy("Aguardando produção reconhecida", "Waiting for recognized production"));
+  const nextPromotion = journey.nextRank?.title ?? copy("Black Jacket conquistada", "Black Jacket earned");
   const progress = loadError || !hasPromotionData ? 0 : journey.overallProgress;
   const progressPercent =
     loadError || !hasPromotionData ? null : Math.round(progress * 100);
   const remainingLabel = journey.finalReached
-    ? "Conquista máxima validada"
+    ? copy("Conquista máxima validada", "Highest achievement validated")
     : getRemainingLabel({
         loadError,
         hasPromotionData,
         mode,
         stage: nextStage,
+        locale,
+        copy,
       });
 
   useGSAP(
@@ -250,7 +275,7 @@ export function JourneyDashboardPreview({
         <div>
           <div data-dashboard-journey-copy className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-[0.17em] text-mint">
-              Jornada de promoção
+              {copy("Jornada de promoção", "Promotion journey")}
             </p>
             <span className="h-px w-10 bg-mint/45" aria-hidden="true" />
             <p className="text-xs text-paper/48">{currentPosition}</p>
@@ -262,21 +287,30 @@ export function JourneyDashboardPreview({
             className="mt-4 max-w-2xl text-[clamp(1.8rem,2.7vw,3rem)] font-medium leading-[1.02] tracking-[-0.05em]"
           >
             {loadError
-              ? "Sua rota continua aqui."
+              ? copy("Sua rota continua aqui.", "Your path continues here.")
               : !hasPromotionData
-                ? "Sua jornada para o Black Jacket começa aqui."
+                ? copy("Sua jornada para o Black Jacket começa aqui.", "Your journey to the Black Jacket starts here.")
               : journey.finalReached
-                ? "Black Jacket conquistada."
-                : `Próxima conquista: ${nextPromotion}.`}
+                ? copy("Black Jacket conquistada.", "Black Jacket earned.")
+                : copy(`Próxima conquista: ${nextPromotion}.`, `Next achievement: ${nextPromotion}.`)}
           </h2>
 
           <p data-dashboard-journey-copy className="mt-4 max-w-xl text-sm leading-6 text-paper/55">
             {loadError
-              ? "Os dados de produção estão temporariamente indisponíveis. Abra a Jornada para tentar novamente."
+              ? copy(
+                  "Os dados de produção estão temporariamente indisponíveis. Abra a Jornada para tentar novamente.",
+                  "Production data is temporarily unavailable. Open the Journey to try again.",
+                )
               : !hasPromotionData
-                ? "Quando a seguradora reconhecer o Target Premium de uma apólice, os PC entram aqui sem usar comissão como atalho."
+                ? copy(
+                    "Quando a seguradora reconhecer o Target Premium de uma apólice, os PC entram aqui sem usar comissão como atalho.",
+                    "When the carrier recognizes a policy's Target Premium, production credits appear here without using commission as a shortcut.",
+                  )
               : journey.finalReached
-                ? "O último nível foi alcançado. Reveja a rota que transformou produção em conquista."
+                ? copy(
+                    "O último nível foi alcançado. Reveja a rota que transformou produção em conquista.",
+                    "The final level has been reached. Review the path that turned production into an achievement.",
+                  )
                 : remainingLabel}
           </p>
         </div>
@@ -286,7 +320,9 @@ export function JourneyDashboardPreview({
             href={journeyHref}
             className="group inline-flex min-h-11 items-center justify-center gap-3 rounded-full bg-paper px-5 py-3 text-sm font-semibold text-rail-strong transition-transform duration-300 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
           >
-            {journey.finalReached && !loadError ? "Ver conquista" : "Abrir Jornada"}
+            {journey.finalReached && !loadError
+              ? copy("Ver conquista", "View achievement")
+              : copy("Abrir Jornada", "Open Journey")}
             <span
               aria-hidden="true"
               className="transition-transform duration-300 group-hover:translate-x-0.5"
@@ -295,9 +331,11 @@ export function JourneyDashboardPreview({
             </span>
           </Link>
           <p className="text-xs text-paper/42">
-            {mode === "agency" ? "Visão da agência" : "Minha produção"}
+            {mode === "agency"
+              ? copy("Visão da agência", "Agency view")
+              : copy("Minha produção", "My production")}
             {" · "}
-            {formatWindow(windowStart, windowEnd)}
+            {formatWindow(windowStart, windowEnd, locale)}
           </p>
         </div>
       </div>
@@ -306,7 +344,7 @@ export function JourneyDashboardPreview({
         <div className="flex items-start justify-between gap-5">
           <div data-dashboard-journey-copy>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-paper/42">
-              Rota até Black Jacket
+              {copy("Rota até Black Jacket", "Path to Black Jacket")}
             </p>
             <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <strong className="font-mono text-3xl font-medium tracking-[-0.055em] tabular-nums sm:text-4xl">
@@ -314,19 +352,24 @@ export function JourneyDashboardPreview({
               </strong>
               <span className="text-xs text-paper/48">
                 {loadError
-                  ? "cálculo indisponível"
+                  ? copy("cálculo indisponível", "calculation unavailable")
                   : !hasPromotionData
-                    ? "sem PC confirmados"
-                    : `${formatPc(displayedPc)} confirmados`}
+                    ? copy("sem PC confirmados", "no confirmed PC")
+                    : copy(
+                        `${formatPc(displayedPc, locale)} confirmados`,
+                        `${formatPc(displayedPc, locale)} confirmed`,
+                      )}
               </span>
             </div>
             {!loadError ? (
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-paper/42">
-                <span>{formatPc(displayedEstimatedPc)} previstos</span>
-                <span>{formatPc(displayedPendingPc)} em validação</span>
+                <span>{copy(`${formatPc(displayedEstimatedPc, locale)} previstos`, `${formatPc(displayedEstimatedPc, locale)} projected`)}</span>
+                <span>{copy(`${formatPc(displayedPendingPc, locale)} em validação`, `${formatPc(displayedPendingPc, locale)} pending validation`)}</span>
                 {mode === "agency" && hasPromotionData ? (
                   <span>
-                    Melhor rota: {strongestRoute === "agency" ? "agência" : "pessoal"}
+                    {copy("Melhor rota", "Best route")}: {strongestRoute === "agency"
+                      ? copy("agência", "agency")
+                      : copy("pessoal", "personal")}
                   </span>
                 ) : null}
               </div>
@@ -347,7 +390,7 @@ export function JourneyDashboardPreview({
         </div>
 
         <div className="mt-6">
-          <div className="relative h-[82px]" role="group" aria-label="Marcos até a Black Jacket">
+          <div className="relative h-[82px]" role="group" aria-label={copy("Marcos até a Black Jacket", "Milestones to the Black Jacket")}>
             <div className="absolute left-0 right-1 top-[10px] h-px bg-white/14">
               <span
                 data-dashboard-journey-fill
@@ -377,11 +420,11 @@ export function JourneyDashboardPreview({
                 const nodeTone = JACKET_NODE_TONES[tone];
                 const stageState = isReached
                   ? stage.achievement === "inherited"
-                    ? "reconhecida pelo nível superior"
-                    : "conquistada pelos próprios requisitos"
+                    ? copy("reconhecida pelo nível superior", "recognized through a higher level")
+                    : copy("conquistada pelos próprios requisitos", "earned through own requirements")
                   : isCurrent
-                    ? "em progresso"
-                    : "marco futuro";
+                    ? copy("em progresso", "in progress")
+                    : copy("marco futuro", "future milestone");
 
                 return (
                   <li
@@ -419,11 +462,16 @@ export function JourneyDashboardPreview({
           <div className="flex flex-col gap-2 border-t border-white/10 pt-4 text-xs sm:flex-row sm:items-center sm:justify-between">
             <span className="text-paper/42">
               {historicalAchievementIsAhead && historicalAchievementLabel
-                ? `Maior conquista: ${historicalAchievementLabel} · janela atual: ${currentPosition}`
-                : "PC confirmados · qualificação da janela atual"}
+                ? copy(
+                    `Maior conquista: ${historicalAchievementLabel} · janela atual: ${currentPosition}`,
+                    `Highest achievement: ${historicalAchievementLabel} · current window: ${currentPosition}`,
+                  )
+                : copy("PC confirmados · qualificação da janela atual", "Confirmed PC · current window qualification")}
             </span>
             <span className="font-medium text-paper/74">
-              {journey.finalReached && !loadError ? "Conquista concluída" : remainingLabel}
+              {journey.finalReached && !loadError
+                ? copy("Conquista concluída", "Achievement completed")
+                : remainingLabel}
             </span>
           </div>
         </div>

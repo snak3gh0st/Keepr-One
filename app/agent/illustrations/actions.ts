@@ -17,6 +17,7 @@ import {
   foresightTermIllustrationInputHash,
 } from '@/lib/national-life/foresight-term-contract'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
+import { getServerI18n } from '@/lib/i18n/server'
 
 export type RequestIllustrationPdfResult =
   | { ok: true; commandId: string; duplicate: boolean; completed: boolean }
@@ -28,8 +29,9 @@ export type RequestIllustrationPdfResult =
 export async function requestIllustrationPdf(
   illustrationId: string,
 ): Promise<RequestIllustrationPdfResult> {
+  const { copy } = await getServerI18n()
   if (!isNationalLifeLocalConnectorEnabled()) {
-    return { ok: false, message: 'Conecte o K-Bot neste navegador para gerar a ilustração oficial.' }
+    return { ok: false, message: copy('Conecte o K-Bot neste navegador para gerar a ilustração oficial.', 'Connect K-Bot in this browser to generate the official illustration.') }
   }
   const agent = await getCurrentAgent()
   const illustration = await prisma.illustration.findFirst({
@@ -43,7 +45,7 @@ export async function requestIllustrationPdf(
       documentFetchedAt: true,
     },
   })
-  if (!illustration) return { ok: false, message: 'Cotação não encontrada.' }
+  if (!illustration) return { ok: false, message: copy('Cotação não encontrada.', 'Quote not found.') }
   if (illustration.documentFetchedAt) {
     return { ok: true, commandId: '', duplicate: true, completed: true }
   }
@@ -72,7 +74,7 @@ export async function requestIllustrationPdf(
           confirmedByUserId: agent.userId,
         })
       } else if (latest.confirmationState !== 'APPROVED') {
-        return { ok: false, message: 'Este pedido não está mais disponível para confirmação.' }
+        return { ok: false, message: copy('Este pedido não está mais disponível para confirmação.', 'This request is no longer available for confirmation.') }
       }
       return {
         ok: true,
@@ -93,7 +95,7 @@ export async function requestIllustrationPdf(
       where: { id: issued.command.commandId, agentId: agent.id },
       select: { state: true, confirmationState: true },
     })
-    if (!persisted) return { ok: false, message: 'Não foi possível registrar o pedido.' }
+    if (!persisted) return { ok: false, message: copy('Não foi possível registrar o pedido.', 'The request could not be recorded.') }
     if (persisted.confirmationState === 'PENDING') {
       await approveConnectorCommand(prismaConnectorCommandRepository, {
         agentId: agent.id,
@@ -102,10 +104,10 @@ export async function requestIllustrationPdf(
         confirmedByUserId: agent.userId,
       })
     } else if (persisted.confirmationState !== 'APPROVED') {
-      return { ok: false, message: 'Este pedido não está mais disponível para confirmação.' }
+      return { ok: false, message: copy('Este pedido não está mais disponível para confirmação.', 'This request is no longer available for confirmation.') }
     }
     if (persisted.state === 'FAILED' || persisted.state === 'CANCELLED') {
-      return { ok: false, message: 'A tentativa anterior não foi concluída. Revise o erro antes de tentar novamente.' }
+      return { ok: false, message: copy('A tentativa anterior não foi concluída. Revise o erro antes de tentar novamente.', 'The previous attempt was not completed. Review the error before trying again.') }
     }
     revalidatePath('/agent/illustrations')
     revalidatePath(`/agent/illustrations/${illustration.id}`)
@@ -116,6 +118,6 @@ export async function requestIllustrationPdf(
       completed: persisted.state === 'COMPLETED',
     }
   } catch {
-    return { ok: false, message: 'Não foi possível iniciar a ilustração oficial agora.' }
+    return { ok: false, message: copy('Não foi possível iniciar a ilustração oficial agora.', 'The official illustration could not be started right now.') }
   }
 }

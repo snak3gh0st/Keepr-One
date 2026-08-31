@@ -5,6 +5,8 @@ import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Button } from "@/components/Button";
 import { Field, Input, Select } from "@/components/Field";
+import { useI18n } from "@/components/i18n/LanguageProvider";
+import type { UserLanguage } from "@/lib/i18n/config";
 import {
   changePasswordAction,
   requestEmailChangeAction,
@@ -42,13 +44,13 @@ export type SettingsFormsProps = {
 };
 
 const TIME_ZONE_OPTIONS = [
-  { value: "America/New_York", label: "Leste dos EUA — Eastern Time" },
-  { value: "America/Chicago", label: "Centro dos EUA — Central Time" },
-  { value: "America/Denver", label: "Montanhas — Mountain Time" },
-  { value: "America/Phoenix", label: "Arizona" },
-  { value: "America/Los_Angeles", label: "Oeste dos EUA — Pacific Time" },
-  { value: "America/Anchorage", label: "Alasca" },
-  { value: "Pacific/Honolulu", label: "Havaí" },
+  { value: "America/New_York", pt: "Leste dos EUA — Eastern Time", en: "US East — Eastern Time" },
+  { value: "America/Chicago", pt: "Centro dos EUA — Central Time", en: "US Central — Central Time" },
+  { value: "America/Denver", pt: "Montanhas — Mountain Time", en: "Mountain — Mountain Time" },
+  { value: "America/Phoenix", pt: "Arizona", en: "Arizona" },
+  { value: "America/Los_Angeles", pt: "Oeste dos EUA — Pacific Time", en: "US West — Pacific Time" },
+  { value: "America/Anchorage", pt: "Alasca", en: "Alaska" },
+  { value: "Pacific/Honolulu", pt: "Havaí", en: "Hawaii" },
 ] as const;
 
 const SECTION_CLASS =
@@ -60,8 +62,66 @@ function describedBy(id: string, error?: string, hasHint = false) {
     .join(" ") || undefined;
 }
 
-function fieldError(state: SettingsActionState, name: string) {
-  return state.fieldErrors?.[name];
+const SETTINGS_MESSAGE_EN: Record<string, string> = {
+  "Revise os campos destacados.": "Review the highlighted fields.",
+  "Informe seu nome completo.": "Enter your full name.",
+  "O nome deve ter no máximo 100 caracteres.": "Name must be no more than 100 characters.",
+  "O telefone informado é muito longo.": "The phone number is too long.",
+  "Informe um telefone válido.": "Enter a valid phone number.",
+  "Informe um telefone com 7 a 15 dígitos.": "Enter a phone number with 7 to 15 digits.",
+  "Selecione seu fuso horário.": "Select your time zone.",
+  "O fuso horário informado é inválido.": "The selected time zone is invalid.",
+  "Selecione um fuso horário válido.": "Select a valid time zone.",
+  "Não foi possível localizar seu perfil.": "We couldn't find your profile.",
+  "Seu perfil já está atualizado.": "Your profile is already up to date.",
+  "Dados pessoais atualizados.": "Personal details updated.",
+  "Não foi possível atualizar seus dados agora. Tente novamente.": "We couldn't update your details right now. Please try again.",
+  "Informe um e-mail válido.": "Enter a valid email.",
+  "O e-mail deve ter no máximo 254 caracteres.": "Email must be no more than 254 characters.",
+  "Informe sua senha atual.": "Enter your current password.",
+  "A senha atual é inválida.": "Your current password is invalid.",
+  "Este já é o e-mail da sua conta.": "This is already your account email.",
+  "Informe um e-mail diferente do atual.": "Enter an email different from your current one.",
+  "Não foi possível confirmar sua identidade.": "We couldn't confirm your identity.",
+  "A senha atual está incorreta.": "Your current password is incorrect.",
+  "Por segurança, entre novamente antes de trocar seu e-mail.": "For security, sign in again before changing your email.",
+  "Não foi possível enviar a confirmação agora. Tente novamente.": "We couldn't send the confirmation right now. Please try again.",
+  "A nova senha deve ter pelo menos 8 caracteres.": "The new password must have at least 8 characters.",
+  "A nova senha deve ter no máximo 128 caracteres.": "The new password must be no more than 128 characters.",
+  "Confirme a nova senha.": "Confirm the new password.",
+  "A confirmação da senha é inválida.": "The password confirmation is invalid.",
+  "As novas senhas não coincidem.": "The new passwords do not match.",
+  "A nova senha precisa ser diferente da senha atual.": "The new password must be different from your current password.",
+  "Senha alterada; suas outras sessões foram encerradas.": "Password changed; your other sessions were signed out.",
+  "Senha alterada com sucesso.": "Password changed successfully.",
+  "Não foi possível alterar a senha.": "We couldn't change the password.",
+  "Por segurança, entre novamente antes de alterar sua senha.": "For security, sign in again before changing your password.",
+  "Não foi possível alterar sua senha agora. Tente novamente.": "We couldn't change your password right now. Please try again.",
+  "Informe o nome da agência.": "Enter the agency name.",
+  "O nome da agência deve ter no máximo 120 caracteres.": "Agency name must be no more than 120 characters.",
+  "Nenhuma agência editável foi encontrada.": "No editable agency was found.",
+  "Não foi possível localizar sua agência.": "We couldn't find your agency.",
+  "O nome da agência já está atualizado.": "The agency name is already up to date.",
+  "Nome da agência atualizado.": "Agency name updated.",
+  "Não foi possível usar este nome de agência.": "This agency name can't be used.",
+  "Escolha outro nome para a agência.": "Choose a different agency name.",
+  "Somente o responsável por um plano Agência ativo pode alterar este nome.": "Only the owner of an active Agency plan can change this name.",
+  "Não foi possível atualizar a agência agora. Tente novamente.": "We couldn't update the agency right now. Please try again.",
+};
+
+function settingsMessage(message: string | undefined, language: UserLanguage) {
+  if (!message || language === "PT") return message;
+  const localEmail = /^E-mail alterado para (.+) neste ambiente local\.$/.exec(message);
+  if (localEmail) return `Email changed to ${localEmail[1]} in this local environment.`;
+  const twoStepEmail = /^Enviamos uma autorização para (.+)\. Depois dela, confirmaremos (.+)\.$/.exec(message);
+  if (twoStepEmail) return `We sent an authorization to ${twoStepEmail[1]}. After approval, we'll confirm ${twoStepEmail[2]}.`;
+  const confirmationEmail = /^Enviamos a confirmação para (.+)\. Seu e-mail atual continua válido até a verificação\.$/.exec(message);
+  if (confirmationEmail) return `We sent a confirmation to ${confirmationEmail[1]}. Your current email remains valid until verification.`;
+  return SETTINGS_MESSAGE_EN[message] ?? message;
+}
+
+function fieldError(state: SettingsActionState, name: string, language: UserLanguage) {
+  return settingsMessage(state.fieldErrors?.[name], language);
 }
 
 function ActionMessage({
@@ -71,6 +131,7 @@ function ActionMessage({
   state: SettingsActionState;
   id: string;
 }) {
+  const { language } = useI18n();
   if (!state.message) return null;
 
   return (
@@ -82,7 +143,7 @@ function ActionMessage({
         state.status === "error" ? "text-danger" : "text-success"
       }`}
     >
-      {state.message}
+      {settingsMessage(state.message, language)}
     </p>
   );
 }
@@ -133,13 +194,14 @@ function PersonalProfileForm({
 }: {
   personal: SettingsFormsProps["personal"];
 }) {
+  const { copy, language } = useI18n();
   const [state, action] = useActionState(
     updatePersonalProfileAction,
     INITIAL_SETTINGS_ACTION_STATE,
   );
-  const nameError = fieldError(state, "name");
-  const phoneError = fieldError(state, "phone");
-  const timeZoneError = fieldError(state, "timeZone");
+  const nameError = fieldError(state, "name", language);
+  const phoneError = fieldError(state, "phone", language);
+  const timeZoneError = fieldError(state, "timeZone", language);
   const hasKnownTimeZone = TIME_ZONE_OPTIONS.some(
     ({ value }) => value === personal.timeZone,
   );
@@ -148,15 +210,15 @@ function PersonalProfileForm({
     <section id="perfil" aria-labelledby="settings-profile-title" className={SECTION_CLASS}>
       <SectionHeading
         id="settings-profile-title"
-        title="Perfil"
-        description="Atualize como seu nome aparece na plataforma e os dados usados para contato e agenda."
+        title={copy("Perfil", "Profile")}
+        description={copy("Atualize como seu nome aparece na plataforma e os dados usados para contato e agenda.", "Update how your name appears on the platform and the details used for contact and scheduling.")}
       />
 
       <form action={action} className="mt-6 max-w-3xl" aria-describedby={state.message ? "settings-profile-message" : undefined}>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <Field
-              label="Nome completo"
+              label={copy("Nome completo", "Full name")}
               htmlFor="settings-name"
               error={nameError}
               required
@@ -176,9 +238,9 @@ function PersonalProfileForm({
           </div>
 
           <Field
-            label="Telefone (opcional)"
+            label={copy("Telefone (opcional)", "Phone (optional)")}
             htmlFor="settings-phone"
-            hint="Use um número em que sua operação possa falar com você."
+            hint={copy("Use um número em que sua operação possa falar com você.", "Use a number where your team can reach you.")}
             error={phoneError}
           >
             <Input
@@ -195,9 +257,9 @@ function PersonalProfileForm({
           </Field>
 
           <Field
-            label="Fuso horário"
+            label={copy("Fuso horário", "Time zone")}
             htmlFor="settings-time-zone"
-            hint="Agenda e lembretes usam este horário."
+            hint={copy("Agenda e lembretes usam este horário.", "Calendar and reminders use this time zone.")}
             error={timeZoneError}
             required
           >
@@ -215,7 +277,7 @@ function PersonalProfileForm({
               ) : null}
               {TIME_ZONE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {copy(option.pt, option.en)}
                 </option>
               ))}
             </Select>
@@ -224,23 +286,23 @@ function PersonalProfileForm({
 
         <div className="mt-6 flex flex-col gap-3 border-t border-border-steel pt-5 sm:flex-row sm:items-center sm:justify-between">
           <ActionMessage state={state} id="settings-profile-message" />
-          <SubmitButton label="Salvar perfil" pendingLabel="Salvando perfil…" />
+          <SubmitButton label={copy("Salvar perfil", "Save profile")} pendingLabel={copy("Salvando perfil…", "Saving profile…")} />
         </div>
       </form>
     </section>
   );
 }
 
-function humanizeRank(rank: string) {
+function humanizeRank(rank: string, copy: (pt: string, en: string) => string) {
   const labels: Record<string, string> = {
-    AGENT: "Agente",
-    AGENCY_OWNER: "Responsável pela agência",
+    AGENT: copy("Agente", "Agent"),
+    AGENCY_OWNER: copy("Responsável pela agência", "Agency owner"),
   };
   return labels[rank] ?? rank.replaceAll("_", " ");
 }
 
-function humanizeStatus(status: string) {
-  return status === "ACTIVE" ? "Conta ativa" : status === "INACTIVE" ? "Conta inativa" : status;
+function humanizeStatus(status: string, copy: (pt: string, en: string) => string) {
+  return status === "ACTIVE" ? copy("Conta ativa", "Active account") : status === "INACTIVE" ? copy("Conta inativa", "Inactive account") : status;
 }
 
 function ProfessionalProfile({
@@ -248,33 +310,34 @@ function ProfessionalProfile({
 }: {
   professional: SettingsFormsProps["professional"];
 }) {
+  const { copy } = useI18n();
   return (
     <section id="profissional" aria-labelledby="settings-professional-title" className={SECTION_CLASS}>
       <SectionHeading
         id="settings-professional-title"
-        title="Dados profissionais"
-        description="Estes dados identificam sua produção e são mantidos pela operação da Keepr One."
+        title={copy("Dados profissionais", "Professional details")}
+        description={copy("Estes dados identificam sua produção e são mantidos pela operação da Keepr One.", "These details identify your production and are maintained by Keepr One operations.")}
       />
 
       <dl className="mt-6 grid gap-x-6 sm:grid-cols-3">
         <div className="border-b border-border-steel py-4 sm:border-b-0">
           <dt className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">NPN</dt>
-          <dd className="mt-2 font-mono text-sm font-semibold text-ink">{professional.npn || "Não informado"}</dd>
+          <dd className="mt-2 font-mono text-sm font-semibold text-ink">{professional.npn || copy("Não informado", "Not provided")}</dd>
         </div>
         <div className="border-b border-border-steel py-4 sm:border-b-0">
-          <dt className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Perfil profissional</dt>
-          <dd className="mt-2 text-sm font-semibold text-ink">{humanizeRank(professional.rank)}</dd>
+          <dt className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">{copy("Perfil profissional", "Professional profile")}</dt>
+          <dd className="mt-2 text-sm font-semibold text-ink">{humanizeRank(professional.rank, copy)}</dd>
         </div>
         <div className="py-4">
-          <dt className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Situação</dt>
+          <dt className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">{copy("Situação", "Status")}</dt>
           <dd className="mt-2 inline-flex rounded-full bg-success-pale px-2.5 py-1 text-xs font-semibold text-success">
-            {humanizeStatus(professional.status)}
+            {humanizeStatus(professional.status, copy)}
           </dd>
         </div>
       </dl>
 
       <p className="mt-3 max-w-2xl rounded-xl bg-panel px-4 py-3 text-xs leading-5 text-ink-muted">
-        Para corrigir o NPN ou o perfil profissional, fale com o suporte Keepr One. Isso evita divergências com dados da National Life e importações da operação.
+        {copy("Para corrigir o NPN ou o perfil profissional, fale com o suporte Keepr One. Isso evita divergências com dados da National Life e importações da operação.", "To correct your NPN or professional profile, contact Keepr One support. This prevents discrepancies with National Life data and operational imports.")}
       </p>
     </section>
   );
@@ -285,21 +348,22 @@ function EmailChangeForm({
 }: {
   security: SettingsFormsProps["security"];
 }) {
+  const { copy, language } = useI18n();
   const [state, action] = useActionState(
     requestEmailChangeAction,
     INITIAL_SETTINGS_ACTION_STATE,
   );
   const [showPassword, setShowPassword] = useState(false);
-  const emailError = fieldError(state, "newEmail");
-  const passwordError = fieldError(state, "currentPassword");
+  const emailError = fieldError(state, "newEmail", language);
+  const passwordError = fieldError(state, "currentPassword", language);
 
   return (
     <div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h3 className="text-base font-semibold text-ink">E-mail de acesso</h3>
+          <h3 className="text-base font-semibold text-ink">{copy("E-mail de acesso", "Sign-in email")}</h3>
           <p className="mt-1 text-sm leading-6 text-ink-muted">
-            Seu e-mail atual é <strong className="font-semibold text-ink">{security.email}</strong>.
+            {copy("Seu e-mail atual é", "Your current email is")} <strong className="font-semibold text-ink">{security.email}</strong>.
           </p>
         </div>
         <span
@@ -309,16 +373,16 @@ function EmailChangeForm({
               : "bg-gold-pale text-gold-ink"
           }`}
         >
-          {security.emailVerified ? "E-mail verificado" : "Verificação pendente"}
+          {security.emailVerified ? copy("E-mail verificado", "Email verified") : copy("Verificação pendente", "Verification pending")}
         </span>
       </div>
 
       <form action={action} className="mt-5 max-w-3xl" aria-describedby={state.message ? "settings-email-message" : undefined}>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
-            label="Novo e-mail"
+            label={copy("Novo e-mail", "New email")}
             htmlFor="settings-new-email"
-            hint="O e-mail atual continua válido até a confirmação do novo endereço."
+            hint={copy("O e-mail atual continua válido até a confirmação do novo endereço.", "Your current email remains valid until the new address is confirmed.")}
             error={emailError}
             required
           >
@@ -330,14 +394,14 @@ function EmailChangeForm({
               inputMode="email"
               maxLength={254}
               required
-              placeholder="novo@email.com"
+              placeholder={copy("novo@email.com", "new@email.com")}
               aria-invalid={Boolean(emailError)}
               aria-describedby={describedBy("settings-new-email", emailError, true)}
             />
           </Field>
 
           <Field
-            label="Senha atual para trocar o e-mail"
+            label={copy("Senha atual para trocar o e-mail", "Current password to change email")}
             htmlFor="settings-email-password"
             error={passwordError}
             required
@@ -357,11 +421,11 @@ function EmailChangeForm({
               <button
                 type="button"
                 onClick={() => setShowPassword((current) => !current)}
-                aria-label={showPassword ? "Ocultar senha da troca de e-mail" : "Mostrar senha da troca de e-mail"}
+                aria-label={showPassword ? copy("Ocultar senha da troca de e-mail", "Hide email-change password") : copy("Mostrar senha da troca de e-mail", "Show email-change password")}
                 aria-pressed={showPassword}
                 className="absolute inset-y-0 right-0 min-w-20 rounded-r-xl px-3 text-xs font-semibold text-ink-muted hover:text-ink"
               >
-                {showPassword ? "Ocultar" : "Mostrar"}
+                {showPassword ? copy("Ocultar", "Hide") : copy("Mostrar", "Show")}
               </button>
             </div>
           </Field>
@@ -369,7 +433,7 @@ function EmailChangeForm({
 
         <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <ActionMessage state={state} id="settings-email-message" />
-          <SubmitButton label="Alterar e-mail" pendingLabel="Solicitando alteração…" />
+          <SubmitButton label={copy("Alterar e-mail", "Change email")} pendingLabel={copy("Solicitando alteração…", "Requesting change…")} />
         </div>
       </form>
     </div>
@@ -377,27 +441,28 @@ function EmailChangeForm({
 }
 
 function PasswordChangeForm() {
+  const { copy, language } = useI18n();
   const [state, action] = useActionState(
     changePasswordAction,
     INITIAL_SETTINGS_ACTION_STATE,
   );
   const [showPasswords, setShowPasswords] = useState(false);
-  const currentPasswordError = fieldError(state, "currentPassword");
-  const newPasswordError = fieldError(state, "newPassword");
-  const confirmPasswordError = fieldError(state, "confirmPassword");
+  const currentPasswordError = fieldError(state, "currentPassword", language);
+  const newPasswordError = fieldError(state, "newPassword", language);
+  const confirmPasswordError = fieldError(state, "confirmPassword", language);
 
   return (
     <div className="mt-8 border-t border-border-steel pt-8">
-      <h3 className="text-base font-semibold text-ink">Senha</h3>
+      <h3 className="text-base font-semibold text-ink">{copy("Senha", "Password")}</h3>
       <p className="mt-1 max-w-2xl text-sm leading-6 text-ink-muted">
-        Confirme sua senha atual e crie uma nova com pelo menos 8 caracteres.
+        {copy("Confirme sua senha atual e crie uma nova com pelo menos 8 caracteres.", "Confirm your current password and create a new one with at least 8 characters.")}
       </p>
 
       <form action={action} className="mt-5 max-w-3xl" aria-describedby={state.message ? "settings-password-message" : undefined}>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <Field
-              label="Senha atual"
+              label={copy("Senha atual", "Current password")}
               htmlFor="settings-current-password"
               error={currentPasswordError}
               required
@@ -417,9 +482,9 @@ function PasswordChangeForm() {
           </div>
 
           <Field
-            label="Nova senha"
+            label={copy("Nova senha", "New password")}
             htmlFor="settings-new-password"
-            hint="Use pelo menos 8 caracteres."
+            hint={copy("Use pelo menos 8 caracteres.", "Use at least 8 characters.")}
             error={newPasswordError}
             required
           >
@@ -437,7 +502,7 @@ function PasswordChangeForm() {
           </Field>
 
           <Field
-            label="Confirme a nova senha"
+            label={copy("Confirme a nova senha", "Confirm new password")}
             htmlFor="settings-confirm-password"
             error={confirmPasswordError}
             required
@@ -463,7 +528,7 @@ function PasswordChangeForm() {
             aria-pressed={showPasswords}
             className="min-h-11 w-fit rounded-full border border-border-steel bg-paper px-4 text-xs font-semibold text-ink-muted hover:border-ink-muted hover:text-ink"
           >
-            {showPasswords ? "Ocultar senhas" : "Mostrar senhas"}
+            {showPasswords ? copy("Ocultar senhas", "Hide passwords") : copy("Mostrar senhas", "Show passwords")}
           </button>
 
           <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-ink">
@@ -474,13 +539,13 @@ function PasswordChangeForm() {
               defaultChecked
               className="h-4 w-4 accent-teal"
             />
-            Encerrar minhas outras sessões
+            {copy("Encerrar minhas outras sessões", "Sign out my other sessions")}
           </label>
         </div>
 
         <div className="mt-5 flex flex-col gap-3 border-t border-border-steel pt-5 sm:flex-row sm:items-center sm:justify-between">
           <ActionMessage state={state} id="settings-password-message" />
-          <SubmitButton label="Alterar senha" pendingLabel="Alterando senha…" />
+          <SubmitButton label={copy("Alterar senha", "Change password")} pendingLabel={copy("Alterando senha…", "Changing password…")} />
         </div>
       </form>
     </div>
@@ -492,12 +557,13 @@ function SecuritySettings({
 }: {
   security: SettingsFormsProps["security"];
 }) {
+  const { copy } = useI18n();
   return (
     <section id="seguranca" aria-labelledby="settings-security-title" className={SECTION_CLASS}>
       <SectionHeading
         id="settings-security-title"
-        title="Segurança"
-        description="Mantenha seu acesso atualizado. Alterações de e-mail e senha sempre exigem sua senha atual."
+        title={copy("Segurança", "Security")}
+        description={copy("Mantenha seu acesso atualizado. Alterações de e-mail e senha sempre exigem sua senha atual.", "Keep your access up to date. Email and password changes always require your current password.")}
       />
 
       <div className="mt-6">
@@ -508,15 +574,15 @@ function SecuritySettings({
   );
 }
 
-function subscriptionLabel(status: string | null) {
+function subscriptionLabel(status: string | null, copy: (pt: string, en: string) => string) {
   const labels: Record<string, string> = {
-    TRIALING: "Período de teste",
-    ACTIVE: "Assinatura ativa",
-    PAST_DUE: "Pagamento pendente",
-    CANCELED: "Assinatura cancelada",
-    EXPIRED: "Assinatura expirada",
+    TRIALING: copy("Período de teste", "Trial period"),
+    ACTIVE: copy("Assinatura ativa", "Active subscription"),
+    PAST_DUE: copy("Pagamento pendente", "Payment pending"),
+    CANCELED: copy("Assinatura cancelada", "Canceled subscription"),
+    EXPIRED: copy("Assinatura expirada", "Expired subscription"),
   };
-  return status ? labels[status] ?? status : "Sem assinatura ativa";
+  return status ? labels[status] ?? status : copy("Sem assinatura ativa", "No active subscription");
 }
 
 function AgencySettings({
@@ -524,23 +590,24 @@ function AgencySettings({
 }: {
   agency: SettingsFormsProps["agency"];
 }) {
+  const { copy, language } = useI18n();
   const [state, action] = useActionState(
     updateAgencyProfileAction,
     INITIAL_SETTINGS_ACTION_STATE,
   );
-  const agencyNameError = fieldError(state, "agencyName");
+  const agencyNameError = fieldError(state, "agencyName", language);
 
   return (
     <section id="agencia" aria-labelledby="settings-agency-title" className={SECTION_CLASS}>
       <SectionHeading
         id="settings-agency-title"
-        title="Agência"
+        title={copy("Agência", "Agency")}
         description={
           agency.kind === "AGENCY_OWNER" && agency.canEditAgency
-            ? "Edite a identificação da sua própria agência. Plano, vínculo e hierarquia permanecem protegidos."
+            ? copy("Edite a identificação da sua própria agência. Plano, vínculo e hierarquia permanecem protegidos.", "Edit your agency identity. Plan, relationship, and hierarchy remain protected.")
             : agency.kind === "AGENCY_OWNER"
-              ? "Sua agência permanece vinculada à conta enquanto os controles de gestão estão temporariamente limitados."
-              : "Consulte seu vínculo comercial e acesse os detalhes do plano."
+              ? copy("Sua agência permanece vinculada à conta enquanto os controles de gestão estão temporariamente limitados.", "Your agency remains linked to the account while management controls are temporarily limited.")
+              : copy("Consulte seu vínculo comercial e acesse os detalhes do plano.", "Review your commercial relationship and plan details.")
         }
       />
 
@@ -548,7 +615,7 @@ function AgencySettings({
         <form action={action} className="mt-6 max-w-3xl" aria-describedby={state.message ? "settings-agency-message" : undefined}>
           <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
             <Field
-              label="Nome da agência"
+              label={copy("Nome da agência", "Agency name")}
               htmlFor="settings-agency-name"
               error={agencyNameError}
               required
@@ -566,48 +633,48 @@ function AgencySettings({
               />
             </Field>
             <div className="rounded-xl bg-panel px-4 py-3">
-              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Plano</p>
-              <p className="mt-2 text-sm font-semibold text-ink">{subscriptionLabel(agency.subscriptionStatus)}</p>
+              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">{copy("Plano", "Plan")}</p>
+              <p className="mt-2 text-sm font-semibold text-ink">{subscriptionLabel(agency.subscriptionStatus, copy)}</p>
             </div>
           </div>
 
           <div className="mt-5 flex flex-col gap-3 border-t border-border-steel pt-5 sm:flex-row sm:items-center sm:justify-between">
             <ActionMessage state={state} id="settings-agency-message" />
-            <SubmitButton label="Salvar agência" pendingLabel="Salvando agência…" />
+            <SubmitButton label={copy("Salvar agência", "Save agency")} pendingLabel={copy("Salvando agência…", "Saving agency…")} />
           </div>
         </form>
       ) : agency.kind === "AGENCY_OWNER" ? (
         <div className="mt-6 flex flex-col gap-4 rounded-xl bg-panel px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Agência vinculada</p>
-            <p className="mt-2 text-sm font-semibold text-ink">{agency.name ?? "Agência não identificada"}</p>
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">{copy("Agência vinculada", "Linked agency")}</p>
+            <p className="mt-2 text-sm font-semibold text-ink">{agency.name ?? copy("Agência não identificada", "Unidentified agency")}</p>
             <p className="mt-1 text-xs leading-5 text-ink-muted">
-              Regularize o Plano Agência para voltar a editar os dados e gerenciar a equipe.
+              {copy("Regularize o Plano Agência para voltar a editar os dados e gerenciar a equipe.", "Bring the Agency plan up to date to edit details and manage the team again.")}
             </p>
           </div>
           <Link href="/agent/agency" className="inline-flex min-h-11 items-center justify-center rounded-full border border-border-steel bg-paper px-4 text-sm font-semibold text-ink hover:border-ink-muted">
-            Regularizar plano
+            {copy("Regularizar plano", "Update plan")}
           </Link>
         </div>
       ) : agency.kind === "AGENCY_MEMBER" ? (
         <div className="mt-6 flex flex-col gap-4 rounded-xl bg-panel px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Agência vinculada</p>
-            <p className="mt-2 text-sm font-semibold text-ink">{agency.name ?? "Agência não identificada"}</p>
-            <p className="mt-1 text-xs leading-5 text-ink-muted">Seu vínculo é administrado pelo responsável da agência.</p>
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">{copy("Agência vinculada", "Linked agency")}</p>
+            <p className="mt-2 text-sm font-semibold text-ink">{agency.name ?? copy("Agência não identificada", "Unidentified agency")}</p>
+            <p className="mt-1 text-xs leading-5 text-ink-muted">{copy("Seu vínculo é administrado pelo responsável da agência.", "Your relationship is managed by the agency owner.")}</p>
           </div>
           <Link href="/agent/agency" className="inline-flex min-h-11 items-center justify-center rounded-full border border-border-steel bg-paper px-4 text-sm font-semibold text-ink hover:border-ink-muted">
-            Ver plano e vínculo
+            {copy("Ver plano e vínculo", "View plan and relationship")}
           </Link>
         </div>
       ) : (
         <div className="mt-6 flex flex-col gap-4 rounded-xl bg-panel px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-semibold text-ink">Operação individual</p>
-            <p className="mt-1 text-xs leading-5 text-ink-muted">Nenhuma agência está vinculada à sua conta.</p>
+            <p className="text-sm font-semibold text-ink">{copy("Operação individual", "Individual operation")}</p>
+            <p className="mt-1 text-xs leading-5 text-ink-muted">{copy("Nenhuma agência está vinculada à sua conta.", "No agency is linked to your account.")}</p>
           </div>
           <Link href="/agent/agency" className="inline-flex min-h-11 items-center justify-center rounded-full border border-border-steel bg-paper px-4 text-sm font-semibold text-ink hover:border-ink-muted">
-            Ver meu plano
+            {copy("Ver meu plano", "View my plan")}
           </Link>
         </div>
       )}
@@ -615,30 +682,30 @@ function AgencySettings({
   );
 }
 
-const SETTINGS_SECTIONS = [
-  { href: "#perfil", label: "Perfil" },
-  { href: "#profissional", label: "Dados profissionais" },
-  { href: "#seguranca", label: "Segurança" },
-  { href: "#agencia", label: "Agência" },
-] as const;
-
 export function SettingsForms({
   personal,
   professional,
   security,
   agency,
 }: SettingsFormsProps) {
+  const { copy } = useI18n();
+  const sections = [
+    { href: "#perfil", label: copy("Perfil", "Profile") },
+    { href: "#profissional", label: copy("Dados profissionais", "Professional details") },
+    { href: "#seguranca", label: copy("Segurança", "Security") },
+    { href: "#agencia", label: copy("Agência", "Agency") },
+  ] as const;
   return (
     <div className="mt-6 grid min-w-0 gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
       <nav
-        aria-label="Seções das configurações"
+        aria-label={copy("Seções das configurações", "Settings sections")}
         className="self-start rounded-2xl border border-border-steel bg-paper/90 p-2 lg:sticky lg:top-24"
       >
         <p className="px-3 pb-2 pt-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-          Nesta página
+          {copy("Nesta página", "On this page")}
         </p>
         <ul className="grid grid-cols-2 gap-1 lg:grid-cols-1">
-          {SETTINGS_SECTIONS.map((section) => (
+          {sections.map((section) => (
             <li key={section.href}>
               <a
                 href={section.href}

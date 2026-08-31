@@ -26,6 +26,7 @@ const publicPage = {
   minimumNoticeMinutes: 0,
   maximumAdvanceDays: 60,
   ownerName: 'Maria Silva',
+  ownerLanguage: 'PT' as const,
   ownerTimeZone: 'America/New_York',
   weeklyWindows: [{ weekday: 1, startMinute: 540, endMinute: 660 }],
 }
@@ -107,7 +108,7 @@ describe('public scheduling bookings', () => {
             bufferBeforeMinutes: 10, bufferAfterMinutes: 15,
             minimumNoticeMinutes: 0, maximumAdvanceDays: 60,
             weeklyWindows: publicPage.weeklyWindows,
-            ownerUser: { name: 'Maria Silva', timeZone: 'America/New_York', agent: { status: 'ACTIVE' } },
+            ownerUser: { name: 'Maria Silva', language: 'PT', timeZone: 'America/New_York', agent: { status: 'ACTIVE' } },
           }
         }),
       },
@@ -126,7 +127,7 @@ describe('public scheduling bookings', () => {
     const availability = vi.fn(async () => ({
       page: {
         slug: 'maria-silva', title: 'Conversa inicial', description: null,
-        durationMinutes: 30, ownerName: 'Maria Silva', ownerTimeZone: 'America/New_York',
+        durationMinutes: 30, ownerName: 'Maria Silva', ownerLanguage: 'PT' as const, ownerTimeZone: 'America/New_York',
       },
       slots: [{ startsAt: guest.startsAt, endsAt: '2026-08-17T13:30:00.000Z' }],
     }))
@@ -166,6 +167,7 @@ describe('public scheduling bookings', () => {
         payload: {
           to: guest.email,
           inviteeName: guest.name,
+          language: 'PT',
           ownerName: 'Maria Silva',
           title: 'Conversa inicial',
           startsAt: guest.startsAt,
@@ -198,7 +200,7 @@ describe('public scheduling bookings', () => {
       getAvailability: vi.fn(async () => ({
         page: {
           slug: 'maria-silva', title: 'Conversa inicial', description: null,
-          durationMinutes: 30, ownerName: 'Maria Silva', ownerTimeZone: 'America/New_York',
+          durationMinutes: 30, ownerName: 'Maria Silva', ownerLanguage: 'PT' as const, ownerTimeZone: 'America/New_York',
         },
         slots: [{ startsAt: guest.startsAt, endsAt: '2026-08-17T13:30:00.000Z' }],
       })),
@@ -230,7 +232,7 @@ describe('public scheduling bookings', () => {
         getAvailability: vi.fn(async () => ({
           page: {
             slug: 'maria-silva', title: 'Conversa inicial', description: null,
-            durationMinutes: 30, ownerName: 'Maria Silva', ownerTimeZone: 'America/New_York',
+            durationMinutes: 30, ownerName: 'Maria Silva', ownerLanguage: 'PT' as const, ownerTimeZone: 'America/New_York',
           },
           slots: [{ startsAt: guest.startsAt, endsAt: '2026-08-17T13:30:00.000Z' }],
         })),

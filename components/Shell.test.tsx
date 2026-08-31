@@ -151,6 +151,24 @@ describe('Shell plan access', () => {
     ])
   })
 
+  it('places one language selector at the end of the lateral navigation, not in the top bar', () => {
+    const { container } = render(
+      <Shell role="AGENT" userName="Ana">
+        <p>Conteúdo</p>
+      </Shell>,
+    )
+
+    const navigation = screen.getByRole('navigation', { name: 'Navegação principal' })
+    const moduleList = navigation.querySelector('ul')
+    const navigationFooter = navigation.querySelector('[data-shell-nav-footer]')
+
+    expect(navigationFooter).not.toBeNull()
+    expect(moduleList?.nextElementSibling).toBe(navigationFooter)
+    expect(navigationFooter?.querySelectorAll('[data-language-switcher]')).toHaveLength(1)
+    expect(moduleList?.querySelector('[data-language-switcher]')).toBeNull()
+    expect(container.querySelector('.shell-topbar [data-language-switcher]')).toBeNull()
+  })
+
   it('uses Agência as the current module name on the agency route', () => {
     mocks.pathname = '/agent/agency'
 
@@ -295,7 +313,7 @@ describe('Shell achievement band', () => {
     expect(band).toHaveAttribute('data-achievement-tone', 'blue')
     expect(screen.getByText('Agency Vice President')).toBeInTheDocument()
     expect(screen.getAllByText('Apólices')).not.toHaveLength(0)
-    expect(await screen.findByText('Up to date')).toBeInTheDocument()
+    expect(await screen.findByText('Atualizado')).toBeInTheDocument()
   })
 
   it('keeps pre-jacket ranks in the neutral shell', async () => {
@@ -317,7 +335,7 @@ describe('Shell achievement band', () => {
     expect(container.querySelector('[data-achievement-tone]')).toBeNull()
     expect(screen.queryByText('Regional Leader')).not.toBeInTheDocument()
     expect(screen.getAllByText('Hoje')).not.toHaveLength(0)
-    expect(await screen.findByText('Up to date')).toBeInTheDocument()
+    expect(await screen.findByText('Atualizado')).toBeInTheDocument()
   })
 
   it('persists a local preview achievement after the Journey shell unmounts', async () => {

@@ -6,6 +6,7 @@ import {
   useNationalLifeConnectionAttempt,
   type ActiveNationalLifeAttempt,
 } from './useNationalLifeConnectionAttempt'
+import { useI18n } from '@/components/i18n/LanguageProvider'
 
 function remainingTime(expiresAt: string) {
   return Math.max(0, new Date(expiresAt).getTime() - Date.now())
@@ -18,14 +19,14 @@ function formatCountdown(milliseconds: number) {
   return `${String(minutesPart).padStart(2, '0')}:${String(secondsPart).padStart(2, '0')}`
 }
 
-function stateLabel(state: string | undefined) {
+function stateLabel(state: string | undefined, copy: (pt: string, en: string) => string) {
   if (state === 'AWAITING_MFA') {
-    return 'Confirm the verification on the portal'
+    return copy('Confirme a verificação no portal', 'Confirm the verification on the portal')
   }
   if (state === 'AWAITING_LOGIN') {
-    return 'Sign in on the official portal'
+    return copy('Entre no portal oficial', 'Sign in on the official portal')
   }
-  return 'Opening the official portal'
+  return copy('Abrindo o portal oficial', 'Opening the official portal')
 }
 
 const VIEWER_ASPECT_RATIO = 16 / 10
@@ -69,6 +70,7 @@ export function NationalLifeBrowserModal({
   onAuthenticated(): void
   onClosed(message: string): void
 }) {
+  const { copy } = useI18n()
   const { status, viewerUrl, error, close } =
     useNationalLifeConnectionAttempt(attempt)
   const [remaining, setRemaining] = useState(() => remainingTime(attempt.expiresAt))
@@ -76,8 +78,8 @@ export function NationalLifeBrowserModal({
   const { viewerAreaRef, stageSize } = useViewerStageSize(viewerUrl)
 
   const origin = useMemo(
-    () => status?.currentOrigin ?? 'Aguardando o portal oficial da National Life',
-    [status?.currentOrigin],
+    () => status?.currentOrigin ?? copy('Aguardando o portal oficial da National Life', 'Waiting for the official National Life portal'),
+    [copy, status?.currentOrigin],
   )
 
   useEffect(() => {
@@ -87,12 +89,12 @@ export function NationalLifeBrowserModal({
       if (next === 0 && !completed.current) {
         completed.current = true
         void close().finally(() => {
-          onClosed('Your secure session expired. Connect again to continue.')
+          onClosed(copy('Sua sessão segura expirou. Conecte novamente para continuar.', 'Your secure session expired. Connect again to continue.'))
         })
       }
     }, 1_000)
     return () => window.clearInterval(timer)
-  }, [attempt.expiresAt, close, onClosed])
+  }, [attempt.expiresAt, close, copy, onClosed])
 
   useEffect(() => {
     if (completed.current) {
@@ -115,7 +117,7 @@ export function NationalLifeBrowserModal({
     }
     completed.current = true
     await close()
-    onClosed('Connection canceled. You can try again whenever you like.')
+    onClosed(copy('Conexão cancelada. Você pode tentar novamente quando quiser.', 'Connection canceled. You can try again whenever you like.'))
   }
 
   return (
@@ -131,7 +133,7 @@ export function NationalLifeBrowserModal({
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-2 rounded-full bg-mint-pale px-3 py-1 text-xs font-semibold text-teal-deep">
                 <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                Secure, isolated session
+                {copy('Sessão segura e isolada', 'Secure, isolated session')}
               </span>
               <span className="font-mono text-xs tabular-nums text-ink-muted">
                 {formatCountdown(remaining)}
@@ -141,26 +143,26 @@ export function NationalLifeBrowserModal({
               id="national-life-modal-title"
               className="mt-3 text-xl font-semibold tracking-[-0.025em] text-ink"
             >
-              Sign in to National Life
+              {copy('Entre na National Life', 'Sign in to National Life')}
             </h2>
             <p className="mt-1 text-sm text-ink-muted">
-              This is the real National Life / Auth0 sign-in page, opened inside a session protected by Keepr One.
+              {copy('Esta é a página real de login da National Life / Auth0, aberta em uma sessão protegida pela Keepr One.', 'This is the real National Life / Auth0 sign-in page, opened inside a session protected by Keepr One.')}
             </p>
           </div>
           <Button type="button" variant="secondary" onClick={handleCancel}>
-            Cancel
+            {copy('Cancelar', 'Cancel')}
           </Button>
         </header>
 
         <div className="flex items-center justify-between gap-4 border-b border-border-steel bg-panel px-5 py-3 text-xs lg:px-6">
           <div className="min-w-0">
-            <p className="font-semibold text-ink">{stateLabel(status?.state)}</p>
-            <p className="mt-0.5 truncate font-mono text-ink-muted" aria-label="Verified origin">
+            <p className="font-semibold text-ink">{stateLabel(status?.state, copy)}</p>
+            <p className="mt-0.5 truncate font-mono text-ink-muted" aria-label={copy('Origem verificada', 'Verified origin')}>
               {origin}
             </p>
           </div>
           <span className="hidden shrink-0 rounded-full border border-border-steel bg-paper px-3 py-1.5 font-semibold text-success sm:inline-flex">
-            Origin verified by Keepr One
+            {copy('Origem verificada pela Keepr One', 'Origin verified by Keepr One')}
           </span>
         </div>
 
@@ -176,7 +178,7 @@ export function NationalLifeBrowserModal({
                 style={stageSize ? stageSize : { visibility: 'hidden' }}
               >
                 <iframe
-                  title="Official National Life portal"
+                  title={copy('Portal oficial da National Life', 'Official National Life portal')}
                   src={viewerUrl}
                   className="h-full w-full border-0"
                   sandbox="allow-forms allow-scripts allow-same-origin"
@@ -188,9 +190,9 @@ export function NationalLifeBrowserModal({
             <div className="grid h-full min-h-[600px] place-items-center bg-panel">
               <div className="text-center">
                 <span className="mx-auto block h-8 w-8 animate-spin rounded-full border-2 border-border-steel border-t-teal" />
-                <p className="mt-4 text-sm font-medium text-ink">Abrindo o portal oficial...</p>
+                <p className="mt-4 text-sm font-medium text-ink">{copy('Abrindo o portal oficial...', 'Opening the official portal...')}</p>
                 <p className="mt-1 text-xs text-ink-muted">
-                  Nenhuma senha da National Life passa pelo Keepr One.
+                  {copy('Nenhuma senha da National Life passa pela Keepr One.', 'No National Life password passes through Keepr One.')}
                 </p>
               </div>
             </div>

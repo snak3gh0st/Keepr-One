@@ -1,7 +1,6 @@
-import { auth } from '@/lib/auth'
 import { requireAgentOnboardingCompleteForUser } from '@/lib/agent-onboarding-gate'
 import { requireFounderAccessForUser } from '@/lib/founder-access'
-import { headers } from 'next/headers'
+import { getCurrentSession } from '@/lib/i18n/server'
 
 export type Role = 'ADMIN' | 'AGENT' | 'CLIENT'
 
@@ -26,7 +25,7 @@ async function readRequiredRole(
   roles: Role[],
   options: { enforceFounderAccess: boolean; enforceOnboarding: boolean },
 ) {
-  const session = await auth.api.getSession({ headers: await headers() })
+  const session = await getCurrentSession()
   if (!session) throw new Error('Not authenticated')
 
   const role = session.user.role as unknown as string

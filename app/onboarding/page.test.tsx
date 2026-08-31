@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
     chatwootConfigFromEnv: vi.fn(),
     whatsappChannelModeFromEnv: vi.fn(),
     whatsappConfigFromEnv: vi.fn(),
+    getServerI18n: vi.fn(),
     redirect: vi.fn((target: string) => {
       throw new Error(`REDIRECT:${target}`);
     }),
@@ -41,6 +42,9 @@ vi.mock("@/lib/messaging/whatsapp-config", () => ({
 vi.mock("@/lib/founder-access", () => ({
   FounderAccessRequiredError: mocks.MockFounderAccessRequiredError,
 }));
+vi.mock("@/lib/i18n/server", () => ({
+  getServerI18n: mocks.getServerI18n,
+}));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/components/onboarding/OnboardingExperience", () => ({
   OnboardingExperience: (props: unknown) => {
@@ -49,7 +53,7 @@ vi.mock("@/components/onboarding/OnboardingExperience", () => ({
   },
 }));
 
-import OnboardingPage from "./page";
+import OnboardingPage, { generateMetadata } from "./page";
 
 const PAGE_DATA = {
   onboarding: {
@@ -84,6 +88,10 @@ beforeEach(() => {
     baseUrl: "https://wa.example.com",
     apiKey: "secret",
   });
+  mocks.getServerI18n.mockResolvedValue({
+    language: "PT",
+    copy: (portuguese: string) => portuguese,
+  });
 });
 
 afterEach(() => {
@@ -92,6 +100,19 @@ afterEach(() => {
 });
 
 describe("OnboardingPage", () => {
+  it("localizes private-page metadata from the persisted server language", async () => {
+    mocks.getServerI18n.mockResolvedValue({
+      language: "EN",
+      copy: (_portuguese: string, english: string) => english,
+    });
+
+    await expect(generateMetadata()).resolves.toMatchObject({
+      title: "Set up your access",
+      description: expect.stringContaining("Confirm your details"),
+      robots: { index: false, follow: false },
+    });
+  });
+
   it("routes an expired founder to the subscription boundary instead of returning 500", async () => {
     mocks.getCurrentAgentOnboarding.mockRejectedValue(
       new mocks.MockFounderAccessRequiredError(),

@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { Table, Thead, Th, Tr, Td, EmptyState } from "@/components/Table";
-import { RolePill } from "@/components/StatusPill";
 import { Pagination, clampPage } from "@/components/Pagination";
+import { useI18n } from "@/components/i18n/LanguageProvider";
+import { LocalizedRolePill } from "../LocalizedStatusPills";
 
 type Row = {
   id: string;
@@ -17,6 +18,7 @@ type Row = {
 const PAGE_SIZE = 20;
 
 export function AuditTable({ rows }: { rows: Row[] }) {
+  const { copy } = useI18n();
   const [page, setPage] = useState(1);
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = clampPage(page, pageCount);
@@ -26,18 +28,18 @@ export function AuditTable({ rows }: { rows: Row[] }) {
   );
 
   if (rows.length === 0) {
-    return <EmptyState>Nenhuma alteração registrada ainda.</EmptyState>;
+    return <EmptyState>{copy('Nenhuma alteração registrada ainda.', 'No changes have been recorded yet.')}</EmptyState>;
   }
 
   return (
     <div>
-      <Table>
+      <Table label={copy('Eventos de auditoria', 'Audit events')}>
         <Thead>
           <tr>
-            <Th>Data</Th>
-            <Th>Quem</Th>
-            <Th>Ação</Th>
-            <Th>O que mudou</Th>
+            <Th>{copy('Data', 'Date')}</Th>
+            <Th>{copy('Quem', 'Who')}</Th>
+            <Th>{copy('Ação', 'Action')}</Th>
+            <Th>{copy('O que mudou', 'What changed')}</Th>
           </tr>
         </Thead>
         <tbody>
@@ -47,7 +49,7 @@ export function AuditTable({ rows }: { rows: Row[] }) {
               <Td>
                 <div className="flex items-center gap-2">
                   <span>{log.userName}</span>
-                  <RolePill role={log.userRole} />
+                  <LocalizedRolePill role={log.userRole} />
                 </div>
               </Td>
               <Td>{log.actionLabel}</Td>
@@ -58,7 +60,15 @@ export function AuditTable({ rows }: { rows: Row[] }) {
                   <ul className="flex flex-col gap-0.5">
                     {log.diffs.map((d) => (
                       <li key={d.field} className="font-mono text-xs">
-                        <span className="text-ink-muted">{d.field}:</span> {d.before} → {d.after}
+                        <span className="text-ink-muted">{
+                          d.field === 'parentAgentId'
+                            ? copy('Gerente', 'Manager')
+                            : d.field === 'overridePercent'
+                              ? copy('Percentual de sobrecomissão', 'Override percentage')
+                              : d.field === 'rank'
+                                ? copy('Cargo', 'Rank')
+                                : d.field
+                        }:</span> {d.before} → {d.after}
                       </li>
                     ))}
                   </ul>

@@ -22,6 +22,7 @@ import {
 import { getForesightIllustrationProduct } from '@/lib/national-life/foresight-product-catalog'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
 import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
+import { getServerI18n } from '@/lib/i18n/server'
 
 function normalizeText(value: string | null | undefined): string {
   return (value ?? '').trim()
@@ -66,8 +67,9 @@ function targetIllustrationId(target: unknown): string | null {
 export async function requestForesightIllustration(
   formData: FormData,
 ): Promise<RequestForesightIllustrationResult> {
+  const { copy } = await getServerI18n()
   if (!isNationalLifeLocalConnectorEnabled()) {
-    return { ok: false, message: 'Conecte o K-Bot neste navegador para gerar a ilustração oficial.' }
+    return { ok: false, message: copy('Conecte o K-Bot neste navegador para gerar a ilustração oficial.', 'Connect K-Bot in this browser to generate the official illustration.') }
   }
   const agent = await getCurrentAgent()
 
@@ -87,39 +89,39 @@ export async function requestForesightIllustration(
   const faceAmount = Number(normalizeText(formData.get('faceAmount') as string | null))
   const monthlyPremium = Number(normalizeText(formData.get('monthlyPremium') as string | null))
 
-  if (!product) return { ok: false, message: 'Escolha o produto da ilustração.' }
-  if (!firstName) return { ok: false, message: 'Informe o nome.' }
-  if (!lastName) return { ok: false, message: 'Informe o sobrenome.' }
+  if (!product) return { ok: false, message: copy('Escolha o produto da ilustração.', 'Choose the illustration product.') }
+  if (!firstName) return { ok: false, message: copy('Informe o nome.', 'Enter the first name.') }
+  if (!lastName) return { ok: false, message: copy('Informe o sobrenome.', 'Enter the last name.') }
   const dateOfBirth = parseIsoDate(dateOfBirthRaw)
-  if (!dateOfBirth) return { ok: false, message: 'Data de nascimento inválida.' }
+  if (!dateOfBirth) return { ok: false, message: copy('Data de nascimento inválida.', 'Invalid date of birth.') }
   if (!FORESIGHT_ISSUE_STATES.includes(issueState as typeof FORESIGHT_ISSUE_STATES[number])) {
-    return { ok: false, message: 'Escolha o estado de emissão.' }
+    return { ok: false, message: copy('Escolha o estado de emissão.', 'Choose the issue state.') }
   }
-  if (!GENDERS.has(gender)) return { ok: false, message: 'Informe o sexo, como a seguradora o classifica.' }
-  if (!RATE_CLASSES.has(rateClass)) return { ok: false, message: 'Informe a classe de risco.' }
+  if (!GENDERS.has(gender)) return { ok: false, message: copy('Informe o sexo, como a seguradora o classifica.', 'Enter the sex as classified by the carrier.') }
+  if (!RATE_CLASSES.has(rateClass)) return { ok: false, message: copy('Informe a classe de risco.', 'Enter the rate class.') }
   const isPremiumSolve = product?.kind === 'IUL' && solveBasis === 'PREMIUM'
   const isExplicitIulSolve = product?.kind === 'IUL' && solveBasis.length > 0
   if (!isPremiumSolve && (!Number.isFinite(faceAmount) || faceAmount <= 0 || faceAmount > 1_000_000_000)) {
-    return { ok: false, message: 'Informe um capital segurado maior que zero.' }
+    return { ok: false, message: copy('Informe um capital segurado maior que zero.', 'Enter a face amount greater than zero.') }
   }
   if (product.kind === 'IUL') {
     if (isExplicitIulSolve && !IUL_SOLVE_BASES.has(solveBasis)) {
-      return { ok: false, message: 'Escolha se a ilustração será resolvida por capital ou prêmio.' }
+      return { ok: false, message: copy('Escolha se a ilustração será resolvida por capital ou prêmio.', 'Choose whether the illustration will be solved by face amount or premium.') }
     }
     if (!DEATH_BENEFIT_OPTIONS.has(deathBenefitOption)) {
-      return { ok: false, message: 'Informe a opção de benefício por morte.' }
+      return { ok: false, message: copy('Informe a opção de benefício por morte.', 'Enter the death benefit option.') }
     }
     if (strategy !== CAP_FOCUS) {
-      return { ok: false, message: 'A ilustração oficial usa S&P 500 — foco em teto.' }
+      return { ok: false, message: copy('A ilustração oficial usa S&P 500 — foco em teto.', 'The official illustration uses S&P 500 — cap focus.') }
     }
     if ((isPremiumSolve || !isExplicitIulSolve) &&
       (!Number.isFinite(monthlyPremium) || monthlyPremium <= 0 || monthlyPremium > 100_000_000)) {
-      return { ok: false, message: 'Informe um prêmio mensal maior que zero.' }
+      return { ok: false, message: copy('Informe um prêmio mensal maior que zero.', 'Enter a monthly premium greater than zero.') }
     }
   } else if (!TERM_DURATIONS.has(termDuration)) {
-    return { ok: false, message: 'Escolha a duração do Term.' }
+    return { ok: false, message: copy('Escolha a duração do Term.', 'Choose the Term duration.') }
   } else if (premiumMode !== 'Monthly') {
-    return { ok: false, message: 'A ilustração Term oficial usa cobrança mensal.' }
+    return { ok: false, message: copy('A ilustração Term oficial usa cobrança mensal.', 'The official Term illustration uses monthly billing.') }
   }
 
   const illustrationId = `ill_${randomUUID()}`
@@ -179,7 +181,7 @@ export async function requestForesightIllustration(
       select: { id: true },
     })
     if (!ownedClient) {
-      return { ok: false, message: 'Cliente fora da sua carteira pessoal.' }
+      return { ok: false, message: copy('Cliente fora da sua carteira pessoal.', 'Client is outside your personal book.') }
     }
   }
 
@@ -273,6 +275,6 @@ export async function requestForesightIllustration(
       errorName: error instanceof Error ? error.name : typeof error,
       errorCode: rawCode,
     })
-    return { ok: false, message: 'Não foi possível iniciar a ilustração oficial agora.' }
+    return { ok: false, message: copy('Não foi possível iniciar a ilustração oficial agora.', 'The official illustration could not be started right now.') }
   }
 }

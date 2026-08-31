@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useEffectEvent, useRef, type ReactNode } from "react";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 type HiddenOutsideElement = {
   element: Element;
@@ -66,6 +67,7 @@ export function OverlaySurface({
   variant = "modal",
   children,
 }: OverlaySurfaceProps) {
+  const { copy } = useI18n();
   const overlayRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const close = useEffectEvent(onClose);
@@ -146,7 +148,7 @@ export function OverlaySurface({
       <button
         type="button"
         className="crm-overlay-backdrop"
-        aria-label="Fechar"
+        aria-label={copy("Fechar", "Close")}
         tabIndex={-1}
         onClick={onClose}
       />

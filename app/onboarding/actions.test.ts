@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   headers: vi.fn(),
   revalidatePath: vi.fn(),
   redirect: vi.fn(),
+  getServerI18n: vi.fn(),
 }))
 
 vi.mock('@/lib/require-role', () => ({
@@ -36,6 +37,7 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('next/headers', () => ({ headers: mocks.headers }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 vi.mock('next/navigation', () => ({ redirect: mocks.redirect }))
+vi.mock('@/lib/i18n/server', () => ({ getServerI18n: mocks.getServerI18n }))
 vi.mock('@/lib/agent-onboarding', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/agent-onboarding')>()
   return {
@@ -139,6 +141,10 @@ beforeEach(() => {
   mocks.redirect.mockImplementation(() => {
     throw new Error('NEXT_REDIRECT')
   })
+  mocks.getServerI18n.mockResolvedValue({
+    language: 'PT',
+    copy: (portuguese: string) => portuguese,
+  })
 })
 
 afterEach(() => {
@@ -146,6 +152,29 @@ afterEach(() => {
 })
 
 describe('onboarding server actions', () => {
+  it('returns validation errors in the persisted English language', async () => {
+    mocks.getServerI18n.mockResolvedValue({
+      language: 'EN',
+      copy: (_portuguese: string, english: string) => english,
+    })
+
+    const result = await saveOnboardingProfileAction(
+      INITIAL_ONBOARDING_ACTION_STATE,
+      form({
+        name: 'Maria Agent',
+        phone: '+1 305 555 0100',
+        timeZone: 'America/New_York',
+        npn: '',
+      }),
+    )
+
+    expect(result).toMatchObject({
+      status: 'error',
+      message: 'Review the highlighted fields.',
+      fieldErrors: { npn: 'Enter your NPN.' },
+    })
+  })
+
   it('requires a 4–20 digit NPN before doing authenticated or database work', async () => {
     const result = await saveOnboardingProfileAction(
       INITIAL_ONBOARDING_ACTION_STATE,

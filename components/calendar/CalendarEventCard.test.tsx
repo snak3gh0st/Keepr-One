@@ -1,9 +1,18 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CalendarEventCard } from "./CalendarEventCard";
+import { LanguageProvider } from "@/components/i18n/LanguageProvider";
 import type { CalendarEventView } from "./types";
+
+vi.mock("@/lib/auth-client", () => ({
+  authClient: { updateUser: vi.fn() },
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 const event: CalendarEventView = {
   id: "event/42",
@@ -72,6 +81,18 @@ describe("CalendarEventCard", () => {
     }} />);
 
     expect(screen.getByText("✓ Concluída")).toBeInTheDocument();
+  });
+
+  it("renders controls and derived states in English", () => {
+    render(
+      <LanguageProvider initialLanguage="EN">
+        <CalendarEventCard event={{ ...event, endsAt: "2020-08-20T13:30:00.000Z" }} />
+      </LanguageProvider>,
+    );
+
+    expect(screen.getByRole("link", { name: `Open event ${event.title}` })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Join Meet" })).toBeInTheDocument();
+    expect(screen.getByText("✓ Completed")).toBeInTheDocument();
   });
 
 });
