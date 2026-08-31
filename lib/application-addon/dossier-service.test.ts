@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ApplicationDossierV1 } from './dossier-contract'
+import type { ApplicationDossierV2 } from './dossier-contract'
 import { reviewApplicationDossier, saveApplicationDossier } from './dossier-service'
 
-const dossier: ApplicationDossierV1 = {
-  version: 1,
+const dossier: ApplicationDossierV2 = {
+  version: 2,
   insured: {
     firstName: 'Alex', lastName: 'Teste', birthDate: '1998-08-27', sexAtBirth: 'MALE',
     email: 'alex@example.com', phone: '+13055550123',
@@ -11,7 +11,12 @@ const dossier: ApplicationDossierV1 = {
   address: { line1: '100 Main St', city: 'Miami', state: 'FL', postalCode: '33101' },
   owner: { sameAsInsured: true, relationship: 'SELF' },
   beneficiaries: [{ fullName: 'Taylor Teste', relationship: 'SPOUSE', sharePercent: 100 }],
-  coverage: { product: 'IUL', faceAmount: 500_000, premiumMode: 'MONTHLY', plannedPremium: 300 },
+  coverage: {
+    family: 'IUL', carrierProduct: 'FlexLife (25)(LSW)', issueState: 'FL',
+    applicationType: 'FULL', illustrationId: 'illustration_1', illustrationInputHash: 'b'.repeat(64),
+    faceAmount: 500_000, premiumMode: 'MONTHLY', plannedPremium: 300,
+  },
+  agent: { carrierNumber: 'AGENT123' },
   existingCoverage: { hasExisting: false, replacementExpected: false },
   documents: [{ documentId: 'doc_1', type: 'IDENTITY', contentHash: 'a'.repeat(64) }],
   consent: { clientAuthorizedCollection: true, agentAttestedAccuracy: true },

@@ -94,6 +94,22 @@ import {
   writeSyncState,
 } from '../lib/state'
 import { commandExecutorFor } from '../lib/command-executor'
+import {
+  parseIgoApplicationSnapshot,
+  sha256IgoApplicationDossier,
+  type IgoApplicationSnapshotV2,
+} from '../lib/igo-contract'
+import {
+  parseIgoApplicationDraftResponse,
+  type ExecuteIgoApplicationDraftMessage,
+  type IgoApplicationDraftResponse,
+} from '../lib/igo-messages'
+import {
+  NLG_IGO_EAPP_PATH,
+  NLG_TOOLS_PATH,
+  parseOpenIgoEAppResponse,
+  type OpenIgoEAppMessage,
+} from '../lib/nlg-tool-launcher'
 
 type ActiveNavigation = {
   type: 'BEGIN_GRID' | 'CAPTURE_PAGE' | 'BEGIN_EXPORT'
@@ -148,6 +164,12 @@ const SCHEDULED_SYNC_FRESH_MS = 24 * 60 * 60_000
 // redirect can be the carrier's canonical route. If that canonical route still
 // does not match, a third trip would be a loop, so isolate the source instead.
 const MAX_STAGE_NAVIGATION_ATTEMPTS = 2
+const IGO_ORIGIN = 'https://igoforms2.ipipeline.com'
+const IGO_HANDOFF_ORIGINS = [
+  'https://pipepasstoigo.ipipeline.com',
+  'https://federate.ipipeline.com',
+] as const
+const IGO_SSO_PATH = NLG_IGO_EAPP_PATH
 
 function errorCode(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
@@ -568,6 +590,41 @@ async function findBoundCommandTab(
     .sort((left, right) => (right.lastAccessed ?? 0) - (left.lastAccessed ?? 0))[0]
 }
 
+async function findBoundIgoCommandTab(
+  carrierTabId: number | undefined,
+  hint?: chrome.tabs.Tab,
+): Promise<chrome.tabs.Tab | undefined> {
+  const isReusable = (tab: chrome.tabs.Tab) => {
+    try {
+      const url = new URL(tab.url ?? '')
+      return url.origin === IGO_ORIGIN ||
+        (IGO_HANDOFF_ORIGINS as readonly string[]).includes(url.origin) ||
+        (url.origin === NLG_ORIGIN && url.pathname === IGO_SSO_PATH)
+    } catch {
+      return false
+    }
+  }
+  if (hint && isReusable(hint)) return hint
+  if (typeof carrierTabId === 'number' && hint?.id === carrierTabId) return hint
+  const tabs = await chrome.tabs.query({
+    url: [
+      `${NLG_ORIGIN}/*`,
+      `${NLG_AUTH0_ORIGIN}/*`,
+      `${IGO_ORIGIN}/*`,
+      ...IGO_HANDOFF_ORIGINS.map((origin) => `${origin}/*`),
+    ],
+  })
+  if (typeof carrierTabId === 'number') {
+    const bound = tabs.find((tab) => tab.id === carrierTabId)
+    if (bound && isReusable(bound)) return bound
+    const replacement = tabs.filter(isReusable)
+      .sort((left, right) => (right.lastAccessed ?? 0) - (left.lastAccessed ?? 0))[0]
+    return replacement ?? bound
+  }
+  return tabs.filter(isReusable)
+    .sort((left, right) => (right.lastAccessed ?? 0) - (left.lastAccessed ?? 0))[0]
+}
+
 async function postCommandEvent(input: {
   dispatch: ConnectorCommandDispatch
   device: { deviceId: string; baseUrl: string }
@@ -722,6 +779,202 @@ async function executePolicyDetailCommand(
     carrierTabId: tab.id,
     nextEventSequence: sequence,
     status: 'COMPLETED',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+function parseIgoCommandInput(value: unknown): {
+  inputHash: string
+  snapshot: IgoApplicationSnapshotV2
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('IGO_INPUT_INVALID')
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).sort().join(',') !== 'inputHash,snapshot' ||
+    typeof record.inputHash !== 'string' || !/^[a-f0-9]{64}$/.test(record.inputHash)) {
+    throw new Error('IGO_INPUT_INVALID')
+  }
+  const snapshot = parseIgoApplicationSnapshot(record.snapshot)
+  if (!snapshot) throw new Error('IGO_INPUT_INVALID')
+  return { inputHash: record.inputHash, snapshot }
+}
+
+async function sendIgoExecution(
+  tabId: number,
+  message: ExecuteIgoApplicationDraftMessage,
+): Promise<IgoApplicationDraftResponse> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, message)
+      return parseIgoApplicationDraftResponse(response, message)
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError ?? new Error('IGO_BRIDGE_UNAVAILABLE')
+}
+
+async function openIgoFromNationalLifeTools(tabId: number): Promise<void> {
+  const message: OpenIgoEAppMessage = {
+    type: 'OPEN_IGO_EAPP_FROM_TOOLS',
+    token: randomToken(),
+    correlationId: crypto.randomUUID(),
+  }
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      parseOpenIgoEAppResponse(await chrome.tabs.sendMessage(tabId, message), message)
+      return
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError ?? new Error('IGO_TOOL_LAUNCH_FAILED')
+}
+
+async function executeIgoApplicationDraftCommand(
+  dispatch: ConnectorCommandDispatch,
+  device: { deviceId: string; baseUrl: string },
+  hint?: chrome.tabs.Tab,
+): Promise<void> {
+  if (dispatch.command.capability !== 'PREPARE_APPLICATION_DRAFT') throw new Error('UNKNOWN_CAPABILITY')
+  const params = dispatch.command.params
+  if (!('applicationId' in params) || !('payloadHash' in params)) throw new Error('INVALID_COMMAND')
+
+  const previous = await readCommandState()
+  const sameCommand = previous.commandId === dispatch.command.commandId
+  let carrierTabId = sameCommand ? previous.carrierTabId : undefined
+  let sequence = dispatch.nextEventSequence
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId,
+    nextEventSequence: sequence,
+    status: 'NAVIGATING',
+    phase: 'OPENING_IGO',
+    updatedAt: new Date().toISOString(),
+  })
+
+  const targetUrl = `${NLG_ORIGIN}${NLG_TOOLS_PATH}`
+  const tab = await findBoundIgoCommandTab(carrierTabId, hint)
+  if (!tab?.id) {
+    const created = await chrome.tabs.create({ active: false, url: targetUrl })
+    if (created.id === undefined) throw new Error('COMMAND_TAB_UNAVAILABLE')
+    await writeCommandState({
+      ...(await readCommandState()),
+      carrierTabId: created.id,
+      status: 'NAVIGATING',
+      updatedAt: new Date().toISOString(),
+    })
+    return
+  }
+  carrierTabId = tab.id
+  await writeCommandState({
+    ...(await readCommandState()), carrierTabId, updatedAt: new Date().toISOString(),
+  })
+
+  let currentUrl: URL
+  try {
+    currentUrl = new URL(tab.url ?? '')
+  } catch {
+    await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+  if (currentUrl.origin === NLG_AUTH0_ORIGIN ||
+    (currentUrl.origin === NLG_ORIGIN && isAuthPath(currentUrl.pathname))) {
+    const requirement = currentUrl.pathname.includes('/mfa') || currentUrl.pathname.includes('/challenge')
+      ? 'MFA_REQUIRED' as const
+      : 'AUTH_REQUIRED' as const
+    if (dispatch.lastEventType !== requirement) {
+      sequence = await postCommandEvent({
+        dispatch, device, sequence, type: requirement, payload: { action: 'SIGN_IN_TO_CONTINUE' },
+      })
+    }
+    await writeCommandState({
+      ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
+      status: requirement, updatedAt: new Date().toISOString(),
+    })
+    if (!tab.active) await updateTab(tab.id, { active: true })
+    return
+  }
+  if ((IGO_HANDOFF_ORIGINS as readonly string[]).includes(currentUrl.origin) ||
+    (currentUrl.origin === NLG_ORIGIN && currentUrl.pathname === IGO_SSO_PATH)) return
+  if (currentUrl.origin === NLG_ORIGIN && currentUrl.pathname === NLG_TOOLS_PATH) {
+    if (previous.phase === 'WAITING_IGO_HANDOFF') return
+    await openIgoFromNationalLifeTools(tab.id)
+    await writeCommandState({
+      ...(await readCommandState()), carrierTabId: tab.id, status: 'NAVIGATING',
+      phase: 'WAITING_IGO_HANDOFF', updatedAt: new Date().toISOString(),
+    })
+    return
+  }
+  if (currentUrl.origin !== IGO_ORIGIN) {
+    await updateTab(tab.id, { url: targetUrl })
+    return
+  }
+
+  const rawInput = await signedJsonRequest<unknown>({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname: `/api/agent/integrations/national-life/local-connector/commands/${encodeURIComponent(dispatch.command.commandId)}/input`,
+    body: {},
+  })
+  const approved = parseIgoCommandInput(rawInput)
+  if (approved.inputHash !== params.payloadHash || approved.snapshot.applicationId !== params.applicationId ||
+    approved.snapshot.payloadHash !== params.payloadHash ||
+    await sha256IgoApplicationDossier(approved.snapshot) !== approved.inputHash) {
+    throw new Error('IGO_INPUT_HASH_MISMATCH')
+  }
+  await writeCommandState({
+    ...(await readCommandState()), carrierTabId: tab.id, status: 'RUNNING', phase: 'WRITING_IGO_DRAFT',
+    updatedAt: new Date().toISOString(),
+  })
+  if (dispatch.lastEventType !== 'COMMAND_STARTED' && dispatch.lastEventType !== 'DATA_BATCH') {
+    sequence = await postCommandEvent({ dispatch, device, sequence, type: 'COMMAND_STARTED' })
+  }
+  let receipt: Extract<IgoApplicationDraftResponse, { ok: true }>['receipt'] | null = null
+  if (dispatch.lastEventType !== 'DATA_BATCH') {
+    const response = await sendIgoExecution(tab.id, {
+      type: 'EXECUTE_IGO_APPLICATION_DRAFT',
+      token: randomToken(),
+      correlationId: crypto.randomUUID(),
+      payloadHash: approved.inputHash,
+      snapshot: approved.snapshot,
+    })
+    if (!response.ok) throw new Error(response.code)
+    receipt = response.receipt
+    sequence = await postCommandEvent({
+      dispatch,
+      device,
+      sequence,
+      type: 'DATA_BATCH',
+      payload: { applicationDraft: receipt },
+    })
+  }
+  sequence = await postCommandEvent({
+    dispatch,
+    device,
+    sequence,
+    type: 'COMMAND_COMPLETED',
+    payload: {
+      result: receipt?.progress === 'DRAFT_READY' ? 'IGO_APPLICATION_DRAFT_READY' : 'IGO_APPLICATION_NEEDS_INFORMATION',
+      ...(receipt ? { receipt } : {}),
+    },
+  })
+  await writeCommandState({
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId: tab.id,
+    nextEventSequence: sequence,
+    status: 'COMPLETED',
+    phase: 'COMPLETED',
     updatedAt: new Date().toISOString(),
   })
 }
@@ -1167,7 +1420,9 @@ async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?
         ? executeForesightCommand
         : executorKind === 'FLEXLIFE_QUOTE'
           ? executeFlexLifeQuoteCommand
-          : executePolicyDetailCommand
+          : executorKind === 'IGO_APPLICATION_DRAFT'
+            ? executeIgoApplicationDraftCommand
+            : executePolicyDetailCommand
       await executor(dispatch, {
         deviceId: device.deviceId,
         baseUrl: device.baseUrl,
@@ -2853,7 +3108,18 @@ export default defineBackground(() => {
     if (changeInfo.status === 'complete') {
       void (async () => {
         const command = await readCommandState()
-        if (command.carrierTabId === tabId && command.status !== 'COMPLETED') {
+        let isIgoHandoff = false
+        if (command.phase === 'WAITING_IGO_HANDOFF') {
+          try {
+            const url = new URL(tab.url ?? '')
+            isIgoHandoff = url.origin === IGO_ORIGIN ||
+              (IGO_HANDOFF_ORIGINS as readonly string[]).includes(url.origin) ||
+              (url.origin === NLG_ORIGIN && url.pathname === IGO_SSO_PATH)
+          } catch {
+            isIgoHandoff = false
+          }
+        }
+        if ((command.carrierTabId === tabId || isIgoHandoff) && command.status !== 'COMPLETED') {
           await pollAndExecuteCommand(tab)
         }
       })()

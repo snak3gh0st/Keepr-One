@@ -61,6 +61,17 @@ describe('popupStatusText', () => {
     expect(popupCommandStatusText({ status: 'RUNNING', phase: 'GENERATING_PDF' })).toMatch(/official PDF/i)
   })
 
+  it('describes the iGO draft step without implying submission', () => {
+    const text = popupCommandStatusText({ status: 'RUNNING', phase: 'WRITING_IGO_DRAFT' })
+    expect(text).toMatch(/iGO.*draft/i)
+    expect(text).not.toMatch(/submit|submitted/i)
+  })
+
+  it('describes the official iGO button handoff', () => {
+    expect(popupCommandStatusText({ status: 'NAVIGATING', phase: 'WAITING_IGO_HANDOFF' }))
+      .toMatch(/selected iGO e-App.*secure handoff/i)
+  })
+
   it('asks for login instead of showing a stale work step', () => {
     expect(popupCommandStatusText({ status: 'AUTH_REQUIRED', phase: 'OPENING_FORESIGHT' })).toMatch(/Sign in/i)
   })

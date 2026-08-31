@@ -30,6 +30,25 @@ type ProspectDefaults = {
   dateOfBirth: string | null;
 };
 
+type IllustrationOption = {
+  id: string;
+  kind: string;
+  productName: string | null;
+};
+
+const TERM_PRODUCTS = [
+  "LSW 10-G", "LSW 15-G", "LSW 20-G", "LSW 30-G", "LSW ART",
+  "NL 10-G", "NL 15-G", "NL 20-G", "NL 30-G", "NL ART",
+] as const;
+
+const IUL_PRODUCTS = [
+  "2019 PeakLife NL",
+  "FlexLife (25)(LSW)",
+  "RapidProtect (LSW)",
+  "RapidProtect NL",
+  "SummitLife (LSW)",
+] as const;
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -65,10 +84,12 @@ export function ApplicationDossier({
   application,
   addon,
   prospect,
+  illustrations,
 }: {
   application: ApplicationView;
   addon: { entitled: boolean; status: string | null; canAutomate: boolean };
   prospect: ProspectDefaults;
+  illustrations: IllustrationOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -82,6 +103,7 @@ export function ApplicationDossier({
   const consent = record(dossier.consent);
   const carrierReceipt = record(application.carrierReceipt);
   const confirmedValues = record(carrierReceipt.confirmedValues);
+  const carrierProgress = text(carrierReceipt.progress);
   const carrierChanges = Array.isArray(carrierReceipt.changes)
     ? carrierReceipt.changes.map(record).filter((change) => text(change.field))
     : [];
@@ -92,13 +114,16 @@ export function ApplicationDossier({
     ? record(dossier.beneficiaries[0])
     : {};
   const [fallbackFirstName, ...fallbackLastName] = prospect.name.trim().split(/\s+/);
+  const [productFamily, setProductFamily] = useState(text(coverage.family, text(coverage.product)));
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const family = String(form.get("family") ?? "");
+    const termDuration = String(form.get("termDuration") ?? "");
     setMessage(null);
     const payload = {
-      version: 1,
+      version: 2,
       insured: {
         firstName: String(form.get("firstName") ?? "").trim(),
         lastName: String(form.get("lastName") ?? "").trim(),
@@ -125,10 +150,18 @@ export function ApplicationDossier({
         sharePercent: numberValue(form.get("beneficiaryShare")) ?? 0,
       }] : [],
       coverage: {
-        ...(form.get("product") ? { product: String(form.get("product")) } : {}),
+        ...(family ? { family } : {}),
+        ...(form.get("carrierProduct") ? { carrierProduct: String(form.get("carrierProduct")) } : {}),
+        ...(family === "TERM" && termDuration ? { termDuration } : {}),
+        ...(form.get("issueState") ? { issueState: String(form.get("issueState")).trim().toUpperCase() } : {}),
+        ...(form.get("applicationType") ? { applicationType: String(form.get("applicationType")) } : {}),
+        ...(form.get("illustrationId") ? { illustrationId: String(form.get("illustrationId")) } : {}),
         ...(numberValue(form.get("faceAmount")) ? { faceAmount: numberValue(form.get("faceAmount")) } : {}),
         ...(form.get("premiumMode") ? { premiumMode: String(form.get("premiumMode")) } : {}),
         ...(numberValue(form.get("plannedPremium")) ? { plannedPremium: numberValue(form.get("plannedPremium")) } : {}),
+      },
+      agent: {
+        ...(form.get("carrierNumber") ? { carrierNumber: String(form.get("carrierNumber")).trim() } : {}),
       },
       existingCoverage: {
         hasExisting: form.get("hasExisting") === "on",
@@ -219,18 +252,20 @@ export function ApplicationDossier({
         <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-900">Confirmado no iGO</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-900">Lido de volta do iGO</p>
               <p className="mt-1 text-sm text-emerald-950">Rascunho {application.externalId} · {text(carrierReceipt.carrierStatus, "Recebido")}</p>
             </div>
             <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-900">
-              {text(confirmedValues.premiumMode) === "MONTHLY" ? "Mensal" : "Anual"}
+              {carrierProgress === "DRAFT_READY"
+                ? (text(confirmedValues.premiumMode) === "MONTHLY" ? "Mensal" : "Anual")
+                : "Rascunho parcial"}
             </span>
           </div>
           <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <div><dt className="text-xs text-emerald-800">Cliente</dt><dd className="font-semibold text-emerald-950">{text(confirmedValues.insuredName)}</dd></div>
-            <div><dt className="text-xs text-emerald-800">Produto</dt><dd className="font-semibold text-emerald-950">{text(confirmedValues.product)}</dd></div>
-            <div><dt className="text-xs text-emerald-800">Capital confirmado</dt><dd className="font-semibold text-emerald-950">US$ {Number(confirmedValues.faceAmount ?? 0).toLocaleString("en-US")}</dd></div>
-            <div><dt className="text-xs text-emerald-800">Prêmio confirmado</dt><dd className="font-semibold text-emerald-950">US$ {Number(confirmedValues.plannedPremium ?? 0).toLocaleString("en-US")}</dd></div>
+            <div><dt className="text-xs text-emerald-800">Produto</dt><dd className="font-semibold text-emerald-950">{text(confirmedValues.carrierProduct, text(confirmedValues.family))}{text(confirmedValues.termDuration) ? ` · ${text(confirmedValues.termDuration)}` : ""}</dd></div>
+            <div><dt className="text-xs text-emerald-800">Capital confirmado</dt><dd className="font-semibold text-emerald-950">{typeof confirmedValues.faceAmount === "number" ? `US$ ${confirmedValues.faceAmount.toLocaleString("en-US")}` : "Ainda não preenchido no iGO"}</dd></div>
+            <div><dt className="text-xs text-emerald-800">Prêmio confirmado</dt><dd className="font-semibold text-emerald-950">{typeof confirmedValues.plannedPremium === "number" ? `US$ ${confirmedValues.plannedPremium.toLocaleString("en-US")}` : "Ainda não preenchido no iGO"}</dd></div>
           </dl>
           {carrierChanges.length ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -289,7 +324,13 @@ export function ApplicationDossier({
             <label className={labelClass}>Beneficiário principal<input name="beneficiaryName" className={fieldClass} defaultValue={text(beneficiary.fullName)} /></label>
             <label className={labelClass}>Relação<input name="beneficiaryRelationship" className={fieldClass} defaultValue={text(beneficiary.relationship)} /></label>
             <label className={labelClass}>Participação %<input name="beneficiaryShare" type="number" min="0.01" max="100" step="0.01" className={fieldClass} defaultValue={typeof beneficiary.sharePercent === "number" ? beneficiary.sharePercent : 100} /></label>
-            <label className={labelClass}>Produto<select name="product" className={fieldClass} defaultValue={text(coverage.product)}><option value="">Selecione</option><option value="IUL">IUL</option><option value="TERM">Term</option></select></label>
+            <label className={labelClass}>Família do produto<select name="family" className={fieldClass} value={productFamily} onChange={(event) => setProductFamily(event.target.value)}><option value="">Selecione</option><option value="IUL">IUL</option><option value="TERM">Term</option></select></label>
+            <label className={labelClass}>Produto exato no iGO<select name="carrierProduct" className={fieldClass} defaultValue={text(coverage.carrierProduct)}><option value="">Selecione</option>{(productFamily === "TERM" ? TERM_PRODUCTS : IUL_PRODUCTS).map((product) => <option key={product} value={product}>{product}</option>)}</select></label>
+            {productFamily === "TERM" ? <label className={labelClass}>Prazo do Term<select name="termDuration" className={fieldClass} defaultValue={text(coverage.termDuration)}><option value="">Selecione</option><option value="10-G">10 anos</option><option value="15-G">15 anos</option><option value="20-G">20 anos</option><option value="30-G">30 anos</option><option value="ART">ART</option></select></label> : null}
+            <label className={labelClass}>Estado da proposta<input name="issueState" maxLength={2} className={fieldClass} defaultValue={text(coverage.issueState, text(address.state, prospect.state ?? ""))} /></label>
+            <label className={labelClass}>Tipo de Application<select name="applicationType" className={fieldClass} defaultValue={text(coverage.applicationType, "FULL")}><option value="FULL">Application completa</option><option value="TERM_CONVERSION">Conversão de Term</option></select></label>
+            <label className={labelClass}>Illustration revisada<select name="illustrationId" className={fieldClass} defaultValue={text(coverage.illustrationId)}><option value="">Selecione</option>{illustrations.filter((illustration) => illustration.kind !== "PRELIMINARY").map((illustration) => <option key={illustration.id} value={illustration.id}>{illustration.productName ?? "Illustration oficial"}</option>)}</select></label>
+            <label className={labelClass}>Número do agente na National Life<input name="carrierNumber" className={fieldClass} defaultValue={text(record(dossier.agent).carrierNumber)} /></label>
             <label className={labelClass}>Capital segurado<input name="faceAmount" type="number" min="1" step="0.01" className={fieldClass} defaultValue={typeof coverage.faceAmount === "number" ? coverage.faceAmount : ""} /></label>
             <label className={labelClass}>Prêmio planejado<input name="plannedPremium" type="number" min="1" step="0.01" className={fieldClass} defaultValue={typeof coverage.plannedPremium === "number" ? coverage.plannedPremium : ""} /></label>
             <label className={labelClass}>Frequência<select name="premiumMode" className={fieldClass} defaultValue={text(coverage.premiumMode, "MONTHLY")}><option value="MONTHLY">Mensal</option><option value="ANNUAL">Anual</option></select></label>

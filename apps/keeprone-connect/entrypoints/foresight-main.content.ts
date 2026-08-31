@@ -4,6 +4,10 @@ import {
   applyForesightAllocationPreference,
   writeForesightControlValueWhenReady,
 } from '../lib/foresight-control-value'
+import {
+  FORESIGHT_TERM_OPTIONAL_REPORT_SELECTOR,
+  isForesightTermNaicReportGroup,
+} from '../lib/foresight-term-reports'
 
 const CHANNEL = 'FYNTRA_FORESIGHT_CONNECTOR_V1'
 const MAIN_FRAME_ID = 'ctl00_mobilityPH_iframeMain'
@@ -98,6 +102,20 @@ export default defineContentScript({
         wait: () => delay(100),
       })
       if (!written) throw new Error('FORESIGHT_CONTROL_UNAVAILABLE')
+    }
+    const setWidgetNumber = (win: CarrierWindow, id: string, value: number) => {
+      const widget = win.$find?.(id)
+      if (!object(widget) || typeof widget.set_Value !== 'function') {
+        throw new Error('FORESIGHT_SCHEMA_MISMATCH')
+      }
+      ;(widget.set_Value as (value: string) => void).call(widget, String(value))
+      const raw = typeof widget.get_RawValue === 'function'
+        ? (widget.get_RawValue as () => unknown).call(widget)
+        : null
+      const observed = Number(String(raw).replace(/[^0-9.-]/g, ''))
+      if (!Number.isFinite(observed) || Math.abs(observed - value) > 0.005) {
+        throw new Error('FORESIGHT_WRITE_MISMATCH')
+      }
     }
     const applyClient = async (values: MainRequest['values']) => {
       let { doc, win } = carrier()
@@ -311,29 +329,31 @@ export default defineContentScript({
         termDuration: 'ctl00_mobilityPH_panelTermProduct_ucTermProduct_cboTermProduct',
       }
       setSelect(doc, fields.designType, String(values.designType))
-      element<HTMLSelectElement>(doc, fields.designType).dispatchEvent(new Event('change', { bubbles: true }))
-      await delay(600)
-      ;({ doc, win } = carrier())
-      await writeScheduleValue(fields.faceAmount, Number(values.faceAmount))
-      invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefit', 'updateDeathBenefitSchedule')
+      setWidgetNumber(win, fields.faceAmount, Number(values.faceAmount))
+      invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefit', 'updateDeathBenefit')
       await delay(900)
       ;({ doc, win } = carrier())
       setSelect(doc, fields.premiumMode, String(values.premiumMode))
-      element<HTMLSelectElement>(doc, fields.premiumMode).dispatchEvent(new Event('change', { bubbles: true }))
+      invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefit', 'updatePremium')
       await delay(700)
       ;({ doc, win } = carrier())
       setSelect(doc, fields.termDuration, String(values.termDuration))
-      element<HTMLSelectElement>(doc, fields.termDuration).dispatchEvent(new Event('change', { bubbles: true }))
+      invoke(win, 'ctl00_mobilityPH_panelTermProduct_ucTermProduct', 'updateTermProduct')
       await delay(900)
     }
     const applyTermReports = async (values: MainRequest['values']) => {
       const { doc } = carrier()
       const groups = [...doc.querySelectorAll<HTMLInputElement>('input[type="checkbox"][id$="_chkGroup"]')]
-      const main = groups.find((checkbox) => checkbox.parentElement?.parentElement?.textContent?.includes(`Term ${String(values.duration)}`) && checkbox.parentElement?.parentElement?.textContent?.includes('NAIC Illustration'))
+      const main = groups.find((checkbox) => isForesightTermNaicReportGroup(
+        checkbox,
+        String(values.duration),
+      ))
       if (!main) throw new Error('FORESIGHT_REPORT_SELECTION_MISMATCH')
       for (const checkbox of groups) if (checkbox !== main && checkbox.checked) checkbox.click()
       if (!main.checked) main.click()
-      for (const checkbox of doc.querySelectorAll<HTMLInputElement>('input[type="checkbox"][id*="rptOptionalReports"]')) {
+      for (const checkbox of doc.querySelectorAll<HTMLInputElement>(
+        FORESIGHT_TERM_OPTIONAL_REPORT_SELECTOR,
+      )) {
         if (checkbox.checked) checkbox.click()
       }
       await delay(500)
