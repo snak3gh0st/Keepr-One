@@ -343,15 +343,22 @@ async function reportsDocument(): Promise<Document> {
   }, 'FORESIGHT_REPORT_SELECTION_MISMATCH')
 }
 
-async function verifyReports(doc: Document, duration: string): Promise<void> {
+async function verifyReports(duration: string): Promise<void> {
   await applyInMainWorld('APPLY_TERM_REPORTS', { duration })
-  doc = await reportsDocument()
-  const groups = [...doc.querySelectorAll<HTMLInputElement>('input[type="checkbox"][id$="_chkGroup"]')].filter((checkbox) => checkbox.checked)
-  if (groups.length !== 1 || !isForesightTermNaicReportGroup(groups[0]!, duration)) fail('FORESIGHT_REPORT_SELECTION_MISMATCH')
-  const extras = [...doc.querySelectorAll<HTMLInputElement>(
-    FORESIGHT_TERM_OPTIONAL_REPORT_SELECTOR,
-  )].filter((checkbox) => checkbox.checked)
-  if (extras.length) fail('FORESIGHT_REPORT_SELECTION_MISMATCH')
+  // Report selection is an ASP.NET postback. The desired checkbox can be
+  // visible while a carrier response still restores the previous selection;
+  // keep reacquiring the frame until the exact final state is observable.
+  await waitFor(() => {
+    const doc = frameDocument(MAIN_FRAME_ID)
+    if (!doc) return null
+    const groups = [...doc.querySelectorAll<HTMLInputElement>('input[type="checkbox"][id$="_chkGroup"]')]
+      .filter((checkbox) => checkbox.checked)
+    if (groups.length !== 1 || !isForesightTermNaicReportGroup(groups[0]!, duration)) return null
+    const extras = [...doc.querySelectorAll<HTMLInputElement>(
+      FORESIGHT_TERM_OPTIONAL_REPORT_SELECTOR,
+    )].filter((checkbox) => checkbox.checked)
+    return extras.length === 0 ? true : null
+  }, 'FORESIGHT_REPORT_SELECTION_MISMATCH')
 }
 
 async function saveCase(caseName: string): Promise<void> {
@@ -389,8 +396,8 @@ export async function executeForesightTermIllustration(input: {
   if (readbackError) fail(readbackError)
   const termDuration = resolveForesightTermDuration(input.snapshot, funding.termDuration)
   input.onProgress?.('VERIFYING_VALUES')
-  const reports = await reportsDocument()
-  await verifyReports(reports, termDuration.confirmedTermDuration)
+  await reportsDocument()
+  await verifyReports(termDuration.confirmedTermDuration)
   if (!opened.existing) {
     input.onProgress?.('SAVING_CASE')
     await saveCase(input.snapshot.carrierCaseName)

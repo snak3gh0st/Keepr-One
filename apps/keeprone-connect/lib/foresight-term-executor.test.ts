@@ -121,6 +121,21 @@ describe('Foresight Term client target', () => {
     )).toBe(true)
   })
 
+  it('waits for the exact report selection to stabilize before reading it back', () => {
+    const source = readFileSync(
+      new URL('./foresight-term-executor.ts', import.meta.url),
+      'utf8',
+    )
+    const workflow = source.slice(
+      source.indexOf('async function verifyReports'),
+      source.indexOf('async function saveCase'),
+    )
+
+    expect(workflow).toContain('await waitFor(() => {')
+    expect(workflow).toContain('frameDocument(MAIN_FRAME_ID)')
+    expect(workflow).toContain("'FORESIGHT_REPORT_SELECTION_MISMATCH'")
+  })
+
   it('selects only optional report pages, not their nested settings', () => {
     expect(FORESIGHT_TERM_OPTIONAL_REPORT_SELECTOR).toBe(
       'input[type="checkbox"][id*="rptOptionalReports"][id$="_chkOptional"]',
