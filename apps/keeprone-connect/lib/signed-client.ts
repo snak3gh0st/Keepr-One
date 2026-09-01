@@ -64,7 +64,8 @@ export class SignedRequestError extends Error {
       | 'RUN_START_RATE_LIMITED'
       | 'FORESIGHT_TERM_PDF_INVALID'
       | 'FORESIGHT_TERM_PREMIUM_MISSING'
-      | 'FORESIGHT_TERM_PREMIUM_MISMATCH',
+      | 'FORESIGHT_TERM_PREMIUM_MISMATCH'
+      | 'DEVICE_ENCRYPTION_KEY_CONFLICT',
     readonly status?: number,
     readonly retryAfterSeconds?: number,
   ) {
@@ -208,6 +209,9 @@ export async function signedJsonRequest<T>(input: {
     }
     if (conflictCode === 'STAGE_INCOMPLETE' || conflictCode === 'STAGE_TRUNCATED') {
       throw new SignedRequestError(conflictCode)
+    }
+    if (conflictCode === 'DEVICE_ENCRYPTION_KEY_CONFLICT') {
+      throw new SignedRequestError('DEVICE_ENCRYPTION_KEY_CONFLICT')
     }
     throw new SignedRequestError('IDEMPOTENCY_CONFLICT')
   }

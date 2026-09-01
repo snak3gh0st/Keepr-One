@@ -14,6 +14,7 @@ vi.mock('../lib/signed-client', () => ({
 vi.mock('../lib/key-store', () => ({
   clearDeviceKeys: vi.fn(),
   getOrCreateDeviceKey: vi.fn(),
+  getOrCreateCredentialEncryptionKey: vi.fn(),
 }))
 
 import {
@@ -25,6 +26,10 @@ import {
 import { sha256ForesightSnapshot } from '../lib/foresight-contract'
 import { sha256FlexLifeQuoteSnapshot } from '../lib/flexlife-quote-contract'
 import { sha256IgoApplicationDossier } from '../lib/igo-contract'
+import {
+  getOrCreateCredentialEncryptionKey,
+  getOrCreateDeviceKey,
+} from '../lib/key-store'
 
 const NLG = 'https://www.nationallife.com'
 const NLG_AUTH0 = 'https://nlg-prod.auth0.com'
@@ -346,12 +351,87 @@ beforeEach(() => {
     documentBytes: FORESIGHT_PDF.byteLength,
   })
   tabs.query.mockResolvedValue([])
-  storage.device = { deviceId: 'device-1', baseUrl: 'http://localhost:3000', status: 'READY' }
+  storage.device = {
+    deviceId: 'device-1', baseUrl: 'http://localhost:3000', status: 'READY',
+    credentialEncryptionKeyRegistered: true,
+  }
+  vi.mocked(getOrCreateDeviceKey).mockResolvedValue({ kty: 'EC', crv: 'P-256' })
+  vi.mocked(getOrCreateCredentialEncryptionKey).mockResolvedValue({
+    kty: 'RSA', alg: 'RSA-OAEP-256', use: 'enc', key_ops: ['encrypt'], ext: true,
+    e: 'AQAB', n: 'public-modulus',
+  })
   vi.stubGlobal('chrome', chromeStub)
   vi.stubGlobal('defineBackground', (main: unknown) => main)
   // The extension's own vitest config substitutes this at build time; the repo-root
   // config does not, and without it every allowed-origin check fails.
   vi.stubGlobal('__KEEPR_ORIGIN__', 'http://localhost:3000')
+})
+
+describe('credential encryption key enrollment', () => {
+  it('includes the public encryption key when pairing and never sends private fields', async () => {
+    storage.device = { status: 'UNPAIRED' }
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(
+      JSON.stringify({ deviceId: 'device-paired' }),
+      { status: 201, headers: { 'content-type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+    await bootBackground()
+    const sendResponse = vi.fn()
+
+    emit(
+      'runtime.onMessageExternal',
+      {
+        type: 'PAIR_CONNECTOR',
+        code: 'NL-secret-pairing-code',
+        label: 'Este computador',
+        baseUrl: 'http://localhost:3000',
+      },
+      EXTERNAL_SENDER,
+      sendResponse,
+    )
+    await flush()
+
+    const pairingCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/pairings/exchange'))
+    const body = JSON.parse(String(pairingCall?.[1]?.body))
+    expect(body.encryptionPublicKeyJwk).toMatchObject({
+      kty: 'RSA', alg: 'RSA-OAEP-256', use: 'enc', key_ops: ['encrypt'], ext: true,
+    })
+    expect(JSON.stringify(body.encryptionPublicKeyJwk)).not.toMatch(
+      /"d"|"p"|"q"|"dp"|"dq"|"qi"/,
+    )
+    expect(storage.device).toMatchObject({
+      deviceId: 'device-paired', credentialEncryptionKeyRegistered: true,
+    })
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, deviceId: 'device-paired' })
+  })
+
+  it('registers once after upgrading an already paired device', async () => {
+    storage.device = {
+      deviceId: 'device-1', baseUrl: 'http://localhost:3000', status: 'READY',
+    }
+
+    await bootBackground()
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith({
+      baseUrl: 'http://localhost:3000',
+      deviceId: 'device-1',
+      method: 'POST',
+      pathname: '/api/agent/integrations/national-life/local-connector/devices/encryption-key',
+      body: {
+        schemaVersion: 1,
+        publicKeyJwk: expect.objectContaining({ kty: 'RSA', alg: 'RSA-OAEP-256' }),
+      },
+    })
+    expect(storage.device).toMatchObject({ credentialEncryptionKeyRegistered: true })
+
+    vi.mocked(signedJsonRequest).mockClear()
+    await bootBackground()
+    await flush()
+    expect(signedJsonRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/devices/encryption-key',
+    }))
+  })
 })
 
 describe('empurrão de atualização no caminho real', () => {

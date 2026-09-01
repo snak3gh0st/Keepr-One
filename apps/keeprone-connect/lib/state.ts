@@ -16,6 +16,7 @@ export type SyncStatus =
 export type DeviceState = {
   deviceId?: string
   baseUrl?: string
+  credentialEncryptionKeyRegistered?: boolean
   status: ConnectorStatus
 }
 

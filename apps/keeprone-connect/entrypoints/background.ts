@@ -23,7 +23,11 @@ import {
   matchesNationalLifeStagePath,
   requireAllowedBaseUrl,
 } from '../lib/constants'
-import { clearDeviceKeys, getOrCreateDeviceKey } from '../lib/key-store'
+import {
+  clearDeviceKeys,
+  getOrCreateCredentialEncryptionKey,
+  getOrCreateDeviceKey,
+} from '../lib/key-store'
 import {
   parseBridgeMessage,
   parseCapturePolicyDetailAck,
@@ -462,7 +466,10 @@ async function pairConnector(
   const baseUrl = requireAllowedBaseUrl(message.baseUrl)
   await writeDeviceState({ baseUrl, status: 'PAIRING' })
   try {
-    const publicKeyJwk = await getOrCreateDeviceKey()
+    const [publicKeyJwk, encryptionPublicKeyJwk] = await Promise.all([
+      getOrCreateDeviceKey(),
+      getOrCreateCredentialEncryptionKey(),
+    ])
     const response = await fetch(
       `${baseUrl}/api/agent/integrations/national-life/local-connector/pairings/exchange`,
       {
@@ -475,6 +482,7 @@ async function pairConnector(
           code: message.code,
           label: message.label,
           publicKeyJwk,
+          encryptionPublicKeyJwk,
         }),
         credentials: 'omit',
         cache: 'no-store',
@@ -489,7 +497,12 @@ async function pairConnector(
     ) {
       throw new Error('PAIRING_REJECTED')
     }
-    await writeDeviceState({ deviceId: result.deviceId, baseUrl, status: 'READY' })
+    await writeDeviceState({
+      deviceId: result.deviceId,
+      baseUrl,
+      status: 'READY',
+      credentialEncryptionKeyRegistered: true,
+    })
     // Scheduling is best-effort. The device is already paired at this point;
     // an unavailable alarms API must not turn a valid pairing into ERROR.
     void ensureScheduledSyncAlarm().catch(() => {})
@@ -544,6 +557,27 @@ async function ensureScheduledSyncAlarm() {
     delayInMinutes: 1,
     periodInMinutes: SCHEDULED_SYNC_PERIOD_MINUTES,
   })
+}
+
+async function ensureCredentialEncryptionKeyRegistered() {
+  const device = await readDeviceState()
+  if (
+    device.status !== 'READY' ||
+    !device.deviceId ||
+    !device.baseUrl ||
+    device.credentialEncryptionKeyRegistered
+  ) {
+    return
+  }
+  const publicKeyJwk = await getOrCreateCredentialEncryptionKey()
+  await signedJsonRequest({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname: '/api/agent/integrations/national-life/local-connector/devices/encryption-key',
+    body: { schemaVersion: 1, publicKeyJwk },
+  })
+  await writeDeviceState({ ...device, credentialEncryptionKeyRegistered: true })
 }
 
 async function startScheduledSyncIfDue() {
@@ -3179,6 +3213,10 @@ export default defineBackground(() => {
   // bound National Life tab to the foreground.
   void ensureScheduledSyncAlarm().catch(() => {})
   void ensureCommandPollAlarm().catch(() => {})
+  // Upgrade path for devices paired before credential delivery existed. The
+  // signed registration is idempotent and the local marker prevents sending it
+  // again after the server accepts it.
+  void ensureCredentialEncryptionKeyRegistered().catch(() => {})
   // Uma batida a cada subida do service worker. É a janela mais barata que existe
   // para uma flag chegar sem nenhuma ação do agente, e o worker sobe com muita
   // frequência justamente porque este conector acorda o tempo todo.

@@ -511,7 +511,7 @@ git commit -m "feat(kbot): add consented National Life credential settings"
 - Produces on server: `registerDeviceEncryptionKey()`.
 - Consumes: existing ECDSA signing key and `verifyLocalConnectorDeviceRequest()`.
 
-- [ ] **Step 1: Write failing key-store tests**
+- [x] **Step 1: Write failing key-store tests**
 
 Use fake IndexedDB/Web Crypto and assert:
 
@@ -528,21 +528,21 @@ expect(privateKey?.usages).toEqual(['decrypt'])
 Call twice and assert the same public JWK returns. Assert `clearDeviceKeys()`
 deletes signing and encryption keys together.
 
-- [ ] **Step 2: Write failing registration tests**
+- [x] **Step 2: Write failing registration tests**
 
 The signed route accepts only `{ schemaVersion: 1, publicKeyJwk }`, records the
 thumbprint for the same signed device, and refuses changing a previously
 registered thumbprint with `DEVICE_ENCRYPTION_KEY_CONFLICT`. A revoked device,
 cross-device id and JWK with private fields are rejected.
 
-- [ ] **Step 3: Run focused tests and verify failure**
+- [x] **Step 3: Run focused tests and verify failure**
 
 ```bash
 pnpm --filter @fyntra/keeprone-connect test -- key-store.test.ts background.test.ts
 pnpm vitest run lib/national-life/credentials/device-key-service.test.ts app/api/agent/integrations/national-life/local-connector/devices/encryption-key/route.test.ts
 ```
 
-- [ ] **Step 4: Implement RSA-OAEP enrollment**
+- [x] **Step 4: Implement RSA-OAEP enrollment**
 
 Generate the key pair once:
 
@@ -568,7 +568,7 @@ upgrade, a paired device without an encryption key generates one and sends it
 once through the new signed route before requesting a credential lease. A
 changed key requires device revocation and re-pairing; it is never overwritten.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 ```bash
 pnpm --filter @fyntra/keeprone-connect test -- key-store.test.ts background.test.ts
@@ -577,7 +577,7 @@ pnpm vitest run lib/national-life/credentials/device-key-service.test.ts app/api
 
 Expected: pass and no private JWK property appears in any request fixture.
 
-- [ ] **Step 6: Commit device encryption enrollment**
+- [x] **Step 6: Commit device encryption enrollment**
 
 ```bash
 git add apps/keeprone-connect lib/national-life/credentials/device-key-service.ts lib/national-life/credentials/device-key-service.test.ts lib/national-life/local-connector/pairing.ts lib/national-life/local-connector/pairing.test.ts app/api/agent/integrations/national-life/local-connector/devices/encryption-key
