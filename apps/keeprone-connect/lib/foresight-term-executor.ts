@@ -22,6 +22,8 @@ const MAIN_FRAME_ID = 'ctl00_mobilityPH_iframeMain'
 const MODAL_FRAME_ID = 'ctl00_mobilityPH_modalDialog__Iframe'
 const MAIN_CHANNEL = 'FYNTRA_FORESIGHT_CONNECTOR_V1'
 const NEW_ILLUSTRATION_ID = 'ctl00_mobilityPH_verticalMenu_ActivitiesNewIllustration_0'
+const TERM_CLIENT_MENU_ID = 'ctl00_mobilityPH_verticalMenu_Client_0'
+const MODULE_LANDING_PATH = '/NWI/ProductWorkflow/ModuleLandingPage.aspx'
 const SAVE_AS_ID = 'ctl00_mobilityPH_ucInfoContainer_lnkSaveAs'
 const SAVE_NAME_ID = 'ctl00_mobilityPH_panelContent_txtItemName'
 const SAVE_FOLDER_ID = 'ctl00_mobilityPH_panelContent_cboFolder'
@@ -204,6 +206,25 @@ export function buildForesightTermClientTarget(snapshot: ForesightTermIllustrati
 }
 
 async function openTerm(snapshot: ForesightTermIllustrationSnapshotV1): Promise<{ doc: Document; existing: boolean }> {
+  // After an interrupted Term run, Foresight can restore its in-progress case
+  // at ModuleLandingPage rather than the case list. Resume only when the
+  // active product is the requested Term product; the existing/readback path
+  // performs no writes, so a mismatched open case cannot be overwritten.
+  const landing = await waitFor(() => {
+    const path = framePath(MAIN_FRAME_ID)
+    if (path === '/NWI/Main/StartPage.aspx') return 'START' as const
+    if (path === MODULE_LANDING_PATH &&
+      document.getElementById(TERM_CLIENT_MENU_ID) instanceof HTMLElement &&
+      document.body?.innerText.includes(snapshot.product.carrierName)) return 'RESUME' as const
+    return null
+  }, 'FORESIGHT_NAVIGATION_TIMEOUT')
+  if (landing === 'RESUME') {
+    click(document, TERM_CLIENT_MENU_ID)
+    return {
+      doc: await waitForFramePath((path) => /\/NWI\/.*\/client\.aspx$/i.test(path)),
+      existing: true,
+    }
+  }
   const start = await waitForFramePath((path) => path === '/NWI/Main/StartPage.aspx')
   const existing = [...start.querySelectorAll<HTMLAnchorElement>('a')].filter((link) => link.textContent?.trim() === snapshot.carrierCaseName)
   if (existing.length > 1) fail('FORESIGHT_CASE_AMBIGUOUS')

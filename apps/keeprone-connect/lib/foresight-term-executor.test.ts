@@ -136,6 +136,24 @@ describe('Foresight Term client target', () => {
     expect(workflow).toContain("'FORESIGHT_REPORT_SELECTION_MISMATCH'")
   })
 
+  it('safely resumes a matching in-progress Term case instead of overwriting it', () => {
+    const source = readFileSync(
+      new URL('./foresight-term-executor.ts', import.meta.url),
+      'utf8',
+    )
+    const workflow = source.slice(
+      source.indexOf('async function openTerm'),
+      source.indexOf('function readClient'),
+    )
+
+    expect(source).toContain("const MODULE_LANDING_PATH = '/NWI/ProductWorkflow/ModuleLandingPage.aspx'")
+    expect(workflow).toContain('document.body?.innerText.includes(snapshot.product.carrierName)')
+    expect(workflow).toContain('click(document, TERM_CLIENT_MENU_ID)')
+    expect(workflow).toContain('existing: true')
+    expect(workflow.indexOf('click(document, TERM_CLIENT_MENU_ID)'))
+      .toBeLessThan(workflow.indexOf('click(document, NEW_ILLUSTRATION_ID)'))
+  })
+
   it('selects only optional report pages, not their nested settings', () => {
     expect(FORESIGHT_TERM_OPTIONAL_REPORT_SELECTOR).toBe(
       'input[type="checkbox"][id*="rptOptionalReports"][id$="_chkOptional"]',
