@@ -156,11 +156,9 @@ type LeaseServiceDependencies = Readonly<{
 }>
 
 function pageApproved(request: CredentialLeaseRequestV1) {
-  if (request.page.classification !== 'LOGIN') return false
-  if (request.page.origin === 'https://www.nationallife.com') {
-    return request.page.pathname === '/agent/auth/login'
-  }
-  return request.page.origin === 'https://nlg-prod.auth0.com' && request.page.pathname === '/login'
+  return request.page.classification === 'LOGIN' &&
+    request.page.origin === 'https://nlg-prod.auth0.com' &&
+    request.page.pathname === '/login'
 }
 
 function rolloutAllowsAgent(rollout: Rollout, agentId: string) {

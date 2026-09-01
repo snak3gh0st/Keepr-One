@@ -107,8 +107,8 @@ const request = {
   schemaVersion: 1 as const,
   operation: { kind: 'SYNC_RUN' as const, id: 'run_1' },
   page: {
-    origin: 'https://www.nationallife.com' as const,
-    pathname: '/agent/auth/login',
+    origin: 'https://nlg-prod.auth0.com' as const,
+    pathname: '/login',
     classification: 'LOGIN' as const,
   },
 }
@@ -149,7 +149,7 @@ describe('credential lease service', () => {
 
   it.each([
     { ...request, page: { ...request.page, pathname: '/agent/book-of-business' } },
-    { ...request, page: { ...request.page, origin: 'https://nlg-prod.auth0.com' as const, pathname: '/authorize' } },
+    { ...request, page: { ...request.page, pathname: '/authorize' } },
     { ...request, page: { ...request.page, classification: 'MFA' as never } },
   ])('refuses an unapproved page contract before decrypting', async (candidate) => {
     const test = harness()

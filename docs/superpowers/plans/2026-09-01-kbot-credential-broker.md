@@ -806,7 +806,7 @@ git commit -m "feat(kbot): isolate credential decryption broker"
 - Create: `apps/keeprone-connect/lib/auth-page-contract.ts`
 - Create: `apps/keeprone-connect/lib/auth-page-contract.test.ts`
 - Create: `apps/keeprone-connect/entrypoints/nlg-auth.content.ts`
-- Create: `apps/keeprone-connect/entrypoints/nlg-auth.content.test.ts`
+- Create: `apps/keeprone-connect/tests/nlg-auth-content.test.ts`
 - Modify: `apps/keeprone-connect/lib/messages.ts`
 - Modify: `apps/keeprone-connect/lib/messages.test.ts`
 - Modify: `apps/keeprone-connect/wxt.config.ts`
@@ -820,7 +820,7 @@ git commit -m "feat(kbot): isolate credential decryption broker"
 - Produces extension message `SUBMIT_CARRIER_CREDENTIAL` with an in-memory credential and safe acknowledgement `SUBMITTED | REFUSED_*`.
 - Consumes no command URLs, selectors or scripts from the server.
 
-- [ ] **Step 1: Capture the live DOM contract without credentials**
+- [x] **Step 1: Capture the live DOM contract without credentials**
 
 Using an owner-controlled logged-out or expired National Life test session,
 record only the login page origin, pathname, form action origin/path, input
@@ -833,11 +833,12 @@ uses a username-first flow, model separate `USERNAME_LOGIN` and `PASSWORD_LOGIN`
 classifications and keep one lease envelope in service-worker memory across the
 two exact pages for at most 60 seconds; do not request a second lease.
 
-- [ ] **Step 2: Write classifier and executor tests**
+- [x] **Step 2: Write classifier and executor tests**
 
 Cover:
 
-- exact National Life and Auth0 login fixtures accepted;
+- exact observed Auth0 login fixture accepted; the National Life auth route is
+  treated only as a redirect and never receives a credential;
 - lookalike origin, unexpected path, multiple password fields, hidden duplicate
   password, cross-origin form action, extra OTP input, CAPTCHA and unknown form
   refused before any value is assigned;
@@ -847,13 +848,13 @@ Cover:
 - generic messages with a `password` property remain rejected by
   `parseExternalMessage` and all existing bridge parsers.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 ```bash
 pnpm --filter @fyntra/keeprone-connect test -- auth-page-contract.test.ts nlg-auth.content.test.ts messages.test.ts
 ```
 
-- [ ] **Step 4: Implement the isolated content script**
+- [x] **Step 4: Implement the isolated content script**
 
 Configure WXT matches only for the exact observed login path families on:
 
@@ -871,14 +872,14 @@ dispatches the minimum `input`/`change` events required by the observed form,
 and calls the exact submit button once. It returns a safe code and drops local
 references in `finally`.
 
-- [ ] **Step 5: Run connector tests and manifest checks**
+- [x] **Step 5: Run connector tests and manifest checks**
 
 ```bash
 pnpm --filter @fyntra/keeprone-connect test -- auth-page-contract.test.ts nlg-auth.content.test.ts messages.test.ts manifest-key.test.ts igo-manifest.test.ts
 pnpm --filter @fyntra/keeprone-connect typecheck
 ```
 
-- [ ] **Step 6: Commit the login executor**
+- [x] **Step 6: Commit the login executor**
 
 ```bash
 git add apps/keeprone-connect tests/fixtures/national-life

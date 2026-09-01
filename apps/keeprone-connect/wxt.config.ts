@@ -30,6 +30,7 @@ export default defineConfig({
     permissions: ['storage', 'tabs', 'alarms'],
     host_permissions: [
       'https://www.nationallife.com/*',
+      'https://nlg-prod.auth0.com/*',
       'https://pipepasstoigo.ipipeline.com/*',
       'https://federate.ipipeline.com/*',
       'https://igoforms2.ipipeline.com/*',
