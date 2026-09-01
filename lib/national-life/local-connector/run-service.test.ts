@@ -395,6 +395,51 @@ describe('local connector runs', () => {
     }))
   })
 
+  it('reopens an earning-detail retry at paid commissions when its prerequisite is incomplete', async () => {
+    const runUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const plan = [
+      'NEW_BUSINESS',
+      'RECENTLY_CLOSED',
+      'INFORCE_CLIENTS',
+      'PAID_COMMISSIONS',
+      'COMMISSIONS_EARNING_REPORT',
+      'CORRESPONDENCE',
+    ] as const
+    const db = {
+      nationalLifeSyncRun: {
+        create: vi.fn(),
+        updateMany: runUpdateMany,
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            id: 'run-incomplete-paid-commissions',
+            state: 'FAILED',
+            plannedGridKeys: [...plan],
+            completedStages: 3,
+            currentGridKey: 'COMMISSIONS_EARNING_REPORT',
+            stageCompletions: plan.slice(0, 3).map((gridKey) => ({ gridKey })),
+            stageFailures: [],
+          })
+          .mockResolvedValueOnce(null),
+      },
+      nationalLifeConnectorStageFailure: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      nationalLifeConnectorStageReceipt: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never
+
+    await expect(startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: plan },
+    )).resolves.toMatchObject({
+      runId: 'run-incomplete-paid-commissions',
+      nextStageIndex: 3,
+      completedStages: 3,
+    })
+    expect(runUpdateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      data: expect.objectContaining({ currentGridKey: 'PAID_COMMISSIONS' }),
+    }))
+  })
+
 
   it('resolves failures for a deprecated source when migrating a running plan', async () => {
     const failureUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
