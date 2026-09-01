@@ -127,11 +127,11 @@ describe('credential lease service', () => {
     ['agent outside allowlist', { allowAgent: false }, 'CREDENTIAL_AGENT_NOT_ALLOWED'],
     ['revoked device', { context: context({ device: { ...context().device!, status: 'REVOKED' } }) }, 'CREDENTIAL_DEVICE_NOT_ACTIVE'],
     ['wrong device owner', { context: context({ device: { ...context().device!, agentId: 'agent_2' } }) }, 'CREDENTIAL_DEVICE_NOT_ACTIVE'],
-    ['missing device key', { context: context({ device: { ...context().device!, encryptionPublicKeyJwk: null } }) }, 'CREDENTIAL_DEVICE_KEY_UNAVAILABLE'],
+    ['missing device key', { context: context({ device: { ...context().device!, encryptionPublicKeyJwk: null } }) }, 'DEVICE_ENCRYPTION_KEY_REQUIRED'],
     ['device key conflict', { context: context({ device: { ...context().device!, encryptionKeyThumbprint: 'different' } }) }, 'CREDENTIAL_DEVICE_KEY_CONFLICT'],
-    ['missing credential', { context: context({ credential: null }) }, 'CREDENTIAL_UNAVAILABLE'],
-    ['rejected credential', { context: context({ credential: { ...context().credential!, status: 'REJECTED' } }) }, 'CREDENTIAL_UNAVAILABLE'],
-    ['disabled credential', { context: context({ credential: { ...context().credential!, autoLoginEnabled: false } }) }, 'CREDENTIAL_UNAVAILABLE'],
+    ['missing credential', { context: context({ credential: null }) }, 'CREDENTIAL_NOT_CONFIGURED'],
+    ['rejected credential', { context: context({ credential: { ...context().credential!, status: 'REJECTED' } }) }, 'CREDENTIAL_AUTO_LOGIN_DISABLED'],
+    ['disabled credential', { context: context({ credential: { ...context().credential!, autoLoginEnabled: false } }) }, 'CREDENTIAL_AUTO_LOGIN_DISABLED'],
     ['wrong operation owner', { context: context({ operation: { ...context().operation!, agentId: 'agent_2' } }) }, 'CREDENTIAL_OPERATION_NOT_AUTH_REQUIRED'],
     ['wrong operation device', { context: context({ operation: { ...context().operation!, deviceId: 'device_2' } }) }, 'CREDENTIAL_OPERATION_NOT_AUTH_REQUIRED'],
     ['operation not running', { context: context({ operation: { ...context().operation!, state: 'FAILED' } }) }, 'CREDENTIAL_OPERATION_NOT_AUTH_REQUIRED'],
@@ -280,7 +280,7 @@ describe('credential lease service', () => {
 
     expect(credentialUpdate).not.toHaveBeenCalled()
     expect(notificationUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { dedupeKey: 'national-life-mfa-required:SYNC_RUN:run_1:1' },
+      where: { dedupeKey: 'national-life-mfa-required:run_1:1' },
       create: expect.objectContaining({
         recipientUserId: 'user_1', type: 'NATIONAL_LIFE_MFA_REQUIRED',
       }),

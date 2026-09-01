@@ -907,7 +907,7 @@ git commit -m "feat(kbot): add exact National Life login executor"
 - Produces: `attemptAutomaticCarrierLogin()` and persisted non-secret auth-attempt metadata.
 - Existing sync/command resume functions remain the only continuation path after authenticated proof.
 
-- [ ] **Step 1: Write the background state-machine tests**
+- [x] **Step 1: Write the background state-machine tests**
 
 Add tests for:
 
@@ -928,7 +928,7 @@ Add tests for:
 9. `chrome.storage.local` records contain operation id, auth epoch, lease id and
    attempted timestamp only; no envelope or credential marker.
 
-- [ ] **Step 2: Extend signed-client safe errors without adding generic retry**
+- [x] **Step 2: Extend signed-client safe errors without adding generic retry**
 
 Add safe codes:
 
@@ -945,7 +945,7 @@ Credential lease creation must call `signedJsonRequest` directly once. It must
 not call `retryIdempotentSignedRequest`, because an ambiguous response may mean
 the one-time lease was already issued.
 
-- [ ] **Step 3: Persist only non-secret auth-attempt state**
+- [x] **Step 3: Persist only non-secret auth-attempt state**
 
 Extend sync and command state with:
 
@@ -963,7 +963,7 @@ Parsers reject `username`, `password`, `wrappedKey`, `ciphertext` and `iv` at
 every nested level. Clear attempt metadata only after `RESTORED` or terminal
 operation completion; retaining it through worker eviction enforces no retry.
 
-- [ ] **Step 4: Implement `attemptAutomaticCarrierLogin()`**
+- [x] **Step 4: Implement `attemptAutomaticCarrierLogin()`**
 
 The function order is fixed:
 
@@ -981,7 +981,7 @@ The function order is fixed:
 Do not add a background login loop. The existing `resumePending()` remains
 passive while auth is pending.
 
-- [ ] **Step 5: Add distinct MFA notifications and user copy**
+- [x] **Step 5: Add distinct MFA notifications and user copy**
 
 `auth-state` accepts strict `REQUIRED | MFA_REQUIRED | RESTORED`. Use a
 deduplicated `NATIONAL_LIFE_MFA_REQUIRED` notification with text explaining that
@@ -996,14 +996,14 @@ Popup copy distinguishes:
 - broker unavailable, using manual login;
 - ordinary manual login when no credential is configured.
 
-- [ ] **Step 6: Run focused integration tests**
+- [x] **Step 6: Run focused integration tests**
 
 ```bash
 pnpm --filter @fyntra/keeprone-connect test -- background.test.ts state.test.ts signed-client.test.ts popup-copy.test.ts
 pnpm vitest run 'app/api/agent/integrations/national-life/local-connector/runs/[runId]/auth-state/route.test.ts' lib/national-life/local-connector/auth-notification-service.test.ts
 ```
 
-- [ ] **Step 7: Commit the K-Bot integration**
+- [x] **Step 7: Commit the K-Bot integration**
 
 ```bash
 git add apps/keeprone-connect app/api/agent/integrations/national-life/local-connector/runs lib/national-life/local-connector/auth-notification-service.ts lib/national-life/local-connector/auth-notification-service.test.ts

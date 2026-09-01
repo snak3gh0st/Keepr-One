@@ -116,9 +116,10 @@ export type CredentialLeaseErrorCode =
   | 'CREDENTIAL_FEATURE_DISABLED'
   | 'CREDENTIAL_AGENT_NOT_ALLOWED'
   | 'CREDENTIAL_DEVICE_NOT_ACTIVE'
-  | 'CREDENTIAL_DEVICE_KEY_UNAVAILABLE'
+  | 'DEVICE_ENCRYPTION_KEY_REQUIRED'
   | 'CREDENTIAL_DEVICE_KEY_CONFLICT'
-  | 'CREDENTIAL_UNAVAILABLE'
+  | 'CREDENTIAL_NOT_CONFIGURED'
+  | 'CREDENTIAL_AUTO_LOGIN_DISABLED'
   | 'CREDENTIAL_OPERATION_NOT_AUTH_REQUIRED'
   | 'CREDENTIAL_AUTH_STATE_EXPIRED'
   | 'CREDENTIAL_PAGE_NOT_APPROVED'
@@ -172,13 +173,13 @@ function validateDevice(context: CredentialLeaseContext, input: { agentId: strin
     device.status !== 'ACTIVE' || device.revokedAt
   ) throw new CredentialLeaseError('CREDENTIAL_DEVICE_NOT_ACTIVE')
   if (!device.encryptionPublicKeyJwk || !device.encryptionKeyThumbprint) {
-    throw new CredentialLeaseError('CREDENTIAL_DEVICE_KEY_UNAVAILABLE')
+    throw new CredentialLeaseError('DEVICE_ENCRYPTION_KEY_REQUIRED')
   }
   let thumbprint: string
   try {
     thumbprint = credentialEncryptionKeyThumbprint(device.encryptionPublicKeyJwk as JsonWebKey)
   } catch {
-    throw new CredentialLeaseError('CREDENTIAL_DEVICE_KEY_UNAVAILABLE')
+    throw new CredentialLeaseError('DEVICE_ENCRYPTION_KEY_REQUIRED')
   }
   if (thumbprint !== device.encryptionKeyThumbprint) {
     throw new CredentialLeaseError('CREDENTIAL_DEVICE_KEY_CONFLICT')
@@ -188,14 +189,16 @@ function validateDevice(context: CredentialLeaseContext, input: { agentId: strin
 
 function validateCredential(context: CredentialLeaseContext, agentId: string) {
   const credential = context.credential
+  if (!credential || credential.agentId !== agentId || credential.provider !== 'NATIONAL_LIFE') {
+    throw new CredentialLeaseError('CREDENTIAL_NOT_CONFIGURED')
+  }
   if (
-    !credential || credential.agentId !== agentId || credential.provider !== 'NATIONAL_LIFE' ||
     credential.encryptionProvider !== 'VAULT_TRANSIT' || credential.formatVersion !== 1 ||
     !credential.keyVersion || !/^v[1-9][0-9]*$/.test(credential.keyVersion) ||
     !credential.encryptedPayload || !/^vault:v[1-9][0-9]*:[A-Za-z0-9+/=_-]+$/.test(credential.encryptedPayload) ||
     !credential.autoLoginEnabled ||
     !['UNTESTED', 'READY'].includes(credential.status) || credential.revokedAt
-  ) throw new CredentialLeaseError('CREDENTIAL_UNAVAILABLE')
+  ) throw new CredentialLeaseError('CREDENTIAL_AUTO_LOGIN_DISABLED')
   return credential
 }
 
@@ -529,7 +532,9 @@ export function createPrismaCredentialLeasePersistence(
             },
             data: { lastLeasedAt: input.lastLeasedAt },
           })
-          if (credential.count !== 1) throw new CredentialLeaseError('CREDENTIAL_UNAVAILABLE')
+          if (credential.count !== 1) {
+            throw new CredentialLeaseError('CREDENTIAL_AUTO_LOGIN_DISABLED')
+          }
         })
         return true
       } catch (error) {
@@ -614,7 +619,11 @@ export function createPrismaCredentialLeasePersistence(
             },
           })
         } else if (input.outcome === 'MFA_REQUIRED') {
-          const dedupeKey = `national-life-mfa-required:${lease.operationKind}:${lease.operationId}:${lease.authEpoch}`
+          // Sync auth-state uses the same key, so the lease result and the run
+          // transition converge on one notification instead of creating two.
+          const dedupeKey = lease.operationKind === 'SYNC_RUN'
+            ? `national-life-mfa-required:${lease.operationId}:${lease.authEpoch}`
+            : `national-life-mfa-required:${lease.operationKind}:${lease.operationId}:${lease.authEpoch}`
           await transaction.notification.upsert({
             where: { dedupeKey },
             create: {

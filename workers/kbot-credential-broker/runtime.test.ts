@@ -83,6 +83,9 @@ describe('K-Bot credential broker runtime', () => {
     for (const [error, status] of [
       [new CredentialLeaseError('CREDENTIAL_PAGE_NOT_APPROVED'), 400],
       [new CredentialLeaseError('CREDENTIAL_LEASE_ALREADY_ISSUED'), 409],
+      [new CredentialLeaseError('CREDENTIAL_NOT_CONFIGURED'), 409],
+      [new CredentialLeaseError('CREDENTIAL_AUTO_LOGIN_DISABLED'), 409],
+      [new CredentialLeaseError('DEVICE_ENCRYPTION_KEY_REQUIRED'), 409],
       [new CredentialLeaseError('CREDENTIAL_RATE_LIMITED', 37), 429],
       [new CredentialLeaseError('CREDENTIAL_LIMIT_UNAVAILABLE'), 503],
     ] as const) {

@@ -20,6 +20,16 @@ export type DeviceState = {
   status: ConnectorStatus
 }
 
+export type CredentialAttempt = {
+  operationKind: 'SYNC_RUN' | 'CONNECTOR_COMMAND'
+  operationId: string
+  /// Zero is a pre-request marker. The broker-authoritative epoch replaces it
+  /// only after the one-shot response arrives.
+  authEpoch: number
+  leaseId?: string
+  attemptedAt: string
+}
+
 export type SyncState = {
   runId?: string
   /// Id da aba criada e mantida pelo conector. Nunca é inferido de uma aba do
@@ -60,6 +70,7 @@ export type SyncState = {
   /// True only while the carrier asks the agent to renew the browser session.
   /// No credential, cookie or MFA material is ever stored here.
   authRenewalPending?: boolean
+  credentialAttempt?: CredentialAttempt
   status: SyncStatus
   errorCode?: string
   /// Contador monotônico de lotes enviados neste run. Existe porque `status` e
@@ -100,6 +111,7 @@ export type CommandState = {
   /// Fine-grained, non-sensitive progress for the active official illustration.
   /// It is presentation state only; command events remain the audit authority.
   phase?: CommandProgressPhase
+  credentialAttempt?: CredentialAttempt
 }
 
 const COMMAND_STATUSES = [
@@ -120,6 +132,42 @@ function boundedString(value: unknown, max = 240): value is string {
     !/[\u0000-\u001f\u007f]/.test(value)
 }
 
+const FORBIDDEN_STORAGE_KEYS = new Set([
+  'username', 'password', 'wrappedkey', 'ciphertext', 'iv',
+])
+
+function containsForbiddenStorageKey(value: unknown, seen = new WeakSet<object>()): boolean {
+  if (!value || typeof value !== 'object') return false
+  if (seen.has(value)) return false
+  seen.add(value)
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsForbiddenStorageKey(entry, seen))
+  }
+  return Object.entries(value as Record<string, unknown>).some(([key, entry]) =>
+    FORBIDDEN_STORAGE_KEYS.has(key.toLowerCase()) || containsForbiddenStorageKey(entry, seen))
+}
+
+export function parseCredentialAttempt(value: unknown): CredentialAttempt | undefined {
+  if (!isRecord(value) || containsForbiddenStorageKey(value)) return undefined
+  const keys = Object.keys(value).sort()
+  const allowed = ['attemptedAt', 'authEpoch', 'leaseId', 'operationId', 'operationKind']
+  if (keys.some((key) => !allowed.includes(key))) return undefined
+  if (
+    (value.operationKind !== 'SYNC_RUN' && value.operationKind !== 'CONNECTOR_COMMAND') ||
+    !boundedString(value.operationId, 128) ||
+    !Number.isInteger(value.authEpoch) || Number(value.authEpoch) < 0 ||
+    typeof value.attemptedAt !== 'string' || !Number.isFinite(Date.parse(value.attemptedAt)) ||
+    (value.leaseId !== undefined && !boundedString(value.leaseId, 128))
+  ) return undefined
+  return {
+    operationKind: value.operationKind,
+    operationId: value.operationId,
+    authEpoch: Number(value.authEpoch),
+    ...(value.leaseId === undefined ? {} : { leaseId: value.leaseId }),
+    attemptedAt: value.attemptedAt,
+  }
+}
+
 function parseCommandProgressPhase(value: unknown): CommandProgressPhase | undefined {
   return parseForesightProgressPhase(value) ??
     (typeof value === 'string' && (IGO_COMMAND_PHASES as readonly string[]).includes(value)
@@ -132,7 +180,8 @@ function parseCommandProgressPhase(value: unknown): CommandProgressPhase | undef
 /// new engine to the wrong tab or leave the popup in an impossible state.
 export function parseCommandState(value: unknown): CommandState {
   if (!isRecord(value) || typeof value.status !== 'string' ||
-    !(COMMAND_STATUSES as readonly string[]).includes(value.status)) {
+    !(COMMAND_STATUSES as readonly string[]).includes(value.status) ||
+    containsForbiddenStorageKey(value)) {
     return { status: 'IDLE' }
   }
 
@@ -153,6 +202,27 @@ export function parseCommandState(value: unknown): CommandState {
   }
   const phase = parseCommandProgressPhase(value.phase)
   if (phase) state.phase = phase
+  const credentialAttempt = parseCredentialAttempt(value.credentialAttempt)
+  if (credentialAttempt) state.credentialAttempt = credentialAttempt
+  return state
+}
+
+const SYNC_STATUSES = [
+  'IDLE', 'STARTING', 'NAVIGATING', 'EXTRACTING', 'UPLOADING', 'AUTH_REQUIRED',
+  'COMPLETED', 'PARTIAL', 'ERROR',
+] as const satisfies readonly SyncStatus[]
+
+/// Sync state has a large, independently validated stage/checkpoint surface.
+/// Preserve that compatibility shape while applying a fail-closed secret gate
+/// and a strict parser to the only new nested authentication metadata.
+export function parseSyncState(value: unknown): SyncState {
+  if (!isRecord(value) || typeof value.status !== 'string' ||
+    !(SYNC_STATUSES as readonly string[]).includes(value.status) ||
+    containsForbiddenStorageKey(value)) return { status: 'IDLE' }
+  const state = { ...value } as SyncState
+  delete state.credentialAttempt
+  const credentialAttempt = parseCredentialAttempt(value.credentialAttempt)
+  if (credentialAttempt) state.credentialAttempt = credentialAttempt
   return state
 }
 
@@ -184,12 +254,11 @@ export async function writeDeviceState(value: DeviceState): Promise<void> {
 
 export async function readSyncState(): Promise<SyncState> {
   const result = await chrome.storage.local.get(SYNC_KEY)
-  const value = result[SYNC_KEY] as SyncState | undefined
-  return value ?? { status: 'IDLE' }
+  return parseSyncState(result[SYNC_KEY])
 }
 
 export async function writeSyncState(value: SyncState): Promise<void> {
-  await chrome.storage.local.set({ [SYNC_KEY]: value })
+  await chrome.storage.local.set({ [SYNC_KEY]: parseSyncState(value) })
 }
 
 export async function readCommandState(): Promise<CommandState> {
@@ -198,5 +267,5 @@ export async function readCommandState(): Promise<CommandState> {
 }
 
 export async function writeCommandState(value: CommandState): Promise<void> {
-  await chrome.storage.local.set({ [COMMAND_KEY]: value })
+  await chrome.storage.local.set({ [COMMAND_KEY]: parseCommandState(value) })
 }

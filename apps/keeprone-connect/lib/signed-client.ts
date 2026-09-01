@@ -65,12 +65,53 @@ export class SignedRequestError extends Error {
       | 'FORESIGHT_TERM_PDF_INVALID'
       | 'FORESIGHT_TERM_PREMIUM_MISSING'
       | 'FORESIGHT_TERM_PREMIUM_MISMATCH'
-      | 'DEVICE_ENCRYPTION_KEY_CONFLICT',
+      | 'DEVICE_ENCRYPTION_KEY_CONFLICT'
+      | 'CREDENTIAL_NOT_CONFIGURED'
+      | 'CREDENTIAL_AUTO_LOGIN_DISABLED'
+      | 'CREDENTIAL_LEASE_ALREADY_ISSUED'
+      | 'CREDENTIAL_BROKER_UNAVAILABLE'
+      | 'CREDENTIAL_RATE_LIMITED'
+      | 'DEVICE_ENCRYPTION_KEY_REQUIRED',
     readonly status?: number,
     readonly retryAfterSeconds?: number,
   ) {
     super(code)
   }
+}
+
+const SAFE_CREDENTIAL_FAILURES = [
+  'CREDENTIAL_NOT_CONFIGURED',
+  'CREDENTIAL_AUTO_LOGIN_DISABLED',
+  'CREDENTIAL_LEASE_ALREADY_ISSUED',
+  'CREDENTIAL_BROKER_UNAVAILABLE',
+  'CREDENTIAL_RATE_LIMITED',
+  'DEVICE_ENCRYPTION_KEY_REQUIRED',
+] as const
+
+type SafeCredentialFailure = typeof SAFE_CREDENTIAL_FAILURES[number]
+
+async function responseErrorValue(response: Response): Promise<unknown> {
+  try {
+    const payload = (await response.clone().json()) as { error?: unknown }
+    return payload?.error
+  } catch {
+    return undefined
+  }
+}
+
+export async function responseFailureCode(response: Response): Promise<
+  SignedRequestError['code']
+> {
+  const error = await responseErrorValue(response)
+  if ((SAFE_CREDENTIAL_FAILURES as readonly unknown[]).includes(error)) {
+    return error as SafeCredentialFailure
+  }
+  if (response.status === 409) {
+    if (error === 'STAGE_INCOMPLETE' || error === 'STAGE_TRUNCATED' ||
+      error === 'DEVICE_ENCRYPTION_KEY_CONFLICT') return error
+    return 'IDEMPOTENCY_CONFLICT'
+  }
+  return classifyFailedResponse(response.status, response.headers)
 }
 
 export function termReconciliationFailure(response: Response): Promise<
@@ -198,28 +239,11 @@ export async function signedJsonRequest<T>(input: {
     cache: 'no-store',
     redirect: 'error',
   })
-  if (response.status === 409) {
-    let conflictCode: unknown
-    try {
-      const payload = (await response.clone().json()) as { error?: unknown }
-      conflictCode = payload.error
-    } catch {
-      // Some 409 responses have no JSON body. Preserve the old idempotency
-      // fallback for those responses.
-    }
-    if (conflictCode === 'STAGE_INCOMPLETE' || conflictCode === 'STAGE_TRUNCATED') {
-      throw new SignedRequestError(conflictCode)
-    }
-    if (conflictCode === 'DEVICE_ENCRYPTION_KEY_CONFLICT') {
-      throw new SignedRequestError('DEVICE_ENCRYPTION_KEY_CONFLICT')
-    }
-    throw new SignedRequestError('IDEMPOTENCY_CONFLICT')
-  }
   if (!response.ok) {
     const retryAfter = Number.parseInt(response.headers.get('retry-after') ?? '', 10)
     const reconciliationCode = await termReconciliationFailure(response)
     throw new SignedRequestError(
-      reconciliationCode ?? classifyFailedResponse(response.status, response.headers),
+      reconciliationCode ?? await responseFailureCode(response),
       response.status,
       Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
     )

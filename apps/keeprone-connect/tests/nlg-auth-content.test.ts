@@ -11,6 +11,15 @@ function loginPage() {
 }
 
 describe('isolated National Life auth content script', () => {
+  it('returns only the safe page classification for an exact private probe', () => {
+    const page = loginPage()
+    expect(handleNationalLifeAuthCredentialMessage(
+      { type: 'CLASSIFY_CARRIER_AUTH_PAGE' },
+      page.window.document,
+      page.window.location.href,
+    )).toEqual({ ok: true, code: 'LOGIN' })
+  })
+
   it('accepts only its private exact message and returns a redacted acknowledgement', () => {
     const page = loginPage()
     page.window.document.querySelector('#btn-login')?.addEventListener('click', (event) => {
