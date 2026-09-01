@@ -150,6 +150,7 @@ const tabQueues = new Map<number, Promise<void>>()
 /// processada agora. `tabQueues` sozinho não distingue "uma mensagem, que sou eu"
 /// de "uma mensagem minha e outras esperando".
 const pendingBridgeMessages = new Map<number, number>()
+const carrierAuthenticationQueues = new Map<number, Promise<void>>()
 let syncStartLock: Promise<unknown> | null = null
 let tabNavigationLock: Promise<unknown> | null = null
 let commandPollLock: Promise<unknown> | null = null
@@ -530,6 +531,7 @@ async function unpairConnector() {
   }
   activeDocuments.clear()
   tabQueues.clear()
+  carrierAuthenticationQueues.clear()
   await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
   await chrome.alarms.clear(SCHEDULED_SYNC_ALARM)
   await chrome.alarms.clear(COMMAND_POLL_ALARM)
@@ -1835,9 +1837,19 @@ async function attemptAutomaticCarrierLogin(
 }
 
 async function handleCarrierAuthenticationPage(tabId: number, url: URL) {
-  const operation = await credentialOperationForTab(tabId)
-  if (!operation) return
-  await attemptAutomaticCarrierLogin(operation, url)
+  const previous = carrierAuthenticationQueues.get(tabId) ?? Promise.resolve()
+  const next = previous.catch(() => undefined).then(async () => {
+    const operation = await credentialOperationForTab(tabId)
+    if (!operation) return
+    await attemptAutomaticCarrierLogin(operation, url)
+  })
+  const queued = next.finally(() => {
+    if (carrierAuthenticationQueues.get(tabId) === queued) {
+      carrierAuthenticationQueues.delete(tabId)
+    }
+  })
+  carrierAuthenticationQueues.set(tabId, queued)
+  await queued
 }
 
 async function resolveCommandCredentialIfAuthenticated(tabId: number, rawUrl?: string) {
@@ -1902,6 +1914,7 @@ async function forgetRevokedDevice() {
   await writeDeviceState({ baseUrl: device.baseUrl, status: 'UNPAIRED' })
   activeNavigations.clear()
   tabQueues.clear()
+  carrierAuthenticationQueues.clear()
 }
 
 /// Único caminho de falha do sync. Grava o motivo, tenta avisar o servidor e só
@@ -3422,7 +3435,20 @@ export default defineBackground(() => {
         sendResponse({ ok: false, error: 'INVALID_AUTH_READY' })
         return
       }
-      respond(sendResponse, handleTabReady(sender.tab.id, sender.url).then(() => ({ ok: true as const })))
+      respond(sendResponse, (async () => {
+        // Auth0 can finish loading after tabs.onUpdated. Sync already resumes
+        // through handleTabReady; commands do not, so wake that path only when
+        // this tab is the currently paused command.
+        await handleTabReady(sender.tab.id, sender.url)
+        const command = await readCommandState()
+        if (
+          command.carrierTabId === sender.tab.id &&
+          (command.status === 'AUTH_REQUIRED' || command.status === 'MFA_REQUIRED')
+        ) {
+          await handleCarrierAuthenticationPage(sender.tab.id, url)
+        }
+        return { ok: true as const }
+      })())
       return true
     }
     if (type === 'FORESIGHT_PROGRESS' && Object.keys(value).length === 2) {
@@ -3526,6 +3552,7 @@ export default defineBackground(() => {
     settleDocument(tabId, { ok: false, error: 'CONNECTOR_TAB_CLOSED' })
     activeNavigations.delete(tabId)
     tabQueues.delete(tabId)
+    carrierAuthenticationQueues.delete(tabId)
     tabReadyLocks.delete(tabId)
     // A visible Chrome tab is not a disposable implementation detail. The agent
     // closing it is an explicit stop signal, not permission to keep reopening

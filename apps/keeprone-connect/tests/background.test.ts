@@ -563,6 +563,38 @@ describe('automatic carrier login recovery', () => {
     expect(readyResponse).toHaveBeenCalledWith({ ok: true })
   })
 
+  it('retries a command login once when Auth0 reports readiness, even if it signals twice', async () => {
+    storage.command = {
+      commandId: 'cmd-1', runId: 'command-run-1', carrierTabId: 7,
+      status: 'AUTH_REQUIRED', nextEventSequence: 3,
+    }
+    const commandSealed = {
+      ...sealed,
+      operation: { kind: 'CONNECTOR_COMMAND' as const, id: 'cmd-1', authEpoch: 3 },
+    }
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/credential-leases')) return commandSealed as never
+      return {} as never
+    })
+    await bootBackground()
+
+    for (const respond of [vi.fn(), vi.fn()]) {
+      emit(
+        'runtime.onMessage',
+        { type: 'CARRIER_AUTH_PAGE_READY' },
+        { id: chromeStub.runtime.id, tab: { id: 7 }, url: authUrl },
+        respond,
+      )
+    }
+    await flush()
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(1)
+    expect(tabs.sendMessage.mock.calls.filter(([, message]) =>
+      (message as { type?: string }).type === 'SUBMIT_CARRIER_CREDENTIAL')).toHaveLength(1)
+  })
+
   it('closes an issued lease as unknown when the exact login submit cannot be completed', async () => {
     storage.sync = {
       runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
