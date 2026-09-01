@@ -771,7 +771,7 @@ export function NationalLifeLocalConnectorCard({
           </span>
         </div>
         <p className="mt-6 max-w-2xl text-sm leading-6 text-ink-muted">
-          K-Bot operates the approved National Life steps in your browser session. Your password never passes through Keepr One.
+          K-Bot operates the approved National Life steps in your browser session. By default, you sign in directly on National Life. If you opt in under Settings, Keepr One protects your credential for one K-Bot login attempt when that session expires.
           {installMode === 'pilot'
             ? ' In this pilot, load the unpacked extension using the ID configured for this environment.'
             : null}
