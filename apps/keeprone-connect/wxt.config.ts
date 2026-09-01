@@ -1,11 +1,13 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'wxt'
-import { normalizeManifestKey } from './lib/manifest-key'
+import { extensionIdFromManifestKey, normalizeManifestKey } from './lib/manifest-key'
 
 const keeprOrigin = new URL(process.env.WXT_KEEPR_ORIGIN ?? 'https://app.keeprone.com').origin
+const officialKeeprOrigin = 'https://app.keeprone.com'
+const officialExtensionId = 'anfhdbmapiohhbplmccimflcenijfnoi'
 const localhostOrigin = 'http://localhost:3000'
-if (!['https://app.keeprone.com', localhostOrigin].includes(keeprOrigin)) {
+if (![officialKeeprOrigin, localhostOrigin].includes(keeprOrigin)) {
   throw new Error('WXT_KEEPR_ORIGIN must be Keepr production or localhost')
 }
 // Chrome match patterns do not include ports. Keep the exact origin (including
@@ -18,6 +20,16 @@ const manifestKey = existsSync(manifestKeyPath)
   ? normalizeManifestKey(readFileSync(manifestKeyPath, 'utf8'))
   : undefined
 const isChromeWebStoreBuild = process.env.WXT_CHROME_WEB_STORE === 'true'
+if (
+  !isChromeWebStoreBuild &&
+  keeprOrigin === officialKeeprOrigin &&
+  manifestKey &&
+  extensionIdFromManifestKey(manifestKey) !== officialExtensionId
+) {
+  throw new Error(
+    `The unpacked production build must use the official K-Bot extension identity ${officialExtensionId}`,
+  )
+}
 
 export default defineConfig({
   manifest: {
