@@ -84,6 +84,52 @@ describe('KBotAvatar', () => {
     expect(screen.queryByText(/chat|message/i)).not.toBeInTheDocument()
   })
 
+  it('offers the three safe K-Bot task entry points when idle', async () => {
+    render(
+      <KBotCornerPresence
+        state="idle"
+        title="K-Bot is ready"
+        detail="Choose what you want me to do."
+        quickActions={[
+          { href: '/sync', badge: 'NL', label: 'Sync National Life', detail: 'Update carrier data' },
+          { href: '/illustrations/new', badge: 'PDF', label: 'Create Illustration', detail: 'Term or IUL' },
+          { href: '/cases?intent=application', badge: 'iGO', label: 'Create Application in iGO', detail: 'Choose a case first' },
+        ]}
+      />,
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: 'View K-Bot activity' }))
+
+    expect(screen.getByRole('navigation', { name: 'K-Bot actions' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Sync National Life/i })).toHaveAttribute('href', '/sync')
+    expect(screen.getByRole('link', { name: /Create Illustration/i })).toHaveAttribute('href', '/illustrations/new')
+    expect(screen.getByRole('link', { name: /Create Application in iGO/i })).toHaveAttribute(
+      'href',
+      '/cases?intent=application',
+    )
+  })
+
+  it('moves focus into the task launcher and returns it on Escape', async () => {
+    render(
+      <KBotCornerPresence
+        state="idle"
+        title="K-Bot is ready"
+        quickActions={[
+          { href: '/sync', badge: 'NL', label: 'Sync National Life', detail: 'Update carrier data' },
+        ]}
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'View K-Bot activity' })
+    await userEvent.click(trigger)
+
+    expect(screen.getByRole('link', { name: /Sync National Life/i })).toHaveFocus()
+    await userEvent.keyboard('{Escape}')
+
+    expect(screen.queryByLabelText('K-Bot activity panel')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
   it('anchors a temporary update beside the avatar', () => {
     render(
       <KBotCornerPresence

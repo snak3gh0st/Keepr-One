@@ -32,7 +32,7 @@ const PRODUCT_OPTIONS = [
   { value: "IUL", label: "IUL (Indexed Universal Life)" },
 ];
 
-export function NewCaseForm() {
+export function NewCaseForm({ applicationIntent = false }: { applicationIntent?: boolean }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -43,7 +43,7 @@ export function NewCaseForm() {
 
     const result = await createInsuranceCase(formData);
     if (result.ok) {
-      router.push(`/agent/cases/${result.caseId}`);
+      router.push(`/agent/cases/${result.caseId}${applicationIntent ? "#application" : ""}`);
       return;
     }
     setMessage(result.message);
