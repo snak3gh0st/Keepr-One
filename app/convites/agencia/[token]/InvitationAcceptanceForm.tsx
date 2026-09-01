@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useActionState, useState } from 'react'
+import { useActionState, useEffect, useState } from 'react'
 import { useFormStatus } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
@@ -36,9 +36,11 @@ const invitationDiscount = formatPlanPrice(AGENCY_INVITATION_DISCOUNT_CENTS)
 function SubmitButton({
   disabled,
   fixedAccess,
+  simulationEnabled,
 }: {
   disabled: boolean
   fixedAccess: boolean
+  simulationEnabled: boolean
 }) {
   const { pending } = useFormStatus()
   return (
@@ -48,7 +50,9 @@ function SubmitButton({
       className="inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-[#0b0c0b] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#1a1c1a] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#65e497]/25 disabled:cursor-not-allowed disabled:opacity-45"
     >
       {pending
-        ? 'Confirmando convite…'
+        ? simulationEnabled ? 'Confirmando convite…' : 'Abrindo checkout seguro…'
+        : !simulationEnabled
+          ? 'Continuar para pagamento seguro'
         : fixedAccess
           ? 'Confirmar acesso e entrar na estrutura'
           : 'Confirmar plano e entrar na estrutura'}
@@ -134,6 +138,12 @@ export function InvitationAcceptanceForm({
     next: returnPath,
   }).toString()}`
 
+  useEffect(() => {
+    if (state.status === 'checkout' && state.nextUrl) {
+      window.location.assign(state.nextUrl)
+    }
+  }, [state.nextUrl, state.status])
+
   if (accountGate === 'SIGN_IN') {
     return (
       <div className="rounded-xl border border-black/10 bg-white p-5">
@@ -169,6 +179,19 @@ export function InvitationAcceptanceForm({
             {state.createdAccount ? 'Entrar com a conta criada' : 'Abrir minha área'}
           </Link>
         ) : null}
+      </div>
+    )
+  }
+
+  if (state.status === 'checkout' && state.nextUrl) {
+    return (
+      <div role="status" className="rounded-xl border border-[#18864b]/25 bg-[#edfdf3] p-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#08733e]">Checkout preparado</p>
+        <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-[#101512]">Abrindo o pagamento seguro.</h2>
+        <p className="mt-3 text-sm leading-6 text-[#3c4a41]">{state.message}</p>
+        <a href={state.nextUrl} className="mt-5 inline-flex min-h-11 items-center rounded-xl bg-[#101512] px-4 text-sm font-semibold text-white">
+          Continuar para a Stripe
+        </a>
       </div>
     )
   }
@@ -342,7 +365,7 @@ export function InvitationAcceptanceForm({
       <div className="rounded-xl border border-[#a15c00]/20 bg-[#fff8e8] px-4 py-3 text-xs leading-5 text-[#704000]">
         {simulationEnabled
           ? 'Ambiente local de demonstração: o plano ficará ativo por 30 dias sem cobrança real. Em produção, a ativação dependerá da confirmação do provedor de pagamento.'
-          : 'A ativação está indisponível: não há um provedor de pagamento confirmado neste ambiente. Nenhuma alteração será realizada.'}
+          : 'Você será direcionado ao checkout seguro da Stripe. A conta e o vínculo só serão criados após a confirmação do pagamento.'}
       </div>
 
       {state.status === 'error' ? (
@@ -350,8 +373,9 @@ export function InvitationAcceptanceForm({
       ) : null}
 
       <SubmitButton
-        disabled={!simulationEnabled || plan === ''}
+        disabled={plan === ''}
         fixedAccess={Boolean(fixedPlan)}
+        simulationEnabled={simulationEnabled}
       />
     </form>
   )

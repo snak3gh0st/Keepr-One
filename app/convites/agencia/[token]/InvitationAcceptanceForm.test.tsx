@@ -115,22 +115,24 @@ describe('InvitationAcceptanceForm', () => {
     expect(screen.getByRole('button', { name: 'Confirmar acesso e entrar na estrutura' })).toBeEnabled()
   })
 
-  it('fails closed visually when local billing simulation is not enabled', () => {
+  it('offers secure Stripe payment when local billing simulation is not enabled', () => {
     render(
       <InvitationAcceptanceForm
         token={token}
         invitedEmail="invitee@example.com"
         accountGate="READY"
         ownedAgencyName={null}
-        allowedPlans={['AGENT_AGENCY_MEMBER', 'AGENCY']}
+        allowedPlans={['AGENT_AGENCY_MEMBER']}
+        intendedType="AGENT"
         monthlyPriceCents={4_990}
         planRestriction={null}
         simulationEnabled={false}
       />,
     )
 
-    expect(screen.getByRole('button', { name: 'Confirmar plano e entrar na estrutura' })).toBeDisabled()
-    expect(screen.getByText(/não há um provedor de pagamento confirmado/i)).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Continuar para pagamento seguro' })).toBeEnabled()
+    expect(screen.getByText(/checkout seguro da Stripe/i)).toBeVisible()
+    expect(screen.getByText(/conta e o vínculo só serão criados após a confirmação/i)).toBeVisible()
   })
 
   it('requires an existing invitee to authenticate and preserves the invitation return path', () => {

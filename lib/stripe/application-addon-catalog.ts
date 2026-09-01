@@ -4,7 +4,7 @@ export const K_BOT_APPLICATION_MONTHLY_CENTS = 1_299
 export const K_BOT_APPLICATION_TRIAL_DAYS = 14
 
 const DEFAULT_PRODUCT_ID = 'prod_VAdcDhsg3cIDLa'
-const DEFAULT_PRICE_ID = 'price_1UAILRGJWjOaP9iw7U9oIyes'
+const DEFAULT_PRICE_ID = 'price_1UAi6nGJWjOaP9iw9O7Vh6FC'
 
 function configuredId(name: string, fallback: string, prefix: string): string {
   const value = process.env[name]?.trim() || fallback
