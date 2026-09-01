@@ -553,7 +553,22 @@ describe("revokeAgencyInvitationAction", () => {
 
     expect(result).toEqual({ status: "success", message: "Convite revogado." });
     expect(mocks.invitationUpdateMany).toHaveBeenCalledWith({
-      where: { id: "invite-1", agencyId: "agency-1", status: "PENDING" },
+      where: {
+        id: "invite-1",
+        agencyId: "agency-1",
+        status: "PENDING",
+        OR: [
+          { checkout: { is: null } },
+          {
+            checkout: {
+              is: {
+                status: "PENDING",
+                checkoutExpiresAt: { lte: now },
+              },
+            },
+          },
+        ],
+      },
       data: { status: "REVOKED", revokedAt: now },
     });
     expect(mocks.auditCreate).toHaveBeenCalledWith({
@@ -607,6 +622,17 @@ describe("revokeAgencyInvitationAction", () => {
         agencyId: "agency-1",
         invitedByAgentId: "agent-member",
         status: "PENDING",
+        OR: [
+          { checkout: { is: null } },
+          {
+            checkout: {
+              is: {
+                status: "PENDING",
+                checkoutExpiresAt: { lte: now },
+              },
+            },
+          },
+        ],
       },
     }));
     expect(mocks.invitationUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -615,6 +641,17 @@ describe("revokeAgencyInvitationAction", () => {
         agencyId: "agency-1",
         invitedByAgentId: "agent-member",
         status: "PENDING",
+        OR: [
+          { checkout: { is: null } },
+          {
+            checkout: {
+              is: {
+                status: "PENDING",
+                checkoutExpiresAt: { lte: now },
+              },
+            },
+          },
+        ],
       },
     }));
   });

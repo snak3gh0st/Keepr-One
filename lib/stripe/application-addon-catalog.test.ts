@@ -9,7 +9,7 @@ describe('K-Bot Application Stripe catalog', () => {
   it('uses the live symbolic monthly price and 14-day trial', () => {
     expect(getKBotApplicationCatalog()).toEqual({
       productId: 'prod_VAdcDhsg3cIDLa',
-      priceId: 'price_1UAILRGJWjOaP9iw7U9oIyes',
+      priceId: 'price_1UAi6nGJWjOaP9iw9O7Vh6FC',
       unitAmountCents: 1_299,
       currency: 'usd',
       trialDays: 14,

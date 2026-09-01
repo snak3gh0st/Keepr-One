@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getStripeClient } from '@/lib/stripe/client'
 import { syncStripePlatformSubscription } from '@/lib/stripe/platform-subscription'
 import { syncStripeApplicationAddonSubscription } from '@/lib/stripe/application-addon-subscription'
+import { syncStripeAgencyInvitationSubscription } from '@/lib/stripe/agency-invitation-subscription'
 
 export const runtime = 'nodejs'
 
@@ -17,6 +18,10 @@ async function syncSubscription(stripeSubscriptionId: string): Promise<void> {
   const subscription = await getStripeClient().subscriptions.retrieve(stripeSubscriptionId)
   if (subscription.metadata.keeprOnePlatformAddonSubscriptionId) {
     await syncStripeApplicationAddonSubscription(stripeSubscriptionId)
+    return
+  }
+  if (subscription.metadata.keeprOneAgencyInvitationCheckoutId) {
+    await syncStripeAgencyInvitationSubscription(stripeSubscriptionId)
     return
   }
   await syncStripePlatformSubscription(stripeSubscriptionId)

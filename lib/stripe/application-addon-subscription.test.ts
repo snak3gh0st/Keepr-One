@@ -32,7 +32,7 @@ const providerSubscription = {
       current_period_start: 1_787_710_120,
       current_period_end: 1_790_388_120,
       price: {
-        id: 'price_1UAILRGJWjOaP9iw7U9oIyes',
+        id: 'price_1UAi6nGJWjOaP9iw9O7Vh6FC',
         active: true,
         livemode: true,
         product: 'prod_VAdcDhsg3cIDLa',
@@ -63,7 +63,7 @@ describe('K-Bot Application subscription reconciliation', () => {
         stripeCustomerId: 'cus_1',
         stripeSubscriptionId: 'sub_addon_1',
         stripeProductId: 'prod_VAdcDhsg3cIDLa',
-        stripePriceId: 'price_1UAILRGJWjOaP9iw7U9oIyes',
+        stripePriceId: 'price_1UAi6nGJWjOaP9iw9O7Vh6FC',
         unitAmountCents: 1_299,
         currency: 'USD',
       }),

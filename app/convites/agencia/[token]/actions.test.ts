@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => ({
   founderEnrollmentUpdate: vi.fn(),
   onboardingCreate: vi.fn(),
   auditCreate: vi.fn(),
+  createInvitationCheckout: vi.fn(),
+  providerSubscriptionFindFirst: vi.fn(),
 }))
 
 const transactionClient = {
@@ -72,9 +74,14 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('next/headers', () => ({ headers: mocks.headers }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 vi.mock('better-auth/crypto', () => ({ hashPassword: mocks.hashPassword }))
+vi.mock('@/lib/stripe/agency-invitation-checkout', () => ({
+  createStripeAgencyInvitationCheckout: mocks.createInvitationCheckout,
+}))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     agencyInvitation: { findUnique: mocks.invitationFindUnique },
+    agencyMembership: { findFirst: mocks.membershipFindFirst },
+    platformSubscription: { findFirst: mocks.providerSubscriptionFindFirst },
     user: { findFirst: mocks.userFindFirst },
     $transaction: mocks.transaction,
   },
@@ -277,6 +284,13 @@ beforeEach(() => {
   mocks.subscriptionFindFirst.mockImplementation(async ({ where }: {
     where: { agencyId?: string }
   }) => where.agencyId === 'parent-agency' ? { id: 'parent-agency-subscription' } : null)
+  mocks.subscriptionCreate.mockResolvedValue({ id: 'new-subscription' })
+  mocks.subscriptionUpdate.mockResolvedValue({ id: 'updated-subscription' })
+  mocks.createInvitationCheckout.mockResolvedValue({
+    checkoutId: 'invite-checkout-1',
+    checkoutUrl: 'https://checkout.stripe.com/c/pay/invitation-1',
+  })
+  mocks.providerSubscriptionFindFirst.mockResolvedValue(null)
   mocks.invitationUpdateMany.mockResolvedValue({ count: 1 })
   mocks.transaction.mockImplementation(async (callback: (tx: typeof transactionClient) => unknown) =>
     callback(transactionClient))
@@ -952,19 +966,61 @@ describe('acceptAgencyInvitationAction', () => {
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
-  it('fails closed before every database read or write in production', async () => {
+  it('opens Stripe Checkout in production without creating access before provider confirmation', async () => {
     vi.stubEnv('NODE_ENV', 'production')
     vi.stubEnv('ALLOW_LOCAL_BILLING_SIMULATION', 'true')
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://app.keeprone.com')
 
     const result = await acceptAgencyInvitationAction(
       INITIAL_AGENCY_INVITATION_ACCEPTANCE_STATE,
       form('AGENT_AGENCY_MEMBER'),
     )
 
-    expect(result.status).toBe('error')
-    expect(result.message).toContain('Nenhuma cobrança ou alteração foi realizada')
-    expect(mocks.invitationFindUnique).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      status: 'checkout',
+      message: 'Checkout seguro preparado. Você será direcionado para a Stripe.',
+      nextUrl: 'https://checkout.stripe.com/c/pay/invitation-1',
+      createdAccount: false,
+    })
+    expect(mocks.createInvitationCheckout).toHaveBeenCalledWith({
+      invitationId: 'invitation-1',
+      invitedEmail: 'invitee@example.com',
+      name: 'Maria Invitee',
+      agencyName: null,
+      passwordHash: 'hashed-password',
+      userId: null,
+      plan: 'AGENT_AGENCY_MEMBER',
+      inviterRole: 'OWNER',
+      unitAmountCents: 4_990,
+      acceptedTermsAt: now,
+      invitationExpiresAt: new Date('2026-09-09T12:00:00.000Z'),
+      origin: 'https://app.keeprone.com',
+      invitationToken: token,
+      stripeCustomerId: null,
+    })
     expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it('does not create a second provider subscription for an existing billed invitee', async () => {
+    const owner = existingOwner()
+    mocks.userFindFirst.mockResolvedValue(owner)
+    mocks.getSession.mockResolvedValue({ user: { id: owner.id, email: owner.email } })
+    mocks.providerSubscriptionFindFirst.mockResolvedValue({
+      id: 'current-provider-subscription',
+      stripeCustomerId: 'cus_existing',
+      stripeSubscriptionId: 'sub_existing',
+    })
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://app.keeprone.com')
+
+    const result = await acceptAgencyInvitationAction(
+      INITIAL_AGENCY_INVITATION_ACCEPTANCE_STATE,
+      form('AGENCY'),
+    )
+
+    expect(result.status).toBe('error')
+    expect(result.message).toContain('já possui uma assinatura vinculada à Stripe')
+    expect(mocks.createInvitationCheckout).not.toHaveBeenCalled()
   })
 
   it('fails closed when the inviter no longer has an active invitation authority', async () => {
