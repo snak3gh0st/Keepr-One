@@ -344,6 +344,12 @@ export async function startLocalConnectorRun(
       ? activePlan.indexOf('PAID_COMMISSIONS')
       : active.state === 'COMPLETED'
       ? activePlan.length
+      // A failed run can retain the last page it reached even when an earlier
+      // prerequisite did not complete. Its failure rows are resolved below for
+      // the retry, so resume at the first missing completion rather than skip
+      // that prerequisite by trusting the stale current-grid pointer.
+      : active.state === 'FAILED'
+        ? nextUnsettledStageIndex(activePlan, completedKeys, [])
       : active.state === 'PARTIAL' && firstFailedIndex !== undefined
         ? firstFailedIndex
         : currentIndex >= 0
