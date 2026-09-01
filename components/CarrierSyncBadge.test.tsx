@@ -242,6 +242,38 @@ describe('CarrierSyncBadge', () => {
     )
   })
 
+  it('explains that protected sign-in remains ready when this computer must be reconnected', async () => {
+    mocks.sendConnectorMessage.mockResolvedValue({
+      ok: true,
+      device: { status: 'UNPAIRED' },
+      sync: { status: 'IDLE' },
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        state: { kind: 'IN_SYNC' },
+        connector: {
+          enabled: true,
+          extensionTarget: 'abcdefghijklmnopabcdefghijklmnop',
+          autoLoginEnabled: true,
+        },
+      }),
+    })))
+
+    render(<CarrierSyncBadge />)
+
+    await screen.findByLabelText('K-Bot status')
+    await waitFor(() => expect(screen.getByLabelText('K-Bot status')).toHaveAttribute('data-state', 'waiting'))
+    const presence = screen.getByLabelText('K-Bot status')
+    expect(presence).toHaveTextContent('K-Bot needs this computer reconnected')
+    expect(presence).toHaveTextContent('Your protected National Life sign-in is ready')
+    await userEvent.click(screen.getByRole('button', { name: 'View K-Bot activity' }))
+    expect(screen.getByRole('link', { name: 'Reconnect K-Bot' })).toHaveAttribute(
+      'href',
+      '/agent/integrations/national-life',
+    )
+  })
+
   it('counts what is on its way, without offering an action', async () => {
     answerWith({ kind: 'WORKING', count: 2 })
     render(<CarrierSyncBadge />)

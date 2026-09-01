@@ -23,4 +23,18 @@ describe('illustration connector command status', () => {
     ], now)
     expect(status.get('ill_1')).toEqual({ state: 'FAILED', safeErrorCode: 'COMMAND_EXPIRED' })
   })
+
+  it('waits for K-Bot when a queued illustration has not been claimed by a browser', () => {
+    const unclaimed = {
+      state: 'QUEUED',
+      deviceId: null,
+      target: { kind: 'ILLUSTRATION', id: 'ill_unclaimed' },
+      safeErrorCode: null,
+      expiresAt: future,
+    }
+
+    expect(latestIllustrationCommandStatus([unclaimed], now).get('ill_unclaimed')).toEqual({
+      state: 'WAITING_FOR_KBOT',
+    })
+  })
 })

@@ -138,6 +138,8 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
       ? 'Conferência do PDF pendente'
     : commandStatus?.state === 'BLOCKED'
       ? 'Aguardando login'
+      : commandStatus?.state === 'WAITING_FOR_KBOT'
+        ? 'Aguardando K-Bot neste computador'
       : commandStatus?.state === 'FAILED'
         ? 'Revisão do cenário necessária'
         : commandStatus?.state === 'WORKING'
@@ -201,7 +203,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
         <ol className="relative mt-6 grid gap-3 border-t border-border-steel pt-5 sm:grid-cols-3" aria-label="Progresso da ilustração">
           {[
             ['Dados revisados', 'Cenário aprovado no Keepr One', 'complete'],
-            ['K-Bot no Foresight', foresightStep, resultVerified ? 'complete' : commandStatus?.state === 'WORKING' || commandStatus?.state === 'BLOCKED' ? 'current' : 'waiting'],
+            ['K-Bot no Foresight', foresightStep, resultVerified ? 'complete' : commandStatus?.state === 'WORKING' || commandStatus?.state === 'BLOCKED' || commandStatus?.state === 'WAITING_FOR_KBOT' ? 'current' : 'waiting'],
             ['PDF oficial', resultVerified ? 'Recebido e verificado' : documentReady ? 'Recebido; conferência pendente' : 'Aguardando a National Life', resultVerified ? 'complete' : 'waiting'],
           ].map(([title, detail, stepState], index) => (
             <li key={title as string} className="flex items-start gap-3">

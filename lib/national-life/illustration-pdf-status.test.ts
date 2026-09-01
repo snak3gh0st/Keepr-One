@@ -75,6 +75,19 @@ describe('latestPdfStatusByIllustration', () => {
 })
 
 describe('illustrationPdfMessage', () => {
+  it('does not call an unclaimed connector command a running Foresight render', () => {
+    const status = { state: 'WAITING_FOR_KBOT' } as never
+
+    expect(describeIllustrationDelivery({ documentReady: false, status })).toEqual({
+      eyebrow: 'K-Bot · conexão necessária',
+      title: 'Reconecte o K-Bot para iniciar',
+      detail: 'O pedido oficial está salvo. Reconecte o K-Bot neste computador para ele abrir o Foresight e continuar a mesma ilustração.',
+    })
+    expect(illustrationPdfMessage(status)).toBe(
+      'K-Bot está aguardando conexão neste computador para iniciar o mesmo pedido.',
+    )
+  })
+
   it('never presents an uploaded PDF as verified when its Term reconciliation failed', () => {
     expect(describeIllustrationDelivery({
       documentReady: true,
