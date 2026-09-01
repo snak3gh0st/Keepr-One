@@ -3406,6 +3406,25 @@ export default defineBackground(() => {
       return
     }
     const type = (value as { type: string }).type
+    if (type === 'CARRIER_AUTH_PAGE_READY' && Object.keys(value).length === 1) {
+      if (sender.id !== chrome.runtime.id || sender.tab?.id === undefined || !sender.url) {
+        sendResponse({ ok: false, error: 'INVALID_AUTH_READY' })
+        return
+      }
+      let url: URL
+      try {
+        url = new URL(sender.url)
+      } catch {
+        sendResponse({ ok: false, error: 'INVALID_AUTH_READY' })
+        return
+      }
+      if (url.origin !== NLG_AUTH0_ORIGIN || url.pathname !== '/login') {
+        sendResponse({ ok: false, error: 'INVALID_AUTH_READY' })
+        return
+      }
+      respond(sendResponse, handleTabReady(sender.tab.id, sender.url).then(() => ({ ok: true as const })))
+      return true
+    }
     if (type === 'FORESIGHT_PROGRESS' && Object.keys(value).length === 2) {
       const phase = parseForesightProgressPhase((value as { phase?: unknown }).phase)
       if (!phase || sender.tab?.id === undefined || !sender.url?.startsWith(`${NLG_ORIGIN}/NWI/`)) {

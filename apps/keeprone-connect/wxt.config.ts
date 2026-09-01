@@ -35,7 +35,7 @@ export default defineConfig({
   manifest: {
     name: 'K-Bot by KeeprOne',
     description: 'K-Bot sincroniza a National Life e cria ilustrações oficiais no seu navegador, com segurança.',
-    version: '0.1.57',
+    version: '0.1.58',
     // Chrome Web Store rejects the development-only key field. Keep it for
     // unpacked local builds so the smoke-test extension retains its stable ID.
     ...(!isChromeWebStoreBuild && manifestKey ? { key: manifestKey } : {}),

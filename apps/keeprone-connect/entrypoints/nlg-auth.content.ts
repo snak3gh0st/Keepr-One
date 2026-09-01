@@ -13,5 +13,12 @@ export default defineContentScript({
       sendResponse(handleNationalLifeAuthCredentialMessage(value, document, location.href))
       return false
     })
+    // `tabs.onUpdated(complete)` can fire before this document-idle script is
+    // listening. Signal readiness after registering the handler so a transient
+    // missed probe cannot strand an approved automatic-login episode.
+    void chrome.runtime.sendMessage({ type: 'CARRIER_AUTH_PAGE_READY' }).then(
+      () => {},
+      () => {},
+    )
   },
 })
