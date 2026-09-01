@@ -9,6 +9,7 @@ import {
 } from '@/lib/national-life/carrier-sync-state'
 import {
   KBotCornerPresence,
+  type KBotAction,
   type KBotActivityMode,
   type KBotState,
   type KBotTask,
@@ -57,6 +58,27 @@ type Notice = {
   href: string
   action: string
 }
+
+const K_BOT_QUICK_ACTIONS: KBotAction[] = [
+  {
+    href: '/agent/integrations/national-life',
+    badge: 'NL',
+    label: 'Sync National Life',
+    detail: 'Update your carrier data in this browser',
+  },
+  {
+    href: '/agent/illustrations/new',
+    badge: 'PDF',
+    label: 'Create Illustration',
+    detail: 'Prepare a Term or IUL official illustration',
+  },
+  {
+    href: '/agent/cases?intent=application',
+    badge: 'iGO',
+    label: 'Create Application in iGO',
+    detail: 'Choose a case, review the dossier, then authorize K-Bot',
+  },
+]
 
 /// The carrier activity center in the global shell. It stays quiet at rest,
 /// polls only while a sync or illustration is actually moving, and preserves
@@ -443,6 +465,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
                 ? 'waiting'
             : null}
         tasks={tasks}
+        quickActions={K_BOT_QUICK_ACTIONS}
         announcement={notice?.message}
       />
     )

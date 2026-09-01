@@ -433,28 +433,30 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         )}
       </Section>
 
-      <Section title="Aplicação">
-        {!hasApplication ? (
-          <div className="space-y-3">
-            <Empty>Nenhuma aplicação iniciada. Ao iniciar, uma lista padrão de pendências é criada para acompanhamento.</Empty>
-            <Button variant="primary" disabled={pending} onClick={beginApplication}>
-              Iniciar aplicação
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {c.applications.map((app) => (
-              <ApplicationDossier
-                key={app.id}
-                application={app}
-                addon={c.applicationAddon}
-                prospect={c.prospect}
-                illustrations={c.illustrations}
-              />
-            ))}
-          </div>
-        )}
-      </Section>
+      <div id="application" className="scroll-mt-24">
+        <Section title="Aplicação">
+          {!hasApplication ? (
+            <div className="space-y-3">
+              <Empty>Nenhuma aplicação iniciada. Ao iniciar, uma lista padrão de pendências é criada para acompanhamento.</Empty>
+              <Button variant="primary" disabled={pending} onClick={beginApplication}>
+                Iniciar aplicação
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {c.applications.map((app) => (
+                <ApplicationDossier
+                  key={app.id}
+                  application={app}
+                  addon={c.applicationAddon}
+                  prospect={c.prospect}
+                  illustrations={c.illustrations}
+                />
+              ))}
+            </div>
+          )}
+        </Section>
+      </div>
 
       <Section title="Pendências">
         {requirements.length === 0 ? (

@@ -9,7 +9,12 @@ import { getPipelineForAgent } from '@/lib/crm'
 
 export const dynamic = 'force-dynamic'
 
-export default async function CasesPage() {
+export default async function CasesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ intent?: string }>
+}) {
+  const { intent } = await searchParams
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
   const scopeAgentIds = await getAgentScopeIds(agent.id)
@@ -57,6 +62,7 @@ export default async function CasesPage() {
           cases={boardCases}
           stages={currentPipeline.stages}
           stageOptionsByAgent={stageOptionsByAgent}
+          applicationIntent={intent === 'application'}
         />
       )}
     </Shell>
