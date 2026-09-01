@@ -114,12 +114,13 @@ export function NationalLifeConnectionCard({
               </div>
             </div>
             <p className="mt-5 text-sm leading-6 text-ink-muted">
-              Sign in on the official National Life portal. Keepr One keeps only
-              the signed-in session, and never your password.
+              Sign in on the official National Life portal. Keepr One keeps the
+              signed-in session by default. Protected credential storage is optional
+              and can be enabled or revoked under Settings.
             </p>
             <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-ink">
               <span className="h-2 w-2 rounded-full bg-success" />
-              Keepr One never stores your password
+              Protected K-Bot sign-in is always opt-in
             </p>
           </div>
 

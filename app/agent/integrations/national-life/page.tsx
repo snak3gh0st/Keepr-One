@@ -77,7 +77,7 @@ export default async function NationalLifeConnectionPage() {
                 <div className="mt-7 flex flex-wrap gap-2">
                   <span className="inline-flex items-center gap-2 rounded-full bg-teal-pale px-3 py-2 text-xs font-semibold text-teal-deep">
                     <span className="h-1.5 w-1.5 rounded-full bg-teal" aria-hidden="true" />
-                    Password stays on National Life
+                    Protected sign-in is optional
                   </span>
                   <span className="inline-flex items-center gap-2 rounded-full bg-panel px-3 py-2 text-xs font-semibold text-ink-muted">
                     Sync and illustration stay independent
@@ -89,7 +89,7 @@ export default async function NationalLifeConnectionPage() {
                 {[
                   ['01', 'You choose the work', 'Start a sync or an official illustration from Keepr One.'],
                   ['02', 'K-Bot gets to work', 'K-Bot opens the places it needs in National Life and follows the same steps you would.'],
-                  ['03', 'You sign in when needed', 'Your login always happens directly on the National Life website.'],
+                  ['03', 'Sign-in stays under your control', 'You can sign in yourself or opt in to one protected K-Bot login attempt. MFA and CAPTCHA always stay with you.'],
                   ['04', 'K-Bot checks the result', 'The information is checked and organized before it appears in Keepr One.'],
                   ['05', 'Everything is ready here', 'See your updated information or open the official illustration PDF.'],
                 ].map(([number, title, copy]) => (

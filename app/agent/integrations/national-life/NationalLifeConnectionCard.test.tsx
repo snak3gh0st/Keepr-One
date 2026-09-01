@@ -58,11 +58,11 @@ afterEach(() => {
 })
 
 describe('NationalLifeConnectionCard', () => {
-  it('offers connection without collecting or claiming to save National Life credentials', async () => {
+  it('offers connection without collecting credentials and explains the optional protected setting', async () => {
     render(<NationalLifeConnectionCard summary={null} />)
 
     expect(screen.getByRole('button', { name: 'Connect National Life' })).toBeInTheDocument()
-    expect(screen.getByText('Keepr One never stores your password')).toBeInTheDocument()
+    expect(screen.getByText('Protected K-Bot sign-in is always opt-in')).toBeInTheDocument()
     expect(screen.queryByLabelText(/username|password/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/save connection/i)).not.toBeInTheDocument()
 
