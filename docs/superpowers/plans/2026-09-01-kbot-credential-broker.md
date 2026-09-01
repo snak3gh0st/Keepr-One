@@ -606,7 +606,7 @@ git commit -m "feat(kbot): enroll device credential encryption keys"
 - Produces broker: `issueCredentialLease()` and `recordCredentialLeaseOutcome()`.
 - Consumes: Vault decrypt port, strict device request identity, auth epoch/state and Redis.
 
-- [ ] **Step 1: Write cross-runtime envelope tests**
+- [x] **Step 1: Write cross-runtime envelope tests**
 
 Generate an RSA-OAEP pair in the test, seal a sentinel credential with the public
 JWK, open it with the private key, and assert exact round-trip. Then assert
@@ -617,7 +617,7 @@ The server envelope implementation must generate a random 32-byte AES key and
 12-byte IV, use AES-256-GCM with canonical metadata AAD, wrap only the AES key
 with RSA-OAEP SHA-256, and expose no plaintext field.
 
-- [ ] **Step 2: Write failing lease authorization tests**
+- [x] **Step 2: Write failing lease authorization tests**
 
 Cover every refusal before testing success:
 
@@ -636,7 +636,7 @@ The success test must assert the lease row is created before decryption, the
 credential status changes only to record `lastLeasedAt`, and the returned JSON
 contains only the sealed contract.
 
-- [ ] **Step 3: Update auth epoch transitions test-first**
+- [x] **Step 3: Update auth epoch transitions test-first**
 
 For sync runs, change `recordLocalConnectorAuthState` to accept
 `REQUIRED | MFA_REQUIRED | RESTORED`. Transitioning `READY -> REQUIRED`
@@ -647,7 +647,7 @@ For commands, `recordConnectorCommandEvent` applies the same epoch rule when an
 `AUTH_REQUIRED` or `MFA_REQUIRED` event changes the command state. Add tests for
 repeated events and a second later authentication episode.
 
-- [ ] **Step 4: Implement a strict credential limiter**
+- [x] **Step 4: Implement a strict credential limiter**
 
 Do not use the existing fail-open sync limiter. Implement atomic Redis limits:
 
@@ -666,7 +666,7 @@ In production, unavailable Redis returns `CREDENTIAL_LIMIT_UNAVAILABLE` and no
 Vault decrypt call occurs. In development/test, an injected in-memory limiter
 is permitted and must preserve the same limits.
 
-- [ ] **Step 5: Implement lease issue and result handling**
+- [x] **Step 5: Implement lease issue and result handling**
 
 `issueCredentialLease()` performs ownership/state/rate checks, inserts the
 unique lease with a 60-second expiry, decrypts through Vault, seals to the device
@@ -686,14 +686,14 @@ that epoch.
 
 Audit only identifiers, safe action and outcome.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 ```bash
 pnpm vitest run lib/national-life/credentials/sealed-envelope.test.ts lib/national-life/credentials/lease-service.test.ts lib/national-life/credentials/rate-limit.test.ts lib/national-life/local-connector/auth-notification-service.test.ts lib/national-life/connector-command-service.test.ts
 pnpm --filter @fyntra/keeprone-connect test -- credential-envelope.test.ts
 ```
 
-- [ ] **Step 7: Commit the lease domain**
+- [x] **Step 7: Commit the lease domain**
 
 ```bash
 git add lib/national-life/credentials apps/keeprone-connect/lib/credential-envelope.ts apps/keeprone-connect/lib/credential-envelope.test.ts lib/national-life/local-connector/auth-notification-service.ts lib/national-life/local-connector/auth-notification-service.test.ts lib/national-life/connector-command-service.ts lib/national-life/connector-command-service.test.ts

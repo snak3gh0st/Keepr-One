@@ -22,10 +22,13 @@ type MemoryCommand = {
   requiresConfirmation: boolean
   confirmationState: 'NOT_REQUIRED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'
   state: ConnectorCommandState
+  authState: string
+  authEpoch: number
+  authRequiredAt: Date | null
   expiresAt: Date
   target: Prisma.JsonValue | null
   params: Prisma.JsonValue
-  events: Array<{ sequence: number }>
+  events: Array<{ sequence: number; type: string }>
 } & Record<string, unknown>
 
 function createRepository() {
@@ -52,7 +55,7 @@ function createRepository() {
     async createConfirmation() {},
     async approveConfirmation() {},
     async appendEvent(input) {
-      commands.get(input.commandId)?.events.push({ sequence: input.sequence })
+      commands.get(input.commandId)?.events.push({ sequence: input.sequence, type: input.type })
     },
   }
   return { repository, commands }
@@ -114,6 +117,44 @@ describe('connector command service', () => {
 
     expect(first).toMatchObject({ duplicate: false, command: { capability: 'FORESIGHT_INVENTORY' } })
     expect(duplicate).toMatchObject({ duplicate: true, command: { commandId: first.command.commandId } })
+  })
+
+  it('increments auth epoch once, preserves it for MFA, and increments the next episode', async () => {
+    const { repository, commands } = createRepository()
+    const issued = await issueConnectorCommand(repository, {
+      agentId: 'agent_1',
+      deviceId: 'device_1',
+      capability: 'FORESIGHT_INVENTORY',
+      target: null,
+      params: {},
+      idempotencyKey: 'auth-epoch-command',
+      expiresAt: new Date(now.getTime() + 10 * 60_000),
+      now,
+    })
+    const event = (sequence: number, type: 'AUTH_REQUIRED' | 'MFA_REQUIRED' | 'COMMAND_STARTED') => ({
+      protocolVersion: 1,
+      eventId: `event_${sequence}`,
+      commandId: issued.command.commandId,
+      runId: issued.command.runId,
+      sequence,
+      type,
+      emittedAt: new Date(now.getTime() + sequence * 1_000).toISOString(),
+      payload: null,
+      error: null,
+    })
+
+    await recordConnectorCommandEvent(repository, { agentId: 'agent_1', event: event(1, 'AUTH_REQUIRED'), now })
+    await recordConnectorCommandEvent(repository, { agentId: 'agent_1', event: event(2, 'AUTH_REQUIRED'), now })
+    await recordConnectorCommandEvent(repository, { agentId: 'agent_1', event: event(3, 'MFA_REQUIRED'), now })
+    expect(commands.get(issued.command.commandId)).toMatchObject({
+      state: 'AUTH_REQUIRED', authState: 'MFA_REQUIRED', authEpoch: 1,
+    })
+
+    await recordConnectorCommandEvent(repository, { agentId: 'agent_1', event: event(4, 'COMMAND_STARTED'), now })
+    await recordConnectorCommandEvent(repository, { agentId: 'agent_1', event: event(5, 'AUTH_REQUIRED'), now })
+    expect(commands.get(issued.command.commandId)).toMatchObject({
+      state: 'AUTH_REQUIRED', authState: 'AUTH_REQUIRED', authEpoch: 2,
+    })
   })
 
   it('blocks submission until the exact reviewed payload hash is approved', async () => {

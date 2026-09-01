@@ -29,6 +29,9 @@ type CommandRecord = {
   requiresConfirmation: boolean
   confirmationState: 'NOT_REQUIRED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'
   state: ConnectorCommandState
+  authState: string
+  authEpoch: number
+  authRequiredAt: Date | null
   expiresAt: Date
   events: Array<{ sequence: number }>
 }
@@ -56,6 +59,9 @@ export type ConnectorCommandRepository = {
       safeErrorCode?: string | null
       startedAt?: Date | null
       completedAt?: Date | null
+      authState?: string
+      authEpoch?: number
+      authRequiredAt?: Date | null
     }
   }): Promise<void>
   createConfirmation(input: {
@@ -193,6 +199,9 @@ export async function issueConnectorCommand(
     requiresConfirmation,
     confirmationState,
     state,
+    authState: 'READY',
+    authEpoch: 0,
+    authRequiredAt: null,
     safeErrorCode: null,
     expiresAt: input.expiresAt,
     startedAt: null,
@@ -290,11 +299,22 @@ export async function recordConnectorCommandEvent(
   })
   const state = nextStateForEvent(event)
   if (state) {
+    const startsAuthEpisode = event.type === 'AUTH_REQUIRED' && command.authState === 'READY'
+    const authPatch = event.type === 'AUTH_REQUIRED' || event.type === 'MFA_REQUIRED'
+      ? {
+          authState: event.type,
+          authEpoch: startsAuthEpisode ? command.authEpoch + 1 : command.authEpoch,
+          authRequiredAt: startsAuthEpisode ? now : command.authRequiredAt ?? now,
+        }
+      : event.type === 'COMMAND_STARTED'
+        ? { authState: 'READY', authRequiredAt: null }
+        : {}
     await repository.updateCommand({
       commandId: command.id,
       agentId: input.agentId,
       patch: {
         state,
+        ...authPatch,
         ...(state === 'RUNNING' ? { startedAt: now } : {}),
         ...(state === 'COMPLETED' || state === 'FAILED' ? { completedAt: now } : {}),
         ...(state === 'FAILED' ? { safeErrorCode: event.error?.code ?? 'COMMAND_FAILED' } : {}),
