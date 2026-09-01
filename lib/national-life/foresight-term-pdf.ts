@@ -61,6 +61,13 @@ export async function extractForesightTermPremiums(documentBytes: Uint8Array): P
     new TextDecoder().decode(documentBytes.subarray(0, 5)) !== '%PDF-') {
     throw new Error('FORESIGHT_TERM_PDF_INVALID')
   }
+  // PDF.js needs these primitives while reading certain production PDFs. They
+  // are supplied explicitly so the standalone server image does not depend on
+  // an optional transitive package being present at runtime.
+  const canvas = await import('@napi-rs/canvas')
+  const runtime = globalThis as unknown as Record<string, unknown>
+  runtime.DOMMatrix ??= canvas.DOMMatrix
+  runtime.Path2D ??= canvas.Path2D
   const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs')
   const loadingTask = getDocument({
     data: Uint8Array.from(documentBytes),

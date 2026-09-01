@@ -3,6 +3,10 @@ import { PHASE_DEVELOPMENT_SERVER } from "next/constants.js";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Native canvas bindings must remain Node externals. PDF.js uses them only
+  // during server-side PDF extraction, and standalone tracing carries their
+  // platform binary into the production image.
+  serverExternalPackages: ['@napi-rs/canvas'],
   // Coolify builds on the same 8 GB host that serves production. Next otherwise
   // fans page-data collection out to every visible CPU and can starve the live
   // containers even though the old release remains available during the build.
