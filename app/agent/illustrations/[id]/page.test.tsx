@@ -48,6 +48,11 @@ vi.mock('@/components/PageHeader', () => ({
 vi.mock('../IllustrationPdfButton', () => ({
   IllustrationPdfButton: () => <button>Gerar PDF</button>,
 }))
+vi.mock('../StartApplicationFromIllustrationButton', () => ({
+  StartApplicationFromIllustrationButton: ({ illustrationId }: { illustrationId: string }) => (
+    <button>Application de {illustrationId}</button>
+  ),
+}))
 
 import IllustrationDetailPage from './page'
 
@@ -102,6 +107,7 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('Prêmio mensal informado')).toBeTruthy()
     expect(screen.getByText('Informado pelo agente para a ilustração')).toBeTruthy()
     expect(screen.queryByText('O que a seguradora respondeu')).toBeNull()
+    expect(screen.queryByText(/Application de illustration-1/)).toBeNull()
   })
 
   it('shows the material Foresight choices that will be verified before a carrier save', async () => {
@@ -178,6 +184,7 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('Prêmio anual confirmado')).toBeTruthy()
     expect(screen.getByText('$4,200.00')).toBeTruthy()
     expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Application de illustration-solved-iul' })).toBeTruthy()
     expect(screen.getByText('Resolvido pelo prêmio mensal')).toBeTruthy()
     expect(screen.getByText('Based on Target Premium')).toBeTruthy()
     expect(screen.getByText('Pedido do agente')).toBeTruthy()
@@ -223,6 +230,7 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('$755.04')).toBeTruthy()
     expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
     expect(screen.queryByText('Prêmio mensal informado')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Application de illustration-term-result' })).toBeTruthy()
   })
 
   it('explains when the carrier confirms values different from the agent input', async () => {

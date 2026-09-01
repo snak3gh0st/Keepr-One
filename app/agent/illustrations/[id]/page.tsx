@@ -17,6 +17,7 @@ import {
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { ForesightActivityIndicator } from '../ForesightActivityIndicator'
+import { StartApplicationFromIllustrationButton } from '../StartApplicationFromIllustrationButton'
 
 const currency = (value: number) =>
   new Intl.NumberFormat('en-US', {
@@ -154,14 +155,19 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
             <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">{delivery.detail}</p>
           </div>
           {documentReady ? (
-            <a
-              href={`/api/illustrations/${illustration.id}/document`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-h-11 items-center justify-center rounded-full bg-rail-strong px-5 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-rail"
-            >
-              Abrir PDF oficial da National Life
-            </a>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <a
+                href={`/api/illustrations/${illustration.id}/document`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-steel bg-paper px-5 py-2.5 text-sm font-semibold text-teal-deep transition-colors hover:border-teal hover:bg-teal-pale"
+              >
+                Abrir PDF oficial
+              </a>
+              {foresightResult ? (
+                <StartApplicationFromIllustrationButton illustrationId={illustration.id} />
+              ) : null}
+            </div>
           ) : (
             <IllustrationPdfButton
               illustrationId={illustration.id}

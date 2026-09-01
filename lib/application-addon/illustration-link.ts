@@ -12,6 +12,8 @@ type IllustrationSource = {
   caseId: string | null
   createdAt: Date
   productName: string | null
+  faceAmount?: number | null
+  premium?: number | null
   rawPayload: unknown
 }
 
@@ -43,7 +45,9 @@ export function resolveApplicationIllustrationLink(
     if (snapshot.product.carrierName !== expectedCarrier ||
       snapshot.termDuration !== target.termDuration ||
       snapshot.insured.issueState !== target.issueState ||
-      (target.faceAmount !== undefined && snapshot.faceAmount !== target.faceAmount)) mismatch()
+      (target.faceAmount !== undefined && (source.faceAmount ?? snapshot.faceAmount) !== target.faceAmount) ||
+      (target.plannedPremium !== undefined && source.premium != null && source.premium !== target.plannedPremium) ||
+      (target.premiumMode !== undefined && target.premiumMode !== 'MONTHLY')) mismatch()
     return {
       illustrationId: source.id,
       illustrationInputHash: foresightTermIllustrationInputHash(snapshot),
@@ -53,9 +57,11 @@ export function resolveApplicationIllustrationLink(
   if (target.carrierProduct !== 'FlexLife (25)(LSW)' || source.productName !== 'FlexLife') mismatch()
   const snapshot = buildForesightIllustrationSnapshot(source)
   if (snapshot.insured.issueState !== target.issueState ||
-    (target.faceAmount !== undefined && snapshot.faceAmount !== null && snapshot.faceAmount !== target.faceAmount) ||
+    (target.faceAmount !== undefined && (source.faceAmount ?? snapshot.faceAmount) !== null &&
+      (source.faceAmount ?? snapshot.faceAmount) !== target.faceAmount) ||
     (target.plannedPremium !== undefined && target.premiumMode === 'MONTHLY' &&
-      snapshot.premium.amount !== null && snapshot.premium.amount !== target.plannedPremium)) mismatch()
+      (source.premium ?? snapshot.premium.amount) !== null &&
+      (source.premium ?? snapshot.premium.amount) !== target.plannedPremium)) mismatch()
   return {
     illustrationId: source.id,
     illustrationInputHash: foresightIllustrationInputHash(snapshot),
