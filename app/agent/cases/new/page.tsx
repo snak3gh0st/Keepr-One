@@ -9,13 +9,7 @@ import { NewCaseForm } from './NewCaseForm'
 
 export const dynamic = 'force-dynamic'
 
-export default async function NewCasePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ intent?: string }>
-}) {
-  const { intent } = await searchParams
-  const applicationIntent = intent === 'application'
+export default async function NewCasePage() {
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
 
@@ -29,7 +23,7 @@ export default async function NewCasePage({
           description="Registre o cliente e abra uma oportunidade para conduzir o atendimento até a apólice."
         >
           <Link
-            href={applicationIntent ? '/agent/cases?intent=application' : '/agent/cases'}
+            href="/agent/cases"
             className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
           >
             ← Voltar às oportunidades
@@ -38,7 +32,7 @@ export default async function NewCasePage({
       </div>
       <div className="module-content-grid">
         <div className="min-w-0">
-          <NewCaseForm applicationIntent={applicationIntent} />
+          <NewCaseForm />
         </div>
         <ContextPanel eyebrow="Como funciona" title="Do primeiro contato à apólice">
           <p>A oportunidade começa no primeiro contato e avança pelas etapas do atendimento até a emissão.</p>

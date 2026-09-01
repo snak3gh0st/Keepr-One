@@ -33,7 +33,6 @@ import {
 import { moveCaseAndScheduleAction, moveCaseStageAction } from "../actions";
 import {
   updateRequirement,
-  startApplication,
   saveNeedsAnalysis,
   addCaseNote,
   cancelCaseFollowUp,
@@ -287,15 +286,6 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
     });
   }
 
-  function beginApplication() {
-    setMessage(null);
-    startTransition(async () => {
-      const result = await startApplication(c.id);
-      if (result.ok) router.refresh();
-      else setMessage(result.message);
-    });
-  }
-
   const hasApplication = c.applications.length > 0;
   const requirements = c.applications.flatMap((application) => application.requirements);
   const openRequirements = requirements.filter((requirement) => requirement.status === "OPEN").length;
@@ -437,10 +427,15 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         <Section title="Aplicação">
           {!hasApplication ? (
             <div className="space-y-3">
-              <Empty>Nenhuma aplicação iniciada. Ao iniciar, uma lista padrão de pendências é criada para acompanhamento.</Empty>
-              <Button variant="primary" disabled={pending} onClick={beginApplication}>
-                Iniciar aplicação
-              </Button>
+              <Empty>
+                Nenhuma Application iniciada. A Application deve nascer de uma Illustration com PDF oficial e valores confirmados pela National Life.
+              </Empty>
+              <Link
+                href="/agent/illustrations?intent=application"
+                className="inline-flex min-h-11 items-center justify-center rounded-md bg-teal-deep px-4 py-2 text-sm font-semibold text-paper transition-colors hover:bg-teal"
+              >
+                Escolher Illustration oficial
+              </Link>
             </div>
           ) : (
             <div className="space-y-4">

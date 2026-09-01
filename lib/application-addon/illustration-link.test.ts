@@ -70,6 +70,16 @@ describe('Application Illustration link', () => {
     })).toThrow('APPLICATION_ILLUSTRATION_MISMATCH')
   })
 
+  it('accepts carrier-confirmed values even when a premium solve changed the requested premium', () => {
+    expect(resolveApplicationIllustrationLink({ ...flexLife, faceAmount: 500_000, premium: 325 }, {
+      family: 'IUL', carrierProduct: 'FlexLife (25)(LSW)', issueState: 'FL',
+      faceAmount: 500_000, plannedPremium: 325, premiumMode: 'MONTHLY',
+    })).toEqual({
+      illustrationId: 'illustration_iul_1',
+      illustrationInputHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    })
+  })
+
   it('rejects a cross-case Illustration before producing a link', () => {
     expect(() => resolveApplicationIllustrationLink({ ...flexLife, caseId: 'case_2' }, {
       family: 'IUL', carrierProduct: 'FlexLife (25)(LSW)', issueState: 'FL', expectedCaseId: 'case_1',

@@ -61,6 +61,19 @@ describe('Foresight Term illustration contract', () => {
     expect(foresightTermIllustrationInputHash(first)).not.toBe(foresightTermIllustrationInputHash(changed))
   })
 
+  it('keeps the sealed request readable after the official result is persisted beside it', () => {
+    expect(buildForesightTermIllustrationSnapshot({
+      ...source,
+      rawPayload: {
+        ...source.rawPayload,
+        foresightTermResult: {
+          source: 'OFFICIAL_PDF', premiumMode: 'Monthly', confirmedFaceAmount: 250000,
+          confirmedMonthlyPremium: 42.5, confirmedAnnualPremium: 510,
+        },
+      },
+    })).toMatchObject({ illustrationId: 'ill_term_1', termDuration: '20-G' })
+  })
+
   it('accepts a Term receipt only when the named carrier and official PDF are exact', () => {
     const receipt = {
       inputHash: 'a'.repeat(64),

@@ -15,7 +15,6 @@ import {
 import { CrmStageSelect } from "@/components/crm/CrmStageSelect";
 import { FollowUpModal } from "@/components/crm/FollowUpModal";
 import { StageManagerDrawer } from "@/components/crm/StageManagerDrawer";
-import { KBotAvatar } from "@/components/kbot/KBotAvatar";
 import {
   archiveStageAction,
   createStageAction,
@@ -113,12 +112,10 @@ export function CasesBoard({
   cases,
   stages,
   stageOptionsByAgent,
-  applicationIntent = false,
 }: {
   cases: Case[];
   stages: CrmStageView[];
   stageOptionsByAgent: Record<string, CrmStageView[]>;
-  applicationIntent?: boolean;
 }) {
   const router = useRouter();
   const root = useRef<HTMLDivElement>(null);
@@ -330,30 +327,6 @@ export function CasesBoard({
     <div ref={root} className="cases-workspace">
       <CrmNavigation active="opportunities" />
 
-      {applicationIntent ? (
-        <section
-          className="flex flex-col gap-4 rounded-xl border border-border-steel bg-paper p-4 sm:flex-row sm:items-center"
-          aria-labelledby="kbot-application-intent-title"
-        >
-          <KBotAvatar state="idle" size="sm" />
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">K-Bot · iGO Application</p>
-            <h2 id="kbot-application-intent-title" className="mt-1 text-base font-semibold text-ink">
-              Escolha o caso que vai para o iGO.
-            </h2>
-            <p className="mt-1 max-w-3xl text-sm leading-5 text-ink-muted">
-              A Application é criada dentro do caso. Abra o cliente abaixo, inicie a aplicação, revise os dados Term ou IUL e autorize o K-Bot a preparar o rascunho.
-            </p>
-          </div>
-          <Link
-            href="/agent/cases/new?intent=application"
-            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md border border-border-steel bg-paper px-4 py-2 text-sm font-semibold text-teal-deep transition-colors hover:border-teal hover:bg-teal-pale focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2"
-          >
-            Novo atendimento
-          </Link>
-        </section>
-      ) : null}
-
       <section
         className="cases-hero keepr-noise"
         aria-labelledby="cases-page-title"
@@ -545,13 +518,7 @@ export function CasesBoard({
                 <ul className="cases-list">
                   {pageCases.map((caseItem) => (
                     <li key={caseItem.id} className="cases-row" data-case-row>
-                      <Link
-                        href={`/agent/cases/${caseItem.id}${applicationIntent ? '#application' : ''}`}
-                        className="cases-row-link"
-                        aria-label={applicationIntent
-                          ? `Abrir Application de ${caseItem.prospectName}`
-                          : `Abrir lead ${caseItem.prospectName}`}
-                      >
+                      <Link href={`/agent/cases/${caseItem.id}`} className="cases-row-link" aria-label={`Abrir lead ${caseItem.prospectName}`}>
                         <div className="cases-row-person">
                           <span aria-hidden="true">
                             {initials(caseItem.prospectName) || "CL"}
@@ -612,7 +579,7 @@ export function CasesBoard({
                           compact
                         />
                       </div>
-                      <Link href={`/agent/cases/${caseItem.id}${applicationIntent ? '#application' : ''}`} className="cases-row-arrow" aria-hidden="true" tabIndex={-1}>→</Link>
+                      <Link href={`/agent/cases/${caseItem.id}`} className="cases-row-arrow" aria-hidden="true" tabIndex={-1}>→</Link>
                     </li>
                   ))}
                 </ul>

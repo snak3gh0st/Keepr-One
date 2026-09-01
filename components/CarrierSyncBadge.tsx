@@ -73,10 +73,10 @@ const K_BOT_QUICK_ACTIONS: KBotAction[] = [
     detail: 'Prepare a Term or IUL official illustration',
   },
   {
-    href: '/agent/cases?intent=application',
+    href: '/agent/illustrations?intent=application',
     badge: 'iGO',
     label: 'Create Application in iGO',
-    detail: 'Choose a case, review the dossier, then authorize K-Bot',
+    detail: 'Choose the official illustration that will start the Application',
   },
 ]
 

@@ -84,7 +84,8 @@ export function buildForesightTermIllustrationSnapshot(
   source: IllustrationSource,
 ): ForesightTermIllustrationSnapshotV1 {
   const payload = record(source.rawPayload)
-  if (!exactKeys(payload, ['foresightTermDraft'])) throw new Error('INVALID_FORESIGHT_TERM_INPUT')
+  if (!Object.keys(payload).every((key) => ['foresightTermDraft', 'foresightTermResult'].includes(key)) ||
+    !('foresightTermDraft' in payload)) throw new Error('INVALID_FORESIGHT_TERM_INPUT')
   const draft = record(payload.foresightTermDraft)
   if (!exactKeys(draft, [
     'schemaVersion', 'carrierProduct', 'firstName', 'lastName', 'dateOfBirth', 'issueState',
