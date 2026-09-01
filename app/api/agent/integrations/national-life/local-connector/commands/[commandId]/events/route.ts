@@ -280,6 +280,27 @@ export async function POST(
         deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
       },
     )
+    if (event.type === 'COMMAND_STARTED') {
+      // The MFA lease is terminal before the user finishes the carrier step.
+      // COMMAND_STARTED is therefore the first server-side proof that the same
+      // command recovered, so retire its warning without making event delivery
+      // depend on notification cleanup.
+      try {
+        await prisma.notification.updateMany({
+          where: {
+            type: 'NATIONAL_LIFE_MFA_REQUIRED',
+            readAt: null,
+            dedupeKey: {
+              startsWith: `national-life-mfa-required:CONNECTOR_COMMAND:${params.commandId}:`,
+            },
+          },
+          data: { readAt: new Date() },
+        })
+      } catch {
+        // The command event is already durable and must not be retried merely
+        // because a presentation-only notification could not be retired.
+      }
+    }
     return new Response(null, { status: 204, headers: NO_STORE })
   } catch (error) {
     if (error instanceof LocalConnectorSignatureError) {

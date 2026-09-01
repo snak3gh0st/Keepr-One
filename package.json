@@ -13,6 +13,7 @@
     "connector:test": "pnpm --filter @fyntra/keeprone-connect test",
     "connector:typecheck": "pnpm --filter @fyntra/keeprone-connect typecheck",
     "worker:national-life": "tsx scripts/national-life-runtime.ts",
+    "worker:kbot-credential-broker": "NODE_OPTIONS=--conditions=react-server tsx scripts/kbot-credential-broker.ts",
     "fixture:national-life": "tsx scripts/national-life-fixture-server.ts",
     "seed:demo": "SEED_PASSWORD=FyntraDemo2026! DEMO_AGENT_COUNT=100 DEMO_CLIENTS_PER_AGENT=2 DEMO_POLICIES_PER_CLIENT=2 tsx prisma/seed-demo.ts",
     "backfill:reviews": "tsx prisma/backfill-reviews.ts"

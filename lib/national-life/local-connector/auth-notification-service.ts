@@ -8,12 +8,17 @@ type AuthNotificationDb = Pick<
   'nationalLifeSyncRun' | 'notification' | '$transaction'
 >
 
-export type LocalConnectorAuthState = 'REQUIRED' | 'RESTORED'
+export type LocalConnectorAuthState = 'REQUIRED' | 'MFA_REQUIRED' | 'RESTORED'
 
 const NOTIFICATION_TYPE = 'NATIONAL_LIFE_LOGIN_REQUIRED'
+const MFA_NOTIFICATION_TYPE = 'NATIONAL_LIFE_MFA_REQUIRED'
 
 function notificationKey(runId: string) {
   return `national-life-login-required:${runId}`
+}
+
+function mfaNotificationKey(runId: string, authEpoch: number) {
+  return `national-life-mfa-required:${runId}:${authEpoch}`
 }
 
 /**
@@ -45,20 +50,46 @@ export async function recordLocalConnectorAuthState(
       },
       select: {
         id: true,
+        authState: true,
+        authEpoch: true,
+        authRequiredAt: true,
         agent: { select: { userId: true } },
       },
     })
     if (!run) throw new LocalConnectorRunError('RUN_NOT_ACTIVE')
 
-    const dedupeKey = notificationKey(run.id)
-    if (input.state === 'REQUIRED') {
+    const startsNewEpisode = input.state === 'REQUIRED' && run.authState === 'READY'
+    const authEpoch = startsNewEpisode ? run.authEpoch + 1 : run.authEpoch
+    const authRequiredAt = startsNewEpisode ? now : run.authRequiredAt
+    const authState = input.state === 'RESTORED' ? 'READY' : input.state
+    await tx.nationalLifeSyncRun.updateMany({
+      where: {
+        id: run.id,
+        agentId: input.agentId,
+        connectorDeviceId: input.deviceId,
+        state: 'RUNNING',
+      },
+      data: {
+        authState,
+        authEpoch,
+        authRequiredAt: input.state === 'RESTORED' ? null : authRequiredAt ?? now,
+      },
+    })
+
+    const dedupeKey = input.state === 'MFA_REQUIRED'
+      ? mfaNotificationKey(run.id, authEpoch)
+      : notificationKey(run.id)
+    if (input.state === 'REQUIRED' || input.state === 'MFA_REQUIRED') {
+      const mfa = input.state === 'MFA_REQUIRED'
       await tx.notification.upsert({
         where: { dedupeKey },
         create: {
           recipientUserId: run.agent.userId,
-          type: NOTIFICATION_TYPE,
-          title: 'Renove seu login da National Life',
-          message: 'Seus dados continuam seguros. Entre novamente para o sync continuar de onde parou.',
+          type: mfa ? MFA_NOTIFICATION_TYPE : NOTIFICATION_TYPE,
+          title: mfa ? 'A National Life precisa da sua verificação' : 'Renove seu login da National Life',
+          message: mfa
+            ? 'Conclua o MFA diretamente na National Life. O K-Bot continuará depois da verificação.'
+            : 'Seus dados continuam seguros. Entre novamente para o sync continuar de onde parou.',
           href: '/agent/integrations/national-life',
           dedupeKey,
           createdAt: now,
@@ -72,13 +103,16 @@ export async function recordLocalConnectorAuthState(
       await tx.notification.updateMany({
         where: {
           recipientUserId: run.agent.userId,
-          dedupeKey,
           readAt: null,
+          OR: [
+            { dedupeKey: notificationKey(run.id) },
+            { dedupeKey: { startsWith: `national-life-mfa-required:${run.id}:` } },
+          ],
         },
         data: { readAt: now },
       })
     }
 
-    return { runId: run.id, authState: input.state }
+    return { runId: run.id, authState: input.state, authEpoch }
   })
 }

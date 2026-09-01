@@ -3,6 +3,7 @@ import {
   base64Url,
   canonicalMessage,
   classifyFailedResponse,
+  responseFailureCode,
   retryIdempotentSignedRequest,
   SignedRequestError,
   sha256,
@@ -92,6 +93,28 @@ describe('classifyFailedResponse', () => {
   it('keeps a run-start rate limit distinct from a portal failure', () => {
     expect(classifyFailedResponse(429, new Headers({ 'retry-after': '120' })))
       .toBe('RUN_START_RATE_LIMITED')
+  })
+})
+
+describe('responseFailureCode', () => {
+  it.each([
+    [409, 'CREDENTIAL_NOT_CONFIGURED'],
+    [409, 'CREDENTIAL_AUTO_LOGIN_DISABLED'],
+    [409, 'CREDENTIAL_LEASE_ALREADY_ISSUED'],
+    [409, 'DEVICE_ENCRYPTION_KEY_REQUIRED'],
+    [429, 'CREDENTIAL_RATE_LIMITED'],
+    [503, 'CREDENTIAL_BROKER_UNAVAILABLE'],
+  ] as const)('preserves the safe credential error %s/%s', async (status, error) => {
+    await expect(responseFailureCode(new Response(JSON.stringify({ error }), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    }))).resolves.toBe(error)
+  })
+
+  it('does not trust arbitrary server error strings', async () => {
+    await expect(responseFailureCode(new Response(JSON.stringify({
+      error: 'password=must-not-land',
+    }), { status: 409 }))).resolves.toBe('IDEMPOTENCY_CONFLICT')
   })
 })
 

@@ -15,6 +15,8 @@ import {
   INITIAL_SETTINGS_ACTION_STATE,
   type SettingsActionState,
 } from "./state";
+import { KBotCredentialSettings } from "./KBotCredentialSettings";
+import type { NationalLifeCredentialSummary } from "@/lib/national-life/credentials/settings-service";
 
 type AccessKind = "INDIVIDUAL" | "AGENCY_MEMBER" | "AGENCY_OWNER";
 
@@ -41,6 +43,8 @@ export type SettingsFormsProps = {
   };
   kbot: {
     enabled: boolean;
+    credentialBrokerEnabled: boolean;
+    credentialSummary: NationalLifeCredentialSummary;
   };
 };
 
@@ -523,25 +527,12 @@ function KBotSettings({
         title="K-Bot e National Life"
         description="Controle a conexão do K-Bot neste computador e revise como a autenticação da seguradora funciona."
       />
-
-      <div className="mt-6 grid gap-4 rounded-2xl border border-border-steel bg-panel p-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-        <div>
-          <p className="text-sm font-semibold text-ink">
-            {kbot.enabled ? "K-Bot está disponível neste ambiente" : "K-Bot não está disponível neste ambiente"}
-          </p>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-ink-muted">
-            O Keepr One não guarda nem envia sua senha da National Life. Quando a sessão expira, o K-Bot abre a página oficial; depois do seu login manual, retoma o mesmo pedido automaticamente.
-          </p>
-          <p className="mt-3 max-w-2xl text-xs leading-5 text-ink-muted">
-            Em um computador particular e confiável, use o gerenciador de senhas do navegador e a opção “Remember this device” da National Life, quando ela estiver disponível. A National Life continua controlando MFA e a duração da sessão.
-          </p>
-        </div>
-        <Link
-          href="/agent/integrations/national-life"
-          className="inline-flex min-h-11 items-center justify-center rounded-full border border-border-steel bg-paper px-4 text-sm font-semibold text-ink hover:border-ink-muted"
-        >
-          Gerenciar K-Bot e National Life
-        </Link>
+      <div className="mt-6">
+        <KBotCredentialSettings
+          connectorEnabled={kbot.enabled}
+          credentialBrokerEnabled={kbot.credentialBrokerEnabled}
+          summary={kbot.credentialSummary}
+        />
       </div>
     </section>
   );

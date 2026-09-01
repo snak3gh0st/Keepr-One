@@ -23,7 +23,13 @@ import {
   matchesNationalLifeStagePath,
   requireAllowedBaseUrl,
 } from '../lib/constants'
-import { clearDeviceKeys, getOrCreateDeviceKey } from '../lib/key-store'
+import {
+  clearDeviceKeys,
+  getOrCreateCredentialEncryptionKey,
+  getOrCreateDeviceKey,
+  readCredentialDecryptionKey,
+} from '../lib/key-store'
+import { openSealedCredentialLease } from '../lib/credential-envelope'
 import {
   parseBridgeMessage,
   parseCapturePolicyDetailAck,
@@ -92,6 +98,7 @@ import {
   writeDeviceState,
   writeCommandState,
   writeSyncState,
+  type CredentialAttempt,
 } from '../lib/state'
 import { commandExecutorFor } from '../lib/command-executor'
 import {
@@ -462,7 +469,10 @@ async function pairConnector(
   const baseUrl = requireAllowedBaseUrl(message.baseUrl)
   await writeDeviceState({ baseUrl, status: 'PAIRING' })
   try {
-    const publicKeyJwk = await getOrCreateDeviceKey()
+    const [publicKeyJwk, encryptionPublicKeyJwk] = await Promise.all([
+      getOrCreateDeviceKey(),
+      getOrCreateCredentialEncryptionKey(),
+    ])
     const response = await fetch(
       `${baseUrl}/api/agent/integrations/national-life/local-connector/pairings/exchange`,
       {
@@ -475,6 +485,7 @@ async function pairConnector(
           code: message.code,
           label: message.label,
           publicKeyJwk,
+          encryptionPublicKeyJwk,
         }),
         credentials: 'omit',
         cache: 'no-store',
@@ -489,7 +500,12 @@ async function pairConnector(
     ) {
       throw new Error('PAIRING_REJECTED')
     }
-    await writeDeviceState({ deviceId: result.deviceId, baseUrl, status: 'READY' })
+    await writeDeviceState({
+      deviceId: result.deviceId,
+      baseUrl,
+      status: 'READY',
+      credentialEncryptionKeyRegistered: true,
+    })
     // Scheduling is best-effort. The device is already paired at this point;
     // an unavailable alarms API must not turn a valid pairing into ERROR.
     void ensureScheduledSyncAlarm().catch(() => {})
@@ -544,6 +560,27 @@ async function ensureScheduledSyncAlarm() {
     delayInMinutes: 1,
     periodInMinutes: SCHEDULED_SYNC_PERIOD_MINUTES,
   })
+}
+
+async function ensureCredentialEncryptionKeyRegistered() {
+  const device = await readDeviceState()
+  if (
+    device.status !== 'READY' ||
+    !device.deviceId ||
+    !device.baseUrl ||
+    device.credentialEncryptionKeyRegistered
+  ) {
+    return
+  }
+  const publicKeyJwk = await getOrCreateCredentialEncryptionKey()
+  await signedJsonRequest({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname: '/api/agent/integrations/national-life/local-connector/devices/encryption-key',
+    body: { schemaVersion: 1, publicKeyJwk },
+  })
+  await writeDeviceState({ ...device, credentialEncryptionKeyRegistered: true })
 }
 
 async function startScheduledSyncIfDue() {
@@ -1429,6 +1466,25 @@ async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?
         deviceId: device.deviceId,
         baseUrl: device.baseUrl,
       }, hint)
+      const auth = await readCommandState()
+      if (
+        auth.status === 'AUTH_REQUIRED' && auth.carrierTabId !== undefined &&
+        auth.commandId === dispatch.command.commandId
+      ) {
+        const authTab = hint?.id === auth.carrierTabId
+          ? hint
+          : await findBoundCommandTab(auth.carrierTabId)
+        if (authTab?.id !== undefined && authTab.url) {
+          try {
+            const authUrl = new URL(authTab.url)
+            if (authUrl.origin === NLG_AUTH0_ORIGIN) {
+              await handleCarrierAuthenticationPage(authTab.id, authUrl)
+            }
+          } catch {
+            // The normal tab-update path handles the next valid URL.
+          }
+        }
+      }
     } catch (error) {
       const code = errorCode(error, 'COMMAND_FAILED')
         .replace(/[^A-Z0-9_]/g, '_').slice(0, 80) || 'COMMAND_FAILED'
@@ -1488,7 +1544,7 @@ async function reportRunFailure(code: string) {
   }
 }
 
-async function reportRunAuthState(state: 'REQUIRED' | 'RESTORED') {
+async function reportRunAuthState(state: 'REQUIRED' | 'MFA_REQUIRED' | 'RESTORED') {
   const device = await readDeviceState()
   const sync = await readSyncState()
   if (
@@ -1501,7 +1557,7 @@ async function reportRunAuthState(state: 'REQUIRED' | 'RESTORED') {
     return
   }
   try {
-    await signedJsonRequest({
+    return await signedJsonRequest<{ authEpoch?: unknown }>({
       baseUrl: device.baseUrl,
       deviceId: device.deviceId,
       method: 'POST',
@@ -1514,6 +1570,300 @@ async function reportRunAuthState(state: 'REQUIRED' | 'RESTORED') {
   }
 }
 
+type CredentialAuthOperation = Readonly<{
+  kind: 'SYNC_RUN' | 'CONNECTOR_COMMAND'
+  id: string
+  tabId: number
+  attempt?: CredentialAttempt
+  errorCode?: string
+}>
+
+type AuthPageClassification = 'LOGIN' | 'MFA' | 'CAPTCHA' | 'REJECTED' | 'UNKNOWN'
+
+function safeCredentialFallbackCode(error: unknown) {
+  if (error instanceof SignedRequestError && [
+    'CREDENTIAL_NOT_CONFIGURED',
+    'CREDENTIAL_AUTO_LOGIN_DISABLED',
+    'CREDENTIAL_LEASE_ALREADY_ISSUED',
+    'CREDENTIAL_BROKER_UNAVAILABLE',
+    'CREDENTIAL_RATE_LIMITED',
+    'DEVICE_ENCRYPTION_KEY_REQUIRED',
+    'CLIENT_TOO_OLD',
+  ].includes(error.code)) return error.code
+  return 'CREDENTIAL_BROKER_UNAVAILABLE'
+}
+
+async function credentialOperationForTab(tabId: number): Promise<CredentialAuthOperation | null> {
+  const command = await readCommandState()
+  if (
+    command.carrierTabId === tabId && command.commandId &&
+    (command.status === 'AUTH_REQUIRED' || command.status === 'MFA_REQUIRED')
+  ) {
+    return {
+      kind: 'CONNECTOR_COMMAND', id: command.commandId, tabId,
+      attempt: command.credentialAttempt,
+      errorCode: command.errorCode,
+    }
+  }
+  const sync = await readSyncState()
+  if (sync.carrierTabId === tabId && sync.runId && sync.status === 'AUTH_REQUIRED') {
+    return {
+      kind: 'SYNC_RUN', id: sync.runId, tabId,
+      attempt: sync.credentialAttempt, errorCode: sync.errorCode,
+    }
+  }
+  return null
+}
+
+async function updateCredentialOperation(
+  operation: CredentialAuthOperation,
+  patch: { credentialAttempt?: CredentialAttempt; errorCode?: string },
+) {
+  if (operation.kind === 'SYNC_RUN') {
+    const state = await readSyncState()
+    if (state.runId !== operation.id || state.carrierTabId !== operation.tabId) return
+    await writeSyncState({ ...state, ...patch })
+    return
+  }
+  const state = await readCommandState()
+  if (state.commandId !== operation.id || state.carrierTabId !== operation.tabId) return
+  await writeCommandState({ ...state, ...patch })
+}
+
+async function classifyCarrierAuthPage(tabId: number): Promise<AuthPageClassification> {
+  try {
+    const value = await chrome.tabs.sendMessage(tabId, { type: 'CLASSIFY_CARRIER_AUTH_PAGE' })
+    if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !== 'code,ok') return 'UNKNOWN'
+    const ack = value as { ok?: unknown; code?: unknown }
+    if (ack.ok !== true || !['LOGIN', 'MFA', 'CAPTCHA', 'REJECTED', 'UNKNOWN'].includes(
+      String(ack.code),
+    )) return 'UNKNOWN'
+    return ack.code as AuthPageClassification
+  } catch {
+    return 'UNKNOWN'
+  }
+}
+
+function parseLeaseMetadata(
+  value: unknown,
+  operation: CredentialAuthOperation,
+): { leaseId: string; authEpoch: number } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const envelope = value as Record<string, unknown>
+  const bound = envelope.operation
+  if (!bound || typeof bound !== 'object' || Array.isArray(bound)) return null
+  const record = bound as Record<string, unknown>
+  if (
+    typeof envelope.leaseId !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(envelope.leaseId) ||
+    record.kind !== operation.kind || record.id !== operation.id ||
+    !Number.isInteger(record.authEpoch) || Number(record.authEpoch) < 1
+  ) return null
+  return { leaseId: envelope.leaseId, authEpoch: Number(record.authEpoch) }
+}
+
+async function reportCredentialLeaseOutcome(
+  attempt: CredentialAttempt | undefined,
+  outcome: 'AUTHENTICATED' | 'MFA_REQUIRED' | 'REJECTED' | 'UNKNOWN_PAGE',
+) {
+  if (!attempt?.leaseId) return
+  const device = await readDeviceState()
+  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) return
+  try {
+    await signedJsonRequest({
+      baseUrl: device.baseUrl,
+      deviceId: device.deviceId,
+      method: 'POST',
+      pathname: `/api/agent/integrations/national-life/local-connector/credential-leases/${encodeURIComponent(attempt.leaseId)}/result`,
+      body: { schemaVersion: 1, outcome },
+    })
+  } catch {
+    // Result reporting is intentionally one-shot and never blocks the existing
+    // browser-auth recovery path. A duplicate terminal result is harmless.
+  }
+}
+
+async function postStoredCommandAuthEvent(type: 'MFA_REQUIRED') {
+  const [device, command] = await Promise.all([readDeviceState(), readCommandState()])
+  if (
+    device.status !== 'READY' || !device.deviceId || !device.baseUrl ||
+    !command.commandId || !command.runId || command.carrierTabId === undefined ||
+    typeof command.nextEventSequence !== 'number' || command.status === 'MFA_REQUIRED'
+  ) return
+  const sequence = command.nextEventSequence
+  await signedJsonRequest({
+    baseUrl: device.baseUrl,
+    deviceId: device.deviceId,
+    method: 'POST',
+    pathname: `/api/agent/integrations/national-life/local-connector/commands/${encodeURIComponent(command.commandId)}/events`,
+    body: {
+      protocolVersion: CONNECTOR_COMMAND_PROTOCOL_VERSION,
+      eventId: crypto.randomUUID(),
+      commandId: command.commandId,
+      runId: command.runId,
+      sequence,
+      type,
+      emittedAt: new Date().toISOString(),
+      payload: { action: 'SIGN_IN_TO_CONTINUE' },
+      error: null,
+    },
+  })
+  await writeCommandState({
+    ...(await readCommandState()),
+    nextEventSequence: sequence + 1,
+    status: 'MFA_REQUIRED',
+    errorCode: 'MFA_REQUIRED',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+async function markObservedAuthPage(
+  operation: CredentialAuthOperation,
+  classification: Exclude<AuthPageClassification, 'LOGIN'>,
+) {
+  const observedCode = classification === 'MFA'
+    ? 'MFA_REQUIRED'
+    : classification === 'REJECTED'
+      ? 'CREDENTIAL_REJECTED'
+      : classification === 'CAPTCHA'
+        ? 'CREDENTIAL_CAPTCHA_REQUIRED'
+        : 'CREDENTIAL_PAGE_UNSUPPORTED'
+  if (operation.errorCode === observedCode) return
+  if (classification === 'MFA') {
+    await reportCredentialLeaseOutcome(operation.attempt, 'MFA_REQUIRED')
+    if (operation.kind === 'SYNC_RUN') await reportRunAuthState('MFA_REQUIRED')
+    else await postStoredCommandAuthEvent('MFA_REQUIRED')
+    await updateCredentialOperation(operation, { errorCode: observedCode })
+  } else if (classification === 'REJECTED') {
+    await reportCredentialLeaseOutcome(operation.attempt, 'REJECTED')
+    await updateCredentialOperation(operation, { errorCode: observedCode })
+  } else {
+    await reportCredentialLeaseOutcome(operation.attempt, 'UNKNOWN_PAGE')
+    await updateCredentialOperation(operation, { errorCode: observedCode })
+  }
+  // UNKNOWN also covers a content script that is still loading or an older
+  // extension build. The tab was already foregrounded when auth was first
+  // detected; stealing focus on every watchdog tick would be a retry loop in
+  // user-visible form.
+  if (classification !== 'UNKNOWN') await updateTab(operation.tabId, { active: true })
+}
+
+async function attemptAutomaticCarrierLogin(
+  operation: CredentialAuthOperation,
+  url: URL,
+) {
+  const classification = await classifyCarrierAuthPage(operation.tabId)
+  if (classification !== 'LOGIN') {
+    await markObservedAuthPage(operation, classification)
+    return
+  }
+  if (operation.attempt) return
+
+  let issuedAttempt: CredentialAttempt | undefined
+  try {
+    await ensureCredentialEncryptionKeyRegistered()
+    const privateKey = await readCredentialDecryptionKey()
+    if (!privateKey) throw new SignedRequestError('DEVICE_ENCRYPTION_KEY_REQUIRED')
+
+    const preliminary: CredentialAttempt = {
+      operationKind: operation.kind,
+      operationId: operation.id,
+      authEpoch: 0,
+      attemptedAt: new Date().toISOString(),
+    }
+    await updateCredentialOperation(operation, {
+      credentialAttempt: preliminary,
+      errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
+    })
+
+    const device = await readDeviceState()
+    if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
+      throw new Error('DEVICE_NOT_READY')
+    }
+    const sealed = await signedJsonRequest<unknown>({
+      baseUrl: device.baseUrl,
+      deviceId: device.deviceId,
+      method: 'POST',
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases',
+      body: {
+        schemaVersion: 1,
+        operation: { kind: operation.kind, id: operation.id },
+        page: { origin: url.origin, pathname: url.pathname, classification: 'LOGIN' },
+      },
+    })
+    const metadata = parseLeaseMetadata(sealed, operation)
+    if (!metadata) throw new Error('CREDENTIAL_LEASE_INVALID')
+    const attempt: CredentialAttempt = {
+      ...preliminary,
+      authEpoch: metadata.authEpoch,
+      leaseId: metadata.leaseId,
+    }
+    issuedAttempt = attempt
+    await updateCredentialOperation(operation, {
+      credentialAttempt: attempt,
+      errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
+    })
+
+    let credential: Awaited<ReturnType<typeof openSealedCredentialLease>> | undefined
+    try {
+      credential = await openSealedCredentialLease(sealed, privateKey, {
+        operation: {
+          kind: operation.kind,
+          id: operation.id,
+          authEpoch: metadata.authEpoch,
+        },
+      })
+      const acknowledgement = await chrome.tabs.sendMessage(operation.tabId, {
+        type: 'SUBMIT_CARRIER_CREDENTIAL',
+        credential,
+      })
+      if (!acknowledgement || acknowledgement.ok !== true || acknowledgement.code !== 'SUBMITTED') {
+        await reportCredentialLeaseOutcome(attempt, 'UNKNOWN_PAGE')
+        await updateCredentialOperation(operation, { errorCode: 'CREDENTIAL_PAGE_UNSUPPORTED' })
+      }
+    } finally {
+      credential = undefined
+    }
+  } catch (error) {
+    if (issuedAttempt?.leaseId) {
+      await reportCredentialLeaseOutcome(issuedAttempt, 'UNKNOWN_PAGE')
+      await updateCredentialOperation(operation, { errorCode: 'CREDENTIAL_PAGE_UNSUPPORTED' })
+    } else {
+      await updateCredentialOperation(operation, { errorCode: safeCredentialFallbackCode(error) })
+    }
+  }
+}
+
+async function handleCarrierAuthenticationPage(tabId: number, url: URL) {
+  const operation = await credentialOperationForTab(tabId)
+  if (!operation) return
+  await attemptAutomaticCarrierLogin(operation, url)
+}
+
+async function resolveCommandCredentialIfAuthenticated(tabId: number, rawUrl?: string) {
+  const command = await readCommandState()
+  if (
+    command.carrierTabId !== tabId || !command.credentialAttempt?.leaseId ||
+    !rawUrl || (command.status !== 'AUTH_REQUIRED' && command.status !== 'MFA_REQUIRED')
+  ) return
+  let url: URL
+  try {
+    url = new URL(rawUrl)
+  } catch {
+    return
+  }
+  if (url.origin !== NLG_ORIGIN || !url.pathname.startsWith('/agent/')) return
+  if (!(await hasAuthenticatedPortalSession(tabId))) return
+  await reportCredentialLeaseOutcome(command.credentialAttempt, 'AUTHENTICATED')
+  await writeCommandState({
+    ...(await readCommandState()),
+    credentialAttempt: undefined,
+    errorCode: undefined,
+    status: 'AUTH_REQUIRED',
+    updatedAt: new Date().toISOString(),
+  })
+}
+
 async function requireCarrierAuthentication(
   state: Awaited<ReturnType<typeof readSyncState>>,
   tabId: number,
@@ -1523,7 +1873,7 @@ async function requireCarrierAuthentication(
   await writeSyncState({
     ...state,
     status: 'AUTH_REQUIRED',
-    errorCode: undefined,
+    errorCode: firstNotice ? undefined : state.errorCode,
     authRenewalPending: true,
   })
   if (updateProperties) await updateTab(tabId, updateProperties)
@@ -1533,8 +1883,14 @@ async function requireCarrierAuthentication(
 async function resolveCarrierAuthenticationIfNeeded() {
   const state = await readSyncState()
   if (!state.authRenewalPending) return
+  await reportCredentialLeaseOutcome(state.credentialAttempt, 'AUTHENTICATED')
   await reportRunAuthState('RESTORED')
-  await writeSyncState({ ...(await readSyncState()), authRenewalPending: false })
+  await writeSyncState({
+    ...(await readSyncState()),
+    authRenewalPending: false,
+    credentialAttempt: undefined,
+    errorCode: undefined,
+  })
 }
 
 /// Esquece o pareamento sem tocar no estado do sync. `unpairConnector` zera o
@@ -2081,6 +2437,7 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
   }
   if (url.origin === NLG_AUTH0_ORIGIN) {
     await requireCarrierAuthentication(state, tabId, { active: true })
+    await handleCarrierAuthenticationPage(tabId, url)
     return
   }
   if (url.origin !== NLG_ORIGIN) return
@@ -2877,7 +3234,11 @@ async function resumePending(options?: { reconcileWithServer?: boolean }) {
     if (!authTab?.url || authTab.id === undefined) return
     try {
       const authUrl = new URL(authTab.url)
-      if (authUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(authUrl.pathname)) return
+      if (authUrl.origin === NLG_AUTH0_ORIGIN) {
+        await handleCarrierAuthenticationPage(authTab.id, authUrl)
+        return
+      }
+      if (isAuthPath(authUrl.pathname)) return
     } catch {
       return
     }
@@ -3122,7 +3483,19 @@ export default defineBackground(() => {
           }
         }
         if ((command.carrierTabId === tabId || isIgoHandoff) && command.status !== 'COMPLETED') {
+          await resolveCommandCredentialIfAuthenticated(tabId, tab.url)
           await pollAndExecuteCommand(tab)
+          const after = await readCommandState()
+          if (after.carrierTabId === tabId && after.status === 'AUTH_REQUIRED' && tab.url) {
+            try {
+              const authUrl = new URL(tab.url)
+              if (authUrl.origin === NLG_AUTH0_ORIGIN) {
+                await handleCarrierAuthenticationPage(tabId, authUrl)
+              }
+            } catch {
+              // Ignore incomplete navigation URLs.
+            }
+          }
         }
       })()
       void handleTabReady(tabId, tab.url).catch((error) =>
@@ -3179,6 +3552,10 @@ export default defineBackground(() => {
   // bound National Life tab to the foreground.
   void ensureScheduledSyncAlarm().catch(() => {})
   void ensureCommandPollAlarm().catch(() => {})
+  // Upgrade path for devices paired before credential delivery existed. The
+  // signed registration is idempotent and the local marker prevents sending it
+  // again after the server accepts it.
+  void ensureCredentialEncryptionKeyRegistered().catch(() => {})
   // Uma batida a cada subida do service worker. É a janela mais barata que existe
   // para uma flag chegar sem nenhuma ação do agente, e o worker sobe com muita
   // frequência justamente porque este conector acorda o tempo todo.

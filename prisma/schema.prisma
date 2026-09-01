@@ -507,6 +507,7 @@ model Agent {
   nationalLifeConnectorPairings         NationalLifeConnectorPairing[]
   nationalLifeConnectorDevices          NationalLifeConnectorDevice[]
   nationalLifeConnectorCommands         NationalLifeConnectorCommand[]
+  nationalLifeCredentialLeases          NationalLifeCredentialLease[]
   nationalLifeExportUploads             NationalLifeExportUpload[]
   nationalLifeDocumentTransfers         NationalLifeDocumentTransfer[]
   messagingAccount                      AgentMessagingAccount?
@@ -1648,21 +1649,30 @@ model SchedulingEmailJob {
 }
 
 model AgentIntegrationCredential {
-  id              String    @id @default(cuid())
-  agentId         String
-  agent           Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  provider        String
-  maskedUsername  String
-  keyVersion      String
-  algorithm       String
-  iv              String
-  ciphertext      String
-  authTag         String
-  status          String    @default("UNTESTED")
-  lastTestedAt    DateTime?
-  lastSucceededAt DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                 String                        @id @default(cuid())
+  agentId            String
+  agent              Agent                         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  provider           String
+  maskedUsername     String
+  keyVersion         String?
+  algorithm          String?
+  iv                 String?
+  ciphertext         String?
+  authTag            String?
+  formatVersion      Int                           @default(1)
+  encryptionProvider String                        @default("LEGACY_LOCAL_AES")
+  encryptedPayload   String?
+  autoLoginEnabled   Boolean                       @default(false)
+  status             String                        @default("UNTESTED")
+  consentedAt        DateTime?
+  lastLeasedAt       DateTime?
+  lastTestedAt       DateTime?
+  lastSucceededAt    DateTime?
+  lastRejectedAt     DateTime?
+  revokedAt          DateTime?
+  createdAt          DateTime                      @default(now())
+  updatedAt          DateTime                      @updatedAt
+  leases             NationalLifeCredentialLease[]
 
   @@unique([agentId, provider])
   @@index([provider, status])
@@ -1811,6 +1821,9 @@ model NationalLifeSyncRun {
   provider          String                                 @default("NATIONAL_LIFE")
   executionSource   String                                 @default("REMOTE")
   state             NationalLifeSyncRunState               @default(QUEUED)
+  authState         String                                 @default("READY")
+  authEpoch         Int                                    @default(0)
+  authRequiredAt    DateTime?
   totalStages       Int
   completedStages   Int                                    @default(0)
   failedStages      Int                                    @default(0)
@@ -1862,25 +1875,28 @@ model NationalLifeConnectorPairing {
 }
 
 model NationalLifeConnectorDevice {
-  id                  String                                 @id @default(cuid())
-  agentId             String
-  agent               Agent                                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  label               String
-  publicKeyJwk        Json
-  publicKeyThumbprint String                                 @unique
-  status              String                                 @default("ACTIVE")
-  lastSeenAt          DateTime?
-  revokedAt           DateTime?
-  createdAt           DateTime                               @default(now())
-  updatedAt           DateTime                               @updatedAt
-  replays             NationalLifeConnectorReplay[]
-  stageReceipts       NationalLifeConnectorStageReceipt[]
-  stageCompletions    NationalLifeConnectorStageCompletion[]
-  stageFailures       NationalLifeConnectorStageFailure[]
-  syncRuns            NationalLifeSyncRun[]
-  commands            NationalLifeConnectorCommand[]
-  exportUploads       NationalLifeExportUpload[]
-  documentTransfers   NationalLifeDocumentTransfer[]
+  id                      String                                 @id @default(cuid())
+  agentId                 String
+  agent                   Agent                                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  label                   String
+  publicKeyJwk            Json
+  publicKeyThumbprint     String                                 @unique
+  encryptionPublicKeyJwk  Json?
+  encryptionKeyThumbprint String?                                @unique
+  status                  String                                 @default("ACTIVE")
+  lastSeenAt              DateTime?
+  revokedAt               DateTime?
+  createdAt               DateTime                               @default(now())
+  updatedAt               DateTime                               @updatedAt
+  replays                 NationalLifeConnectorReplay[]
+  stageReceipts           NationalLifeConnectorStageReceipt[]
+  stageCompletions        NationalLifeConnectorStageCompletion[]
+  stageFailures           NationalLifeConnectorStageFailure[]
+  syncRuns                NationalLifeSyncRun[]
+  commands                NationalLifeConnectorCommand[]
+  exportUploads           NationalLifeExportUpload[]
+  documentTransfers       NationalLifeDocumentTransfer[]
+  credentialLeases        NationalLifeCredentialLease[]
 
   @@index([agentId, status])
 }
@@ -1898,6 +1914,9 @@ model NationalLifeConnectorCommand {
   runId                String
   capability           String
   state                NationalLifeConnectorCommandState         @default(QUEUED)
+  authState            String                                    @default("READY")
+  authEpoch            Int                                       @default(0)
+  authRequiredAt       DateTime?
   target               Json?
   params               Json
   payloadHash          String
@@ -1917,6 +1936,30 @@ model NationalLifeConnectorCommand {
   @@index([agentId, state, createdAt])
   @@index([deviceId, state, createdAt])
   @@index([expiresAt])
+}
+
+model NationalLifeCredentialLease {
+  id            String                      @id @default(cuid())
+  agentId       String
+  agent         Agent                       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  credentialId  String
+  credential    AgentIntegrationCredential  @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  deviceId      String
+  device        NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  operationKind String
+  operationId   String
+  authEpoch     Int
+  status        String                      @default("ISSUED")
+  outcome       String?
+  issuedAt      DateTime                    @default(now())
+  expiresAt     DateTime
+  reportedAt    DateTime?
+  createdAt     DateTime                    @default(now())
+  updatedAt     DateTime                    @updatedAt
+
+  @@unique([deviceId, operationKind, operationId, authEpoch])
+  @@index([agentId, issuedAt])
+  @@index([status, expiresAt])
 }
 
 model NationalLifeConnectorCommandEvent {

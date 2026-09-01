@@ -3,7 +3,10 @@ import {
   isNationalLifeLocalConnectorEnabled,
   localConnectorUnavailableResponse,
 } from '@/lib/national-life/local-connector/config'
-import { publicP256JwkSchema } from '@/lib/national-life/local-connector/contracts'
+import {
+  publicP256JwkSchema,
+  publicRsaOaepJwkSchema,
+} from '@/lib/national-life/local-connector/contracts'
 import {
   exchangeLocalConnectorPairing,
   LocalConnectorPairingError,
@@ -25,6 +28,7 @@ const exchangeSchema = z.strictObject({
     .max(100)
     .refine((value) => !/[<>\u0000]/.test(value)),
   publicKeyJwk: publicP256JwkSchema,
+  encryptionPublicKeyJwk: publicRsaOaepJwkSchema.optional(),
 })
 
 export async function POST(request: Request) {

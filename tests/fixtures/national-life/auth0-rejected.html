@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><style>#loginFormMFA{display:none}</style></head>
+<body>
+  <form id="loginForm" action="/login">
+    <input id="email" name="email" type="text" placeholder="Enter Username" aria-label="Enter Username">
+    <input id="password" name="password" type="password" placeholder="Enter Password" aria-label="Enter Password">
+    <input id="chkRememberMe" name="chkRememberMe" type="checkbox" aria-label="Email" checked>
+    <button id="btn-login" type="submit">Login</button>
+    <span id="error-message" class="incorrectUser col-md-12 error login-er-msg">The Username or Password that you entered is incorrect. Please try again.</span>
+  </form>
+  <form id="loginFormMFA" action="/login">
+    <input id="code" name="code" type="text">
+    <button id="entercodetxt" type="submit">Confirm Code</button>
+  </form>
+</body>
+</html>

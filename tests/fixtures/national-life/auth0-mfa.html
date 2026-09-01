@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><style>#loginForm{display:none}</style></head>
+<body>
+  <form id="loginForm" action="/login">
+    <input id="email" name="email" type="text" placeholder="Enter Username" aria-label="Enter Username">
+    <input id="password" name="password" type="password" placeholder="Enter Password" aria-label="Enter Password">
+    <input id="chkRememberMe" name="chkRememberMe" type="checkbox" aria-label="Email" checked>
+    <button id="btn-login" type="submit">Login</button>
+  </form>
+  <form id="loginFormMFA" action="/login">
+    <input id="code" name="code" type="text">
+    <em class="incorrectUser error help-block" style="display:none">Invalid code.</em>
+    <button id="entercodetxt" type="submit">Confirm Code</button>
+  </form>
+</body>
+</html>
