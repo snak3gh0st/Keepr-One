@@ -20,6 +20,22 @@ has an encrypt-only Vault identity. Only the private broker has a decrypt-only
 identity. The extension private RSA-OAEP key is non-extractable in IndexedDB.
 No API can reveal or copy a saved credential.
 
+## Vault server and recovery boundary
+
+Deploy `deploy/kbot-vault.compose.yaml` with the paths from
+`deploy/kbot-vault.env.example`. The image is pinned by version and digest,
+uses integrated Raft storage, verified TLS, an unprivileged UID, a read-only
+root filesystem and no published port. `disable_mlock=true` is intentional on
+hosts where swap is enabled; the Raft barrier still encrypts Vault data at
+rest.
+
+Do not use Vault dev mode. Initialize with five Shamir shares and a threshold
+of three, encrypt every share and the initial root token to an operator-held
+PGP key, and keep the encrypted recovery bundle off the Vault host. A restart
+must leave Vault sealed until an operator presents three shares. Never store
+unseal shares or the root token in Compose, Coolify, Vault Agent AppRole files,
+or the Vault host.
+
 ## Vault Transit bootstrap
 
 Enable Transit and create a derived, non-exportable, non-deletable key. Keep the
@@ -29,13 +45,22 @@ actual mount and key names aligned with `KBOT_CREDENTIAL_VAULT_MOUNT` and
 ```bash
 vault secrets enable -path=transit transit
 vault write transit/keys/kbot-national-life \
-  type=aes256-gcm96 derived=true exportable=false allow_plaintext_backup=false deletion_allowed=false
+  type=aes256-gcm96 derived=true exportable=false allow_plaintext_backup=false
+vault write transit/keys/kbot-national-life/config deletion_allowed=false
 ```
 
 The Keepr One web role gets only:
 
 ```hcl
 path "transit/encrypt/kbot-national-life" {
+  capabilities = ["update"]
+}
+
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+
+path "auth/token/renew-self" {
   capabilities = ["update"]
 }
 ```
@@ -46,12 +71,22 @@ The private broker role gets only:
 path "transit/decrypt/kbot-national-life" {
   capabilities = ["update"]
 }
+
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+
+path "auth/token/renew-self" {
+  capabilities = ["update"]
+}
 ```
 
 Use two distinct Vault Agent configurations and file sinks. Mount the web sink
 read-only at the path in `KBOT_CREDENTIAL_VAULT_ENCRYPT_TOKEN_FILE`; mount the
 broker sink read-only at `/run/secrets/vault-token`. Never put a token value in
 an environment variable, image, Compose file, database, or repository.
+The agents use separate AppRoles, omit the default policy, renew their own
+periodic service tokens, and write each sink with mode `0400`.
 
 Both Transit calls use a derived context bound to agent ID, provider,
 credential format and purpose. Restoring ciphertext under another agent does
@@ -62,17 +97,20 @@ not produce a usable credential.
 1. Confirm carrier/compliance authorization and back up PostgreSQL.
 2. Apply `20260901170000_add_kbot_credential_broker` with the feature disabled.
 3. Create the Vault key, policies, roles and two token sinks.
-4. Deploy `deploy/kbot-credential-broker.compose.yaml` on the private Coolify
+4. Deploy `deploy/kbot-vault.compose.yaml`, initialize/unseal Vault, then start
+   both Vault Agents and verify the two token sinks.
+5. Deploy `deploy/kbot-credential-broker.compose.yaml` on the private Coolify
    network. It must have no `ports`, public domain, Traefik labels or public
    router. `expose: 3020` is container-network metadata only.
-5. Configure the web service with the encrypt sink and the exact private URL
+6. Configure the web service with the encrypt sink, the Vault CA certificate,
+   `NODE_EXTRA_CA_CERTS`, and the exact private URL
    `http://kbot-credential-broker:3020`. Do not mount the decrypt sink there.
-6. Confirm Redis is available. Lease rate limiting fails closed if Redis is
+7. Confirm Redis is available. Lease rate limiting fails closed if Redis is
    unavailable; do not replace that behavior with an in-memory fallback.
-7. Deploy Keepr One with `KBOT_CREDENTIAL_BROKER_ENABLED=false`.
-8. Publish/install the reviewed K-Bot extension artifact.
-9. Enable one exact agent ID in both processes; keep all-agent rollout false.
-10. Complete the pilot checklist before adding another agent.
+8. Deploy Keepr One with `KBOT_CREDENTIAL_BROKER_ENABLED=false`.
+9. Publish/install the reviewed K-Bot extension artifact.
+10. Enable one exact agent ID in both processes; keep all-agent rollout false.
+11. Complete the pilot checklist before adding another agent.
 
 Shared settings:
 
@@ -90,6 +128,7 @@ Web-only settings:
 ```text
 KBOT_CREDENTIAL_VAULT_ENCRYPT_TOKEN_FILE
 KBOT_CREDENTIAL_BROKER_URL=http://kbot-credential-broker:3020
+NODE_EXTRA_CA_CERTS=/run/secrets/kbot-vault/ca.crt
 ```
 
 Broker-only settings:
@@ -97,6 +136,7 @@ Broker-only settings:
 ```text
 KBOT_CREDENTIAL_VAULT_DECRYPT_TOKEN_FILE=/run/secrets/vault-token
 KBOT_CREDENTIAL_BROKER_PORT=3020
+NODE_EXTRA_CA_CERTS=/run/secrets/vault-ca.crt
 DATABASE_URL
 REDIS_URL
 ```
@@ -120,6 +160,12 @@ filesystem, `/tmp` tmpfs, all Linux capabilities dropped and
 must not resolve or connect. Keepr One is the bounded public proxy and forwards
 only the closed signing-header allowlist, exact request bytes and safe response
 headers.
+
+Also verify the Vault and both Vault Agent containers have no published ports,
+read-only roots, no Linux capabilities and the expected unprivileged UIDs.
+Prove the web token can encrypt but cannot decrypt, the broker token can decrypt
+but cannot encrypt, and perform one synthetic context-bound round trip before
+accepting a real credential.
 
 ## Pilot proof
 

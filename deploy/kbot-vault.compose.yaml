@@ -1,0 +1,103 @@
+services:
+  kbot-vault:
+    image: hashicorp/vault:1.21.4@sha256:4e33b126a59c0c333b76fb4e894722462659a6bec7c48c9ee8cea56fccfd2569
+    container_name: kbot-vault
+    restart: unless-stopped
+    user: "100:1000"
+    command: ["vault", "server", "-config=/vault/config/vault.hcl"]
+    environment:
+      SKIP_CHOWN: "true"
+      SKIP_SETCAP: "true"
+      VAULT_ADDR: https://kbot-vault:8200
+      VAULT_CACERT: /vault/tls/ca.crt
+    expose:
+      - "8200"
+    volumes:
+      - "${KBOT_VAULT_DATA_DIR:?Vault data directory is required}:/vault/data"
+      - "${KBOT_VAULT_CONFIG_DIR:?Vault config directory is required}:/vault/config:ro"
+      - "${KBOT_VAULT_TLS_DIR:?Vault TLS directory is required}:/vault/tls:ro"
+      - "${KBOT_VAULT_BOOTSTRAP_DIR:?Vault bootstrap directory is required}:/vault/bootstrap:ro"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,uid=100,gid=1000,mode=0700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=https://kbot-vault:8200", "-ca-cert=/vault/tls/ca.crt"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      coolify:
+        aliases:
+          - kbot-vault
+
+  kbot-vault-agent-encrypt:
+    image: hashicorp/vault:1.21.4@sha256:4e33b126a59c0c333b76fb4e894722462659a6bec7c48c9ee8cea56fccfd2569
+    container_name: kbot-vault-agent-encrypt
+    restart: unless-stopped
+    user: "10001:10001"
+    command: agent -config=/vault/config/agent-encrypt.hcl
+    environment:
+      SKIP_CHOWN: "true"
+      SKIP_SETCAP: "true"
+    depends_on:
+      kbot-vault:
+        condition: service_healthy
+    volumes:
+      - "${KBOT_VAULT_CONFIG_DIR:?Vault config directory is required}:/vault/config:ro"
+      - "${KBOT_VAULT_TLS_DIR:?Vault TLS directory is required}:/vault/tls:ro"
+      - "${KBOT_VAULT_ENCRYPT_APPROLE_DIR:?Encrypt AppRole directory is required}:/vault/approle:ro"
+      - "${KBOT_VAULT_ENCRYPT_TOKEN_DIR:?Encrypt token sink directory is required}:/vault/token"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m,uid=10001,gid=10001,mode=0700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "test", "-s", "/vault/token/token"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - coolify
+
+  kbot-vault-agent-decrypt:
+    image: hashicorp/vault:1.21.4@sha256:4e33b126a59c0c333b76fb4e894722462659a6bec7c48c9ee8cea56fccfd2569
+    container_name: kbot-vault-agent-decrypt
+    restart: unless-stopped
+    user: "10001:10001"
+    command: agent -config=/vault/config/agent-decrypt.hcl
+    environment:
+      SKIP_CHOWN: "true"
+      SKIP_SETCAP: "true"
+    depends_on:
+      kbot-vault:
+        condition: service_healthy
+    volumes:
+      - "${KBOT_VAULT_CONFIG_DIR:?Vault config directory is required}:/vault/config:ro"
+      - "${KBOT_VAULT_TLS_DIR:?Vault TLS directory is required}:/vault/tls:ro"
+      - "${KBOT_VAULT_DECRYPT_APPROLE_DIR:?Decrypt AppRole directory is required}:/vault/approle:ro"
+      - "${KBOT_VAULT_DECRYPT_TOKEN_DIR:?Decrypt token sink directory is required}:/vault/token"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m,uid=10001,gid=10001,mode=0700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "test", "-s", "/vault/token/token"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - coolify
+
+networks:
+  coolify:
+    external: true
