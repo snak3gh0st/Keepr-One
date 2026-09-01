@@ -44,8 +44,10 @@ function termPdfReconciliationMessage(error: unknown): string {
 export async function reconcileTermIllustrationPdf(
   illustrationId: string,
 ): Promise<ReconcileTermIllustrationPdfResult> {
+  let stage = 'authenticate'
   try {
     const agent = await getCurrentAgent()
+    stage = 'load-artifact'
     const illustration = await prisma.illustration.findFirst({
       where: {
         id: illustrationId,
@@ -67,14 +69,18 @@ export async function reconcileTermIllustrationPdf(
       return { ok: false, message: 'Nenhum PDF Term disponível para conferir.' }
     }
 
+    stage = 'validate-scenario'
     const snapshot = buildForesightTermIllustrationSnapshot(illustration)
+    stage = 'extract-premiums'
     const premiums = await extractForesightTermPremiums(illustration.documentBytes)
+    stage = 'prepare-result'
     const rawPayload = illustration.rawPayload && typeof illustration.rawPayload === 'object' &&
       !Array.isArray(illustration.rawPayload)
       ? illustration.rawPayload as Record<string, unknown>
       : null
     if (!rawPayload) return { ok: false, message: 'Os dados do cenário Term não estão disponíveis para conferência.' }
 
+    stage = 'persist-result'
     const updated = await prisma.illustration.updateMany({
       where: {
         id: illustration.id,
@@ -104,6 +110,7 @@ export async function reconcileTermIllustrationPdf(
       return { ok: false, message: 'Não foi possível salvar a conferência deste PDF Term.' }
     }
 
+    stage = 'audit-result'
     try {
       await prisma.auditLog.create({
         data: {
@@ -121,10 +128,27 @@ export async function reconcileTermIllustrationPdf(
       console.error('Term PDF reconciliation audit failed', auditError)
     }
 
+    stage = 'revalidate'
     revalidatePath('/agent/illustrations')
     revalidatePath(`/agent/illustrations/${illustration.id}`)
     return { ok: true, message: 'Prêmios Term confirmados com o PDF oficial.' }
   } catch (error) {
+    const code = error instanceof Error ? error.message : 'UNKNOWN'
+    // The action intentionally never exposes raw parser/database errors to the
+    // client. Keep a bounded, non-sensitive stage marker in the server log so
+    // an operational failure can be diagnosed without recording PDF content or
+    // any carrier credentials.
+    console.error('Term PDF reconciliation failed', {
+      illustrationId,
+      stage,
+      code: [
+        'FORESIGHT_TERM_PREMIUM_MISSING',
+        'FORESIGHT_TERM_PREMIUM_MISMATCH',
+        'FORESIGHT_TERM_PDF_INVALID',
+        'INVALID_FORESIGHT_TERM_INPUT',
+      ].includes(code) ? code : 'UNCLASSIFIED',
+      errorName: error instanceof Error ? error.name : typeof error,
+    })
     return { ok: false, message: termPdfReconciliationMessage(error) }
   }
 }
