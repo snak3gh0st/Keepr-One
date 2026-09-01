@@ -702,6 +702,48 @@ describe('automatic carrier login recovery', () => {
     expect((storage.sync as Record<string, unknown>).credentialAttempt).toBeUndefined()
   })
 
+  it('settles a command credential lease after the command has already started', async () => {
+    storage.command = {
+      commandId: 'cmd-1', runId: 'command-run-1', carrierTabId: 17,
+      nextEventSequence: 4, status: 'RUNNING', phase: 'OPENING_FORESIGHT',
+      errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
+      credentialAttempt: {
+        operationKind: 'CONNECTOR_COMMAND', operationId: 'cmd-1', authEpoch: 3,
+        leaseId: 'lease_1', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    await bootBackground()
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return undefined as never
+      return {} as never
+    })
+    const commandWrites: Array<Record<string, unknown>> = []
+    const set = chromeStub.storage.local.set
+    chromeStub.storage.local.set = async (value) => {
+      if (value.command && typeof value.command === 'object') {
+        commandWrites.push(value.command as Record<string, unknown>)
+      }
+      await set(value)
+    }
+
+    emit('tabs.onUpdated', 17, { status: 'complete' }, {
+      id: 17, active: true, url: `${NLG}${NEW_BUSINESS_PATH}`,
+    })
+    await flush()
+    chromeStub.storage.local.set = set
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease_1/result',
+      body: { schemaVersion: 1, outcome: 'AUTHENTICATED' },
+    }))
+    const settled = commandWrites.find((write) => write.status === 'RUNNING')
+    expect(settled).toMatchObject({
+      commandId: 'cmd-1', status: 'RUNNING', phase: 'OPENING_FORESIGHT',
+    })
+    expect(settled).not.toHaveProperty('credentialAttempt')
+    expect(settled).not.toHaveProperty('errorCode')
+  })
+
   it.each([
     ['MFA', 'MFA_REQUIRED'],
     ['REJECTED', 'CREDENTIAL_REJECTED'],

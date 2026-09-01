@@ -97,12 +97,12 @@ export default defineContentScript({
       }
       ;(value[method] as (...values: unknown[]) => unknown).apply(value, args)
     }
-    const waitForCarrierIdle = async () => {
+    const waitForCarrierIdle = async (timeoutCode = 'FORESIGHT_TERM_FUNDING_TIMEOUT') => {
       const idle = await waitForForesightAsyncWorkerIdle({
         read: () => carrier().win.$ITAsyncWorker,
         wait: () => delay(100),
       })
-      if (!idle) throw new Error('FORESIGHT_TERM_FUNDING_TIMEOUT')
+      if (!idle) throw new Error(timeoutCode)
     }
     const writeScheduleValue = async (id: string, value: number) => {
       const written = await writeForesightControlValueWhenReady({
@@ -309,25 +309,27 @@ export default defineContentScript({
       }
       setSelect(doc, fields.jurisdiction, String(values.jurisdiction))
       element<HTMLSelectElement>(doc, fields.jurisdiction).dispatchEvent(new Event('change', { bubbles: true }))
-      await delay(700)
+      await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT')
 
       ;({ doc, win } = carrier())
       setInput(doc, fields.firstName, String(values.firstName))
       setInput(doc, fields.lastName, String(values.lastName))
       invoke(win, 'ctl00_mobilityPH_panelInsured_ucInsured', 'updateName')
-      await delay(500)
+      await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT')
+      ;({ doc, win } = carrier())
       setSelect(doc, fields.gender, String(values.gender))
       setInput(doc, fields.birthDate, String(values.birthDate))
       invoke(win, 'ctl00_mobilityPH_panelInsured_ucInsured', 'updateInformation')
-      await delay(800)
+      await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT')
 
       ;({ doc, win } = carrier())
       setSelect(doc, fields.riskClass, String(values.riskClass))
       invoke(win, 'ctl00_mobilityPH_panelInsured_ucRisk', 'updateInformation')
-      await delay(600)
+      await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT')
+      ;({ doc, win } = carrier())
       setSelect(doc, fields.ownerType, optionByText(doc, fields.ownerType, 'Same as Insured'))
       invoke(win, 'ctl00_mobilityPH_panelOwner_ucOwner', 'updateOwnerType')
-      await delay(600)
+      await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT')
     }
     const applyTermFunding = async (values: MainRequest['values']) => {
       let { doc, win } = carrier()
