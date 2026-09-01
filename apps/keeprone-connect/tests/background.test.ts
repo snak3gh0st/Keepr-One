@@ -521,6 +521,48 @@ describe('automatic carrier login recovery', () => {
     )
   })
 
+  it('leases after the Auth0 content script reports that its exact login page is ready', async () => {
+    await bootBackground()
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'NAVIGATING',
+    }
+    let classifications = 0
+    tabs.sendMessage.mockImplementation(async (tabId: number, message: unknown) => {
+      const value = message as { type?: string }
+      if (value.type === 'CLASSIFY_CARRIER_AUTH_PAGE') {
+        classifications += 1
+        if (classifications === 1) throw new Error('auth content script is still loading')
+        return { ok: true, code: 'LOGIN' }
+      }
+      if (value.type === 'SUBMIT_CARRIER_CREDENTIAL') return { ok: true, code: 'SUBMITTED' }
+      return defaultTabMessageResponse(tabId, message)
+    })
+    brokerResponder()
+
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    await flush()
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(0)
+
+    const readyResponse = vi.fn()
+    emit(
+      'runtime.onMessage',
+      { type: 'CARRIER_AUTH_PAGE_READY' },
+      { id: chromeStub.runtime.id, tab: { id: 7 }, url: authUrl },
+      readyResponse,
+    )
+    await flush()
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(1)
+    expect(tabs.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+    }))
+    expect(readyResponse).toHaveBeenCalledWith({ ok: true })
+  })
+
   it('closes an issued lease as unknown when the exact login submit cannot be completed', async () => {
     storage.sync = {
       runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
