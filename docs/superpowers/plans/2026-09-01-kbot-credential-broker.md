@@ -253,7 +253,7 @@ git commit -m "feat(kbot): add credential broker data contract"
 - Produces: `CredentialEncryptPort.encrypt()`, `CredentialDecryptPort.decrypt()`, `createVaultTransitEncryptClient()` and `createVaultTransitDecryptClient()`.
 - Produces: `getKBotCredentialWebConfig()` and `getKBotCredentialBrokerConfig()` with mutually exclusive token-file requirements.
 
-- [ ] **Step 1: Write failing Vault client tests**
+- [x] **Step 1: Write failing Vault client tests**
 
 Use an injected `fetch` and token-file reader. Assert:
 
@@ -277,7 +277,7 @@ expect(request.context).toBe(request.associated_data)
 
 Add negative cases for HTTP redirect, timeout, malformed JSON, non-`vault:vN:` ciphertext, malformed base64 plaintext, binding mismatch and a config that tries to load both encrypt and decrypt identities in the same runtime.
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 ```bash
 pnpm vitest run lib/national-life/credentials/vault-transit.test.ts lib/national-life/credentials/config.test.ts
@@ -285,7 +285,7 @@ pnpm vitest run lib/national-life/credentials/vault-transit.test.ts lib/national
 
 Expected: missing modules.
 
-- [ ] **Step 3: Implement the Vault ports**
+- [x] **Step 3: Implement the Vault ports**
 
 Define narrow interfaces:
 
@@ -328,7 +328,7 @@ Both clients must:
 The encrypt client calls `/v1/<mount>/encrypt/<key>`. The decrypt client calls
 `/v1/<mount>/decrypt/<key>` and verifies the decrypted strict credential schema.
 
-- [ ] **Step 4: Implement fail-closed configuration**
+- [x] **Step 4: Implement fail-closed configuration**
 
 Add these non-public variables to `.env.example` without values that could be mistaken for production credentials:
 
@@ -350,7 +350,7 @@ broker URL. `getKBotCredentialBrokerConfig()` may read only the decrypt token
 file variable and port. Both reject an enabled production configuration with a
 missing field. No variable receives a `NEXT_PUBLIC_` prefix.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 ```bash
 pnpm vitest run lib/national-life/credentials/vault-transit.test.ts lib/national-life/credentials/config.test.ts
@@ -358,7 +358,7 @@ pnpm vitest run lib/national-life/credentials/vault-transit.test.ts lib/national
 
 Expected: pass with no sentinel secret in thrown errors or captured console calls.
 
-- [ ] **Step 6: Commit the Vault boundary**
+- [x] **Step 6: Commit the Vault boundary**
 
 ```bash
 git add .env.example lib/national-life/credentials
