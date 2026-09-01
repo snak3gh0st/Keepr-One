@@ -1399,7 +1399,9 @@ async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?
   const operation = (async () => {
     const device = await readDeviceState()
     if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) return
-    await writeCommandState({ ...(await readCommandState()), status: 'POLLING' })
+    await writeCommandState({
+      ...(await readCommandState()), status: 'POLLING', updatedAt: new Date().toISOString(),
+    })
     let dispatch: ConnectorCommandDispatch | null = null
     try {
       const raw = await signedJsonRequest<unknown>({
