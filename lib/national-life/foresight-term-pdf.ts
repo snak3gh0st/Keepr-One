@@ -68,6 +68,11 @@ export async function extractForesightTermPremiums(documentBytes: Uint8Array): P
   const runtime = globalThis as unknown as Record<string, unknown>
   runtime.DOMMatrix ??= canvas.DOMMatrix
   runtime.Path2D ??= canvas.Path2D
+  // The Next server bundle cannot resolve PDF.js' relative fake-worker import.
+  // Providing the official worker handler up front keeps text extraction in
+  // process and avoids a browser-style worker dependency on the server.
+  const worker = await import('pdfjs-dist/legacy/build/pdf.worker.mjs')
+  runtime.pdfjsWorker ??= { WorkerMessageHandler: worker.WorkerMessageHandler }
   const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs')
   const loadingTask = getDocument({
     data: Uint8Array.from(documentBytes),
