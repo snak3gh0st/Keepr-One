@@ -5,6 +5,7 @@ import {
 import {
   buildForesightTermIllustrationSnapshot,
   foresightTermIllustrationInputHash,
+  resolveForesightTermDurationResult,
 } from '@/lib/national-life/foresight-term-contract'
 
 type IllustrationSource = {
@@ -40,10 +41,11 @@ export function resolveApplicationIllustrationLink(
 
   if (target.family === 'TERM') {
     const snapshot = buildForesightTermIllustrationSnapshot(source)
+    const durationResult = resolveForesightTermDurationResult(source)
     const expectedCarrier = target.carrierProduct.startsWith('NL ') ? 'NL Term'
       : target.carrierProduct.startsWith('LSW ') ? 'LSW Term' : mismatch()
     if (snapshot.product.carrierName !== expectedCarrier ||
-      snapshot.termDuration !== target.termDuration ||
+      durationResult.confirmedTermDuration !== target.termDuration ||
       snapshot.insured.issueState !== target.issueState ||
       (target.faceAmount !== undefined && (source.faceAmount ?? snapshot.faceAmount) !== target.faceAmount) ||
       (target.plannedPremium !== undefined && source.premium != null && source.premium !== target.plannedPremium) ||

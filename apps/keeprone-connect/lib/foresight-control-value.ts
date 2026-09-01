@@ -17,6 +17,10 @@ type ForesightDeferred = {
   fail(callback: () => void): ForesightDeferred
 }
 
+type ForesightAsyncWorker = {
+  _isIdle?: unknown
+}
+
 /// Foresight's ASP.NET widgets keep a value separate from the visible input.
 /// Writing only `input.value` looks right momentarily, but its next update can
 /// restore the old carrier value. Prefer the widget setter, then send the
@@ -46,6 +50,28 @@ export async function writeForesightControlValueWhenReady(input: {
       if (writeForesightControlValue(input.read(), input.value)) return true
     } catch {
       // Foresight replaces the iframe document during ASP.NET postbacks.
+    }
+    if (attempt + 1 < attempts) await input.wait()
+  }
+  return false
+}
+
+/// Foresight serializes its PageService calls through `$ITAsyncWorker`.
+/// A field can show the requested value while an older queued response is
+/// still capable of replacing it. Continue only after that carrier-owned queue
+/// is empty, reacquiring the frame on every read because the portal may replace
+/// it while a command is running.
+export async function waitForForesightAsyncWorkerIdle(input: {
+  read(): ForesightAsyncWorker | null | undefined
+  wait(): Promise<unknown>
+  attempts?: number
+}): Promise<boolean> {
+  const attempts = input.attempts ?? 40
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      if (input.read()?._isIdle === true) return true
+    } catch {
+      // Foresight may replace the frame between reads.
     }
     if (attempt + 1 < attempts) await input.wait()
   }

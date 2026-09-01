@@ -34,6 +34,8 @@ export type ForesightTermExecutionReceipt = {
   caseFingerprint: string
   carrierCaseName: string
   carrierProduct: 'LSW Term' | 'NL Term'
+  requestedTermDuration: '10-G' | '15-G' | '20-G' | '30-G' | 'ART'
+  confirmedTermDuration: '10-G' | '15-G' | '20-G' | '30-G' | 'ART'
   release: string
   reportCode: 'NAIC_ILLUSTRATION'
   documentSha256: string
@@ -150,10 +152,14 @@ function validReceipt(
       'documentSha256', 'documentBytes', 'saved',
     ]) && receipt.productCode === '956'
   }
+  if (!('termDuration' in expected.snapshot)) return false
+  const termDurations = ['10-G', '15-G', '20-G', '30-G', 'ART'] as const
   return exactKeys(receipt, [
-    'inputHash', 'caseFingerprint', 'carrierCaseName', 'carrierProduct', 'release', 'reportCode',
-    'documentSha256', 'documentBytes', 'saved',
-  ]) && receipt.carrierProduct === expected.snapshot.product.carrierName
+    'inputHash', 'caseFingerprint', 'carrierCaseName', 'carrierProduct', 'requestedTermDuration',
+    'confirmedTermDuration', 'release', 'reportCode', 'documentSha256', 'documentBytes', 'saved',
+  ]) && receipt.carrierProduct === expected.snapshot.product.carrierName &&
+    receipt.requestedTermDuration === expected.snapshot.termDuration &&
+    (termDurations as readonly unknown[]).includes(receipt.confirmedTermDuration)
 }
 
 export function parseForesightExecutionResponse(

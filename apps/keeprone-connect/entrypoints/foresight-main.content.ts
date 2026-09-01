@@ -2,6 +2,7 @@ import { FORESIGHT_FLEXLIFE_FIELDS, foresightSolveValue } from '../lib/foresight
 import { isForesightPdf, parseForesightReportUrl } from '../lib/foresight-report'
 import {
   applyForesightAllocationPreference,
+  waitForForesightAsyncWorkerIdle,
   writeForesightControlValueWhenReady,
 } from '../lib/foresight-control-value'
 import {
@@ -21,6 +22,7 @@ type CarrierWindow = Window & {
     sendRequest(path: string, parameters: unknown[]): CarrierDeferred
   }
   $ITCommon?: { sessionTokenId(): string }
+  $ITAsyncWorker?: { _isIdle?: boolean }
   __doPostBack?: (target: string, argument: string) => void
 }
 
@@ -94,6 +96,13 @@ export default defineContentScript({
         throw new Error('FORESIGHT_SCHEMA_MISMATCH')
       }
       ;(value[method] as (...values: unknown[]) => unknown).apply(value, args)
+    }
+    const waitForCarrierIdle = async () => {
+      const idle = await waitForForesightAsyncWorkerIdle({
+        read: () => carrier().win.$ITAsyncWorker,
+        wait: () => delay(100),
+      })
+      if (!idle) throw new Error('FORESIGHT_TERM_FUNDING_TIMEOUT')
     }
     const writeScheduleValue = async (id: string, value: number) => {
       const written = await writeForesightControlValueWhenReady({
@@ -331,15 +340,15 @@ export default defineContentScript({
       setSelect(doc, fields.designType, String(values.designType))
       setWidgetNumber(win, fields.faceAmount, Number(values.faceAmount))
       invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefit', 'updateDeathBenefit')
-      await delay(900)
+      await waitForCarrierIdle()
       ;({ doc, win } = carrier())
       setSelect(doc, fields.premiumMode, String(values.premiumMode))
       invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefit', 'updatePremium')
-      await delay(700)
+      await waitForCarrierIdle()
       ;({ doc, win } = carrier())
       setSelect(doc, fields.termDuration, String(values.termDuration))
       invoke(win, 'ctl00_mobilityPH_panelTermProduct_ucTermProduct', 'updateTermProduct')
-      await delay(900)
+      await waitForCarrierIdle()
     }
     const applyTermReports = async (values: MainRequest['values']) => {
       const { doc } = carrier()

@@ -3,6 +3,7 @@ import {
   buildForesightTermIllustrationSnapshot,
   foresightTermIllustrationInputHash,
   parseForesightTermIllustrationReceipt,
+  resolveForesightTermDurationResult,
 } from './foresight-term-contract'
 
 const source = {
@@ -69,9 +70,31 @@ describe('Foresight Term illustration contract', () => {
         foresightTermResult: {
           source: 'OFFICIAL_PDF', premiumMode: 'Monthly', confirmedFaceAmount: 250000,
           confirmedMonthlyPremium: 42.5, confirmedAnnualPremium: 510,
+          requestedTermDuration: '20-G', confirmedTermDuration: '15-G',
         },
       },
     })).toMatchObject({ illustrationId: 'ill_term_1', termDuration: '20-G' })
+  })
+
+  it('keeps the request immutable while exposing the duration confirmed by National Life', () => {
+    const adjusted = {
+      ...source,
+      rawPayload: {
+        ...source.rawPayload,
+        foresightTermResult: {
+          source: 'OFFICIAL_PDF', premiumMode: 'Monthly', confirmedFaceAmount: 250000,
+          confirmedMonthlyPremium: 42.5, confirmedAnnualPremium: 510,
+          requestedTermDuration: '20-G', confirmedTermDuration: '15-G',
+        },
+      },
+    }
+
+    expect(resolveForesightTermDurationResult(adjusted)).toEqual({
+      requestedTermDuration: '20-G',
+      confirmedTermDuration: '15-G',
+      adjusted: true,
+    })
+    expect(buildForesightTermIllustrationSnapshot(adjusted).termDuration).toBe('20-G')
   })
 
   it('accepts a Term receipt only when the named carrier and official PDF are exact', () => {
@@ -80,6 +103,8 @@ describe('Foresight Term illustration contract', () => {
       caseFingerprint: `case_${'b'.repeat(64)}`,
       carrierCaseName: 'KEEPRONE-20260827-ILLTERM123',
       carrierProduct: 'LSW Term',
+      requestedTermDuration: '20-G',
+      confirmedTermDuration: '15-G',
       release: '5.3.65.31',
       reportCode: 'NAIC_ILLUSTRATION',
       documentSha256: 'c'.repeat(64),
@@ -87,6 +112,10 @@ describe('Foresight Term illustration contract', () => {
       saved: true,
     }
     expect(parseForesightTermIllustrationReceipt(receipt)).toEqual(receipt)
+    const legacy = { ...receipt } as Record<string, unknown>
+    delete legacy.requestedTermDuration
+    delete legacy.confirmedTermDuration
+    expect(parseForesightTermIllustrationReceipt(legacy)).toEqual(legacy)
     expect(parseForesightTermIllustrationReceipt({ ...receipt, carrierProduct: 'Term' })).toBeNull()
     expect(parseForesightTermIllustrationReceipt({ ...receipt, extra: true })).toBeNull()
   })

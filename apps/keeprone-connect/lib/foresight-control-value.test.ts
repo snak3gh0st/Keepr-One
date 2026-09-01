@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   applyForesightAllocationPreference,
   selectForesightOption,
+  waitForForesightAsyncWorkerIdle,
   writeForesightControlValue,
   writeForesightControlValueWhenReady,
 } from './foresight-control-value'
@@ -136,5 +137,44 @@ describe('Foresight select writer', () => {
       ['session-123', '24'],
     )
     expect(postBack).toHaveBeenCalledWith('ctl00_mobilityPH_panelInterestRates_upAssumedRate', '')
+  })
+})
+
+describe('Foresight async worker', () => {
+  it('waits until every queued carrier update has finished', async () => {
+    const read = vi.fn()
+      .mockReturnValueOnce({ _isIdle: false })
+      .mockReturnValueOnce({ _isIdle: false })
+      .mockReturnValueOnce({ _isIdle: true })
+    const wait = vi.fn().mockResolvedValue(undefined)
+
+    await expect(waitForForesightAsyncWorkerIdle({ read, wait }))
+      .resolves.toBe(true)
+
+    expect(read).toHaveBeenCalledTimes(3)
+    expect(wait).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps waiting while the carrier replaces its frame', async () => {
+    const read = vi.fn()
+      .mockImplementationOnce(() => { throw new Error('frame replaced') })
+      .mockReturnValueOnce({ _isIdle: true })
+    const wait = vi.fn().mockResolvedValue(undefined)
+
+    await expect(waitForForesightAsyncWorkerIdle({ read, wait }))
+      .resolves.toBe(true)
+    expect(wait).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses to continue while the carrier still has queued updates', async () => {
+    const wait = vi.fn().mockResolvedValue(undefined)
+
+    await expect(waitForForesightAsyncWorkerIdle({
+      read: () => ({ _isIdle: false }),
+      wait,
+      attempts: 3,
+    })).resolves.toBe(false)
+
+    expect(wait).toHaveBeenCalledTimes(2)
   })
 })

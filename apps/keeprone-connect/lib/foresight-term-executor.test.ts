@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import {
   buildForesightTermClientTarget,
   FORESIGHT_TERM_FUNDING_MENU_ID,
+  foresightTermReadbackError,
+  resolveForesightTermDuration,
 } from './foresight-term-executor'
 import { parseForesightTermIllustrationSnapshot } from './foresight-term-contract'
 import {
@@ -58,6 +60,52 @@ describe('Foresight Term client target', () => {
     expect(workflow).toContain("'updatePremium'")
     expect(workflow).toContain("'updateTermProduct'")
     expect(workflow).not.toContain("'updateDeathBenefitSchedule'")
+    expect(workflow.match(/await waitForCarrierIdle\(\)/g)).toHaveLength(3)
+  })
+
+  it('uses a valid duration returned by the carrier as an explicit fallback', () => {
+    const snapshot = parseForesightTermIllustrationSnapshot({
+      schemaVersion: 1,
+      illustrationId: 'ill_term_readback',
+      caseId: null,
+      carrierCaseName: 'KEEPRONE-TERM-READBACK',
+      product: { carrierName: 'LSW Term', kind: 'TERM' },
+      insured: {
+        firstName: 'Paulo',
+        lastName: 'Loureiro Campos',
+        dateOfBirth: '1988-06-02',
+        issueState: 'FL',
+      },
+      underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
+      faceAmount: 1_000_000,
+      premiumMode: 'Monthly',
+      termDuration: '20-G',
+      reports: ['NAIC_ILLUSTRATION'],
+    })!
+    const client = {
+      firstName: 'Paulo',
+      lastName: 'Loureiro Campos',
+      dateOfBirth: '06/02/1988',
+      issueState: 'FL',
+      gender: 'Male',
+      rateClass: 'Standard_NT',
+    }
+    const funding = {
+      designType: 'Specify Face Amount',
+      faceAmount: '$1,000,000',
+      premiumMode: 'Monthly',
+      termDuration: '15-G',
+    }
+
+    expect(foresightTermReadbackError(snapshot, client, funding)).toBeNull()
+    expect(resolveForesightTermDuration(snapshot, funding.termDuration)).toEqual({
+      requestedTermDuration: '20-G',
+      confirmedTermDuration: '15-G',
+    })
+    expect(foresightTermReadbackError(snapshot, client, {
+      ...funding,
+      termDuration: '25-G',
+    })).toBe('FORESIGHT_TERM_DURATION_READBACK_MISMATCH')
   })
 
   it('matches the Term duration from the report section around the NAIC checkbox', () => {

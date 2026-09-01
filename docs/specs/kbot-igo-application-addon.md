@@ -14,6 +14,11 @@ carrier-confirmed face amount and premium, insured identity, and immutable input
 hash. A case is linked or created from that Illustration; selecting an unrelated
 case is not the entry point.
 
+The agent request remains sealed for audit. Carrier-confirmed values are stored
+as a separate result and drive the Application. When National Life confirms a
+different valid Term duration, KeeprOne shows requested versus confirmed and
+uses the confirmed duration in the official PDF and iGO draft.
+
 ## Product boundary
 
 - KeeprOne owns intake, readiness, consent, document inventory, paid entitlement, audit history, and user-facing status.

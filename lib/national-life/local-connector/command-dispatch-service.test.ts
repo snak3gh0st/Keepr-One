@@ -494,6 +494,8 @@ describe('local connector command dispatch', () => {
       caseFingerprint: `case_${'b'.repeat(64)}`,
       carrierCaseName,
       carrierProduct: 'NL Term',
+      requestedTermDuration: '20-G',
+      confirmedTermDuration: '15-G',
       release: '5.3.65.31',
       reportCode: 'NAIC_ILLUSTRATION',
       documentSha256: createHash('sha256').update(bytes).digest('hex'),
@@ -533,6 +535,7 @@ describe('local connector command dispatch', () => {
     expect(persistTermResult).toHaveBeenCalledWith({
       agentId: 'agent_1', illustrationId: 'illustration_term_1',
       monthlyPremium: 62.92, annualPremium: 755.04,
+      requestedTermDuration: '20-G', confirmedTermDuration: '15-G',
     })
     expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ payload: { illustration: receipt } }))
   })
@@ -646,6 +649,7 @@ describe('local connector command dispatch', () => {
         sequence: 2, type: 'DATA_BATCH', emittedAt: now.toISOString(), error: null,
         payload: { illustration: {
           inputHash, caseFingerprint: `case_${'b'.repeat(64)}`, carrierCaseName, carrierProduct: 'NL Term',
+          requestedTermDuration: '20-G', confirmedTermDuration: '20-G',
           release: '5.3.65.31', reportCode: 'NAIC_ILLUSTRATION',
           documentSha256: createHash('sha256').update(bytes).digest('hex'), documentBytes: bytes.byteLength, saved: true,
         } },

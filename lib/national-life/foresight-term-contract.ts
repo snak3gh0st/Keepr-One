@@ -132,6 +132,8 @@ export type ForesightTermIllustrationReceipt = {
   caseFingerprint: string
   carrierCaseName: string
   carrierProduct: (typeof TERM_CARRIER_PRODUCTS)[number]
+  requestedTermDuration?: (typeof TERM_DURATIONS)[number]
+  confirmedTermDuration?: (typeof TERM_DURATIONS)[number]
   release: string
   reportCode: 'NAIC_ILLUSTRATION'
   documentSha256: string
@@ -142,19 +144,62 @@ export type ForesightTermIllustrationReceipt = {
 export function parseForesightTermIllustrationReceipt(value: unknown): ForesightTermIllustrationReceipt | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const receipt = value as Record<string, unknown>
-  const expected = [
+  const legacyExpected = [
     'inputHash', 'caseFingerprint', 'carrierCaseName', 'carrierProduct', 'release', 'reportCode',
     'documentSha256', 'documentBytes', 'saved',
   ].sort()
+  const expected = [...legacyExpected, 'requestedTermDuration', 'confirmedTermDuration'].sort()
   const keys = Object.keys(receipt).sort()
-  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index]) ||
+  const legacy = keys.length === legacyExpected.length &&
+    keys.every((key, index) => key === legacyExpected[index])
+  const current = keys.length === expected.length &&
+    keys.every((key, index) => key === expected[index])
+  if ((!legacy && !current) ||
     typeof receipt.inputHash !== 'string' || !/^[a-f0-9]{64}$/.test(receipt.inputHash) ||
     typeof receipt.caseFingerprint !== 'string' || !/^case_[a-f0-9]{64}$/.test(receipt.caseFingerprint) ||
     typeof receipt.carrierCaseName !== 'string' || !/^[A-Z0-9][A-Z0-9_-]{5,79}$/.test(receipt.carrierCaseName) ||
-    !product(receipt.carrierProduct) || typeof receipt.release !== 'string' || receipt.release.length > 32 ||
+    !product(receipt.carrierProduct) || (current && (!duration(receipt.requestedTermDuration) ||
+    !duration(receipt.confirmedTermDuration))) || typeof receipt.release !== 'string' || receipt.release.length > 32 ||
     receipt.reportCode !== 'NAIC_ILLUSTRATION' || typeof receipt.documentSha256 !== 'string' ||
     !/^[a-f0-9]{64}$/.test(receipt.documentSha256) || !Number.isSafeInteger(receipt.documentBytes) ||
     (receipt.documentBytes as number) < 5 || (receipt.documentBytes as number) > 25 * 1024 * 1024 ||
     receipt.saved !== true) return null
   return receipt as ForesightTermIllustrationReceipt
+}
+
+export function resolveForesightTermDurationResult(source: IllustrationSource): {
+  requestedTermDuration: ForesightTermIllustrationSnapshotV1['termDuration']
+  confirmedTermDuration: ForesightTermIllustrationSnapshotV1['termDuration']
+  adjusted: boolean
+} {
+  const snapshot = buildForesightTermIllustrationSnapshot(source)
+  const payload = record(source.rawPayload)
+  const rawResult = payload.foresightTermResult
+  if (!rawResult || typeof rawResult !== 'object' || Array.isArray(rawResult)) {
+    return {
+      requestedTermDuration: snapshot.termDuration,
+      confirmedTermDuration: snapshot.termDuration,
+      adjusted: false,
+    }
+  }
+  const result = rawResult as Record<string, unknown>
+  const hasRequested = Object.hasOwn(result, 'requestedTermDuration')
+  const hasConfirmed = Object.hasOwn(result, 'confirmedTermDuration')
+  // Official Term results created before duration reconciliation remain valid.
+  if (!hasRequested && !hasConfirmed) {
+    return {
+      requestedTermDuration: snapshot.termDuration,
+      confirmedTermDuration: snapshot.termDuration,
+      adjusted: false,
+    }
+  }
+  if (!hasRequested || !hasConfirmed || result.source !== 'OFFICIAL_PDF' ||
+    result.requestedTermDuration !== snapshot.termDuration || !duration(result.confirmedTermDuration)) {
+    throw new Error('INVALID_FORESIGHT_TERM_INPUT')
+  }
+  return {
+    requestedTermDuration: snapshot.termDuration,
+    confirmedTermDuration: result.confirmedTermDuration,
+    adjusted: result.confirmedTermDuration !== snapshot.termDuration,
+  }
 }

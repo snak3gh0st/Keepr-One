@@ -63,13 +63,14 @@ describe('Application from official Illustration', () => {
         foresightTermResult: {
           source: 'OFFICIAL_PDF', premiumMode: 'Monthly', confirmedFaceAmount: 500_000,
           confirmedMonthlyPremium: 62.92, confirmedAnnualPremium: 755.04,
+          requestedTermDuration: '20-G', confirmedTermDuration: '15-G',
         },
       },
     }, 'case-2')
 
     expect(seed.prospect.tobaccoStatus).toBe('YES')
     expect(seed.dossier.coverage).toMatchObject({
-      family: 'TERM', carrierProduct: 'LSW 20-G', termDuration: '20-G',
+      family: 'TERM', carrierProduct: 'LSW 15-G', termDuration: '15-G',
       illustrationId: 'illustration-term-1', faceAmount: 500_000, plannedPremium: 62.92,
     })
   })

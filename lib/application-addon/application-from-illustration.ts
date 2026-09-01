@@ -7,6 +7,7 @@ import {
 import {
   buildForesightTermIllustrationSnapshot,
   foresightTermIllustrationInputHash,
+  resolveForesightTermDurationResult,
 } from '@/lib/national-life/foresight-term-contract'
 
 export type ApplicationIllustrationSource = {
@@ -67,6 +68,7 @@ export function buildApplicationFromIllustrationSeed(
     if (snapshot.faceAmount !== faceAmount) {
       throw new ApplicationFromIllustrationError('ILLUSTRATION_RESULT_MISSING')
     }
+    const durationResult = resolveForesightTermDurationResult(linkedSource)
     const carrierPrefix = snapshot.product.carrierName === 'LSW Term' ? 'LSW' : 'NL'
     const dossier = parseApplicationDossierDraftV2({
       version: 2,
@@ -79,8 +81,8 @@ export function buildApplicationFromIllustrationSeed(
       address: { state: snapshot.insured.issueState },
       coverage: {
         family: 'TERM',
-        carrierProduct: `${carrierPrefix} ${snapshot.termDuration}`,
-        termDuration: snapshot.termDuration,
+        carrierProduct: `${carrierPrefix} ${durationResult.confirmedTermDuration}`,
+        termDuration: durationResult.confirmedTermDuration,
         issueState: snapshot.insured.issueState,
         applicationType: 'FULL',
         illustrationId: source.id,

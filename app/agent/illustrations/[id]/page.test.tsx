@@ -217,6 +217,7 @@ describe('Illustration detail page', () => {
         foresightTermResult: {
           source: 'OFFICIAL_PDF', premiumMode: 'Monthly', confirmedFaceAmount: 500_000,
           confirmedMonthlyPremium: 62.92, confirmedAnnualPremium: 755.04,
+          requestedTermDuration: '20-G', confirmedTermDuration: '15-G',
         },
       },
     })
@@ -229,6 +230,11 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('Total anual no modo mensal')).toBeTruthy()
     expect(screen.getByText('$755.04')).toBeTruthy()
     expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
+    expect(screen.getAllByText('Prazo solicitado').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('20-G').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Prazo confirmado pela National Life').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('15-G').length).toBeGreaterThan(0)
+    expect(screen.getByText(/este é o prazo usado no PDF oficial e na Application/)).toBeTruthy()
     expect(screen.queryByText('Prêmio mensal informado')).toBeNull()
     expect(screen.getByRole('button', { name: 'Application de illustration-term-result' })).toBeTruthy()
   })
