@@ -12,6 +12,8 @@ describe('K-Bot credential broker compose isolation', () => {
     expect(compose).toContain('KBOT_CREDENTIAL_VAULT_DECRYPT_TOKEN_FILE: /run/secrets/vault-token')
     expect(compose).not.toContain('KBOT_CREDENTIAL_VAULT_ENCRYPT_TOKEN_FILE')
     expect(compose).toContain(':/run/secrets/vault-token:ro')
+    expect(compose).toContain('NODE_EXTRA_CA_CERTS: /run/secrets/vault-ca.crt')
+    expect(compose).toContain(':/run/secrets/vault-ca.crt:ro')
     expect(compose).toContain('read_only: true')
     expect(compose).toContain('/tmp:rw,noexec,nosuid')
     expect(compose).toContain('user: "10001:10001"')

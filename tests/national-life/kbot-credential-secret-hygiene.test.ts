@@ -93,7 +93,7 @@ describe('K-Bot credential secret hygiene', () => {
     })
 
     const page = loginPage()
-    page.window.document.querySelector('#btn-login')?.addEventListener('click', (event) => {
+    page.window.document.querySelector('#btn-login')?.addEventListener('click', (event: Event) => {
       event.preventDefault()
     })
     const acknowledgement = submitNationalLifeCredential(

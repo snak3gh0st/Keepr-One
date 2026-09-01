@@ -155,7 +155,7 @@ describe('K-Bot credential broker synthetic recovery', () => {
   ] as const)('delivers no plaintext for %s', async (_label, options) => {
     const test = await harness(options)
     const response = await test.handler(request())
-    expect(response.status).toBe(options.enabled === false ? 503 : 409)
+    expect(response.status).toBe('enabled' in options && options.enabled === false ? 503 : 409)
     expect(test.decrypt).not.toHaveBeenCalled()
   })
 })
