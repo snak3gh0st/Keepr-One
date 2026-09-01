@@ -1,5 +1,6 @@
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentChatwootContext, AgentMessagingUnavailableError } from '@/lib/messaging/agent-chatwoot-context'
+import { prisma } from '@/lib/prisma'
 
 const NO_STORE = { 'Cache-Control': 'private, no-store' }
 const STATUSES = new Set(['all', 'open', 'resolved', 'pending', 'snoozed'])
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
     const query = params.get('q')?.trim().slice(0, 120) || undefined
     const page = Math.max(1, Math.min(100, Number(params.get('page')) || 1))
 
-    const [inboxes, result] = await Promise.all([
+    const [inboxes, result, whatsappChannel] = await Promise.all([
       context.chatwoot.listInboxes({ accountId: context.accountId, token: context.token }),
       context.chatwoot.listConversations({
         accountId: context.accountId,
@@ -27,12 +28,22 @@ export async function GET(request: Request) {
         query,
         page,
       }),
+      prisma.agentMessagingChannel.findUnique({
+        where: { agentId_kind: { agentId: agent.id, kind: 'WHATSAPP' } },
+        select: { status: true },
+      }),
     ])
 
-    const inboxIds = new Set(inboxes.map((inbox) => inbox.id))
+    // Chatwoot keeps historical conversations after the provider session is
+    // disconnected. They must not remain visible as if WhatsApp were active.
+    const visibleInboxes = inboxes.filter((inbox) => (
+      inbox.kind !== 'WHATSAPP' || whatsappChannel?.status === 'CONNECTED'
+    ))
+    const inboxIds = new Set(visibleInboxes.map((inbox) => inbox.id))
+    const conversations = result.conversations.filter((conversation) => inboxIds.has(conversation.inboxId))
     return Response.json({
-      inboxes,
-      conversations: result.conversations.filter((conversation) => inboxIds.has(conversation.inboxId)),
+      inboxes: visibleInboxes,
+      conversations,
       total: result.total,
       page,
     }, { headers: NO_STORE })
