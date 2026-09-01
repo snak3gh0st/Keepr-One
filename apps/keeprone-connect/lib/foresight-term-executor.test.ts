@@ -63,6 +63,22 @@ describe('Foresight Term client target', () => {
     expect(workflow.match(/await waitForCarrierIdle\(\)/g)).toHaveLength(3)
   })
 
+  it('lets each Term client postback begin before waiting for carrier idle', () => {
+    const source = readFileSync(
+      new URL('../entrypoints/foresight-main.content.ts', import.meta.url),
+      'utf8',
+    )
+    const workflow = source.slice(
+      source.indexOf('const applyTermClient'),
+      source.indexOf('const applyTermFunding'),
+    )
+
+    expect(source).toContain('minimumSettleMs = 0')
+    expect(workflow).toContain("await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT', 700)")
+    expect(workflow).toContain("await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT', 500)")
+    expect(workflow.match(/await waitForCarrierIdle\('FORESIGHT_TERM_CLIENT_TIMEOUT', 600\)/g)).toHaveLength(2)
+  })
+
   it('uses a valid duration returned by the carrier as an explicit fallback', () => {
     const snapshot = parseForesightTermIllustrationSnapshot({
       schemaVersion: 1,
