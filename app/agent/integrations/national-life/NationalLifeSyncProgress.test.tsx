@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
 import {
@@ -268,6 +269,36 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.getByText(/Last synced/)).toBeTruthy()
     expect(screen.getByText('238 records saved to Keepr One.')).toBeTruthy()
+  })
+
+  it('defers timezone-local timestamps until hydration', () => {
+    const completedStatus = status({
+      state: 'COMPLETED',
+      shouldPoll: false,
+      completed: 13,
+      percent: 100,
+      currentGridLabel: null,
+      completedAt: new Date('2026-09-01T21:28:37.199Z'),
+      stageCoverage: [{
+        gridKey: 'NEW_BUSINESS',
+        label: 'new business',
+        state: 'VERIFIED',
+        verifiedRecords: 856,
+        verifiedAt: new Date('2026-09-01T21:28:37.199Z'),
+      }],
+    })
+
+    const serverMarkup = renderToStaticMarkup(
+      <NationalLifeSyncProgress initialStatus={completedStatus} />,
+    )
+
+    expect(serverMarkup).not.toContain('Last synced')
+    expect(serverMarkup).not.toContain('Confirmed by National Life')
+
+    render(<NationalLifeSyncProgress initialStatus={completedStatus} />)
+
+    expect(screen.getByText(/Last synced/)).toBeTruthy()
+    expect(screen.getByText(/Confirmed by National Life/)).toBeTruthy()
   })
 
   it('refuses to call an empty write a success', () => {
