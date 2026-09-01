@@ -5,6 +5,10 @@ import { Button } from '@/components/Button'
 
 type State = 'checking' | 'idle' | 'starting' | 'waiting' | 'connected' | 'disconnecting' | 'failed'
 
+type ConnectWhatsappProps = {
+  onConnectionChange?: (connected: boolean) => void
+}
+
 function formatPhone(phone: string) {
   const digits = phone.replace(/\D/g, '')
   if (digits.length === 11 && digits.startsWith('1')) {
@@ -16,13 +20,18 @@ function formatPhone(phone: string) {
 /// The agent starts this. Nothing is provisioned before they ask, because a session
 /// created on their behalf is a session with no screen to scan it — which is how
 /// this went wrong the first time.
-export function ConnectWhatsapp() {
+export function ConnectWhatsapp({ onConnectionChange }: ConnectWhatsappProps = {}) {
   const [state, setState] = useState<State>('checking')
   const [qr, setQr] = useState<string | null>(null)
   const [phone, setPhone] = useState<string | null>(null)
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [confirmDisconnect, setConfirmDisconnect] = useState(false)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+  const onConnectionChangeRef = useRef(onConnectionChange)
+
+  useEffect(() => {
+    onConnectionChangeRef.current = onConnectionChange
+  }, [onConnectionChange])
 
   const loadStatus = useCallback(async () => {
     try {
@@ -35,7 +44,9 @@ export function ConnectWhatsapp() {
       }
       setPhone(body.phone)
       setErrorCode(null)
-      setState(body.state === 'open' && body.status === 'CONNECTED' ? 'connected' : 'idle')
+      const connected = body.state === 'open' && body.status === 'CONNECTED'
+      onConnectionChangeRef.current?.(connected)
+      setState(connected ? 'connected' : 'idle')
     } catch {
       setErrorCode('STATUS_UNAVAILABLE')
       setState('failed')
@@ -59,9 +70,11 @@ export function ConnectWhatsapp() {
       }
       if (body.state === 'open' && body.status === 'CONNECTED') {
         setPhone(body.phone)
+        onConnectionChangeRef.current?.(true)
         setState('connected')
         return
       }
+      onConnectionChangeRef.current?.(false)
       setQr(body.qr)
       // The provider answers without a code while the session is still starting, so
       // an absent QR means "not yet", never "broken".
@@ -81,6 +94,7 @@ export function ConnectWhatsapp() {
       setPhone(null)
       setQr(null)
       setConfirmDisconnect(false)
+      onConnectionChangeRef.current?.(false)
       setState('idle')
     } catch {
       setConfirmDisconnect(false)
@@ -175,7 +189,7 @@ export function ConnectWhatsapp() {
             ) : (
               <div className="mt-5 rounded-xl border border-danger/20 bg-danger-pale px-4 py-4">
                 <p className="text-sm leading-6 text-danger">
-                  As conversas já salvas continuam aqui, mas novas mensagens deixam de chegar até você conectar novamente.
+                  As conversas do WhatsApp deixam de aparecer enquanto o canal estiver desconectado, e novas mensagens deixam de chegar até você conectar novamente.
                 </p>
                 <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                   <Button
