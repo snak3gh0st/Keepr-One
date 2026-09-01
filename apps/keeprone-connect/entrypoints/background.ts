@@ -1856,7 +1856,7 @@ async function resolveCommandCredentialIfAuthenticated(tabId: number, rawUrl?: s
   const command = await readCommandState()
   if (
     command.carrierTabId !== tabId || !command.credentialAttempt?.leaseId ||
-    !rawUrl || (command.status !== 'AUTH_REQUIRED' && command.status !== 'MFA_REQUIRED')
+    !rawUrl || ['IDLE', 'COMPLETED', 'ERROR'].includes(command.status)
   ) return
   let url: URL
   try {
@@ -1867,11 +1867,21 @@ async function resolveCommandCredentialIfAuthenticated(tabId: number, rawUrl?: s
   if (url.origin !== NLG_ORIGIN || !url.pathname.startsWith('/agent/')) return
   if (!(await hasAuthenticatedPortalSession(tabId))) return
   await reportCredentialLeaseOutcome(command.credentialAttempt, 'AUTHENTICATED')
+  // Auth0 can redirect into the agent portal while command dispatch already
+  // advanced this state to NAVIGATING or RUNNING. The lease remains bound to
+  // this exact tab and attempt, so clear only that attempt and preserve the
+  // command progress that won the race. A terminal command must never be
+  // rewritten by a late navigation callback.
+  const latest = await readCommandState()
+  if (
+    latest.carrierTabId !== tabId ||
+    latest.credentialAttempt?.leaseId !== command.credentialAttempt.leaseId ||
+    ['IDLE', 'COMPLETED', 'ERROR'].includes(latest.status)
+  ) return
   await writeCommandState({
-    ...(await readCommandState()),
+    ...latest,
     credentialAttempt: undefined,
     errorCode: undefined,
-    status: 'AUTH_REQUIRED',
     updatedAt: new Date().toISOString(),
   })
 }
