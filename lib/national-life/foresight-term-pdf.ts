@@ -19,14 +19,20 @@ export function parseForesightTermPremiumText(text: string): {
   annualPremium: number
 } {
   const normalized = text.replace(/\s+/g, ' ').trim()
+  // pdfjs preserves the words but not the carrier's exact spacing. In
+  // particular, Foresight may insert spaces around "$", parentheses or the
+  // Group Bill slash. Match that layout variance, while still requiring one
+  // unique summary and one unique annualized payment row below.
+  const monthlyEft = String.raw`Monthly\s*\(\s*EFT(?:\s*\/\s*Group\s*Bill)?\s*\)`
   const summary = uniqueNumbers(
-    [...normalized.matchAll(/Initial Premium:\s*\$([\d,]+\.\d{2})\s+Monthly\s*\(EFT\)/gi)]
+    [...normalized.matchAll(new RegExp(String.raw`Initial\s+Premium\s*:\s*\$\s*([\d,]+\.\d{2})\s+${monthlyEft}`, 'gi'))]
       .map((match) => money(match[1]!))
       .filter((value): value is number => value !== null),
   )
-  const paymentRows = [...normalized.matchAll(
-    /Monthly\s*\(EFT(?:\/Group Bill)?\)\s+12\s+\$([\d,]+\.\d{2})\s+\$([\d,]+\.\d{2})/gi,
-  )].map((match) => ({
+  const paymentRows = [...normalized.matchAll(new RegExp(
+    String.raw`${monthlyEft}\s+12\s+\$\s*([\d,]+\.\d{2})\s+\$\s*([\d,]+\.\d{2})`,
+    'gi',
+  ))].map((match) => ({
     monthlyPremium: money(match[1]!),
     annualPremium: money(match[2]!),
   })).filter((row): row is { monthlyPremium: number; annualPremium: number } =>

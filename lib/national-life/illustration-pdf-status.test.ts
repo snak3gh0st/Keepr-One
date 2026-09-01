@@ -75,6 +75,29 @@ describe('latestPdfStatusByIllustration', () => {
 })
 
 describe('illustrationPdfMessage', () => {
+  it('never presents an uploaded PDF as verified when its Term reconciliation failed', () => {
+    expect(describeIllustrationDelivery({
+      documentReady: true,
+      status: { state: 'FAILED', safeErrorCode: 'FORESIGHT_TERM_PREMIUM_MISSING' },
+    })).toEqual({
+      eyebrow: 'Revisão necessária',
+      title: 'Não foi possível conferir o PDF Term',
+      detail: 'O PDF Term foi recebido, mas os prêmios não puderam ser conferidos. Tente conferir este PDF novamente; se persistir, gere uma nova ilustração.',
+    })
+  })
+
+  it('does not mask a generic reconciliation failure behind an uploaded file', () => {
+    expect(describeIllustrationDelivery({
+      documentReady: true,
+      verified: false,
+      status: { state: 'FAILED', safeErrorCode: 'DEVICE_REQUEST_FAILED' },
+    })).toEqual({
+      eyebrow: 'Revisão necessária',
+      title: 'O PDF foi recebido, mas a conferência não terminou',
+      detail: 'O arquivo foi recebido, mas o K-Bot não concluiu a conferência do resultado. Nenhum valor foi aceito como oficial. Não foi possível gerar (DEVICE_REQUEST_FAILED).',
+    })
+  })
+
   // The measured failure of 2026-07-31 15:38 UTC. Nothing is wrong with the
   // quote — the carrier's tool wants a login — and the sentence has to say so,
   // or the agent goes looking in the wrong place.

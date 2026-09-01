@@ -112,6 +112,10 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
       return 'O Foresight ainda estava atualizando o cenário Term e não confirmou os valores a tempo. Gere novamente; nenhum PDF foi emitido.'
     case 'FORESIGHT_TERM_DURATION_READBACK_MISMATCH':
       return 'O Foresight alterou o prazo do Term durante a atualização. Revise o prazo e gere novamente; nenhum PDF foi emitido.'
+    case 'FORESIGHT_TERM_PREMIUM_MISSING':
+    case 'FORESIGHT_TERM_PREMIUM_MISMATCH':
+    case 'FORESIGHT_TERM_PDF_INVALID':
+      return 'O PDF Term foi recebido, mas os prêmios não puderam ser conferidos. Tente conferir este PDF novamente; se persistir, gere uma nova ilustração.'
     case 'FORESIGHT_TERM_CLIENT_READBACK_MISMATCH':
       return 'O Foresight devolveu dados do segurado diferentes do pedido Term. Revise o cenário e gere novamente; nenhum PDF foi emitido.'
     case 'FORESIGHT_TERM_FACE_AMOUNT_READBACK_MISMATCH':
@@ -132,8 +136,34 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
 
 export function describeIllustrationDelivery(input: {
   documentReady: boolean
+  verified?: boolean
   status?: IllustrationPdfStatus
 }): IllustrationDelivery {
+  if (input.status?.state === 'FAILED' && [
+    'FORESIGHT_TERM_PREMIUM_MISSING',
+    'FORESIGHT_TERM_PREMIUM_MISMATCH',
+    'FORESIGHT_TERM_PDF_INVALID',
+  ].includes(input.status.safeErrorCode ?? '')) {
+    return {
+      eyebrow: 'Revisão necessária',
+      title: 'Não foi possível conferir o PDF Term',
+      detail: illustrationPdfMessage(input.status),
+    }
+  }
+  if (input.documentReady && input.verified === false) {
+    if (input.status?.state === 'FAILED') {
+      return {
+        eyebrow: 'Revisão necessária',
+        title: 'O PDF foi recebido, mas a conferência não terminou',
+        detail: `O arquivo foi recebido, mas o K-Bot não concluiu a conferência do resultado. Nenhum valor foi aceito como oficial. ${illustrationPdfMessage(input.status)}`,
+      }
+    }
+    return {
+      eyebrow: 'Documento recebido',
+      title: 'K-Bot está conferindo o PDF oficial',
+      detail: 'O arquivo foi recebido da National Life, mas os valores ainda não foram aceitos como resultado oficial.',
+    }
+  }
   if (input.documentReady) {
     return {
       eyebrow: 'Documento pronto',

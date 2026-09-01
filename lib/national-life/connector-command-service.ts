@@ -90,7 +90,10 @@ export class ConnectorCommandError extends Error {
       | 'COMMAND_NOT_FOUND'
       | 'CONFIRMATION_REQUIRED'
       | 'CONFIRMATION_REJECTED'
-      | 'EVENT_INVALID',
+      | 'EVENT_INVALID'
+      | 'FORESIGHT_TERM_PDF_INVALID'
+      | 'FORESIGHT_TERM_PREMIUM_MISSING'
+      | 'FORESIGHT_TERM_PREMIUM_MISMATCH',
   ) {
     super(code)
   }

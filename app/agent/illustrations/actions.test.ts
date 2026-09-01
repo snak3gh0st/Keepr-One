@@ -4,10 +4,13 @@ const mocks = vi.hoisted(() => ({
   getAgent: vi.fn(),
   enabled: vi.fn(() => true),
   illustrationFindFirst: vi.fn(),
+  illustrationUpdateMany: vi.fn(),
   commandFindFirst: vi.fn(),
+  auditCreate: vi.fn(),
   issue: vi.fn(),
   approve: vi.fn(),
   revalidate: vi.fn(),
+  extractTermPremiums: vi.fn(),
 }))
 
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }))
@@ -17,9 +20,13 @@ vi.mock('@/lib/national-life/local-connector/config', () => ({
 }))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    illustration: { findFirst: mocks.illustrationFindFirst },
+    illustration: { findFirst: mocks.illustrationFindFirst, updateMany: mocks.illustrationUpdateMany },
     nationalLifeConnectorCommand: { findFirst: mocks.commandFindFirst },
+    auditLog: { create: mocks.auditCreate },
   },
+}))
+vi.mock('@/lib/national-life/foresight-term-pdf', () => ({
+  extractForesightTermPremiums: mocks.extractTermPremiums,
 }))
 vi.mock('@/lib/national-life/connector-command-service', async () => {
   const actual = await vi.importActual<typeof import('@/lib/national-life/connector-command-service')>(
@@ -33,7 +40,7 @@ vi.mock('@/lib/national-life/connector-command-service', async () => {
   }
 })
 
-import { requestIllustrationPdf } from './actions'
+import { reconcileTermIllustrationPdf, requestIllustrationPdf } from './actions'
 
 const illustration = {
   id: 'ill_1',
@@ -89,6 +96,9 @@ describe('request official Foresight illustration', () => {
       command: { commandId: 'cmd_1' }, payloadHash: 'p'.repeat(64), duplicate: false,
     })
     mocks.approve.mockResolvedValue(undefined)
+    mocks.illustrationUpdateMany.mockResolvedValue({ count: 1 })
+    mocks.auditCreate.mockResolvedValue({ id: 'audit_1' })
+    mocks.extractTermPremiums.mockResolvedValue({ monthlyPremium: 62.92, annualPremium: 755.04 })
   })
 
   it('uses the button click as approval for one immutable command', async () => {
@@ -152,5 +162,66 @@ describe('request official Foresight illustration', () => {
       ok: true, commandId: '', duplicate: true, completed: true,
     })
     expect(mocks.issue).not.toHaveBeenCalled()
+  })
+})
+
+describe('reconcile stored Term PDF', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.getAgent.mockResolvedValue({ id: 'agent_1', userId: 'user_1' })
+    mocks.illustrationUpdateMany.mockResolvedValue({ count: 1 })
+    mocks.auditCreate.mockResolvedValue({ id: 'audit_1' })
+    mocks.extractTermPremiums.mockResolvedValue({ monthlyPremium: 62.92, annualPremium: 755.04 })
+  })
+
+  it('re-reads the signed Term PDF without issuing another carrier command', async () => {
+    const documentBytes = new TextEncoder().encode('%PDF-1.7\nterm')
+    mocks.illustrationFindFirst.mockResolvedValue({
+      ...termIllustration,
+      documentMimeType: 'application/pdf',
+      documentBytes,
+    })
+
+    await expect(reconcileTermIllustrationPdf('ill_term_1')).resolves.toEqual({
+      ok: true,
+      message: 'Prêmios Term confirmados com o PDF oficial.',
+    })
+
+    expect(mocks.illustrationFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: 'ill_term_1', agentId: 'agent_1', productName: { in: ['LSW Term', 'NL Term'] },
+      }),
+    }))
+    expect(mocks.extractTermPremiums).toHaveBeenCalledWith(documentBytes)
+    expect(mocks.illustrationUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'ill_term_1', agentId: 'agent_1' }),
+      data: expect.objectContaining({
+        premium: 62.92,
+        targetPremiumSource: 'CARRIER_CALCULATED_FOR_TERM',
+        rawPayload: expect.objectContaining({
+          foresightTermResult: expect.objectContaining({
+            confirmedMonthlyPremium: 62.92,
+            confirmedAnnualPremium: 755.04,
+            requestedTermDuration: '20-G',
+          }),
+        }),
+      }),
+    }))
+    expect(mocks.issue).not.toHaveBeenCalled()
+  })
+
+  it('does not write when the Term parser cannot verify the stored document', async () => {
+    mocks.illustrationFindFirst.mockResolvedValue({
+      ...termIllustration,
+      documentMimeType: 'application/pdf',
+      documentBytes: new TextEncoder().encode('%PDF-1.7\nterm'),
+    })
+    mocks.extractTermPremiums.mockRejectedValue(new Error('FORESIGHT_TERM_PREMIUM_MISSING'))
+
+    await expect(reconcileTermIllustrationPdf('ill_term_1')).resolves.toEqual({
+      ok: false,
+      message: 'O PDF não trouxe uma tabela de prêmios Term que possa ser confirmada. Gere uma nova ilustração.',
+    })
+    expect(mocks.illustrationUpdateMany).not.toHaveBeenCalled()
   })
 })

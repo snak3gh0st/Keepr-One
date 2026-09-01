@@ -5,6 +5,7 @@ import { Shell } from "@/components/Shell";
 import { getCurrentAgentAccess } from "@/lib/agent-access";
 import { getCurrentAgent } from "@/lib/agent-context";
 import { prisma } from "@/lib/prisma";
+import { getNationalLifeLocalConnectorConfig } from "@/lib/national-life/local-connector/config";
 import { SettingsForms } from "./SettingsForms";
 
 export default async function AgentSettingsPage() {
@@ -25,6 +26,7 @@ export default async function AgentSettingsPage() {
   if (!user) {
     throw new Error("Usuário da conta não encontrado.");
   }
+  const kbot = getNationalLifeLocalConnectorConfig();
 
   return (
     <Shell role="AGENT" userName={user.name}>
@@ -54,6 +56,9 @@ export default async function AgentSettingsPage() {
           name: access.agencyName,
           subscriptionStatus: access.subscriptionStatus,
           canEditAgency: access.canManageTeam,
+        }}
+        kbot={{
+          enabled: kbot.enabled,
         }}
       />
     </Shell>

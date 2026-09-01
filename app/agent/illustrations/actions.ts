@@ -16,11 +16,118 @@ import {
   buildForesightTermIllustrationSnapshot,
   foresightTermIllustrationInputHash,
 } from '@/lib/national-life/foresight-term-contract'
+import { extractForesightTermPremiums } from '@/lib/national-life/foresight-term-pdf'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
 
 export type RequestIllustrationPdfResult =
   | { ok: true; commandId: string; duplicate: boolean; completed: boolean }
   | { ok: false; message: string }
+
+export type ReconcileTermIllustrationPdfResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string }
+
+function termPdfReconciliationMessage(error: unknown): string {
+  const code = error instanceof Error ? error.message : ''
+  if (code === 'FORESIGHT_TERM_PREMIUM_MISSING' || code === 'FORESIGHT_TERM_PREMIUM_MISMATCH') {
+    return 'O PDF não trouxe uma tabela de prêmios Term que possa ser confirmada. Gere uma nova ilustração.'
+  }
+  if (code === 'FORESIGHT_TERM_PDF_INVALID') {
+    return 'O arquivo recebido não é um PDF Term válido. Gere uma nova ilustração.'
+  }
+  return 'Não foi possível conferir este PDF Term agora. Tente novamente.'
+}
+
+/// Reconciles the already-uploaded carrier PDF. This is deliberately separate
+/// from `requestIllustrationPdf`: retrying a local read-back must never create
+/// another Foresight case or send a second carrier command.
+export async function reconcileTermIllustrationPdf(
+  illustrationId: string,
+): Promise<ReconcileTermIllustrationPdfResult> {
+  try {
+    const agent = await getCurrentAgent()
+    const illustration = await prisma.illustration.findFirst({
+      where: {
+        id: illustrationId,
+        agentId: agent.id,
+        productName: { in: ['LSW Term', 'NL Term'] },
+        documentMimeType: 'application/pdf',
+        documentBytes: { not: null },
+      },
+      select: {
+        id: true,
+        caseId: true,
+        createdAt: true,
+        productName: true,
+        rawPayload: true,
+        documentBytes: true,
+      },
+    })
+    if (!illustration?.documentBytes) {
+      return { ok: false, message: 'Nenhum PDF Term disponível para conferir.' }
+    }
+
+    const snapshot = buildForesightTermIllustrationSnapshot(illustration)
+    const premiums = await extractForesightTermPremiums(illustration.documentBytes)
+    const rawPayload = illustration.rawPayload && typeof illustration.rawPayload === 'object' &&
+      !Array.isArray(illustration.rawPayload)
+      ? illustration.rawPayload as Record<string, unknown>
+      : null
+    if (!rawPayload) return { ok: false, message: 'Os dados do cenário Term não estão disponíveis para conferência.' }
+
+    const updated = await prisma.illustration.updateMany({
+      where: {
+        id: illustration.id,
+        agentId: agent.id,
+        productName: { in: ['LSW Term', 'NL Term'] },
+        documentMimeType: 'application/pdf',
+      },
+      data: {
+        premium: premiums.monthlyPremium,
+        targetPremium: premiums.monthlyPremium,
+        targetPremiumSource: 'CARRIER_CALCULATED_FOR_TERM',
+        rawPayload: {
+          ...rawPayload,
+          foresightTermResult: {
+            source: 'OFFICIAL_PDF',
+            premiumMode: 'Monthly',
+            confirmedFaceAmount: snapshot.faceAmount,
+            confirmedMonthlyPremium: premiums.monthlyPremium,
+            confirmedAnnualPremium: premiums.annualPremium,
+            requestedTermDuration: snapshot.termDuration,
+            confirmedTermDuration: snapshot.termDuration,
+          },
+        },
+      },
+    })
+    if (updated.count !== 1) {
+      return { ok: false, message: 'Não foi possível salvar a conferência deste PDF Term.' }
+    }
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: agent.userId,
+          action: 'FORESIGHT_TERM_PDF_RECONCILED',
+          entity: 'Illustration',
+          entityId: illustration.id,
+          after: {
+            monthlyPremium: premiums.monthlyPremium,
+            annualPremium: premiums.annualPremium,
+          },
+        },
+      })
+    } catch (auditError) {
+      console.error('Term PDF reconciliation audit failed', auditError)
+    }
+
+    revalidatePath('/agent/illustrations')
+    revalidatePath(`/agent/illustrations/${illustration.id}`)
+    return { ok: true, message: 'Prêmios Term confirmados com o PDF oficial.' }
+  } catch (error) {
+    return { ok: false, message: termPdfReconciliationMessage(error) }
+  }
+}
 
 /// Issues the exact Foresight case reviewed by the signed-in agent. The button
 /// click is the explicit approval gesture; both server and extension still
