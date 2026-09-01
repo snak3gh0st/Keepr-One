@@ -1759,6 +1759,7 @@ async function attemptAutomaticCarrierLogin(
   }
   if (operation.attempt) return
 
+  let issuedAttempt: CredentialAttempt | undefined
   try {
     await ensureCredentialEncryptionKeyRegistered()
     const privateKey = await readCredentialDecryptionKey()
@@ -1797,6 +1798,7 @@ async function attemptAutomaticCarrierLogin(
       authEpoch: metadata.authEpoch,
       leaseId: metadata.leaseId,
     }
+    issuedAttempt = attempt
     await updateCredentialOperation(operation, {
       credentialAttempt: attempt,
       errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
@@ -1823,7 +1825,12 @@ async function attemptAutomaticCarrierLogin(
       credential = undefined
     }
   } catch (error) {
-    await updateCredentialOperation(operation, { errorCode: safeCredentialFallbackCode(error) })
+    if (issuedAttempt?.leaseId) {
+      await reportCredentialLeaseOutcome(issuedAttempt, 'UNKNOWN_PAGE')
+      await updateCredentialOperation(operation, { errorCode: 'CREDENTIAL_PAGE_UNSUPPORTED' })
+    } else {
+      await updateCredentialOperation(operation, { errorCode: safeCredentialFallbackCode(error) })
+    }
   }
 }
 

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   enabled: vi.fn(() => true),
   verify: vi.fn(),
   record: vi.fn(),
+  retireNotifications: vi.fn(),
 }))
 
 vi.mock('@/lib/national-life/local-connector/config', () => ({
@@ -26,7 +27,12 @@ vi.mock('@/lib/national-life/local-connector/command-dispatch-service', async ()
 vi.mock('@/lib/national-life/local-connector/command-dispatch-prisma', () => ({
   prismaLocalConnectorCommandDispatchRepository: {},
 }))
-vi.mock('@/lib/prisma', () => ({ prisma: { illustration: { findFirst: vi.fn() } } }))
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    illustration: { findFirst: vi.fn() },
+    notification: { updateMany: mocks.retireNotifications },
+  },
+}))
 vi.mock('@/lib/national-life/policy-detail-prisma', () => ({
   createPrismaPolicyDetailRepository: () => ({ kind: 'policy-detail-repository' }),
 }))
@@ -62,6 +68,7 @@ describe('local connector command event route', () => {
     mocks.enabled.mockReturnValue(true)
     mocks.verify.mockResolvedValue({ agentId: 'agent_1', deviceId: 'device_1' })
     mocks.record.mockResolvedValue(undefined)
+    mocks.retireNotifications.mockResolvedValue({ count: 1 })
   })
 
   it('records an event under the exact signed device and path command', async () => {
@@ -84,6 +91,25 @@ describe('local connector command event route', () => {
       applicationDraftReceiptRepository: expect.objectContaining({ persistOwnedDraftReceipt: expect.any(Function) }),
       deploymentScope: 'national-life-local-connector',
     })
+    expect(mocks.retireNotifications).toHaveBeenCalledWith({
+      where: {
+        type: 'NATIONAL_LIFE_MFA_REQUIRED',
+        readAt: null,
+        dedupeKey: {
+          startsWith: 'national-life-mfa-required:CONNECTOR_COMMAND:cmd_1:',
+        },
+      },
+      data: { readAt: expect.any(Date) },
+    })
+  })
+
+  it('keeps an accepted command event successful if notification cleanup fails', async () => {
+    mocks.retireNotifications.mockRejectedValueOnce(new Error('notification database unavailable'))
+
+    const response = await POST(request(), { params: Promise.resolve({ commandId }) })
+
+    expect(response.status).toBe(204)
+    expect(mocks.record).toHaveBeenCalledOnce()
   })
 
   it('rejects a body naming a different command', async () => {

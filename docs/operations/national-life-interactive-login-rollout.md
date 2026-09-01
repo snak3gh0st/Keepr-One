@@ -10,6 +10,14 @@ login, MFA, and reconnection; it is not a general portal browser.
 
 The feature remains disabled until all gates in this document pass.
 
+This document describes the remote interactive-login runtime. The local K-Bot
+credential broker is a separate, opt-in path documented in
+`kbot-credential-broker-runbook.md`. The remote runtime still never receives or
+autofills credentials. The local path may perform one device-bound submission
+only after explicit Settings consent; it cannot handle MFA/CAPTCHA and cannot
+drive a general browser session. Do not share Vault identities, rollout flags,
+containers or session material between these two architectures.
+
 ## Deploy in stages
 
 1. Back up the production database, then deploy the additive migration and web

@@ -371,8 +371,8 @@ beforeEach(() => {
   } as CryptoKey)
   vi.mocked(openSealedCredentialLease).mockResolvedValue({
     formatVersion: 1,
-    username: 'credential-user-sentinel-7e2d',
-    password: 'credential-password-sentinel-91af',
+    username: 'synthetic-carrier-user',
+    password: 'synthetic-carrier-password',
   })
   vi.stubGlobal('chrome', chromeStub)
   vi.stubGlobal('defineBackground', (main: unknown) => main)
@@ -506,8 +506,8 @@ describe('automatic carrier login recovery', () => {
       type: 'SUBMIT_CARRIER_CREDENTIAL',
       credential: {
         formatVersion: 1,
-        username: 'credential-user-sentinel-7e2d',
-        password: 'credential-password-sentinel-91af',
+        username: 'synthetic-carrier-user',
+        password: 'synthetic-carrier-password',
       },
     })
     expect(storage.sync).toMatchObject({
@@ -517,8 +517,41 @@ describe('automatic carrier login recovery', () => {
       },
     })
     expect(JSON.stringify(storage)).not.toMatch(
-      /credential-user-sentinel|credential-password-sentinel|wrappedKey|ciphertext|"iv"/,
+      /synthetic-carrier-user|synthetic-carrier-password|wrappedKey|ciphertext|"iv"/,
     )
+  })
+
+  it('closes an issued lease as unknown when the exact login submit cannot be completed', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(async (tabId: number, message: unknown) => {
+      const value = message as { type?: string }
+      if (value.type === 'CLASSIFY_CARRIER_AUTH_PAGE') {
+        return { ok: true, code: 'LOGIN' }
+      }
+      if (value.type === 'SUBMIT_CARRIER_CREDENTIAL') {
+        throw new Error('content script unavailable')
+      }
+      return defaultTabMessageResponse(tabId, message)
+    })
+    brokerResponder()
+    await bootBackground()
+
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease_1/result',
+      body: { schemaVersion: 1, outcome: 'UNKNOWN_PAGE' },
+    }))
+    expect(storage.sync).toMatchObject({
+      status: 'AUTH_REQUIRED',
+      errorCode: 'CREDENTIAL_PAGE_UNSUPPORTED',
+      credentialAttempt: { leaseId: 'lease_1' },
+    })
   })
 
   it('survives service-worker eviction without a second lease or submit', async () => {

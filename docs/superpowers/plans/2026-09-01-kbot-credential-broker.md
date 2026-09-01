@@ -1025,13 +1025,13 @@ git commit -m "feat(kbot): restore carrier login with MFA-safe fallback"
 - Consumes every earlier task.
 - Produces synthetic end-to-end proof, operational Vault policies/rotation/kill-switch procedure and pilot checklist.
 
-- [ ] **Step 1: Add a sentinel secret-hygiene integration test**
+- [x] **Step 1: Add a sentinel secret-hygiene integration test**
 
 Run the complete fake flow with unique markers:
 
 ```ts
-const username = 'credential-user-sentinel-7e2d'
-const password = 'credential-password-sentinel-91af'
+const username = '<unique-credential-user-sentinel>'
+const password = '<unique-credential-password-sentinel>'
 ```
 
 Capture repository writes, audit writes, command events, notifications,
@@ -1041,7 +1041,7 @@ encrypt request and the exact isolated form input assignment, never in any
 persisted/captured surface. Assert PostgreSQL-facing data contains only
 `vault:v...` ciphertext and masked username.
 
-- [ ] **Step 2: Add end-to-end synthetic recovery scenarios**
+- [x] **Step 2: Add end-to-end synthetic recovery scenarios**
 
 Cover these exact stories:
 
@@ -1055,7 +1055,7 @@ Cover these exact stories:
 - tab closes after lease -> no second automatic attempt in that auth epoch;
 - feature kill switch during auth -> no new lease and manual recovery remains.
 
-- [ ] **Step 3: Write the operations runbook**
+- [x] **Step 3: Write the operations runbook**
 
 Include exact Vault policy examples:
 
@@ -1081,14 +1081,14 @@ The smoke checklist must distinguish implementation, deployment, extension
 version, configured Vault policy, synthetic proof, real owner-controlled login,
 MFA observation and successful resumed K-Bot operation.
 
-- [ ] **Step 4: Bump the extension version only after all connector tests pass**
+- [x] **Step 4: Bump the extension version only after all connector tests pass**
 
 Change `apps/keeprone-connect/wxt.config.ts` from `0.1.56` to the next unused
 version discovered from Git and Chrome Web Store state. Do not assume `0.1.57`
 is unused; verify before editing. Build unpacked and Web Store artifacts
 separately, preserving the current manifest-key rule.
 
-- [ ] **Step 5: Run the complete local validation matrix**
+- [x] **Step 5: Run the complete local validation matrix**
 
 ```bash
 pnpm test
@@ -1104,7 +1104,7 @@ git diff --check
 Expected: all commands pass. Existing unrelated warnings must be reported
 separately and may not be described as credential-broker failures.
 
-- [ ] **Step 6: Perform a focused secret scan**
+- [x] **Step 6: Perform a focused secret scan**
 
 Run pattern searches against tracked source, generated extension output and test
 logs for the two sentinel markers and for forbidden credential storage keys.
@@ -1112,7 +1112,7 @@ Expected: zero occurrences outside the explicit test fixture source that defines
 the sentinel values. Inspect the built extension permissions and confirm only
 the exact National Life/Auth0/iPipeline/Keepr One origins are present.
 
-- [ ] **Step 7: Commit documentation and proof**
+- [x] **Step 7: Commit documentation and proof**
 
 ```bash
 git add tests/national-life docs/operations docs/architecture apps/keeprone-connect/wxt.config.ts

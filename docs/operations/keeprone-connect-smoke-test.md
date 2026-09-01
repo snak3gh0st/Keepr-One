@@ -57,6 +57,32 @@ Em ordem, e a ordem importa.
 
 ## O teste
 
+### Matriz final do K-Bot
+
+Antes do teste com dados reais, confirme separadamente: migration aplicada;
+web/broker implantados; Vault encrypt/decrypt com identidades distintas;
+broker sem rota pública; Redis disponível; versão da extensão realmente
+carregada; flag/allowlist do piloto; e teste sintético verde. Código ou build
+local não prova nenhum desses itens em produção.
+
+Execute, nesta ordem, preservando o mesmo login do carrier:
+
+1. **Sync:** force uma sessão expirada, confirme uma única tentativa automática
+   ou o fallback manual, conclua MFA se solicitado e verifique que o mesmo run
+   retoma do checkpoint. Valide recibos e dados no banco como abaixo.
+2. **Illustration Term:** gere o PDF oficial, confira produto/duração, premium
+   mensal e anual no read-back e no PDF. `FORESIGHT_TERM_*` é falha até a
+   reconciliação fechar; não aceite apenas o download.
+3. **Illustration IUL:** valide solve basis, face amount/premium, identificação
+   do caso e PDF oficial antes de considerar concluída.
+4. **Application iGO:** confirme o handoff oficial, criação do draft e read-back
+   dos campos aprovados. O K-Bot não deve enviar/submeter a aplicação final.
+
+Em cada etapa, provoque no máximo o ramo necessário. Não faça tentativa real de
+senha errada em conta de produção. Retry automático é permitido apenas para
+requisições idempotentes; criação de lease, submissão de login, MFA e comandos
+com efeito externo não entram no retry genérico.
+
 1. Abrir `https://app.keeprone.com/agent/integrations/national-life`.
 2. Clicar em conectar. Se o device não estiver pareado, o card pareia sozinho antes
    de iniciar o sync.
