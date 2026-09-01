@@ -176,6 +176,11 @@ export function NationalLifeSyncProgress({
 }) {
   const [status, setStatus] = useState<NationalLifeSyncStatus | null>(initialStatus)
   const [pollingEnabled, setPollingEnabled] = useState(Boolean(initialStatus?.shouldPoll))
+  const [hydrated, setHydrated] = useState(false)
+
+  useEffect(() => {
+    setHydrated(true)
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -247,7 +252,7 @@ export function NationalLifeSyncProgress({
   const plannedStructuredSources = Math.max(0, (status.stageCoverage?.length ?? 0) - plannedSnapshotSources)
   const currentPriorityPlan = isCurrentPriorityPlan(status)
   const historicalCompletedPlan = status.state === 'COMPLETED' && !currentPriorityPlan
-  const lastSynced = formatMoment(status.completedAt)
+  const lastSynced = hydrated ? formatMoment(status.completedAt) : null
   // Só depois do fim. No meio do run, "nada novo desta vez" ou "120 gravados"
   // seriam a mesma mentira do "concluído" eterno, apontada para o outro lado.
   const outcome = terminal ? outcomeLine(status, snapshotRecords) : null
@@ -422,7 +427,7 @@ export function NationalLifeSyncProgress({
                     {stage.state === 'CAPTURED' ? 'snapshot records captured' : 'rows verified'}
                   </p>
                 )}
-                {stage.verifiedAt && (
+                {hydrated && stage.verifiedAt && (
                   <p className="mt-1 text-[10px] opacity-80">
                     Confirmed by National Life {formatMoment(stage.verifiedAt)}
                   </p>
