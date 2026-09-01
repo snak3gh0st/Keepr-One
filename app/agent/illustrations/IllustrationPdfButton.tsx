@@ -143,16 +143,18 @@ export function IllustrationPdfButton({
                 // direct page-to-extension channel is temporarily unavailable.
               }
             }
-            setMessage(result.duplicate
-              ? 'Retomando a geração oficial já registrada.'
-              : 'K-Bot iniciou a ilustração oficial. Você pode sair desta página; se a sessão expirar, avisaremos para entrar novamente.')
+            setMessage(result.retryingLogin
+              ? 'K-Bot vai tentar a credencial protegida uma vez. Se a National Life pedir MFA, conclua a verificação para continuar.'
+              : result.duplicate
+                ? 'Retomando a geração oficial já registrada.'
+                : 'K-Bot iniciou a ilustração oficial. Você pode sair desta página; se a sessão expirar, avisaremos para entrar novamente.')
             router.refresh()
           })
         }
         className="text-teal transition-colors hover:text-teal-deep disabled:text-ink-muted"
       >
         {generating ? <ForesightActivityIndicator label={generatingLabel} /> :
-          status === 'BLOCKED' ? 'Continuar após login' :
+          status === 'BLOCKED' ? 'Tentar login novamente' :
             status === 'FAILED' ? 'Tentar novamente' : 'Gerar ilustração oficial'}
       </button>
       {generating && trailIndex >= 0 && (
