@@ -722,7 +722,7 @@ git commit -m "feat(kbot): issue device-bound credential leases"
 - Public Keepr One routes forward bounded bytes and an exact header allowlist; they never verify/consume the signed JTI themselves.
 - Broker consumes `verifyLocalConnectorDeviceRequest()`, lease service and decrypt-only Vault client.
 
-- [ ] **Step 1: Write failing broker runtime tests**
+- [x] **Step 1: Write failing broker runtime tests**
 
 Assert the runtime:
 
@@ -736,7 +736,7 @@ Assert the runtime:
 - returns generic 400/401/409/429/503 responses with no provider error body;
 - never logs request headers or bodies.
 
-- [ ] **Step 2: Write failing proxy tests**
+- [x] **Step 2: Write failing proxy tests**
 
 The Next.js route forwards only `content-type`, connector version and the five
 `x-fyntra-*` signature headers. It forwards the exact original method, pathname
@@ -748,7 +748,7 @@ headers (`content-type`, `cache-control`, `retry-after`,
 An unavailable broker returns `503 { error: 'CREDENTIAL_BROKER_UNAVAILABLE' }`
 and never falls back to decrypting in the web app.
 
-- [ ] **Step 3: Implement the broker runtime and proxy**
+- [x] **Step 3: Implement the broker runtime and proxy**
 
 Use Node `createServer` for the private runtime; do not add Express. Add:
 
@@ -761,7 +761,7 @@ The public route does not call cookie authentication and does not call
 authority for these requests. The public route is a bounded transport boundary,
 not an alternate decrypt path.
 
-- [ ] **Step 4: Add isolated deployment configuration**
+- [x] **Step 4: Add isolated deployment configuration**
 
 The broker compose service:
 
@@ -779,13 +779,13 @@ The broker compose service:
 Add compose tests that reject `ports:`, Traefik router labels, encrypt-token
 variables and privileged mode.
 
-- [ ] **Step 5: Run broker and proxy tests**
+- [x] **Step 5: Run broker and proxy tests**
 
 ```bash
 pnpm vitest run workers/kbot-credential-broker/runtime.test.ts lib/national-life/credentials/broker-proxy.test.ts app/api/agent/integrations/national-life/local-connector/credential-leases/route.test.ts 'app/api/agent/integrations/national-life/local-connector/credential-leases/[leaseId]/result/route.test.ts' deploy/kbot-credential-broker.compose.test.ts
 ```
 
-- [ ] **Step 6: Build the broker image locally**
+- [x] **Step 6: Build the broker image locally**
 
 ```bash
 docker build -f Dockerfile.kbot-credential-broker -t keeprone-kbot-credential-broker:test .
@@ -793,7 +793,7 @@ docker build -f Dockerfile.kbot-credential-broker -t keeprone-kbot-credential-br
 
 Expected: image builds and health process starts without the Keepr One encrypt token.
 
-- [ ] **Step 7: Commit broker runtime and routes**
+- [x] **Step 7: Commit broker runtime and routes**
 
 ```bash
 git add workers/kbot-credential-broker scripts/kbot-credential-broker.ts Dockerfile.kbot-credential-broker deploy/kbot-credential-broker.compose.yaml deploy/kbot-credential-broker.compose.test.ts lib/national-life/credentials/broker-proxy.ts lib/national-life/credentials/broker-proxy.test.ts app/api/agent/integrations/national-life/local-connector/credential-leases package.json
