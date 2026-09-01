@@ -11,6 +11,8 @@ import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-c
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
+import { KBotAvatar } from '@/components/kbot/KBotAvatar'
+import { StartApplicationFromIllustrationButton } from './StartApplicationFromIllustrationButton'
 
 const currency = (value: number) =>
   new Intl.NumberFormat('en-US', {
@@ -19,7 +21,13 @@ const currency = (value: number) =>
     maximumFractionDigits: 0,
   }).format(value)
 
-export default async function IllustrationsPage() {
+export default async function IllustrationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ intent?: string }>
+}) {
+  const { intent } = await searchParams
+  const applicationIntent = intent === 'application'
   const agent = await getCurrentAgent()
   const localConnector = getNationalLifeLocalConnectorConfig()
   const [user, illustrations, pdfStatus] = await Promise.all([
@@ -40,6 +48,7 @@ export default async function IllustrationsPage() {
         targetPremiumSource: true,
         productName: true,
         documentFetchedAt: true,
+        documentMimeType: true,
         client: { select: { id: true, name: true } },
       },
     }),
@@ -62,6 +71,25 @@ export default async function IllustrationsPage() {
         </Link>
       </PageHeader>
 
+      {applicationIntent ? (
+        <section className="mb-5 flex flex-col gap-4 rounded-xl border border-border-steel bg-paper p-4 sm:flex-row sm:items-center">
+          <KBotAvatar state="idle" size="sm" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">K-Bot · iGO Application</p>
+            <h2 className="mt-1 text-base font-semibold text-ink">Escolha a Illustration que originará a Application.</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-5 text-ink-muted">
+              Use uma Illustration com PDF oficial. Produto, prazo, capital e prêmio confirmados serão vinculados automaticamente ao novo dossiê.
+            </p>
+          </div>
+          <Link
+            href="/agent/illustrations/new"
+            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md border border-border-steel bg-paper px-4 py-2 text-sm font-semibold text-teal-deep transition-colors hover:border-teal hover:bg-teal-pale"
+          >
+            Nova Illustration
+          </Link>
+        </section>
+      ) : null}
+
       <section className="module-main-surface">
         <Table>
           <Thead>
@@ -73,6 +101,7 @@ export default async function IllustrationsPage() {
               <Th className="text-right">Capital segurado</Th>
               <Th className="text-right">Prêmio mensal</Th>
               <Th>Documento</Th>
+              <Th>Application</Th>
             </tr>
           </Thead>
           <tbody>
@@ -80,12 +109,18 @@ export default async function IllustrationsPage() {
               const status = pdfStatus.get(illustration.id)
               const hasCarrierPremium = Boolean(illustration.documentFetchedAt && illustration.premium)
               const premium = hasCarrierPremium ? illustration.premium : illustration.targetPremium
+              const canStartApplication = Boolean(
+                illustration.documentFetchedAt &&
+                illustration.documentMimeType === 'application/pdf' &&
+                illustration.faceAmount &&
+                illustration.premium,
+              )
               return (
               <Tr key={illustration.id}>
                 <Td>{formatCarrierInstant(illustration.createdAt)}</Td>
                 <Td>
                   <Link
-                    href={`/agent/illustrations/${illustration.id}`}
+                    href={`/agent/illustrations/${illustration.id}${applicationIntent ? '?intent=application' : ''}`}
                     className="text-teal hover:text-teal-deep"
                   >
                     {illustration.insuredName ?? '—'}
@@ -157,6 +192,13 @@ export default async function IllustrationsPage() {
                         </p>
                       )}
                     </>
+                  )}
+                </Td>
+                <Td>
+                  {canStartApplication ? (
+                    <StartApplicationFromIllustrationButton illustrationId={illustration.id} compact />
+                  ) : (
+                    <span className="text-xs leading-5 text-ink-muted">Disponível após o PDF oficial</span>
                   )}
                 </Td>
               </Tr>

@@ -93,7 +93,7 @@ describe('KBotAvatar', () => {
         quickActions={[
           { href: '/sync', badge: 'NL', label: 'Sync National Life', detail: 'Update carrier data' },
           { href: '/illustrations/new', badge: 'PDF', label: 'Create Illustration', detail: 'Term or IUL' },
-          { href: '/cases?intent=application', badge: 'iGO', label: 'Create Application in iGO', detail: 'Choose a case first' },
+          { href: '/illustrations?intent=application', badge: 'iGO', label: 'Create Application in iGO', detail: 'Choose an official illustration' },
         ]}
       />,
     )
@@ -105,7 +105,7 @@ describe('KBotAvatar', () => {
     expect(screen.getByRole('link', { name: /Create Illustration/i })).toHaveAttribute('href', '/illustrations/new')
     expect(screen.getByRole('link', { name: /Create Application in iGO/i })).toHaveAttribute(
       'href',
-      '/cases?intent=application',
+      '/illustrations?intent=application',
     )
   })
 

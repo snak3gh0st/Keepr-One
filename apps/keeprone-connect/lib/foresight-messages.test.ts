@@ -112,6 +112,8 @@ describe('Foresight content messages', () => {
         caseFingerprint: `case_${'b'.repeat(64)}`,
         carrierCaseName: termSnapshot.carrierCaseName,
         carrierProduct: 'NL Term',
+        requestedTermDuration: '20-G',
+        confirmedTermDuration: '15-G',
         release: '5.3.65.31',
         reportCode: 'NAIC_ILLUSTRATION',
         documentSha256: 'c'.repeat(64),
@@ -124,6 +126,10 @@ describe('Foresight content messages', () => {
     expect(() => parseForesightExecutionResponse({
       ...response,
       receipt: { ...response.receipt, carrierProduct: 'LSW Term' },
+    }, termMessage)).toThrow('FORESIGHT_RESPONSE_INVALID')
+    expect(() => parseForesightExecutionResponse({
+      ...response,
+      receipt: { ...response.receipt, requestedTermDuration: '30-G' },
     }, termMessage)).toThrow('FORESIGHT_RESPONSE_INVALID')
   })
 

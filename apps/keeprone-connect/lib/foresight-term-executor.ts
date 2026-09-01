@@ -271,6 +271,55 @@ function readFunding(doc: Document) {
   }
 }
 
+type ForesightTermClientReadback = ReturnType<typeof readClient>
+type ForesightTermFundingReadback = ReturnType<typeof readFunding>
+const TERM_DURATIONS = new Set<ForesightTermIllustrationSnapshotV1['termDuration']>([
+  '10-G', '15-G', '20-G', '30-G', 'ART',
+])
+
+function isTermDuration(value: string): value is ForesightTermIllustrationSnapshotV1['termDuration'] {
+  return TERM_DURATIONS.has(value as ForesightTermIllustrationSnapshotV1['termDuration'])
+}
+
+export function resolveForesightTermDuration(
+  snapshot: ForesightTermIllustrationSnapshotV1,
+  observed: string,
+): {
+  requestedTermDuration: ForesightTermIllustrationSnapshotV1['termDuration']
+  confirmedTermDuration: ForesightTermIllustrationSnapshotV1['termDuration']
+} {
+  if (!isTermDuration(observed)) fail('FORESIGHT_TERM_DURATION_READBACK_MISMATCH')
+  return {
+    requestedTermDuration: snapshot.termDuration,
+    confirmedTermDuration: observed,
+  }
+}
+
+export function foresightTermReadbackError(
+  snapshot: ForesightTermIllustrationSnapshotV1,
+  client: ForesightTermClientReadback,
+  funding: ForesightTermFundingReadback,
+): string | null {
+  if (client.firstName !== snapshot.insured.firstName ||
+    client.lastName !== snapshot.insured.lastName ||
+    client.dateOfBirth !== foresightClientBirthDate(snapshot.insured.dateOfBirth) ||
+    client.issueState !== snapshot.insured.issueState ||
+    client.gender !== snapshot.underwriting.gender ||
+    client.rateClass !== snapshot.underwriting.rateClass) {
+    return 'FORESIGHT_TERM_CLIENT_READBACK_MISMATCH'
+  }
+  if (funding.designType !== 'Specify Face Amount' || funding.premiumMode !== 'Monthly') {
+    return 'FORESIGHT_TERM_FUNDING_READBACK_MISMATCH'
+  }
+  if (funding.faceAmount.replace(/[$,]/g, '') !== String(snapshot.faceAmount)) {
+    return 'FORESIGHT_TERM_FACE_AMOUNT_READBACK_MISMATCH'
+  }
+  if (!isTermDuration(funding.termDuration)) {
+    return 'FORESIGHT_TERM_DURATION_READBACK_MISMATCH'
+  }
+  return null
+}
+
 async function fillFunding(doc: Document, snapshot: ForesightTermIllustrationSnapshotV1) {
   await applyInMainWorld('APPLY_TERM_FUNDING', {
     designType: optionValue(doc, TERM_FIELDS.funding.designType, 'Specify Face Amount'),
@@ -336,10 +385,12 @@ export async function executeForesightTermIllustration(input: {
   input.onProgress?.('CONFIGURING_PRODUCT')
   const fundingDoc = await fundingDocument()
   const funding = opened.existing ? readFunding(fundingDoc) : await fillFunding(fundingDoc, input.snapshot)
-  if (client.firstName !== input.snapshot.insured.firstName || client.lastName !== input.snapshot.insured.lastName || client.dateOfBirth !== foresightClientBirthDate(input.snapshot.insured.dateOfBirth) || client.issueState !== input.snapshot.insured.issueState || client.gender !== input.snapshot.underwriting.gender || client.rateClass !== input.snapshot.underwriting.rateClass || funding.designType !== 'Specify Face Amount' || funding.faceAmount.replace(/[$,]/g, '') !== String(input.snapshot.faceAmount) || funding.premiumMode !== 'Monthly' || funding.termDuration !== input.snapshot.termDuration) fail('FORESIGHT_TERM_READBACK_MISMATCH')
+  const readbackError = foresightTermReadbackError(input.snapshot, client, funding)
+  if (readbackError) fail(readbackError)
+  const termDuration = resolveForesightTermDuration(input.snapshot, funding.termDuration)
   input.onProgress?.('VERIFYING_VALUES')
   const reports = await reportsDocument()
-  await verifyReports(reports, input.snapshot.termDuration)
+  await verifyReports(reports, termDuration.confirmedTermDuration)
   if (!opened.existing) {
     input.onProgress?.('SAVING_CASE')
     await saveCase(input.snapshot.carrierCaseName)
@@ -353,6 +404,8 @@ export async function executeForesightTermIllustration(input: {
       caseFingerprint: await caseFingerprint(input.snapshot),
       carrierCaseName: input.snapshot.carrierCaseName,
       carrierProduct: input.snapshot.product.carrierName,
+      requestedTermDuration: termDuration.requestedTermDuration,
+      confirmedTermDuration: termDuration.confirmedTermDuration,
       release,
       reportCode: 'NAIC_ILLUSTRATION',
       documentSha256: await sha256Hex(pdf),

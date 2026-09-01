@@ -201,6 +201,19 @@ describe('CarrierSyncBadge', () => {
     expect(screen.getByRole('button', { name: 'View K-Bot activity' })).toBeTruthy()
   })
 
+  it('starts Application selection from official Illustrations, not unrelated cases', async () => {
+    answerWith({ kind: 'IN_SYNC' })
+    render(<CarrierSyncBadge />)
+    await screen.findByText('Up to date')
+
+    await userEvent.click(screen.getByRole('button', { name: 'View K-Bot activity' }))
+
+    expect(screen.getByRole('link', { name: /Create Application in iGO/i })).toHaveAttribute(
+      'href',
+      '/agent/illustrations?intent=application',
+    )
+  })
+
   it('keeps K-Bot visible and sad on every page when this browser is disconnected', async () => {
     mocks.sendConnectorMessage.mockResolvedValue({
       ok: true,

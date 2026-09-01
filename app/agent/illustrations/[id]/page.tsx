@@ -7,6 +7,7 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { formatCarrierInstant } from '@/lib/national-life/carrier-instant'
 import { flexLifeProductLabel } from '@/lib/national-life/flex-life'
 import { buildForesightIllustrationSnapshot } from '@/lib/national-life/foresight-illustration-contract'
+import { resolveForesightTermDurationResult } from '@/lib/national-life/foresight-term-contract'
 import { IllustrationPdfButton } from '../IllustrationPdfButton'
 import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
 import { getIllustrationCommandStatuses } from '@/lib/national-life/illustration-command-status'
@@ -17,6 +18,7 @@ import {
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { ForesightActivityIndicator } from '../ForesightActivityIndicator'
+import { StartApplicationFromIllustrationButton } from '../StartApplicationFromIllustrationButton'
 
 const currency = (value: number) =>
   new Intl.NumberFormat('en-US', {
@@ -108,6 +110,13 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
   const documentReady = illustration.documentFetchedAt && illustration.documentMimeType === 'application/pdf'
   const foresightResult = documentReady ? foresightResultFrom(illustration.rawPayload) : null
   const isTermProduct = illustration.productName === 'NL Term' || illustration.productName === 'LSW Term'
+  const termDurationResult = isTermProduct ? (() => {
+    try {
+      return resolveForesightTermDurationResult(illustration)
+    } catch {
+      return null
+    }
+  })() : null
   const hasCarrierPremium = Boolean(documentReady && illustration.premium)
   const premiumValue = hasCarrierPremium ? illustration.premium : illustration.targetPremium
   const carrierAdjustedPremium = foresightResult?.solveBasis === 'PREMIUM' &&
@@ -154,14 +163,19 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
             <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">{delivery.detail}</p>
           </div>
           {documentReady ? (
-            <a
-              href={`/api/illustrations/${illustration.id}/document`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-h-11 items-center justify-center rounded-full bg-rail-strong px-5 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-rail"
-            >
-              Abrir PDF oficial da National Life
-            </a>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <a
+                href={`/api/illustrations/${illustration.id}/document`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-steel bg-paper px-5 py-2.5 text-sm font-semibold text-teal-deep transition-colors hover:border-teal hover:bg-teal-pale"
+              >
+                Abrir PDF oficial
+              </a>
+              {foresightResult ? (
+                <StartApplicationFromIllustrationButton illustrationId={illustration.id} />
+              ) : null}
+            </div>
           ) : (
             <IllustrationPdfButton
               illustrationId={illustration.id}
@@ -210,6 +224,9 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                   : `${currency(foresightResult.requestedAmount)} de capital segurado`}
               </p>
               <p className="mt-1 text-xs text-ink-muted">Valor enviado ao Foresight para cálculo.</p>
+              {termDurationResult && (
+                <p className="mt-2 text-xs font-semibold text-ink">Prazo solicitado: {termDurationResult.requestedTermDuration}</p>
+              )}
             </div>
             <div className="bg-teal-pale/35 p-5 sm:p-6">
               <p className="text-xs font-semibold uppercase tracking-[0.1em] text-teal-deep">Confirmação da National Life</p>
@@ -218,6 +235,9 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                 <p className="text-sm font-semibold text-ink">{premiumCurrency(foresightResult.confirmedAnnualPremium)} por ano</p>
               </div>
               <p className="mt-2 text-xs text-ink-muted">Capital segurado confirmado: {currency(foresightResult.confirmedFaceAmount)}</p>
+              {termDurationResult && (
+                <p className="mt-1 text-xs font-semibold text-teal-deep">Prazo confirmado: {termDurationResult.confirmedTermDuration}</p>
+              )}
             </div>
           </div>
         </section>
@@ -237,6 +257,8 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
           </p>
           <dl className="mt-3">
             <Fact label="Produto" value={flexLifeProductLabel(illustration.productName)} />
+            {termDurationResult && <Fact label="Prazo solicitado" value={termDurationResult.requestedTermDuration} />}
+            {termDurationResult && <Fact label="Prazo confirmado pela National Life" value={termDurationResult.confirmedTermDuration} />}
             <Fact label="Capital segurado" value={illustration.faceAmount ? currency(Number(illustration.faceAmount)) : null} />
             <Fact label={hasCarrierPremium ? 'Prêmio mensal confirmado' : 'Prêmio mensal informado'} value={premiumValue ? premiumCurrency(Number(premiumValue)) : null} />
             {foresightResult && (
@@ -266,6 +288,12 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
             <p className="mt-4 rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 text-xs leading-5 text-ink">
               Você informou {currency(foresightResult.requestedAmount)} de capital segurado. A National Life confirmou{' '}
               {currency(foresightResult.confirmedFaceAmount)} no PDF oficial.
+            </p>
+          )}
+          {termDurationResult?.adjusted && (
+            <p className="mt-4 rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 text-xs leading-5 text-ink">
+              Você solicitou {termDurationResult.requestedTermDuration}. A National Life confirmou{' '}
+              {termDurationResult.confirmedTermDuration}; este é o prazo usado no PDF oficial e na Application.
             </p>
           )}
         </section>

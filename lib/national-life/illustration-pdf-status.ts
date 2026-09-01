@@ -108,6 +108,15 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
       return 'O Foresight não conseguiu calcular um cenário válido com esse valor de origem. Revise o capital ou prêmio e gere uma nova ilustração; nenhum PDF foi emitido.'
     case 'FORESIGHT_CLIENT_READBACK_TIMEOUT':
       return 'O Foresight não confirmou os dados do segurado. Revise nascimento, estado e perfil de risco antes de tentar novamente; nenhum PDF foi emitido.'
+    case 'FORESIGHT_TERM_FUNDING_TIMEOUT':
+      return 'O Foresight ainda estava atualizando o cenário Term e não confirmou os valores a tempo. Gere novamente; nenhum PDF foi emitido.'
+    case 'FORESIGHT_TERM_DURATION_READBACK_MISMATCH':
+      return 'O Foresight alterou o prazo do Term durante a atualização. Revise o prazo e gere novamente; nenhum PDF foi emitido.'
+    case 'FORESIGHT_TERM_CLIENT_READBACK_MISMATCH':
+      return 'O Foresight devolveu dados do segurado diferentes do pedido Term. Revise o cenário e gere novamente; nenhum PDF foi emitido.'
+    case 'FORESIGHT_TERM_FACE_AMOUNT_READBACK_MISMATCH':
+    case 'FORESIGHT_TERM_FUNDING_READBACK_MISMATCH':
+      return 'O Foresight devolveu capital ou cobrança diferentes do pedido Term. Revise o cenário e gere novamente; nenhum PDF foi emitido.'
     case 'FORESIGHT_SOLVE_READBACK_TIMEOUT':
     case 'FORESIGHT_SOLVE_READBACK_MISMATCH':
     case 'FORESIGHT_RESPONSE_INVALID':

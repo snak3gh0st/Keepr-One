@@ -125,7 +125,8 @@ describe('Foresight isolated-world executor', () => {
     } as const
     const receipt = {
       inputHash: 'a'.repeat(64), caseFingerprint: `case_${'b'.repeat(64)}`,
-      carrierCaseName: termSnapshot.carrierCaseName, carrierProduct: 'LSW Term', release: '5.3.65.31',
+      carrierCaseName: termSnapshot.carrierCaseName, carrierProduct: 'LSW Term',
+      requestedTermDuration: '20-G', confirmedTermDuration: '15-G', release: '5.3.65.31',
       reportCode: 'NAIC_ILLUSTRATION', documentSha256: 'c'.repeat(64), documentBytes: 9, saved: true,
     } as const
     const document = { contentType: 'application/pdf', pdfBase64: 'JVBERi0xLjcK' } as const

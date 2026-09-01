@@ -113,6 +113,8 @@ export function ApplicationDossier({
   const beneficiary = Array.isArray(dossier.beneficiaries)
     ? record(dossier.beneficiaries[0])
     : {};
+  const linkedIllustrationId = text(coverage.illustrationId);
+  const linkedIllustration = illustrations.find((illustration) => illustration.id === linkedIllustrationId);
   const [fallbackFirstName, ...fallbackLastName] = prospect.name.trim().split(/\s+/);
   const [productFamily, setProductFamily] = useState(text(coverage.family, text(coverage.product)));
 
@@ -329,7 +331,17 @@ export function ApplicationDossier({
             {productFamily === "TERM" ? <label className={labelClass}>Prazo do Term<select name="termDuration" className={fieldClass} defaultValue={text(coverage.termDuration)}><option value="">Selecione</option><option value="10-G">10 anos</option><option value="15-G">15 anos</option><option value="20-G">20 anos</option><option value="30-G">30 anos</option><option value="ART">ART</option></select></label> : null}
             <label className={labelClass}>Estado da proposta<input name="issueState" maxLength={2} className={fieldClass} defaultValue={text(coverage.issueState, text(address.state, prospect.state ?? ""))} /></label>
             <label className={labelClass}>Tipo de Application<select name="applicationType" className={fieldClass} defaultValue={text(coverage.applicationType, "FULL")}><option value="FULL">Application completa</option><option value="TERM_CONVERSION">Conversão de Term</option></select></label>
-            <label className={labelClass}>Illustration revisada<select name="illustrationId" className={fieldClass} defaultValue={text(coverage.illustrationId)}><option value="">Selecione</option>{illustrations.filter((illustration) => illustration.kind !== "PRELIMINARY").map((illustration) => <option key={illustration.id} value={illustration.id}>{illustration.productName ?? "Illustration oficial"}</option>)}</select></label>
+            {linkedIllustrationId ? (
+              <label className={labelClass}>
+                Illustration de origem
+                <input type="hidden" name="illustrationId" value={linkedIllustrationId} />
+                <span className={`${fieldClass} flex items-center bg-panel`}>
+                  {linkedIllustration?.productName ?? "Illustration oficial vinculada"}
+                </span>
+              </label>
+            ) : (
+              <label className={labelClass}>Illustration revisada<select name="illustrationId" className={fieldClass} defaultValue=""><option value="">Selecione</option>{illustrations.filter((illustration) => illustration.kind !== "PRELIMINARY").map((illustration) => <option key={illustration.id} value={illustration.id}>{illustration.productName ?? "Illustration oficial"}</option>)}</select></label>
+            )}
             <label className={labelClass}>Número do agente na National Life<input name="carrierNumber" className={fieldClass} defaultValue={text(record(dossier.agent).carrierNumber)} /></label>
             <label className={labelClass}>Capital segurado<input name="faceAmount" type="number" min="1" step="0.01" className={fieldClass} defaultValue={typeof coverage.faceAmount === "number" ? coverage.faceAmount : ""} /></label>
             <label className={labelClass}>Prêmio planejado<input name="plannedPremium" type="number" min="1" step="0.01" className={fieldClass} defaultValue={typeof coverage.plannedPremium === "number" ? coverage.plannedPremium : ""} /></label>

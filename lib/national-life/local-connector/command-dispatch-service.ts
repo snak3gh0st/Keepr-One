@@ -135,6 +135,8 @@ export type ForesightArtifactRepository = {
     illustrationId: string
     monthlyPremium: number
     annualPremium: number
+    requestedTermDuration?: '10-G' | '15-G' | '20-G' | '30-G' | 'ART'
+    confirmedTermDuration?: '10-G' | '15-G' | '20-G' | '30-G' | 'ART'
   }) => Promise<void>
 }
 
@@ -433,6 +435,12 @@ export async function recordDeviceConnectorCommandEvent(
         illustrationId: publicCommand.target.id,
         monthlyPremium: premiums.monthlyPremium,
         annualPremium: premiums.annualPremium,
+        ...(receipt.requestedTermDuration && receipt.confirmedTermDuration
+          ? {
+              requestedTermDuration: receipt.requestedTermDuration,
+              confirmedTermDuration: receipt.confirmedTermDuration,
+            }
+          : {}),
       })
     }
   }
