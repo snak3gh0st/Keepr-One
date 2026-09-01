@@ -43,7 +43,7 @@ export function IllustrationPdfButton({
   illustrationId: string
   extensionId?: string
   disabled?: boolean
-  status?: 'WORKING' | 'BLOCKED' | 'FAILED'
+  status?: 'WORKING' | 'WAITING_FOR_KBOT' | 'BLOCKED' | 'FAILED'
   safeErrorCode?: string | null
 }) {
   const router = useRouter()
@@ -84,6 +84,17 @@ export function IllustrationPdfButton({
     : pending
       ? 'K-Bot está iniciando…'
       : 'K-Bot está trabalhando no Foresight…'
+
+  if (status === 'WAITING_FOR_KBOT') {
+    return (
+      <Link
+        href="/agent/integrations/national-life"
+        className="text-teal transition-colors hover:text-teal-deep"
+      >
+        Conectar K-Bot para continuar
+      </Link>
+    )
+  }
 
   if (status === 'FAILED' && [
     'FORESIGHT_PREMIUM_WRITE_MISMATCH',

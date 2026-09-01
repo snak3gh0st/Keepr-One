@@ -5,6 +5,7 @@ import type { IllustrationPdfStatus } from './illustration-pdf-status'
 
 type IllustrationCommandStatusRecord = {
   state: string
+  deviceId?: string | null
   target: unknown
   safeErrorCode: string | null
   expiresAt: Date
@@ -28,6 +29,8 @@ export function latestIllustrationCommandStatus(
       result.set(id, { state: 'FAILED', safeErrorCode: 'COMMAND_EXPIRED' })
     } else if (command.state === 'AUTH_REQUIRED') {
       result.set(id, { state: 'BLOCKED', safeErrorCode: command.safeErrorCode })
+    } else if (command.state === 'QUEUED' && command.deviceId === null) {
+      result.set(id, { state: 'WAITING_FOR_KBOT' })
     } else if (['QUEUED', 'RUNNING', 'WAITING_FOR_CONFIRMATION', 'PAUSED'].includes(command.state)) {
       result.set(id, { state: 'WORKING' })
     } else if (command.state === 'COMPLETED') {
@@ -47,7 +50,7 @@ export async function getIllustrationCommandStatuses(agentId: string) {
     where: { agentId, capability: 'GENERATE_ILLUSTRATION' },
     orderBy: { createdAt: 'desc' },
     take: 300,
-    select: { state: true, target: true, safeErrorCode: true, expiresAt: true },
+    select: { state: true, deviceId: true, target: true, safeErrorCode: true, expiresAt: true },
   })
   return latestIllustrationCommandStatus(commands)
 }

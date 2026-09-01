@@ -10,6 +10,7 @@ import {
 /// why" — not lease owners, attempt counts, or an error code in English.
 export type IllustrationPdfStatus =
   | { state: 'WORKING' }
+  | { state: 'WAITING_FOR_KBOT' }
   | { state: 'BLOCKED'; safeErrorCode: string | null }
   | { state: 'FAILED'; safeErrorCode: string | null }
 
@@ -80,6 +81,9 @@ export function latestPdfStatusByIllustration(
 /// Saying "falhou" there sends the agent looking for a problem that is not in
 /// the data. The portal-level reconnect code follows the same blocked path.
 export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
+  if (status.state === 'WAITING_FOR_KBOT') {
+    return 'K-Bot está aguardando conexão neste computador para iniciar o mesmo pedido.'
+  }
   if (status.state === 'WORKING') {
     // The number comes from measuring a full illustration opening in the
     // carrier's tool: minutes, not seconds. Without it, silence reads as broken.
@@ -176,6 +180,13 @@ export function describeIllustrationDelivery(input: {
       eyebrow: 'K-Bot · ação necessária',
       title: 'Conecte a National Life para continuar',
       detail: 'A sessão do navegador expirou. Depois do login, o K-Bot retoma o mesmo pedido.',
+    }
+  }
+  if (input.status?.state === 'WAITING_FOR_KBOT') {
+    return {
+      eyebrow: 'K-Bot · conexão necessária',
+      title: 'Reconecte o K-Bot para iniciar',
+      detail: 'O pedido oficial está salvo. Reconecte o K-Bot neste computador para ele abrir o Foresight e continuar a mesma ilustração.',
     }
   }
   if (input.status?.state === 'WORKING') {

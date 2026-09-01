@@ -15,7 +15,7 @@ import { sanitizeNationalLifeSyncStatusForAgent } from '@/lib/national-life/plan
 
 type IllustrationActivity = {
   id: string
-  state: 'WORKING' | 'NEEDS_YOU' | 'READY' | 'FAILED'
+  state: 'WORKING' | 'NEEDS_YOU' | 'NEEDS_KBOT' | 'READY' | 'FAILED'
   updatedAt: Date
 }
 
@@ -36,6 +36,7 @@ function illustrationTargetId(target: unknown): string | null {
 
 async function illustrationActivity(agentId: string, command: {
   state: string
+  deviceId: string | null
   target: unknown
   expiresAt: Date
   updatedAt: Date
@@ -48,6 +49,9 @@ async function illustrationActivity(agentId: string, command: {
     ['QUEUED', 'RUNNING', 'AUTH_REQUIRED', 'WAITING_FOR_CONFIRMATION', 'PAUSED'].includes(command.state)
   ) return null
   if (command.state === 'AUTH_REQUIRED') return { id, state: 'NEEDS_YOU', updatedAt: command.updatedAt }
+  if (command.state === 'QUEUED' && command.deviceId === null) {
+    return { id, state: 'NEEDS_KBOT', updatedAt: command.updatedAt }
+  }
   if (['QUEUED', 'RUNNING', 'WAITING_FOR_CONFIRMATION', 'PAUSED'].includes(command.state)) {
     return { id, state: 'WORKING', updatedAt: command.updatedAt }
   }
@@ -118,7 +122,7 @@ export async function GET() {
   }
   try {
     const agent = await getCurrentAgent()
-    const [working, blocked, rawSync, latestIllustrationCommand, latestApplicationCommand] = await Promise.all([
+    const [working, blocked, rawSync, latestIllustrationCommand, latestApplicationCommand, credential] = await Promise.all([
       prisma.browserAutomationJob.count({
         where: {
           agentId: agent.id,
@@ -144,7 +148,7 @@ export async function GET() {
       prisma.nationalLifeConnectorCommand.findFirst({
         where: { agentId: agent.id, capability: 'GENERATE_ILLUSTRATION' },
         orderBy: { createdAt: 'desc' },
-        select: { state: true, target: true, expiresAt: true, updatedAt: true },
+        select: { state: true, deviceId: true, target: true, expiresAt: true, updatedAt: true },
       }),
       prisma.nationalLifeConnectorCommand.findFirst({
         where: {
@@ -154,13 +158,17 @@ export async function GET() {
         orderBy: { createdAt: 'desc' },
         select: { state: true, target: true, expiresAt: true, updatedAt: true },
       }),
+      prisma.agentIntegrationCredential.findUnique({
+        where: { agentId_provider: { agentId: agent.id, provider: NATIONAL_LIFE_PROVIDER } },
+        select: { autoLoginEnabled: true },
+      }),
     ])
     const sync = await sanitizeNationalLifeSyncStatusForAgent(agent.id, rawSync)
     const illustration = await illustrationActivity(agent.id, latestIllustrationCommand)
     const application = await applicationActivity(agent.id, latestApplicationCommand)
     return NextResponse.json({
       state: carrierSyncState({ working, blocked }),
-      connector,
+      connector: credential?.autoLoginEnabled ? { ...connector, autoLoginEnabled: true } : connector,
       ...(sync ? { sync } : {}),
       ...(illustration ? { illustration } : {}),
       ...(application ? { application } : {}),

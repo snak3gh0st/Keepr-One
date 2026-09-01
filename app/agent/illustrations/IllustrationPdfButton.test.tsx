@@ -23,6 +23,21 @@ afterEach(() => {
 })
 
 describe('IllustrationPdfButton', () => {
+  it('sends an unclaimed request to reconnect K-Bot instead of issuing another illustration command', () => {
+    render(
+      <IllustrationPdfButton
+        illustrationId="ill_1"
+        status={'WAITING_FOR_KBOT' as never}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'Conectar K-Bot para continuar' })).toHaveAttribute(
+      'href',
+      '/agent/integrations/national-life',
+    )
+    expect(mocks.request).not.toHaveBeenCalled()
+  })
+
   it('shows the real Foresight step reported by K-Bot in plain language', async () => {
     mocks.send.mockResolvedValue({
       ok: true,

@@ -29,7 +29,7 @@ type CompactSyncStatus = {
 
 type IllustrationActivity = {
   id: string
-  state: 'WORKING' | 'NEEDS_YOU' | 'READY' | 'FAILED'
+  state: 'WORKING' | 'NEEDS_YOU' | 'NEEDS_KBOT' | 'READY' | 'FAILED'
   updatedAt: string
 }
 
@@ -48,6 +48,7 @@ type BadgeResponse = {
   connector?: {
     enabled: boolean
     extensionTarget?: string | null
+    autoLoginEnabled?: boolean
   } | null
 }
 
@@ -92,6 +93,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
   const [application, setApplication] = useState<ApplicationActivity | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [extensionTarget, setExtensionTarget] = useState<string | null | undefined>(undefined)
+  const [autoLoginEnabled, setAutoLoginEnabled] = useState(false)
   const [connectorState, setConnectorState] = useState<BrowserConnectorState>('checking')
   const previousIllustrationState = useRef<IllustrationActivity['state'] | null>(null)
   const previousApplicationState = useRef<ApplicationActivity['state'] | null>(null)
@@ -156,6 +158,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
     setApplication(nextApplication)
     if ('connector' in body) {
       setExtensionTarget(body.connector?.enabled ? body.connector.extensionTarget ?? null : null)
+      setAutoLoginEnabled(Boolean(body.connector?.enabled && body.connector.autoLoginEnabled))
     }
   }, [])
 
@@ -210,7 +213,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
   }, [extensionTarget])
 
   const shouldPoll = Boolean(sync?.shouldPoll) || illustration?.state === 'WORKING' ||
-    illustration?.state === 'NEEDS_YOU' || application?.state === 'WORKING' ||
+    illustration?.state === 'NEEDS_YOU' || illustration?.state === 'NEEDS_KBOT' || application?.state === 'WORKING' ||
     application?.state === 'NEEDS_YOU'
 
   useEffect(() => {
@@ -261,6 +264,16 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
           Sync {sync.completed}/{sync.total} · Illustration
         </Link>
       )
+    : illustration?.state === 'NEEDS_KBOT'
+      ? (
+          <Link
+            href="/agent/integrations/national-life"
+            className={`shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-gold ${separated ? 'shell-carrier-separated' : ''}`}
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden="true" />
+            Reconnect K-Bot to continue
+          </Link>
+        )
     : sync
       ? (
           <span className={`shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs text-ink-muted ${separated ? 'shell-carrier-separated' : ''}`}>
@@ -321,6 +334,13 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       id: 'illustration',
       label: 'I need your login',
       detail: 'Sign in to National Life so I can continue your illustration',
+      state: 'waiting',
+    })
+  } else if (illustration?.state === 'NEEDS_KBOT') {
+    tasks.push({
+      id: 'illustration',
+      label: 'Illustration waiting for K-Bot',
+      detail: 'Reconnect this computer so K-Bot can open Foresight and continue the same request.',
       state: 'waiting',
     })
   }
@@ -409,6 +429,15 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       detail = `${sync.completed} of ${sync.total} areas checked.`
       actionLabel = 'View update'
       activityMode = 'sync'
+    } else if (illustration?.state === 'NEEDS_KBOT') {
+      botState = 'waiting'
+      title = 'Reconnect K-Bot to start the illustration'
+      detail = autoLoginEnabled
+        ? 'Your protected National Life sign-in is ready. Reconnect K-Bot on this computer to continue the same request.'
+        : 'Reconnect K-Bot on this computer so it can open Foresight and continue the same request.'
+      actionHref = '/agent/integrations/national-life'
+      actionLabel = 'Reconnect K-Bot'
+      activityMode = 'illustration'
     } else if (illustration?.state === 'NEEDS_YOU' || state?.kind === 'NEEDS_YOU') {
       botState = 'waiting'
       title = 'I need you to sign in to National Life'
@@ -431,10 +460,17 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       detail = 'Install or reload the extension so I can work with National Life.'
       actionLabel = 'Connect K-Bot'
     } else if (browserConnectorState === 'disconnected') {
-      botState = 'error'
-      title = 'K-Bot is disconnected'
-      detail = 'Connect this computer once and I will stay with you throughout Keepr One.'
-      actionLabel = 'Connect K-Bot'
+      if (autoLoginEnabled) {
+        botState = 'waiting'
+        title = 'K-Bot needs this computer reconnected'
+        detail = 'Your protected National Life sign-in is ready. Reconnect K-Bot to use it when the carrier asks you to sign in.'
+        actionLabel = 'Reconnect K-Bot'
+      } else {
+        botState = 'error'
+        title = 'K-Bot is disconnected'
+        detail = 'Connect this computer once and I will stay with you throughout Keepr One.'
+        actionLabel = 'Connect K-Bot'
+      }
     } else if (browserConnectorState === 'checking') {
       title = 'I am checking this browser'
       detail = 'I will be ready in a moment.'
