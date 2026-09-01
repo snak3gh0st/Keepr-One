@@ -38,6 +38,16 @@ const BASE_PROPS: SettingsFormsProps = {
   },
   kbot: {
     enabled: true,
+    credentialBrokerEnabled: false,
+    credentialSummary: {
+      configured: false,
+      autoLoginEnabled: false,
+      status: "NOT_CONFIGURED",
+      maskedUsername: null,
+      consentedAt: null,
+      lastSucceededAt: null,
+      lastRejectedAt: null,
+    },
   },
 };
 

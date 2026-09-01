@@ -6,11 +6,13 @@ import { getCurrentAgentAccess } from "@/lib/agent-access";
 import { getCurrentAgent } from "@/lib/agent-context";
 import { prisma } from "@/lib/prisma";
 import { getNationalLifeLocalConnectorConfig } from "@/lib/national-life/local-connector/config";
+import { getKBotCredentialWebConfig } from "@/lib/national-life/credentials/config";
+import { getNationalLifeCredentialSummary } from "@/lib/national-life/credentials/settings-service";
 import { SettingsForms } from "./SettingsForms";
 
 export default async function AgentSettingsPage() {
   const agent = await getCurrentAgent();
-  const [access, user] = await Promise.all([
+  const [access, user, credentialSummary] = await Promise.all([
     getCurrentAgentAccess(),
     prisma.user.findUnique({
       where: { id: agent.userId },
@@ -21,12 +23,18 @@ export default async function AgentSettingsPage() {
         timeZone: true,
       },
     }),
+    getNationalLifeCredentialSummary(agent.id),
   ]);
 
   if (!user) {
     throw new Error("Usuário da conta não encontrado.");
   }
   const kbot = getNationalLifeLocalConnectorConfig();
+  const credentialConfig = getKBotCredentialWebConfig();
+  const credentialBrokerEnabled = credentialConfig.enabled && (
+    credentialConfig.autoLoginAllAgents
+    || credentialConfig.autoLoginAgentIds.has(agent.id)
+  );
 
   return (
     <Shell role="AGENT" userName={user.name}>
@@ -59,6 +67,8 @@ export default async function AgentSettingsPage() {
         }}
         kbot={{
           enabled: kbot.enabled,
+          credentialBrokerEnabled,
+          credentialSummary,
         }}
       />
     </Shell>

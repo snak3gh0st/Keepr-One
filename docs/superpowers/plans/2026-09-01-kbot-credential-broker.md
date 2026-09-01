@@ -385,7 +385,7 @@ git commit -m "feat(kbot): add Vault Transit credential boundary"
 - Produces: `saveNationalLifeCredentialAction` and `revokeNationalLifeCredentialAction`.
 - The only client-visible credential shape is `NationalLifeCredentialSummary`.
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Use an in-memory repository and fake encrypt port. Cover create, replacement,
 revoke and cross-agent access. Assert the persisted write contains no `username`
@@ -410,7 +410,7 @@ expect(audit.create).toHaveBeenCalledWith(expect.objectContaining({
 Revocation must clear `encryptedPayload`, set `status='REVOKED'`,
 `autoLoginEnabled=false`, and retain no old ciphertext in `AuditLog.before`.
 
-- [ ] **Step 2: Write failing Server Action tests**
+- [x] **Step 2: Write failing Server Action tests**
 
 Test strict validation and call ordering:
 
@@ -422,7 +422,7 @@ Test strict validation and call ordering:
 - revoke also requires current Keepr One password;
 - a CLIENT role or inactive agent cannot reach the service.
 
-- [ ] **Step 3: Run the tests and verify they fail**
+- [x] **Step 3: Run the tests and verify they fail**
 
 ```bash
 pnpm vitest run lib/national-life/credentials/settings-service.test.ts app/agent/settings/credential-actions.test.ts
@@ -430,7 +430,7 @@ pnpm vitest run lib/national-life/credentials/settings-service.test.ts app/agent
 
 Expected: missing modules.
 
-- [ ] **Step 4: Implement the service and actions**
+- [x] **Step 4: Implement the service and actions**
 
 Use this server action input contract:
 
@@ -462,7 +462,7 @@ export type NationalLifeCredentialSummary = Readonly<{
 }>
 ```
 
-- [ ] **Step 5: Build the Settings component**
+- [x] **Step 5: Build the Settings component**
 
 Replace the current “Keepr One does not store your password” copy with a focused
 `KBotCredentialSettings` component. The form includes National Life username,
@@ -477,7 +477,7 @@ rejected state explains that K-Bot attempted login once, stopped and requires a
 replacement credential. The feature-disabled state retains the existing manual
 login instructions.
 
-- [ ] **Step 6: Run Settings tests**
+- [x] **Step 6: Run Settings tests**
 
 ```bash
 pnpm vitest run lib/national-life/credentials/settings-service.test.ts app/agent/settings/credential-actions.test.ts app/agent/settings/KBotCredentialSettings.test.tsx app/agent/settings/SettingsForms.test.tsx
@@ -485,7 +485,7 @@ pnpm vitest run lib/national-life/credentials/settings-service.test.ts app/agent
 
 Expected: pass; rendered DOM and serialized props contain no fixture password or Vault ciphertext.
 
-- [ ] **Step 7: Commit the Settings workflow**
+- [x] **Step 7: Commit the Settings workflow**
 
 ```bash
 git add app/agent/settings lib/national-life/credentials/settings-service.ts lib/national-life/credentials/settings-service.test.ts
