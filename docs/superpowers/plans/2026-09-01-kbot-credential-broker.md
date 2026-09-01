@@ -6,7 +6,7 @@
 
 **Architecture:** Keepr One encrypts credentials with an encrypt-only Vault Transit identity and stores only Vault ciphertext. A separate private broker verifies the existing signed device protocol and an active `AUTH_REQUIRED` operation, decrypts with a decrypt-only Vault identity, then returns a 60-second AES-GCM envelope whose key is wrapped to a non-extractable RSA-OAEP key owned by the paired K-Bot device. The extension submits only an exact allowlisted login form once; MFA, CAPTCHA, unknown pages and rejected credentials stop automation and preserve the manual-login fallback.
 
-**Tech Stack:** Next.js 15, React 19, TypeScript, Prisma/PostgreSQL, Better Auth, Redis, HashiCorp Vault Transit, Node Web Crypto, WXT/Chrome MV3, Vitest.
+**Tech Stack:** Next.js 16.2, React 19, TypeScript, Prisma/PostgreSQL, Better Auth, Redis, HashiCorp Vault Transit, Node Web Crypto, WXT/Chrome MV3, Vitest.
 
 **Spec:** `docs/superpowers/specs/2026-09-01-kbot-credential-broker-design.md`
 
@@ -39,7 +39,7 @@
 - Produces: nullable legacy credential columns, Vault ciphertext columns, device encryption JWK columns, auth epoch/state columns and `NationalLifeCredentialLease`.
 - Consumes: existing `AgentIntegrationCredential`, `NationalLifeConnectorDevice`, `NationalLifeSyncRun` and `NationalLifeConnectorCommand` ownership boundaries.
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
 Add strict-parser tests with these assertions:
 
@@ -68,7 +68,7 @@ expect(parseCredentialLeaseResult({ schemaVersion: 1, outcome: 'OTP_SUBMITTED' }
 
 Also extend the local-connector JWK tests to accept a strict RSA-OAEP public JWK and reject private components (`d`, `p`, `q`, `dp`, `dq`, `qi`).
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 Run:
 
@@ -78,7 +78,7 @@ pnpm vitest run lib/national-life/credentials/contracts.test.ts lib/national-lif
 
 Expected: failure because the credential contracts and RSA JWK parser do not exist.
 
-- [ ] **Step 3: Implement the pure contracts**
+- [x] **Step 3: Implement the pure contracts**
 
 Create strict Zod-backed parsers for these exact public types:
 
@@ -139,7 +139,7 @@ export type SealedCredentialLeaseV1 = Readonly<{
 
 Use identifier limits of 128 characters, username 1–128 characters and password 1–256 characters. Reject unknown fields everywhere. The RSA public JWK must be `kty=RSA`, `alg=RSA-OAEP-256`, `use=enc`, `key_ops=['encrypt']`, `ext=true`, exponent `AQAB`, and a canonical base64url modulus of at least 384 bytes for RSA-3072.
 
-- [ ] **Step 4: Add the Prisma model changes**
+- [x] **Step 4: Add the Prisma model changes**
 
 Apply this model shape while retaining current names and relationships:
 
@@ -211,7 +211,7 @@ model NationalLifeCredentialLease {
 
 Add the inverse relations to `Agent` and `NationalLifeConnectorDevice`.
 
-- [ ] **Step 5: Generate and inspect the migration**
+- [x] **Step 5: Generate and inspect the migration**
 
 Run:
 
@@ -221,7 +221,7 @@ pnpm exec prisma migrate dev --create-only --name add_kbot_credential_broker
 
 Rename the generated directory to `20260901170000_add_kbot_credential_broker` if Prisma generated a different timestamp. Confirm the SQL makes the five legacy crypto columns nullable, adds only nullable/defaulted columns to populated tables, creates the unique nullable encryption-key index, and does not delete or reinterpret existing credential rows.
 
-- [ ] **Step 6: Regenerate Prisma and run focused tests**
+- [x] **Step 6: Regenerate Prisma and run focused tests**
 
 Run:
 
@@ -232,7 +232,7 @@ pnpm vitest run lib/national-life/credentials/contracts.test.ts lib/national-lif
 
 Expected: both files pass.
 
-- [ ] **Step 7: Commit the schema and contracts**
+- [x] **Step 7: Commit the schema and contracts**
 
 ```bash
 git add prisma/schema.prisma prisma/migrations/20260901170000_add_kbot_credential_broker lib/national-life/credentials/contracts.ts lib/national-life/credentials/contracts.test.ts lib/national-life/local-connector/contracts.ts lib/national-life/local-connector/contracts.test.ts
