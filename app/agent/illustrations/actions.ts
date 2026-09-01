@@ -5,8 +5,10 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { prisma } from '@/lib/prisma'
 import {
   approveConnectorCommand,
+  ConnectorCommandError,
   issueConnectorCommand,
   prismaConnectorCommandRepository,
+  retryConnectorCommandAuthentication,
 } from '@/lib/national-life/connector-command-service'
 import {
   buildForesightIllustrationSnapshot,
@@ -20,7 +22,7 @@ import { extractForesightTermPremiums } from '@/lib/national-life/foresight-term
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
 
 export type RequestIllustrationPdfResult =
-  | { ok: true; commandId: string; duplicate: boolean; completed: boolean }
+  | { ok: true; commandId: string; duplicate: boolean; completed: boolean; retryingLogin?: true }
   | { ok: false; message: string }
 
 export type ReconcileTermIllustrationPdfResult =
@@ -195,6 +197,7 @@ export async function requestIllustrationPdf(
     const resumable = latest && latest.expiresAt > now &&
       ['QUEUED', 'RUNNING', 'AUTH_REQUIRED', 'WAITING_FOR_CONFIRMATION', 'PAUSED'].includes(latest.state)
     if (resumable) {
+      let retryingLogin = false
       if (latest.confirmationState === 'PENDING') {
         await approveConnectorCommand(prismaConnectorCommandRepository, {
           agentId: agent.id,
@@ -205,11 +208,21 @@ export async function requestIllustrationPdf(
       } else if (latest.confirmationState !== 'APPROVED') {
         return { ok: false, message: 'Este pedido não está mais disponível para confirmação.' }
       }
+      if (latest.state === 'AUTH_REQUIRED') {
+        await retryConnectorCommandAuthentication(prismaConnectorCommandRepository, {
+          agentId: agent.id,
+          commandId: latest.id,
+        })
+        retryingLogin = true
+      }
+      revalidatePath('/agent/illustrations')
+      revalidatePath(`/agent/illustrations/${illustration.id}`)
       return {
         ok: true,
         commandId: latest.id,
         duplicate: true,
         completed: false,
+        ...(retryingLogin ? { retryingLogin: true as const } : {}),
       }
     }
     const issued = await issueConnectorCommand(prismaConnectorCommandRepository, {
@@ -246,7 +259,13 @@ export async function requestIllustrationPdf(
       duplicate: issued.duplicate,
       completed: persisted.state === 'COMPLETED',
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof ConnectorCommandError && error.code === 'AUTH_RETRY_UNAVAILABLE') {
+      return {
+        ok: false,
+        message: 'A National Life ainda precisa de uma verificação manual. Conclua o login ou MFA na janela da seguradora e tente novamente.',
+      }
+    }
     return { ok: false, message: 'Não foi possível iniciar a ilustração oficial agora.' }
   }
 }

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -56,5 +57,36 @@ describe('IllustrationPdfButton', () => {
     expect(await screen.findByText('K-Bot está criando o PDF oficial…')).toBeTruthy()
     expect(screen.getByRole('list', { name: 'Etapas da ilustração pelo K-Bot' })).toBeTruthy()
     expect(screen.getByText('Salvar e criar PDF').closest('li')).toHaveAttribute('aria-current', 'step')
+  })
+
+  it('labels a blocked password login as one explicit retry and explains the MFA boundary', async () => {
+    mocks.request.mockResolvedValue({
+      ok: true,
+      commandId: 'cmd_existing',
+      duplicate: true,
+      completed: false,
+      retryingLogin: true,
+    })
+    mocks.send.mockResolvedValue({ ok: true })
+    const user = userEvent.setup()
+
+    render(
+      <IllustrationPdfButton
+        illustrationId="ill_1"
+        extensionId="abcdefghijklmnopabcdefghijklmnop"
+        status="BLOCKED"
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Tentar login novamente' }))
+
+    expect(mocks.request).toHaveBeenCalledWith('ill_1')
+    expect(mocks.send).toHaveBeenCalledWith(
+      'abcdefghijklmnopabcdefghijklmnop',
+      { type: 'START_NATIONAL_LIFE_COMMAND', commandId: 'cmd_existing' },
+    )
+    expect(await screen.findByText(
+      'K-Bot vai tentar a credencial protegida uma vez. Se a National Life pedir MFA, conclua a verificação para continuar.',
+    )).toHaveAttribute('role', 'status')
   })
 })

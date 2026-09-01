@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   auditCreate: vi.fn(),
   issue: vi.fn(),
   approve: vi.fn(),
+  retryAuthentication: vi.fn(),
   revalidate: vi.fn(),
   extractTermPremiums: vi.fn(),
 }))
@@ -36,6 +37,7 @@ vi.mock('@/lib/national-life/connector-command-service', async () => {
     ...actual,
     issueConnectorCommand: mocks.issue,
     approveConnectorCommand: mocks.approve,
+    retryConnectorCommandAuthentication: mocks.retryAuthentication,
     prismaConnectorCommandRepository: {},
   }
 })
@@ -96,6 +98,7 @@ describe('request official Foresight illustration', () => {
       command: { commandId: 'cmd_1' }, payloadHash: 'p'.repeat(64), duplicate: false,
     })
     mocks.approve.mockResolvedValue(undefined)
+    mocks.retryAuthentication.mockResolvedValue(undefined)
     mocks.illustrationUpdateMany.mockResolvedValue({ count: 1 })
     mocks.auditCreate.mockResolvedValue({ id: 'audit_1' })
     mocks.extractTermPremiums.mockResolvedValue({ monthlyPremium: 62.92, annualPremium: 755.04 })
@@ -115,16 +118,19 @@ describe('request official Foresight illustration', () => {
     })
   })
 
-  it('resumes an assigned login-blocked command instead of creating another case', async () => {
+  it('uses the explicit click to retry one blocked password login without creating another case', async () => {
     mocks.commandFindFirst.mockReset()
     mocks.commandFindFirst.mockResolvedValueOnce({
       id: 'cmd_existing', payloadHash: 'p'.repeat(64), state: 'AUTH_REQUIRED',
       confirmationState: 'APPROVED', expiresAt: new Date(Date.now() + 60_000),
     })
     await expect(requestIllustrationPdf('ill_1')).resolves.toEqual({
-      ok: true, commandId: 'cmd_existing', duplicate: true, completed: false,
+      ok: true, commandId: 'cmd_existing', duplicate: true, completed: false, retryingLogin: true,
     })
     expect(mocks.issue).not.toHaveBeenCalled()
+    expect(mocks.retryAuthentication).toHaveBeenCalledWith(expect.anything(), {
+      agentId: 'agent_1', commandId: 'cmd_existing',
+    })
   })
 
   it('creates one deterministic retry after a terminal attempt', async () => {

@@ -85,6 +85,16 @@ export type ConnectorCommandRepository = {
     safeErrorCode: string | null
     now: Date
   }): Promise<void>
+  retryAuthentication?(input: {
+    commandId: string
+    agentId: string
+    sequence: number
+    now: Date
+  }): Promise<boolean>
+}
+
+export type ConnectorAuthenticationRetryRepository = ConnectorCommandRepository & {
+  retryAuthentication: NonNullable<ConnectorCommandRepository['retryAuthentication']>
 }
 
 export class ConnectorCommandError extends Error {
@@ -96,6 +106,7 @@ export class ConnectorCommandError extends Error {
       | 'COMMAND_NOT_FOUND'
       | 'CONFIRMATION_REQUIRED'
       | 'CONFIRMATION_REJECTED'
+      | 'AUTH_RETRY_UNAVAILABLE'
       | 'EVENT_INVALID'
       | 'FORESIGHT_TERM_PDF_INVALID'
       | 'FORESIGHT_TERM_PREMIUM_MISSING'
@@ -263,6 +274,35 @@ export async function approveConnectorCommand(
   })
 }
 
+/// A retry is a new, explicit user-authorized authentication episode for the
+/// existing reviewed command. It never changes the immutable carrier payload
+/// and deliberately does not advance authEpoch; only an actual AUTH_REQUIRED
+/// report from the bound connector opens and numbers the next episode.
+export async function retryConnectorCommandAuthentication(
+  repository: ConnectorAuthenticationRetryRepository,
+  input: { agentId: string; commandId: string; now?: Date },
+): Promise<void> {
+  const now = input.now ?? new Date()
+  const command = await repository.findById({ commandId: input.commandId, agentId: input.agentId })
+  if (!command) throw new ConnectorCommandError('COMMAND_NOT_FOUND')
+  if (command.expiresAt <= now) throw new ConnectorCommandError('COMMAND_EXPIRED')
+  if (
+    !command.requiresConfirmation ||
+    command.confirmationState !== 'APPROVED' ||
+    command.state !== 'AUTH_REQUIRED' ||
+    command.authState !== 'AUTH_REQUIRED'
+  ) {
+    throw new ConnectorCommandError('AUTH_RETRY_UNAVAILABLE')
+  }
+  const retried = await repository.retryAuthentication({
+    commandId: command.id,
+    agentId: input.agentId,
+    sequence: command.events.length,
+    now,
+  })
+  if (!retried) throw new ConnectorCommandError('AUTH_RETRY_UNAVAILABLE')
+}
+
 function nextStateForEvent(event: ConnectorCommandEvent): ConnectorCommandState | null {
   switch (event.type) {
     case 'COMMAND_STARTED': return 'RUNNING'
@@ -281,6 +321,9 @@ export async function recordConnectorCommandEvent(
 ): Promise<void> {
   const event = parseConnectorCommandEvent(input.event)
   if (!event) throw new ConnectorCommandError('EVENT_INVALID')
+  // This event is generated only by the authenticated Keepr One user action.
+  // A connector must report carrier state, never reset an auth episode itself.
+  if (event.type === 'AUTH_RETRY_REQUESTED') throw new ConnectorCommandError('EVENT_INVALID')
   const command = await repository.findById({ commandId: event.commandId, agentId: input.agentId })
   if (!command || command.runId !== event.runId) throw new ConnectorCommandError('COMMAND_NOT_FOUND')
   if (command.expiresAt <= (input.now ?? new Date())) throw new ConnectorCommandError('COMMAND_EXPIRED')
@@ -337,7 +380,7 @@ type ConnectorCommandPrisma = Pick<PrismaClient,
 
 export function createPrismaConnectorCommandRepository(
   db: ConnectorCommandPrisma,
-): ConnectorCommandRepository {
+): ConnectorAuthenticationRetryRepository {
   return {
   async findByAgentIdempotencyKey(input) {
     return (await db.nationalLifeConnectorCommand.findUnique({
@@ -386,6 +429,38 @@ export function createPrismaConnectorCommandRepository(
         safeErrorCode: input.safeErrorCode,
         createdAt: input.now,
       },
+    })
+  },
+  async retryAuthentication(input) {
+    return (db as PrismaClient).$transaction(async (transaction) => {
+      const updated = await transaction.nationalLifeConnectorCommand.updateMany({
+        where: {
+          id: input.commandId,
+          agentId: input.agentId,
+          state: 'AUTH_REQUIRED',
+          authState: 'AUTH_REQUIRED',
+          confirmationState: 'APPROVED',
+          expiresAt: { gt: input.now },
+        },
+        data: {
+          state: 'QUEUED',
+          authState: 'READY',
+          authRequiredAt: null,
+          safeErrorCode: null,
+        },
+      })
+      if (updated.count !== 1) return false
+      await transaction.nationalLifeConnectorCommandEvent.create({
+        data: {
+          commandId: input.commandId,
+          sequence: input.sequence,
+          type: 'AUTH_RETRY_REQUESTED',
+          payload: { action: 'RETRY_AUTOMATIC_LOGIN' },
+          safeErrorCode: null,
+          createdAt: input.now,
+        },
+      })
+      return true
     })
   },
   }
