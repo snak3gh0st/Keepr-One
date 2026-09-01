@@ -8,6 +8,7 @@ import {
   sha256,
   sha256Bytes,
   signCanonicalMessage,
+  termReconciliationFailure,
 } from './signed-client'
 
 function fromBase64Url(value: string): ArrayBuffer {
@@ -91,6 +92,22 @@ describe('classifyFailedResponse', () => {
   it('keeps a run-start rate limit distinct from a portal failure', () => {
     expect(classifyFailedResponse(429, new Headers({ 'retry-after': '120' })))
       .toBe('RUN_START_RATE_LIMITED')
+  })
+})
+
+describe('Term PDF reconciliation failures', () => {
+  it('keeps the server-confirmed parser cause for the command failure record', async () => {
+    await expect(termReconciliationFailure(new Response(
+      JSON.stringify({ error: 'FORESIGHT_TERM_PREMIUM_MISSING' }),
+      { status: 422, headers: { 'content-type': 'application/json' } },
+    ))).resolves.toBe('FORESIGHT_TERM_PREMIUM_MISSING')
+  })
+
+  it('does not trust arbitrary response bodies as a safe parser cause', async () => {
+    await expect(termReconciliationFailure(new Response(
+      JSON.stringify({ error: 'DATABASE_ERROR' }),
+      { status: 422, headers: { 'content-type': 'application/json' } },
+    ))).resolves.toBeNull()
   })
 })
 

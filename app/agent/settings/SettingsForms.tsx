@@ -39,6 +39,9 @@ export type SettingsFormsProps = {
     subscriptionStatus: string | null;
     canEditAgency: boolean;
   };
+  kbot: {
+    enabled: boolean;
+  };
 };
 
 const TIME_ZONE_OPTIONS = [
@@ -508,6 +511,42 @@ function SecuritySettings({
   );
 }
 
+function KBotSettings({
+  kbot,
+}: {
+  kbot: SettingsFormsProps["kbot"];
+}) {
+  return (
+    <section id="kbot" aria-labelledby="settings-kbot-title" className={SECTION_CLASS}>
+      <SectionHeading
+        id="settings-kbot-title"
+        title="K-Bot e National Life"
+        description="Controle a conexão do K-Bot neste computador e revise como a autenticação da seguradora funciona."
+      />
+
+      <div className="mt-6 grid gap-4 rounded-2xl border border-border-steel bg-panel p-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+        <div>
+          <p className="text-sm font-semibold text-ink">
+            {kbot.enabled ? "K-Bot está disponível neste ambiente" : "K-Bot não está disponível neste ambiente"}
+          </p>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-ink-muted">
+            O Keepr One não guarda nem envia sua senha da National Life. Quando a sessão expira, o K-Bot abre a página oficial; depois do seu login manual, retoma o mesmo pedido automaticamente.
+          </p>
+          <p className="mt-3 max-w-2xl text-xs leading-5 text-ink-muted">
+            Em um computador particular e confiável, use o gerenciador de senhas do navegador e a opção “Remember this device” da National Life, quando ela estiver disponível. A National Life continua controlando MFA e a duração da sessão.
+          </p>
+        </div>
+        <Link
+          href="/agent/integrations/national-life"
+          className="inline-flex min-h-11 items-center justify-center rounded-full border border-border-steel bg-paper px-4 text-sm font-semibold text-ink hover:border-ink-muted"
+        >
+          Gerenciar K-Bot e National Life
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 function subscriptionLabel(status: string | null) {
   const labels: Record<string, string> = {
     TRIALING: "Período de teste",
@@ -619,6 +658,7 @@ const SETTINGS_SECTIONS = [
   { href: "#perfil", label: "Perfil" },
   { href: "#profissional", label: "Dados profissionais" },
   { href: "#seguranca", label: "Segurança" },
+  { href: "#kbot", label: "K-Bot e National Life" },
   { href: "#agencia", label: "Agência" },
 ] as const;
 
@@ -627,6 +667,7 @@ export function SettingsForms({
   professional,
   security,
   agency,
+  kbot,
 }: SettingsFormsProps) {
   return (
     <div className="mt-6 grid min-w-0 gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
@@ -655,6 +696,7 @@ export function SettingsForms({
         <PersonalProfileForm personal={personal} />
         <ProfessionalProfile professional={professional} />
         <SecuritySettings security={security} />
+        <KBotSettings kbot={kbot} />
         <AgencySettings agency={agency} />
       </div>
     </div>

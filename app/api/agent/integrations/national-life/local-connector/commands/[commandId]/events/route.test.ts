@@ -100,4 +100,13 @@ describe('local connector command event route', () => {
     expect(response.status).toBe(404)
     await expect(response.json()).resolves.toEqual({ error: 'COMMAND_NOT_FOUND' })
   })
+
+  it('returns a safe, specific Term reconciliation cause to the paired extension', async () => {
+    mocks.record.mockRejectedValueOnce(new ConnectorCommandError('FORESIGHT_TERM_PREMIUM_MISSING'))
+
+    const response = await POST(request(), { params: Promise.resolve({ commandId }) })
+
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toEqual({ error: 'FORESIGHT_TERM_PREMIUM_MISSING' })
+  })
 })

@@ -36,6 +36,9 @@ const BASE_PROPS: SettingsFormsProps = {
     subscriptionStatus: "ACTIVE",
     canEditAgency: true,
   },
+  kbot: {
+    enabled: true,
+  },
 };
 
 beforeEach(() => {
@@ -59,6 +62,7 @@ describe("SettingsForms", () => {
     expect(screen.getByRole("heading", { name: "Perfil" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Dados profissionais" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Segurança" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "K-Bot e National Life" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Agência" })).toBeInTheDocument();
 
     expect(screen.getByLabelText(/Nome completo/)).toHaveValue("Ana Corretora");
@@ -85,6 +89,11 @@ describe("SettingsForms", () => {
     expect(screen.getByRole("button", { name: "Alterar e-mail" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Alterar senha" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Salvar agência" })).toBeEnabled();
+    expect(screen.getByText(/não guarda nem envia sua senha da National Life/i)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Gerenciar K-Bot e National Life" })).toHaveAttribute(
+      "href",
+      "/agent/integrations/national-life",
+    );
   });
 
   it("keeps an invited member's agency details read-only", () => {

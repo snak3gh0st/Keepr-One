@@ -19,6 +19,7 @@ import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { ForesightActivityIndicator } from '../ForesightActivityIndicator'
 import { StartApplicationFromIllustrationButton } from '../StartApplicationFromIllustrationButton'
+import { TermPdfReconciliationButton } from '../TermPdfReconciliationButton'
 
 const currency = (value: number) =>
   new Intl.NumberFormat('en-US', {
@@ -117,16 +118,24 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
       return null
     }
   })() : null
-  const hasCarrierPremium = Boolean(documentReady && illustration.premium)
+  const resultVerified = Boolean(documentReady && foresightResult)
+  const needsTermReconciliation = Boolean(isTermProduct && documentReady && !foresightResult)
+  const hasCarrierPremium = Boolean(foresightResult && illustration.premium)
   const premiumValue = hasCarrierPremium ? illustration.premium : illustration.targetPremium
   const carrierAdjustedPremium = foresightResult?.solveBasis === 'PREMIUM' &&
     Math.abs(foresightResult.requestedAmount - foresightResult.confirmedMonthlyPremium) > 0.005
   const carrierAdjustedFace = foresightResult?.solveBasis === 'DEATH_BENEFIT' &&
     Math.abs(foresightResult.requestedAmount - foresightResult.confirmedFaceAmount) > 0.005
-  const delivery = describeIllustrationDelivery({ documentReady: Boolean(documentReady), status: commandStatus })
+  const delivery = describeIllustrationDelivery({
+    documentReady: Boolean(documentReady),
+    verified: resultVerified,
+    status: commandStatus,
+  })
   const isGenerating = commandStatus?.state === 'WORKING'
-  const foresightStep = documentReady
+  const foresightStep = resultVerified
     ? 'Caso salvo'
+    : documentReady
+      ? 'Conferência do PDF pendente'
     : commandStatus?.state === 'BLOCKED'
       ? 'Aguardando login'
       : commandStatus?.state === 'FAILED'
@@ -150,7 +159,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
         </Link>
       </PageHeader>
 
-      <section className="relative overflow-hidden rounded-[1.55rem] border border-border-steel bg-paper p-5 shadow-[0_20px_58px_rgba(15,29,19,0.058)] sm:p-7" aria-live={documentReady ? 'off' : 'polite'}>
+      <section className="relative overflow-hidden rounded-[1.55rem] border border-border-steel bg-paper p-5 shadow-[0_20px_58px_rgba(15,29,19,0.058)] sm:p-7" aria-live={resultVerified ? 'off' : 'polite'}>
         <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full border border-teal/15 shadow-[0_0_0_28px_rgba(31,128,86,0.035),0_0_0_56px_rgba(31,128,86,0.02)]" aria-hidden="true" />
         <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div>
@@ -170,8 +179,11 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                 rel="noreferrer"
                 className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-steel bg-paper px-5 py-2.5 text-sm font-semibold text-teal-deep transition-colors hover:border-teal hover:bg-teal-pale"
               >
-                Abrir PDF oficial
+                {resultVerified ? 'Abrir PDF oficial' : 'Abrir PDF recebido'}
               </a>
+              {needsTermReconciliation ? (
+                <TermPdfReconciliationButton illustrationId={illustration.id} />
+              ) : null}
               {foresightResult ? (
                 <StartApplicationFromIllustrationButton illustrationId={illustration.id} />
               ) : null}
@@ -189,8 +201,8 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
         <ol className="relative mt-6 grid gap-3 border-t border-border-steel pt-5 sm:grid-cols-3" aria-label="Progresso da ilustração">
           {[
             ['Dados revisados', 'Cenário aprovado no Keepr One', 'complete'],
-            ['K-Bot no Foresight', foresightStep, documentReady ? 'complete' : commandStatus?.state === 'WORKING' || commandStatus?.state === 'BLOCKED' ? 'current' : 'waiting'],
-            ['PDF oficial', documentReady ? 'Recebido e verificado' : 'Aguardando a National Life', documentReady ? 'complete' : 'waiting'],
+            ['K-Bot no Foresight', foresightStep, resultVerified ? 'complete' : commandStatus?.state === 'WORKING' || commandStatus?.state === 'BLOCKED' ? 'current' : 'waiting'],
+            ['PDF oficial', resultVerified ? 'Recebido e verificado' : documentReady ? 'Recebido; conferência pendente' : 'Aguardando a National Life', resultVerified ? 'complete' : 'waiting'],
           ].map(([title, detail, stepState], index) => (
             <li key={title as string} className="flex items-start gap-3">
               <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-mono font-semibold ${stepState === 'complete' ? 'bg-teal text-paper' : stepState === 'current' ? 'bg-gold text-ink' : 'bg-panel text-ink-muted'}`}>
@@ -203,7 +215,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
             </li>
           ))}
         </ol>
-        {!documentReady && commandStatus && (
+        {!resultVerified && commandStatus && (
           <p className="relative mt-4 border-l-2 border-teal pl-3 text-xs leading-5 text-ink-muted">{illustrationPdfMessage(commandStatus)}</p>
         )}
       </section>
@@ -258,7 +270,9 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
           <dl className="mt-3">
             <Fact label="Produto" value={flexLifeProductLabel(illustration.productName)} />
             {termDurationResult && <Fact label="Prazo solicitado" value={termDurationResult.requestedTermDuration} />}
-            {termDurationResult && <Fact label="Prazo confirmado pela National Life" value={termDurationResult.confirmedTermDuration} />}
+            {termDurationResult && foresightResult && (
+              <Fact label="Prazo confirmado pela National Life" value={termDurationResult.confirmedTermDuration} />
+            )}
             <Fact label="Capital segurado" value={illustration.faceAmount ? currency(Number(illustration.faceAmount)) : null} />
             <Fact label={hasCarrierPremium ? 'Prêmio mensal confirmado' : 'Prêmio mensal informado'} value={premiumValue ? premiumCurrency(Number(premiumValue)) : null} />
             {foresightResult && (
@@ -342,7 +356,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
       </div>
 
       <p className="mt-5 text-xs leading-5 text-ink-muted">
-        Pedido criado em {formatCarrierInstant(illustration.createdAt)}. Nenhum valor é apresentado como cálculo da National Life antes do PDF oficial.
+        Pedido criado em {formatCarrierInstant(illustration.createdAt)}. Nenhum valor é apresentado como cálculo da National Life antes da conferência do PDF oficial.
       </p>
     </Shell>
   )

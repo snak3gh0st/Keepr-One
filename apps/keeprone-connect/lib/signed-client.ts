@@ -61,12 +61,33 @@ export class SignedRequestError extends Error {
       | 'PATH_NOT_ALLOWED'
       | 'CLIENT_TOO_OLD'
       | 'CONNECTOR_PAUSED'
-      | 'RUN_START_RATE_LIMITED',
+      | 'RUN_START_RATE_LIMITED'
+      | 'FORESIGHT_TERM_PDF_INVALID'
+      | 'FORESIGHT_TERM_PREMIUM_MISSING'
+      | 'FORESIGHT_TERM_PREMIUM_MISMATCH',
     readonly status?: number,
     readonly retryAfterSeconds?: number,
   ) {
     super(code)
   }
+}
+
+export function termReconciliationFailure(response: Response): Promise<
+  'FORESIGHT_TERM_PDF_INVALID' | 'FORESIGHT_TERM_PREMIUM_MISSING' | 'FORESIGHT_TERM_PREMIUM_MISMATCH' | null
+> {
+  if (response.status !== 422) return Promise.resolve(null)
+  return response.clone().json()
+    .then((payload: unknown) => {
+      const code = payload && typeof payload === 'object' && 'error' in payload
+        ? (payload as { error?: unknown }).error
+        : null
+      return code === 'FORESIGHT_TERM_PDF_INVALID' ||
+        code === 'FORESIGHT_TERM_PREMIUM_MISSING' ||
+        code === 'FORESIGHT_TERM_PREMIUM_MISMATCH'
+        ? code
+        : null
+    })
+    .catch(() => null)
 }
 
 function isTransientSignedRequestFailure(error: unknown): boolean {
@@ -192,8 +213,9 @@ export async function signedJsonRequest<T>(input: {
   }
   if (!response.ok) {
     const retryAfter = Number.parseInt(response.headers.get('retry-after') ?? '', 10)
+    const reconciliationCode = await termReconciliationFailure(response)
     throw new SignedRequestError(
-      classifyFailedResponse(response.status, response.headers),
+      reconciliationCode ?? classifyFailedResponse(response.status, response.headers),
       response.status,
       Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
     )

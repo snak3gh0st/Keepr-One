@@ -26,6 +26,16 @@ describe('Foresight Term official PDF premium extraction', () => {
     })
   })
 
+  it('accepts harmless Foresight whitespace and Group Bill label variations', () => {
+    expect(parseForesightTermPremiumText(`
+      Initial Premium: $ 62.92 Monthly ( EFT / Group Bill )
+      Monthly ( EFT / Group Bill ) 12 $ 62.92 $ 755.04
+    `)).toEqual({
+      monthlyPremium: 62.92,
+      annualPremium: 755.04,
+    })
+  })
+
   it('rejects a payment table that disagrees with the carrier summary', () => {
     expect(() => parseForesightTermPremiumText(
       officialTermText.replace('12 $62.92 $755.04', '12 $63.92 $767.04'),

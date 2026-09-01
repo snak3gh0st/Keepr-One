@@ -233,7 +233,12 @@ const applicationDraftReceiptRepository = {
 }
 
 function commandErrorResponse(error: ConnectorCommandError): Response {
-  const status = error.code === 'COMMAND_NOT_FOUND' ? 404
+  const status = [
+    'FORESIGHT_TERM_PDF_INVALID',
+    'FORESIGHT_TERM_PREMIUM_MISSING',
+    'FORESIGHT_TERM_PREMIUM_MISMATCH',
+  ].includes(error.code) ? 422
+    : error.code === 'COMMAND_NOT_FOUND' ? 404
     : error.code === 'COMMAND_EXPIRED' ? 410
       : error.code === 'CONFIRMATION_REQUIRED' ? 409
         : 400

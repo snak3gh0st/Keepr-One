@@ -174,6 +174,18 @@ function isForesightTermIllustrationReceipt(
   return parseForesightTermIllustrationReceipt(receipt) !== null
 }
 
+function foresightTermReconciliationError(error: unknown): ConnectorCommandError {
+  const code = error instanceof Error ? error.message : ''
+  if (
+    code === 'FORESIGHT_TERM_PDF_INVALID' ||
+    code === 'FORESIGHT_TERM_PREMIUM_MISSING' ||
+    code === 'FORESIGHT_TERM_PREMIUM_MISMATCH'
+  ) {
+    return new ConnectorCommandError(code)
+  }
+  return new ConnectorCommandError('FORESIGHT_TERM_PDF_INVALID')
+}
+
 function toPublicCommand(candidate: LocalConnectorCommandCandidate): ConnectorCommand {
   const command = parseConnectorCommand({
     protocolVersion: candidate.protocolVersion,
@@ -422,8 +434,8 @@ export async function recordDeviceConnectorCommandEvent(
       let premiums
       try {
         premiums = await input.extractTermPremiums(artifact.documentBytes)
-      } catch {
-        throw new ConnectorCommandError('EVENT_INVALID')
+      } catch (error) {
+        throw foresightTermReconciliationError(error)
       }
       if (!Number.isFinite(premiums.monthlyPremium) || premiums.monthlyPremium <= 0 ||
         !Number.isFinite(premiums.annualPremium) || premiums.annualPremium <= 0 ||
