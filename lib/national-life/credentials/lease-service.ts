@@ -206,10 +206,11 @@ function validateOperation(
   input: { agentId: string; deviceId: string; request: CredentialLeaseRequestV1; now: Date },
 ) {
   const operation = context.operation
+  const expectedAuthState = operation?.kind === 'SYNC_RUN' ? 'REQUIRED' : 'AUTH_REQUIRED'
   if (
     !operation || operation.kind !== input.request.operation.kind ||
     operation.id !== input.request.operation.id || operation.agentId !== input.agentId ||
-    operation.deviceId !== input.deviceId || operation.authState !== 'AUTH_REQUIRED' ||
+    operation.deviceId !== input.deviceId || operation.authState !== expectedAuthState ||
     operation.authEpoch < 1 || operation.latestEventType === 'MFA_REQUIRED' ||
     (operation.kind === 'SYNC_RUN' && operation.state !== 'RUNNING') ||
     (operation.kind === 'CONNECTOR_COMMAND' && operation.state !== 'AUTH_REQUIRED') ||
@@ -487,7 +488,7 @@ export function createPrismaCredentialLeasePersistence(
                   agentId: input.agentId,
                   connectorDeviceId: input.deviceId,
                   state: 'RUNNING',
-                  authState: 'AUTH_REQUIRED',
+                  authState: 'REQUIRED',
                   authEpoch: input.authEpoch,
                 },
                 select: { id: true },

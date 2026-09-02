@@ -86,9 +86,13 @@ describe('National Life authentication page contract', () => {
 
   it('fills the two exact inputs and clicks the exact submit button once', () => {
     const page = fixture('auth0-login')
-    const button = page.window.document.querySelector<HTMLButtonElement>('#btn-login')!
-    const submitted = vi.fn((event: Event) => event.preventDefault())
-    button.addEventListener('click', submitted)
+    const form = page.window.document.querySelector<HTMLFormElement>('#loginForm')!
+    let preventedBeforeTestHandler = false
+    const submitted = vi.fn((event: Event) => {
+      preventedBeforeTestHandler = event.defaultPrevented
+      event.preventDefault()
+    })
+    form.addEventListener('submit', submitted)
 
     const acknowledgement = submitNationalLifeCredential(
       page.window.document,
@@ -103,6 +107,7 @@ describe('National Life authentication page contract', () => {
     // substitui a preferência "Remember this device" do portal.
     expect(page.window.document.querySelector<HTMLInputElement>('#chkRememberMe')?.checked).toBe(true)
     expect(submitted).toHaveBeenCalledTimes(1)
+    expect(preventedBeforeTestHandler).toBe(false)
     expect(JSON.stringify(acknowledgement)).not.toMatch(/sentinel|username|password/)
 
     expect(submitNationalLifeCredential(

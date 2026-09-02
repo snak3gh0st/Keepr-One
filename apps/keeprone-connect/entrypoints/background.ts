@@ -2308,7 +2308,16 @@ async function navigatePendingGrid() {
       if (existing.url) {
         try {
           const existingUrl = new URL(existing.url)
-          if (existingUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(existingUrl.pathname)) {
+          if (existingUrl.origin === NLG_AUTH0_ORIGIN) {
+            await requireCarrierAuthentication(
+              await readSyncState(),
+              existing.id,
+              existing.active ? undefined : { active: true },
+            )
+            await handleCarrierAuthenticationPage(existing.id, existingUrl)
+            return
+          }
+          if (isAuthPath(existingUrl.pathname)) {
             await requireCarrierAuthentication(
               await readSyncState(),
               existing.id,
