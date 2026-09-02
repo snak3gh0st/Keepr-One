@@ -28,6 +28,7 @@ import {
   signedJsonRequest,
 } from '../lib/signed-client'
 import { sha256ForesightSnapshot } from '../lib/foresight-contract'
+import { sha256ForesightTermSnapshot } from '../lib/foresight-term-contract'
 import { sha256FlexLifeQuoteSnapshot } from '../lib/flexlife-quote-contract'
 import { sha256IgoApplicationDossier } from '../lib/igo-contract'
 import {
@@ -113,7 +114,7 @@ function register(name: string) {
   }
 }
 
-async function defaultTabMessageResponse(tabId: number, message: unknown) {
+async function defaultTabMessageResponse(tabId: number, message: unknown): Promise<unknown> {
   void tabId
   const value = message as {
     type?: string
@@ -1362,8 +1363,8 @@ describe('background plan executor', () => {
     expect(storage.command).toMatchObject({ status: 'COMPLETED', nextEventSequence: 4 })
   })
 
-  it('reuses the latest Foresight tab for a new illustration command', async () => {
-    storage.command = { status: 'COMPLETED', carrierTabId: 12 }
+  it('resets the latest Foresight tab for a new or hash-mismatched illustration command', async () => {
+    storage.command = { status: 'ERROR', carrierTabId: 12, termInputHash: 'b'.repeat(64) }
     tabs.query.mockResolvedValue([
       { id: 44, active: false, lastAccessed: 20, url: `${NLG}/NWI/Main/Layout.aspx` },
       { id: 45, active: false, lastAccessed: 10, url: `${NLG}/NWI/Main/Layout.aspx` },
@@ -1392,6 +1393,91 @@ describe('background plan executor', () => {
     expect(tabs.update).toHaveBeenCalledWith(44, { url: `${NLG}/agent/sso/foresight` })
     expect(tabs.create).not.toHaveBeenCalled()
     expect(storage.command).toMatchObject({ carrierTabId: 44, status: 'NAVIGATING' })
+  })
+
+  it('resumes only the exact interrupted Term case without reopening Foresight', async () => {
+    const snapshot = {
+      schemaVersion: 1,
+      illustrationId: 'ill_term_resume',
+      caseId: null,
+      carrierCaseName: 'KEEPRONE_TERM_RESUME',
+      product: { carrierName: 'LSW Term', kind: 'TERM' },
+      insured: { firstName: 'Synthetic', lastName: 'Test', dateOfBirth: '1990-01-01', issueState: 'FL' },
+      underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
+      faceAmount: 100_000,
+      premiumMode: 'Monthly',
+      termDuration: '20-G',
+      reports: ['NAIC_ILLUSTRATION'],
+    } as const
+    const inputHash = await sha256ForesightTermSnapshot(snapshot)
+    storage.command = {
+      commandId: 'cmd_term_interrupted',
+      runId: 'run_term_interrupted',
+      carrierTabId: 44,
+      termInputHash: inputHash,
+      status: 'ERROR',
+    }
+    tabs.query.mockResolvedValue([
+      { id: 44, active: false, lastAccessed: 20, url: `${NLG}/NWI/Main/Layout.aspx` },
+    ])
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_term_resume',
+      runId: 'run_term_resume',
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: snapshot.illustrationId },
+      params: { illustrationId: snapshot.illustrationId, inputHash },
+      idempotencyKey: `illustration:${snapshot.illustrationId}:${inputHash}`,
+      issuedAt: '2026-09-01T18:00:00.000Z',
+      expiresAt: '2026-09-01T18:30:00.000Z',
+      requiresConfirmation: true,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+      } as never
+      if (request.pathname.endsWith('/commands/cmd_term_resume/input')) {
+        return { inputHash, snapshot } as never
+      }
+      return undefined as never
+    })
+    tabs.sendMessage.mockImplementationOnce(async (_tabId, message) => {
+      const request = message as { type?: string; token: string; correlationId: string }
+      if (request.type !== 'EXECUTE_FORESIGHT_ILLUSTRATION') return defaultTabMessageResponse(_tabId, message)
+      return {
+        ok: true,
+        type: 'FORESIGHT_ILLUSTRATION_SAVED',
+        token: request.token,
+        correlationId: request.correlationId,
+        receipt: {
+          inputHash,
+          caseFingerprint: `case_${'c'.repeat(64)}`,
+          carrierCaseName: snapshot.carrierCaseName,
+          carrierProduct: snapshot.product.carrierName,
+          requestedTermDuration: snapshot.termDuration,
+          confirmedTermDuration: snapshot.termDuration,
+          release: '5.3.65.31',
+          reportCode: 'NAIC_ILLUSTRATION',
+          documentSha256: FORESIGHT_PDF_HASH,
+          documentBytes: FORESIGHT_PDF.byteLength,
+          saved: true,
+        },
+        document: { contentType: 'application/pdf', pdfBase64: FORESIGHT_PDF_BASE64 },
+      }
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    expect(tabs.update).not.toHaveBeenCalledWith(44, { url: `${NLG}/agent/sso/foresight` })
+    await vi.waitFor(() => expect(tabs.sendMessage).toHaveBeenCalled())
+    expect(tabs.sendMessage).toHaveBeenCalledWith(44, expect.objectContaining({
+      type: 'EXECUTE_FORESIGHT_ILLUSTRATION', inputHash, snapshot,
+    }))
+    await vi.waitFor(() => expect(storage.command).toMatchObject({
+      status: 'COMPLETED', carrierTabId: 44,
+    }))
   })
 
   it('executes an on-demand policy detail command in its own inactive tab', async () => {

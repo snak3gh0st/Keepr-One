@@ -112,6 +112,12 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
       return 'O Foresight não conseguiu calcular um cenário válido com esse valor de origem. Revise o capital ou prêmio e gere uma nova ilustração; nenhum PDF foi emitido.'
     case 'FORESIGHT_CLIENT_READBACK_TIMEOUT':
       return 'O Foresight não confirmou os dados do segurado. Revise nascimento, estado e perfil de risco antes de tentar novamente; nenhum PDF foi emitido.'
+    case 'FORESIGHT_TERM_CLIENT_JURISDICTION_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_INFORMATION_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_RISK_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_OWNER_WRITE_MISMATCH':
+      return 'O Foresight não confirmou uma etapa do cadastro Term após uma repetição segura. Nenhum PDF foi emitido e o K-Bot não continuará tentando sozinho.'
     case 'FORESIGHT_TERM_FUNDING_TIMEOUT':
       return 'O Foresight ainda estava atualizando o cenário Term e não confirmou os valores a tempo. Gere novamente; nenhum PDF foi emitido.'
     case 'FORESIGHT_TERM_DURATION_READBACK_MISMATCH':

@@ -1298,6 +1298,12 @@ async function executeForesightCommand(
 
   const previous = await readCommandState()
   const sameCommand = previous.commandId === dispatch.command.commandId
+  // A retry arrives as a new command id. Preserve only an exact, non-secret
+  // Term input hash so it can resume the matching open Foresight case; any
+  // different Term request (and every FlexLife request) starts cleanly.
+  const resumableTermInputHash = previous.termInputHash === params.inputHash
+    ? previous.termInputHash
+    : undefined
   let carrierTabId = sameCommand ? previous.carrierTabId : undefined
   let sequence = dispatch.nextEventSequence
   await writeCommandState({
@@ -1307,6 +1313,7 @@ async function executeForesightCommand(
     nextEventSequence: sequence,
     status: 'NAVIGATING',
     phase: 'OPENING_FORESIGHT',
+    ...(resumableTermInputHash === undefined ? {} : { termInputHash: resumableTermInputHash }),
     updatedAt: new Date().toISOString(),
   })
 
@@ -1336,7 +1343,8 @@ async function executeForesightCommand(
     await updateTab(tab.id, { url: targetUrl })
     return
   }
-  if (!sameCommand && currentUrl.origin === NLG_ORIGIN && currentUrl.pathname === '/NWI/Main/Layout.aspx') {
+  if (!sameCommand && currentUrl.origin === NLG_ORIGIN && currentUrl.pathname === '/NWI/Main/Layout.aspx' &&
+    resumableTermInputHash === undefined) {
     await updateTab(tab.id, { url: targetUrl })
     return
   }
@@ -1380,6 +1388,7 @@ async function executeForesightCommand(
   }
   await writeCommandState({
     ...(await readCommandState()), carrierTabId: tab.id, status: 'RUNNING',
+    ...('code' in approved.snapshot.product ? {} : { termInputHash: approved.inputHash }),
     updatedAt: new Date().toISOString(),
   })
   if (dispatch.lastEventType !== 'COMMAND_STARTED' && dispatch.lastEventType !== 'DATA_BATCH') {
@@ -3430,13 +3439,15 @@ export default defineBackground(() => {
     }
     const type = (value as { type: string }).type
     if (type === 'CARRIER_AUTH_PAGE_READY' && Object.keys(value).length === 1) {
-      if (sender.id !== chrome.runtime.id || sender.tab?.id === undefined || !sender.url) {
+      const authTabId = sender.tab?.id
+      const authPageUrl = sender.url
+      if (sender.id !== chrome.runtime.id || authTabId === undefined || !authPageUrl) {
         sendResponse({ ok: false, error: 'INVALID_AUTH_READY' })
         return
       }
       let url: URL
       try {
-        url = new URL(sender.url)
+        url = new URL(authPageUrl)
       } catch {
         sendResponse({ ok: false, error: 'INVALID_AUTH_READY' })
         return
@@ -3449,13 +3460,13 @@ export default defineBackground(() => {
         // Auth0 can finish loading after tabs.onUpdated. Sync already resumes
         // through handleTabReady; commands do not, so wake that path only when
         // this tab is the currently paused command.
-        await handleTabReady(sender.tab.id, sender.url)
+        await handleTabReady(authTabId, authPageUrl)
         const command = await readCommandState()
         if (
-          command.carrierTabId === sender.tab.id &&
+          command.carrierTabId === authTabId &&
           (command.status === 'AUTH_REQUIRED' || command.status === 'MFA_REQUIRED')
         ) {
-          await handleCarrierAuthenticationPage(sender.tab.id, url)
+          await handleCarrierAuthenticationPage(authTabId, url)
         }
         return { ok: true as const }
       })())
