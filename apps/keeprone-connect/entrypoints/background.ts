@@ -215,6 +215,25 @@ async function updateTab(tabId: number, updateProperties: chrome.tabs.UpdateProp
   return retryTabEdit(() => chrome.tabs.update(tabId, updateProperties))
 }
 
+async function focusCarrierTabForAuthRequirement(
+  tabId: number,
+  requirement: 'AUTH_REQUIRED' | 'MFA_REQUIRED',
+  tabActive: boolean | undefined,
+) {
+  // Stored credentials are entered by K-Bot in the background. Only a real
+  // MFA hand-off needs the user's attention in National Life; ordinary login
+  // pages stay behind Keepr One and never steal focus.
+  if (requirement === 'MFA_REQUIRED' && !tabActive) {
+    await updateTab(tabId, { active: true })
+  }
+}
+
+function authRequirementForPath(pathname: string): 'AUTH_REQUIRED' | 'MFA_REQUIRED' {
+  return pathname.includes('/mfa') || pathname.includes('/challenge')
+    ? 'MFA_REQUIRED'
+    : 'AUTH_REQUIRED'
+}
+
 async function reloadTab(tabId: number) {
   return retryTabEdit(() => chrome.tabs.reload(tabId))
 }
@@ -769,9 +788,7 @@ async function executePolicyDetailCommand(
     return
   }
   if (currentUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(currentUrl.pathname)) {
-    const requirement = currentUrl.pathname.includes('/mfa') || currentUrl.pathname.includes('/challenge')
-      ? 'MFA_REQUIRED' as const
-      : 'AUTH_REQUIRED' as const
+    const requirement = authRequirementForPath(currentUrl.pathname)
     if (dispatch.lastEventType !== requirement) {
       sequence = await postCommandEvent({
         dispatch, device, sequence, type: requirement,
@@ -782,7 +799,7 @@ async function executePolicyDetailCommand(
       ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
       status: requirement, updatedAt: new Date().toISOString(),
     })
-    if (!tab.active) await updateTab(tab.id, { active: true })
+    await focusCarrierTabForAuthRequirement(tab.id, requirement, tab.active)
     return
   }
   if (`${currentUrl.pathname}${currentUrl.search}` !== params.navigatePath) {
@@ -800,7 +817,7 @@ async function executePolicyDetailCommand(
       ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
       status: 'AUTH_REQUIRED', updatedAt: new Date().toISOString(),
     })
-    await updateTab(tab.id, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+    await updateTab(tab.id, { url: `${NLG_ORIGIN}${LOGIN_PATH}` })
     return
   }
 
@@ -958,9 +975,7 @@ async function executeIgoApplicationDraftCommand(
   }
   if (currentUrl.origin === NLG_AUTH0_ORIGIN ||
     (currentUrl.origin === NLG_ORIGIN && isAuthPath(currentUrl.pathname))) {
-    const requirement = currentUrl.pathname.includes('/mfa') || currentUrl.pathname.includes('/challenge')
-      ? 'MFA_REQUIRED' as const
-      : 'AUTH_REQUIRED' as const
+    const requirement = authRequirementForPath(currentUrl.pathname)
     if (dispatch.lastEventType !== requirement) {
       sequence = await postCommandEvent({
         dispatch, device, sequence, type: requirement, payload: { action: 'SIGN_IN_TO_CONTINUE' },
@@ -970,7 +985,7 @@ async function executeIgoApplicationDraftCommand(
       ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
       status: requirement, updatedAt: new Date().toISOString(),
     })
-    if (!tab.active) await updateTab(tab.id, { active: true })
+    await focusCarrierTabForAuthRequirement(tab.id, requirement, tab.active)
     return
   }
   if ((IGO_HANDOFF_ORIGINS as readonly string[]).includes(currentUrl.origin) ||
@@ -1157,9 +1172,7 @@ async function executeFlexLifeQuoteCommand(
     return
   }
   if (currentUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(currentUrl.pathname)) {
-    const requirement = currentUrl.pathname.includes('/mfa') || currentUrl.pathname.includes('/challenge')
-      ? 'MFA_REQUIRED' as const
-      : 'AUTH_REQUIRED' as const
+    const requirement = authRequirementForPath(currentUrl.pathname)
     if (dispatch.lastEventType !== requirement) {
       sequence = await postCommandEvent({
         dispatch, device, sequence, type: requirement, payload: { action: 'SIGN_IN_TO_CONTINUE' },
@@ -1169,7 +1182,7 @@ async function executeFlexLifeQuoteCommand(
       ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
       status: requirement, updatedAt: new Date().toISOString(),
     })
-    if (!tab.active) await updateTab(tab.id, { active: true })
+    await focusCarrierTabForAuthRequirement(tab.id, requirement, tab.active)
     return
   }
   if (currentUrl.origin !== NLG_ORIGIN || currentUrl.pathname !== targetPath) {
@@ -1187,7 +1200,7 @@ async function executeFlexLifeQuoteCommand(
       ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
       status: 'AUTH_REQUIRED', updatedAt: new Date().toISOString(),
     })
-    await updateTab(tab.id, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+    await updateTab(tab.id, { url: `${NLG_ORIGIN}${LOGIN_PATH}` })
     return
   }
 
@@ -1398,9 +1411,7 @@ async function executeForesightCommand(
   }
   if (currentUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(currentUrl.pathname) ||
     currentUrl.pathname.startsWith('/NWI/Unsecure/')) {
-    const requirement = currentUrl.pathname.includes('/mfa') || currentUrl.pathname.includes('/challenge')
-      ? 'MFA_REQUIRED' as const
-      : 'AUTH_REQUIRED' as const
+    const requirement = authRequirementForPath(currentUrl.pathname)
     if (dispatch.lastEventType !== requirement) {
       sequence = await postCommandEvent({
         dispatch, device, sequence, type: requirement,
@@ -1411,7 +1422,7 @@ async function executeForesightCommand(
       ...(await readCommandState()), carrierTabId: tab.id, nextEventSequence: sequence,
       status: requirement, updatedAt: new Date().toISOString(),
     })
-    if (!tab.active) await updateTab(tab.id, { active: true })
+    await focusCarrierTabForAuthRequirement(tab.id, requirement, tab.active)
     return
   }
   if (currentUrl.origin !== NLG_ORIGIN || currentUrl.pathname !== '/NWI/Main/Layout.aspx') {
@@ -1521,7 +1532,7 @@ async function restartRetriedCommandAuthentication(
     credentialAttempt: undefined,
     updatedAt: new Date().toISOString(),
   })
-  await updateTab(tab.id, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+  await updateTab(tab.id, { url: `${NLG_ORIGIN}${LOGIN_PATH}` })
   return true
 }
 
@@ -1864,10 +1875,9 @@ async function markObservedAuthPage(
     await updateCredentialOperation(operation, { errorCode: observedCode })
   }
   // UNKNOWN also covers a content script that is still loading or an older
-  // extension build. The tab was already foregrounded when auth was first
-  // detected; stealing focus on every watchdog tick would be a retry loop in
-  // user-visible form.
-  if (classification !== 'UNKNOWN') await updateTab(operation.tabId, { active: true })
+  // extension build. Keep ordinary auto-login, rejection and CAPTCHA pages in
+  // the background. MFA is the only human hand-off that may take focus.
+  if (classification === 'MFA') await updateTab(operation.tabId, { active: true })
 }
 
 async function attemptAutomaticCarrierLogin(
@@ -2044,8 +2054,6 @@ async function resolveCommandCredentialIfAuthenticated(tabId: number, rawUrl?: s
 
 async function requireCarrierAuthentication(
   state: Awaited<ReturnType<typeof readSyncState>>,
-  tabId: number,
-  updateProperties?: chrome.tabs.UpdateProperties,
 ) {
   const firstNotice = !state.authRenewalPending
   await writeSyncState({
@@ -2056,7 +2064,6 @@ async function requireCarrierAuthentication(
     authRequiredAt: state.authRequiredAt ?? new Date().toISOString(),
     credentialPageReloadedAt: firstNotice ? undefined : state.credentialPageReloadedAt,
   })
-  if (updateProperties) await updateTab(tabId, updateProperties)
   if (firstNotice) await reportRunAuthState('REQUIRED')
 }
 
@@ -2343,8 +2350,9 @@ async function findReusableConnectorTab(state: Awaited<ReturnType<typeof readSyn
   return usable.find((tab) => tab.active) ?? usable[0]
 }
 
-async function navigatePendingGrid() {
+async function navigatePendingGrid(options?: { foreground?: boolean }) {
   return withTabNavigationLock(async () => {
+    const foreground = options?.foreground === true
     const state = await readSyncState()
     const stage = currentStage(state)
     if (!state.runId || !stage) return
@@ -2360,24 +2368,29 @@ async function navigatePendingGrid() {
       if (state.carrierTabId !== existing.id) {
         await writeSyncState({ ...state, carrierTabId: existing.id })
       }
+      if (foreground && !existing.active) {
+        // OPEN_NLG is an explicit user request. Automatic login remains
+        // passive; this is the intentional manual escape hatch.
+        await updateTab(existing.id, { active: true })
+      }
       if (existing.url) {
         try {
           const existingUrl = new URL(existing.url)
           if (existingUrl.origin === NLG_AUTH0_ORIGIN) {
-            await requireCarrierAuthentication(
-              await readSyncState(),
-              existing.id,
-              existing.active ? undefined : { active: true },
-            )
+            const requirement = authRequirementForPath(existingUrl.pathname)
+            await requireCarrierAuthentication(await readSyncState())
+            if (!foreground) {
+              await focusCarrierTabForAuthRequirement(existing.id, requirement, existing.active)
+            }
             await handleCarrierAuthenticationPage(existing.id, existingUrl)
             return
           }
           if (isAuthPath(existingUrl.pathname)) {
-            await requireCarrierAuthentication(
-              await readSyncState(),
-              existing.id,
-              existing.active ? undefined : { active: true },
-            )
+            const requirement = authRequirementForPath(existingUrl.pathname)
+            await requireCarrierAuthentication(await readSyncState())
+            if (!foreground) {
+              await focusCarrierTabForAuthRequirement(existing.id, requirement, existing.active)
+            }
             return
           }
           const existingPath = `${existingUrl.pathname}${existingUrl.search}`
@@ -2410,10 +2423,7 @@ async function navigatePendingGrid() {
       return
     }
 
-    const created = await chrome.tabs.create({
-      active: state.status === 'AUTH_REQUIRED',
-      url: target,
-    })
+    const created = await chrome.tabs.create({ active: foreground, url: target })
     if (created?.id !== undefined) {
       await writeSyncState({
         ...(await readSyncState()),
@@ -2640,13 +2650,15 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
     return
   }
   if (url.origin === NLG_AUTH0_ORIGIN) {
-    await requireCarrierAuthentication(state, tabId, { active: true })
+    await requireCarrierAuthentication(state)
+    await focusCarrierTabForAuthRequirement(tabId, authRequirementForPath(url.pathname), undefined)
     await handleCarrierAuthenticationPage(tabId, url)
     return
   }
   if (url.origin !== NLG_ORIGIN) return
   if (isAuthPath(url.pathname)) {
-    await requireCarrierAuthentication(state, tabId)
+    await requireCarrierAuthentication(state)
+    await focusCarrierTabForAuthRequirement(tabId, authRequirementForPath(url.pathname), undefined)
     return
   }
   // The carrier may finish Auth0/MFA by redirecting to the authenticated agent
@@ -2674,10 +2686,8 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
       return
     }
     if (!(await hasAuthenticatedPortalSession(tabId))) {
-      await requireCarrierAuthentication(state, tabId, {
-        active: true,
-        url: `${NLG_ORIGIN}${LOGIN_PATH}`,
-      })
+      await requireCarrierAuthentication(state)
+      await updateTab(tabId, { url: `${NLG_ORIGIN}${LOGIN_PATH}` })
       return
     }
     await resolveCarrierAuthenticationIfNeeded()
@@ -2704,10 +2714,8 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
   // A redirect to Auth0 is then an explicit negative instead of a page-shape
   // guess, and no extraction begins until this succeeds.
   if (!(await hasAuthenticatedPortalSession(tabId))) {
-    await requireCarrierAuthentication(state, tabId, {
-      active: true,
-      url: `${NLG_ORIGIN}${LOGIN_PATH}`,
-    })
+    await requireCarrierAuthentication(state)
+    await updateTab(tabId, { url: `${NLG_ORIGIN}${LOGIN_PATH}` })
     return
   }
   await resolveCarrierAuthenticationIfNeeded()
@@ -3447,9 +3455,9 @@ async function retryPendingSync() {
       errorCode: undefined,
     })
     if (tab?.id !== undefined) {
-      await updateTab(tab.id, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+      await updateTab(tab.id, { url: `${NLG_ORIGIN}${LOGIN_PATH}` })
     } else {
-      const created = await chrome.tabs.create({ active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+      const created = await chrome.tabs.create({ active: false, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
       if (created.id === undefined) {
         await writeSyncState({ ...(await readSyncState()), errorCode: 'NATIONAL_LIFE_TAB_UNAVAILABLE' })
         return { ok: false as const, error: 'NATIONAL_LIFE_TAB_UNAVAILABLE' }
@@ -3725,7 +3733,7 @@ export default defineBackground(() => {
           }
           const state = await readSyncState()
           if (state.runId && currentStage(state) && state.status !== 'COMPLETED') {
-            await navigatePendingGrid()
+            await navigatePendingGrid({ foreground: true })
           } else {
             const tab = await findNationalLifeTab()
             if (tab?.id !== undefined) await updateTab(tab.id, { active: true })

@@ -490,7 +490,7 @@ describe('automatic carrier login recovery', () => {
       runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
       status: 'NAVIGATING',
     }
-    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: authUrl }])
     tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
     brokerResponder()
     await bootBackground()
@@ -518,6 +518,7 @@ describe('automatic carrier login recovery', () => {
         operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 3, leaseId: 'lease_1',
       },
     })
+    expect(tabs.update).not.toHaveBeenCalledWith(7, { active: true })
     expect(JSON.stringify(storage)).not.toMatch(
       /synthetic-carrier-user|synthetic-carrier-password|wrappedKey|ciphertext|"iv"/,
     )
@@ -534,7 +535,7 @@ describe('automatic carrier login recovery', () => {
         attemptedAt: '2026-09-01T20:00:00.000Z',
       },
     }
-    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: authUrl }])
     tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
     vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
       if (request.pathname.endsWith('/runs')) {
@@ -555,10 +556,7 @@ describe('automatic carrier login recovery', () => {
     emit('runtime.onMessage', { type: 'RETRY_SYNC' }, {}, sendResponse)
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled())
 
-    expect(tabs.update).toHaveBeenCalledWith(7, {
-      active: true,
-      url: `${NLG}/agent/auth/login`,
-    })
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}/agent/auth/login` })
     expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
       request.pathname.endsWith('/credential-leases'))).toHaveLength(0)
     expect(readSync()).toMatchObject({
@@ -608,7 +606,7 @@ describe('automatic carrier login recovery', () => {
     })
     brokerResponder()
 
-    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: false, url: authUrl })
     await flush()
 
     expect(tabs.reload).toHaveBeenCalledTimes(1)
@@ -1098,12 +1096,12 @@ describe('automatic carrier login recovery', () => {
         leaseId: 'lease_1', attemptedAt: '2026-09-01T21:00:00.000Z',
       },
     }
-    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: authUrl }])
     tabs.sendMessage.mockImplementation(authResponder(classification))
     brokerResponder()
     await bootBackground()
 
-    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: false, url: authUrl })
     await flush()
 
     expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
@@ -1111,6 +1109,11 @@ describe('automatic carrier login recovery', () => {
       body: { schemaVersion: 1, outcome: classification === 'MFA' ? 'MFA_REQUIRED' : 'REJECTED' },
     }))
     expect(storage.sync).toMatchObject({ status: 'AUTH_REQUIRED', errorCode })
+    if (classification === 'MFA') {
+      expect(tabs.update).toHaveBeenCalledWith(7, { active: true })
+    } else {
+      expect(tabs.update).not.toHaveBeenCalledWith(7, { active: true })
+    }
     expect(tabs.sendMessage).not.toHaveBeenCalledWith(
       7,
       expect.objectContaining({ type: 'SUBMIT_CARRIER_CREDENTIAL' }),
@@ -1170,10 +1173,7 @@ describe('automatic carrier login recovery', () => {
     emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
     await flush()
 
-    expect(tabs.update).toHaveBeenCalledWith(17, {
-      active: true,
-      url: `${NLG}/agent/auth/login`,
-    })
+    expect(tabs.update).toHaveBeenCalledWith(17, { url: `${NLG}/agent/auth/login` })
     expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
       request.pathname.endsWith('/credential-leases'))).toHaveLength(0)
     expect(storage.command).not.toHaveProperty('credentialAttempt')
@@ -2046,7 +2046,7 @@ describe('background plan executor', () => {
     expect(storage.command).toMatchObject({
       commandId: 'cmd_policy_auth', carrierTabId: 4, status: 'AUTH_REQUIRED', nextEventSequence: 2,
     })
-    expect(tabs.update).toHaveBeenCalledWith(4, { active: true })
+    expect(tabs.update).not.toHaveBeenCalledWith(4, { active: true })
 
     emit('tabs.onUpdated', 4, { status: 'complete' }, {
       id: 4, active: true, url: `${NLG}${POLICY_DETAIL_PATH}`,
@@ -3311,10 +3311,7 @@ describe('background plan executor', () => {
       7,
       expect.objectContaining({ type: 'BEGIN_GRID' }),
     )
-    expect(tabs.update).toHaveBeenCalledWith(7, {
-      active: true,
-      url: `${NLG}/agent/auth/login`,
-    })
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}/agent/auth/login` })
     expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED', stageIndex: 0 })
   })
 
