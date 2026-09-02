@@ -1604,7 +1604,9 @@ async function reportRunFailure(code: string) {
   }
 }
 
-async function reportRunAuthState(state: 'REQUIRED' | 'MFA_REQUIRED' | 'RESTORED') {
+async function reportRunAuthState(
+  state: 'REQUIRED' | 'RETRY_REQUIRED' | 'MFA_REQUIRED' | 'RESTORED',
+) {
   const device = await readDeviceState()
   const sync = await readSyncState()
   if (
@@ -2308,7 +2310,16 @@ async function navigatePendingGrid() {
       if (existing.url) {
         try {
           const existingUrl = new URL(existing.url)
-          if (existingUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(existingUrl.pathname)) {
+          if (existingUrl.origin === NLG_AUTH0_ORIGIN) {
+            await requireCarrierAuthentication(
+              await readSyncState(),
+              existing.id,
+              existing.active ? undefined : { active: true },
+            )
+            await handleCarrierAuthenticationPage(existing.id, existingUrl)
+            return
+          }
+          if (isAuthPath(existingUrl.pathname)) {
             await requireCarrierAuthentication(
               await readSyncState(),
               existing.id,
@@ -3357,6 +3368,28 @@ function enqueueBridgeMessage(tabId: number, message: BridgeMessage): Promise<vo
 }
 
 async function retryPendingSync() {
+  const state = await readSyncState()
+  if (state.status === 'AUTH_REQUIRED' && state.runId && currentStage(state)) {
+    // An explicit retry starts one fresh, server-authorized authentication
+    // episode. This is the recovery path for a broker outage or an auth lease
+    // whose five-minute window expired while the user kept the login tab open.
+    // Keep the run, plan and stage cursor; clear only the previous delivery
+    // attempt so requireCarrierAuthentication reports REQUIRED with a new epoch.
+    const renewed = await reportRunAuthState('RETRY_REQUIRED')
+    if (typeof renewed?.authEpoch !== 'number' || renewed.authEpoch < 1) {
+      await writeSyncState({ ...state, errorCode: 'CREDENTIAL_BROKER_UNAVAILABLE' })
+      return { ok: false as const, error: 'CREDENTIAL_BROKER_UNAVAILABLE' }
+    }
+    await writeSyncState({
+      ...state,
+      status: 'NAVIGATING',
+      authRenewalPending: false,
+      authRequiredAt: new Date().toISOString(),
+      credentialPageReloadedAt: undefined,
+      credentialAttempt: undefined,
+      errorCode: undefined,
+    })
+  }
   return startNewSync()
 }
 

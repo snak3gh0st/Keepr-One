@@ -523,6 +523,57 @@ describe('automatic carrier login recovery', () => {
     )
   })
 
+  it('retries the existing Auth0 tab and submits the stored credential immediately', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 1,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+      authRequiredAt: '2026-09-01T20:00:00.000Z',
+      errorCode: 'CREDENTIAL_BROKER_UNAVAILABLE',
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 0,
+        attemptedAt: '2026-09-01T20:00:00.000Z',
+      },
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/runs')) {
+        return {
+          runId: 'run-1', schemaVersion: 3, stages: TWO_STAGE_PLAN,
+          duplicate: true, completedStages: 1, nextStageIndex: 1,
+        } as never
+      }
+      if (request.pathname.endsWith('/auth-state')) return { authEpoch: 3 } as never
+      if (request.pathname.endsWith('/credential-leases')) return sealed as never
+      return {} as never
+    })
+    await bootBackground()
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(0)
+
+    const sendResponse = vi.fn()
+    emit('runtime.onMessage', { type: 'RETRY_SYNC' }, {}, sendResponse)
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled())
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(1)
+    expect(tabs.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+    }))
+    expect(readSync()).toMatchObject({
+      runId: 'run-1', stageIndex: 1, status: 'AUTH_REQUIRED',
+      authRenewalPending: true,
+      credentialAttempt: { authEpoch: 3, leaseId: 'lease_1' },
+    })
+    const authStateCalls = vi.mocked(signedJsonRequest).mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.pathname.endsWith('/auth-state'))
+    expect(authStateCalls.map((request) => request.body)).toEqual([
+      { state: 'RETRY_REQUIRED' },
+      { state: 'REQUIRED' },
+    ])
+  })
+
   it('reloads an already-open Auth0 page once, then leases when the content script is ready', async () => {
     await bootBackground()
     storage.sync = {

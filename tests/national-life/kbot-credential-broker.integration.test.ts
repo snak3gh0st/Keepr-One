@@ -40,7 +40,7 @@ async function harness(options: { enabled?: boolean; deviceStatus?: string } = {
         },
         operation: {
           kind: 'SYNC_RUN', id: 'run_1', agentId: 'agent_1', deviceId: 'device_1',
-          state: 'RUNNING', authState: 'AUTH_REQUIRED', authEpoch: 1,
+          state: 'RUNNING', authState: 'REQUIRED', authEpoch: 1,
           authRequiredAt: new Date(now.getTime() - 5_000), expiresAt: null,
           latestEventType: null,
         },
