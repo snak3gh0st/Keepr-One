@@ -197,6 +197,39 @@ function SectionHeading({
   );
 }
 
+type KBotAccessStatus = {
+  status: "protected" | "ready" | "manual";
+  label: string;
+  avatarState: "idle" | "waiting";
+};
+
+function getKbotAccessStatus(
+  kbot: SettingsFormsProps["kbot"],
+  copy: (pt: string, en: string) => string,
+): KBotAccessStatus {
+  if (kbot.credentialBrokerEnabled && kbot.credentialSummary.configured) {
+    return {
+      status: "protected",
+      label: copy("Credencial protegida", "Protected credential"),
+      avatarState: "idle",
+    };
+  }
+
+  if (kbot.credentialBrokerEnabled) {
+    return {
+      status: "ready",
+      label: copy("Pronto para configurar login automático", "Ready to configure automatic login"),
+      avatarState: "waiting",
+    };
+  }
+
+  return {
+    status: "manual",
+    label: copy("Login manual protegido", "Manual sign-in protected"),
+    avatarState: "idle",
+  };
+}
+
 function SettingsOverview({
   personal,
   professional,
@@ -205,6 +238,7 @@ function SettingsOverview({
   kbot,
 }: SettingsFormsProps) {
   const { copy } = useI18n();
+  const kbotAccessStatus = getKbotAccessStatus(kbot, copy);
   const sections = [
     {
       href: "#perfil",
@@ -232,11 +266,7 @@ function SettingsOverview({
       index: "04",
       label: "K-Bot",
       value: kbot.enabled ? copy("Conectado ao ambiente", "Connected to the environment") : copy("Indisponível neste ambiente", "Unavailable in this environment"),
-      detail: kbot.credentialBrokerEnabled && kbot.credentialSummary.configured
-        ? copy("Credencial protegida", "Protected credential")
-        : kbot.credentialBrokerEnabled
-          ? copy("Pronto para configurar login automático", "Ready to configure automatic login")
-          : copy("Login manual protegido", "Manual sign-in protected"),
+      detail: kbotAccessStatus.label,
     },
     {
       href: "#agencia",
@@ -287,13 +317,16 @@ function SettingsOverview({
           </nav>
         </div>
 
-        <aside className="relative overflow-hidden border-t border-border-steel bg-rail-strong p-5 text-paper sm:p-7 lg:border-l lg:border-t-0">
+        <aside
+          data-kbot-access-status={kbotAccessStatus.status}
+          className="relative overflow-hidden border-t border-border-steel bg-rail-strong p-5 text-paper sm:p-7 lg:border-l lg:border-t-0"
+        >
           <span aria-hidden="true" className="absolute -right-12 -top-14 size-36 rounded-full border border-mint/15" />
           <span aria-hidden="true" className="absolute -right-5 -top-7 size-24 rounded-full border border-mint/10" />
           <div className="relative">
             <div className="flex items-center gap-3">
               <KBotAvatar
-                state={kbot.credentialBrokerEnabled && !kbot.credentialSummary.configured ? "waiting" : "idle"}
+                state={kbotAccessStatus.avatarState}
                 size="sm"
               />
               <div className="min-w-0">
@@ -307,11 +340,7 @@ function SettingsOverview({
             <div className="mt-6 border-t border-paper/10 pt-4">
               <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-paper/45">{copy("Acesso", "Access")}</p>
               <p className="mt-2 text-sm font-semibold text-paper">
-                {kbot.credentialBrokerEnabled && kbot.credentialSummary.configured
-                  ? copy("Credencial protegida", "Protected credential")
-                  : kbot.credentialBrokerEnabled
-                    ? copy("Pronto para configurar", "Ready to configure")
-                    : copy("Login manual", "Manual sign-in")}
+                {kbotAccessStatus.label}
               </p>
             </div>
           </div>
