@@ -741,6 +741,7 @@ async function executePolicyDetailCommand(
     ...(sameCommand && previous.credentialPageReloadedAt
       ? { credentialPageReloadedAt: previous.credentialPageReloadedAt }
       : {}),
+    ...(sameCommand && previous.errorCode ? { errorCode: previous.errorCode } : {}),
     updatedAt: new Date().toISOString(),
   })
 
@@ -926,6 +927,7 @@ async function executeIgoApplicationDraftCommand(
     ...(sameCommand && previous.credentialPageReloadedAt
       ? { credentialPageReloadedAt: previous.credentialPageReloadedAt }
       : {}),
+    ...(sameCommand && previous.errorCode ? { errorCode: previous.errorCode } : {}),
     updatedAt: new Date().toISOString(),
   })
 
@@ -1128,6 +1130,7 @@ async function executeFlexLifeQuoteCommand(
     ...(sameCommand && previous.credentialPageReloadedAt
       ? { credentialPageReloadedAt: previous.credentialPageReloadedAt }
       : {}),
+    ...(sameCommand && previous.errorCode ? { errorCode: previous.errorCode } : {}),
     updatedAt: new Date().toISOString(),
   })
 
@@ -1357,6 +1360,7 @@ async function executeForesightCommand(
     ...(sameCommand && previous.credentialPageReloadedAt
       ? { credentialPageReloadedAt: previous.credentialPageReloadedAt }
       : {}),
+    ...(sameCommand && previous.errorCode ? { errorCode: previous.errorCode } : {}),
     ...(resumableTermInputHash === undefined ? {} : { termInputHash: resumableTermInputHash }),
     updatedAt: new Date().toISOString(),
   })
@@ -1484,6 +1488,43 @@ async function executeForesightCommand(
   })
 }
 
+async function restartRetriedCommandAuthentication(
+  dispatch: ConnectorCommandDispatch,
+  device: { deviceId: string; baseUrl: string },
+  hint?: chrome.tabs.Tab,
+): Promise<boolean> {
+  if (dispatch.lastEventType !== 'AUTH_RETRY_REQUESTED') return false
+
+  const previous = await readCommandState()
+  let tab = await findBoundCommandTab(previous.carrierTabId, hint)
+  if (tab?.id === undefined) {
+    tab = await chrome.tabs.create({ active: true })
+  }
+  if (tab.id === undefined) throw new Error('COMMAND_TAB_UNAVAILABLE')
+
+  const nextEventSequence = await postCommandEvent({
+    dispatch,
+    device,
+    sequence: dispatch.nextEventSequence,
+    type: 'AUTH_REQUIRED',
+    payload: { action: 'SIGN_IN_TO_CONTINUE' },
+  })
+  await writeCommandState({
+    ...previous,
+    commandId: dispatch.command.commandId,
+    runId: dispatch.command.runId,
+    carrierTabId: tab.id,
+    nextEventSequence,
+    status: 'AUTH_REQUIRED',
+    errorCode: undefined,
+    credentialPageReloadedAt: new Date().toISOString(),
+    credentialAttempt: undefined,
+    updatedAt: new Date().toISOString(),
+  })
+  await updateTab(tab.id, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+  return true
+}
+
 async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?: string): Promise<void> {
   if (commandPollLock) {
     const activePoll = commandPollLock
@@ -1514,6 +1555,10 @@ async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?
         return
       }
       dispatch = parseConnectorCommandDispatch(raw)
+      if (await restartRetriedCommandAuthentication(dispatch, {
+        deviceId: device.deviceId,
+        baseUrl: device.baseUrl,
+      }, hint)) return
       const executorKind = commandExecutorFor(dispatch.command.capability)
       const executor = executorKind === 'FORESIGHT'
         ? executeForesightCommand
@@ -1830,6 +1875,14 @@ async function attemptAutomaticCarrierLogin(
   url: URL,
 ) {
   const classification = await classifyCarrierAuthPage(operation.tabId)
+  if (classification === 'UNKNOWN' && operation.attempt?.leaseId) {
+    // Once the credential content script acknowledges SUBMITTED, Auth0
+    // immediately disables Login while webAuth.login is in flight. The strict
+    // classifier intentionally reports that transient DOM as UNKNOWN. A second
+    // readiness/watchdog pass must stay passive here: reloading would cancel
+    // the carrier request, erase the password and strand the one-shot lease.
+    return
+  }
   if (classification !== 'LOGIN') {
     if (classification === 'UNKNOWN' && !operation.pageReloadedAt) {
       // Chrome does not inject a newly loaded extension's content scripts into
@@ -3380,15 +3433,30 @@ async function retryPendingSync() {
       await writeSyncState({ ...state, errorCode: 'CREDENTIAL_BROKER_UNAVAILABLE' })
       return { ok: false as const, error: 'CREDENTIAL_BROKER_UNAVAILABLE' }
     }
+    const tab = await findConnectorTab(state)
     await writeSyncState({
       ...state,
-      status: 'NAVIGATING',
-      authRenewalPending: false,
+      status: 'AUTH_REQUIRED',
+      authRenewalPending: true,
       authRequiredAt: new Date().toISOString(),
-      credentialPageReloadedAt: undefined,
+      // The next lease belongs only to the Auth0 transaction created by this
+      // first-party login navigation. Never spend a renewed one-shot lease on
+      // the stale Auth0 document that displayed the retry button.
+      credentialPageReloadedAt: new Date().toISOString(),
       credentialAttempt: undefined,
       errorCode: undefined,
     })
+    if (tab?.id !== undefined) {
+      await updateTab(tab.id, { active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+    } else {
+      const created = await chrome.tabs.create({ active: true, url: `${NLG_ORIGIN}${LOGIN_PATH}` })
+      if (created.id === undefined) {
+        await writeSyncState({ ...(await readSyncState()), errorCode: 'NATIONAL_LIFE_TAB_UNAVAILABLE' })
+        return { ok: false as const, error: 'NATIONAL_LIFE_TAB_UNAVAILABLE' }
+      }
+      await writeSyncState({ ...(await readSyncState()), carrierTabId: created.id })
+    }
+    return { ok: true as const, status: 'AUTH_REQUIRED' as const }
   }
   return startNewSync()
 }

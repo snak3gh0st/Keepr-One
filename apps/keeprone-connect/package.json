@@ -1,6 +1,6 @@
 {
   "name": "@fyntra/keeprone-connect",
-  "version": "0.1.71",
+  "version": "0.1.76",
   "private": true,
   "type": "module",
   "scripts": {
