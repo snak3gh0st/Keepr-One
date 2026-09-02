@@ -74,9 +74,9 @@ export type SyncState = {
   /// user data; it only lets the scheduler distinguish a person actively
   /// signing in from a server-expired run that must be reconciled.
   authRequiredAt?: string
-  /// One bounded reload of an already-open carrier login page after an
-  /// extension update. The timestamp is coordination-only and survives service
-  /// worker eviction so recovery cannot become a reload loop.
+  /// One bounded recovery navigation for the current carrier login episode.
+  /// The timestamp is coordination-only and survives service-worker eviction,
+  /// so neither an extension reload nor an explicit retry can become a loop.
   credentialPageReloadedAt?: string
   credentialAttempt?: CredentialAttempt
   status: SyncStatus

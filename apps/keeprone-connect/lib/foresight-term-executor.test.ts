@@ -80,7 +80,9 @@ describe('Foresight Term client target', () => {
     expect(source).toContain('minimumSettleMs = 0')
     expect(retry).toContain("await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT', minimumSettleMs)")
     expect(workflow).toContain("retryTermClientPostback(700, 'FORESIGHT_TERM_CLIENT_JURISDICTION_WRITE_MISMATCH'")
-    expect(workflow).toContain("retryTermClientPostback(500, 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH'")
+    expect(workflow).toMatch(
+      /retryTermClientPostback\(\s*500, 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH'/,
+    )
     expect(workflow.match(/retryTermClientPostback\(600,/g)).toHaveLength(2)
   })
 
@@ -96,9 +98,27 @@ describe('Foresight Term client target', () => {
 
     expect(source).toContain('const retryTermClientPostback')
     expect(source).toContain('for (let attempt = 0; attempt < 2; attempt += 1)')
-    expect(workflow.match(/retryTermClientPostback\(/g)).toHaveLength(5)
+    expect(workflow.match(/retryTermClientPostback\(/g)).toHaveLength(6)
     expect(workflow).toContain("'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH'")
     expect(workflow).toContain("'FORESIGHT_TERM_CLIENT_INFORMATION_WRITE_MISMATCH'")
+  })
+
+  it('repairs the insured name after owner postback and verifies the complete client', () => {
+    const source = readFileSync(
+      new URL('../entrypoints/foresight-main.content.ts', import.meta.url),
+      'utf8',
+    )
+    const workflow = source.slice(
+      source.indexOf('const applyTermClient'),
+      source.indexOf('const applyTermFunding'),
+    )
+    const owner = workflow.indexOf("'FORESIGHT_TERM_CLIENT_OWNER_WRITE_MISMATCH'")
+    const repairedName = workflow.lastIndexOf("'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH'")
+
+    expect(owner).toBeGreaterThan(-1)
+    expect(repairedName).toBeGreaterThan(owner)
+    expect(workflow).toContain('matchesCompleteTermClient(carrier().doc)')
+    expect(workflow).toContain("throw new Error('FORESIGHT_TERM_CLIENT_CUMULATIVE_WRITE_MISMATCH')")
   })
 
   it('uses a valid duration returned by the carrier as an explicit fallback', () => {
