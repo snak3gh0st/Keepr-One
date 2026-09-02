@@ -49,6 +49,7 @@ const publicPage = {
   minimumNoticeMinutes: 0,
   maximumAdvanceDays: 60,
   ownerName: 'Maria Silva',
+  ownerLanguage: 'PT' as const,
   ownerTimeZone: 'America/New_York',
   weeklyWindows: [{ weekday: 1, startMinute: 540, endMinute: 660 }],
 }
@@ -321,6 +322,7 @@ function createMemoryDatabase() {
         weeklyWindows: publicPage.weeklyWindows,
         ownerUser: {
           name: publicPage.ownerName,
+          language: publicPage.ownerLanguage,
           timeZone: publicPage.ownerTimeZone,
           agent: { status: 'ACTIVE' },
         },
@@ -432,6 +434,7 @@ describe('public booking to Google and confirmation delivery', () => {
           description: publicPage.description,
           durationMinutes: publicPage.durationMinutes,
           ownerName: publicPage.ownerName,
+          ownerLanguage: publicPage.ownerLanguage,
           ownerTimeZone: publicPage.ownerTimeZone,
         },
         slots: [{ startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() }],

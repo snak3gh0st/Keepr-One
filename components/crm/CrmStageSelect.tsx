@@ -3,6 +3,8 @@
 import { useId, useState, useTransition } from "react";
 import type { CrmStageView } from "@/lib/crm";
 import { CrmStagePill } from "@/components/StatusPill";
+import { useI18n } from "@/components/i18n/LanguageProvider";
+import { localizedCrmStage, localizedCrmStageName } from "./i18n";
 
 type Result = { ok: true } | { ok: false; message: string };
 
@@ -21,6 +23,7 @@ export function CrmStageSelect({
   onFollowUpRequired?: (stageId: string) => void;
   compact?: boolean;
 }) {
+  const { copy } = useI18n();
   const id = useId();
   const errorId = `${id}-error`;
   const [editing, setEditing] = useState(false);
@@ -38,9 +41,13 @@ export function CrmStageSelect({
           setError(null);
           setEditing(true);
         }}
-        aria-label={`Alterar etapa${stage ? `: ${stage.name}` : ""}`}
+        aria-label={stage
+          ? copy("Alterar etapa: {stage}", "Change stage: {stage}", {
+              stage: localizedCrmStageName(copy, stage),
+            })
+          : copy("Alterar etapa", "Change stage")}
       >
-        <CrmStagePill stage={stage} />
+        <CrmStagePill stage={localizedCrmStage(copy, stage)} />
         <span aria-hidden="true">⌄</span>
       </button>
     );
@@ -57,7 +64,7 @@ export function CrmStageSelect({
       }}
     >
       <label className="sr-only" htmlFor={id}>
-        Alterar etapa do lead
+        {copy("Alterar etapa do lead", "Change lead stage")}
       </label>
       <select
         id={id}
@@ -100,17 +107,17 @@ export function CrmStageSelect({
           });
         }}
       >
-        {!stage ? <option value="">Sem etapa</option> : null}
+        {!stage ? <option value="">{copy("Sem etapa", "No stage")}</option> : null}
         {stages.map((item) => (
           <option key={item.id} value={item.id}>
-            {item.name}
+            {localizedCrmStageName(copy, item)}
           </option>
         ))}
       </select>
       {pending ? (
         <>
           <i aria-hidden="true" />
-          <span className="sr-only" role="status">Salvando etapa…</span>
+          <span className="sr-only" role="status">{copy("Salvando etapa…", "Saving stage…")}</span>
         </>
       ) : null}
       {error ? (

@@ -27,7 +27,7 @@ describe('National Life policy detail refresh button', () => {
 
   it('issues the server command and wakes the extension without blocking navigation', async () => {
     render(<NationalLifePolicyRefreshButton policyId="policy_1" extensionId="extension_1" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Atualizar da National Life' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Atualizar pela National Life' }))
 
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith('policy_1'))
     expect(mocks.send).toHaveBeenCalledWith('extension_1', {
@@ -39,7 +39,7 @@ describe('National Life policy detail refresh button', () => {
   it('keeps the durable queued command when direct browser wake-up is unavailable', async () => {
     mocks.send.mockRejectedValueOnce(new Error('CONNECTOR_UNAVAILABLE'))
     render(<NationalLifePolicyRefreshButton policyId="policy_1" extensionId="extension_1" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Atualizar da National Life' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Atualizar pela National Life' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('Atualização agendada')
   })

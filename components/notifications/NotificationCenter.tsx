@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { setOutsideContentInert } from '@/components/overlays/OverlaySurface'
+import { useI18n } from '@/components/i18n/LanguageProvider'
 
 type NotificationItem = {
   id: string
@@ -27,16 +28,20 @@ type NotificationInbox = {
 const EMPTY_INBOX: NotificationInbox = { notifications: [], unreadCount: 0 }
 const POLL_INTERVAL_MS = 60_000
 
-function relativeTime(value: string) {
+function relativeTime(
+  value: string,
+  locale: string,
+  copy: (pt: string, en: string, values?: Record<string, string | number>) => string,
+) {
   const elapsed = Math.max(0, Date.now() - new Date(value).getTime())
   const minutes = Math.floor(elapsed / 60_000)
-  if (minutes < 1) return 'Agora'
-  if (minutes < 60) return `Há ${minutes} min`
+  if (minutes < 1) return copy('Agora', 'Now')
+  if (minutes < 60) return copy('Há {count} min', '{count} min ago', { count: minutes })
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `Há ${hours}h`
+  if (hours < 24) return copy('Há {count}h', '{count}h ago', { count: hours })
   const days = Math.floor(hours / 24)
-  if (days < 7) return `Há ${days}d`
-  return new Intl.DateTimeFormat('pt-BR', {
+  if (days < 7) return copy('Há {count}d', '{count}d ago', { count: days })
+  return new Intl.DateTimeFormat(locale, {
     day: '2-digit', month: 'short', timeZone: 'America/New_York',
   }).format(
     new Date(value),
@@ -66,6 +71,7 @@ function CloseIcon() {
 }
 
 export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
+  const { copy, locale, language } = useI18n()
   const [inbox, setInbox] = useState<NotificationInbox>(EMPTY_INBOX)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -234,6 +240,41 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
 
   const badgeLabel = inbox.unreadCount > 99 ? '99+' : String(inbox.unreadCount)
 
+  function notificationCopy(item: NotificationItem) {
+    if (language === 'PT') return { title: item.title, message: item.message }
+
+    const titleByType: Record<string, string> = {
+      FOLLOW_UP_DUE: item.title === 'Follow-up de hoje' ? 'Today’s follow-up' : 'Pending follow-up',
+      CALENDAR_EVENT_REMINDER: 'Meeting starting soon',
+      CALENDAR_EVENT_CANCELLED: 'Meeting canceled in Google Calendar',
+      CALENDAR_EVENT_CHANGED: item.title === 'Participante respondeu ao convite'
+        ? 'Attendee responded to the invitation'
+        : 'Meeting updated in Google Calendar',
+      NATIONAL_LIFE_LOGIN_REQUIRED: 'Renew your National Life login',
+    }
+    let message = item.message
+    const followUpMatch = /^Faça o follow-up com (.+)\.$/.exec(message)
+    const reminderMatch = /^(.+) começa em (\d+) minutos\.$/.exec(message)
+    const rescheduleMatch = /^(.+) · De (.+) para (.+)\.$/.exec(message)
+    const attendeeMatch = /^(.+) (confirmou presença|recusou o convite|respondeu talvez|voltou a aguardar resposta)\.$/.exec(message)
+    if (followUpMatch) message = `Follow up with ${followUpMatch[1]}.`
+    else if (reminderMatch) message = `${reminderMatch[1]} starts in ${reminderMatch[2]} minutes.`
+    else if (rescheduleMatch) message = `${rescheduleMatch[1]} · From ${rescheduleMatch[2]} to ${rescheduleMatch[3]}.`
+    else if (attendeeMatch) {
+      const response = {
+        'confirmou presença': 'accepted',
+        'recusou o convite': 'declined the invitation',
+        'respondeu talvez': 'responded maybe',
+        'voltou a aguardar resposta': 'is awaiting a response again',
+      }[attendeeMatch[2]]
+      message = `${attendeeMatch[1]} ${response}.`
+    }
+    else if (item.type === 'NATIONAL_LIFE_LOGIN_REQUIRED') {
+      message = 'Your data remains secure. Sign in again so sync can continue where it stopped.'
+    }
+    return { title: titleByType[item.type] ?? item.title, message }
+  }
+
   return (
     <div ref={root} className="relative">
       <button
@@ -241,8 +282,8 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
         type="button"
         aria-label={
           inbox.unreadCount
-            ? `Notificações, ${inbox.unreadCount} não lidas`
-            : 'Notificações'
+            ? copy('Notificações, {count} não lidas', 'Notifications, {count} unread', { count: inbox.unreadCount })
+            : copy('Notificações', 'Notifications')
         }
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -280,7 +321,7 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
               >
             <motion.button
               type="button"
-              aria-label="Fechar notificações"
+              aria-label={copy('Fechar notificações', 'Close notifications')}
               aria-hidden="true"
               tabIndex={-1}
               initial={reducedMotion ? false : { opacity: 0 }}
@@ -305,12 +346,14 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
               <div className="flex items-start justify-between gap-4 border-b border-border-steel/75 px-5 py-4">
                 <div>
                   <h2 id="notification-center-title" className="text-base font-semibold tracking-[-0.025em] text-ink">
-                    Notificações
+                    {copy('Notificações', 'Notifications')}
                   </h2>
                   <p className="mt-0.5 text-xs text-ink-muted">
                     {inbox.unreadCount
-                      ? `${inbox.unreadCount} ${inbox.unreadCount === 1 ? 'lembrete não lido' : 'lembretes não lidos'}`
-                      : 'Você está em dia.'}
+                      ? inbox.unreadCount === 1
+                        ? copy('1 lembrete não lido', '1 unread reminder')
+                        : copy('{count} lembretes não lidos', '{count} unread reminders', { count: inbox.unreadCount })
+                      : copy('Você está em dia.', 'You’re all caught up.')}
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -321,12 +364,12 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
                       disabled={markingAll}
                       className="min-h-9 rounded-full px-3 text-[11px] font-semibold text-teal transition-colors hover:bg-teal-pale disabled:cursor-wait disabled:opacity-50"
                     >
-                      {markingAll ? 'Atualizando…' : 'Marcar todas como lidas'}
+                      {markingAll ? copy('Atualizando…', 'Updating…') : copy('Marcar todas como lidas', 'Mark all as read')}
                     </button>
                   )}
                   <button
                     type="button"
-                    aria-label="Fechar"
+                    aria-label={copy('Fechar', 'Close')}
                     onClick={() => {
                       setOpen(false)
                       trigger.current?.focus()
@@ -340,7 +383,7 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
 
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {loading ? (
-                  <div className="space-y-3 px-5 py-5" aria-label="Carregando notificações">
+                  <div className="space-y-3 px-5 py-5" aria-label={copy('Carregando notificações', 'Loading notifications')}>
                     {[0, 1, 2].map((item) => (
                       <div key={item} className="h-[76px] animate-pulse rounded-2xl bg-panel" />
                     ))}
@@ -349,6 +392,7 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
                   <ul className="divide-y divide-border-steel/65">
                     {inbox.notifications.map((item, index) => {
                       const unread = !item.readAt
+                      const translatedItem = notificationCopy(item)
                       return (
                         <motion.li
                           key={item.id}
@@ -372,15 +416,15 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
                             />
                             <span className="min-w-0 flex-1">
                               <span className={`block text-[13px] leading-5 text-ink ${unread ? 'font-semibold' : 'font-medium'}`}>
-                                {item.title}
+                                {translatedItem.title}
                               </span>
                               <span className="mt-0.5 block text-xs leading-[1.55] text-ink-muted">
-                                {item.message}
+                                {translatedItem.message}
                               </span>
                               <span className="mt-2 flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-muted/75">
-                                {relativeTime(item.createdAt)}
+                                {relativeTime(item.createdAt, locale, copy)}
                                 <span aria-hidden="true" className="h-0.5 w-0.5 rounded-full bg-border-steel" />
-                                Abrir lead
+                                {copy('Abrir lead', 'Open lead')}
                               </span>
                             </span>
                             <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className="mt-1 h-4 w-4 shrink-0 text-ink-muted transition-transform duration-300 group-hover:translate-x-0.5 group-hover:text-ink">
@@ -396,9 +440,9 @@ export function NotificationCenter({ inverse = false }: { inverse?: boolean }) {
                     <span className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-border-steel bg-panel text-ink-muted">
                       <BellIcon />
                     </span>
-                    <p className="mt-4 text-sm font-semibold text-ink">Nenhum lembrete por aqui</p>
+                    <p className="mt-4 text-sm font-semibold text-ink">{copy('Nenhum lembrete por aqui', 'No reminders here')}</p>
                     <p className="mt-1 max-w-[240px] text-xs leading-5 text-ink-muted">
-                      Seus follow-ups aparecem aqui quando chega a hora de agir.
+                      {copy('Seus follow-ups aparecem aqui quando chega a hora de agir.', 'Your follow-ups appear here when it is time to act.')}
                     </p>
                   </div>
                 )}

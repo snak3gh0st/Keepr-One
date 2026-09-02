@@ -7,6 +7,7 @@ import {
   cancelNationalLifeConnection,
   createNationalLifeViewerBootstrap,
 } from './actions'
+import { useI18n } from '@/components/i18n/LanguageProvider'
 
 const POLL_INTERVAL_MS = 1_500
 const ACTIVE_STATES = new Set<NationalLifeConnectionAttemptState>([
@@ -60,14 +61,17 @@ function toStatus(payload: AttemptStatusPayload): ConnectionAttemptStatus {
   }
 }
 
-function safeTerminalMessage(state: NationalLifeConnectionAttemptState) {
+function safeTerminalMessage(
+  state: NationalLifeConnectionAttemptState,
+  copy: (pt: string, en: string) => string,
+) {
   switch (state) {
     case 'CANCELLED':
-      return 'Connection canceled. You can try again whenever you are ready.'
+      return copy('Conexão cancelada. Você pode tentar novamente quando estiver pronto.', 'Connection canceled. You can try again whenever you are ready.')
     case 'EXPIRED':
-      return 'Your secure session timed out. Connect again to continue.'
+      return copy('Sua sessão segura expirou. Conecte novamente para continuar.', 'Your secure session timed out. Connect again to continue.')
     default:
-      return 'We could not finish connecting. Close this window and try again.'
+      return copy('Não foi possível concluir a conexão. Feche esta janela e tente novamente.', 'We could not finish connecting. Close this window and try again.')
   }
 }
 
@@ -75,6 +79,7 @@ export function useNationalLifeConnectionAttempt(
   attempt: ActiveNationalLifeAttempt,
   active = true,
 ): UseConnectionAttemptResult {
+  const { copy } = useI18n()
   const [status, setStatus] = useState<ConnectionAttemptStatus | null>(() => ({
     id: attempt.attemptId,
     state: attempt.initialState as NationalLifeConnectionAttemptState,
@@ -174,7 +179,7 @@ export function useNationalLifeConnectionAttempt(
           stopped = true
           setViewerUrl(null)
           if (next.state !== 'AUTHENTICATED') {
-            setError(safeTerminalMessage(next.state))
+            setError(safeTerminalMessage(next.state, copy))
           }
         }
       } catch (pollError) {
@@ -186,7 +191,7 @@ export function useNationalLifeConnectionAttempt(
         // Um `Failed to fetch` ou um erro de parse chegava inteiro à tela. O
         // texto cru de uma exceção nunca é uma instrução para o agente.
         void pollError
-        setError('Your secure session was interrupted. Connect again to continue.')
+        setError(copy('Sua sessão segura foi interrompida. Conecte novamente para continuar.', 'Your secure session was interrupted. Connect again to continue.'))
         keepaliveCancel()
       }
     }
@@ -212,7 +217,7 @@ export function useNationalLifeConnectionAttempt(
       window.removeEventListener('keepr-one:sign-out', handleSignOut)
       keepaliveCancel()
     }
-  }, [active, attempt.attemptId, attempt.expiresAt, keepaliveCancel])
+  }, [active, attempt.attemptId, attempt.expiresAt, keepaliveCancel, copy])
 
   return { status, viewerUrl, error, close }
 }

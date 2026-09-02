@@ -70,7 +70,7 @@ describe('public scheduling routes', () => {
     mocks.availability.mockResolvedValue({
       page: {
         slug: 'maria-silva', title: 'Conversa inicial', description: null,
-        durationMinutes: 30, ownerName: 'Maria Silva', ownerTimeZone: 'America/New_York',
+        durationMinutes: 30, ownerName: 'Maria Silva', ownerLanguage: 'PT', ownerTimeZone: 'America/New_York',
       },
       slots: [{ startsAt: '2026-08-17T13:00:00.000Z', endsAt: '2026-08-17T13:30:00.000Z' }],
     })
@@ -209,6 +209,31 @@ describe('public scheduling routes', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'SLOT_UNAVAILABLE',
       message: 'Este horário não está mais disponível.',
+    })
+  })
+
+  it('returns public booking errors in the scheduling page language', async () => {
+    mocks.booking.mockRejectedValueOnce(new SchedulingError(
+      'SLOT_UNAVAILABLE',
+      'Este horário não está mais disponível.',
+    ))
+    const response = await POST(new Request(
+      'https://app.keeprone.com/api/public/scheduling/maria-silva/bookings',
+      {
+        method: 'POST',
+        headers: {
+          origin: 'https://app.keeprone.com',
+          host: 'app.keeprone.com',
+          'x-keepr-one-language': 'EN',
+        },
+        body: JSON.stringify(validBooking),
+      },
+    ), context)
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({
+      error: 'SLOT_UNAVAILABLE',
+      message: 'This time is no longer available.',
     })
   })
 })

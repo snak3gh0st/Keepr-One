@@ -13,15 +13,8 @@ import { policyStatusLabel } from '@/components/StatusPill'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
 import { summarizeQuotePayload } from '@/lib/national-life/quote-summary'
 import { QUOTE_DISCLAIMER } from '@/lib/national-life/quote-disclaimer'
-
-const currency = (value: number) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(value)
-
-const date = (value: Date | null) => (value ? value.toLocaleDateString('pt-BR') : '—')
+import { getServerI18n } from '@/lib/i18n/server'
+import { localeFor } from '@/lib/i18n/config'
 
 /// Everything the book already knows about one person, in one place.
 ///
@@ -30,6 +23,21 @@ const date = (value: Date | null) => (value ? value.toLocaleDateString('pt-BR') 
 /// names an insured and a premium, and until now it could be read from the
 /// illustrations list but never from the client it belongs to.
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { copy, language } = await getServerI18n()
+  const locale = localeFor(language)
+  const currency = (value: number) => new Intl.NumberFormat(locale, {
+    style: 'currency', currency: 'USD', maximumFractionDigits: 0,
+  }).format(value)
+  const date = (value: Date | null) => (value ? value.toLocaleDateString(locale) : '—')
+  const policyLabel = (status: string) => ({
+    INFORCE: copy('Em vigor', 'In force'), APPROVED: copy('Aprovada', 'Approved'),
+    PENDING: copy('Pendente', 'Pending'), LAPSED: copy('Lapsada', 'Lapsed'),
+    CANCELLED: copy('Cancelada', 'Cancelled'),
+  } as Record<string, string>)[status] ?? policyStatusLabel[status] ?? status
+  const caseStatus = (status: string) => ({
+    OPEN: copy('Aberto', 'Open'), CLOSED: copy('Fechado', 'Closed'),
+    ARCHIVED: copy('Arquivado', 'Archived'),
+  } as Record<string, string>)[status] ?? status
   const { id } = await params
   const session = await requireRole('ADMIN', 'AGENT')
 
@@ -86,30 +94,30 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     <Shell role={session.user.role === 'ADMIN' ? 'ADMIN' : 'AGENT'} userName={session.user.name ?? ''}>
       <PageHeader
         title={client.name}
-        eyebrow="Cliente"
-        description={[client.email, client.phone].filter(Boolean).join(' · ') || 'Sem contato registrado'}
+        eyebrow={copy("Cliente", "Client")}
+        description={[client.email, client.phone].filter(Boolean).join(' · ') || copy('Sem contato registrado', 'No contact information recorded')}
       />
 
       <ModuleSummary
         items={[
-          { label: 'Apólices em vigor', value: `${inforce} / ${policies.length}`, detail: 'Proteções ativas' },
-          { label: 'Casos', value: String(insuranceCases.length), detail: 'Processos abertos' },
-          { label: 'Cotações', value: String(illustrations.length), detail: 'Pedidas à seguradora' },
-          { label: 'Nascimento', value: date(client.dateOfBirth), detail: 'Data informada pela seguradora' },
+          { label: copy('Apólices em vigor', 'Policies in force'), value: `${inforce} / ${policies.length}`, detail: copy('Proteções ativas', 'Active coverage') },
+          { label: copy('Casos', 'Cases'), value: String(insuranceCases.length), detail: copy('Processos abertos', 'Open cases') },
+          { label: copy('Cotações', 'Quotes'), value: String(illustrations.length), detail: copy('Pedidas à seguradora', 'Requested from the carrier') },
+          { label: copy('Nascimento', 'Date of birth'), value: date(client.dateOfBirth), detail: copy('Data informada pela seguradora', 'Date provided by the carrier') },
         ]}
       />
 
       <section className="module-main-surface">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.08em] text-ink-muted">
-          Apólices
+          {copy('Apólices', 'Policies')}
         </h2>
         <Table>
           <Thead>
             <tr>
-              <Th>Apólice</Th>
-              <Th>Produto</Th>
-              <Th>Status</Th>
-              <Th className="text-right">Capital segurado</Th>
+              <Th>{copy('Apólice', 'Policy')}</Th>
+              <Th>{copy('Produto', 'Product')}</Th>
+              <Th>{copy('Status', 'Status')}</Th>
+              <Th className="text-right">{copy('Capital segurado', 'Face amount')}</Th>
             </tr>
           </Thead>
           <tbody>
@@ -124,35 +132,35 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                   </Link>
                 </Td>
                 <Td>{policy.product}</Td>
-                <Td>{policyStatusLabel[policy.status] ?? policy.status}</Td>
+                <Td>{policyLabel(policy.status)}</Td>
                 <TdNum>{policy.faceAmount ? currency(Number(policy.faceAmount)) : '—'}</TdNum>
               </Tr>
             ))}
           </tbody>
         </Table>
-        {policies.length === 0 && <EmptyState>Nenhuma apólice.</EmptyState>}
+        {policies.length === 0 && <EmptyState>{copy('Nenhuma apólice.', 'No policies.')}</EmptyState>}
       </section>
 
       <section className="module-main-surface">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.08em] text-ink-muted">
-          Cotações
+          {copy('Cotações', 'Quotes')}
         </h2>
         <Table>
           <Thead>
             <tr>
-              <Th>Data</Th>
-              <Th>Segurado</Th>
-              <Th>Produto</Th>
-              <Th className="text-right">Capital segurado</Th>
-              <Th className="text-right">Prêmio mensal</Th>
-              <Th>Documento</Th>
+              <Th>{copy('Data', 'Date')}</Th>
+              <Th>{copy('Segurado', 'Insured')}</Th>
+              <Th>{copy('Produto', 'Product')}</Th>
+              <Th className="text-right">{copy('Capital segurado', 'Face amount')}</Th>
+              <Th className="text-right">{copy('Prêmio mensal', 'Monthly premium')}</Th>
+              <Th>{copy('Documento', 'Document')}</Th>
             </tr>
           </Thead>
           <tbody>
             {illustrations.map((illustration) => {
               const quote = summarizeQuotePayload(illustration.rawPayload)
               const asked = [
-                quote.issueAge === null ? null : `${quote.issueAge} anos`,
+                quote.issueAge === null ? null : copy('{count} anos', '{count} years old', { count: quote.issueAge }),
                 quote.gender,
                 quote.issueState,
                 quote.rateClass,
@@ -160,7 +168,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
               return (
                 <Tr key={illustration.id}>
-                  <Td>{illustration.createdAt.toLocaleDateString('pt-BR')}</Td>
+                  <Td>{illustration.createdAt.toLocaleDateString(locale)}</Td>
                   <Td>
                     <span className="block">{illustration.insuredName ?? '—'}</span>
                     {asked.length > 0 && (
@@ -179,7 +187,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                     </span>
                     {quote.annualPremium !== null && (
                       <span className="mt-0.5 block text-xs font-normal text-ink-muted">
-                        {currency(quote.annualPremium)} /ano
+                        {currency(quote.annualPremium)} {copy('/ano', '/year')}
                       </span>
                     )}
                   </TdNum>
@@ -191,7 +199,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                         rel="noreferrer"
                         className="text-teal hover:text-teal-deep"
                       >
-                        Abrir PDF
+                        {copy('Abrir PDF', 'Open PDF')}
                       </a>
                     ) : (
                       <span className="text-ink-muted">—</span>
@@ -203,7 +211,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           </tbody>
         </Table>
         {illustrations.length === 0 ? (
-          <EmptyState>Nenhuma cotação para este cliente.</EmptyState>
+          <EmptyState>{copy('Nenhuma cotação para este cliente.', 'No quotes for this client.')}</EmptyState>
         ) : (
           // The carrier's condition travels with the number, wherever it shows.
           <p className="mt-4 border-l-2 border-border-steel pl-3 text-xs leading-5 text-ink-muted">
@@ -214,13 +222,13 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
       <section className="module-main-surface">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.08em] text-ink-muted">
-          Casos
+          {copy('Casos', 'Cases')}
         </h2>
         <Table>
           <Thead>
             <tr>
-              <Th>Aberto em</Th>
-              <Th>Status</Th>
+              <Th>{copy('Aberto em', 'Opened on')}</Th>
+              <Th>{copy('Status', 'Status')}</Th>
             </tr>
           </Thead>
           <tbody>
@@ -231,15 +239,15 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                     href={`/agent/cases/${insuranceCase.id}`}
                     className="text-teal hover:text-teal-deep"
                   >
-                    {insuranceCase.createdAt.toLocaleDateString('pt-BR')}
+                    {insuranceCase.createdAt.toLocaleDateString(locale)}
                   </Link>
                 </Td>
-                <Td>{insuranceCase.status}</Td>
+                <Td>{caseStatus(insuranceCase.status)}</Td>
               </Tr>
             ))}
           </tbody>
         </Table>
-        {insuranceCases.length === 0 && <EmptyState>Nenhum caso.</EmptyState>}
+        {insuranceCases.length === 0 && <EmptyState>{copy('Nenhum caso.', 'No cases.')}</EmptyState>}
       </section>
     </Shell>
   )

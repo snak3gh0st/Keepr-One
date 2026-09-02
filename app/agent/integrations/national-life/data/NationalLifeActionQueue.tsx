@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { EmptyState } from "@/components/Table";
 import { Pagination, clampPage } from "@/components/Pagination";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 export type NationalLifeActionRow = {
   policyNumber: string;
@@ -37,9 +38,9 @@ const REASON_LABELS: Record<string, string> = {
   "Policy Anniversary": "Aniversário da apólice",
 };
 
-function reasonLabel(reason: string | null) {
-  if (!reason) return "Interação registrada pela National Life";
-  return REASON_LABELS[reason] ?? reason;
+function reasonLabel(reason: string | null, language: "PT" | "EN") {
+  if (!reason) return language === "PT" ? "Interação registrada pela National Life" : "Interaction recorded by National Life";
+  return language === "PT" ? REASON_LABELS[reason] ?? reason : reason;
 }
 
 function QueueButton({
@@ -77,6 +78,7 @@ export function NationalLifeActionQueue({
   rows: NationalLifeActionRow[];
   sourceUpdatedAt: string | null;
 }) {
+  const { copy, language, locale } = useI18n();
   const [filter, setFilter] = useState<QueueFilter>("AT_RISK");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -112,53 +114,53 @@ export function NationalLifeActionQueue({
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-ink">Ações recomendadas</h2>
+          <h2 className="text-xl font-semibold text-ink">{copy("Ações recomendadas", "Recommended actions")}</h2>
           <p className="mt-1 max-w-2xl text-sm text-ink-muted">
-            Uma ação por apólice, baseada nas interações registradas nos últimos 30 dias.
+            {copy("Uma ação por apólice, baseada nas interações registradas nos últimos 30 dias.", "One action per policy, based on interactions recorded in the last 30 days.")}
           </p>
           <p className="mt-1 text-xs text-ink-muted">
             {sourceUpdatedAt
-              ? `Fonte atualizada em ${new Date(sourceUpdatedAt).toLocaleString("pt-BR", {
+              ? copy("Fonte atualizada em {date}.", "Source updated on {date}.", { date: new Date(sourceUpdatedAt).toLocaleString(locale, {
                   dateStyle: "medium",
                   timeStyle: "short",
                   timeZone: "America/New_York",
-                })}.`
-              : "A fonte de interações ainda não foi atualizada neste escopo."}
+                }) })
+              : copy("A fonte de interações ainda não foi atualizada neste escopo.", "The interaction source has not been updated for this scope yet.")}
           </p>
         </div>
-        <p className="text-sm text-ink-muted">{rows.length} apólices com sinal recente</p>
+        <p className="text-sm text-ink-muted">{copy("{count} apólices com sinal recente", "{count} policies with a recent signal", { count: rows.length })}</p>
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
         <QueueButton
           active={filter === "AT_RISK"}
           count={counts.risk}
-          label="Precisa de ação"
+          label={copy("Precisa de ação", "Needs action")}
           onClick={() => selectFilter("AT_RISK")}
         />
         <QueueButton
           active={filter === "OPPORTUNITY"}
           count={counts.opportunity}
-          label="Oportunidades"
+          label={copy("Oportunidades", "Opportunities")}
           onClick={() => selectFilter("OPPORTUNITY")}
         />
         <QueueButton
           active={filter === "ALL"}
           count={rows.length}
-          label="Todas"
+          label={copy("Todas", "All")}
           onClick={() => selectFilter("ALL")}
         />
       </div>
 
       <label className="mt-4 block">
-        <span className="sr-only">Buscar ações</span>
+        <span className="sr-only">{copy("Buscar ações", "Search actions")}</span>
         <input
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
             setPage(1);
           }}
-          placeholder="Buscar por cliente, apólice ou motivo"
+          placeholder={copy("Buscar por cliente, apólice ou motivo", "Search by client, policy, or reason")}
           className="w-full rounded-xl border border-border-steel bg-paper px-3 py-3 text-sm text-ink placeholder:text-ink-muted focus:border-teal focus:outline-none focus:ring-4 focus:ring-teal-pale"
         />
       </label>
@@ -167,10 +169,10 @@ export function NationalLifeActionQueue({
         <div className="mt-5">
           <EmptyState>
             {query.trim()
-              ? "Nenhuma ação corresponde à busca."
+              ? copy("Nenhuma ação corresponde à busca.", "No actions match the search.")
               : filter === "AT_RISK"
-                ? "Nenhuma apólice com risco recente."
-                : "Nenhuma oportunidade recente."}
+                ? copy("Nenhuma apólice com risco recente.", "No policies with recent risk.")
+                : copy("Nenhuma oportunidade recente.", "No recent opportunities.")}
           </EmptyState>
         </div>
       ) : (
@@ -187,14 +189,14 @@ export function NationalLifeActionQueue({
                           : "bg-gold-pale text-gold-ink"
                       }`}
                     >
-                      {row.signal === "AT_RISK" ? "Ação necessária" : "Oportunidade"}
+                      {row.signal === "AT_RISK" ? copy("Ação necessária", "Action needed") : copy("Oportunidade", "Opportunity")}
                     </span>
                     <span className="font-mono text-xs text-ink-muted">{row.policyNumber}</span>
                   </div>
-                  <p className="mt-2 font-semibold text-ink">{row.customerName ?? "Cliente não identificado"}</p>
-                  <p className="mt-1 text-sm text-ink">{reasonLabel(row.reason)}</p>
+                  <p className="mt-2 font-semibold text-ink">{row.customerName ?? copy("Cliente não identificado", "Unidentified client")}</p>
+                  <p className="mt-1 text-sm text-ink">{reasonLabel(row.reason, language)}</p>
                   <p className="mt-1 text-xs text-ink-muted">
-                    {new Date(row.occurredAt).toLocaleDateString("pt-BR", {
+                    {new Date(row.occurredAt).toLocaleDateString(locale, {
                       day: "2-digit",
                       month: "short",
                       year: "numeric",
@@ -203,7 +205,7 @@ export function NationalLifeActionQueue({
                       // prevents midnight UTC from becoming the prior day.
                       timeZone: "UTC",
                     })}
-                    {row.eventCount > 1 ? ` · ${row.eventCount} sinais no período` : ""}
+                    {row.eventCount > 1 ? copy(" · {count} sinais no período", " · {count} signals in the period", { count: row.eventCount }) : ""}
                   </p>
                 </div>
                 <div className="flex flex-wrap justify-end gap-2">
@@ -212,7 +214,7 @@ export function NationalLifeActionQueue({
                       href={`tel:${row.phone}`}
                       className="rounded-full border border-border-steel px-3 py-2 text-xs font-semibold text-ink hover:bg-panel"
                     >
-                      Ligar
+                      {copy("Ligar", "Call")}
                     </a>
                   )}
                   {row.email && (
@@ -220,7 +222,7 @@ export function NationalLifeActionQueue({
                       href={`mailto:${row.email}`}
                       className="rounded-full border border-border-steel px-3 py-2 text-xs font-semibold text-ink hover:bg-panel"
                     >
-                      Enviar e-mail
+                      {copy("Enviar e-mail", "Send email")}
                     </a>
                   )}
                   {row.policyId && (
@@ -228,7 +230,7 @@ export function NationalLifeActionQueue({
                       href={`/agent/policies/${row.policyId}`}
                       className="rounded-full bg-ink px-3 py-2 text-xs font-semibold text-paper hover:bg-teal-deep"
                     >
-                      Abrir apólice
+                      {copy("Abrir apólice", "Open policy")}
                     </Link>
                   )}
                 </div>

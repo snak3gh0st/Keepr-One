@@ -304,6 +304,10 @@ export async function createAgencyInvitationAction(
 
   let emailDelivered = true;
   try {
+    const inviter = await prisma.user.findUnique({
+      where: { id: actorUserId },
+      select: { language: true },
+    });
     await sendAgencyInvitationEmail({
       to: email,
       inviteeName: parsed.data.name || null,
@@ -312,6 +316,7 @@ export async function createAgencyInvitationAction(
       monthlyPriceCents,
       invitationUrl,
       expiresAt,
+      language: inviter?.language ?? "PT",
     });
   } catch (error) {
     // The raw token is returned to the authenticated inviter exactly once, so a

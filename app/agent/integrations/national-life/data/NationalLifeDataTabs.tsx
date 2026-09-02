@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/Table";
 import { EntityCard, EntityCardList } from "@/components/EntityCard";
 import { Pagination, clampPage } from "@/components/Pagination";
 import { NATIONAL_LIFE_OPERATIONAL_REPORT_KEYS } from "@/lib/national-life/operational-report-keys";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 export type CaseRow = {
   id: string;
@@ -54,28 +55,26 @@ function parseAmount(value: string | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-const USD = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatAmount(value: string | undefined) {
+function formatAmount(value: string | undefined, locale: string) {
   const parsed = parseAmount(value);
-  return parsed === null ? (value ?? "—") : USD.format(parsed);
+  return parsed === null ? (value ?? "—") : new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(parsed);
 }
 
-function formatFetchedAt(value: string) {
+function formatFetchedAt(value: string, locale: string, copy: (pt: string, en: string, values?: Record<string, string>) => string) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Source update unavailable";
-  return `Updated ${date.toLocaleString("en-US", {
+  if (Number.isNaN(date.getTime())) return copy("Atualização da fonte indisponível", "Source update unavailable");
+  return copy("Atualizado em {date}", "Updated {date}", { date: date.toLocaleString(locale, {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
     timeZone: "America/New_York",
-  })}`;
+  }) });
 }
 
 function statusTone(status: string | null) {
@@ -136,6 +135,7 @@ export function NationalLifeDataTabs({
   inforce: InforceRow[];
   reports: PortalReportRow[];
 }) {
+  const { copy, locale } = useI18n();
   const [tab, setTab] = useState<Tab>("cases");
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
@@ -173,30 +173,30 @@ export function NationalLifeDataTabs({
   return (
     <div>
       <div className="flex flex-wrap gap-2">
-        <TabButton active={tab === "cases"} count={filtered.cases.length} label="Casos" onClick={() => switchTab("cases")} />
+        <TabButton active={tab === "cases"} count={filtered.cases.length} label={copy("Casos", "Cases")} onClick={() => switchTab("cases")} />
         <TabButton
           active={tab === "inforce"}
           count={filtered.inforce.length}
-          label="Apólices"
+          label={copy("Apólices", "Policies")}
           onClick={() => switchTab("inforce")}
         />
         <TabButton
           active={tab === "reports"}
           count={filtered.reports.length}
-          label="Relatórios"
+          label={copy("Relatórios", "Reports")}
           onClick={() => switchTab("reports")}
         />
       </div>
 
       <label className="mt-4 block">
-        <span className="sr-only">Buscar dados do portal</span>
+        <span className="sr-only">{copy("Buscar dados do portal", "Search portal data")}</span>
         <input
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
             setPage(1);
           }}
-          placeholder="Buscar por apólice, cliente, produto ou status"
+          placeholder={copy("Buscar por apólice, cliente, produto ou status", "Search by policy, client, product, or status")}
           className="w-full rounded-xl border border-border-steel bg-paper px-3 py-3 text-sm text-ink placeholder:text-ink-muted focus:border-teal focus:outline-none focus:ring-4 focus:ring-teal-pale"
         />
       </label>
@@ -205,8 +205,8 @@ export function NationalLifeDataTabs({
         <div className="mt-5">
           <EmptyState>
             {query.trim()
-              ? "Nenhum registro corresponde à busca. Tente outra apólice ou nome."
-              : "Ainda não há dados sincronizados nesta área."}
+              ? copy("Nenhum registro corresponde à busca. Tente outra apólice ou nome.", "No records match the search. Try another policy or name.")
+              : copy("Ainda não há dados sincronizados nesta área.", "There is no synced data in this area yet.")}
           </EmptyState>
         </div>
       ) : (
@@ -222,10 +222,10 @@ export function NationalLifeDataTabs({
                   {row.carrierStatus ?? "—"}
                 </p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-4">
-                  <Meta label="Produto" value={row.product} />
-                  <Meta label="Enviado em" value={row.submitDate} />
-                  <Meta label="Prêmio anual" value={row.anticipatedAnnualPremium} />
-                  <Meta label="Pendências" value={row.requirements} />
+                  <Meta label={copy("Produto", "Product")} value={row.product} />
+                  <Meta label={copy("Enviado em", "Submitted on")} value={row.submitDate} />
+                  <Meta label={copy("Prêmio anual", "Annual premium")} value={row.anticipatedAnnualPremium} />
+                  <Meta label={copy("Pendências", "Requirements")} value={row.requirements} />
                 </div>
               </EntityCard>
             ))}
@@ -241,10 +241,10 @@ export function NationalLifeDataTabs({
                   {row.policyStatus ?? "—"}
                 </p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-4">
-                  <Meta label="Produto" value={row.productName} />
-                  <Meta label="Titular" value={row.ownerClientName} />
-                  <Meta label="Emissão" value={row.policyIssueDate} />
-                  <Meta label="Agência" value={row.servicingAgencyName} />
+                  <Meta label={copy("Produto", "Product")} value={row.productName} />
+                  <Meta label={copy("Titular", "Owner")} value={row.ownerClientName} />
+                  <Meta label={copy("Emissão", "Issue date")} value={row.policyIssueDate} />
+                  <Meta label={copy("Agência", "Agency")} value={row.servicingAgencyName} />
                 </div>
               </EntityCard>
             ))}
@@ -261,11 +261,11 @@ export function NationalLifeDataTabs({
                   <p className="mt-1 text-xs uppercase tracking-[0.08em] text-ink-muted">
                     {row.gridKey.replace(/_/g, " ").toLowerCase()}
                   </p>
-                  <p className="mt-1 text-xs text-ink-muted">{formatFetchedAt(row.fetchedAt)}</p>
+                  <p className="mt-1 text-xs text-ink-muted">{formatFetchedAt(row.fetchedAt, locale, copy)}</p>
                   {entries.length > 0 && (
                     <div className="mt-3 grid gap-3 sm:grid-cols-4">
                       {entries.map(([field, value]) => (
-                        <Meta key={field} label={field} value={formatAmount(value)} />
+                        <Meta key={field} label={field} value={formatAmount(value, locale)} />
                       ))}
                     </div>
                   )}

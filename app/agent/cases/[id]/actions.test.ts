@@ -53,6 +53,12 @@ vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }
 vi.mock('@/lib/agent-access', () => ({ getAgentScopeIds: mocks.getAgentScopeIds }))
 vi.mock('@/lib/case-access', () => ({ canAccessCase: mocks.canAccessCase }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
+vi.mock('@/lib/i18n/server', () => ({
+  getServerI18n: vi.fn(async () => ({
+    language: 'PT',
+    copy: (portuguese: string) => portuguese,
+  })),
+}))
 vi.mock('@/lib/crm', () => ({
   CrmDomainError: class CrmDomainError extends Error {},
   cancelFollowUp: vi.fn(),

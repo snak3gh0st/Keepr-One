@@ -1,13 +1,20 @@
 // @vitest-environment jsdom
 
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { LanguageProvider } from "@/components/i18n/LanguageProvider";
 
 vi.mock("./actions", () => ({
   createAgencyInvitationAction: vi.fn(),
   revokeAgencyInvitationAction: vi.fn(),
   updateAgencyRecruitmentStageAction: vi.fn(),
+}));
+vi.mock("@/lib/auth-client", () => ({
+  authClient: { updateUser: vi.fn() },
+}));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 
 import {
@@ -16,6 +23,8 @@ import {
   RecruitmentStageForm,
   RevokeInvitationForm,
 } from "./AgencyInvitationForms";
+
+afterEach(cleanup);
 
 describe("AgencyInvitationForm", () => {
   it("collects only the information needed to send the invitation", () => {
@@ -61,6 +70,19 @@ describe("AgencyInvitationForm", () => {
       "href",
       invitationUrl,
     );
+  });
+
+  it("renders the invitation flow in English when EN is selected", () => {
+    render(
+      <LanguageProvider initialLanguage="EN">
+        <AgencyInvitationForm agencyName="North Star Agency" />
+      </LanguageProvider>,
+    );
+
+    expect(screen.getByLabelText(/Person or contact name/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send invitation by email" })).toBeEnabled();
+    expect(screen.getByText(/\$49\.90\/month/i)).toBeVisible();
+    expect(screen.getByText(/North Star Agency team/i)).toBeVisible();
   });
 });
 

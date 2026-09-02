@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   revalidatePath: vi.fn(),
   transaction: vi.fn(),
   agentFindUnique: vi.fn(),
+  userFindUnique: vi.fn(),
   membershipFindFirst: vi.fn(),
   invitationUpdateMany: vi.fn(),
   invitationFindFirst: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("@/lib/email/send", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     agent: { findUnique: mocks.agentFindUnique },
+    user: { findUnique: mocks.userFindUnique },
     agencyMembership: { findFirst: mocks.membershipFindFirst },
     agencyInvitation: {
       updateMany: mocks.invitationUpdateMany,
@@ -103,6 +105,7 @@ beforeEach(() => {
     agency: { id: "agency-1", name: "North Star" },
   });
   mocks.agentFindUnique.mockResolvedValue({ userId: "owner-user" });
+  mocks.userFindUnique.mockResolvedValue({ language: "PT" });
   mocks.membershipFindFirst.mockResolvedValue(null);
   mocks.invitationUpdateMany.mockResolvedValue({ count: 0 });
   mocks.invitationFindFirst.mockResolvedValue(null);
@@ -179,6 +182,7 @@ describe("createAgencyInvitationAction", () => {
       monthlyPriceCents: 4_990,
       invitationUrl: result.invitationUrl,
       expiresAt: new Date("2026-09-09T16:00:00.000Z"),
+      language: "PT",
     });
   });
 

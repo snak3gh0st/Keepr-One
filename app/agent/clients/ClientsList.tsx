@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/Table";
 import { EntityCard, EntityCardList } from "@/components/EntityCard";
 import { Avatar } from "@/components/Avatar";
 import { Pagination, clampPage } from "@/components/Pagination";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 type Client = {
   id: string;
@@ -19,9 +20,9 @@ type SortDirection = "asc" | "desc";
 
 const CLIENTS_PER_PAGE = 12;
 const ALL_AGENTS = "__all__";
-const collator = new Intl.Collator("pt-BR", { numeric: true, sensitivity: "base" });
-
 export function ClientsList({ clients }: { clients: Client[] }) {
+  const { copy, locale } = useI18n();
+  const collator = useMemo(() => new Intl.Collator(locale, { numeric: true, sensitivity: "base" }), [locale]);
   const queryId = useId();
   const agentSelectId = useId();
   const sortId = useId();
@@ -41,11 +42,11 @@ export function ClientsList({ clients }: { clients: Client[] }) {
           ]),
         ).values(),
       ).sort((left, right) => collator.compare(left.name, right.name)),
-    [clients],
+    [clients, collator],
   );
 
   const filteredClients = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+    const normalizedQuery = query.trim().toLocaleLowerCase(locale);
     const direction = sortDirection === "asc" ? 1 : -1;
 
     return clients
@@ -54,8 +55,8 @@ export function ClientsList({ clients }: { clients: Client[] }) {
           selectedAgentId === ALL_AGENTS || client.agentId === selectedAgentId;
         const matchesQuery =
           normalizedQuery.length === 0 ||
-          client.name.toLocaleLowerCase("pt-BR").includes(normalizedQuery) ||
-          (client.email ?? "").toLocaleLowerCase("pt-BR").includes(normalizedQuery);
+          client.name.toLocaleLowerCase(locale).includes(normalizedQuery) ||
+          (client.email ?? "").toLocaleLowerCase(locale).includes(normalizedQuery);
 
         const matchesContact = !onlyMissingEmail || !client.email;
 
@@ -66,7 +67,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
         if (byName !== 0) return direction * byName;
         return direction * collator.compare(a.agentName, b.agentName);
       });
-  }, [clients, query, selectedAgentId, sortDirection, onlyMissingEmail]);
+  }, [clients, query, selectedAgentId, sortDirection, onlyMissingEmail, collator, locale]);
 
   const missingEmailCount = useMemo(
     () => clients.filter((client) => !client.email).length,
@@ -100,13 +101,13 @@ export function ClientsList({ clients }: { clients: Client[] }) {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
-            Base de clientes
+            {copy("Base de clientes", "Client base")}
           </p>
           <h2
             id="clients-list-title"
             className="mt-2 text-2xl font-medium tracking-[-0.04em] text-ink sm:text-3xl"
           >
-            Encontre quem precisa de você.
+            {copy("Encontre quem precisa de você.", "Find who needs you.")}
           </h2>
         </div>
         <p
@@ -116,8 +117,8 @@ export function ClientsList({ clients }: { clients: Client[] }) {
           aria-atomic="true"
         >
           {filteredClients.length === clients.length
-            ? `${clients.length} ${clients.length === 1 ? "cliente" : "clientes"}`
-            : `${filteredClients.length} de ${clients.length} clientes`}
+            ? clients.length === 1 ? copy("1 cliente", "1 client") : copy("{count} clientes", "{count} clients", { count: clients.length })
+            : copy("{filtered} de {total} clientes", "{filtered} of {total} clients", { filtered: filteredClients.length, total: clients.length })}
         </p>
       </div>
 
@@ -140,7 +141,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
           }`}
         >
           <span className="font-mono tabular-nums">{missingEmailCount}</span>
-          <span>sem e-mail cadastrado</span>
+          <span>{copy("sem e-mail cadastrado", "without an email address")}</span>
         </button>
       )}
 
@@ -148,7 +149,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
         <div className="mt-6 grid gap-3 rounded-2xl border border-border-steel/80 bg-panel/55 p-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.7fr)_minmax(180px,0.8fr)_minmax(160px,0.65fr)]">
           <label htmlFor={queryId} className="grid gap-1.5">
             <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-              Buscar
+              {copy("Buscar", "Search")}
             </span>
             <input
               id={queryId}
@@ -158,7 +159,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
                 setQuery(event.target.value);
                 setPage(1);
               }}
-              placeholder="Nome ou e-mail"
+              placeholder={copy("Nome ou e-mail", "Name or email")}
               autoComplete="off"
               aria-controls="clients-results"
               className="min-h-11 w-full rounded-xl border border-border-steel bg-paper/85 px-3.5 py-2.5 text-sm text-ink outline-none transition-[background-color,border-color,box-shadow] placeholder:text-ink-muted/70 hover:border-teal/50 hover:bg-paper focus:border-teal focus:bg-paper focus:ring-[3px] focus:ring-teal-pale"
@@ -167,7 +168,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
 
           <label htmlFor={agentSelectId} className="grid gap-1.5">
             <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-              Responsável
+              {copy("Responsável", "Owner")}
             </span>
             <select
               id={agentSelectId}
@@ -179,7 +180,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
               aria-controls="clients-results"
               className="min-h-11 w-full rounded-xl border border-border-steel bg-paper/85 px-3.5 py-2.5 text-sm text-ink outline-none transition-[background-color,border-color,box-shadow] hover:border-teal/50 hover:bg-paper focus:border-teal focus:bg-paper focus:ring-[3px] focus:ring-teal-pale"
             >
-              <option value={ALL_AGENTS}>Todos os agentes</option>
+              <option value={ALL_AGENTS}>{copy("Todos os agentes", "All agents")}</option>
               {agents.map((agentItem) => (
                 <option key={agentItem.id} value={agentItem.id}>
                   {agentItem.name}
@@ -190,7 +191,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
 
           <label htmlFor={sortId} className="grid gap-1.5 sm:col-span-2 xl:col-span-1">
             <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-              Ordenar
+              {copy("Ordenar", "Sort")}
             </span>
             <select
               id={sortId}
@@ -202,8 +203,8 @@ export function ClientsList({ clients }: { clients: Client[] }) {
               aria-controls="clients-results"
               className="min-h-11 w-full rounded-xl border border-border-steel bg-paper/85 px-3.5 py-2.5 text-sm text-ink outline-none transition-[background-color,border-color,box-shadow] hover:border-teal/50 hover:bg-paper focus:border-teal focus:bg-paper focus:ring-[3px] focus:ring-teal-pale"
             >
-              <option value="asc">Nome: A–Z</option>
-              <option value="desc">Nome: Z–A</option>
+              <option value="asc">{copy("Nome: A–Z", "Name: A–Z")}</option>
+              <option value="desc">{copy("Nome: Z–A", "Name: Z–A")}</option>
             </select>
           </label>
         </div>
@@ -212,7 +213,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
       <div id="clients-results" className="mt-6">
         {clients.length === 0 ? (
           <EmptyState>
-            Nenhum cliente está disponível nesta base. Eles aparecerão aqui quando forem vinculados à sua operação.
+            {copy("Nenhum cliente está disponível nesta base. Eles aparecerão aqui quando forem vinculados à sua operação.", "No clients are available in this base. They will appear here when linked to your operation.")}
           </EmptyState>
         ) : filteredClients.length === 0 ? (
           <div className="module-empty-state">
@@ -222,13 +223,13 @@ export function ClientsList({ clients }: { clients: Client[] }) {
               <i />
             </span>
             <div>
-              <p>Nenhum cliente corresponde à busca ou ao agente selecionado.</p>
+              <p>{copy("Nenhum cliente corresponde à busca ou ao agente selecionado.", "No client matches the search or selected agent.")}</p>
               <button
                 type="button"
                 onClick={clearFilters}
                 className="mt-4 inline-flex min-h-11 items-center justify-center rounded-full bg-rail-strong px-5 py-2.5 text-sm font-semibold text-paper transition-[background-color,transform] hover:-translate-y-0.5 hover:bg-rail focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
               >
-                Limpar busca e filtros
+                {copy("Limpar busca e filtros", "Clear search and filters")}
               </button>
             </div>
           </div>
@@ -236,7 +237,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
           <>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-0.5">
               <p className="text-xs text-ink-muted">
-                Mostrando <span className="font-mono text-ink">{firstVisible}–{lastVisible}</span> de{" "}
+                {copy("Mostrando", "Showing")} <span className="font-mono text-ink">{firstVisible}–{lastVisible}</span> {copy("de", "of")}{" "}
                 <span className="font-mono text-ink">{filteredClients.length}</span>
               </p>
               {hasActiveFilters && (
@@ -245,7 +246,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
                   onClick={clearFilters}
                   className="min-h-9 rounded-full border border-border-steel bg-paper/75 px-3.5 py-1.5 text-xs font-semibold text-ink-muted transition-colors hover:border-teal hover:text-teal focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
                 >
-                  Limpar filtros
+                  {copy("Limpar filtros", "Clear filters")}
                 </button>
               )}
             </div>
@@ -264,12 +265,12 @@ export function ClientsList({ clients }: { clients: Client[] }) {
                       </Link>
                     </p>
                     <p className="truncate text-xs text-ink-muted">
-                      {client.email ?? "Sem e-mail cadastrado"}
+                      {client.email ?? copy("Sem e-mail cadastrado", "No email address")}
                     </p>
                   </div>
                   <div className="min-w-0 basis-full border-t border-border-steel/70 pt-2 sm:basis-auto sm:border-t-0 sm:pt-0 sm:text-right">
                     <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-                      Responsável
+                      {copy("Responsável", "Owner")}
                     </p>
                     <p className="mt-1 truncate text-xs font-medium text-ink">
                       {client.agentName}

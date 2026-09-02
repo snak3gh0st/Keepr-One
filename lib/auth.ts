@@ -9,6 +9,8 @@ import {
 } from '@/lib/email/send'
 import { createRedisSecondaryStorage } from '@/lib/redis/secondary-storage'
 import { allowLocalEmailChangeWithoutVerification } from '@/lib/email-change-config'
+import { z } from 'zod'
+import { normalizeLanguage } from '@/lib/i18n/config'
 
 const configuredBaseURL = process.env.BETTER_AUTH_URL
 const localBaseURL = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : undefined
@@ -63,14 +65,22 @@ export const auth = betterAuth({
     maxPasswordLength: 128,
     revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => {
-      await sendResetPasswordEmail({ to: user.email, resetUrl: url })
+      await sendResetPasswordEmail({
+        to: user.email,
+        resetUrl: url,
+        language: normalizeLanguage((user as typeof user & { language?: unknown }).language) ?? 'PT',
+      })
     },
   },
   emailVerification: {
     expiresIn: 60 * 60,
     sendVerificationEmail: async ({ user, url }) => {
       if (localEmailChangePreview && !process.env.RESEND_API_KEY) return
-      await sendVerificationEmail({ to: user.email, verificationUrl: url })
+      await sendVerificationEmail({
+        to: user.email,
+        verificationUrl: url,
+        language: normalizeLanguage((user as typeof user & { language?: unknown }).language) ?? 'PT',
+      })
     },
   },
   user: {
@@ -85,12 +95,19 @@ export const auth = betterAuth({
           to: user.email,
           newEmail,
           confirmationUrl: url,
+          language: normalizeLanguage((user as typeof user & { language?: unknown }).language) ?? 'PT',
         })
       },
     },
     additionalFields: {
       // Never accept authorization roles from a public auth request body.
       role: { type: 'string', required: true, defaultValue: 'AGENT', input: false },
+      language: {
+        type: 'string',
+        required: true,
+        defaultValue: 'PT',
+        validator: { input: z.enum(['PT', 'EN']) },
+      },
     },
   },
   // Server Actions need this bridge to persist Set-Cookie headers produced by

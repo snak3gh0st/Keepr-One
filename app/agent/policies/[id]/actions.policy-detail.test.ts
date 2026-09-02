@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   policyFind: vi.fn(),
   requestRefresh: vi.fn(),
   revalidate: vi.fn(),
+  language: { current: 'PT' as 'PT' | 'EN' },
 }))
 
 vi.mock('@/lib/require-role', () => ({ requireRole: mocks.requireRole }))
@@ -26,12 +27,19 @@ vi.mock('@/lib/national-life/connector-command-service', () => ({
 }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }))
 vi.mock('@/lib/storage', () => ({ buildStoredPath: vi.fn(), saveUploadedFile: vi.fn() }))
+vi.mock('@/lib/i18n/server', () => ({
+  getServerI18n: async () => ({
+    language: mocks.language.current,
+    copy: (pt: string, en: string) => mocks.language.current === 'PT' ? pt : en,
+  }),
+}))
 
 import { refreshNationalLifePolicyDetail } from './actions'
 
 describe('refreshNationalLifePolicyDetail action', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.language.current = 'PT'
     mocks.requireRole.mockResolvedValue({ user: { role: 'AGENT' } })
     mocks.currentAgent.mockResolvedValue({ id: 'agent_1' })
     mocks.policyFind.mockResolvedValue({
@@ -60,5 +68,17 @@ describe('refreshNationalLifePolicyDetail action', () => {
       ok: false, message: 'Apólice fora da sua carteira.',
     })
     expect(mocks.requestRefresh).not.toHaveBeenCalled()
+  })
+
+  it('returns authorization errors in the selected English language', async () => {
+    mocks.language.current = 'EN'
+    mocks.policyFind.mockResolvedValueOnce({
+      id: 'policy_2', agentId: 'agent_2', policyNumber: 'LS2', carrier: 'National Life',
+    })
+
+    await expect(refreshNationalLifePolicyDetail('policy_2')).resolves.toEqual({
+      ok: false,
+      message: 'Policy is outside your book.',
+    })
   })
 })

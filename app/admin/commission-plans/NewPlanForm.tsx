@@ -5,8 +5,10 @@ import { createCommissionPlan } from "./actions";
 import { Field, Input, Select } from "@/components/Field";
 import { Button } from "@/components/Button";
 import { RANKS } from "@/lib/ranks";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 export function NewPlanForm() {
+  const { copy } = useI18n();
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -17,7 +19,7 @@ export function NewPlanForm() {
     setSubmitting(false);
     setMessage(
       result.ok
-        ? { ok: true, text: "Plano salvo." }
+        ? { ok: true, text: copy("Plano salvo.", "Plan saved.") }
         : { ok: false, text: result.message },
     );
   }
@@ -25,10 +27,10 @@ export function NewPlanForm() {
   return (
     <div>
       <form action={handleSubmit} className="flex flex-wrap items-end gap-3">
-        <Field label="Rank">
+        <Field label={copy('Cargo', 'Rank')}>
           <Select name="rank" required className="w-40" defaultValue="">
             <option value="" disabled>
-              Selecione…
+              {copy('Selecione…', 'Select…')}
             </option>
             {RANKS.map((r) => (
               <option key={r} value={r}>
@@ -37,23 +39,23 @@ export function NewPlanForm() {
             ))}
           </Select>
         </Field>
-        <Field label="Nível">
+        <Field label={copy('Nível', 'Level')}>
           <Input name="downlineLevel" type="number" min={1} placeholder="1" required className="w-24" />
         </Field>
-        <Field label="% override">
+        <Field label={copy('% sobrecomissão', '% override')}>
           <Input
             name="overridePercent"
             type="number"
             step="0.01"
             min={0}
             max={100}
-            placeholder="10.00"
+            placeholder={copy('10,00', '10.00')}
             required
             className="w-28"
           />
         </Field>
         <Button type="submit" variant="primary" disabled={submitting}>
-          {submitting ? "Salvando…" : "Salvar"}
+          {submitting ? copy("Salvando…", "Saving…") : copy("Salvar", "Save")}
         </Button>
       </form>
       {message && (

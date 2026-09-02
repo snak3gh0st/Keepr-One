@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 import { CalendarEventCard } from "./CalendarEventCard";
 import { CalendarEventModal } from "./CalendarEventModal";
 import { CalendarQuickCreate, type CalendarQuickDraft, type CalendarQuickSlot } from "./CalendarQuickCreate";
@@ -185,24 +186,25 @@ function eventRangeFromApi(arg: EventDropArg | EventResizeDoneArg, timeZone: str
   };
 }
 
-function connectionCopy(data: CalendarPageData) {
+function connectionCopy(data: CalendarPageData, copy: (pt: string, en: string) => string) {
   switch (data.connection.status) {
     case "CONNECTED":
-      return { title: "Google conectado", detail: data.connection.email ?? "Agenda sincronizada", tone: "connected" };
+      return { title: copy("Google conectado", "Google connected"), detail: data.connection.email ?? copy("Agenda sincronizada", "Calendar synced"), tone: "connected" };
     case "SYNCING":
-      return { title: "Sincronizando", detail: "Buscando as últimas alterações…", tone: "syncing" };
+      return { title: copy("Sincronizando", "Syncing"), detail: copy("Buscando as últimas alterações…", "Fetching the latest changes…"), tone: "syncing" };
     case "RECONNECT_REQUIRED":
-      return { title: "Reconecte o Google", detail: "A autorização expirou.", tone: "warning" };
+      return { title: copy("Reconecte o Google", "Reconnect Google"), detail: copy("A autorização expirou.", "Authorization has expired."), tone: "warning" };
     case "ERROR":
-      return { title: "Sincronização pausada", detail: data.connection.errorMessage ?? "Tente novamente em instantes.", tone: "error" };
+      return { title: copy("Sincronização pausada", "Sync paused"), detail: copy("Revise a conexão ou tente novamente em instantes.", "Review the connection or try again in a moment."), tone: "error" };
     case "NOT_CONFIGURED":
-      return { title: "Integração indisponível", detail: "A configuração do Google ainda não foi concluída.", tone: "warning" };
+      return { title: copy("Integração indisponível", "Integration unavailable"), detail: copy("A configuração do Google ainda não foi concluída.", "Google setup has not been completed yet."), tone: "warning" };
     default:
-      return { title: "Google Calendar", detail: "Conecte sua agenda para começar.", tone: "neutral" };
+      return { title: "Google Calendar", detail: copy("Conecte sua agenda para começar.", "Connect your calendar to get started."), tone: "neutral" };
   }
 }
 
 export function CalendarWorkspace(props: CalendarWorkspaceProps) {
+  const { copy, language, locale } = useI18n();
   const { onResolveEvent } = props;
   const searchParams = useSearchParams();
   const requestedEventId = searchParams.get("event");
@@ -233,7 +235,7 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
   const preferencesBusyRef = useRef(false);
   const router = useRouter();
   const pathname = usePathname();
-  const connection = connectionCopy(data);
+  const connection = connectionCopy(data, copy);
 
   useEffect(() => {
     dataRef.current = data;
@@ -261,7 +263,7 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
     void onResolveEvent(requestedEventId).then((event) => {
       if (requestId !== deepLinkRequestRef.current) return;
       if (!event) {
-        setMessage("Esse compromisso não está mais disponível.");
+        setMessage(copy("Esse compromisso não está mais disponível.", "This event is no longer available."));
         return;
       }
       openedDeepLinkRef.current = requestedEventId;
@@ -270,9 +272,9 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
         : { ...current, events: [...current.events, event] });
       setModal({ mode: "details", event });
     }).catch(() => {
-      if (requestId === deepLinkRequestRef.current) setMessage("Esse compromisso não está mais disponível.");
+      if (requestId === deepLinkRequestRef.current) setMessage(copy("Esse compromisso não está mais disponível.", "This event is no longer available."));
     });
-  }, [onResolveEvent, requestedEventId]);
+  }, [copy, onResolveEvent, requestedEventId]);
 
   useEffect(() => {
     if (searchParams.get("create") === "1") {
@@ -354,7 +356,7 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
         dataRef.current = result;
         setData(result);
       } catch {
-        if (requestId === rangeRequestRef.current) setMessage("Não foi possível carregar esse período.");
+        if (requestId === rangeRequestRef.current) setMessage(copy("Não foi possível carregar esse período.", "This period could not be loaded."));
       } finally {
         if (requestId === rangeRequestRef.current) lastRequestedRangeRef.current = null;
       }
@@ -450,7 +452,7 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
     const nextCalendars = previous.map((item) => item.id === calendar.id ? { ...item, visible } : item);
     const defaultCalendar = nextCalendars.find((item) => item.isDefault && item.visible) ?? nextCalendars.find((item) => item.canWrite && item.visible);
     if (!defaultCalendar) {
-      setMessage("Mantenha ao menos um calendário gravável visível.");
+      setMessage(copy("Mantenha ao menos um calendário gravável visível.", "Keep at least one writable calendar visible."));
       preferencesBusyRef.current = false;
       setSavingPreferences(false);
       return;
@@ -470,7 +472,7 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
     } catch {
       dataRef.current = { ...dataRef.current, calendars: previous };
       setData((current) => ({ ...current, calendars: previous }));
-      setMessage("Não foi possível salvar a visibilidade dos calendários.");
+      setMessage(copy("Não foi possível salvar a visibilidade dos calendários.", "Calendar visibility could not be saved."));
     } finally {
       preferencesBusyRef.current = false;
       setSavingPreferences(false);
@@ -502,7 +504,7 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
     } catch {
       dataRef.current = { ...dataRef.current, calendars: previous };
       setData((current) => ({ ...current, calendars: previous }));
-      setMessage("Não foi possível definir o calendário padrão.");
+      setMessage(copy("Não foi possível definir o calendário padrão.", "The default calendar could not be set."));
     } finally {
       preferencesBusyRef.current = false;
       setSavingPreferences(false);
@@ -538,11 +540,11 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
   return (
     <div className="calendar-workspace">
       <PageHeader
-        title="Agenda"
-        eyebrow="Compromissos em curso"
+        title={copy("Agenda", "Calendar")}
+        eyebrow={copy("Compromissos em curso", "Events in progress")}
         description={(
           <div className="calendar-header-copy">
-            <p>Organize reuniões, compromissos e follow-ups no mesmo fluxo do CRM.</p>
+            <p>{copy("Organize reuniões, compromissos e follow-ups no mesmo fluxo do CRM.", "Organize meetings, events, and follow-ups in the same CRM flow.")}</p>
             <div className="calendar-command-status" data-tone={connection.tone}>
               <i />
               <strong>{connection.title}</strong>
@@ -553,51 +555,51 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
       >
         <div className="calendar-header-actions">
           <Link href="/agent/integrations/google-calendar/scheduling">
-            Link de agendamento <span aria-hidden="true">→</span>
+            {copy("Link de agendamento", "Scheduling link")} <span aria-hidden="true">→</span>
           </Link>
           {data.connection.status === "CONNECTED" || data.connection.status === "SYNCING" ? (
-            <button type="button" onClick={async () => { try { setData(await props.onRefresh(data.range)); } catch { setMessage("Não foi possível recarregar a agenda."); } }}>
-              {data.connection.status === "SYNCING" ? "Atualizar status" : "Recarregar"} <span aria-hidden="true">↻</span>
+            <button type="button" onClick={async () => { try { setData(await props.onRefresh(data.range)); } catch { setMessage(copy("Não foi possível recarregar a agenda.", "The calendar could not be reloaded.")); } }}>
+              {data.connection.status === "SYNCING" ? copy("Atualizar status", "Update status") : copy("Recarregar", "Reload")} <span aria-hidden="true">↻</span>
             </button>
           ) : data.connection.status === "RECONNECT_REQUIRED" ? (
-            <Link href="/api/agent/integrations/google-calendar/authorize?returnTo=/agent/calendar">Reconectar Google <span aria-hidden="true">↗</span></Link>
+            <Link href="/api/agent/integrations/google-calendar/authorize?returnTo=/agent/calendar">{copy("Reconectar Google", "Reconnect Google")} <span aria-hidden="true">↗</span></Link>
           ) : data.connection.status === "ERROR" ? (
-            <Link href="/agent/integrations/google-calendar">Revisar sincronização <span aria-hidden="true">→</span></Link>
+            <Link href="/agent/integrations/google-calendar">{copy("Revisar sincronização", "Review sync")} <span aria-hidden="true">→</span></Link>
           ) : data.connection.status === "NOT_CONFIGURED" ? (
-            <Link href="/agent/integrations/google-calendar">Ver configuração <span aria-hidden="true">→</span></Link>
+            <Link href="/agent/integrations/google-calendar">{copy("Ver configuração", "View setup")} <span aria-hidden="true">→</span></Link>
           ) : (
-            <Link href="/agent/integrations/google-calendar">Conectar Google <span aria-hidden="true">↗</span></Link>
+            <Link href="/agent/integrations/google-calendar">{copy("Conectar Google", "Connect Google")} <span aria-hidden="true">↗</span></Link>
           )}
           <button type="button" className="calendar-create-button" onClick={() => setModal({ mode: "create", start: null, end: null, allDay: false })}>
-            <span aria-hidden="true">+</span> Novo compromisso
+            <span aria-hidden="true">+</span> {copy("Novo compromisso", "New event")}
           </button>
         </div>
       </PageHeader>
 
-      {message ? <div className="calendar-inline-alert" role="alert"><span>{message}</span><button type="button" onClick={() => setMessage(null)} aria-label="Fechar aviso">×</button></div> : null}
-      {moveConflict ? <div className="calendar-move-conflict" role="alert"><div><strong>{moveConflict.message}</strong><span>O compromisso voltou ao horário anterior.</span></div><div><button type="button" onClick={() => setMoveConflict(null)}>Manter horário atual</button><button type="button" onClick={() => void confirmMoveConflict()}>Mover mesmo assim</button></div></div> : null}
+      {message ? <div className="calendar-inline-alert" role="alert"><span>{message}</span><button type="button" onClick={() => setMessage(null)} aria-label={copy("Fechar aviso", "Close notice")}>×</button></div> : null}
+      {moveConflict ? <div className="calendar-move-conflict" role="alert"><div><strong>{moveConflict.message}</strong><span>{copy("O compromisso voltou ao horário anterior.", "The event returned to its previous time.")}</span></div><div><button type="button" onClick={() => setMoveConflict(null)}>{copy("Manter horário atual", "Keep current time")}</button><button type="button" onClick={() => void confirmMoveConflict()}>{copy("Mover mesmo assim", "Move anyway")}</button></div></div> : null}
 
-      <div className="calendar-toolbar" aria-label="Controles da agenda">
+      <div className="calendar-toolbar" aria-label={copy("Controles da agenda", "Calendar controls")}>
         <div className="calendar-date-controls">
-          <button type="button" onClick={() => calendarRef.current?.getApi().prev()} aria-label="Período anterior">←</button>
-          <button type="button" onClick={() => calendarRef.current?.getApi().today()}>Hoje</button>
-          <button type="button" onClick={() => calendarRef.current?.getApi().next()} aria-label="Próximo período">→</button>
+          <button type="button" onClick={() => calendarRef.current?.getApi().prev()} aria-label={copy("Período anterior", "Previous period")}>←</button>
+          <button type="button" onClick={() => calendarRef.current?.getApi().today()}>{copy("Hoje", "Today")}</button>
+          <button type="button" onClick={() => calendarRef.current?.getApi().next()} aria-label={copy("Próximo período", "Next period")}>→</button>
         </div>
         <strong className="calendar-period-title" aria-live="polite">{calendarTitle}</strong>
-        <div className="calendar-view-switch" role="group" aria-label="Visualização">
+        <div className="calendar-view-switch" role="group" aria-label={copy("Visualização", "View")}>
           {(["month", "week", "day", "list"] as CalendarViewMode[]).map((mode) => (
             <button key={mode} type="button" data-active={view === mode || undefined} aria-pressed={view === mode} onClick={() => changeView(mode)}>
-              {{ month: "Mês", week: "Semana", day: "Dia", list: "Lista" }[mode]}
+              {{ month: copy("Mês", "Month"), week: copy("Semana", "Week"), day: copy("Dia", "Day"), list: copy("Lista", "List") }[mode]}
             </button>
           ))}
         </div>
-        {loadingRange ? <span className="calendar-loading-label">Atualizando período…</span> : null}
+        {loadingRange ? <span className="calendar-loading-label">{copy("Atualizando período…", "Updating period…")}</span> : null}
       </div>
 
       <div className="calendar-layout">
         <aside className="calendar-sidebar">
           <section>
-            <div className="calendar-sidebar-heading"><div><span>Calendários</span><strong>Visibilidade</strong></div><Link href="/agent/integrations/google-calendar">Configurar</Link></div>
+            <div className="calendar-sidebar-heading"><div><span>{copy("Calendários", "Calendars")}</span><strong>{copy("Visibilidade", "Visibility")}</strong></div><Link href="/agent/integrations/google-calendar">{copy("Configurar", "Settings")}</Link></div>
             {data.calendars.length ? (
               <ul className="calendar-source-list">
                 {data.calendars.map((calendar) => (
@@ -607,18 +609,18 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
                       <i style={{ background: calendar.color }} />
                       <span>{calendar.name}</span>
                     </label>
-                    {calendar.canWrite ? <button type="button" disabled={savingPreferences} data-default={calendar.isDefault || undefined} onClick={() => void setDefaultCalendar(calendar)} aria-label={`${calendar.name}${calendar.isDefault ? " é o calendário padrão" : ": definir como padrão"}`}>{calendar.isDefault ? "Padrão" : "Definir"}</button> : null}
+                    {calendar.canWrite ? <button type="button" disabled={savingPreferences} data-default={calendar.isDefault || undefined} onClick={() => void setDefaultCalendar(calendar)} aria-label={calendar.isDefault ? copy("{name} é o calendário padrão", "{name} is the default calendar", { name: calendar.name }) : copy("{name}: definir como padrão", "{name}: set as default", { name: calendar.name })}>{calendar.isDefault ? copy("Padrão", "Default") : copy("Definir", "Set")}</button> : null}
                   </li>
                 ))}
               </ul>
             ) : (
-              <div className="calendar-source-empty"><p>Nenhum calendário disponível.</p><Link href="/agent/integrations/google-calendar">Conectar Google</Link></div>
+              <div className="calendar-source-empty"><p>{copy("Nenhum calendário disponível.", "No calendars available.")}</p><Link href="/agent/integrations/google-calendar">{copy("Conectar Google", "Connect Google")}</Link></div>
             )}
           </section>
           <section className="calendar-sidebar-guide">
-            <span>Atalhos</span>
-            <p>Selecione um horário para criar. Arraste um compromisso para reagendar.</p>
-            <small>Alterações no Google são salvas em segundo plano — sua agenda não para por uma falha externa.</small>
+            <span>{copy("Atalhos", "Shortcuts")}</span>
+            <p>{copy("Selecione um horário para criar. Arraste um compromisso para reagendar.", "Select a time to create an event. Drag an event to reschedule it.")}</p>
+            <small>{copy("Alterações no Google são salvas em segundo plano — sua agenda não para por uma falha externa.", "Google changes are saved in the background—your calendar keeps working through an external failure.")}</small>
           </section>
         </aside>
 
@@ -631,7 +633,7 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
             <FullCalendar
               ref={calendarRef}
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, luxonPlugin]}
-              locale={ptBrLocale}
+              locale={language === "PT" ? ptBrLocale : "en"}
               {...fullCalendarOptionsForTimeZone(data.timeZone)}
               initialView="timeGridWeek"
               initialDate={data.focusDate}
@@ -676,13 +678,13 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
 
           <div className="calendar-mobile-view">
             <MobileDateRail active={mobileDay} onSelect={selectMobileDay} />
-            <div className="calendar-mobile-day-copy"><span>{new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(displayDateForKey(mobileDay))}</span><strong>{mobileEvents.length} {mobileEvents.length === 1 ? "compromisso" : "compromissos"}</strong></div>
+            <div className="calendar-mobile-day-copy"><span>{new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(displayDateForKey(mobileDay))}</span><strong>{copy("{count} {events}", "{count} {events}", { count: mobileEvents.length, events: mobileEvents.length === 1 ? copy("compromisso", "event") : copy("compromissos", "events") })}</strong></div>
             {mobileEvents.length ? <div className="calendar-mobile-list">{mobileEvents.map((event) => <CalendarEventCard key={event.id} event={event} onOpen={(item) => setModal({ mode: "details", event: item })} />)}</div> : <CalendarEmptyState onCreate={() => openQuickCreate({ start: `${mobileDay}T09:00:00`, end: `${mobileDay}T09:30:00`, allDay: false, anchor: null })} />}
           </div>
         </main>
       </div>
 
-      <button type="button" className="calendar-mobile-create" onClick={() => openQuickCreate({ start: `${mobileDay}T09:00:00`, end: `${mobileDay}T09:30:00`, allDay: false, anchor: null })}><span aria-hidden="true">+</span><span>Agendar</span></button>
+      <button type="button" className="calendar-mobile-create" onClick={() => openQuickCreate({ start: `${mobileDay}T09:00:00`, end: `${mobileDay}T09:30:00`, allDay: false, anchor: null })}><span aria-hidden="true">+</span><span>{copy("Agendar", "Schedule")}</span></button>
 
       {quickCreate ? (
         <CalendarQuickCreate
@@ -722,23 +724,25 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
 }
 
 function CalendarEmptyState({ onCreate }: { onCreate: () => void }) {
+  const { copy } = useI18n();
   return (
     <div className="calendar-empty-state">
       <span aria-hidden="true"><i /><i /><i /></span>
-      <strong>Esse espaço está livre.</strong>
-      <p>Reserve o próximo contato ou conecte o Google Calendar para reunir seus compromissos.</p>
-      <button type="button" onClick={onCreate}>Criar compromisso</button>
+      <strong>{copy("Esse espaço está livre.", "This time is available.")}</strong>
+      <p>{copy("Reserve o próximo contato ou conecte o Google Calendar para reunir seus compromissos.", "Schedule your next contact or connect Google Calendar to bring your events together.")}</p>
+      <button type="button" onClick={onCreate}>{copy("Criar compromisso", "Create event")}</button>
     </div>
   );
 }
 
 function MobileDateRail({ active, onSelect }: { active: string; onSelect: (value: string) => void }) {
+  const { copy, locale } = useI18n();
   const days = Array.from({ length: 9 }, (_, index) => shiftDateKey(active, index - 2));
   return (
-    <div className="calendar-mobile-date-rail" role="list" aria-label="Escolher dia">
+    <div className="calendar-mobile-date-rail" role="list" aria-label={copy("Escolher dia", "Choose day")}>
       {days.map((key) => {
         const date = displayDateForKey(key);
-        return <button type="button" key={key} data-active={key === active || undefined} aria-pressed={key === active} onClick={() => onSelect(key)}><span>{new Intl.DateTimeFormat("pt-BR", { weekday: "short", timeZone: "UTC" }).format(date).replace(".", "")}</span><strong>{new Intl.DateTimeFormat("pt-BR", { day: "2-digit", timeZone: "UTC" }).format(date)}</strong></button>;
+        return <button type="button" key={key} data-active={key === active || undefined} aria-pressed={key === active} onClick={() => onSelect(key)}><span>{new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: "UTC" }).format(date).replace(".", "")}</span><strong>{new Intl.DateTimeFormat(locale, { day: "2-digit", timeZone: "UTC" }).format(date)}</strong></button>;
       })}
     </div>
   );

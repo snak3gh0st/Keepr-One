@@ -23,6 +23,18 @@ export const HIERARCHY_SUBSCRIPTION_STATUS_LABEL: Record<
   NO_SUBSCRIPTION: "Sem assinatura",
 };
 
+export const HIERARCHY_SUBSCRIPTION_STATUS_LABEL_EN: Record<
+  HierarchySubscriptionStatus,
+  string
+> = {
+  TRIALING: "Trial period",
+  ACTIVE: "Active subscription",
+  PAST_DUE: "Payment pending",
+  CANCELED: "Canceled subscription",
+  EXPIRED: "Expired subscription",
+  NO_SUBSCRIPTION: "No subscription",
+};
+
 const HIERARCHY_SUBSCRIPTION_STATUS_SET = new Set<string>(
   Object.keys(HIERARCHY_SUBSCRIPTION_STATUS_LABEL),
 );

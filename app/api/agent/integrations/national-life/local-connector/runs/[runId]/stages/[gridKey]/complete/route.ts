@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
   isNationalLifeLocalConnectorEnabled,
   localConnectorUnavailableResponse,
 } from '@/lib/national-life/local-connector/config'
@@ -20,6 +21,9 @@ import { ingestPortfolioIfRunFinished } from '@/lib/national-life/portfolio-inge
 import { prismaIngestDeps } from '@/lib/national-life/portfolio-ingest-prisma'
 import { prisma } from '@/lib/prisma'
 import { canAgentReadNationalLifeGrid } from '@/lib/national-life/plan-access'
+import {
+  syncStoredNationalLifePromotionCreditsForAgentSafely,
+} from '@/lib/national-life/promotion-credit-sync'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
 const MAX_COMPLETE_BODY_BYTES = 1_024
@@ -85,7 +89,19 @@ export async function POST(
       // the answer: do not run it again.
       terminal: result.terminal === true,
     })
-    return Response.json({ ...result, portfolio }, { status: 201, headers: NO_STORE })
+    const promotionCredits = result.terminal === true
+      ? await syncStoredNationalLifePromotionCreditsForAgentSafely(
+          {
+            agentId: device.agentId,
+            deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+          },
+          prisma,
+        )
+      : undefined
+    return Response.json(
+      { ...result, portfolio, ...(promotionCredits ? { promotionCredits } : {}) },
+      { status: 201, headers: NO_STORE },
+    )
   } catch (error) {
     if (error instanceof LocalConnectorSignatureError) {
       return Response.json(

@@ -10,9 +10,10 @@ import { PolicyStatusPill } from "@/components/StatusPill";
 import { PageHeader } from "@/components/PageHeader";
 import { ModuleSummary } from "@/components/ModuleSummary";
 import { computeNeedsAnalysis, type NeedsAnalysisInput } from "@/lib/needs-analysis";
-import { formatMoney } from "@/lib/format";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 import type { CrmStageView } from "@/lib/crm";
 import { CrmStageSelect } from "@/components/crm/CrmStageSelect";
+import { localizedCrmTimelineBody, localizedCrmTimelineTitle } from "@/components/crm/i18n";
 import { FollowUpModal } from "@/components/crm/FollowUpModal";
 import { FollowUpPanel } from "@/components/crm/FollowUpPanel";
 import { CaseMeetingsSection, caseMeetingCopy } from "@/components/calendar/CaseMeetingsSection";
@@ -127,20 +128,74 @@ type CaseData = {
   now: string;
 };
 
-const PRODUCT_LABEL: Record<string, string> = { TERM: "Term", IUL: "IUL", UNDECIDED: "A definir" };
-const OBJECTIVE_LABEL: Record<string, string> = {
-  PROTECTION: "Proteção",
-  ACCUMULATION: "Acumulação",
-  RETIREMENT: "Aposentadoria",
-  LEGACY: "Legado",
-};
-const REQ_LABEL: Record<string, string> = { OPEN: "Pendente", RECEIVED: "Recebido", WAIVED: "Dispensado" };
+function activityTitle(type: string, title: string, copy: (pt: string, en: string, values?: Record<string, string | number>) => string) {
+  if (title === "Caso criado") return copy("Atendimento iniciado", "Case started");
+  if (title === "Needs analysis atualizada") return copy("Análise de necessidades atualizada", "Needs analysis updated");
+  if (title === "Aplicação iniciada") return copy("Aplicação iniciada", "Application started");
+  if (type === "NOTE" && title === "Nota") return copy("Nota", "Note");
+  const calendarTitles: Record<string, readonly [string, string]> = {
+    CALENDAR_EVENT_CREATED: ["Compromisso criado", "Event created"],
+    CALENDAR_EVENT_UPDATED: ["Compromisso atualizado", "Event updated"],
+    CALENDAR_EVENT_CANCELLED: ["Compromisso cancelado", "Event canceled"],
+    CALENDAR_EVENT_ASSOCIATED: ["Compromisso associado ao lead", "Event linked to lead"],
+    MEETING_CANCELLED_FROM_GOOGLE: ["Reunião cancelada pelo Google Calendar", "Meeting canceled in Google Calendar"],
+    MEETING_UPDATED_FROM_GOOGLE: ["Reunião atualizada pelo Google Calendar", "Meeting updated in Google Calendar"],
+    MEETING_ATTENDEE_RESPONSE: ["Participante respondeu ao convite", "Guest responded to the invitation"],
+  };
+  const calendarTitle = calendarTitles[type];
+  if (calendarTitle) return copy(calendarTitle[0], calendarTitle[1]);
+  return localizedCrmTimelineTitle(copy, type, title);
+}
 
-function activityTitle(type: string, title: string) {
-  if (title === "Caso criado") return "Atendimento iniciado";
-  if (title === "Needs analysis atualizada") return "Análise de necessidades atualizada";
-  if (type === "STAGE_CHANGED") return title.replace("Etapa alterada", "Etapa atualizada");
-  return title;
+function activityBody(type: string, body: string | null, locale: string, copy: (pt: string, en: string, values?: Record<string, string | number>) => string) {
+  if (!body) return null;
+  if (type === "CRM_STAGE_CHANGED" || type.startsWith("FOLLOW_UP")) {
+    return localizedCrmTimelineBody(copy, type, body);
+  }
+  if (type === "CASE_CREATED") {
+    const registered = body.match(/^Prospect (.+) registrado\.$/);
+    if (registered) return copy("Prospect {name} registrado.", "Prospect {name} registered.", { name: registered[1] });
+  }
+  if (type === "APPLICATION_STARTED") {
+    const count = body.match(/\d+/)?.[0] ?? "5";
+    return copy("Checklist padrão criado com {count} pendências.", "Standard checklist created with {count} pending items.", { count });
+  }
+  if (type === "NEEDS_ANALYSIS") {
+    const coverage = body.match(/\$[\d,.]+/)?.[0];
+    const amount = coverage ? Number(coverage.replace(/[$,]/g, "")) : Number.NaN;
+    if (Number.isFinite(amount)) {
+      const formatted = new Intl.NumberFormat(locale, { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(amount);
+      return copy("Cobertura recomendada: {coverage}.", "Recommended coverage: {coverage}.", { coverage: formatted });
+    }
+  }
+  if (type.startsWith("CALENDAR_") || type.startsWith("MEETING_")) {
+    let translated = body
+      .replace(" · De ", ` · ${copy("De ", "From ")}`)
+      .replace(" para ", copy(" para ", " to "))
+      .replaceAll(" · dia inteiro", ` · ${copy("dia inteiro", "all day")}`)
+      .replace("data a definir", copy("data a definir", "date TBD"))
+      .replace("horário a definir", copy("horário a definir", "time TBD"))
+      .replace(" confirmou presença.", copy(" confirmou presença.", " accepted."))
+      .replace(" recusou o convite.", copy(" recusou o convite.", " declined."))
+      .replace(" respondeu talvez.", copy(" respondeu talvez.", " responded maybe."))
+      .replace(" voltou a aguardar resposta.", copy(" voltou a aguardar resposta.", " is awaiting a response again."));
+    if (copy("PT", "EN") === "EN") {
+      translated = translated.replace(/\b(\d{2})\/(\d{2})\/(\d{4})\b/g, "$2/$1/$3");
+    }
+    return translated;
+  }
+  return body;
+}
+
+function requirementTitle(title: string, copy: (pt: string, en: string) => string) {
+  const standard: Record<string, string> = {
+    "Formulário de aplicação assinado": copy("Formulário de aplicação assinado", "Signed application form"),
+    "Documento de identidade": copy("Documento de identidade", "Identity document"),
+    "Exame médico / paramédico": copy("Exame médico / paramédico", "Medical / paramedical exam"),
+    "Autorização HIPAA": copy("Autorização HIPAA", "HIPAA authorization"),
+    "Comprovante de pagamento inicial": copy("Comprovante de pagamento inicial", "Initial payment receipt"),
+  };
+  return standard[title] ?? title;
 }
 
 function ageFrom(iso: string | null): number | null {
@@ -154,9 +209,10 @@ function ageFrom(iso: string | null): number | null {
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const { copy } = useI18n();
   return (
     <section className="module-main-surface">
-      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Fluxo do atendimento</p>
+      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">{copy("Fluxo do atendimento", "Case workflow")}</p>
       <h2 className="mt-2 text-xl font-medium tracking-[-0.035em] text-ink">{title}</h2>
       <div className="mt-5">{children}</div>
     </section>
@@ -167,29 +223,17 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-sm text-ink-muted">{children}</p>;
 }
 
-const NEEDS_FIELDS: { key: keyof NeedsAnalysisInput; label: string }[] = [
-  { key: "annualIncome", label: "Renda anual ($)" },
-  { key: "incomeYears", label: "Anos de reposição de renda" },
-  { key: "mortgageBalance", label: "Saldo da hipoteca ($)" },
-  { key: "otherDebts", label: "Outras dívidas ($)" },
-  { key: "finalExpenses", label: "Despesas finais ($)" },
-  { key: "children", label: "Filhos" },
-  { key: "educationPerChild", label: "Educação por filho ($)" },
-  { key: "existingCoverage", label: "Cobertura existente ($)" },
-  { key: "liquidAssets", label: "Ativos líquidos ($)" },
+const NEEDS_FIELDS: { key: keyof NeedsAnalysisInput; pt: string; en: string }[] = [
+  { key: "annualIncome", pt: "Renda anual ($)", en: "Annual income ($)" },
+  { key: "incomeYears", pt: "Anos de reposição de renda", en: "Years of income replacement" },
+  { key: "mortgageBalance", pt: "Saldo da hipoteca ($)", en: "Mortgage balance ($)" },
+  { key: "otherDebts", pt: "Outras dívidas ($)", en: "Other debts ($)" },
+  { key: "finalExpenses", pt: "Despesas finais ($)", en: "Final expenses ($)" },
+  { key: "children", pt: "Filhos", en: "Children" },
+  { key: "educationPerChild", pt: "Educação por filho ($)", en: "Education per child ($)" },
+  { key: "existingCoverage", pt: "Cobertura existente ($)", en: "Existing coverage ($)" },
+  { key: "liquidAssets", pt: "Ativos líquidos ($)", en: "Liquid assets ($)" },
 ];
-
-const usd = formatMoney;
-const TOBACCO_LABEL: Record<string, string> = { NON_TOBACCO: "Não fumante", TOBACCO: "Fumante" };
-const CRM_DATE = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: "America/New_York",
-  dateStyle: "short",
-});
-const CRM_DATE_TIME = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: "America/New_York",
-  dateStyle: "short",
-  timeStyle: "short",
-});
 
 function NeedsAnalysisForm({
   caseId,
@@ -204,6 +248,13 @@ function NeedsAnalysisForm({
   onSaved: () => void;
   onError: (m: string) => void;
 }) {
+  const { copy, locale } = useI18n();
+  const usd = (value: number) => new Intl.NumberFormat(locale, {
+    style: "currency", currency: "USD", maximumFractionDigits: 0,
+  }).format(value);
+  const dateTime = new Intl.DateTimeFormat(locale, {
+    timeZone: "America/New_York", dateStyle: "short", timeStyle: "short",
+  });
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       NEEDS_FIELDS.map((f) => [
@@ -233,7 +284,7 @@ function NeedsAnalysisForm({
       <div className="grid gap-3 sm:grid-cols-3">
         {NEEDS_FIELDS.map((f) => (
           <label key={f.key} className="block">
-            <span className="text-xs text-ink-muted">{f.label}</span>
+            <span className="text-xs text-ink-muted">{copy(f.pt, f.en)}</span>
             <input
               type="number"
               min={0}
@@ -247,18 +298,18 @@ function NeedsAnalysisForm({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-teal-pale px-4 py-3">
         <div className="text-sm text-ink-muted">
-          Necessidade bruta {usd(preview.grossNeed)} − recursos {usd(preview.resources)}
+          {copy("Necessidade bruta", "Gross need")} {usd(preview.grossNeed)} − {copy("recursos", "resources")} {usd(preview.resources)}
         </div>
         <div className="text-lg font-semibold text-ink">
-          Recomendado: {usd(preview.recommendedCoverage)}
+          {copy("Recomendado:", "Recommended:")} {usd(preview.recommendedCoverage)}
         </div>
       </div>
       <Button variant="primary" disabled={pending || saving} onClick={save}>
-        {saved ? "Recalcular e salvar" : "Salvar análise de necessidades"}
+        {saved ? copy("Recalcular e salvar", "Recalculate and save") : copy("Salvar análise de necessidades", "Save needs analysis")}
       </Button>
       {saved && (
         <p className="text-xs text-ink-muted">
-          Última atualização: {CRM_DATE_TIME.format(new Date(saved.savedAt))} · define a cobertura-alvo da oportunidade.
+          {copy("Última atualização: {date} · define a cobertura-alvo da oportunidade.", "Last updated: {date} · defines the opportunity's target coverage.", { date: dateTime.format(new Date(saved.savedAt)) })}
         </p>
       )}
     </div>
@@ -266,6 +317,22 @@ function NeedsAnalysisForm({
 }
 
 export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
+  const { copy, language, locale } = useI18n();
+  const productLabel: Record<string, string> = { TERM: "Term", IUL: "IUL", UNDECIDED: copy("A definir", "Undecided") };
+  const objectiveLabel: Record<string, string> = {
+    PROTECTION: copy("Proteção", "Protection"), ACCUMULATION: copy("Acumulação", "Accumulation"),
+    RETIREMENT: copy("Aposentadoria", "Retirement"), LEGACY: copy("Legado", "Legacy"),
+  };
+  const requirementLabel: Record<string, string> = {
+    OPEN: copy("Pendente", "Pending"), RECEIVED: copy("Recebido", "Received"), WAIVED: copy("Dispensado", "Waived"),
+  };
+  const tobaccoLabel: Record<string, string> = {
+    NO: copy("Nunca fumou", "Never smoked"), FORMER: copy("Ex-fumante", "Former smoker"),
+    YES: copy("Fumante", "Smoker"), NON_TOBACCO: copy("Não fumante", "Non-smoker"),
+    TOBACCO: copy("Fumante", "Smoker"),
+  };
+  const crmDate = new Intl.DateTimeFormat(locale, { timeZone: "America/New_York", dateStyle: "short" });
+  const crmDateTime = new Intl.DateTimeFormat(locale, { timeZone: "America/New_York", dateStyle: "short", timeStyle: "short" });
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
@@ -289,7 +356,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
   const hasApplication = c.applications.length > 0;
   const requirements = c.applications.flatMap((application) => application.requirements);
   const openRequirements = requirements.filter((requirement) => requirement.status === "OPEN").length;
-  const meetingCopy = caseMeetingCopy(c.crmStage?.systemKey ?? null, c.prospect.name);
+  const meetingCopy = caseMeetingCopy(c.crmStage?.systemKey ?? null, c.prospect.name, language);
 
   async function mutateCalendar(
     action: (input: CalendarEventInput) => Promise<CalendarMutationResult>,
@@ -325,7 +392,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
       <CrmNavigation active="opportunities" />
       <PageHeader
         title={c.prospect.name}
-        eyebrow="CRM · Oportunidade em andamento"
+        eyebrow={copy("CRM · Oportunidade em andamento", "CRM · Opportunity in progress")}
         description={
           <div className="space-y-3">
             <CrmStageSelect
@@ -340,7 +407,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
               onFollowUpRequired={setStageFollowUpId}
             />
             <p>
-              {OBJECTIVE_LABEL[c.objective ?? ""] ?? "—"} · {PRODUCT_LABEL[c.productType ?? ""] ?? c.productType ?? "—"} · {c.carrier ?? "—"}
+              {objectiveLabel[c.objective ?? ""] ?? "—"} · {productLabel[c.productType ?? ""] ?? c.productType ?? "—"} · {c.carrier ?? "—"}
             </p>
           </div>
         }
@@ -348,20 +415,20 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         <Link
           href="/agent/cases"
           className="module-detail-back"
-          aria-label="Voltar para o CRM"
+          aria-label={copy("Voltar para o CRM", "Back to CRM")}
         >
           <span className="module-detail-back-icon" aria-hidden="true">
             <svg viewBox="0 0 20 20" fill="none">
               <path d="m11.75 5.25-4.5 4.75 4.5 4.75M7.5 10h7.25" />
             </svg>
           </span>
-          <span>Voltar para o CRM</span>
+          <span>{copy("Voltar para o CRM", "Back to CRM")}</span>
         </Link>
         <Link
           href="/agent/activities"
           className="inline-flex min-h-11 items-center rounded-full border border-white/15 bg-white/[0.06] px-4 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.12]"
         >
-          Ver atividades <span aria-hidden className="ml-2">↗</span>
+          {copy("Ver atividades", "View activities")} <span aria-hidden className="ml-2">↗</span>
         </Link>
         {c.calendar.canManage && c.calendar.connection.status === "CONNECTED" ? (
           <button
@@ -369,36 +436,36 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
             onClick={() => setCalendarModal({ mode: "create" })}
             className="inline-flex min-h-11 items-center rounded-full bg-paper px-4 text-sm font-semibold text-rail-strong transition-transform duration-300 hover:-translate-y-0.5"
           >
-            Agendar reunião <span aria-hidden className="ml-2">＋</span>
+            {copy("Agendar reunião", "Schedule meeting")} <span aria-hidden className="ml-2">＋</span>
           </button>
         ) : null}
       </PageHeader>
 
       <ModuleSummary
-        label={`Resumo da oportunidade de ${c.prospect.name}`}
+        label={copy("Resumo da oportunidade de {name}", "Opportunity summary for {name}", { name: c.prospect.name })}
         items={[
-          { label: "Agente responsável", value: c.agentName, detail: "Responsável atual pelo atendimento", compact: true },
-          { label: "Cobertura alvo", value: c.targetCoverage ?? "—", detail: "Proteção estimada para esta oportunidade", tone: "green" },
-          { label: "Orçamento mensal", value: c.monthlyBudget ? `${c.monthlyBudget}/m` : "—", detail: "Faixa mensal informada pelo cliente" },
-          { label: "Pendências", value: openRequirements, detail: `${requirements.length} pendências no total`, tone: openRequirements > 0 ? "gold" : "neutral" },
+          { label: copy("Agente responsável", "Assigned agent"), value: c.agentName, detail: copy("Responsável atual pelo atendimento", "Current owner of the case"), compact: true },
+          { label: copy("Cobertura alvo", "Target coverage"), value: c.targetCoverage ?? "—", detail: copy("Proteção estimada para esta oportunidade", "Estimated protection for this opportunity"), tone: "green" },
+          { label: copy("Orçamento mensal", "Monthly budget"), value: c.monthlyBudget ? `${c.monthlyBudget}${copy("/mês", "/mo")}` : "—", detail: copy("Faixa mensal informada pelo cliente", "Monthly range provided by the client") },
+          { label: copy("Pendências", "Pending items"), value: openRequirements, detail: copy("{count} pendências no total", "{count} pending items total", { count: requirements.length }), tone: openRequirements > 0 ? "gold" : "neutral" },
         ]}
       />
       {message && <p role="alert" className="text-sm text-danger">{message}</p>}
 
-      <Section title="Resumo">
+      <Section title={copy("Resumo", "Summary")}>
         <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
-          <div><dt className="text-xs text-ink-muted">Agente</dt><dd className="text-sm text-ink">{c.agentName}</dd></div>
-          <div><dt className="text-xs text-ink-muted">Estado</dt><dd className="text-sm text-ink">{c.prospect.state ?? "—"}</dd></div>
-          <div><dt className="text-xs text-ink-muted">Idade</dt><dd className="text-sm text-ink">{age ?? "—"}</dd></div>
-          <div><dt className="text-xs text-ink-muted">Tabaco</dt><dd className="text-sm text-ink">{c.prospect.tobaccoStatus ? (TOBACCO_LABEL[c.prospect.tobaccoStatus] ?? c.prospect.tobaccoStatus) : "—"}</dd></div>
-          <div><dt className="text-xs text-ink-muted">E-mail</dt><dd className="text-sm text-ink">{c.prospect.email ?? "—"}</dd></div>
-          <div><dt className="text-xs text-ink-muted">Telefone</dt><dd className="text-sm text-ink">{c.prospect.phone ?? "—"}</dd></div>
-          <div><dt className="text-xs text-ink-muted">Cobertura alvo</dt><dd className="text-sm text-ink">{c.targetCoverage ?? "—"}</dd></div>
-          <div><dt className="text-xs text-ink-muted">Orçamento mensal</dt><dd className="text-sm text-ink">{c.monthlyBudget ? `${c.monthlyBudget}/m` : "—"}</dd></div>
+          <div><dt className="text-xs text-ink-muted">{copy("Agente", "Agent")}</dt><dd className="text-sm text-ink">{c.agentName}</dd></div>
+          <div><dt className="text-xs text-ink-muted">{copy("Estado", "State")}</dt><dd className="text-sm text-ink">{c.prospect.state ?? "—"}</dd></div>
+          <div><dt className="text-xs text-ink-muted">{copy("Idade", "Age")}</dt><dd className="text-sm text-ink">{age ?? "—"}</dd></div>
+          <div><dt className="text-xs text-ink-muted">{copy("Tabaco", "Tobacco")}</dt><dd className="text-sm text-ink">{c.prospect.tobaccoStatus ? (tobaccoLabel[c.prospect.tobaccoStatus] ?? c.prospect.tobaccoStatus) : "—"}</dd></div>
+          <div><dt className="text-xs text-ink-muted">{copy("E-mail", "Email")}</dt><dd className="text-sm text-ink">{c.prospect.email ?? "—"}</dd></div>
+          <div><dt className="text-xs text-ink-muted">{copy("Telefone", "Phone")}</dt><dd className="text-sm text-ink">{c.prospect.phone ?? "—"}</dd></div>
+          <div><dt className="text-xs text-ink-muted">{copy("Cobertura alvo", "Target coverage")}</dt><dd className="text-sm text-ink">{c.targetCoverage ?? "—"}</dd></div>
+          <div><dt className="text-xs text-ink-muted">{copy("Orçamento mensal", "Monthly budget")}</dt><dd className="text-sm text-ink">{c.monthlyBudget ? `${c.monthlyBudget}${copy("/mês", "/mo")}` : "—"}</dd></div>
         </dl>
       </Section>
 
-      <Section title="Análise de necessidades">
+      <Section title={copy("Análise de necessidades", "Needs analysis")}>
         <NeedsAnalysisForm
           caseId={c.id}
           saved={c.needsAnalysis}
@@ -408,15 +475,15 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         />
       </Section>
 
-      <Section title="Ilustrações">
+      <Section title={copy("Ilustrações", "Illustrations")}>
         {c.illustrations.length === 0 ? (
-          <Empty>Nenhuma ilustração ainda. Ilustrações formais chegam da seguradora ou por importação — nenhum valor é inventado aqui.</Empty>
+          <Empty>{copy("Nenhuma ilustração ainda. Ilustrações formais chegam da seguradora ou por importação — nenhum valor é inventado aqui.", "No illustrations yet. Formal illustrations arrive from the carrier or through import—no values are invented here.")}</Empty>
         ) : (
           <ul className="divide-y divide-border-steel">
             {c.illustrations.map((il) => (
               <li key={il.id} className="flex items-center justify-between py-2 text-sm">
-                <span className="text-ink">{il.productName ?? "Ilustração"} · {il.kind === "PRELIMINARY" ? "Estimativa" : "Oficial"}</span>
-                <span className="font-mono text-ink-muted">{il.faceAmount ?? "—"} · {il.premium ? `${il.premium}/m` : "—"}</span>
+                <span className="text-ink">{il.productName ?? copy("Ilustração", "Illustration")} · {il.kind === "PRELIMINARY" ? copy("Estimativa", "Estimate") : copy("Oficial", "Official")}</span>
+                <span className="font-mono text-ink-muted">{il.faceAmount ?? "—"} · {il.premium ? `${il.premium}${copy("/mês", "/mo")}` : "—"}</span>
               </li>
             ))}
           </ul>
@@ -424,17 +491,20 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
       </Section>
 
       <div id="application" className="scroll-mt-24">
-        <Section title="Aplicação">
+        <Section title={copy("Aplicação", "Application")}>
           {!hasApplication ? (
             <div className="space-y-3">
               <Empty>
-                Nenhuma Application iniciada. A Application deve nascer de uma Illustration com PDF oficial e valores confirmados pela National Life.
+                {copy(
+                  "Nenhuma Application iniciada. A Application deve nascer de uma Illustration com PDF oficial e valores confirmados pela National Life.",
+                  "No Application has been started. The Application must originate from an Illustration with an official PDF and values confirmed by National Life.",
+                )}
               </Empty>
               <Link
                 href="/agent/illustrations?intent=application"
                 className="inline-flex min-h-11 items-center justify-center rounded-md bg-teal-deep px-4 py-2 text-sm font-semibold text-paper transition-colors hover:bg-teal"
               >
-                Escolher Illustration oficial
+                {copy("Escolher Illustration oficial", "Choose official Illustration")}
               </Link>
             </div>
           ) : (
@@ -453,20 +523,20 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         </Section>
       </div>
 
-      <Section title="Pendências">
+      <Section title={copy("Pendências", "Pending items")}>
         {requirements.length === 0 ? (
-          <Empty>Nenhuma pendência. Elas aparecem quando a seguradora solicita documentos durante a análise.</Empty>
+          <Empty>{copy("Nenhuma pendência. Elas aparecem quando a seguradora solicita documentos durante a análise.", "No pending items. They appear when the carrier requests documents during underwriting.")}</Empty>
         ) : (
           <ul className="divide-y divide-border-steel">
             {requirements.map((r) => (
                 <li key={r.id} className="flex items-center justify-between gap-3 py-2">
-                  <span className="text-sm text-ink">{r.title}</span>
+                  <span className="text-sm text-ink">{requirementTitle(r.title, copy)}</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-ink-muted">{REQ_LABEL[r.status] ?? r.status}</span>
+                    <span className="text-xs text-ink-muted">{requirementLabel[r.status] ?? r.status}</span>
                     {r.status === "OPEN" && (
                       <>
-                        <Button variant="secondary" disabled={pending} onClick={() => setRequirement(r.id, "RECEIVED")}>Recebido</Button>
-                        <Button variant="secondary" disabled={pending} onClick={() => setRequirement(r.id, "WAIVED")}>Dispensar</Button>
+                        <Button variant="secondary" disabled={pending} onClick={() => setRequirement(r.id, "RECEIVED")}>{copy("Recebido", "Received")}</Button>
+                        <Button variant="secondary" disabled={pending} onClick={() => setRequirement(r.id, "WAIVED")}>{copy("Dispensar", "Waive")}</Button>
                       </>
                     )}
                   </div>
@@ -476,9 +546,9 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         )}
       </Section>
 
-      <Section title="Apólices">
+      <Section title={copy("Apólices", "Policies")}>
         {c.policies.length === 0 ? (
-          <Empty>Nenhuma apólice vinculada. A apólice surge quando a oportunidade chega à emissão ou por importação autorizada de histórico.</Empty>
+          <Empty>{copy("Nenhuma apólice vinculada. A apólice surge quando a oportunidade chega à emissão ou por importação autorizada de histórico.", "No linked policy. A policy appears when the opportunity reaches issuance or through an authorized historical import.")}</Empty>
         ) : (
           <ul className="divide-y divide-border-steel">
             {c.policies.map((p) => (
@@ -517,22 +587,22 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         onOpen={(event) => setCalendarModal({ mode: "details", event })}
       />
 
-      <Section title="Histórico do atendimento">
+      <Section title={copy("Histórico do atendimento", "Case history")}>
         <div className="space-y-3">
           <div className="flex gap-2">
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") submitNote(); }}
-              placeholder="Registrar nota (ligação, e-mail, decisão)…"
+              placeholder={copy("Registrar nota (ligação, e-mail, decisão)…", "Record a note (call, email, decision)…")}
               className="min-h-11 flex-1 rounded-xl border border-border-steel bg-paper px-3.5 py-2.5 text-sm text-ink outline-none transition-[border-color,box-shadow] focus:border-teal focus:ring-[3px] focus:ring-teal-pale"
             />
-            <Button variant="secondary" disabled={pending || !note.trim()} onClick={submitNote}>Anotar</Button>
+            <Button variant="secondary" disabled={pending || !note.trim()} onClick={submitNote}>{copy("Anotar", "Add note")}</Button>
           </div>
         </div>
 
         {c.timeline.length === 0 ? (
-          <p className="mt-4 text-sm text-ink-muted">Sem eventos ainda.</p>
+          <p className="mt-4 text-sm text-ink-muted">{copy("Sem eventos ainda.", "No events yet.")}</p>
         ) : (
           <ol className="mt-4 space-y-3">
             {c.timeline.map((t) => {
@@ -545,16 +615,16 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
                       <p className="text-sm font-medium text-ink">
                         {isFollowUp && (
                           <span aria-hidden className="mr-2 inline-flex rounded-full bg-teal-pale px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-teal">
-                            retorno
+                            {copy("retorno", "follow-up")}
                           </span>
                         )}
-                        {activityTitle(t.type, t.title)}
-                        {t.doneAt && <span className="ml-2 text-xs font-normal text-success">✓ concluído</span>}
-                        {overdue && <span className="ml-2 text-xs font-normal text-danger">atrasado</span>}
+                        {activityTitle(t.type, t.title, copy)}
+                        {t.doneAt && <span className="ml-2 text-xs font-normal text-success">✓ {copy("concluído", "completed")}</span>}
+                        {overdue && <span className="ml-2 text-xs font-normal text-danger">{copy("atrasado", "overdue")}</span>}
                       </p>
-                      {t.body && <p className="text-xs text-ink-muted">{t.body}</p>}
+                      {activityBody(t.type, t.body, locale, copy) ? <p className="text-xs text-ink-muted">{activityBody(t.type, t.body, locale, copy)}</p> : null}
                       <p className="text-xs text-ink-muted">
-                        {t.dueAt ? `Vence ${CRM_DATE.format(new Date(t.dueAt))}` : CRM_DATE_TIME.format(new Date(t.createdAt))}
+                        {t.dueAt ? copy("Vence {date}", "Due {date}", { date: crmDate.format(new Date(t.dueAt)) }) : crmDateTime.format(new Date(t.createdAt))}
                       </p>
                     </div>
                   </div>
@@ -571,7 +641,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         onClose={() => setStageFollowUpId(null)}
         prospectName={c.prospect.name}
         onSubmit={async ({ title, scheduledAt }) => {
-          if (!stageFollowUpId) return { ok: false, message: "Etapa não encontrada." };
+          if (!stageFollowUpId) return { ok: false, message: copy("Etapa não encontrada.", "Stage not found.") };
           const result = await moveCaseAndScheduleAction({
             caseId: c.id,
             stageId: stageFollowUpId,
@@ -593,11 +663,11 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
           open
           mode={calendarModal.mode}
           event={"event" in calendarModal ? calendarModal.event : null}
-          initialCase={{ id: c.id, name: c.prospect.name, email: c.prospect.email, stage: c.crmStage?.name ?? null }}
+          initialCase={{ id: c.id, name: c.prospect.name, email: c.prospect.email, stage: c.crmStage?.name ?? null, stageSystemKey: c.crmStage?.systemKey ?? null }}
           initialTitle={meetingCopy.defaultTitle}
           timeZone={c.calendar.timeZone}
           calendars={c.calendar.calendars}
-          cases={[{ id: c.id, name: c.prospect.name, email: c.prospect.email, stage: c.crmStage?.name ?? null }]}
+          cases={[{ id: c.id, name: c.prospect.name, email: c.prospect.email, stage: c.crmStage?.name ?? null, stageSystemKey: c.crmStage?.systemKey ?? null }]}
           onClose={() => setCalendarModal(null)}
           onSubmit={(input) => mutateCalendar(
             calendarModal.mode === "edit" ? updateCalendarEventAction : createCalendarEventAction,

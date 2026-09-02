@@ -10,6 +10,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { layoutHierarchy } from "@/lib/hierarchy-layout";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 import { HierarchyOutline } from "./HierarchyOutline";
 import { ViewNode, type ViewFlowNode } from "./nodes";
 import type { HierarchyViewNode } from "./view-model";
@@ -17,6 +18,7 @@ import type { HierarchyViewNode } from "./view-model";
 const nodeTypes = { view: ViewNode };
 
 function Canvas({ agents }: { agents: readonly HierarchyViewNode[] }) {
+  const { copy } = useI18n();
   const { edges, nodes } = useMemo(() => {
     const layoutInput = agents.map((agent) => ({
       id: agent.agentId,
@@ -56,7 +58,10 @@ function Canvas({ agents }: { agents: readonly HierarchyViewNode[] }) {
     <div
       className="hierarchy-flow hierarchy-desktop-canvas"
       role="region"
-      aria-label="Árvore visual começando em você e seguindo somente para os descendentes"
+      aria-label={copy(
+        "Árvore visual começando em você e seguindo somente para os descendentes",
+        "Visual tree starting with you and showing downstream members only",
+      )}
     >
       <ReactFlow
         nodes={nodes}
@@ -81,6 +86,7 @@ function Canvas({ agents }: { agents: readonly HierarchyViewNode[] }) {
 }
 
 function EmptyHierarchy({ name }: { name: string }) {
+  const { copy } = useI18n();
   return (
     <div className="hierarchy-empty-state">
       <span className="hierarchy-empty-mark" aria-hidden="true">
@@ -89,27 +95,28 @@ function EmptyHierarchy({ name }: { name: string }) {
         <i />
       </span>
       <div>
-        <h3>O mapa da equipe começa em {name}.</h3>
-        <p>Ainda não há agentes ou subagências em nenhuma ramificação.</p>
+        <h3>{copy("O mapa da equipe começa em {name}.", "The team map starts with {name}.", { name })}</h3>
+        <p>{copy("Ainda não há agentes ou subagências em nenhuma ramificação.", "There are no agents or sub-agencies in any branch yet.")}</p>
       </div>
-      <Link href="/agent/agency#invite-agent-title">Convidar para a equipe</Link>
+      <Link href="/agent/agency#invite-agent-title">{copy("Convidar para a equipe", "Invite to the team")}</Link>
     </div>
   );
 }
 
 export function HierarchyCanvas({ agents }: { agents: readonly HierarchyViewNode[] }) {
-  const rootName = agents[0]?.name ?? "você";
+  const { copy } = useI18n();
+  const rootName = agents[0]?.name ?? copy("você", "you");
   const hasDescendants = agents.length > 1;
 
   return (
     <section className="module-main-surface module-hierarchy-surface hierarchy-workspace" aria-labelledby="hierarchy-tree-title">
       <header className="hierarchy-workspace-header">
         <div>
-          <h2 id="hierarchy-tree-title">Mapa da equipe</h2>
-          <p>O mapa começa em você e organiza agentes e subagências dentro de cada ramificação.</p>
+          <h2 id="hierarchy-tree-title">{copy("Mapa da equipe", "Team map")}</h2>
+          <p>{copy("O mapa começa em você e organiza agentes e subagências dentro de cada ramificação.", "The map starts with you and organizes agents and sub-agencies within each branch.")}</p>
         </div>
-        <span aria-label={`${Math.max(0, agents.length - 1)} pessoas na equipe abaixo de você`}>
-          {Math.max(0, agents.length - 1)} na equipe
+        <span aria-label={copy("{count} pessoas na equipe abaixo de você", "{count} people on the team below you", { count: Math.max(0, agents.length - 1) })}>
+          {copy("{count} na equipe", "{count} on the team", { count: Math.max(0, agents.length - 1) })}
         </span>
       </header>
 

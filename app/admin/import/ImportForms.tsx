@@ -3,8 +3,10 @@
 import { useState } from 'react'
 import { submitPolicyImport, submitCommissionImport } from './actions'
 import { Button } from '@/components/Button'
-import { ImportStatusPill } from '@/components/StatusPill'
 import type { ImportStatus } from '@/lib/csv/import-service'
+import { useI18n } from '@/components/i18n/LanguageProvider'
+import { LocalizedImportStatusPill } from '../LocalizedStatusPills'
+import { formatNumber } from '@/lib/i18n/format'
 
 type Result = {
   batchId: string
@@ -14,19 +16,26 @@ type Result = {
 }
 
 function ImportResultSummary({ result }: { result: Result }) {
+  const { copy, language } = useI18n()
+  const importedLabel = result.successCount === 1
+    ? copy('1 linha importada', '1 row imported')
+    : copy(`${formatNumber(result.successCount, language)} linhas importadas`, `${formatNumber(result.successCount, language)} rows imported`)
+  const errorLabel = result.errors.length === 1
+    ? copy('1 erro', '1 error')
+    : copy(`${formatNumber(result.errors.length, language)} erros`, `${formatNumber(result.errors.length, language)} errors`)
   return (
     <div className="mt-4 rounded-lg border border-border-steel bg-panel/50 px-4 py-3 text-sm">
       <div className="flex items-center gap-2">
-        <ImportStatusPill status={result.status} />
+        <LocalizedImportStatusPill status={result.status} />
         <p className="font-semibold text-ink">
-          {result.successCount} linha(s) importada(s), {result.errors.length} erro(s).
+          {importedLabel}, {errorLabel}.
         </p>
       </div>
       {result.errors.length > 0 && (
         <ul aria-live="polite" className="mt-1.5 list-disc pl-4 text-ink">
           {result.errors.map((e) => (
             <li key={e.row}>
-              Linha {e.row}: {e.message}
+              {copy(`Linha ${formatNumber(e.row, language)}`, `Row ${formatNumber(e.row, language)}`)}: {e.message}
             </li>
           ))}
         </ul>
@@ -48,6 +57,7 @@ function ImportCard({
   buttonVariant?: 'primary' | 'secondary'
   hint?: string
 }) {
+  const { copy } = useI18n()
   const [result, setResult] = useState<Result | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -74,10 +84,11 @@ function ImportCard({
           name="file"
           accept=".csv"
           required
+          aria-label={copy('Arquivo CSV', 'CSV file')}
           className="text-sm text-ink-muted file:mr-3 file:rounded-md file:border-0 file:bg-teal-pale file:px-3 file:py-2 file:text-sm file:font-semibold file:text-teal hover:file:bg-teal/20"
         />
         <Button type="submit" variant={buttonVariant} disabled={submitting}>
-          {submitting ? 'Importando…' : buttonLabel}
+          {submitting ? copy('Importando…', 'Importing…') : buttonLabel}
         </Button>
       </form>
       {result && <ImportResultSummary result={result} />}
@@ -86,20 +97,27 @@ function ImportCard({
 }
 
 export function ImportForms() {
+  const { copy } = useI18n()
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       <ImportCard
-        title="1. Apólices (CSV)"
+        title={copy('1. Apólices (CSV)', '1. Policies (CSV)')}
         action={submitPolicyImport}
-        buttonLabel="Importar apólices"
+        buttonLabel={copy('Importar apólices', 'Import policies')}
         buttonVariant="primary"
-        hint="Coluna opcional lastPaymentDate (data do último pagamento): sem ela, apólices em vigor sem data de vigência aparecem como &quot;sem sinal de pagamento&quot; nos alertas de risco do agente."
+        hint={copy(
+          'Coluna opcional lastPaymentDate (data do último pagamento): sem ela, apólices em vigor sem data de vigência aparecem como "sem sinal de pagamento" nos alertas de risco do agente.',
+          'Optional lastPaymentDate column: without it, active policies with no effective date appear as "no payment signal" in the agent\'s risk alerts.',
+        )}
       />
       <ImportCard
-        title="2. Comissões (CSV)"
+        title={copy('2. Comissões (CSV)', '2. Commissions (CSV)')}
         action={submitCommissionImport}
-        buttonLabel="Importar comissões"
-        hint="Importe as apólices primeiro — cada linha de comissão procura a apólice pelo número, e falha se ela ainda não existir."
+        buttonLabel={copy('Importar comissões', 'Import commissions')}
+        hint={copy(
+          'Importe as apólices primeiro — cada linha de comissão procura a apólice pelo número, e falha se ela ainda não existir.',
+          'Import policies first — each commission row looks up the policy by number and fails if the policy does not exist yet.',
+        )}
       />
     </div>
   )

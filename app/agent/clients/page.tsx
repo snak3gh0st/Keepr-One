@@ -8,10 +8,12 @@ import { PageHeader } from '@/components/PageHeader'
 import { ContextPanel } from '@/components/ContextPanel'
 import { ModuleSummary } from '@/components/ModuleSummary'
 import { ClientsList } from './ClientsList'
+import { getServerI18n } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
 export default async function ClientsPage() {
+  const { copy } = await getServerI18n()
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
   const scopeAgentIds = await getAgentScopeIds(agent.id)
@@ -28,24 +30,24 @@ export default async function ClientsPage() {
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <div className="space-y-4">
         <CrmNavigation active="clients" />
-        <PageHeader title="Clientes" eyebrow="CRM · Relacionamentos" description="Sua base organizada para consultar responsáveis, histórico e próximos atendimentos.">
+        <PageHeader title={copy("Clientes", "Clients")} eyebrow={copy("CRM · Relacionamentos", "CRM · Relationships")} description={copy("Sua base organizada para consultar responsáveis, histórico e próximos atendimentos.", "Your organized base for reviewing owners, history, and upcoming cases.")}>
         <Link
           href="/agent/cases/new"
           className="inline-flex items-center gap-2 bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-transform duration-300 hover:-translate-y-0.5"
         >
           <span className="text-success" aria-hidden>+</span>
-          Novo atendimento
+          {copy("Novo atendimento", "New case")}
         </Link>
-        <span className="inline-flex rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal">{clients.length} clientes</span>
+        <span className="inline-flex rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal">{clients.length === 1 ? copy("1 cliente", "1 client") : copy("{count} clientes", "{count} clients", { count: clients.length })}</span>
         </PageHeader>
       </div>
 
       <ModuleSummary
-        label="Resumo da base de clientes"
+        label={copy("Resumo da base de clientes", "Client base summary")}
         items={[
-          { label: 'Na base', value: clients.length, detail: 'Clientes dentro do seu escopo' },
-          { label: 'Agentes responsáveis', value: agentsWithClients, detail: 'Responsáveis pelos clientes no seu escopo', tone: 'green' },
-          { label: 'Com contato', value: clientsWithEmail, detail: 'Cadastros com e-mail disponível' },
+          { label: copy('Na base', 'In the base'), value: clients.length, detail: copy('Clientes dentro do seu escopo', 'Clients within your scope') },
+          { label: copy('Agentes responsáveis', 'Assigned agents'), value: agentsWithClients, detail: copy('Responsáveis pelos clientes no seu escopo', 'Agents responsible for clients in your scope'), tone: 'green' },
+          { label: copy('Com contato', 'With contact info'), value: clientsWithEmail, detail: copy('Cadastros com e-mail disponível', 'Records with an available email') },
         ]}
       />
 
@@ -61,11 +63,11 @@ export default async function ClientsPage() {
             }))}
           />
         </section>
-        <ContextPanel eyebrow="Continue por aqui" title="Relacionamento organizado">
-          <p>Esta lista reúne os clientes que fazem parte do seu acesso atual.</p>
+        <ContextPanel eyebrow={copy("Continue por aqui", "Continue here")} title={copy("Relacionamento organizado", "Organized relationships")}>
+          <p>{copy("Esta lista reúne os clientes que fazem parte do seu acesso atual.", "This list brings together the clients included in your current access.")}</p>
           <div className="mt-5 border-t border-white/10 pt-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Próximo passo</p>
-            <p className="mt-2">Inicie um atendimento para conduzir uma oportunidade, ou consulte as apólices já emitidas do cliente.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">{copy("Próximo passo", "Next step")}</p>
+            <p className="mt-2">{copy("Inicie um atendimento para conduzir uma oportunidade, ou consulte as apólices já emitidas do cliente.", "Start a case to move an opportunity forward, or review the client's issued policies.")}</p>
           </div>
         </ContextPanel>
       </div>

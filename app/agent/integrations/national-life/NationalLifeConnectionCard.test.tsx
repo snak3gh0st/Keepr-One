@@ -15,6 +15,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh }),
 }))
+vi.mock('@/components/i18n/LanguageProvider', () => ({
+  useI18n: () => ({
+    language: 'EN',
+    locale: 'en-US',
+    copy: (_pt: string, en: string, values: Record<string, string | number> = {}) =>
+      en.replace(/\{(\w+)\}/g, (_match, token: string) => String(values[token] ?? `{${token}}`)),
+  }),
+}))
 vi.mock('./actions', () => ({
   startNationalLifeConnection: mocks.start,
   createNationalLifeViewerBootstrap: mocks.bootstrap,

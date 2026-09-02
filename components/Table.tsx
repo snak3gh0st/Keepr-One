@@ -2,23 +2,27 @@
 
 import { TdHTMLAttributes, ThHTMLAttributes } from "react";
 import { motion, useReducedMotion } from "motion/react";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 export function Table({
   children,
-  label = "Tabela de dados",
+  label,
 }: {
   children: React.ReactNode;
   label?: string;
 }) {
+  const { copy } = useI18n();
+  const accessibleLabel = label ?? copy("Tabela de dados", "Data table");
+
   return (
     <div
       className="module-table-shell"
       role="region"
-      aria-label={label}
+      aria-label={accessibleLabel}
       tabIndex={0}
     >
       <table>
-        <caption className="sr-only">{label}</caption>
+        <caption className="sr-only">{accessibleLabel}</caption>
         {children}
       </table>
     </div>

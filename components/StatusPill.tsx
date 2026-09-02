@@ -1,5 +1,8 @@
+"use client";
+
 import { caseStageLabel } from "@/lib/case-workflow";
 import type { CrmStageView } from "@/lib/crm";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 type Tone = "success" | "warning" | "danger" | "neutral";
 
@@ -26,6 +29,14 @@ export const policyStatusLabel: Record<string, string> = {
   CANCELLED: "Cancelada",
 };
 
+const policyStatusLabelEn: Record<string, string> = {
+  INFORCE: "In force",
+  APPROVED: "Approved",
+  PENDING: "Pending",
+  LAPSED: "Lapsed",
+  CANCELLED: "Canceled",
+};
+
 const importStatusTone: Record<string, Tone> = {
   COMPLETED: "success",
   COMPLETED_WITH_ERRORS: "warning",
@@ -38,6 +49,28 @@ const importStatusLabel: Record<string, string> = {
   COMPLETED_WITH_ERRORS: "Concluído com erros",
   FAILED: "Falhou",
   PROCESSING: "Processando",
+};
+
+const importStatusLabelEn: Record<string, string> = {
+  COMPLETED: "Completed",
+  COMPLETED_WITH_ERRORS: "Completed with errors",
+  FAILED: "Failed",
+  PROCESSING: "Processing",
+};
+
+const caseStageLabelEn: Record<string, string> = {
+  LEAD: "Lead",
+  DISCOVERY: "Discovery",
+  DESIGN: "Design",
+  ILLUSTRATION_READY: "Illustration ready",
+  APPLICATION_STARTED: "Application started",
+  SUBMITTED: "Submitted",
+  UNDERWRITING: "Underwriting",
+  APPROVED: "Approved",
+  ISSUED: "Issued",
+  PLACED: "In force",
+  DECLINED: "Declined",
+  WITHDRAWN: "Withdrawn",
 };
 
 function Pill({ tone, children }: { tone: Tone; children: React.ReactNode }) {
@@ -58,17 +91,19 @@ function Pill({ tone, children }: { tone: Tone; children: React.ReactNode }) {
 }
 
 export function PolicyStatusPill({ status }: { status: string }) {
+  const { language } = useI18n();
   return (
     <Pill tone={policyStatusTone[status] ?? "neutral"}>
-      {policyStatusLabel[status] ?? status}
+      {(language === "EN" ? policyStatusLabelEn[status] : policyStatusLabel[status]) ?? status}
     </Pill>
   );
 }
 
 export function ImportStatusPill({ status }: { status: string }) {
+  const { language } = useI18n();
   return (
     <Pill tone={importStatusTone[status] ?? "neutral"}>
-      {importStatusLabel[status] ?? status}
+      {(language === "EN" ? importStatusLabelEn[status] : importStatusLabel[status]) ?? status}
     </Pill>
   );
 }
@@ -82,9 +117,12 @@ const caseStageTone: Record<string, Tone> = {
 };
 
 export function CaseStagePill({ stage }: { stage: string }) {
+  const { language } = useI18n();
   return (
     <Pill tone={caseStageTone[stage] ?? "warning"}>
-      {caseStageLabel[stage as keyof typeof caseStageLabel] ?? stage}
+      {(language === "EN"
+        ? caseStageLabelEn[stage]
+        : caseStageLabel[stage as keyof typeof caseStageLabel]) ?? stage}
     </Pill>
   );
 }
@@ -107,12 +145,18 @@ export function CrmStagePill({
 }: {
   stage: Pick<CrmStageView, "name" | "systemKey"> | null;
 }) {
-  if (!stage) return <Pill tone="neutral">Sem etapa</Pill>;
+  const { copy } = useI18n();
+  if (!stage) return <Pill tone="neutral">{copy("Sem etapa", "No stage")}</Pill>;
   return <Pill tone={crmStageTone[stage.systemKey ?? ""] ?? "neutral"}>{stage.name}</Pill>;
 }
 
 export function RolePill({ role }: { role: string }) {
+  const { copy } = useI18n();
   const label =
-    role === "ADMIN" ? "Admin" : role === "AGENT" ? "Agente" : "Cliente";
+    role === "ADMIN"
+      ? copy("Admin", "Admin")
+      : role === "AGENT"
+        ? copy("Agente", "Agent")
+        : copy("Cliente", "Client");
   return <Pill tone="neutral">{label}</Pill>;
 }

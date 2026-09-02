@@ -4,6 +4,7 @@ import { useId, useMemo, useRef, useState } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
 
@@ -33,7 +34,7 @@ export function TrendChart({
   compact = false,
   tone = "default",
   interactive = false,
-  ariaLabel = "Gráfico de tendência",
+  ariaLabel,
   chartHeight = 150,
 }: {
   data: Point[];
@@ -44,10 +45,12 @@ export function TrendChart({
   ariaLabel?: string;
   chartHeight?: number;
 }) {
+  const { copy, locale } = useI18n();
+  const resolvedAriaLabel = ariaLabel ?? copy("Gráfico de tendência", "Trend chart");
   const formatValue =
     format === "currency"
       ? (v: number) =>
-          new Intl.NumberFormat("en-US", {
+          new Intl.NumberFormat(locale, {
             style: "currency",
             currency: "USD",
             maximumFractionDigits: 0,
@@ -77,7 +80,7 @@ export function TrendChart({
       y: padY + ((max - d.value) / range) * (height - padY * 2),
       value: d.value,
       label: d.label,
-      tooltipLabel: d.tooltipLabel ?? `Mês ${d.label}`,
+      tooltipLabel: d.tooltipLabel ?? copy(`Mês ${d.label}`, `Month ${d.label}`),
     }));
     const linePath = buildPath(points);
     const zeroY = padY + ((max - 0) / range) * (height - padY * 2);
@@ -90,7 +93,7 @@ export function TrendChart({
       if (d.value > data[peakIndex].value) peakIndex = i;
     });
     return { linePath, areaPath, points, peakIndex };
-  }, [data, width, height, padX, padY]);
+  }, [copy, data, width, height, padX, padY]);
 
   const activeIndex = hoverIndex ?? focusIndex;
   const [indicatorIndex, setIndicatorIndex] = useState(peakIndex);
@@ -220,7 +223,7 @@ export function TrendChart({
   return (
     <div ref={scope} className={compact ? "w-40" : "w-full"}>
       <div className={`relative ${interactive && !compact ? "cursor-crosshair" : ""}`}>
-        <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none" role="img" aria-label={ariaLabel}>
+        <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none" role="img" aria-label={resolvedAriaLabel}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={lineColor} stopOpacity="0.3" />

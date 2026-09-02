@@ -33,12 +33,14 @@ import {
   prismaConnectorCommandRepository,
 } from '@/lib/national-life/connector-command-service'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
+import { getServerI18n } from '@/lib/i18n/server'
 import {
   ApplicationFromIllustrationError,
   buildApplicationFromIllustrationSeed,
 } from '@/lib/application-addon/application-from-illustration'
 
 type ActionResult = { ok: true } | { ok: false; message: string }
+type FailureResult = { ok: false; message: string }
 
 export type ApplicationDossierActionResult =
   | { ok: true; ready: boolean; missing: ApplicationDossierMissingItemV2[]; dossierHash?: string }
@@ -53,10 +55,29 @@ async function agentScopeIds(): Promise<{ agentId: string; scope: string[] }> {
   return { agentId: agent.id, scope: await getAgentScopeIds(agent.id) }
 }
 
-function crmActionError(error: unknown): ActionResult {
-  if (error instanceof CrmDomainError) return { ok: false, message: error.message }
+async function localizedMessage(portuguese: string, english: string) {
+  const { copy } = await getServerI18n()
+  return copy(portuguese, english)
+}
+
+async function actionError(portuguese: string, english: string): Promise<FailureResult> {
+  return { ok: false, message: await localizedMessage(portuguese, english) }
+}
+
+async function crmActionError(error: unknown): Promise<ActionResult> {
+  if (error instanceof CrmDomainError) {
+    const englishByCode: Partial<Record<CrmDomainError['code'], string>> = {
+      ACCESS_DENIED: 'This case is outside your portfolio.',
+      CASE_NOT_FOUND: 'Case not found or outside your portfolio.',
+      FOLLOW_UP_ALREADY_SCHEDULED: 'This lead already has a scheduled follow-up. Reschedule the current one.',
+      FOLLOW_UP_NOT_FOUND: 'Follow-up not found or outside your portfolio.',
+      FOLLOW_UP_NOT_SCHEDULED: 'Only pending follow-ups can be changed.',
+      VALIDATION_ERROR: 'Review the follow-up information and try again.',
+    }
+    return { ok: false, message: await localizedMessage(error.message, englishByCode[error.code] ?? 'The action could not be completed.') }
+  }
   console.error('CRM follow-up action error', error)
-  return { ok: false, message: 'Não foi possível concluir a ação. Tente novamente.' }
+  return actionError('Não foi possível concluir a ação. Tente novamente.', 'The action could not be completed. Try again.')
 }
 
 function parseCrmWallClock(value: string) {
@@ -183,7 +204,9 @@ export async function startApplicationFromIllustration(
           documentBytes: true,
         },
       })
-      if (!illustration) return { ok: false, message: 'Illustration não encontrada.' }
+      if (!illustration) {
+        return actionError('Illustration não encontrada.', 'Illustration not found.')
+      }
 
       const caseId = illustration.caseId ?? `case_${randomUUID()}`
       const seed = buildApplicationFromIllustrationSeed({
@@ -209,7 +232,10 @@ export async function startApplicationFromIllustration(
           FOR UPDATE
         `
         if (!lockedCase || lockedCase.assignedAgentId !== agent.id) {
-          return { ok: false, message: 'O atendimento vinculado está fora da sua carteira.' }
+          return actionError(
+            'O atendimento vinculado está fora da sua carteira.',
+            'The linked case is outside your portfolio.',
+          )
         }
       } else {
         const crmStageId = await getOrCreateNewLeadStageId(tx, agent.id)
@@ -268,10 +294,10 @@ export async function startApplicationFromIllustration(
         if (coverage?.illustrationId === illustration.id) {
           return { ok: true, caseId, applicationId: activeApplication.id }
         }
-        return {
-          ok: false,
-          message: 'Este atendimento já possui outra Application em andamento.',
-        }
+        return actionError(
+          'Este atendimento já possui outra Application em andamento.',
+          'This case already has another Application in progress.',
+        )
       }
 
       const application = await tx.application.create({
@@ -310,17 +336,23 @@ export async function startApplicationFromIllustration(
     return result
   } catch (error) {
     if (error instanceof ApplicationFromIllustrationError) {
-      return {
-        ok: false,
-        message: error.code === 'ILLUSTRATION_NOT_OFFICIAL'
-          ? 'Aguarde o PDF oficial da National Life antes de criar a Application.'
-          : 'A Illustration oficial ainda não possui todos os valores confirmados.',
-      }
+      return error.code === 'ILLUSTRATION_NOT_OFFICIAL'
+        ? actionError(
+            'Aguarde o PDF oficial da National Life antes de criar a Application.',
+            'Wait for the official National Life PDF before creating the Application.',
+          )
+        : actionError(
+            'A Illustration oficial ainda não possui todos os valores confirmados.',
+            'The official Illustration does not have all confirmed values yet.',
+          )
     }
     console.error('APPLICATION_FROM_ILLUSTRATION_FAILED', {
       code: error instanceof Error ? error.message : 'UNKNOWN',
     })
-    return { ok: false, message: 'Não foi possível criar a Application a partir desta Illustration.' }
+    return actionError(
+      'Não foi possível criar a Application a partir desta Illustration.',
+      'The Application could not be created from this Illustration.',
+    )
   }
 }
 
@@ -418,7 +450,7 @@ export async function saveKBotApplicationDossier(
     console.error('K_BOT_APPLICATION_DOSSIER_SAVE_FAILED', {
       code: error instanceof Error ? error.message : 'UNKNOWN',
     })
-    return { ok: false, message: 'Não foi possível salvar estas informações agora.' }
+    return actionError('Não foi possível salvar estas informações agora.', 'This information could not be saved right now.')
   }
 }
 
@@ -426,13 +458,13 @@ export async function uploadKBotApplicationDocument(formData: FormData): Promise
   const applicationId = String(formData.get('applicationId') ?? '')
   const type = String(formData.get('type') ?? '')
   const file = formData.get('file')
-  if (!(file instanceof File)) return { ok: false, message: 'Escolha um documento.' }
+  if (!(file instanceof File)) return actionError('Escolha um documento.', 'Choose a document.')
   const agent = await getCurrentAgent()
   const application = await prisma.application.findFirst({
     where: { id: applicationId, insuranceCase: { assignedAgentId: agent.id } },
     select: { id: true, caseId: true },
   })
-  if (!application) return { ok: false, message: 'Aplicação não encontrada.' }
+  if (!application) return actionError('Aplicação não encontrada.', 'Application not found.')
 
   let temporaryPath: string | null = null
   let finalPath: string | null = null
@@ -485,10 +517,10 @@ export async function uploadKBotApplicationDocument(formData: FormData): Promise
     if (finalPath) await unlink(finalPath).catch(() => undefined)
     const code = error instanceof Error ? error.message : 'UNKNOWN'
     const message = code === 'APPLICATION_DOCUMENT_TOO_LARGE'
-      ? 'O documento deve ter no máximo 10 MB.'
+      ? await localizedMessage('O documento deve ter no máximo 10 MB.', 'The document must be no larger than 10 MB.')
       : code === 'APPLICATION_DOCUMENT_TYPE_NOT_ALLOWED'
-        ? 'Envie um PDF, PNG ou JPG.'
-        : 'Não foi possível salvar o documento agora.'
+        ? await localizedMessage('Envie um PDF, PNG ou JPG.', 'Upload a PDF, PNG, or JPG.')
+        : await localizedMessage('Não foi possível salvar o documento agora.', 'The document could not be saved right now.')
     return { ok: false, message }
   }
 }
@@ -502,7 +534,7 @@ export async function reviewKBotApplicationDocument(documentId: string): Promise
     },
     select: { id: true, applicationId: true, application: { select: { caseId: true } } },
   })
-  if (!document) return { ok: false, message: 'Documento não encontrado.' }
+  if (!document) return actionError('Documento não encontrado.', 'Document not found.')
   const now = new Date()
   await prisma.$transaction([
     prisma.applicationDocument.update({
@@ -569,10 +601,10 @@ export async function reviewKBotApplicationDossier(
   } catch (error) {
     const code = error instanceof Error ? error.message : 'UNKNOWN'
     const message = code === 'K_BOT_APPLICATION_ADDON_REQUIRED'
-      ? 'Ative o add-on K-Bot Application para preparar este caso no iGO.'
+      ? await localizedMessage('Ative o add-on K-Bot Application para preparar este caso no iGO.', 'Activate the K-Bot Application add-on to prepare this case in iGO.')
       : code === 'APPLICATION_DOSSIER_INCOMPLETE'
-        ? 'Complete as informações obrigatórias antes de revisar.'
-        : 'Não foi possível concluir a revisão agora.'
+        ? await localizedMessage('Complete as informações obrigatórias antes de revisar.', 'Complete the required information before reviewing.')
+        : await localizedMessage('Não foi possível concluir a revisão agora.', 'The review could not be completed right now.')
     return { ok: false, message }
   }
 }
@@ -581,7 +613,7 @@ export async function prepareKBotApplicationDraft(
   applicationId: string,
 ): Promise<ActionResult> {
   if (!isNationalLifeLocalConnectorEnabled()) {
-    return { ok: false, message: 'Conecte o K-Bot neste navegador para preparar a Application.' }
+    return actionError('Conecte o K-Bot neste navegador para preparar a Application.', 'Connect K-Bot in this browser to prepare the Application.')
   }
   const agent = await getCurrentAgent()
   try {
@@ -600,7 +632,7 @@ export async function prepareKBotApplicationDraft(
         },
       }),
     ])
-    if (!application) return { ok: false, message: 'Aplicação não encontrada.' }
+    if (!application) return actionError('Aplicação não encontrada.', 'Application not found.')
 
     const commandInput = planApplicationDraftCommand(application, {
       agentId: agent.id,
@@ -639,18 +671,18 @@ export async function prepareKBotApplicationDraft(
       data: { automationState: 'READY_TO_PREPARE', safeErrorCode: code.slice(0, 80) },
     })
     const message = code === 'K_BOT_APPLICATION_ADDON_REQUIRED'
-      ? 'Ative o add-on K-Bot Application antes de preparar no iGO.'
+      ? await localizedMessage('Ative o add-on K-Bot Application antes de preparar no iGO.', 'Activate the K-Bot Application add-on before preparing in iGO.')
       : code === 'APPLICATION_NOT_REVIEWED' || code === 'APPLICATION_NOT_READY'
-        ? 'Revise novamente as informações antes de preparar no iGO.'
-        : 'Não foi possível iniciar a preparação no iGO agora.'
+        ? await localizedMessage('Revise novamente as informações antes de preparar no iGO.', 'Review the information again before preparing it in iGO.')
+        : await localizedMessage('Não foi possível iniciar a preparação no iGO agora.', 'Preparation in iGO could not be started right now.')
     return { ok: false, message }
   }
 }
 
 export async function addCaseNote(caseId: string, body: string): Promise<ActionResult> {
   const text = body.trim()
-  if (!text) return { ok: false, message: 'A nota não pode ficar vazia.' }
-  if (text.length > 2000) return { ok: false, message: 'Nota muito longa (máx. 2000 caracteres).' }
+  if (!text) return actionError('A nota não pode ficar vazia.', 'The note cannot be empty.')
+  if (text.length > 2000) return actionError('Nota muito longa (máx. 2000 caracteres).', 'The note is too long (maximum 2,000 characters).')
 
   const { scope } = await agentScopeIds()
   const insuranceCase = await prisma.insuranceCase.findUnique({
@@ -658,7 +690,7 @@ export async function addCaseNote(caseId: string, body: string): Promise<ActionR
     select: { id: true, assignedAgentId: true },
   })
   if (!insuranceCase || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, insuranceCase)) {
-    return { ok: false, message: 'Caso não encontrado ou fora da sua carteira.' }
+    return actionError('Caso não encontrado ou fora da sua carteira.', 'Case not found or outside your portfolio.')
   }
 
   await prisma.caseTimelineEvent.create({
@@ -684,7 +716,7 @@ export async function saveNeedsAnalysis(
     select: { id: true, assignedAgentId: true },
   })
   if (!insuranceCase || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, insuranceCase)) {
-    return { ok: false, message: 'Caso não encontrado ou fora da sua carteira.' }
+    return actionError('Caso não encontrado ou fora da sua carteira.', 'Case not found or outside your portfolio.')
   }
 
   // Coerce every field to a finite number; the calc itself floors negatives.
@@ -720,7 +752,7 @@ type RequirementStatus = (typeof REQUIREMENT_STATUSES)[number]
 
 export async function updateRequirement(requirementId: string, status: RequirementStatus): Promise<ActionResult> {
   if (!REQUIREMENT_STATUSES.includes(status)) {
-    return { ok: false, message: 'Status de requirement inválido.' }
+    return actionError('Status de pendência inválido.', 'Invalid pending item status.')
   }
 
   const { scope } = await agentScopeIds()
@@ -730,7 +762,7 @@ export async function updateRequirement(requirementId: string, status: Requireme
     select: { id: true, application: { select: { caseId: true, insuranceCase: { select: { assignedAgentId: true } } } } },
   })
   if (!requirement || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, requirement.application.insuranceCase)) {
-    return { ok: false, message: 'Requirement não encontrado ou fora da sua carteira.' }
+    return actionError('Pendência não encontrada ou fora da sua carteira.', 'Pending item not found or outside your portfolio.')
   }
 
   await prisma.applicationRequirement.update({

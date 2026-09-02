@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
+import { useI18n } from '@/components/i18n/LanguageProvider'
 
 export type KBotState = 'idle' | 'working' | 'waiting' | 'success' | 'error'
 export type KBotActivityMode = 'idle' | 'sync' | 'illustration' | 'application' | 'combined'
@@ -233,6 +234,7 @@ function KBotProgressRings({
   progress?: number | null
   secondaryState?: 'working' | 'waiting' | null
 }) {
+  const { copy } = useI18n()
   const safeProgress = progress == null ? null : Math.min(1, Math.max(0, progress))
   const percentage = safeProgress == null ? null : Math.round(safeProgress * 100)
   const circumference = 2 * Math.PI * 34
@@ -242,7 +244,7 @@ function KBotProgressRings({
   return (
     <span className="pointer-events-none absolute inset-0" data-kbot-progress="true">
       {safeProgress != null ? (
-        <span role="img" aria-label={`Sync progress: ${percentage}%`} className="absolute inset-0">
+        <span role="img" aria-label={copy('Progresso da sincronização: {percentage}%', 'Sync progress: {percentage}%', { percentage: percentage ?? 0 })} className="absolute inset-0">
           <svg aria-hidden="true" viewBox="0 0 78 102" className="h-full w-full overflow-visible">
             <circle cx="39" cy="50" r="34" fill="none" stroke="currentColor" strokeOpacity="0.12" strokeWidth="1.5" />
             <circle
@@ -263,7 +265,9 @@ function KBotProgressRings({
       {secondaryState ? (
         <span
           role="img"
-          aria-label={secondaryState === 'working' ? 'Illustration in progress' : 'Illustration waiting for login'}
+          aria-label={secondaryState === 'working'
+            ? copy('Ilustração em andamento', 'Illustration in progress')
+            : copy('Ilustração aguardando login', 'Illustration waiting for login')}
           className="absolute inset-0"
         >
           <svg aria-hidden="true" viewBox="0 0 78 102" className="h-full w-full overflow-visible">
@@ -295,7 +299,7 @@ export function KBotCornerPresence({
   title,
   detail,
   actionHref,
-  actionLabel = 'Open K-Bot',
+  actionLabel,
   activity = 'idle',
   progress,
   secondaryState = null,
@@ -315,6 +319,8 @@ export function KBotCornerPresence({
   quickActions?: KBotAction[]
   announcement?: string | null
 }) {
+  const { copy } = useI18n()
+  const resolvedActionLabel = actionLabel ?? copy('Abrir K-Bot', 'Open K-Bot')
   const [open, setOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -362,7 +368,7 @@ export function KBotCornerPresence({
 
   return createPortal(
     <aside
-      aria-label="K-Bot status"
+      aria-label={copy('Status do K-Bot', 'K-Bot status')}
       aria-live={state === 'working' || state === 'waiting' ? 'polite' : 'off'}
       aria-atomic="true"
       data-state={state}
@@ -373,7 +379,7 @@ export function KBotCornerPresence({
         {announcement ? (
           <div
             role="status"
-            aria-label="K-Bot update"
+            aria-label={copy('Atualização do K-Bot', 'K-Bot update')}
             className="kbot-announcement pointer-events-auto absolute bottom-[112px] right-0 w-[min(21rem,calc(100vw-1.5rem))] rounded-xl border border-border-steel bg-paper px-4 py-3.5 text-sm leading-5 text-ink shadow-[0_8px_24px_rgba(16,41,29,0.14)]"
           >
             <span className="block font-semibold">{announcement}</span>
@@ -382,7 +388,7 @@ export function KBotCornerPresence({
                 href={actionHref}
                 className="mt-2 inline-flex min-h-11 items-center rounded-md border border-border-steel bg-paper px-3 py-2 text-sm font-semibold text-teal-deep transition-colors duration-150 hover:border-teal hover:bg-teal-pale focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
               >
-                {actionLabel}
+                {resolvedActionLabel}
               </Link>
             ) : null}
             <span aria-hidden="true" className="absolute -bottom-[7px] right-8 h-3.5 w-3.5 rotate-45 border-b border-r border-border-steel bg-paper" />
@@ -393,7 +399,7 @@ export function KBotCornerPresence({
             ref={panelRef}
             id={panelId}
             tabIndex={-1}
-            aria-label="K-Bot activity panel"
+            aria-label={copy('Painel de atividades do K-Bot', 'K-Bot activity panel')}
             className="kbot-activity-panel pointer-events-auto absolute bottom-[112px] right-0 w-[min(21rem,calc(100vw-1.5rem))] rounded-xl border border-border-steel bg-paper px-4 py-4 shadow-[0_8px_24px_rgba(16,41,29,0.14)]"
           >
             <span className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">
@@ -411,14 +417,14 @@ export function KBotCornerPresence({
                           : 'bg-ink-muted/45'
                 }`}
               />
-              What I am doing
+              {copy('O que estou fazendo', 'What I am doing')}
             </span>
             <span className="block text-sm font-semibold leading-5 text-ink">{title}</span>
             {detail ? (
               <span className="mt-1.5 block text-sm leading-5 text-ink-muted">{detail}</span>
             ) : null}
             {tasks.length > 0 ? (
-              <ul className="mt-4 space-y-2 border-t border-border-steel pt-3" aria-label="K-Bot activities">
+              <ul className="mt-4 space-y-2 border-t border-border-steel pt-3" aria-label={copy('Atividades do K-Bot', 'K-Bot activities')}>
                 {tasks.map((task) => {
                   const safeTaskProgress = task.progress == null
                     ? null
@@ -462,9 +468,9 @@ export function KBotCornerPresence({
               </ul>
             ) : null}
             {showQuickActions ? (
-              <nav className="mt-4 border-t border-border-steel pt-3" aria-label="K-Bot actions">
+              <nav className="mt-4 border-t border-border-steel pt-3" aria-label={copy('Ações do K-Bot', 'K-Bot actions')}>
                 <span className="block text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                  Start a task
+                  {copy('Iniciar uma tarefa', 'Start a task')}
                 </span>
                 <div className="mt-2 grid gap-2">
                   {quickActions.map((action) => (
@@ -494,7 +500,7 @@ export function KBotCornerPresence({
                 href={actionHref}
                 className="mt-3 inline-flex min-h-11 items-center rounded-md border border-border-steel bg-paper px-3 py-2 text-sm font-semibold text-teal-deep transition-colors duration-150 hover:border-teal hover:bg-teal-pale focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
               >
-                {actionLabel}
+                {resolvedActionLabel}
               </Link>
             ) : null}
             <span
@@ -509,7 +515,7 @@ export function KBotCornerPresence({
           type="button"
           aria-expanded={open}
           aria-controls={panelId}
-          aria-label={open ? 'Hide K-Bot activity' : 'View K-Bot activity'}
+          aria-label={open ? copy('Ocultar atividade do K-Bot', 'Hide K-Bot activity') : copy('Ver atividade do K-Bot', 'View K-Bot activity')}
           onClick={() => setOpen((current) => !current)}
           className="kbot-character-stage pointer-events-auto relative grid h-[102px] w-[78px] place-items-end justify-items-center rounded-xl outline-none transition-transform duration-150 hover:-translate-y-px active:translate-y-0 focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
         >

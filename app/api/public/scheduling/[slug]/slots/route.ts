@@ -7,17 +7,20 @@ import {
   consumeSchedulingRateLimit,
   SCHEDULING_NO_STORE,
   SCHEDULING_RATE_LIMITS,
+  schedulingMessage,
+  schedulingRequestLanguage,
 } from '@/lib/scheduling'
 
 type RouteContext = { params: Promise<{ slug: string }> }
 const ALLOWED_QUERY = new Set(['from', 'days', 'timeZone'])
 
 export async function GET(request: Request, context: RouteContext) {
+  const language = schedulingRequestLanguage(request)
   const params = publicSchedulingParamsSchema.safeParse(await context.params)
   const url = new URL(request.url)
   if (!params.success || [...url.searchParams.keys()].some((key) => !ALLOWED_QUERY.has(key))) {
     return Response.json(
-      { error: 'INVALID_REQUEST', message: 'Revise o link de agendamento.' },
+      { error: 'INVALID_REQUEST', message: schedulingMessage(language, 'Revise o link de agendamento.', 'Review the scheduling link.') },
       { status: 400, headers: SCHEDULING_NO_STORE },
     )
   }
@@ -28,7 +31,7 @@ export async function GET(request: Request, context: RouteContext) {
   })
   if (!query.success) {
     return Response.json(
-      { error: 'INVALID_REQUEST', message: 'Período ou fuso horário inválido.' },
+      { error: 'INVALID_REQUEST', message: schedulingMessage(language, 'Período ou fuso horário inválido.', 'Invalid date range or time zone.') },
       { status: 400, headers: SCHEDULING_NO_STORE },
     )
   }
@@ -42,7 +45,7 @@ export async function GET(request: Request, context: RouteContext) {
   })
   if (!limit.allowed) {
     return Response.json(
-      { error: 'RATE_LIMITED', message: 'Muitas consultas. Aguarde um pouco e tente novamente.' },
+      { error: 'RATE_LIMITED', message: schedulingMessage(language, 'Muitas consultas. Aguarde um pouco e tente novamente.', 'Too many requests. Wait a moment and try again.') },
       {
         status: 429,
         headers: {
@@ -62,6 +65,6 @@ export async function GET(request: Request, context: RouteContext) {
     })
     return Response.json(result, { headers: SCHEDULING_NO_STORE })
   } catch (error) {
-    return schedulingErrorResponse(error)
+    return schedulingErrorResponse(error, language)
   }
 }

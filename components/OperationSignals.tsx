@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 export type OperationSignal = {
   title: string;
@@ -19,6 +20,7 @@ const toneClasses: Record<OperationSignal["tone"], string> = {
 
 export function OperationSignals({ signals }: { signals: OperationSignal[] }) {
   const [active, setActive] = useState(0);
+  const { copy } = useI18n();
   if (signals.length === 0) return null;
   const signal = signals[active];
 
@@ -42,14 +44,14 @@ export function OperationSignals({ signals }: { signals: OperationSignal[] }) {
               id="operation-signals-title"
               className="mt-5 max-w-lg text-3xl font-medium tracking-[-0.045em] sm:text-4xl"
             >
-              Decisões melhores começam com clareza.
+              {copy("Decisões melhores começam com clareza.", "Better decisions start with clarity.")}
             </h2>
           </div>
           <div className="mt-10 flex items-center gap-2">
             <button
               type="button"
               onClick={() => move(-1)}
-              aria-label="Insight anterior"
+              aria-label={copy("Insight anterior", "Previous insight")}
               className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/15 text-paper transition-colors hover:bg-white hover:text-rail-strong"
             >
               <ArrowIcon direction="left" />
@@ -57,7 +59,7 @@ export function OperationSignals({ signals }: { signals: OperationSignal[] }) {
             <button
               type="button"
               onClick={() => move(1)}
-              aria-label="Próximo insight"
+              aria-label={copy("Próximo insight", "Next insight")}
               className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/15 text-paper transition-colors hover:bg-white hover:text-rail-strong"
             >
               <ArrowIcon direction="right" />
@@ -79,7 +81,7 @@ export function OperationSignals({ signals }: { signals: OperationSignal[] }) {
             />
             <div className="relative max-w-xl">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] opacity-60">
-                Próximo movimento
+                {copy("Próximo movimento", "Next move")}
               </p>
               <h3 className="mt-5 max-w-2xl text-3xl font-medium leading-[1.05] tracking-[-0.045em] sm:text-4xl">
                 {signal.title}

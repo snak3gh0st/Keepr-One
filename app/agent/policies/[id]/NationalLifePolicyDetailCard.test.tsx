@@ -15,9 +15,9 @@ describe('NationalLifePolicyDetailCard', () => {
       observedAt: '2026-08-26T15:30:43.000Z',
     }} />)
 
-    expect(screen.getAllByText('$133,000.00')).toHaveLength(2)
-    expect(screen.getByText(/\$200\.00 · Monthly/)).toBeInTheDocument()
-    expect(screen.getByText('$2,400.00')).toBeInTheDocument()
+    expect(screen.getAllByText(/US\$\s*133\.000,00/)).toHaveLength(2)
+    expect(screen.getByText(/US\$\s*200,00 · Monthly/)).toBeInTheDocument()
+    expect(screen.getByText(/US\$\s*2\.400,00/)).toBeInTheDocument()
     expect(screen.getByText(/Fonte: detalhe da apólice na National Life/)).toBeInTheDocument()
     expect(screen.queryByText(/não vêm do portal/)).not.toBeInTheDocument()
   })

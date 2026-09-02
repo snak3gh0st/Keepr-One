@@ -15,6 +15,7 @@ import { getGoogleFreeBusyForUser } from '@/lib/calendar/google/freebusy'
 import { isEmailDeliveryConfigured } from '@/lib/email/client'
 import { evaluateSchedulingReadiness } from './readiness'
 import { SchedulingError } from './errors'
+import type { UserLanguage } from '@/lib/i18n/config'
 
 type AvailabilityDb = Pick<PrismaClient, 'schedulingPage' | 'schedulingBooking'>
 
@@ -31,6 +32,7 @@ export type PublicSchedulingPage = {
   minimumNoticeMinutes: number
   maximumAdvanceDays: number
   ownerName: string
+  ownerLanguage: UserLanguage
   ownerTimeZone: string
   weeklyWindows: Array<{
     weekday: number
@@ -223,6 +225,7 @@ export async function getPublicSchedulingPage(
       ownerUser: {
         select: {
           name: true,
+          language: true,
           timeZone: true,
           agent: { select: { status: true } },
           calendarIntegrations: {
@@ -267,6 +270,7 @@ export async function getPublicSchedulingPage(
     minimumNoticeMinutes: page.minimumNoticeMinutes,
     maximumAdvanceDays: page.maximumAdvanceDays,
     ownerName: page.ownerUser.name,
+    ownerLanguage: page.ownerUser.language,
     ownerTimeZone: page.ownerUser.timeZone,
     weeklyWindows: page.weeklyWindows,
   }
@@ -394,6 +398,7 @@ export async function getPublicSchedulingAvailability(
       description: page.description,
       durationMinutes: page.durationMinutes,
       ownerName: page.ownerName,
+      ownerLanguage: page.ownerLanguage,
       ownerTimeZone: page.ownerTimeZone,
     },
     slots,

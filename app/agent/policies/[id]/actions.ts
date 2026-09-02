@@ -14,6 +14,7 @@ import {
   requestNationalLifePolicyDetailRefresh,
 } from '@/lib/national-life/policy-detail-command'
 import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from '@/lib/national-life/local-connector/config'
+import { getServerI18n } from '@/lib/i18n/server'
 
 type ActionResult = { ok: true } | { ok: false; message: string }
 export type PolicyDetailRefreshResult =
@@ -22,17 +23,19 @@ export type PolicyDetailRefreshResult =
 
 // Confirms the caller may act on this policy; returns null when allowed,
 // otherwise a failure result the action can pass straight back to the UI.
-async function assertPolicyAccess(policyId: string): Promise<ActionResult | null> {
+type Copy = Awaited<ReturnType<typeof getServerI18n>>['copy']
+
+async function assertPolicyAccess(policyId: string, copy: Copy): Promise<ActionResult | null> {
   const session = await requireRole('ADMIN', 'AGENT')
   if (session.user.role === 'ADMIN') return null
 
   const policy = await prisma.policy.findUnique({ where: { id: policyId }, select: { agentId: true, clientId: true } })
-  if (!policy) return { ok: false, message: 'Apólice não encontrada.' }
+  if (!policy) return { ok: false, message: copy('Apólice não encontrada.', 'Policy not found.') }
 
   const agent = await getCurrentAgent()
   const scopeIds = await getAgentScopeIds(agent.id)
   if (!canAccessPolicy({ role: 'AGENT', agentScopeIds: scopeIds }, policy)) {
-    return { ok: false, message: 'Apólice fora da sua carteira.' }
+    return { ok: false, message: copy('Apólice fora da sua carteira.', 'Policy is outside your book.') }
   }
   return null
 }
@@ -42,27 +45,32 @@ const MAX_SIZE_BYTES = 10 * 1024 * 1024
 const ILLUSTRATION_SUBDIR = 'illustrations'
 const DOCUMENT_KIND_ILLUSTRATION = 'ILLUSTRATION'
 
-export async function uploadPolicyDocument(formData: FormData): Promise<void> {
+export async function uploadPolicyDocument(formData: FormData): Promise<ActionResult> {
+  const { copy } = await getServerI18n()
   const session = await requireRole('ADMIN', 'AGENT')
-  const policyId = formData.get('policyId') as string
-  const file = formData.get('file') as File
+  const policyId = String(formData.get('policyId') ?? '')
+  const file = formData.get('file')
   const documentKind = (formData.get('documentKind') as string | null) ?? 'DOCUMENT'
 
-  const policy = await prisma.policy.findUniqueOrThrow({ where: { id: policyId } })
+  const policy = await prisma.policy.findUnique({ where: { id: policyId } })
+  if (!policy) return { ok: false, message: copy('Apólice não encontrada.', 'Policy not found.') }
 
   if (session.user.role === 'AGENT') {
     const agent = await getCurrentAgent()
     const scopeIds = await getAgentScopeIds(agent.id)
     if (!canAccessPolicy({ role: 'AGENT', agentScopeIds: scopeIds }, policy)) {
-      throw new Error('Forbidden: policy outside your scope')
+      return { ok: false, message: copy('Apólice fora da sua carteira.', 'Policy is outside your book.') }
     }
   }
 
+  if (!(file instanceof File)) {
+    return { ok: false, message: copy('Selecione um arquivo para enviar.', 'Select a file to upload.') }
+  }
   if (!ALLOWED_TYPES.has(file.type)) {
-    throw new Error(`Unsupported file type: ${file.type}`)
+    return { ok: false, message: copy('Envie um arquivo PDF, PNG ou JPG.', 'Upload a PDF, PNG, or JPG file.') }
   }
   if (file.size > MAX_SIZE_BYTES) {
-    throw new Error('File exceeds the 10 MB limit')
+    return { ok: false, message: copy('O arquivo excede o limite de 10 MB.', 'The file exceeds the 10 MB limit.') }
   }
 
   const uploadsDir = process.env.UPLOADS_DIR ?? './uploads'
@@ -73,32 +81,38 @@ export async function uploadPolicyDocument(formData: FormData): Promise<void> {
     randomUUID,
     isIllustration ? ILLUSTRATION_SUBDIR : undefined,
   )
-  const buffer = Buffer.from(await file.arrayBuffer())
-  await saveUploadedFile(uploadsDir, relativePath, buffer)
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer())
+    await saveUploadedFile(uploadsDir, relativePath, buffer)
 
-  await prisma.policyDocument.create({
-    data: {
-      policyId,
-      filename: file.name,
-      storedPath: relativePath,
-      mimeType: file.type,
-      sizeBytes: file.size,
-      uploadedById: session.user.id,
-    },
-  })
+    await prisma.policyDocument.create({
+      data: {
+        policyId,
+        filename: file.name,
+        storedPath: relativePath,
+        mimeType: file.type,
+        sizeBytes: file.size,
+        uploadedById: session.user.id,
+      },
+    })
+  } catch {
+    return { ok: false, message: copy('Não foi possível enviar o arquivo agora.', 'The file could not be uploaded right now.') }
+  }
 
   revalidatePath(`/agent/policies/${policyId}`)
+  return { ok: true }
 }
 
 export async function scheduleAnnualReview(policyId: string): Promise<ActionResult> {
-  const denied = await assertPolicyAccess(policyId)
+  const { copy } = await getServerI18n()
+  const denied = await assertPolicyAccess(policyId, copy)
   if (denied) return denied
 
   const open = await prisma.policyReview.findFirst({
     where: { policyId, completedAt: null },
     select: { id: true },
   })
-  if (open) return { ok: false, message: 'Já existe uma revisão anual agendada.' }
+  if (open) return { ok: false, message: copy('Já existe uma revisão anual agendada.', 'An annual review is already scheduled.') }
 
   await prisma.policyReview.create({ data: { policyId, dueAt: nextAnnualReview(new Date()) } })
   revalidatePath(`/agent/policies/${policyId}`)
@@ -106,13 +120,14 @@ export async function scheduleAnnualReview(policyId: string): Promise<ActionResu
 }
 
 export async function completeAnnualReview(reviewId: string, notes: string): Promise<ActionResult> {
+  const { copy } = await getServerI18n()
   const review = await prisma.policyReview.findUnique({
     where: { id: reviewId },
     select: { id: true, policyId: true, completedAt: true },
   })
-  if (!review) return { ok: false, message: 'Revisão não encontrada.' }
+  if (!review) return { ok: false, message: copy('Revisão não encontrada.', 'Review not found.') }
 
-  const denied = await assertPolicyAccess(review.policyId)
+  const denied = await assertPolicyAccess(review.policyId, copy)
   if (denied) return denied
   if (review.completedAt) return { ok: true } // idempotent
 
@@ -134,20 +149,21 @@ export async function completeAnnualReview(reviewId: string, notes: string): Pro
 export async function refreshNationalLifePolicyDetail(
   policyId: string,
 ): Promise<PolicyDetailRefreshResult> {
+  const { copy } = await getServerI18n()
   try {
     const session = await requireRole('ADMIN', 'AGENT')
     const policy = await prisma.policy.findUnique({
       where: { id: policyId },
       select: { id: true, agentId: true, policyNumber: true, carrier: true },
     })
-    if (!policy) return { ok: false, message: 'Apólice não encontrada.' }
+    if (!policy) return { ok: false, message: copy('Apólice não encontrada.', 'Policy not found.') }
 
     let agentScopeIds = [policy.agentId]
     if (session.user.role === 'AGENT') {
       const agent = await getCurrentAgent()
       agentScopeIds = await getAgentScopeIds(agent.id)
       if (!agentScopeIds.includes(policy.agentId)) {
-        return { ok: false, message: 'Apólice fora da sua carteira.' }
+        return { ok: false, message: copy('Apólice fora da sua carteira.', 'Policy is outside your book.') }
       }
     }
 
@@ -179,9 +195,9 @@ export async function refreshNationalLifePolicyDetail(
     if (code === 'POLICY_DETAIL_ROUTE_UNAVAILABLE') {
       return {
         ok: false,
-        message: 'Atualize a carteira da National Life primeiro para localizar esta apólice.',
+        message: copy('Atualize a carteira da National Life primeiro para localizar esta apólice.', 'Refresh the National Life book first to locate this policy.'),
       }
     }
-    return { ok: false, message: 'Não foi possível iniciar a atualização agora.' }
+    return { ok: false, message: copy('Não foi possível iniciar a atualização agora.', 'The refresh could not be started right now.') }
   }
 }

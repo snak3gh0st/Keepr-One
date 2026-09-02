@@ -17,6 +17,8 @@ import {
   type OnboardingActionState,
 } from "@/app/onboarding/state";
 import { Field, Input, Select } from "@/components/Field";
+import { useI18n } from "@/components/i18n/LanguageProvider";
+import { LanguageSwitcher } from "@/components/i18n/LanguageSwitcher";
 import { Logo } from "@/components/Logo";
 import { ConnectOfficialWhatsapp } from "@/app/agent/mensagens/ConnectOfficialWhatsapp";
 import { ConnectWhatsapp } from "@/app/agent/mensagens/ConnectWhatsapp";
@@ -28,6 +30,7 @@ import type {
 } from "@/lib/agent-onboarding";
 import type { PublicLocalConnectorConfig } from "@/lib/national-life/local-connector/config";
 import type { WhatsappChannelMode } from "@/lib/messaging/channel-mode";
+import { formatNumber } from "@/lib/i18n/format";
 import { OnboardingIcon } from "./OnboardingIcon";
 import { OnboardingMotion } from "./OnboardingMotion";
 import {
@@ -47,28 +50,42 @@ export type OnboardingExperienceProps = AgentOnboardingPageData & {
 };
 
 const FLOW_STEPS = [
-  { key: "WELCOME", label: "Boas-vindas", href: "#onboarding-welcome" },
-  { key: "PROFILE", label: "Seus dados", href: "#onboarding-profile" },
-  { key: "NATIONAL_LIFE", label: "National Life", href: "#onboarding-national-life" },
-  { key: "CALENDAR", label: "Agenda", href: "#onboarding-calendar" },
-  { key: "WHATSAPP", label: "WhatsApp", href: "#onboarding-whatsapp" },
-  { key: "MODULES", label: "Tour", href: "#onboarding-tour" },
-  { key: "REVIEW", label: "Revisão", href: "#onboarding-review" },
+  { key: "WELCOME", href: "#onboarding-welcome" },
+  { key: "PROFILE", href: "#onboarding-profile" },
+  { key: "NATIONAL_LIFE", href: "#onboarding-national-life" },
+  { key: "CALENDAR", href: "#onboarding-calendar" },
+  { key: "WHATSAPP", href: "#onboarding-whatsapp" },
+  { key: "MODULES", href: "#onboarding-tour" },
+  { key: "REVIEW", href: "#onboarding-review" },
 ] as const satisfies readonly {
   key: Exclude<OnboardingStep, "COMPLETED">;
-  label: string;
   href: string;
 }[];
 
 const TIME_ZONE_OPTIONS = [
-  { value: "America/New_York", label: "Leste dos EUA — Eastern Time" },
-  { value: "America/Chicago", label: "Centro dos EUA — Central Time" },
-  { value: "America/Denver", label: "Montanhas — Mountain Time" },
-  { value: "America/Phoenix", label: "Arizona" },
-  { value: "America/Los_Angeles", label: "Oeste dos EUA — Pacific Time" },
-  { value: "America/Anchorage", label: "Alasca" },
-  { value: "Pacific/Honolulu", label: "Havaí" },
+  { value: "America/New_York", PT: "Leste dos EUA — Eastern Time", EN: "US East — Eastern Time" },
+  { value: "America/Chicago", PT: "Centro dos EUA — Central Time", EN: "US Central — Central Time" },
+  { value: "America/Denver", PT: "Montanhas — Mountain Time", EN: "Mountain Time" },
+  { value: "America/Phoenix", PT: "Arizona", EN: "Arizona" },
+  { value: "America/Los_Angeles", PT: "Oeste dos EUA — Pacific Time", EN: "US West — Pacific Time" },
+  { value: "America/Anchorage", PT: "Alasca", EN: "Alaska" },
+  { value: "Pacific/Honolulu", PT: "Havaí", EN: "Hawaii" },
 ] as const;
+
+function flowStepLabel(
+  key: (typeof FLOW_STEPS)[number]["key"],
+  copy: (portuguese: string, english: string) => string,
+) {
+  switch (key) {
+    case "WELCOME": return copy("Boas-vindas", "Welcome");
+    case "PROFILE": return copy("Seus dados", "Your details");
+    case "NATIONAL_LIFE": return "National Life";
+    case "CALENDAR": return copy("Agenda", "Calendar");
+    case "WHATSAPP": return "WhatsApp";
+    case "MODULES": return copy("Tour", "Tour");
+    case "REVIEW": return copy("Revisão", "Review");
+  }
+}
 
 function stepIndex(step: OnboardingStep): number {
   if (step === "COMPLETED") return FLOW_STEPS.length;
@@ -125,12 +142,13 @@ function StepState({
 }: {
   state: "complete" | "current" | "locked";
 }) {
+  const { copy } = useI18n();
   const label =
     state === "complete"
-      ? "Concluído"
+      ? copy("Concluído", "Completed")
       : state === "current"
-        ? "Etapa atual"
-        : "Aguardando etapa anterior";
+        ? copy("Etapa atual", "Current step")
+        : copy("Aguardando etapa anterior", "Waiting for the previous step");
   return (
     <span className={`onboarding-step-state is-${state}`}>
       <span aria-hidden="true" />
@@ -186,30 +204,37 @@ function PrimarySubmit({
 }
 
 function OnboardingTopbar({ currentStep }: { currentStep: OnboardingStep }) {
+  const { copy, language } = useI18n();
   const currentIndex = stepIndex(currentStep);
   const progress = Math.round((currentIndex / FLOW_STEPS.length) * 100);
 
   return (
     <header className="onboarding-topbar">
       <div className="onboarding-topbar-inner">
-        <a href="#onboarding-welcome" aria-label="Keepr One — início do onboarding">
-          <Logo size={30} className="text-white" />
-        </a>
+        <div className="onboarding-brand-actions">
+          <a
+            href="#onboarding-welcome"
+            aria-label={copy("Keepr One — início do onboarding", "Keepr One — onboarding home")}
+          >
+            <Logo size={30} className="text-white" />
+          </a>
+          <LanguageSwitcher inverse />
+        </div>
         <div className="onboarding-progress-copy">
-          <span>{currentStep === "COMPLETED" ? "Configuração concluída" : "Configurando seu acesso"}</span>
-          <strong>{progress}%</strong>
+          <span>{currentStep === "COMPLETED" ? copy("Configuração concluída", "Setup complete") : copy("Configurando seu acesso", "Setting up your access")}</span>
+          <strong>{formatNumber(progress, language)}%</strong>
         </div>
         <div
           className="onboarding-progress-track"
           role="progressbar"
-          aria-label="Progresso da configuração"
+          aria-label={copy("Progresso da configuração", "Setup progress")}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={progress}
         >
           <span style={{ width: `${progress}%` }} />
         </div>
-        <nav aria-label="Etapas da configuração" className="onboarding-step-nav">
+        <nav aria-label={copy("Etapas da configuração", "Setup steps")} className="onboarding-step-nav">
           <ol>
             {FLOW_STEPS.map((step, index) => {
               const available = index <= currentIndex;
@@ -217,7 +242,7 @@ function OnboardingTopbar({ currentStep }: { currentStep: OnboardingStep }) {
               const content = (
                 <>
                   <span aria-hidden="true">{index < currentIndex ? <OnboardingIcon name="check" className="size-3" /> : null}</span>
-                  {step.label}
+                  {flowStepLabel(step.key, copy)}
                 </>
               );
               return (
@@ -252,37 +277,45 @@ function WelcomeHero({
   pending: boolean;
   state: OnboardingActionState;
 }) {
+  const { copy } = useI18n();
   const isWelcome = currentStep === "WELCOME";
-  const firstName = userName.trim().split(/\s+/)[0] || "agente";
+  const firstName = userName.trim().split(/\s+/)[0] || copy("agente", "agent");
 
   return (
     <section id="onboarding-welcome" className="onboarding-hero" aria-labelledby="onboarding-title">
       <div className="onboarding-hero-copy max-w-6xl">
         <p data-onboarding-reveal className="onboarding-hero-intro">
-          Bem-vindo, {firstName}. Vamos preparar seu acesso.
+          {copy(
+            "Bem-vindo, {name}. Vamos preparar seu acesso.",
+            "Welcome, {name}. Let's set up your access.",
+            { name: firstName },
+          )}
         </p>
         <h1 data-onboarding-reveal id="onboarding-title">
-          Sua operação inteira começa no lugar certo.
+          {copy("Sua operação inteira começa no lugar certo.", "Your entire operation starts in the right place.")}
         </h1>
         <p data-onboarding-reveal className="onboarding-hero-description">
-          Confirme seus dados, conecte as fontes que já usa e conheça cada área disponível no seu plano antes de entrar na operação.
+          {copy(
+            "Confirme seus dados, conecte as fontes que já usa e conheça cada área disponível no seu plano antes de entrar na operação.",
+            "Confirm your details, connect the sources you already use, and explore every area included in your plan before starting work.",
+          )}
         </p>
         <div data-onboarding-reveal className="onboarding-hero-actions">
           {isWelcome ? (
             <form action={action}>
               <button type="submit" className="onboarding-hero-primary" disabled={pending} aria-busy={pending}>
-                {pending ? "Preparando configuração…" : "Começar configuração"}
+                {pending ? copy("Preparando configuração…", "Preparing setup…") : copy("Começar configuração", "Start setup")}
                 <OnboardingIcon name="arrow-right" className="size-4" />
               </button>
             </form>
           ) : (
             <a className="onboarding-hero-primary" href={stepAnchor(currentStep)}>
-              Retomar de onde parei
+              {copy("Retomar de onde parei", "Resume where I left off")}
               <OnboardingIcon name="arrow-right" className="size-4" />
             </a>
           )}
           <a className="onboarding-hero-secondary" href="#onboarding-path">
-            Ver o percurso
+            {copy("Ver o percurso", "View the path")}
           </a>
         </div>
         <ActionFeedback state={state} id="onboarding-welcome-feedback" />
@@ -298,7 +331,12 @@ function WelcomeHero({
           className="onboarding-hero-mark"
         />
         <div className="onboarding-hero-orbit">
-          {["Dados", "National Life", "Agenda", "Operação"].map((label, index) => (
+          {[
+            copy("Dados", "Details"),
+            "National Life",
+            copy("Agenda", "Calendar"),
+            copy("Operação", "Operations"),
+          ].map((label, index) => (
             <span key={label} style={{ "--orbit-index": index } as React.CSSProperties}>
               {label}
             </span>
@@ -315,9 +353,10 @@ function WelcomeHero({
 }
 
 function ModuleMarquee({ modules }: { modules: readonly OnboardingModuleName[] }) {
-  const items = onboardingModulesFor(modules);
+  const { copy, language } = useI18n();
+  const items = onboardingModulesFor(modules, language);
   return (
-    <div id="onboarding-path" className="onboarding-marquee" aria-label="Áreas disponíveis no seu acesso">
+    <div id="onboarding-path" className="onboarding-marquee" aria-label={copy("Áreas disponíveis no seu acesso", "Areas available with your access")}>
       <div data-onboarding-marquee className="onboarding-marquee-track">
         {[...items, ...items].map((module, index) => (
           <span key={`${module.key}-${index}`} aria-hidden={index >= items.length ? "true" : undefined}>
@@ -341,33 +380,34 @@ function IntegrationAccordion({
   calendarConnected: boolean;
   whatsappConnected: boolean;
 }) {
+  const { copy } = useI18n();
   const [active, setActive] = useState<IntegrationKey>("national-life");
   const panels = [
     {
       key: "national-life" as const,
       title: "National Life",
-      copy: "Obrigatória para validar a origem da carteira e liberar a operação.",
-      status: nationalLifeState === "VERIFIED_SYNC" ? "Sincronização validada" : nationalLifeState === "CONNECTOR_PAIRED" ? "Computador conectado" : "Conexão pendente",
+      copy: copy("Obrigatória para validar a origem da carteira e liberar a operação.", "Required to validate the source of your book and enable operations."),
+      status: nationalLifeState === "VERIFIED_SYNC" ? copy("Sincronização validada", "Sync verified") : nationalLifeState === "CONNECTOR_PAIRED" ? copy("Computador conectado", "Computer connected") : copy("Conexão pendente", "Connection pending"),
       href: "#onboarding-national-life",
     },
     {
       key: "calendar" as const,
       title: "Google Calendar",
-      copy: "Opcional para trazer compromissos e reuniões para a Agenda Keepr One.",
-      status: calendarConnected ? "Conectado" : "Você decide agora",
+      copy: copy("Opcional para trazer compromissos e reuniões para a Agenda Keepr One.", "Optional for bringing appointments and meetings into the Keepr One Calendar."),
+      status: calendarConnected ? copy("Conectado", "Connected") : copy("Você decide agora", "Choose now"),
       href: "#onboarding-calendar",
     },
     {
       key: "whatsapp" as const,
       title: "WhatsApp",
-      copy: "Opcional para concentrar conversas no contexto do relacionamento.",
-      status: whatsappConnected ? "Conectado" : "Você decide agora",
+      copy: copy("Opcional para concentrar conversas no contexto do relacionamento.", "Optional for keeping conversations within the relationship context."),
+      status: whatsappConnected ? copy("Conectado", "Connected") : copy("Você decide agora", "Choose now"),
       href: "#onboarding-whatsapp",
     },
   ];
 
   return (
-    <div className="onboarding-integration-accordion" aria-label="Resumo das integrações">
+    <div className="onboarding-integration-accordion" aria-label={copy("Resumo das integrações", "Integration summary")}>
       {panels.map((panel) => {
         const expanded = active === panel.key;
         return (
@@ -384,7 +424,7 @@ function IntegrationAccordion({
             <div id={`onboarding-integration-${panel.key}`} hidden={!expanded}>
               <p>{panel.copy}</p>
               <a href={panel.href}>
-                Abrir etapa
+                {copy("Abrir etapa", "Open step")}
                 <OnboardingIcon name="arrow-right" className="size-4" />
               </a>
             </div>
@@ -408,6 +448,7 @@ function ProfileCard({
   pending: boolean;
   state: OnboardingActionState;
 }) {
+  const { copy, language } = useI18n();
   const currentIndex = stepIndex(currentStep);
   const ownIndex = stepIndex("PROFILE");
   const phase = currentIndex > ownIndex ? "complete" : currentIndex === ownIndex ? "current" : "locked";
@@ -424,31 +465,31 @@ function ProfileCard({
         <span className="onboarding-card-icon"><OnboardingIcon name="profile" /></span>
         <StepState state={phase} />
       </header>
-      <h2 id="onboarding-profile-title">Confirme como sua operação identifica você.</h2>
-      <p>Nome, telefone, fuso e NPN conectam agenda, produção e carteira ao perfil correto.</p>
+      <h2 id="onboarding-profile-title">{copy("Confirme como sua operação identifica você.", "Confirm how your operation identifies you.")}</h2>
+      <p>{copy("Nome, telefone, fuso e NPN conectam agenda, produção e carteira ao perfil correto.", "Your name, phone, time zone, and NPN connect your calendar, production, and book to the right profile.")}</p>
 
       <form action={action} aria-describedby={state.message ? "onboarding-profile-feedback" : undefined}>
-        <Field label="Nome completo" htmlFor="onboarding-name" error={nameError} required>
+        <Field label={copy("Nome completo", "Full name")} htmlFor="onboarding-name" error={nameError} required>
           <Input id="onboarding-name" name="name" autoComplete="name" maxLength={100} defaultValue={profile.name} required disabled={!enabled || pending} aria-invalid={Boolean(nameError)} aria-describedby={describedBy("onboarding-name", nameError)} />
         </Field>
-        <Field label="Telefone" htmlFor="onboarding-phone" error={phoneError} required>
+        <Field label={copy("Telefone", "Phone")} htmlFor="onboarding-phone" error={phoneError} required>
           <Input id="onboarding-phone" name="phone" type="tel" autoComplete="tel" inputMode="tel" maxLength={32} defaultValue={profile.phone} required disabled={!enabled || pending} aria-invalid={Boolean(phoneError)} aria-describedby={describedBy("onboarding-phone", phoneError)} />
         </Field>
-        <Field label="Fuso horário" htmlFor="onboarding-time-zone" hint="Agenda e lembretes usam este horário." error={timeZoneError} required>
+        <Field label={copy("Fuso horário", "Time zone")} htmlFor="onboarding-time-zone" hint={copy("Agenda e lembretes usam este horário.", "Calendar events and reminders use this time zone.")} error={timeZoneError} required>
           <Select id="onboarding-time-zone" name="timeZone" defaultValue={profile.timeZone} required disabled={!enabled || pending} aria-invalid={Boolean(timeZoneError)} aria-describedby={describedBy("onboarding-time-zone", timeZoneError, true)}>
             {!knownTimeZone ? <option value={profile.timeZone}>{profile.timeZone}</option> : null}
-            {TIME_ZONE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            {TIME_ZONE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option[language]}</option>)}
           </Select>
         </Field>
-        <Field label="NPN" htmlFor="onboarding-npn" hint="Informe de 4 a 20 números do identificador associado à sua produção." error={npnError} required>
+        <Field label="NPN" htmlFor="onboarding-npn" hint={copy("Informe de 4 a 20 números do identificador associado à sua produção.", "Enter the 4 to 20 digit identifier associated with your production.")} error={npnError} required>
           <Input id="onboarding-npn" name="npn" inputMode="numeric" autoComplete="off" minLength={4} maxLength={20} pattern="[0-9]{4,20}" defaultValue={profile.npn} required disabled={!enabled || pending} aria-invalid={Boolean(npnError)} aria-describedby={describedBy("onboarding-npn", npnError, true)} />
         </Field>
 
         <ActionFeedback state={state} id="onboarding-profile-feedback" />
         {enabled ? (
           <div className="onboarding-card-actions">
-            <DirectionLink href="#onboarding-welcome">Voltar</DirectionLink>
-            <PrimarySubmit label="Salvar e continuar" pendingLabel="Salvando dados…" pending={pending} />
+            <DirectionLink href="#onboarding-welcome">{copy("Voltar", "Back")}</DirectionLink>
+            <PrimarySubmit label={copy("Salvar e continuar", "Save and continue")} pendingLabel={copy("Salvando dados…", "Saving details…")} pending={pending} />
           </div>
         ) : null}
       </form>
@@ -471,6 +512,7 @@ function NationalLifeCard({
   pending: boolean;
   state: OnboardingActionState;
 }) {
+  const { copy } = useI18n();
   const currentIndex = stepIndex(currentStep);
   const ownIndex = stepIndex("NATIONAL_LIFE");
   const phase = currentIndex > ownIndex ? "complete" : currentIndex === ownIndex ? "current" : "locked";
@@ -481,15 +523,15 @@ function NationalLifeCard({
       <div className="onboarding-card-heading-row">
         <div>
           <span className="onboarding-card-icon"><OnboardingIcon name="national-life" /></span>
-          <h2 id="onboarding-national-life-title">Valide sua origem National Life.</h2>
-          <p>Esta conexão é obrigatória. A Keepr One só avança depois de uma sincronização completa e verificável.</p>
+          <h2 id="onboarding-national-life-title">{copy("Valide sua origem National Life.", "Verify your National Life source.")}</h2>
+          <p>{copy("Esta conexão é obrigatória. A Keepr One só avança depois de uma sincronização completa e verificável.", "This connection is required. Keepr One only continues after a complete, verifiable sync.")}</p>
         </div>
         <StepState state={phase} />
       </div>
 
       <div className="onboarding-integration-status" data-status={integrationState.toLowerCase()}>
-        <strong>{integrationState === "VERIFIED_SYNC" ? "Sincronização validada" : integrationState === "CONNECTOR_PAIRED" ? "Computador conectado" : "Conexão ainda não iniciada"}</strong>
-        <span>{integrationState === "VERIFIED_SYNC" ? "A origem foi comprovada e esta etapa está concluída." : integrationState === "CONNECTOR_PAIRED" ? "Faça uma sincronização completa e valide o resultado abaixo." : "Conecte pelo fluxo oficial disponível neste ambiente."}</span>
+        <strong>{integrationState === "VERIFIED_SYNC" ? copy("Sincronização validada", "Sync verified") : integrationState === "CONNECTOR_PAIRED" ? copy("Computador conectado", "Computer connected") : copy("Conexão ainda não iniciada", "Connection not started")}</strong>
+        <span>{integrationState === "VERIFIED_SYNC" ? copy("A origem foi comprovada e esta etapa está concluída.", "The source has been verified and this step is complete.") : integrationState === "CONNECTOR_PAIRED" ? copy("Faça uma sincronização completa e valide o resultado abaixo.", "Run a complete sync and verify the result below.") : copy("Conecte pelo fluxo oficial disponível neste ambiente.", "Connect through the official flow available in this environment.")}</span>
       </div>
 
       {enabled && integrationState !== "VERIFIED_SYNC" ? (
@@ -499,8 +541,8 @@ function NationalLifeCard({
           </div>
         ) : (
           <div className="onboarding-unavailable-note" role="status">
-            <strong>A conexão ainda não foi liberada neste ambiente.</strong>
-            <p>A equipe Keepr One precisa habilitar o conector National Life antes de você concluir esta etapa. Nenhum endereço alternativo será solicitado.</p>
+            <strong>{copy("A conexão ainda não foi liberada neste ambiente.", "This connection is not enabled in this environment yet.")}</strong>
+            <p>{copy("A equipe Keepr One precisa habilitar o conector National Life antes de você concluir esta etapa. Nenhum endereço alternativo será solicitado.", "The Keepr One team must enable the National Life connector before you can complete this step. You will not be asked for an alternative address.")}</p>
           </div>
         )
       ) : null}
@@ -508,8 +550,8 @@ function NationalLifeCard({
       <ActionFeedback state={state} id="onboarding-national-life-feedback" />
       {enabled ? (
         <form action={action} className="onboarding-card-actions" aria-describedby={state.message ? "onboarding-national-life-feedback" : undefined}>
-          <DirectionLink href="#onboarding-profile">Voltar</DirectionLink>
-          <PrimarySubmit label="Validar sincronização" pendingLabel="Validando origem…" pending={pending} disabled={!config.enabled} />
+          <DirectionLink href="#onboarding-profile">{copy("Voltar", "Back")}</DirectionLink>
+          <PrimarySubmit label={copy("Validar sincronização", "Verify sync")} pendingLabel={copy("Validando origem…", "Verifying source…")} pending={pending} disabled={!config.enabled} />
         </form>
       ) : null}
     </article>
@@ -531,6 +573,7 @@ function CalendarCard({
   pending: boolean;
   state: OnboardingActionState;
 }) {
+  const { copy } = useI18n();
   const currentIndex = stepIndex(currentStep);
   const ownIndex = stepIndex("CALENDAR");
   const phase = currentIndex > ownIndex ? "complete" : currentIndex === ownIndex ? "current" : "locked";
@@ -542,30 +585,30 @@ function CalendarCard({
         <span className="onboarding-card-icon"><OnboardingIcon name="google-calendar" /></span>
         <StepState state={phase} />
       </header>
-      <h2 id="onboarding-calendar-title">Leve o Google Calendar para sua Agenda.</h2>
-      <p>A integração disponível hoje é exclusivamente com Google Calendar. Apple Calendar e iCal ainda não fazem parte deste fluxo.</p>
+      <h2 id="onboarding-calendar-title">{copy("Leve o Google Calendar para sua Agenda.", "Bring Google Calendar into your Keepr One Calendar.")}</h2>
+      <p>{copy("A integração disponível hoje é exclusivamente com Google Calendar. Apple Calendar e iCal ainda não fazem parte deste fluxo.", "The integration currently available works exclusively with Google Calendar. Apple Calendar and iCal are not yet part of this flow.")}</p>
 
-      {connected ? <p className="onboarding-connected-copy"><OnboardingIcon name="check" /> Google Calendar conectado</p> : null}
-      {!configured && enabled ? <p className="onboarding-unavailable-copy">A autorização Google ainda não está configurada neste ambiente. Você pode seguir e conectar depois.</p> : null}
+      {connected ? <p className="onboarding-connected-copy"><OnboardingIcon name="check" /> {copy("Google Calendar conectado", "Google Calendar connected")}</p> : null}
+      {!configured && enabled ? <p className="onboarding-unavailable-copy">{copy("A autorização Google ainda não está configurada neste ambiente. Você pode seguir e conectar depois.", "Google authorization is not configured in this environment yet. You can continue and connect later.")}</p> : null}
 
       <ActionFeedback state={state} id="onboarding-calendar-feedback" />
       {enabled ? (
         <div className="onboarding-option-actions">
           {configured && !connected ? (
             <Link className="onboarding-primary-action" href="/api/agent/integrations/google-calendar/authorize?returnTo=/onboarding">
-              Conectar Google Calendar
+              {copy("Conectar Google Calendar", "Connect Google Calendar")}
               <OnboardingIcon name="arrow-right" className="size-4" />
             </Link>
           ) : null}
           {connected ? (
             <form action={action}>
               <input type="hidden" name="decision" value="CONNECTED" />
-              <PrimarySubmit label="Validar e continuar" pendingLabel="Validando agenda…" pending={pending} />
+              <PrimarySubmit label={copy("Validar e continuar", "Verify and continue")} pendingLabel={copy("Validando agenda…", "Verifying calendar…")} pending={pending} />
             </form>
           ) : null}
           <form action={action}>
             <input type="hidden" name="decision" value="SKIPPED" />
-            <button type="submit" className="onboarding-text-action" disabled={pending}>Configurar depois</button>
+            <button type="submit" className="onboarding-text-action" disabled={pending}>{copy("Configurar depois", "Set up later")}</button>
           </form>
         </div>
       ) : null}
@@ -590,6 +633,7 @@ function WhatsappCard({
   pending: boolean;
   state: OnboardingActionState;
 }) {
+  const { copy } = useI18n();
   const currentIndex = stepIndex(currentStep);
   const ownIndex = stepIndex("WHATSAPP");
   const phase = currentIndex > ownIndex ? "complete" : currentIndex === ownIndex ? "current" : "locked";
@@ -601,15 +645,15 @@ function WhatsappCard({
         <span className="onboarding-card-icon"><OnboardingIcon name="whatsapp" /></span>
         <StepState state={phase} />
       </header>
-      <h2 id="onboarding-whatsapp-title">Decida quando trazer suas conversas.</h2>
-      <p>O WhatsApp é opcional. Se a infraestrutura estiver pronta, você pode conectar agora; caso contrário, a escolha fica registrada para depois.</p>
+      <h2 id="onboarding-whatsapp-title">{copy("Decida quando trazer suas conversas.", "Choose when to bring in your conversations.")}</h2>
+      <p>{copy("O WhatsApp é opcional. Se a infraestrutura estiver pronta, você pode conectar agora; caso contrário, a escolha fica registrada para depois.", "WhatsApp is optional. If the infrastructure is ready, you can connect now; otherwise, your choice is saved for later.")}</p>
 
-      {connected ? <p className="onboarding-connected-copy"><OnboardingIcon name="check" /> WhatsApp conectado e verificado</p> : null}
-      {!available && enabled ? <p className="onboarding-unavailable-copy">A infraestrutura de mensagens ainda não está liberada para esta conta. Nenhum botão de conexão indisponível será exibido.</p> : null}
+      {connected ? <p className="onboarding-connected-copy"><OnboardingIcon name="check" /> {copy("WhatsApp conectado e verificado", "WhatsApp connected and verified")}</p> : null}
+      {!available && enabled ? <p className="onboarding-unavailable-copy">{copy("A infraestrutura de mensagens ainda não está liberada para esta conta. Nenhum botão de conexão indisponível será exibido.", "Messaging infrastructure is not enabled for this account yet. No unavailable connection controls will be shown.")}</p> : null}
 
       {available && enabled && !connected ? (
         <details className="onboarding-inline-setup">
-          <summary>Configurar WhatsApp agora</summary>
+          <summary>{copy("Configurar WhatsApp agora", "Set up WhatsApp now")}</summary>
           <div>{mode === "META_CLOUD" ? <ConnectOfficialWhatsapp /> : <ConnectWhatsapp />}</div>
         </details>
       ) : null}
@@ -620,12 +664,12 @@ function WhatsappCard({
           {connected ? (
             <form action={action}>
               <input type="hidden" name="decision" value="CONNECTED" />
-              <PrimarySubmit label="Validar e continuar" pendingLabel="Validando WhatsApp…" pending={pending} />
+              <PrimarySubmit label={copy("Validar e continuar", "Verify and continue")} pendingLabel={copy("Validando WhatsApp…", "Verifying WhatsApp…")} pending={pending} />
             </form>
           ) : null}
           <form action={action}>
             <input type="hidden" name="decision" value="SKIPPED" />
-            <button type="submit" className="onboarding-text-action" disabled={pending}>Configurar depois</button>
+            <button type="submit" className="onboarding-text-action" disabled={pending}>{copy("Configurar depois", "Set up later")}</button>
           </form>
         </div>
       ) : null}
@@ -670,11 +714,12 @@ function SetupBento({
   whatsappPending: boolean;
   whatsappState: OnboardingActionState;
 }) {
+  const { copy } = useI18n();
   return (
     <section className="onboarding-setup" aria-labelledby="onboarding-setup-title">
       <div className="onboarding-section-heading">
-        <h2 id="onboarding-setup-title">Quatro decisões deixam a base pronta.</h2>
-        <p>Os dados pessoais identificam você. As integrações entram apenas quando a origem e o estado podem ser comprovados.</p>
+        <h2 id="onboarding-setup-title">{copy("Quatro decisões deixam a base pronta.", "Four decisions get your foundation ready.")}</h2>
+        <p>{copy("Os dados pessoais identificam você. As integrações entram apenas quando a origem e o estado podem ser comprovados.", "Your personal details identify you. Integrations are added only when their source and status can be verified.")}</p>
       </div>
 
       <IntegrationAccordion nationalLifeState={data.integrations.nationalLife} calendarConnected={data.integrations.calendarConnected} whatsappConnected={data.integrations.whatsappConnected} />
@@ -700,9 +745,10 @@ function ModuleTour({
   pending: boolean;
   state: OnboardingActionState;
 }) {
+  const { copy, language } = useI18n();
   const modules = useMemo(
-    () => onboardingModulesFor(onboarding.requiredModules),
-    [onboarding.requiredModules],
+    () => onboardingModulesFor(onboarding.requiredModules, language),
+    [language, onboarding.requiredModules],
   );
   const firstPending = onboarding.pendingModules[0];
   const initialIndex = Math.max(0, modules.findIndex((module) => module.key === firstPending));
@@ -739,20 +785,20 @@ function ModuleTour({
   return (
     <section id="onboarding-tour" data-onboarding-tour className="onboarding-tour" aria-labelledby="onboarding-tour-title">
       <div data-onboarding-tour-heading className="onboarding-tour-heading">
-        <h2 id="onboarding-tour-title">Conheça a casa antes de começar o dia.</h2>
-        <p>Seu tour mostra somente os módulos liberados para o seu plano. Cada área precisa ser revisada antes da etapa final.</p>
-        <div className="onboarding-tour-progress" aria-label={`${onboarding.completedModules.length} de ${modules.length} módulos revisados`}>
-          <span><strong>{onboarding.completedModules.length}</strong> de {modules.length} revisados</span>
+        <h2 id="onboarding-tour-title">{copy("Conheça a casa antes de começar o dia.", "Explore your workspace before starting the day.")}</h2>
+        <p>{copy("Seu tour mostra somente os módulos liberados para o seu plano. Cada área precisa ser revisada antes da etapa final.", "Your tour shows only the modules included in your plan. Review each area before the final step.")}</p>
+        <div className="onboarding-tour-progress" aria-label={copy("{completed} de {total} módulos revisados", "{completed} of {total} modules reviewed", { completed: formatNumber(onboarding.completedModules.length, language), total: formatNumber(modules.length, language) })}>
+          <span><strong>{formatNumber(onboarding.completedModules.length, language)}</strong> {copy("de", "of")} {formatNumber(modules.length, language)} {copy("revisados", "reviewed")}</span>
           <span><i style={{ width: `${Math.round((onboarding.completedModules.length / modules.length) * 100)}%` }} /></span>
         </div>
       </div>
 
       <div className="onboarding-tour-stage">
         <div className="onboarding-carousel-controls">
-          <span>{activeIndex + 1} de {modules.length}</span>
+          <span>{formatNumber(activeIndex + 1, language)} {copy("de", "of")} {formatNumber(modules.length, language)}</span>
           <div>
-            <button type="button" onClick={() => move(-1)} aria-label="Ver módulo anterior"><OnboardingIcon name="arrow-left" /></button>
-            <button type="button" onClick={() => move(1)} aria-label="Ver próximo módulo"><OnboardingIcon name="arrow-right" /></button>
+            <button type="button" onClick={() => move(-1)} aria-label={copy("Ver módulo anterior", "View previous module")}><OnboardingIcon name="arrow-left" /></button>
+            <button type="button" onClick={() => move(1)} aria-label={copy("Ver próximo módulo", "View next module")}><OnboardingIcon name="arrow-right" /></button>
           </div>
         </div>
 
@@ -777,16 +823,16 @@ function ModuleTour({
 
         <ActionFeedback state={state} id="onboarding-module-feedback" />
         <div className="onboarding-tour-actions">
-          <DirectionLink href="#onboarding-whatsapp">Voltar às conexões</DirectionLink>
+          <DirectionLink href="#onboarding-whatsapp">{copy("Voltar às conexões", "Back to connections")}</DirectionLink>
           {enabled && !completed ? (
             <form action={action} aria-describedby={state.message ? "onboarding-module-feedback" : undefined}>
               <input type="hidden" name="module" value={activeModule.key} />
-              <PrimarySubmit label="Marcar como revisado" pendingLabel="Registrando módulo…" pending={pending} />
+              <PrimarySubmit label={copy("Marcar como revisado", "Mark as reviewed")} pendingLabel={copy("Registrando módulo…", "Saving module…")} pending={pending} />
             </form>
           ) : completed ? (
-            <span className="onboarding-reviewed-state"><OnboardingIcon name="check" /> Módulo revisado</span>
+            <span className="onboarding-reviewed-state"><OnboardingIcon name="check" /> {copy("Módulo revisado", "Module reviewed")}</span>
           ) : (
-            <span className="onboarding-locked-state">Conclua as conexões para iniciar o tour.</span>
+            <span className="onboarding-locked-state">{copy("Conclua as conexões para iniciar o tour.", "Complete the connections to start the tour.")}</span>
           )}
         </div>
       </div>
@@ -807,29 +853,30 @@ function ReviewSection({
   pending: boolean;
   state: OnboardingActionState;
 }) {
+  const { copy, language } = useI18n();
   const enabled = onboarding.currentStep === "REVIEW";
   const checks = [
-    { title: "Dados do perfil", detail: onboarding.profileCompletedAt ? "Identidade profissional confirmada" : "Ainda pendente", complete: Boolean(onboarding.profileCompletedAt) },
-    { title: "National Life", detail: integrations.nationalLife === "VERIFIED_SYNC" ? "Sincronização completa validada" : "Ainda pendente", complete: Boolean(onboarding.nationalLifeVerifiedAt) },
-    { title: "Google Calendar", detail: onboarding.calendarDecision === "CONNECTED" ? "Conexão validada" : onboarding.calendarDecision === "SKIPPED" ? "Escolhido para configurar depois" : "Decisão pendente", complete: Boolean(onboarding.calendarDecision) },
-    { title: "WhatsApp", detail: onboarding.whatsappDecision === "CONNECTED" ? "Conexão validada" : onboarding.whatsappDecision === "SKIPPED" ? "Escolhido para configurar depois" : "Decisão pendente", complete: Boolean(onboarding.whatsappDecision) },
-    { title: "Tour dos módulos", detail: `${onboarding.completedModules.length} de ${onboarding.requiredModules.length} áreas revisadas`, complete: onboarding.pendingModules.length === 0 },
+    { title: copy("Dados do perfil", "Profile details"), detail: onboarding.profileCompletedAt ? copy("Identidade profissional confirmada", "Professional identity confirmed") : copy("Ainda pendente", "Still pending"), complete: Boolean(onboarding.profileCompletedAt) },
+    { title: "National Life", detail: integrations.nationalLife === "VERIFIED_SYNC" ? copy("Sincronização completa validada", "Complete sync verified") : copy("Ainda pendente", "Still pending"), complete: Boolean(onboarding.nationalLifeVerifiedAt) },
+    { title: "Google Calendar", detail: onboarding.calendarDecision === "CONNECTED" ? copy("Conexão validada", "Connection verified") : onboarding.calendarDecision === "SKIPPED" ? copy("Escolhido para configurar depois", "Selected to set up later") : copy("Decisão pendente", "Decision pending"), complete: Boolean(onboarding.calendarDecision) },
+    { title: "WhatsApp", detail: onboarding.whatsappDecision === "CONNECTED" ? copy("Conexão validada", "Connection verified") : onboarding.whatsappDecision === "SKIPPED" ? copy("Escolhido para configurar depois", "Selected to set up later") : copy("Decisão pendente", "Decision pending"), complete: Boolean(onboarding.whatsappDecision) },
+    { title: copy("Tour dos módulos", "Module tour"), detail: copy("{completed} de {total} áreas revisadas", "{completed} of {total} areas reviewed", { completed: formatNumber(onboarding.completedModules.length, language), total: formatNumber(onboarding.requiredModules.length, language) }), complete: onboarding.pendingModules.length === 0 },
   ];
 
   return (
     <section id="onboarding-review" className="onboarding-review" aria-labelledby="onboarding-review-title">
       <div className="onboarding-review-copy">
-        <h2 id="onboarding-review-title">Revise a base. Depois, a operação é sua.</h2>
-        <p>Nada é marcado por aparência. Cada conclusão abaixo vem do cadastro, da conexão validada ou de uma decisão que você tomou.</p>
+        <h2 id="onboarding-review-title">{copy("Revise a base. Depois, a operação é sua.", "Review the foundation. Then the operation is yours.")}</h2>
+        <p>{copy("Nada é marcado por aparência. Cada conclusão abaixo vem do cadastro, da conexão validada ou de uma decisão que você tomou.", "Nothing is marked complete based on appearance. Every item below comes from your profile, a verified connection, or a decision you made.")}</p>
         <ActionFeedback state={state} id="onboarding-review-feedback" />
         <div className="onboarding-review-actions">
-          <DirectionLink href="#onboarding-tour">Voltar ao tour</DirectionLink>
+          <DirectionLink href="#onboarding-tour">{copy("Voltar ao tour", "Back to tour")}</DirectionLink>
           {enabled ? (
             <form action={action} aria-describedby={state.message ? "onboarding-review-feedback" : undefined}>
-              <PrimarySubmit label="Concluir e entrar na plataforma" pendingLabel="Concluindo configuração…" pending={pending} disabled={checks.some((check) => !check.complete)} />
+              <PrimarySubmit label={copy("Concluir e entrar na plataforma", "Finish and enter the platform")} pendingLabel={copy("Concluindo configuração…", "Finishing setup…")} pending={pending} disabled={checks.some((check) => !check.complete)} />
             </form>
           ) : (
-            <span className="onboarding-locked-state">Conclua todas as etapas para liberar o acesso.</span>
+            <span className="onboarding-locked-state">{copy("Conclua todas as etapas para liberar o acesso.", "Complete every step to unlock access.")}</span>
           )}
         </div>
       </div>
@@ -858,6 +905,7 @@ export function OnboardingExperience({
   calendarConfigured,
   whatsapp,
 }: OnboardingExperienceProps) {
+  const { copy } = useI18n();
   const [welcomeState, welcomeAction, welcomePending] = useActionState(acknowledgeOnboardingWelcomeAction, INITIAL_ONBOARDING_ACTION_STATE);
   const [profileState, profileAction, profilePending] = useActionState(saveOnboardingProfileAction, INITIAL_ONBOARDING_ACTION_STATE);
   const [nationalLifeState, nationalLifeAction, nationalLifePending] = useActionState(verifyNationalLifeOnboardingAction, INITIAL_ONBOARDING_ACTION_STATE);
@@ -902,7 +950,7 @@ export function OnboardingExperience({
   return (
     <OnboardingMotion>
       <main className="onboarding-root w-full max-w-full overflow-x-hidden">
-        <a className="onboarding-skip-link" href="#onboarding-welcome">Ir para o conteúdo principal</a>
+        <a className="onboarding-skip-link" href="#onboarding-welcome">{copy("Ir para o conteúdo principal", "Skip to main content")}</a>
         <OnboardingTopbar currentStep={currentOnboarding.currentStep} />
         <WelcomeHero userName={profile.name} currentStep={currentOnboarding.currentStep} action={welcomeAction} pending={welcomePending} state={welcomeState} />
         <ModuleMarquee modules={currentOnboarding.requiredModules} />
@@ -929,7 +977,7 @@ export function OnboardingExperience({
         <ReviewSection onboarding={currentOnboarding} integrations={integrations} action={completeAction} pending={completePending} state={completeState} />
         <footer className="onboarding-footer">
           <Logo size={26} className="text-white" />
-          <p>Seu progresso fica salvo para você continuar com segurança.</p>
+          <p>{copy("Seu progresso fica salvo para você continuar com segurança.", "Your progress is saved so you can continue safely.")}</p>
         </footer>
       </main>
     </OnboardingMotion>

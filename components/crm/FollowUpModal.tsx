@@ -3,17 +3,11 @@
 import { useMemo, useState, useTransition } from "react";
 import { OverlaySurface } from "@/components/overlays/OverlaySurface";
 import { quickFollowUpDate } from "@/lib/crm/time";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 type Result = { ok: true } | { ok: false; message: string };
 
-const QUICK_DATES = [
-  { days: 0, label: "Hoje" },
-  { days: 1, label: "Amanhã" },
-  { days: 2, label: "Em 2 dias" },
-  { days: 3, label: "Em 3 dias" },
-  { days: 5, label: "Em 5 dias" },
-  { days: 7, label: "Em 7 dias" },
-];
+const QUICK_DAYS = [0, 1, 2, 3, 5, 7] as const;
 
 const CRM_DATE_INPUT = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -52,6 +46,7 @@ export function FollowUpModal({
   submitLabel?: string;
   onSubmit: (input: { title: string; scheduledAt: string }) => Promise<Result>;
 }) {
+  const { copy } = useI18n();
   const [title, setTitle] = useState(initialTitle);
   const [date, setDate] = useState(initialDate ?? localDate(1));
   const [time, setTime] = useState(initialTime);
@@ -61,7 +56,7 @@ export function FollowUpModal({
 
   function submit() {
     if (!date) {
-      setError("Escolha uma data para continuar.");
+      setError(copy("Escolha uma data para continuar.", "Choose a date to continue."));
       return;
     }
     startTransition(async () => {
@@ -85,32 +80,36 @@ export function FollowUpModal({
       <div className="crm-followup-modal">
         <header>
           <div>
-            <span>Próxima ação</span>
-            <h2 id="follow-up-modal-title">Quando deseja fazer o follow-up?</h2>
+            <span>{copy("Próxima ação", "Next action")}</span>
+            <h2 id="follow-up-modal-title">{copy("Quando deseja fazer o follow-up?", "When would you like to follow up?")}</h2>
             <p id="follow-up-modal-description">
-              Agende o próximo contato com <strong>{prospectName}</strong>. O lembrete
-              aparecerá no módulo Hoje e nas notificações.
+              {copy("Agende o próximo contato com", "Schedule the next contact with")} <strong>{prospectName}</strong>. {copy("O lembrete aparecerá no módulo Hoje e nas notificações.", "The reminder will appear in Today and in notifications.")}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Fechar modal">
+          <button type="button" onClick={onClose} aria-label={copy("Fechar modal", "Close dialog")}>
             ×
           </button>
         </header>
 
         <fieldset className="crm-followup-quick">
-          <legend>Escolha rápida</legend>
+          <legend>{copy("Escolha rápida", "Quick choice")}</legend>
           <div>
-            {QUICK_DATES.map((option) => {
-              const optionDate = localDate(option.days);
+            {QUICK_DAYS.map((days) => {
+              const optionDate = localDate(days);
+              const label = days === 0
+                ? copy("Hoje", "Today")
+                : days === 1
+                  ? copy("Amanhã", "Tomorrow")
+                  : copy("Em {count} dias", "In {count} days", { count: days });
               return (
                 <button
                   type="button"
-                  key={option.days}
+                  key={days}
                   data-active={date === optionDate || undefined}
                   aria-pressed={date === optionDate}
                   onClick={() => setDate(optionDate)}
                 >
-                  {option.label}
+                  {label}
                 </button>
               );
             })}
@@ -119,16 +118,16 @@ export function FollowUpModal({
 
         <div className="crm-followup-fields">
           <label>
-            <span>Assunto</span>
+            <span>{copy("Assunto", "Subject")}</span>
             <input
               value={title}
               maxLength={160}
               onChange={(event) => setTitle(event.target.value)}
-              placeholder="Ex.: Retomar proposta de proteção"
+              placeholder={copy("Ex.: Retomar proposta de proteção", "E.g. Revisit protection proposal")}
             />
           </label>
           <label>
-            <span>Data</span>
+            <span>{copy("Data", "Date")}</span>
             <input
               type="date"
               min={today}
@@ -137,7 +136,7 @@ export function FollowUpModal({
             />
           </label>
           <label>
-            <span>Horário</span>
+            <span>{copy("Horário", "Time")}</span>
             <input
               type="time"
               value={time}
@@ -150,10 +149,10 @@ export function FollowUpModal({
 
         <footer>
           <button type="button" onClick={onClose} disabled={pending}>
-            Agora não
+            {copy("Agora não", "Not now")}
           </button>
           <button type="button" onClick={submit} disabled={pending || !date}>
-            {pending ? "Salvando…" : submitLabel}
+            {pending ? copy("Salvando…", "Saving…") : submitLabel === "Agendar follow-up" ? copy("Agendar follow-up", "Schedule follow-up") : submitLabel}
             <span aria-hidden="true">→</span>
           </button>
         </footer>

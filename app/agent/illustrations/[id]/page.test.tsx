@@ -9,9 +9,22 @@ const mocks = vi.hoisted(() => ({
   findFirstIllustration: vi.fn(),
   notFound: vi.fn(),
   getCommandStatuses: vi.fn(),
+  language: { current: 'PT' as 'PT' | 'EN' },
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
+vi.mock('@/lib/i18n/server', () => ({
+  getServerI18n: async () => ({
+    language: mocks.language.current,
+    copy: (pt: string, en: string, values?: Record<string, string | number>) => {
+      let message = mocks.language.current === 'PT' ? pt : en
+      for (const [key, value] of Object.entries(values ?? {})) {
+        message = message.replaceAll(`{${key}}`, String(value))
+      }
+      return message
+    },
+  }),
+}))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     user: { findUnique: mocks.findUniqueUser },
@@ -63,6 +76,7 @@ afterEach(cleanup)
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.language.current = 'PT'
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1' })
   mocks.findUniqueUser.mockResolvedValue({ name: 'Ana Corretora' })
   mocks.getCommandStatuses.mockResolvedValue(new Map())
@@ -185,15 +199,15 @@ describe('Illustration detail page', () => {
 
     expect(screen.getByText('Prêmio mensal confirmado')).toBeTruthy()
     expect(screen.getByText('Prêmio anual confirmado')).toBeTruthy()
-    expect(screen.getByText('$4,200.00')).toBeTruthy()
+    expect(screen.getByText(/US\$\s*4\.200,00$/)).toBeTruthy()
     expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Application de illustration-solved-iul' })).toBeTruthy()
     expect(screen.getByText('Resolvido pelo prêmio mensal')).toBeTruthy()
     expect(screen.getByText('Based on Target Premium')).toBeTruthy()
     expect(screen.getByText('Pedido do agente')).toBeTruthy()
     expect(screen.getByText('Confirmação da National Life')).toBeTruthy()
-    expect(screen.getByText('$350.00 por mês')).toBeTruthy()
-    expect(screen.getByText('$4,200.00 por ano')).toBeTruthy()
+    expect(screen.getByText(/US\$\s*350,00 por mês/)).toBeTruthy()
+    expect(screen.getByText(/US\$\s*4\.200,00 por ano/)).toBeTruthy()
   })
 
   it('shows the official Term premium instead of empty IUL input fields', async () => {
@@ -229,9 +243,9 @@ describe('Illustration detail page', () => {
 
     expect(screen.getByText('Resultado confirmado pela National')).toBeTruthy()
     expect(screen.getByText('Prêmio mensal confirmado')).toBeTruthy()
-    expect(screen.getAllByText('$62.92').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/US\$\s*62,92/).length).toBeGreaterThan(0)
     expect(screen.getByText('Total anual no modo mensal')).toBeTruthy()
-    expect(screen.getByText('$755.04')).toBeTruthy()
+    expect(screen.getAllByText(/US\$\s*755,04/).length).toBeGreaterThan(0)
     expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
     expect(screen.getAllByText('Prazo solicitado').length).toBeGreaterThan(0)
     expect(screen.getAllByText('20-G').length).toBeGreaterThan(0)
@@ -301,8 +315,8 @@ describe('Illustration detail page', () => {
 
     render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-adjusted-iul' }) }))
 
-    expect(screen.getByText(/Você informou \$100\.00 por mês/)).toBeTruthy()
-    expect(screen.getByText(/National Life confirmou \$105\.00 por mês e \$1,260\.00 por ano/)).toBeTruthy()
+    expect(screen.getByText(/Você informou US\$\s*100,00 por mês/)).toBeTruthy()
+    expect(screen.getByText(/National Life confirmou US\$\s*105,00 por mês e US\$\s*1\.260,00 por ano/)).toBeTruthy()
   })
 
   it('shows a premium rejection as a scenario review instead of an in-progress Foresight run', async () => {

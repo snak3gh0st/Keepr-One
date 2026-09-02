@@ -16,6 +16,7 @@ import {
   zonedDateTimeToUtc,
   retryCalendarEventSync,
   checkCalendarConflictPolicy,
+  type CalendarConflictGuardResult,
 } from "@/lib/calendar";
 import { addCalendarDays } from "@/lib/calendar/time";
 import { getGoogleCalendarEnv, isGoogleCalendarConfigured } from "@/lib/calendar/google/env";
@@ -33,6 +34,7 @@ import type {
   CalendarPreferencesInput,
   CalendarRange,
 } from "@/components/calendar/types";
+import { getServerI18n } from "@/lib/i18n/server";
 
 const RANGE_LIMIT_MS = 400 * 86_400_000;
 const WRITABLE_CALENDAR_ROLES = new Set(["owner", "writer"]);
@@ -74,10 +76,40 @@ function revalidateCalendarSurfaces(caseId?: string | null) {
   if (caseId) revalidatePath(`/agent/cases/${caseId}`);
 }
 
-function mutationError(error: unknown): CalendarMutationResult {
-  if (error instanceof CalendarDomainError) return { ok: false, message: error.message, code: error.code };
+async function mutationError(error: unknown): Promise<CalendarMutationResult> {
+  const { copy } = await getServerI18n();
+  if (error instanceof CalendarDomainError) {
+    const englishByCode: Partial<Record<CalendarDomainError["code"], string>> = {
+      VALIDATION_ERROR: "Review the event information and try again.",
+      CONNECTION_NOT_FOUND: "Google Calendar is not connected.",
+      CONNECTION_NOT_READY: "Reconnect Google Calendar before changing events.",
+      CALENDAR_NOT_FOUND: "Calendar not found.",
+      CALENDAR_NOT_WRITABLE: "This calendar does not allow changes.",
+      EVENT_NOT_FOUND: "Event not found.",
+      CASE_NOT_OWNED: "The selected lead is outside your portfolio.",
+      REVISION_CONFLICT: "This event changed in another session. Reload and try again.",
+    };
+    return { ok: false, message: copy(error.message, englishByCode[error.code] ?? "The event could not be saved."), code: error.code };
+  }
   console.error("Calendar mutation failed", error);
-  return { ok: false, message: "Não foi possível salvar esse compromisso agora.", code: "UNEXPECTED_ERROR" };
+  return { ok: false, message: copy("Não foi possível salvar esse compromisso agora.", "The event could not be saved right now."), code: "UNEXPECTED_ERROR" };
+}
+
+async function localizeConflictGuard(result: CalendarConflictGuardResult): Promise<CalendarConflictGuardResult> {
+  if (result.ok) return result;
+  const { copy } = await getServerI18n();
+  return {
+    ...result,
+    message: result.conflicts.length === 1
+      ? copy("Já existe um compromisso nesse horário.", "There is already an event at this time.")
+      : copy("Existem {count} compromissos nesse horário.", "There are {count} events at this time.", { count: result.conflicts.length }),
+    conflicts: result.conflicts.map((conflict) => ({
+      ...conflict,
+      title: conflict.title === "Ocupado no Google Calendar"
+        ? copy("Ocupado no Google Calendar", "Busy in Google Calendar")
+        : conflict.title,
+    })),
+  };
 }
 
 async function userContext() {
@@ -95,7 +127,7 @@ async function caseViews(ownerUserId: string) {
     select: {
       id: true,
       prospect: { select: { firstName: true, lastName: true, email: true } },
-      crmStage: { select: { name: true } },
+      crmStage: { select: { name: true, systemKey: true } },
     },
   });
   return cases.map((item) => ({
@@ -103,6 +135,7 @@ async function caseViews(ownerUserId: string) {
     name: `${item.prospect.firstName} ${item.prospect.lastName}`.trim(),
     email: item.prospect.email,
     stage: item.crmStage?.name ?? null,
+    stageSystemKey: item.crmStage?.systemKey ?? null,
   }));
 }
 
@@ -110,9 +143,9 @@ async function caseView(ownerUserId: string, caseId: string | null | undefined) 
   if (!caseId) return null;
   const item = await prisma.insuranceCase.findFirst({
     where: { id: caseId, assignedAgent: { userId: ownerUserId } },
-    select: { id: true, prospect: { select: { firstName: true, lastName: true, email: true } }, crmStage: { select: { name: true } } },
+    select: { id: true, prospect: { select: { firstName: true, lastName: true, email: true } }, crmStage: { select: { name: true, systemKey: true } } },
   });
-  return item ? { id: item.id, name: `${item.prospect.firstName} ${item.prospect.lastName}`.trim(), email: item.prospect.email, stage: item.crmStage?.name ?? null } : null;
+  return item ? { id: item.id, name: `${item.prospect.firstName} ${item.prospect.lastName}`.trim(), email: item.prospect.email, stage: item.crmStage?.name ?? null, stageSystemKey: item.crmStage?.systemKey ?? null } : null;
 }
 
 export async function getCalendarPageData(range: CalendarRange): Promise<CalendarPageData> {
@@ -167,10 +200,10 @@ export async function createCalendarEventAction(input: CalendarEventInput): Prom
   try {
     const { agent, timeZone } = await userContext();
     if (input.timeZone !== timeZone) throw new CalendarDomainError("VALIDATION_ERROR", "O fuso da agenda foi atualizado. Recarregue a página.");
-    const conflictGuard = await checkCalendarConflictPolicy({
+    const conflictGuard = await localizeConflictGuard(await checkCalendarConflictPolicy({
       ownerUserId: agent.userId, schedule: toSchedule(input), userTimeZone: timeZone,
       allowConflict: input.allowConflict, conflictOverrideToken: input.conflictOverrideToken,
-    });
+    }));
     if (!conflictGuard.ok) return conflictGuard;
     const event = await createCalendarEvent({
       ownerUserId: agent.userId,
@@ -195,10 +228,10 @@ export async function updateCalendarEventAction(input: CalendarEventInput): Prom
     if (!input.id || !input.baseRevision) throw new CalendarDomainError("VALIDATION_ERROR", "Revisão do compromisso inválida.");
     const { agent, timeZone } = await userContext();
     if (input.timeZone !== timeZone) throw new CalendarDomainError("VALIDATION_ERROR", "O fuso da agenda foi atualizado. Recarregue a página.");
-    const conflictGuard = await checkCalendarConflictPolicy({
+    const conflictGuard = await localizeConflictGuard(await checkCalendarConflictPolicy({
       ownerUserId: agent.userId, eventId: input.id, schedule: toSchedule(input), userTimeZone: timeZone,
       allowConflict: input.allowConflict, conflictOverrideToken: input.conflictOverrideToken,
-    });
+    }));
     if (!conflictGuard.ok) return conflictGuard;
     const event = await updateCalendarEvent({
       ownerUserId: agent.userId,
@@ -238,10 +271,10 @@ export async function moveCalendarEventAction(input: CalendarMoveInput): Promise
     const moveSchedule = input.allDay
       ? { allDay: true as const, startDate: input.startDate!, endDate: input.endDate ?? addCalendarDays(input.startDate!, 1), timeZone }
       : { allDay: false as const, startsAt: new Date(input.startsAt!), endsAt: new Date(input.endsAt!), timeZone };
-    const conflictGuard = await checkCalendarConflictPolicy({
+    const conflictGuard = await localizeConflictGuard(await checkCalendarConflictPolicy({
       ownerUserId: agent.userId, eventId: input.id, schedule: moveSchedule, userTimeZone: timeZone,
       allowConflict: input.allowConflict, conflictOverrideToken: input.conflictOverrideToken,
-    });
+    }));
     if (!conflictGuard.ok) return conflictGuard;
     const event = await updateCalendarEvent({
       ownerUserId: agent.userId,
@@ -294,15 +327,16 @@ export async function checkCalendarAvailabilityAction(input: {
 }): Promise<CalendarAvailabilityResult> {
   try {
     const { agent, timeZone } = await userContext();
+    const { language } = await getServerI18n();
     if (input.timeZone !== timeZone) throw new CalendarDomainError("VALIDATION_ERROR", "Fuso horário divergente.");
     const start = parseLocal(input.startsAtLocal, timeZone);
     const end = parseLocal(input.endsAtLocal, timeZone);
     if (end <= start) throw new CalendarDomainError("VALIDATION_ERROR", "Período inválido.");
     const configured = isGoogleCalendarConfigured();
-    const conflictsResult = await checkCalendarConflictPolicy({
+    const conflictsResult = await localizeConflictGuard(await checkCalendarConflictPolicy({
       ownerUserId: agent.userId, eventId: input.excludeEventId,
       schedule: { allDay: false, startsAt: start, endsAt: end, timeZone }, userTimeZone: timeZone,
-    });
+    }));
     const conflicts = conflictsResult.ok ? [] : conflictsResult.conflicts;
     const duration = end.getTime() - start.getTime();
     const suggestedSlots: Array<{ startsAtLocal: string; endsAtLocal: string; label: string }> = [];
@@ -325,13 +359,25 @@ export async function checkCalendarAvailabilityAction(input: {
         ) {
           const local = wallClock(next, timeZone);
           const localEnd = wallClock(nextEnd, timeZone);
-          suggestedSlots.push({ startsAtLocal: local, endsAtLocal: localEnd, label: local.slice(11).replace(":", "h") });
+          suggestedSlots.push({
+            startsAtLocal: local,
+            endsAtLocal: localEnd,
+            label: new Intl.DateTimeFormat(language === "PT" ? "pt-BR" : "en-US", {
+              hour: "2-digit",
+              minute: "2-digit",
+              timeZone,
+            }).format(next),
+          });
         }
       }
     }
     return { ok: true, conflicts, suggestedSlots };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : "Não foi possível verificar a disponibilidade." };
+    const { copy } = await getServerI18n();
+    if (error instanceof CalendarDomainError) {
+      return { ok: false, message: copy(error.message, "Availability could not be checked. Review the selected time.") };
+    }
+    return { ok: false, message: copy("Não foi possível verificar a disponibilidade.", "Availability could not be checked.") };
   }
 }
 

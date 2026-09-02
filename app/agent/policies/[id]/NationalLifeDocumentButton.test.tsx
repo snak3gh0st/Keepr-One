@@ -48,7 +48,7 @@ describe('NationalLifeDocumentButton', () => {
     installChromeResponse({ ok: true, documentId: 'document-1' })
     render(<NationalLifeDocumentButton extensionId={extensionId} reportRowId="report-row-1" />)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Trazer para o Keepr One' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Trazer para a Keepr One' }))
 
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalledOnce())
   })
@@ -57,7 +57,7 @@ describe('NationalLifeDocumentButton', () => {
     installChromeResponse({ ok: false, error: 'AUTH_REQUIRED' })
     render(<NationalLifeDocumentButton extensionId={extensionId} reportRowId="report-row-1" />)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Trazer para o Keepr One' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Trazer para a Keepr One' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Entre na National Life na aba que foi aberta e tente novamente.',
@@ -70,7 +70,7 @@ describe('NationalLifeDocumentButton', () => {
     installChromeResponse({ ok: false, error: 'INVALID_MESSAGE' })
     render(<NationalLifeDocumentButton extensionId={extensionId} reportRowId="report-row-1" />)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Trazer para o Keepr One' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Trazer para a Keepr One' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('Atualize e recarregue o K-Bot')
   })
@@ -83,7 +83,7 @@ describe('NationalLifeDocumentButton', () => {
     installChromeResponse({ ok: false, error })
     render(<NationalLifeDocumentButton extensionId={extensionId} reportRowId="report-row-1" />)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Trazer para o Keepr One' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Trazer para a Keepr One' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent(expectedMessage)
   })

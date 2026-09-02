@@ -210,7 +210,7 @@ async function createBookingTransaction(
         weeklyWindows: {
           select: { weekday: true, startMinute: true, endMinute: true },
         },
-        ownerUser: { select: { name: true, timeZone: true, agent: { select: { status: true } } } },
+        ownerUser: { select: { name: true, language: true, timeZone: true, agent: { select: { status: true } } } },
       },
     })
     if (
@@ -325,6 +325,7 @@ async function createBookingTransaction(
           to: input.guest.email,
           inviteeName: input.guest.name,
           ownerName: page.ownerUser.name,
+          language: page.ownerUser.language,
           title: page.title,
           startsAt: input.startsAt.toISOString(),
           endsAt: endsAt.toISOString(),

@@ -1,3 +1,7 @@
+"use client";
+
+import { useI18n } from "@/components/i18n/LanguageProvider";
+
 type SummaryTone = "neutral" | "green" | "gold" | "danger";
 
 type SummaryItem = {
@@ -10,11 +14,13 @@ type SummaryItem = {
 
 export function ModuleSummary({
   items,
-  label = "Resumo do módulo",
+  label,
 }: {
   items: SummaryItem[];
   label?: string;
 }) {
+  const { copy } = useI18n();
+  const resolvedLabel = label ?? copy("Resumo do módulo", "Module summary");
   const countClass =
     items.length === 4
       ? "module-summary--four"
@@ -25,7 +31,7 @@ export function ModuleSummary({
           : "module-summary--three";
 
   return (
-    <section className={`module-summary ${countClass}`} aria-label={label}>
+    <section className={`module-summary ${countClass}`} aria-label={resolvedLabel}>
       {items.map((item) => (
         <div
           key={item.label}

@@ -11,10 +11,17 @@ const mocks = vi.hoisted(() => ({
   approve: vi.fn(),
   retryAuthentication: vi.fn(),
   revalidate: vi.fn(),
+  language: { current: 'PT' as 'PT' | 'EN' },
   extractTermPremiums: vi.fn(),
 }))
 
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }))
+vi.mock('@/lib/i18n/server', () => ({
+  getServerI18n: async () => ({
+    language: mocks.language.current,
+    copy: (pt: string, en: string) => mocks.language.current === 'PT' ? pt : en,
+  }),
+}))
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getAgent }))
 vi.mock('@/lib/national-life/local-connector/config', () => ({
   isNationalLifeLocalConnectorEnabled: mocks.enabled,
@@ -88,6 +95,7 @@ describe('request official Foresight illustration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.enabled.mockReturnValue(true)
+    mocks.language.current = 'PT'
     mocks.getAgent.mockResolvedValue({ id: 'agent_1', userId: 'user_1' })
     mocks.illustrationFindFirst.mockResolvedValue(illustration)
     mocks.commandFindFirst.mockReset()
@@ -169,11 +177,22 @@ describe('request official Foresight illustration', () => {
     })
     expect(mocks.issue).not.toHaveBeenCalled()
   })
+
+  it('returns action errors in the selected English language', async () => {
+    mocks.language.current = 'EN'
+    mocks.illustrationFindFirst.mockResolvedValueOnce(null)
+
+    await expect(requestIllustrationPdf('missing')).resolves.toEqual({
+      ok: false,
+      message: 'Quote not found.',
+    })
+  })
 })
 
 describe('reconcile stored Term PDF', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.language.current = 'PT'
     mocks.getAgent.mockResolvedValue({ id: 'agent_1', userId: 'user_1' })
     mocks.illustrationUpdateMany.mockResolvedValue({ count: 1 })
     mocks.auditCreate.mockResolvedValue({ id: 'audit_1' })

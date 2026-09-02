@@ -2,12 +2,14 @@
 
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildGoogleCalendarUrl,
   buildOutlookCalendarUrl,
   downloadIcsCalendar,
 } from "@/lib/scheduling/calendar-export";
+import { localeFor, type UserLanguage } from "@/lib/i18n/config";
+import { localize, type MessageValues } from "@/lib/i18n/catalog";
 
 gsap.registerPlugin(useGSAP);
 
@@ -17,6 +19,7 @@ type PublicSchedulingPage = {
   description: string | null;
   durationMinutes: number;
   ownerName: string;
+  ownerLanguage: UserLanguage;
   ownerTimeZone: string;
 };
 
@@ -54,14 +57,14 @@ const COMMON_TIME_ZONES = [
 ];
 
 const DAYS_PER_WEEK = 7;
-const TIME_ZONE_NAMES: Record<string, string> = {
-  "America/New_York": "Nova York",
-  "America/Chicago": "Chicago",
-  "America/Denver": "Denver",
-  "America/Los_Angeles": "Los Angeles",
-  "America/Sao_Paulo": "São Paulo",
-  "Europe/London": "Londres",
-  UTC: "UTC",
+const TIME_ZONE_NAMES: Record<string, Record<UserLanguage, string>> = {
+  "America/New_York": { PT: "Nova York", EN: "New York" },
+  "America/Chicago": { PT: "Chicago", EN: "Chicago" },
+  "America/Denver": { PT: "Denver", EN: "Denver" },
+  "America/Los_Angeles": { PT: "Los Angeles", EN: "Los Angeles" },
+  "America/Sao_Paulo": { PT: "São Paulo", EN: "São Paulo" },
+  "Europe/London": { PT: "Londres", EN: "London" },
+  UTC: { PT: "UTC", EN: "UTC" },
 };
 
 function visitorTimeZone() {
@@ -110,8 +113,8 @@ export function slotsByLocalDate(slots: PublicSlot[], timeZone: string) {
   return grouped;
 }
 
-function formatTime(value: string, timeZone: string) {
-  return new Intl.DateTimeFormat("pt-BR", {
+function formatTime(value: string, timeZone: string, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
     timeZone,
     hour: "2-digit",
     minute: "2-digit",
@@ -119,8 +122,8 @@ function formatTime(value: string, timeZone: string) {
   }).format(new Date(value));
 }
 
-function formatFullDate(value: string, timeZone: string) {
-  return new Intl.DateTimeFormat("pt-BR", {
+function formatFullDate(value: string, timeZone: string, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
     timeZone,
     weekday: "long",
     day: "2-digit",
@@ -129,8 +132,8 @@ function formatFullDate(value: string, timeZone: string) {
   }).format(new Date(value));
 }
 
-function shortDateParts(key: string) {
-  const parts = new Intl.DateTimeFormat("pt-BR", {
+function shortDateParts(key: string, locale: string) {
+  const parts = new Intl.DateTimeFormat(locale, {
     timeZone: "UTC",
     weekday: "short",
     day: "2-digit",
@@ -140,31 +143,31 @@ function shortDateParts(key: string) {
   return { weekday: read("weekday"), day: read("day"), month: read("month") };
 }
 
-function formatDateKey(key: string, options: Intl.DateTimeFormatOptions) {
-  return new Intl.DateTimeFormat("pt-BR", {
+function formatDateKey(key: string, options: Intl.DateTimeFormatOptions, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
     ...options,
     timeZone: "UTC",
   }).format(dateFromKey(key));
 }
 
-function formatDateKeyFull(key: string) {
-  return formatDateKey(key, { weekday: "long", day: "2-digit", month: "long" });
+function formatDateKeyFull(key: string, locale: string) {
+  return formatDateKey(key, { weekday: "long", day: "2-digit", month: "long" }, locale);
 }
 
-function formatWeekRange(keys: string[]) {
+function formatWeekRange(keys: string[], locale: string) {
   const first = keys.at(0);
   const last = keys.at(-1);
   if (!first || !last) return "";
-  const start = formatDateKey(first, { day: "2-digit", month: "short" }).replace(".", "");
-  const end = formatDateKey(last, { day: "2-digit", month: "short" }).replace(".", "");
+  const start = formatDateKey(first, { day: "2-digit", month: "short" }, locale).replace(".", "");
+  const end = formatDateKey(last, { day: "2-digit", month: "short" }, locale).replace(".", "");
   return `${start} – ${end}`;
 }
 
-function timeZoneLabel(timeZone: string, at = new Date()) {
-  const name = TIME_ZONE_NAMES[timeZone] ?? timeZone.replaceAll("_", " ");
+function timeZoneLabel(timeZone: string, language: UserLanguage, locale: string, at = new Date()) {
+  const name = TIME_ZONE_NAMES[timeZone]?.[language] ?? timeZone.replaceAll("_", " ");
   if (timeZone === "UTC") return name;
   try {
-    const offset = new Intl.DateTimeFormat("pt-BR", {
+    const offset = new Intl.DateTimeFormat(locale, {
       timeZone,
       timeZoneName: "shortOffset",
     }).formatToParts(at).find((part) => part.type === "timeZoneName")?.value;
@@ -183,7 +186,13 @@ async function apiError(response: Response, fallback: string) {
   }
 }
 
-export function PublicScheduling({ slug }: { slug: string }) {
+export function PublicScheduling({
+  slug,
+  initialLanguage = "PT",
+}: {
+  slug: string;
+  initialLanguage?: UserLanguage;
+}) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [timeZone, setTimeZone] = useState(visitorTimeZone);
   const [page, setPage] = useState<PublicSchedulingPage | null>(null);
@@ -202,6 +211,13 @@ export function PublicScheduling({ slug }: { slug: string }) {
   const slotButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const pendingSlotFocusRef = useRef<string | null>(null);
   const hasRenderedTimes = useRef(false);
+  const language = page?.ownerLanguage ?? initialLanguage;
+  const locale = localeFor(language);
+  const copy = useCallback(
+    (portuguese: string, english: string, values: MessageValues = {}) =>
+      localize(language, portuguese, english, values),
+    [language],
+  );
 
   const today = useMemo(() => dateKeyInTimeZone(new Date(), timeZone), [timeZone]);
   const dateKeys = useMemo(() => Array.from({ length: 14 }, (_, index) => addDateKeyDays(today, index)), [today]);
@@ -213,6 +229,10 @@ export function PublicScheduling({ slug }: { slug: string }) {
   );
 
   useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
+  useEffect(() => {
     const controller = new AbortController();
     async function load() {
       setLoading(true);
@@ -221,10 +241,10 @@ export function PublicScheduling({ slug }: { slug: string }) {
       try {
         const query = new URLSearchParams({ from: today, days: "14", timeZone });
         const response = await fetch(`/api/public/scheduling/${encodeURIComponent(slug)}/slots?${query}`, {
-          headers: { Accept: "application/json" },
+          headers: { Accept: "application/json", "X-Keepr-One-Language": language },
           signal: controller.signal,
         });
-        if (!response.ok) throw new Error(await apiError(response, "Esta agenda não está disponível agora."));
+        if (!response.ok) throw new Error(await apiError(response, copy("Esta agenda não está disponível agora.", "This calendar is unavailable right now.")));
         const data = (await response.json()) as SlotsResponse;
         setPage(data.page);
         setSlots(data.slots);
@@ -237,7 +257,7 @@ export function PublicScheduling({ slug }: { slug: string }) {
         if (!controller.signal.aborted) {
           setPage(null);
           setSlots([]);
-          setLoadError(error instanceof Error ? error.message : "Esta agenda não está disponível agora.");
+          setLoadError(error instanceof Error ? error.message : copy("Esta agenda não está disponível agora.", "This calendar is unavailable right now."));
         }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
@@ -245,7 +265,7 @@ export function PublicScheduling({ slug }: { slug: string }) {
     }
     void load();
     return () => controller.abort();
-  }, [dateKeys, refreshKey, slug, timeZone, today]);
+  }, [copy, dateKeys, language, refreshKey, slug, timeZone, today]);
 
   useEffect(() => {
     const activeDate = dateRailRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]');
@@ -370,7 +390,7 @@ export function PublicScheduling({ slug }: { slug: string }) {
     try {
       const response = await fetch(`/api/public/scheduling/${encodeURIComponent(slug)}/bookings`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: { "Content-Type": "application/json", Accept: "application/json", "X-Keepr-One-Language": language },
         body: JSON.stringify({
           startsAt: selectedSlot.startsAt,
           name: String(form.get("name") ?? "").trim(),
@@ -383,7 +403,7 @@ export function PublicScheduling({ slug }: { slug: string }) {
         }),
       });
       if (!response.ok) {
-        const message = await apiError(response, "Não foi possível confirmar este horário.");
+        const message = await apiError(response, copy("Não foi possível confirmar este horário.", "We could not confirm this time."));
         if (response.status === 409) {
           setSelectedSlot(null);
           setRefreshKey((value) => value + 1);
@@ -393,7 +413,7 @@ export function PublicScheduling({ slug }: { slug: string }) {
       const data = (await response.json()) as BookingResponse;
       setConfirmation(data.booking);
     } catch (error) {
-      setBookingError(error instanceof Error ? error.message : "Não foi possível confirmar este horário.");
+      setBookingError(error instanceof Error ? error.message : copy("Não foi possível confirmar este horário.", "We could not confirm this time."));
     } finally {
       setSubmitting(false);
     }
@@ -403,8 +423,8 @@ export function PublicScheduling({ slug }: { slug: string }) {
     return (
       <div className="public-scheduling-loading" role="status">
         <span aria-hidden="true" />
-        <strong>Consultando horários disponíveis</strong>
-        <p>Isso leva apenas alguns segundos.</p>
+        <strong>{copy("Consultando horários disponíveis", "Checking available times")}</strong>
+        <p>{copy("Isso leva apenas alguns segundos.", "This only takes a few seconds.")}</p>
       </div>
     );
   }
@@ -412,10 +432,10 @@ export function PublicScheduling({ slug }: { slug: string }) {
   if (loadError || !page) {
     return (
       <section className="public-scheduling-unavailable" role="alert">
-        <p>Agenda indisponível</p>
-        <h1>Não foi possível abrir este link.</h1>
-        <span>{loadError ?? "Confirme o endereço recebido e tente novamente."}</span>
-        <button type="button" onClick={() => setRefreshKey((value) => value + 1)}>Tentar novamente</button>
+        <p>{copy("Agenda indisponível", "Calendar unavailable")}</p>
+        <h1>{copy("Não foi possível abrir este link.", "We could not open this link.")}</h1>
+        <span>{loadError ?? copy("Confirme o endereço recebido e tente novamente.", "Check the link you received and try again.")}</span>
+        <button type="button" onClick={() => setRefreshKey((value) => value + 1)}>{copy("Tentar novamente", "Try again")}</button>
       </section>
     );
   }
@@ -431,6 +451,8 @@ export function PublicScheduling({ slug }: { slug: string }) {
     };
     const confirmationTimeZone = timeZoneLabel(
       confirmation.inviteeTimeZone,
+      language,
+      locale,
       new Date(confirmation.startsAt),
     );
 
@@ -440,37 +462,37 @@ export function PublicScheduling({ slug }: { slug: string }) {
           <header className="public-scheduling-confirmation-status" role="status" aria-live="polite">
             <div className="public-scheduling-confirmation-mark" aria-hidden="true" data-booking-confirmation-mark>✓</div>
             <div>
-              <p>Horário reservado</p>
-              <h1 id="booking-confirmation-title" tabIndex={-1}>Agendamento confirmado</h1>
+              <p>{copy("Horário reservado", "Time reserved")}</p>
+              <h1 id="booking-confirmation-title" tabIndex={-1}>{copy("Agendamento confirmado", "Booking confirmed")}</h1>
               <span>{confirmation.title}</span>
             </div>
           </header>
 
-          <dl aria-label="Resumo do agendamento">
-            <div><dt>Com</dt><dd>{confirmation.ownerName}</dd></div>
-            <div><dt>Data</dt><dd>{formatFullDate(confirmation.startsAt, confirmation.inviteeTimeZone)}</dd></div>
-            <div><dt>Horário</dt><dd>{formatTime(confirmation.startsAt, confirmation.inviteeTimeZone)} – {formatTime(confirmation.endsAt, confirmation.inviteeTimeZone)}</dd></div>
-            <div><dt>Fuso</dt><dd>{confirmationTimeZone}</dd></div>
+          <dl aria-label={copy("Resumo do agendamento", "Booking summary")}>
+            <div><dt>{copy("Com", "With")}</dt><dd>{confirmation.ownerName}</dd></div>
+            <div><dt>{copy("Data", "Date")}</dt><dd>{formatFullDate(confirmation.startsAt, confirmation.inviteeTimeZone, locale)}</dd></div>
+            <div><dt>{copy("Horário", "Time")}</dt><dd>{formatTime(confirmation.startsAt, confirmation.inviteeTimeZone, locale)} – {formatTime(confirmation.endsAt, confirmation.inviteeTimeZone, locale)}</dd></div>
+            <div><dt>{copy("Fuso", "Time zone")}</dt><dd>{confirmationTimeZone}</dd></div>
           </dl>
 
           <p className="public-scheduling-confirmation-note">
-            <strong>Convite oficial por e-mail</strong>
-            Você receberá os detalhes e o link do Google Meet na sua caixa de entrada.
+            <strong>{copy("Convite oficial por e-mail", "Official email invitation")}</strong>
+            {copy("Você receberá os detalhes e o link do Google Meet na sua caixa de entrada.", "You will receive the details and Google Meet link in your inbox.")}
           </p>
         </section>
 
         <aside className="public-scheduling-calendar-add" aria-labelledby="calendar-add-title">
           <div className="public-scheduling-calendar-add-heading">
             <div>
-              <p>Próximo passo</p>
-              <h2 id="calendar-add-title">Salve no seu calendário</h2>
-              <span>Escolha onde deseja guardar este compromisso.</span>
+              <p>{copy("Próximo passo", "Next step")}</p>
+              <h2 id="calendar-add-title">{copy("Salve no seu calendário", "Save it to your calendar")}</h2>
+              <span>{copy("Escolha onde deseja guardar este compromisso.", "Choose where you want to save this event.")}</span>
             </div>
           </div>
 
           <details className="public-scheduling-calendar-picker">
             <summary>
-              <span>Adicionar à agenda</span>
+              <span>{copy("Adicionar à agenda", "Add to calendar")}</span>
               <span aria-hidden="true">⌄</span>
             </summary>
             <div className="public-scheduling-calendar-options">
@@ -482,7 +504,7 @@ export function PublicScheduling({ slug }: { slug: string }) {
                 referrerPolicy="no-referrer"
               >
                 <span aria-hidden="true">G</span>
-                <span><strong>Google Agenda</strong><small>Abrir evento preenchido</small></span>
+                <span><strong>{copy("Google Agenda", "Google Calendar")}</strong><small>{copy("Abrir evento preenchido", "Open prefilled event")}</small></span>
                 <span aria-hidden="true">↗</span>
               </a>
               <a
@@ -493,7 +515,7 @@ export function PublicScheduling({ slug }: { slug: string }) {
                 referrerPolicy="no-referrer"
               >
                 <span aria-hidden="true">O</span>
-                <span><strong>Microsoft Outlook</strong><small>Abrir evento preenchido</small></span>
+                <span><strong>Microsoft Outlook</strong><small>{copy("Abrir evento preenchido", "Open prefilled event")}</small></span>
                 <span aria-hidden="true">↗</span>
               </a>
               <button
@@ -502,14 +524,14 @@ export function PublicScheduling({ slug }: { slug: string }) {
                 onClick={() => downloadIcsCalendar(calendarEvent)}
               >
                 <span aria-hidden="true">↓</span>
-                <span><strong>Apple Calendar e outros</strong><small>Baixar arquivo universal .ics</small></span>
+                <span><strong>{copy("Apple Calendar e outros", "Apple Calendar and others")}</strong><small>{copy("Baixar arquivo universal .ics", "Download universal .ics file")}</small></span>
                 <span aria-hidden="true">↓</span>
               </button>
             </div>
           </details>
 
           <p className="public-scheduling-calendar-help">
-            Se o convite já apareceu no seu calendário, não é necessário adicionar novamente.
+            {copy("Se o convite já apareceu no seu calendário, não é necessário adicionar novamente.", "If the invitation is already in your calendar, you do not need to add it again.")}
           </p>
         </aside>
       </div>
@@ -517,93 +539,93 @@ export function PublicScheduling({ slug }: { slug: string }) {
   }
 
   const daySlots = groupedSlots.get(selectedDate) ?? [];
-  const selectedDateLabel = selectedDate ? formatDateKeyFull(selectedDate) : "";
-  const currentTimeZoneLabel = timeZoneLabel(timeZone);
+  const selectedDateLabel = selectedDate ? formatDateKeyFull(selectedDate, locale) : "";
+  const currentTimeZoneLabel = timeZoneLabel(timeZone, language, locale);
 
   return (
     <div ref={rootRef} className="public-scheduling-shell">
       <div className="public-scheduling-workspace">
         <aside className="public-scheduling-event" aria-labelledby="public-scheduling-title">
           <div className="public-scheduling-event-copy">
-            <p>Reunião com {page.ownerName}</p>
+            <p>{copy("Reunião com {name}", "Meeting with {name}", { name: page.ownerName })}</p>
             <h1 id="public-scheduling-title">{page.title}</h1>
             {page.description ? <span>{page.description}</span> : null}
           </div>
 
-          <dl className="public-scheduling-event-facts" aria-label="Detalhes da reunião">
-            <div><dt>Duração</dt><dd>{page.durationMinutes} minutos</dd></div>
-            <div><dt>Formato</dt><dd>Google Meet</dd></div>
-            <div><dt>Horários</dt><dd>{currentTimeZoneLabel}</dd></div>
+          <dl className="public-scheduling-event-facts" aria-label={copy("Detalhes da reunião", "Meeting details")}>
+            <div><dt>{copy("Duração", "Duration")}</dt><dd>{page.durationMinutes} {copy("minutos", "minutes")}</dd></div>
+            <div><dt>{copy("Formato", "Format")}</dt><dd>Google Meet</dd></div>
+            <div><dt>{copy("Horários", "Times")}</dt><dd>{currentTimeZoneLabel}</dd></div>
           </dl>
 
-          <ol className="public-scheduling-progress" aria-label="Etapas do agendamento">
+          <ol className="public-scheduling-progress" aria-label={copy("Etapas do agendamento", "Booking steps")}>
             <li aria-current={!selectedSlot ? "step" : undefined} data-complete={selectedSlot ? true : undefined}>
               <span aria-hidden="true">1</span>
-              <div><strong>Data e horário</strong><small>Escolha uma opção disponível.</small></div>
+              <div><strong>{copy("Data e horário", "Date and time")}</strong><small>{copy("Escolha uma opção disponível.", "Choose an available option.")}</small></div>
             </li>
             <li aria-current={selectedSlot ? "step" : undefined}>
               <span aria-hidden="true">2</span>
-              <div><strong>Seus dados</strong><small>Confirme para receber o convite.</small></div>
+              <div><strong>{copy("Seus dados", "Your details")}</strong><small>{copy("Confirme para receber o convite.", "Confirm to receive the invitation.")}</small></div>
             </li>
           </ol>
 
           <div className="public-scheduling-event-note">
-            <strong>Convite automático</strong>
-            <p>O evento e o link do Google Meet serão enviados por e-mail.</p>
+            <strong>{copy("Convite automático", "Automatic invitation")}</strong>
+            <p>{copy("O evento e o link do Google Meet serão enviados por e-mail.", "The event and Google Meet link will be sent by email.")}</p>
           </div>
         </aside>
 
         <section className="public-scheduling-stage">
           {selectedSlot ? (
             <form className="public-scheduling-form" onSubmit={book} data-booking-step-content>
-              <button type="button" className="public-scheduling-back" onClick={changeSlot}>← Voltar aos horários</button>
+              <button type="button" className="public-scheduling-back" onClick={changeSlot}>← {copy("Voltar aos horários", "Back to times")}</button>
               <div className="public-scheduling-selected-slot">
-                <div><span>Horário escolhido</span><strong>{formatFullDate(selectedSlot.startsAt, timeZone)}</strong></div>
-                <small>{formatTime(selectedSlot.startsAt, timeZone)} – {formatTime(selectedSlot.endsAt, timeZone)}</small>
+                <div><span>{copy("Horário escolhido", "Selected time")}</span><strong>{formatFullDate(selectedSlot.startsAt, timeZone, locale)}</strong></div>
+                <small>{formatTime(selectedSlot.startsAt, timeZone, locale)} – {formatTime(selectedSlot.endsAt, timeZone, locale)}</small>
               </div>
               <div className="public-scheduling-form-heading">
-                <h2 id="booking-details-title" tabIndex={-1}>Confirme seus dados</h2>
-                <p>Usaremos estas informações somente para organizar a reunião.</p>
+                <h2 id="booking-details-title" tabIndex={-1}>{copy("Confirme seus dados", "Confirm your details")}</h2>
+                <p>{copy("Usaremos estas informações somente para organizar a reunião.", "We will only use this information to organize the meeting.")}</p>
               </div>
               <div className="public-scheduling-form-grid">
-                <label><span>Nome completo</span><input name="name" autoComplete="name" minLength={2} maxLength={100} required /></label>
-                <label><span>E-mail</span><input name="email" type="email" autoComplete="email" maxLength={254} required /></label>
-                <label><span>Telefone <i>opcional</i></span><input name="phone" type="tel" autoComplete="tel" maxLength={30} /></label>
-                <label className="public-scheduling-field-wide"><span>Observação <i>opcional</i></span><textarea name="notes" rows={3} maxLength={1000} /></label>
-                <label className="public-scheduling-honeypot" aria-hidden="true"><span>Empresa</span><input name="company" tabIndex={-1} autoComplete="off" /></label>
+                <label><span>{copy("Nome completo", "Full name")}</span><input name="name" autoComplete="name" minLength={2} maxLength={100} required /></label>
+                <label><span>{copy("E-mail", "Email")}</span><input name="email" type="email" autoComplete="email" maxLength={254} required /></label>
+                <label><span>{copy("Telefone", "Phone")} <i>{copy("opcional", "optional")}</i></span><input name="phone" type="tel" autoComplete="tel" maxLength={30} /></label>
+                <label className="public-scheduling-field-wide"><span>{copy("Observação", "Notes")} <i>{copy("opcional", "optional")}</i></span><textarea name="notes" rows={3} maxLength={1000} /></label>
+                <label className="public-scheduling-honeypot" aria-hidden="true"><span>{copy("Empresa", "Company")}</span><input name="company" tabIndex={-1} autoComplete="off" /></label>
               </div>
               {bookingError ? <p className="public-scheduling-inline-error" role="alert">{bookingError}</p> : null}
               <div className="public-scheduling-form-actions">
-                <small>Ao confirmar, o horário será reservado e o convite chegará no seu e-mail.</small>
-                <button type="submit" className="public-scheduling-submit" disabled={submitting}>{submitting ? "Confirmando…" : "Confirmar agendamento"}</button>
+                <small>{copy("Ao confirmar, o horário será reservado e o convite chegará no seu e-mail.", "When you confirm, the time will be reserved and the invitation will arrive by email.")}</small>
+                <button type="submit" className="public-scheduling-submit" disabled={submitting}>{submitting ? copy("Confirmando…", "Confirming…") : copy("Confirmar agendamento", "Confirm booking")}</button>
               </div>
             </form>
           ) : (
             <div className="public-scheduling-picker" data-booking-step-content>
               <header>
                 <div>
-                  <h2 id="public-scheduling-date-title">Escolha o melhor horário</h2>
-                  <p>Datas e horários disponíveis nos próximos 14 dias.</p>
+                  <h2 id="public-scheduling-date-title">{copy("Escolha o melhor horário", "Choose the best time")}</h2>
+                  <p>{copy("Datas e horários disponíveis nos próximos 14 dias.", "Available dates and times over the next 14 days.")}</p>
                 </div>
                 <label>
-                  <span>Seu fuso horário</span>
+                  <span>{copy("Seu fuso horário", "Your time zone")}</span>
                   <select value={timeZone} onChange={(event) => setTimeZone(event.target.value)}>
-                    {timeZoneOptions.map((zone) => <option key={zone} value={zone}>{timeZoneLabel(zone)}</option>)}
+                    {timeZoneOptions.map((zone) => <option key={zone} value={zone}>{timeZoneLabel(zone, language, locale)}</option>)}
                   </select>
                 </label>
               </header>
 
               <div className="public-scheduling-week-toolbar">
-                <div><span>Período exibido</span><strong aria-live="polite">{formatWeekRange(visibleDateKeys)}</strong></div>
+                <div><span>{copy("Período exibido", "Displayed period")}</span><strong aria-live="polite">{formatWeekRange(visibleDateKeys, locale)}</strong></div>
                 <div>
-                  <button type="button" aria-label="Semana anterior" disabled={weekOffset === 0} onClick={() => showWeek(weekOffset - DAYS_PER_WEEK)}>←</button>
-                  <button type="button" aria-label="Próxima semana" disabled={weekOffset + DAYS_PER_WEEK >= dateKeys.length} onClick={() => showWeek(weekOffset + DAYS_PER_WEEK)}>→</button>
+                  <button type="button" aria-label={copy("Semana anterior", "Previous week")} disabled={weekOffset === 0} onClick={() => showWeek(weekOffset - DAYS_PER_WEEK)}>←</button>
+                  <button type="button" aria-label={copy("Próxima semana", "Next week")} disabled={weekOffset + DAYS_PER_WEEK >= dateKeys.length} onClick={() => showWeek(weekOffset + DAYS_PER_WEEK)}>→</button>
                 </div>
               </div>
 
-              <div ref={dateRailRef} className="public-scheduling-date-rail" role="group" aria-label="Datas disponíveis">
+              <div ref={dateRailRef} className="public-scheduling-date-rail" role="group" aria-label={copy("Datas disponíveis", "Available dates")}>
                 {visibleDateKeys.map((key) => {
-                  const parts = shortDateParts(key);
+                  const parts = shortDateParts(key, locale);
                   const available = (groupedSlots.get(key)?.length ?? 0) > 0;
                   return (
                     <button key={key} type="button" data-active={selectedDate === key || undefined} aria-pressed={selectedDate === key} disabled={!available} onClick={() => selectDate(key)}>
@@ -615,10 +637,12 @@ export function PublicScheduling({ slug }: { slug: string }) {
 
               <section className="public-scheduling-times" aria-labelledby="public-scheduling-times-title">
                 <header>
-                  <div><span>Horários para</span><h3 id="public-scheduling-times-title">{selectedDateLabel}</h3></div>
-                  <small>{daySlots.length} {daySlots.length === 1 ? "horário disponível" : "horários disponíveis"}</small>
+                  <div><span>{copy("Horários para", "Times for")}</span><h3 id="public-scheduling-times-title">{selectedDateLabel}</h3></div>
+                  <small>{daySlots.length} {daySlots.length === 1 ? copy("horário disponível", "available time") : copy("horários disponíveis", "available times")}</small>
                 </header>
-                <div className="public-scheduling-time-list" role="group" aria-label={selectedDate ? `Horários para ${selectedDate}` : "Horários"}>
+                <div className="public-scheduling-time-list" role="group" aria-label={selectedDate
+                  ? copy("Horários para {date}", "Times for {date}", { date: selectedDate })
+                  : copy("Horários", "Times")}>
                   {daySlots.length ? daySlots.map((slot) => (
                     <button
                       key={slot.startsAt}
@@ -630,9 +654,9 @@ export function PublicScheduling({ slug }: { slug: string }) {
                       data-booking-time-option
                       onClick={() => chooseSlot(slot)}
                     >
-                      {formatTime(slot.startsAt, timeZone)}
+                      {formatTime(slot.startsAt, timeZone, locale)}
                     </button>
-                  )) : <p>Sem horários neste dia. Escolha outra data ou avance uma semana.</p>}
+                  )) : <p>{copy("Sem horários neste dia. Escolha outra data ou avance uma semana.", "No times are available on this day. Choose another date or move to the next week.")}</p>}
                 </div>
               </section>
               {bookingError && !selectedSlot ? <p id="public-scheduling-booking-error" className="public-scheduling-inline-error" role="alert" tabIndex={-1}>{bookingError}</p> : null}

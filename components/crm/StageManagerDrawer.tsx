@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { CrmStageView } from "@/lib/crm";
 import { OverlaySurface } from "@/components/overlays/OverlaySurface";
+import { useI18n } from "@/components/i18n/LanguageProvider";
+import { localizedCrmStageName } from "./i18n";
 
 type Result = { ok: true } | { ok: false; message: string };
 
@@ -33,6 +35,7 @@ export function StageManagerDrawer({
   actions: StageManagerActions;
   onChanged: () => void;
 }) {
+  const { copy } = useI18n();
   const [ordered, setOrdered] = useState(() => sortStages(stages));
   const [newName, setNewName] = useState("");
   const [newPosition, setNewPosition] = useState(stages.length + 1);
@@ -105,13 +108,13 @@ export function StageManagerDrawer({
       <div className="crm-stage-manager" aria-busy={pending}>
         <header>
           <div>
-            <span>Pipeline pessoal</span>
-            <h2 id="stage-manager-title">Gerenciar etapas</h2>
+            <span>{copy("Pipeline pessoal", "Personal pipeline")}</span>
+            <h2 id="stage-manager-title">{copy("Gerenciar etapas", "Manage stages")}</h2>
             <p id="stage-manager-description">
-              Adapte a sequência ao seu processo sem perder nenhum lead.
+              {copy("Adapte a sequência ao seu processo sem perder nenhum lead.", "Adapt the sequence to your process without losing any leads.")}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Fechar painel">
+          <button type="button" onClick={onClose} aria-label={copy("Fechar painel", "Close panel")}>
             ×
           </button>
         </header>
@@ -129,16 +132,16 @@ export function StageManagerDrawer({
           }}
         >
           <label>
-            <span>Nova etapa</span>
+            <span>{copy("Nova etapa", "New stage")}</span>
             <input
               value={newName}
               maxLength={80}
               onChange={(event) => setNewName(event.target.value)}
-              placeholder="Nome da etapa"
+              placeholder={copy("Nome da etapa", "Stage name")}
             />
           </label>
           <label>
-            <span>Posição</span>
+            <span>{copy("Posição", "Position")}</span>
             <select
               value={newPosition}
               onChange={(event) => setNewPosition(Number(event.target.value))}
@@ -151,13 +154,13 @@ export function StageManagerDrawer({
             </select>
           </label>
           <button type="submit" disabled={pending || !newName.trim()}>
-            Adicionar
+            {copy("Adicionar", "Add")}
           </button>
         </form>
 
         <div className="crm-stage-list-heading">
-          <span>{ordered.length} etapas</span>
-          <small>Use as setas para alterar a ordem</small>
+          <span>{ordered.length === 1 ? copy("1 etapa", "1 stage") : copy("{count} etapas", "{count} stages", { count: ordered.length })}</span>
+          <small>{copy("Use as setas para alterar a ordem", "Use the arrows to change the order")}</small>
         </div>
 
         <ol className="crm-stage-list">
@@ -178,7 +181,7 @@ export function StageManagerDrawer({
                   }}
                 >
                   <label className="sr-only" htmlFor={`rename-${stage.id}`}>
-                    Novo nome
+                    {copy("Novo nome", "New name")}
                   </label>
                   <input
                     id={`rename-${stage.id}`}
@@ -187,15 +190,15 @@ export function StageManagerDrawer({
                     maxLength={80}
                     onChange={(event) => setEditingName(event.target.value)}
                   />
-                  <button type="submit" disabled={pending}>Salvar</button>
-                  <button type="button" onClick={() => setEditingId(null)}>Cancelar</button>
+                  <button type="submit" disabled={pending}>{copy("Salvar", "Save")}</button>
+                  <button type="button" onClick={() => setEditingId(null)}>{copy("Cancelar", "Cancel")}</button>
                 </form>
               ) : (
                 <div className="crm-stage-name">
-                  <strong>{stage.name}</strong>
+                  <strong>{localizedCrmStageName(copy, stage)}</strong>
                   <small>
-                    {stage.caseCount} {stage.caseCount === 1 ? "lead" : "leads"}
-                    {stage.systemKey ? " · etapa padrão" : " · personalizada"}
+                    {stage.caseCount === 1 ? copy("1 lead", "1 lead") : copy("{count} leads", "{count} leads", { count: stage.caseCount })}
+                    {stage.systemKey ? copy(" · etapa padrão", " · default stage") : copy(" · personalizada", " · custom")}
                   </small>
                 </div>
               )}
@@ -204,7 +207,7 @@ export function StageManagerDrawer({
                   <button
                     type="button"
                     disabled={pending || index === 0}
-                    aria-label={`Mover ${stage.name} para cima`}
+                    aria-label={copy("Mover {stage} para cima", "Move {stage} up", { stage: localizedCrmStageName(copy, stage) })}
                     onClick={() => move(index, -1)}
                   >
                     ↑
@@ -212,7 +215,7 @@ export function StageManagerDrawer({
                   <button
                     type="button"
                     disabled={pending || index === ordered.length - 1}
-                    aria-label={`Mover ${stage.name} para baixo`}
+                    aria-label={copy("Mover {stage} para baixo", "Move {stage} down", { stage: localizedCrmStageName(copy, stage) })}
                     onClick={() => move(index, 1)}
                   >
                     ↓
@@ -220,19 +223,19 @@ export function StageManagerDrawer({
                   <button
                     type="button"
                     disabled={pending}
-                    aria-label={`Editar ${stage.name}`}
+                    aria-label={copy("Editar {stage}", "Edit {stage}", { stage: localizedCrmStageName(copy, stage) })}
                     onClick={() => {
                       setEditingId(stage.id);
                       setEditingName(stage.name);
                     }}
                   >
-                    Editar
+                    {copy("Editar", "Edit")}
                   </button>
                   <button
                     type="button"
                     className="danger"
                     disabled={pending || ordered.length <= 1}
-                    aria-label={`Remover ${stage.name}`}
+                    aria-label={copy("Remover {stage}", "Remove {stage}", { stage: localizedCrmStageName(copy, stage) })}
                     onClick={() => {
                       setRemovingId(stage.id);
                       setError(null);
@@ -243,7 +246,7 @@ export function StageManagerDrawer({
                       setTransferTo(candidate?.id ?? "");
                     }}
                   >
-                    Remover
+                    {copy("Remover", "Remove")}
                   </button>
                 </div>
               ) : null}
@@ -259,41 +262,40 @@ export function StageManagerDrawer({
             aria-labelledby="stage-transfer-title"
           >
             <div>
-              <span>Confirmar remoção</span>
-              <h3 id="stage-transfer-title">Mover leads antes de excluir?</h3>
+              <span>{copy("Confirmar remoção", "Confirm removal")}</span>
+              <h3 id="stage-transfer-title">{copy("Mover leads antes de excluir?", "Move leads before deleting?")}</h3>
               <p>
                 {removing.caseCount > 0
-                  ? `Existem ${removing.caseCount} leads em “${removing.name}”. Escolha a etapa de destino.`
+                  ? copy("Existem {count} leads em “{stage}”. Escolha a etapa de destino.", "There are {count} leads in “{stage}”. Choose the destination stage.", { count: removing.caseCount, stage: localizedCrmStageName(copy, removing) })
                   : removing.systemKey
-                    ? `“${removing.name}” está vazia. Escolha qual etapa herdará seu comportamento padrão.`
-                    : `“${removing.name}” está vazia e pode ser removida com segurança.`}
+                    ? copy("“{stage}” está vazia. Escolha qual etapa herdará seu comportamento padrão.", "“{stage}” is empty. Choose which stage will inherit its default behavior.", { stage: localizedCrmStageName(copy, removing) })
+                    : copy("“{stage}” está vazia e pode ser removida com segurança.", "“{stage}” is empty and can be safely removed.", { stage: removing.name })}
               </p>
             </div>
             {removing.caseCount > 0 || removing.systemKey ? (
               <label>
-                <span>Transferir para</span>
+                <span>{copy("Transferir para", "Transfer to")}</span>
                 <select
                   value={transferTo}
                   disabled={transferCandidates.length === 0}
                   onChange={(event) => setTransferTo(event.target.value)}
                 >
                   {transferCandidates.length === 0 ? (
-                    <option value="">Crie uma etapa personalizada</option>
+                    <option value="">{copy("Crie uma etapa personalizada", "Create a custom stage")}</option>
                   ) : null}
                   {transferCandidates.map((stage) => (
-                    <option key={stage.id} value={stage.id}>{stage.name}</option>
+                    <option key={stage.id} value={stage.id}>{localizedCrmStageName(copy, stage)}</option>
                   ))}
                 </select>
               </label>
             ) : null}
             {removing.systemKey && transferCandidates.length === 0 ? (
               <p role="status">
-                Para remover uma etapa padrão, crie primeiro uma etapa personalizada.
-                Ela receberá os leads e o comportamento automático desta etapa.
+                {copy("Para remover uma etapa padrão, crie primeiro uma etapa personalizada. Ela receberá os leads e o comportamento automático desta etapa.", "To remove a default stage, first create a custom stage. It will receive the leads and the automatic behavior from this stage.")}
               </p>
             ) : null}
             <footer>
-              <button type="button" onClick={() => setRemovingId(null)}>Cancelar</button>
+              <button type="button" onClick={() => setRemovingId(null)}>{copy("Cancelar", "Cancel")}</button>
               <button
                 type="button"
                 className="danger"
@@ -310,7 +312,7 @@ export function StageManagerDrawer({
                   )
                 }
               >
-                Remover etapa
+                {copy("Remover etapa", "Remove stage")}
               </button>
             </footer>
           </section>

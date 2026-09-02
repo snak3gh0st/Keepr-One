@@ -31,6 +31,8 @@ import {
   NationalLifeActionQueue,
   type NationalLifeActionRow,
 } from './NationalLifeActionQueue'
+import { getServerI18n } from '@/lib/i18n/server'
+import { localeFor } from '@/lib/i18n/config'
 
 export const dynamic = 'force-dynamic'
 
@@ -100,6 +102,8 @@ function toPortalReportRow(row: {
 }
 
 export default async function NationalLifeDataPage() {
+  const { copy, language } = await getServerI18n()
+  const locale = localeFor(language)
   const agent = await getCurrentAgent()
   const [user, access] = await Promise.all([
     prisma.user.findUnique({ where: { id: agent.userId } }),
@@ -126,11 +130,11 @@ export default async function NationalLifeDataPage() {
     return (
       <Shell role="AGENT" userName={user?.name ?? ''}>
         <PageHeader
-          title="National Life data"
-          eyebrow="Integration"
-          description="This integration is not set up yet."
+          title={copy('Dados da National Life', 'National Life data')}
+          eyebrow={copy('Integração', 'Integration')}
+          description={copy('Esta integração ainda não está configurada.', 'This integration is not set up yet.')}
         />
-        <ErrorBanner>National Life is not set up yet. Contact Keepr One support to turn it on.</ErrorBanner>
+        <ErrorBanner>{copy('A National Life ainda não está configurada. Fale com o suporte da Keepr One para ativá-la.', 'National Life is not set up yet. Contact Keepr One support to turn it on.')}</ErrorBanner>
       </Shell>
     )
   }
@@ -264,60 +268,60 @@ export default async function NationalLifeDataPage() {
   const riskActions = actions.filter((row) => row.signal === 'AT_RISK').length
   const opportunityActions = actions.filter((row) => row.signal === 'OPPORTUNITY').length
   const syncDetail = lastSyncedAt
-    ? lastSyncedAt.toLocaleString('pt-BR', { dateStyle: 'medium', timeStyle: 'short' })
-    : 'Ainda não sincronizado'
+    ? lastSyncedAt.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
+    : copy('Ainda não sincronizado', 'Not synced yet')
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <PageHeader
         title="National Life"
-        eyebrow="Carteira conectada"
+        eyebrow={copy('Carteira conectada', 'Connected book')}
         description={access.canViewAgencyNationalLife
-          ? "Dados diretos dos agentes com assinatura ativa na agência, espelhados na National Life."
-          : "Seus clientes, apólices, casos e oportunidades pessoais, espelhados na National Life."}
+          ? copy('Dados diretos dos agentes com assinatura ativa na agência, espelhados na National Life.', 'Direct data from agents with an active agency subscription, mirrored from National Life.')
+          : copy('Seus clientes, apólices, casos e oportunidades pessoais, espelhados na National Life.', 'Your personal clients, policies, cases, and opportunities, mirrored from National Life.')}
       >
         <Link
           href="/agent/integrations/national-life"
           className="inline-flex items-center rounded-full border border-border-steel bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-colors hover:border-teal hover:bg-panel"
         >
-          Gerenciar conexão
+          {copy('Gerenciar conexão', 'Manage connection')}
         </Link>
       </PageHeader>
 
       {loadError && (
         <ErrorBanner>
-          We could not load your National Life data right now. Refresh the page to try again.
+          {copy('Não foi possível carregar seus dados da National Life agora. Atualize a página para tentar novamente.', 'We could not load your National Life data right now. Refresh the page to try again.')}
         </ErrorBanner>
       )}
 
       {!loadError && (
         <ModuleSummary
-          label="Resumo da National Life"
+          label={copy('Resumo da National Life', 'National Life summary')}
           items={[
             {
-              label: 'Ativas em All Clients',
+              label: copy('Ativas em All Clients', 'Active in All Clients'),
               value: activeInforce,
-              detail: `${inforce.length} apólices no escopo completo da grade; o resumo pessoal da National usa outro denominador`,
+              detail: copy('{count} apólices no escopo completo da grade; o resumo pessoal da National usa outro denominador', '{count} policies in the full grid scope; National’s personal summary uses a different denominator', { count: inforce.length }),
               tone: 'green',
             },
             {
-              label: 'Precisa de ação',
+              label: copy('Precisa de ação', 'Needs action'),
               value: riskActions,
-              detail: 'Apólices com sinal de risco nos últimos 30 dias',
+              detail: copy('Apólices com sinal de risco nos últimos 30 dias', 'Policies with a risk signal in the last 30 days'),
               tone: riskActions > 0 ? 'danger' : 'green',
             },
             {
-              label: 'Oportunidades',
+              label: copy('Oportunidades', 'Opportunities'),
               value: opportunityActions,
-              detail: 'Aniversários e datas para relacionamento',
+              detail: copy('Aniversários e datas para relacionamento', 'Birthdays and dates for client outreach'),
               tone: opportunityActions > 0 ? 'gold' : 'neutral',
             },
             {
-              label: 'Fontes estruturadas',
+              label: copy('Fontes estruturadas', 'Structured sources'),
               value: structuredSourceCount > 0
                 ? `${structuredSourceCount}/${structuredSourceTarget}`
                 : '—',
-              detail: `${rawPageSourceCount} fontes adicionais preservadas somente como página bruta · ${syncDetail}`,
+              detail: copy('{count} fontes adicionais preservadas somente como página bruta · {sync}', '{count} additional sources preserved only as raw pages · {sync}', { count: rawPageSourceCount, sync: syncDetail }),
               tone:
                 structuredSourceCount === structuredSourceTarget ? 'green' : 'gold',
             },
@@ -334,29 +338,24 @@ export default async function NationalLifeDataPage() {
             />
           )}
         </section>
-        <ContextPanel eyebrow="Confiança dos dados" title="National como espelho">
+        <ContextPanel eyebrow={copy('Confiança dos dados', 'Data confidence')} title={copy('National como espelho', 'National as the source mirror')}>
           <p>
-            A KeeprOne é a área operacional diária. A National Life permanece como fonte de origem,
-            e cada informação precisa carregar escopo, atualização e trilha até o registro do carrier.
+            {copy('A Keepr One é a área operacional diária. A National Life permanece como fonte de origem, e cada informação precisa carregar escopo, atualização e trilha até o registro da operadora.', 'Keepr One is the daily operational workspace. National Life remains the source of record, and every item must carry scope, freshness, and a trail back to the carrier record.')}
           </p>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">
-              Limite conhecido
+              {copy('Limite conhecido', 'Known limitation')}
             </p>
             <p className="mt-2">
-              Páginas capturadas para descoberta não são mais contadas como relatórios. Até existir
-              um parser específico e reconciliação, elas ficam somente no raw e aparecem como fonte
-              ainda não estruturada — nunca como zero ou como linha operacional.
+              {copy('Páginas capturadas para descoberta não são mais contadas como relatórios. Até existir um parser específico e reconciliação, elas ficam somente nos dados brutos e aparecem como fonte ainda não estruturada — nunca como zero ou como linha operacional.', 'Pages captured for discovery are no longer counted as reports. Until a dedicated parser and reconciliation exist, they remain only in raw data and appear as an unstructured source — never as zero or as an operational row.')}
             </p>
           </div>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">
-              Estado da carteira
+              {copy('Estado da carteira', 'Book status')}
             </p>
             <p className="mt-2">
-              {attentionInforce} apólices estão em lapse, pending lapse ou not active. A fila de ação
-              usa somente sinais registrados nos últimos 30 dias, para não misturar histórico antigo
-              com prioridade atual.
+              {copy('{count} apólices estão em lapse, pending lapse ou not active. A fila de ação usa somente sinais registrados nos últimos 30 dias, para não misturar histórico antigo com prioridade atual.', '{count} policies are in lapse, pending lapse, or not active status. The action queue uses only signals recorded in the last 30 days so older history is not mixed with current priorities.', { count: attentionInforce })}
             </p>
           </div>
         </ContextPanel>
@@ -364,13 +363,13 @@ export default async function NationalLifeDataPage() {
       <section className="mt-8 module-main-surface">
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold text-ink">Área operacional espelhada</h2>
+            <h2 className="text-xl font-semibold text-ink">{copy('Área operacional espelhada', 'Mirrored operational area')}</h2>
             <p className="mt-1 text-sm text-ink-muted">
-              Trabalhe com casos, carteira e registros estruturados; o bruto fica reservado à auditoria.
+              {copy('Trabalhe com casos, carteira e registros estruturados; os dados brutos ficam reservados à auditoria.', 'Work with cases, policies, and structured records; raw data remains reserved for audit.')}
             </p>
           </div>
           <p className="text-sm text-ink-muted">
-            {cases.length} casos · {inforce.length} apólices · {reports.length} linhas de relatório
+            {copy('{cases} casos · {policies} apólices · {reports} linhas de relatório', '{cases} cases · {policies} policies · {reports} report rows', { cases: cases.length, policies: inforce.length, reports: reports.length })}
           </p>
         </div>
         {!loadError && (

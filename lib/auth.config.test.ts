@@ -36,9 +36,14 @@ describe('auth security configuration', () => {
     expect(options).toEqual(expect.objectContaining({
       emailAndPassword: expect.objectContaining({ disableSignUp: true }),
       user: expect.objectContaining({
-        additionalFields: {
+        additionalFields: expect.objectContaining({
           role: expect.objectContaining({ input: false }),
-        },
+          language: expect.objectContaining({
+            type: 'string',
+            required: true,
+            defaultValue: 'PT',
+          }),
+        }),
       }),
       rateLimit: expect.objectContaining({ storage: 'memory' }),
     }))
@@ -84,11 +89,13 @@ describe('auth security configuration', () => {
     expect(mocks.sendVerificationEmail).toHaveBeenCalledWith({
       to: 'novo@example.com',
       verificationUrl: 'https://app.keeprone.com/api/auth/verify-email?token=new',
+      language: 'PT',
     })
     expect(mocks.sendChangeEmailConfirmationEmail).toHaveBeenCalledWith({
       to: 'atual@example.com',
       newEmail: 'novo@example.com',
       confirmationUrl: 'https://app.keeprone.com/api/auth/verify-email?token=old',
+      language: 'PT',
     })
   })
 

@@ -2,6 +2,8 @@
 
 import { useRef } from "react";
 import type { CrmStageView } from "@/lib/crm";
+import { useI18n } from "@/components/i18n/LanguageProvider";
+import { localizedCrmStageName } from "./i18n";
 
 type PipelineRailProps = {
   stages: CrmStageView[];
@@ -25,9 +27,10 @@ export function PipelineRail({
   onManage,
   panelId,
 }: PipelineRailProps) {
+  const { copy } = useI18n();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
   const items = [
-    { id: null, filterKey: null, name: "Todos", caseCount: allCount },
+    { id: null, filterKey: null, name: copy("Todos", "All"), caseCount: allCount, systemKey: null },
     ...stages.map((stage) => ({
       ...stage,
       filterKey: stage.systemKey ? `system:${stage.systemKey}` : `stage:${stage.id}`,
@@ -72,7 +75,7 @@ export function PipelineRail({
       <div
         className="crm-pipeline-rail"
         role="tablist"
-        aria-label="Filtrar leads por etapa do pipeline"
+        aria-label={copy("Filtrar leads por etapa do pipeline", "Filter leads by pipeline stage")}
       >
         {items.map((item, index) => {
           const active = index === activeIndex;
@@ -92,8 +95,8 @@ export function PipelineRail({
               onClick={() => select(index)}
               onKeyDown={(event) => handleKeyDown(event, index)}
             >
-              <span>{item.name}</span>
-              <b aria-label={`${item.caseCount} leads`}>{item.caseCount}</b>
+              <span>{item.id === null ? item.name : localizedCrmStageName(copy, item)}</span>
+              <b aria-label={item.caseCount === 1 ? copy("1 lead", "1 lead") : copy("{count} leads", "{count} leads", { count: item.caseCount })}>{item.caseCount}</b>
             </button>
           );
         })}
@@ -104,7 +107,7 @@ export function PipelineRail({
             <path d="M10 6.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
             <path d="m15.7 11.5 1.2.9-1.6 2.8-1.5-.6c-.5.4-1 .7-1.6.9l-.2 1.6H8l-.2-1.6a6 6 0 0 1-1.6-.9l-1.5.6-1.6-2.8 1.2-.9a6 6 0 0 1 0-1.9l-1.2-.9 1.6-2.8 1.5.6c.5-.4 1-.7 1.6-.9L8 4h4l.2 1.6c.6.2 1.1.5 1.6.9l1.5-.6 1.6 2.8-1.2.9a6 6 0 0 1 0 1.9Z" />
           </svg>
-          <span>Gerenciar etapas</span>
+          <span>{copy("Gerenciar etapas", "Manage stages")}</span>
         </button>
       ) : null}
     </div>

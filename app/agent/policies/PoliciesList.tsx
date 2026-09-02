@@ -11,6 +11,7 @@ import {
   policyStatusLabel,
 } from "@/components/StatusPill";
 import { clampPage } from "@/components/Pagination";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 type Policy = {
   id: string;
@@ -38,20 +39,6 @@ const STATUS_ORDER = [
   "CANCELLED",
 ];
 const PAGE_SIZE = 12;
-const USD = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-const USD_WHOLE = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
-});
-const COUNT = new Intl.NumberFormat("pt-BR", {
-  maximumFractionDigits: 0,
-});
-
 type PremiumFilter = "all" | "known";
 type MetricKey = "all" | "inforce" | "premium";
 
@@ -61,12 +48,12 @@ function premiumValue(premium: string | null) {
   return Number.isFinite(value) ? value : 0;
 }
 
-function formatPremium(premium: string | null) {
+function formatPremium(premium: string | null, formatter: Intl.NumberFormat) {
   // An unknown premium is shown as unknown. Rendering it as $0.00 would be a
   // number the carrier never gave us.
   if (premium === null) return "—";
   const value = Number(premium);
-  return Number.isFinite(value) ? USD.format(value) : "—";
+  return Number.isFinite(value) ? formatter.format(value) : "—";
 }
 
 function paginationItems(page: number, pageCount: number) {
@@ -88,6 +75,18 @@ function paginationItems(page: number, pageCount: number) {
 }
 
 export function PoliciesList({ policies }: { policies: Policy[] }) {
+  const { copy, language, locale } = useI18n();
+  const currency = useMemo(() => new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }), [locale]);
+  const wholeCurrency = useMemo(() => new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }), [locale]);
+  const count = useMemo(() => new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }), [locale]);
   const root = useRef<HTMLDivElement>(null);
   const navigation = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
@@ -129,13 +128,15 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
 
     return statuses.map((value) => ({
       value,
-      label: policyStatusLabel[value] ?? value,
+      label: language === "PT"
+        ? policyStatusLabel[value] ?? value
+        : ({ INFORCE: "In force", APPROVED: "Approved", PENDING: "Pending", LAPSED: "Lapsed", CANCELLED: "Cancelled" } as Record<string, string>)[value] ?? value,
       count: counts.get(value) ?? 0,
     }));
-  }, [policies]);
+  }, [language, policies]);
 
   const filteredPolicies = useMemo(() => {
-    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase("pt-BR");
+    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase(locale);
     const result = policies.filter((policy) => {
       if (status !== "all" && policy.status !== status) return false;
       if (premiumFilter === "known" && policy.premium === null) return false;
@@ -148,18 +149,18 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
         policy.product,
       ]
         .join(" ")
-        .toLocaleLowerCase("pt-BR")
+        .toLocaleLowerCase(locale)
         .includes(normalizedQuery);
     });
 
     if (sortMode === "client-asc") {
       return result.sort((left, right) =>
-        left.clientName.localeCompare(right.clientName, "pt-BR"),
+        left.clientName.localeCompare(right.clientName, locale),
       );
     }
     if (sortMode === "client-desc") {
       return result.sort((left, right) =>
-        right.clientName.localeCompare(left.clientName, "pt-BR"),
+        right.clientName.localeCompare(left.clientName, locale),
       );
     }
     if (sortMode === "premium-desc") {
@@ -175,7 +176,7 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
       );
     }
     return result;
-  }, [deferredQuery, policies, premiumFilter, sortMode, status]);
+  }, [deferredQuery, locale, policies, premiumFilter, sortMode, status]);
 
   const pageCount = Math.max(
     1,
@@ -306,35 +307,35 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
   const metrics = [
     {
       key: "all" as const,
-      label: "Apólices",
-      value: COUNT.format(summary.total),
-      detail: "Toda a carteira em uma única visão",
+      label: copy("Apólices", "Policies"),
+      value: count.format(summary.total),
+      detail: copy("Toda a carteira em uma única visão", "Your entire book in one view"),
       progress: 100,
-      progressLabel: "Carteira completa",
-      action: "Ver todas",
+      progressLabel: copy("Carteira completa", "Complete book"),
+      action: copy("Ver todas", "View all"),
     },
     {
       key: "inforce" as const,
-      label: "Em vigor",
-      value: COUNT.format(summary.inForce),
-      detail: "Proteções ativas neste momento",
+      label: copy("Em vigor", "In force"),
+      value: count.format(summary.inForce),
+      detail: copy("Proteções ativas neste momento", "Coverage active right now"),
       progress: summary.total > 0 ? (summary.inForce / summary.total) * 100 : 0,
-      progressLabel: `${summary.total > 0 ? Math.round((summary.inForce / summary.total) * 100) : 0}% da carteira`,
-      action: "Filtrar ativas",
+      progressLabel: copy("{percentage}% da carteira", "{percentage}% of the book", { percentage: summary.total > 0 ? Math.round((summary.inForce / summary.total) * 100) : 0 }),
+      action: copy("Filtrar ativas", "Filter active"),
     },
     {
       key: "premium" as const,
-      label: "Prêmio registrado",
-      value: USD_WHOLE.format(summary.totalPremium),
+      label: copy("Prêmio registrado", "Recorded premium"),
+      value: wholeCurrency.format(summary.totalPremium),
       prefix: "US$",
-      detail: "Valores nas frequências originais",
+      detail: copy("Valores nas frequências originais", "Amounts at their original frequencies"),
       progress:
         summary.total > 0 ? (summary.withPremium / summary.total) * 100 : 0,
       progressLabel:
         summary.withoutPremium > 0
-          ? `${COUNT.format(summary.withPremium)} com valor · ${COUNT.format(summary.withoutPremium)} sem valor`
-          : `${COUNT.format(summary.withPremium)} com valor informado`,
-      action: "Ver por prêmio",
+          ? copy("{withValue} com valor · {withoutValue} sem valor", "{withValue} with amount · {withoutValue} without amount", { withValue: count.format(summary.withPremium), withoutValue: count.format(summary.withoutPremium) })
+          : copy("{count} com valor informado", "{count} with an amount", { count: count.format(summary.withPremium) }),
+      action: copy("Ver por prêmio", "View by premium"),
     },
   ];
 
@@ -355,7 +356,7 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
       {policies.length > 0 && (
         <nav
           className="policy-metrics-nav"
-          aria-label="Atalhos da carteira de apólices"
+          aria-label={copy("Atalhos da carteira de apólices", "Policy book shortcuts")}
         >
           {metrics.map((metric) => (
             <button
@@ -407,20 +408,20 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
           {policies.length === 0 ? (
             <div className="space-y-4">
               <EmptyState>
-                Nenhuma apólice ainda. Apólices aparecem quando uma oportunidade chega à emissão ou por importação de histórico autorizada — elas não são criadas manualmente.
+                {copy("Nenhuma apólice ainda. Apólices aparecem quando uma oportunidade chega à emissão ou por importação de histórico autorizada — elas não são criadas manualmente.", "No policies yet. Policies appear when an opportunity reaches issue or through an authorized historical import — they are not created manually.")}
               </EmptyState>
               <div className="space-y-3">
                 <Link
                   href="/agent/cases/new"
                   className="inline-flex min-h-11 w-full items-center justify-center rounded-full bg-rail-strong px-4 py-2.5 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5"
                 >
-                  Iniciar atendimento
+                  {copy("Iniciar atendimento", "Start service")}
                 </Link>
                 <Link
                   href="/agent/illustrations/new"
                   className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-border-steel bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-[background-color,border-color,transform] duration-300 hover:-translate-y-0.5 hover:border-ink-muted hover:bg-panel"
                 >
-                  Criar primeira ilustração
+                  {copy("Criar primeira ilustração", "Create first illustration")}
                 </Link>
               </div>
             </div>
@@ -437,9 +438,9 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                 <header className="policy-command-heading">
                   <div>
                     <h2 id="policy-navigation-title">
-                      Encontre uma apólice em segundos.
+                      {copy("Encontre uma apólice em segundos.", "Find a policy in seconds.")}
                     </h2>
-                    <p>Busque pelo cliente, contrato, seguradora ou produto.</p>
+                    <p>{copy("Busque pelo cliente, contrato, seguradora ou produto.", "Search by client, contract, carrier, or product.")}</p>
                   </div>
                   <p
                     className="policy-result-count"
@@ -448,16 +449,16 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                   >
                     <span>{pageStart}–{pageEnd}</span>
                     <small>
-                      de {COUNT.format(filteredPolicies.length)}
+                      {copy("de", "of")} {count.format(filteredPolicies.length)}
                       {filteredPolicies.length !== policies.length &&
-                        ` em ${COUNT.format(policies.length)}`}
+                        copy(" em {count}", " out of {count}", { count: count.format(policies.length) })}
                     </small>
                   </p>
                 </header>
 
                 <div className="policy-command-grid">
                   <label className="policy-command-search" htmlFor="policy-search">
-                    <span>Buscar na carteira</span>
+                    <span>{copy("Buscar na carteira", "Search the book")}</span>
                     <span className="policy-search-field">
                       <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
                         <circle cx="8.6" cy="8.6" r="5.1" />
@@ -478,12 +479,12 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                           }
                         }}
                         aria-controls="policy-list"
-                        placeholder="Nome, número, seguradora ou produto"
+                        placeholder={copy("Nome, número, seguradora ou produto", "Name, number, carrier, or product")}
                       />
                       {query && (
                         <button
                           type="button"
-                          aria-label="Limpar busca"
+                          aria-label={copy("Limpar busca", "Clear search")}
                           onClick={() => {
                             setQuery("");
                             setPage(1);
@@ -498,7 +499,7 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                   </label>
 
                   <label className="policy-command-sort" htmlFor="policy-sort">
-                    <span>Ordenar carteira</span>
+                    <span>{copy("Ordenar carteira", "Sort book")}</span>
                     <select
                       id="policy-sort"
                       value={sortMode}
@@ -507,11 +508,11 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                         setPage(1);
                       }}
                     >
-                      <option value="default">Mais recentes</option>
-                      <option value="client-asc">Cliente: A–Z</option>
-                      <option value="client-desc">Cliente: Z–A</option>
-                      <option value="premium-desc">Maior prêmio</option>
-                      <option value="premium-asc">Menor prêmio</option>
+                      <option value="default">{copy("Mais recentes", "Most recent")}</option>
+                      <option value="client-asc">{copy("Cliente: A–Z", "Client: A–Z")}</option>
+                      <option value="client-desc">{copy("Cliente: Z–A", "Client: Z–A")}</option>
+                      <option value="premium-desc">{copy("Maior prêmio", "Highest premium")}</option>
+                      <option value="premium-asc">{copy("Menor prêmio", "Lowest premium")}</option>
                     </select>
                   </label>
 
@@ -524,16 +525,16 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                     <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
                       <path d="M4.2 5.7h9.6M7 5.7V4.1h4v1.6m-5.8 0 .6 8.2h6.4l.6-8.2M7.8 8v3.7M10.2 8v3.7" />
                     </svg>
-                    Limpar
+                    {copy("Limpar", "Clear")}
                   </button>
                 </div>
 
                 <div className="policy-status-filter">
-                  <span>Status da apólice</span>
+                  <span>{copy("Status da apólice", "Policy status")}</span>
                   <div
                     className="policy-status-rail"
                     role="group"
-                    aria-label="Filtrar por status"
+                    aria-label={copy("Filtrar por status", "Filter by status")}
                   >
                     <button
                       type="button"
@@ -541,8 +542,8 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                       aria-controls="policy-list"
                       onClick={() => changeStatus("all")}
                     >
-                      <span>Todos</span>
-                      <small>{COUNT.format(policies.length)}</small>
+                      <span>{copy("Todos", "All")}</span>
+                      <small>{count.format(policies.length)}</small>
                     </button>
                     {statusOptions.map((option) => (
                       <button
@@ -553,7 +554,7 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                         onClick={() => changeStatus(option.value)}
                       >
                         <span>{option.label}</span>
-                        <small>{COUNT.format(option.count)}</small>
+                        <small>{count.format(option.count)}</small>
                       </button>
                     ))}
                   </div>
@@ -561,16 +562,16 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
 
                 {premiumFilter === "known" && (
                   <div className="policy-active-filter">
-                    <span>Prêmio informado</span>
+                    <span>{copy("Prêmio informado", "Premium provided")}</span>
                     <button
                       type="button"
-                      aria-label="Remover filtro de prêmio informado"
+                      aria-label={copy("Remover filtro de prêmio informado", "Remove premium provided filter")}
                       onClick={() => {
                         setPremiumFilter("all");
                         setPage(1);
                       }}
                     >
-                      Remover
+                      {copy("Remover", "Remove")}
                     </button>
                   </div>
                 )}
@@ -579,27 +580,27 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
       {filteredPolicies.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border-steel bg-panel/55 px-5 py-12 text-center">
           <p className="mx-auto max-w-md text-base font-semibold text-ink">
-            Nenhuma apólice corresponde a esta busca.
+            {copy("Nenhuma apólice corresponde a esta busca.", "No policies match this search.")}
           </p>
           <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-ink-muted">
-            Tente outro cliente, número, seguradora ou status.
+            {copy("Tente outro cliente, número, seguradora ou status.", "Try another client, number, carrier, or status.")}
           </p>
           <button
             type="button"
             onClick={clearFilters}
             className="mt-5 inline-flex min-h-10 items-center justify-center rounded-xl bg-rail-strong px-4 py-2.5 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
           >
-            Limpar filtros
+            {copy("Limpar filtros", "Clear filters")}
           </button>
         </div>
       ) : (
         <>
           <div id="policy-list" className="policy-list-frame">
             <div className="policy-list-header" aria-hidden="true">
-              <span>Cliente e apólice</span>
-              <span>Seguradora e produto</span>
-              <span>Prêmio</span>
-              <span>Status</span>
+              <span>{copy("Cliente e apólice", "Client and policy")}</span>
+              <span>{copy("Seguradora e produto", "Carrier and product")}</span>
+              <span>{copy("Prêmio", "Premium")}</span>
+              <span>{copy("Status", "Status")}</span>
             </div>
             <ul className="policy-list">
               {pagePolicies.map((policy) => (
@@ -608,7 +609,7 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                     href={`/agent/policies/${policy.id}`}
                     className="policy-list-row"
                     data-policy-row
-                    aria-label={`Abrir apólice ${policy.policyNumber} de ${policy.clientName}`}
+                    aria-label={copy("Abrir apólice {number} de {client}", "Open policy {number} for {client}", { number: policy.policyNumber, client: policy.clientName })}
                   >
                     <span className="policy-list-identity">
                       <strong>{policy.clientName}</strong>
@@ -619,11 +620,17 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                       <small>{policy.product}</small>
                     </span>
                     <span className="policy-list-premium">
-                      <small>Prêmio</small>
-                      <strong>{formatPremium(policy.premium)}</strong>
+                      <small>{copy("Prêmio", "Premium")}</small>
+                      <strong>{formatPremium(policy.premium, currency)}</strong>
                     </span>
                     <span className="policy-list-action">
-                      <PolicyStatusPill status={policy.status} />
+                      {language === "PT" ? (
+                        <PolicyStatusPill status={policy.status} />
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-panel px-2.5 py-[3px] text-xs font-semibold tracking-wide text-ink-muted">
+                          {({ INFORCE: "In force", APPROVED: "Approved", PENDING: "Pending", LAPSED: "Lapsed", CANCELLED: "Cancelled" } as Record<string, string>)[policy.status] ?? policy.status}
+                        </span>
+                      )}
                       <span className="policy-list-arrow" aria-hidden="true">
                         <svg viewBox="0 0 18 18" fill="none">
                           <path d="M4.5 9h9M10 5.5 13.5 9 10 12.5" />
@@ -636,17 +643,17 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
             </ul>
           </div>
           {pageCount > 1 && (
-            <nav className="policy-pagination" aria-label="Paginação das apólices">
+            <nav className="policy-pagination" aria-label={copy("Paginação das apólices", "Policy pagination")}>
               <p>
                 <strong>{pageStart}–{pageEnd}</strong>
-                <span>de {COUNT.format(filteredPolicies.length)}</span>
+                <span>{copy("de", "of")} {count.format(filteredPolicies.length)}</span>
               </p>
               <div>
                 <button
                   type="button"
                   onClick={() => changePage(currentPage - 1)}
                   disabled={currentPage <= 1}
-                  aria-label="Página anterior"
+                  aria-label={copy("Página anterior", "Previous page")}
                 >
                   <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
                     <path d="m10.5 5.5-3.5 3.5 3.5 3.5" />
@@ -661,7 +668,7 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                     <button
                       key={item}
                       type="button"
-                      aria-label={`Ir para a página ${item}`}
+                      aria-label={copy("Ir para a página {page}", "Go to page {page}", { page: item })}
                       aria-current={item === currentPage ? "page" : undefined}
                       onClick={() => changePage(item)}
                     >
@@ -673,7 +680,7 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                   type="button"
                   onClick={() => changePage(currentPage + 1)}
                   disabled={currentPage >= pageCount}
-                  aria-label="Próxima página"
+                  aria-label={copy("Próxima página", "Next page")}
                 >
                   <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
                     <path d="m7.5 5.5 3.5 3.5-3.5 3.5" />
@@ -687,11 +694,11 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
             </div>
           )}
         </section>
-        <ContextPanel eyebrow="Continue por aqui" title="Carteira sob controle">
-          <p>O status mostra a situação atual da apólice. O prêmio preserva o valor e a frequência informados pela seguradora.</p>
+        <ContextPanel eyebrow={copy("Continue por aqui", "Continue here")} title={copy("Carteira sob controle", "Your book under control")}>
+          <p>{copy("O status mostra a situação atual da apólice. O prêmio preserva o valor e a frequência informados pela seguradora.", "Status shows the policy's current state. Premium preserves the amount and frequency provided by the carrier.")}</p>
           <div className="mt-5 border-t border-white/10 pt-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">Detalhes</p>
-            <p className="mt-2">Selecione uma linha para abrir a apólice completa e seus documentos.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-paper/45">{copy("Detalhes", "Details")}</p>
+            <p className="mt-2">{copy("Selecione uma linha para abrir a apólice completa e seus documentos.", "Select a row to open the full policy and its documents.")}</p>
           </div>
         </ContextPanel>
       </div>

@@ -13,6 +13,7 @@ import {
   reorderCrmStages,
   parseCrmLocalDateTime,
 } from "@/lib/crm";
+import { getServerI18n } from "@/lib/i18n/server";
 
 export type CrmActionResult = { ok: true } | { ok: false; message: string };
 
@@ -24,10 +25,25 @@ async function actionContext() {
   };
 }
 
-function resultError(error: unknown): CrmActionResult {
-  if (error instanceof CrmDomainError) return { ok: false, message: error.message };
+async function resultError(error: unknown): Promise<CrmActionResult> {
+  const { copy, language } = await getServerI18n();
+  if (error instanceof CrmDomainError) {
+    if (language === "PT") return { ok: false, message: error.message };
+    const englishByCode: Record<CrmDomainError["code"], string> = {
+      CASE_NOT_FOUND: "Case not found or outside your book.",
+      STAGE_NOT_FOUND: "Pipeline stage not found.",
+      STAGE_HAS_CASES: "Move the leads in this stage before removing it.",
+      INVALID_STAGE_ORDER: "The stage order is invalid. Refresh and try again.",
+      FOLLOW_UP_NOT_FOUND: "Follow-up not found or outside your book.",
+      FOLLOW_UP_NOT_SCHEDULED: "Only pending follow-ups can be changed.",
+      FOLLOW_UP_ALREADY_SCHEDULED: "This lead already has a scheduled follow-up. Reschedule the current one.",
+      ACCESS_DENIED: "You do not have access to this case.",
+      VALIDATION_ERROR: "Review the information and try again.",
+    };
+    return { ok: false, message: englishByCode[error.code] };
+  }
   console.error("CRM action error", error);
-  return { ok: false, message: "Não foi possível concluir a ação. Tente novamente." };
+  return { ok: false, message: copy("Não foi possível concluir a ação. Tente novamente.", "The action could not be completed. Try again.") };
 }
 
 function parseWallClock(value: string) {

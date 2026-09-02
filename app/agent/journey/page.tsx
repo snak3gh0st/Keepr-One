@@ -12,6 +12,7 @@ import {
   type PromotionMode,
 } from "@/lib/promotion-journey";
 import { PromotionJourney } from "./PromotionJourney";
+import { getServerI18n } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export default async function JourneyPage({
   searchParams: Promise<{ preview?: string }>;
 }) {
   const { preview } = await searchParams;
+  const { copy } = await getServerI18n();
   const localPreview = getLocalPromotionPreview(preview);
   const agent = await getCurrentAgent();
   const [user, promotion] = await Promise.all([
@@ -62,21 +64,27 @@ export default async function JourneyPage({
       promotionIdentity={promotionIdentity}
     >
       <PageHeader
-        title="Jornada"
+        title={copy("Jornada", "Journey")}
         eyebrow={
           isBlackJacket
-            ? "Black Jacket · nível máximo conquistado"
-            : "Caminho de promoção"
+            ? copy("Black Jacket · nível máximo conquistado", "Black Jacket · highest level achieved")
+            : copy("Caminho de promoção", "Promotion path")
         }
         description={
           isBlackJacket
-            ? "Você concluiu a jornada e alcançou o último nível. A Black Jacket agora representa a sua maior conquista."
-            : "Acompanhe os PC reconhecidos pelo Target Premium — da primeira meta à conquista do Black Jacket."
+            ? copy(
+                "Você concluiu a jornada e alcançou o último nível. A Black Jacket agora representa a sua maior conquista.",
+                "You completed the journey and reached the final level. The Black Jacket now represents your greatest achievement.",
+              )
+            : copy(
+                "Acompanhe os PC reconhecidos pelo Target Premium — da primeira meta à conquista do Black Jacket.",
+                "Track the PC recognized through Target Premium — from your first goal to earning the Black Jacket.",
+              )
         }
         variant={isBlackJacket ? "black-achievement" : undefined}
       >
         <Link href="/agent/commissions" className="commission-header-link">
-          Ver extrato
+          {copy("Ver extrato", "View statement")}
           <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
             <path d="M4.5 9h9M10 5.5 13.5 9 10 12.5" />
           </svg>
@@ -85,7 +93,10 @@ export default async function JourneyPage({
 
       {promotion.loadError && !localPreview ? (
         <ErrorBanner>
-          Não foi possível calcular sua jornada agora. Tente atualizar a página.
+          {copy(
+            "Não foi possível calcular sua jornada agora. Tente atualizar a página.",
+            "We could not calculate your journey right now. Try refreshing the page.",
+          )}
         </ErrorBanner>
       ) : (
         <div className="journey-workspace">

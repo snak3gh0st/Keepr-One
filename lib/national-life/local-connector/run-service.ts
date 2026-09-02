@@ -10,9 +10,11 @@ import type { NationalLifeGridKey } from '../portal-grid-client'
 import {
   syncConfirmedCasePromotionCreditsSafely,
   syncConfirmedInforcePromotionCreditsSafely,
+  syncNationalLifeCommissionPromotionCreditsSafely,
   type PromotionCreditSyncResult,
   type PromotionDatabase,
 } from '../promotion-credit-sync'
+import { COMMISSION_EARNING_GRID_KEYS } from '../commission-grid-keys'
 import {
   planReadGridStages,
   planReadPageStages,
@@ -935,6 +937,20 @@ async function syncLocalPromotionCredits(
         agentId: input.agentId,
         deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
         snapshots: plan.snapshots,
+        fetchedAt: observedAt,
+      },
+      db,
+    )
+  }
+  if (
+    plan.target === 'REPORT_ROW' &&
+    (COMMISSION_EARNING_GRID_KEYS as readonly string[]).includes(input.gridKey)
+  ) {
+    return syncNationalLifeCommissionPromotionCreditsSafely(
+      {
+        agentId: input.agentId,
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+        rows: input.envelope.records,
         fetchedAt: observedAt,
       },
       db,

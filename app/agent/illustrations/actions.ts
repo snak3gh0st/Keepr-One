@@ -20,6 +20,7 @@ import {
 } from '@/lib/national-life/foresight-term-contract'
 import { extractForesightTermPremiums } from '@/lib/national-life/foresight-term-pdf'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
+import { getServerI18n } from '@/lib/i18n/server'
 
 export type RequestIllustrationPdfResult =
   | { ok: true; commandId: string; duplicate: boolean; completed: boolean; retryingLogin?: true }
@@ -29,15 +30,27 @@ export type ReconcileTermIllustrationPdfResult =
   | { ok: true; message: string }
   | { ok: false; message: string }
 
-function termPdfReconciliationMessage(error: unknown): string {
+function termPdfReconciliationMessage(
+  error: unknown,
+  copy: (portuguese: string, english: string) => string,
+): string {
   const code = error instanceof Error ? error.message : ''
   if (code === 'FORESIGHT_TERM_PREMIUM_MISSING' || code === 'FORESIGHT_TERM_PREMIUM_MISMATCH') {
-    return 'O PDF não trouxe uma tabela de prêmios Term que possa ser confirmada. Gere uma nova ilustração.'
+    return copy(
+      'O PDF não trouxe uma tabela de prêmios Term que possa ser confirmada. Gere uma nova ilustração.',
+      'The PDF did not contain a Term premium table that could be verified. Generate a new illustration.',
+    )
   }
   if (code === 'FORESIGHT_TERM_PDF_INVALID') {
-    return 'O arquivo recebido não é um PDF Term válido. Gere uma nova ilustração.'
+    return copy(
+      'O arquivo recebido não é um PDF Term válido. Gere uma nova ilustração.',
+      'The received file is not a valid Term PDF. Generate a new illustration.',
+    )
   }
-  return 'Não foi possível conferir este PDF Term agora. Tente novamente.'
+  return copy(
+    'Não foi possível conferir este PDF Term agora. Tente novamente.',
+    'This Term PDF could not be verified right now. Try again.',
+  )
 }
 
 /// Reconciles the already-uploaded carrier PDF. This is deliberately separate
@@ -46,6 +59,7 @@ function termPdfReconciliationMessage(error: unknown): string {
 export async function reconcileTermIllustrationPdf(
   illustrationId: string,
 ): Promise<ReconcileTermIllustrationPdfResult> {
+  const { copy } = await getServerI18n()
   let stage = 'authenticate'
   try {
     const agent = await getCurrentAgent()
@@ -68,7 +82,10 @@ export async function reconcileTermIllustrationPdf(
       },
     })
     if (!illustration?.documentBytes) {
-      return { ok: false, message: 'Nenhum PDF Term disponível para conferir.' }
+      return {
+        ok: false,
+        message: copy('Nenhum PDF Term disponível para conferir.', 'No Term PDF is available for verification.'),
+      }
     }
 
     stage = 'validate-scenario'
@@ -80,7 +97,15 @@ export async function reconcileTermIllustrationPdf(
       !Array.isArray(illustration.rawPayload)
       ? illustration.rawPayload as Record<string, unknown>
       : null
-    if (!rawPayload) return { ok: false, message: 'Os dados do cenário Term não estão disponíveis para conferência.' }
+    if (!rawPayload) {
+      return {
+        ok: false,
+        message: copy(
+          'Os dados do cenário Term não estão disponíveis para conferência.',
+          'The Term scenario data is not available for verification.',
+        ),
+      }
+    }
 
     stage = 'persist-result'
     const updated = await prisma.illustration.updateMany({
@@ -109,7 +134,13 @@ export async function reconcileTermIllustrationPdf(
       },
     })
     if (updated.count !== 1) {
-      return { ok: false, message: 'Não foi possível salvar a conferência deste PDF Term.' }
+      return {
+        ok: false,
+        message: copy(
+          'Não foi possível salvar a conferência deste PDF Term.',
+          'The verification of this Term PDF could not be saved.',
+        ),
+      }
     }
 
     stage = 'audit-result'
@@ -133,7 +164,13 @@ export async function reconcileTermIllustrationPdf(
     stage = 'revalidate'
     revalidatePath('/agent/illustrations')
     revalidatePath(`/agent/illustrations/${illustration.id}`)
-    return { ok: true, message: 'Prêmios Term confirmados com o PDF oficial.' }
+    return {
+      ok: true,
+      message: copy(
+        'Prêmios Term confirmados com o PDF oficial.',
+        'Term premiums verified against the official PDF.',
+      ),
+    }
   } catch (error) {
     const code = error instanceof Error ? error.message : 'UNKNOWN'
     // The action intentionally never exposes raw parser/database errors to the
@@ -151,7 +188,7 @@ export async function reconcileTermIllustrationPdf(
       ].includes(code) ? code : 'UNCLASSIFIED',
       errorName: error instanceof Error ? error.name : typeof error,
     })
-    return { ok: false, message: termPdfReconciliationMessage(error) }
+    return { ok: false, message: termPdfReconciliationMessage(error, copy) }
   }
 }
 
@@ -161,8 +198,9 @@ export async function reconcileTermIllustrationPdf(
 export async function requestIllustrationPdf(
   illustrationId: string,
 ): Promise<RequestIllustrationPdfResult> {
+  const { copy } = await getServerI18n()
   if (!isNationalLifeLocalConnectorEnabled()) {
-    return { ok: false, message: 'Conecte o K-Bot neste navegador para gerar a ilustração oficial.' }
+    return { ok: false, message: copy('Conecte o K-Bot neste navegador para gerar a ilustração oficial.', 'Connect K-Bot in this browser to generate the official illustration.') }
   }
   const agent = await getCurrentAgent()
   const illustration = await prisma.illustration.findFirst({
@@ -176,7 +214,7 @@ export async function requestIllustrationPdf(
       documentFetchedAt: true,
     },
   })
-  if (!illustration) return { ok: false, message: 'Cotação não encontrada.' }
+  if (!illustration) return { ok: false, message: copy('Cotação não encontrada.', 'Quote not found.') }
   if (illustration.documentFetchedAt) {
     return { ok: true, commandId: '', duplicate: true, completed: true }
   }
@@ -206,7 +244,7 @@ export async function requestIllustrationPdf(
           confirmedByUserId: agent.userId,
         })
       } else if (latest.confirmationState !== 'APPROVED') {
-        return { ok: false, message: 'Este pedido não está mais disponível para confirmação.' }
+        return { ok: false, message: copy('Este pedido não está mais disponível para confirmação.', 'This request is no longer available for confirmation.') }
       }
       if (latest.state === 'AUTH_REQUIRED') {
         await retryConnectorCommandAuthentication(prismaConnectorCommandRepository, {
@@ -237,7 +275,7 @@ export async function requestIllustrationPdf(
       where: { id: issued.command.commandId, agentId: agent.id },
       select: { state: true, confirmationState: true },
     })
-    if (!persisted) return { ok: false, message: 'Não foi possível registrar o pedido.' }
+    if (!persisted) return { ok: false, message: copy('Não foi possível registrar o pedido.', 'The request could not be recorded.') }
     if (persisted.confirmationState === 'PENDING') {
       await approveConnectorCommand(prismaConnectorCommandRepository, {
         agentId: agent.id,
@@ -246,10 +284,10 @@ export async function requestIllustrationPdf(
         confirmedByUserId: agent.userId,
       })
     } else if (persisted.confirmationState !== 'APPROVED') {
-      return { ok: false, message: 'Este pedido não está mais disponível para confirmação.' }
+      return { ok: false, message: copy('Este pedido não está mais disponível para confirmação.', 'This request is no longer available for confirmation.') }
     }
     if (persisted.state === 'FAILED' || persisted.state === 'CANCELLED') {
-      return { ok: false, message: 'A tentativa anterior não foi concluída. Revise o erro antes de tentar novamente.' }
+      return { ok: false, message: copy('A tentativa anterior não foi concluída. Revise o erro antes de tentar novamente.', 'The previous attempt was not completed. Review the error before trying again.') }
     }
     revalidatePath('/agent/illustrations')
     revalidatePath(`/agent/illustrations/${illustration.id}`)
@@ -263,9 +301,18 @@ export async function requestIllustrationPdf(
     if (error instanceof ConnectorCommandError && error.code === 'AUTH_RETRY_UNAVAILABLE') {
       return {
         ok: false,
-        message: 'A National Life ainda precisa de uma verificação manual. Conclua o login ou MFA na janela da seguradora e tente novamente.',
+        message: copy(
+          'A National Life ainda precisa de uma verificação manual. Conclua o login ou MFA na janela da seguradora e tente novamente.',
+          'National Life still requires manual verification. Complete the sign-in or MFA in the carrier window and try again.',
+        ),
       }
     }
-    return { ok: false, message: 'Não foi possível iniciar a ilustração oficial agora.' }
+    return {
+      ok: false,
+      message: copy(
+        'Não foi possível iniciar a ilustração oficial agora.',
+        'The official illustration could not be started right now.',
+      ),
+    }
   }
 }

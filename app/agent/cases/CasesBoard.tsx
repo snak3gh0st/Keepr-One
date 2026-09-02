@@ -15,6 +15,7 @@ import {
 import { CrmStageSelect } from "@/components/crm/CrmStageSelect";
 import { FollowUpModal } from "@/components/crm/FollowUpModal";
 import { StageManagerDrawer } from "@/components/crm/StageManagerDrawer";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 import {
   archiveStageAction,
   createStageAction,
@@ -39,52 +40,7 @@ type Case = {
 
 type SortMode = "recent" | "oldest" | "name";
 
-const PRODUCT_LABEL: Record<string, string> = {
-  TERM: "Term",
-  IUL: "IUL",
-  UNDECIDED: "Produto a definir",
-};
-
-const OBJECTIVE_LABEL: Record<string, string> = {
-  PROTECTION: "Proteção",
-  ACCUMULATION: "Acumulação",
-  RETIREMENT: "Aposentadoria",
-  LEGACY: "Legado",
-};
-
-const PIPELINE_SIGNALS = [
-  "Novo atendimento",
-  "Diagnóstico",
-  "Proposta",
-  "Aplicação",
-  "Análise",
-  "Emissão",
-  "Relacionamento",
-];
-
 const PAGE_SIZE = 10;
-
-const USD = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
-
-const SHORT_DATE = new Intl.DateTimeFormat("pt-BR", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  timeZone: "America/New_York",
-});
-
-function updatedLabel(iso: string): string {
-  return SHORT_DATE.format(new Date(iso));
-}
-
-function moneyLabel(value: string | null, suffix = "") {
-  if (!value) return "A definir";
-  return `${USD.format(Number(value))}${suffix}`;
-}
 
 function initials(name: string) {
   return name
@@ -95,10 +51,10 @@ function initials(name: string) {
     .join("");
 }
 
-function PipelineSignalGroup({ hidden = false }: { hidden?: boolean }) {
+function PipelineSignalGroup({ signals, hidden = false }: { signals: string[]; hidden?: boolean }) {
   return (
     <div className="cases-marquee-group" aria-hidden={hidden || undefined}>
-      {PIPELINE_SIGNALS.map((signal) => (
+      {signals.map((signal) => (
         <span key={signal}>
           {signal}
           <i />
@@ -117,6 +73,24 @@ export function CasesBoard({
   stages: CrmStageView[];
   stageOptionsByAgent: Record<string, CrmStageView[]>;
 }) {
+  const { copy, locale } = useI18n();
+  const productLabel = useMemo<Record<string, string>>(() => ({
+    TERM: "Term", IUL: "IUL", UNDECIDED: copy("Produto a definir", "Product undecided"),
+  }), [copy]);
+  const objectiveLabel = useMemo<Record<string, string>>(() => ({
+    PROTECTION: copy("Proteção", "Protection"), ACCUMULATION: copy("Acumulação", "Accumulation"),
+    RETIREMENT: copy("Aposentadoria", "Retirement"), LEGACY: copy("Legado", "Legacy"),
+  }), [copy]);
+  const pipelineSignals = useMemo(() => [
+    copy("Novo atendimento", "New case"), copy("Diagnóstico", "Discovery"),
+    copy("Proposta", "Proposal"), copy("Aplicação", "Application"),
+    copy("Análise", "Underwriting"), copy("Emissão", "Issuance"),
+    copy("Relacionamento", "Relationship"),
+  ], [copy]);
+  const usd = useMemo(() => new Intl.NumberFormat(locale, { style: "currency", currency: "USD", maximumFractionDigits: 0 }), [locale]);
+  const shortDate = useMemo(() => new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", timeZone: "America/New_York" }), [locale]);
+  const updatedLabel = (iso: string) => shortDate.format(new Date(iso));
+  const moneyLabel = (value: string | null, suffix = "") => value ? `${usd.format(Number(value))}${suffix}` : copy("A definir", "To be defined");
   const router = useRouter();
   const root = useRef<HTMLDivElement>(null);
   const [activeStageKey, setActiveStageKey] = useState<string | null>(null);
@@ -141,7 +115,7 @@ export function CasesBoard({
   }, [activeStageKey, stages]);
 
   const filtered = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+    const normalizedQuery = query.trim().toLocaleLowerCase(locale);
 
     const result = cases.filter((caseItem) => {
       const belongsToStage =
@@ -155,25 +129,25 @@ export function CasesBoard({
       const searchable = [
         caseItem.prospectName,
         caseItem.agentName,
-        PRODUCT_LABEL[caseItem.productType] ?? caseItem.productType,
-        OBJECTIVE_LABEL[caseItem.objective] ?? caseItem.objective,
+        productLabel[caseItem.productType] ?? caseItem.productType,
+        objectiveLabel[caseItem.objective] ?? caseItem.objective,
       ]
         .join(" ")
-        .toLocaleLowerCase("pt-BR");
+        .toLocaleLowerCase(locale);
 
       return searchable.includes(normalizedQuery);
     });
 
     return result.sort((left, right) => {
       if (sortMode === "name") {
-        return left.prospectName.localeCompare(right.prospectName, "pt-BR");
+        return left.prospectName.localeCompare(right.prospectName, locale);
       }
       if (sortMode === "oldest") {
         return left.updatedAt.localeCompare(right.updatedAt);
       }
       return right.updatedAt.localeCompare(left.updatedAt);
     });
-  }, [cases, effectiveStageKey, query, sortMode]);
+  }, [cases, effectiveStageKey, query, sortMode, locale, productLabel, objectiveLabel]);
 
   const railStages = useMemo(
     () =>
@@ -333,9 +307,9 @@ export function CasesBoard({
       >
         <div className="cases-hero-main">
           <div className="cases-hero-copy">
-            <p data-cases-hero-item>Central de relacionamento e vendas</p>
+            <p data-cases-hero-item>{copy("Central de relacionamento e vendas", "Relationship and sales hub")}</p>
             <h1 data-cases-hero-item id="cases-page-title">
-              Seu CRM, do primeiro contato à apólice.
+              {copy("Seu CRM, do primeiro contato à apólice.", "Your CRM, from first contact to policy.")}
               <span className="cases-inline-flow" aria-hidden="true">
                 <i />
                 <i />
@@ -343,47 +317,46 @@ export function CasesBoard({
               </span>
             </h1>
             <p data-cases-hero-item>
-              Organize clientes, oportunidades e próximas ações em uma única
-              visão, do novo atendimento ao relacionamento.
+              {copy("Organize clientes, oportunidades e próximas ações em uma única visão, do novo atendimento ao relacionamento.", "Organize clients, opportunities, and next actions in one view, from a new case through the relationship.")}
             </p>
           </div>
 
           <div className="cases-hero-actions" data-cases-hero-item>
             <Link href="/agent/activities" className="cases-hero-secondary">
-              Ver atividades
+              {copy("Ver atividades", "View activities")}
               <span aria-hidden="true">↗</span>
             </Link>
             <Link href="/agent/cases/new" className="cases-hero-primary">
               <span aria-hidden="true">+</span>
-              Novo atendimento
+              {copy("Novo atendimento", "New case")}
             </Link>
           </div>
         </div>
 
         <div className="cases-pipeline-marquee" aria-hidden="true">
           <div className="cases-marquee-track" data-cases-marquee>
-            <PipelineSignalGroup />
-            <PipelineSignalGroup hidden />
+            <PipelineSignalGroup signals={pipelineSignals} />
+            <PipelineSignalGroup signals={pipelineSignals} hidden />
           </div>
         </div>
       </section>
 
-      <section className="cases-summary-grid" aria-label="Resumo da fila">
+      <section className="cases-summary-grid" aria-label={copy("Resumo da fila", "Queue summary")}>
         {[
           {
-            label: "Em andamento",
+            label: copy("Em andamento", "In progress"),
             value: activeCases,
-            detail: "Oportunidades que ainda pedem ação",
+            detail: copy("Oportunidades que ainda pedem ação", "Opportunities that still need action"),
           },
           {
-            label: "Em follow-up",
+            label: copy("Em follow-up", "In follow-up"),
             value: followUpCases,
-            detail: "Leads com próximo contato definido",
+            detail: copy("Leads com próximo contato definido", "Leads with a defined next contact"),
           },
           {
-            label: "Convertidos",
+            label: copy("Convertidos", "Converted"),
             value: convertedCases,
-            detail: "Contratos, apólices e clientes ativos",
+            detail: copy("Contratos, apólices e clientes ativos", "Contracts, policies, and active clients"),
           },
         ].map((metric) => (
           <div className="cases-summary-card" data-cases-metric key={metric.label}>
@@ -404,17 +377,17 @@ export function CasesBoard({
         >
           <div className="cases-board-heading">
             <div>
-              <p>Pipeline de oportunidades</p>
-              <h2 id="cases-list-title">Escolha a próxima ação.</h2>
+              <p>{copy("Pipeline de oportunidades", "Opportunity pipeline")}</p>
+              <h2 id="cases-list-title">{copy("Escolha a próxima ação.", "Choose the next action.")}</h2>
             </div>
             <span role="status" aria-live="polite">
-              {filtered.length} {filtered.length === 1 ? "resultado" : "resultados"}
+              {filtered.length === 1 ? copy("1 resultado", "1 result") : copy("{count} resultados", "{count} results", { count: filtered.length })}
             </span>
           </div>
 
           <div className="cases-toolbar">
             <label className="cases-search">
-              <span>Buscar</span>
+              <span>{copy("Buscar", "Search")}</span>
               <input
                 type="search"
                 aria-controls="crm-pipeline-results"
@@ -423,12 +396,12 @@ export function CasesBoard({
                   setQuery(event.target.value);
                   setPage(1);
                 }}
-                placeholder="Cliente, agente, produto ou objetivo"
+                placeholder={copy("Cliente, agente, produto ou objetivo", "Client, agent, product, or objective")}
               />
             </label>
 
             <label className="cases-sort">
-              <span>Ordenar</span>
+              <span>{copy("Ordenar", "Sort")}</span>
               <select
                 aria-controls="crm-pipeline-results"
                 value={sortMode}
@@ -437,9 +410,9 @@ export function CasesBoard({
                   setPage(1);
                 }}
               >
-                <option value="recent">Atualizados recentemente</option>
-                <option value="oldest">Atualizados há mais tempo</option>
-                <option value="name">Nome do cliente</option>
+                <option value="recent">{copy("Atualizados recentemente", "Recently updated")}</option>
+                <option value="oldest">{copy("Atualizados há mais tempo", "Oldest updates")}</option>
+                <option value="name">{copy("Nome do cliente", "Client name")}</option>
               </select>
             </label>
           </div>
@@ -467,39 +440,39 @@ export function CasesBoard({
                 <div className="cases-empty-visual" data-empty-visual aria-hidden="true">
                   <span data-empty-card>
                     <i />
-                    Atendimento registrado
+                    {copy("Atendimento registrado", "Case registered")}
                   </span>
                   <span data-empty-card>
                     <i />
-                    Próximo passo definido
+                    {copy("Próximo passo definido", "Next step defined")}
                   </span>
                   <span data-empty-card>
                     <i />
-                    Apólice acompanhada
+                    {copy("Apólice acompanhada", "Policy tracked")}
                   </span>
                 </div>
 
                 <div className="cases-empty-copy">
-                  <p>{cases.length === 0 ? "Seu CRM está pronto." : "A busca terminou."}</p>
+                  <p>{cases.length === 0 ? copy("Seu CRM está pronto.", "Your CRM is ready.") : copy("A busca terminou.", "Search complete.")}</p>
                   <h3>
                     {cases.length === 0
-                      ? "Comece pelo primeiro atendimento."
-                      : "Nenhuma oportunidade corresponde a esta visão."}
+                      ? copy("Comece pelo primeiro atendimento.", "Start with your first case.")
+                      : copy("Nenhuma oportunidade corresponde a esta visão.", "No opportunity matches this view.")}
                   </h3>
                   <p>
                     {cases.length === 0
-                      ? "Inicie um atendimento para reunir cliente, objetivo, documentos e próxima ação em um único fluxo."
-                      : "Ajuste a busca ou limpe os filtros para voltar a ver toda a sua fila."}
+                      ? copy("Inicie um atendimento para reunir cliente, objetivo, documentos e próxima ação em um único fluxo.", "Start a case to bring the client, objective, documents, and next action into one workflow.")
+                      : copy("Ajuste a busca ou limpe os filtros para voltar a ver toda a sua fila.", "Adjust the search or clear filters to see your full queue again.")}
                   </p>
                   <div>
                     {cases.length === 0 ? (
                       <Link href="/agent/cases/new">
-                        Criar primeiro atendimento
+                        {copy("Criar primeiro atendimento", "Create first case")}
                         <span aria-hidden="true">↗</span>
                       </Link>
                     ) : (
                       <button type="button" onClick={resetFilters}>
-                        Limpar filtros
+                        {copy("Limpar filtros", "Clear filters")}
                       </button>
                     )}
                   </div>
@@ -508,53 +481,52 @@ export function CasesBoard({
             ) : (
               <>
                 <div className="cases-list-head" aria-hidden="true">
-                  <span>Cliente e responsável</span>
-                  <span>Produto e objetivo</span>
-                  <span>Valores</span>
-                  <span>Etapa</span>
+                  <span>{copy("Cliente e responsável", "Client and owner")}</span>
+                  <span>{copy("Produto e objetivo", "Product and objective")}</span>
+                  <span>{copy("Valores", "Amounts")}</span>
+                  <span>{copy("Etapa", "Stage")}</span>
                   <i />
                 </div>
 
                 <ul className="cases-list">
                   {pageCases.map((caseItem) => (
                     <li key={caseItem.id} className="cases-row" data-case-row>
-                      <Link href={`/agent/cases/${caseItem.id}`} className="cases-row-link" aria-label={`Abrir lead ${caseItem.prospectName}`}>
+                      <Link href={`/agent/cases/${caseItem.id}`} className="cases-row-link" aria-label={copy("Abrir lead {name}", "Open lead {name}", { name: caseItem.prospectName })}>
                         <div className="cases-row-person">
                           <span aria-hidden="true">
                             {initials(caseItem.prospectName) || "CL"}
                           </span>
                           <div>
-                            <span className="sr-only">Cliente: </span>
+                            <span className="sr-only">{copy("Cliente:", "Client:")} </span>
                             <strong>{caseItem.prospectName}</strong>
                             <small>
-                              <span className="sr-only">Responsável e atualização: </span>
-                              {caseItem.agentName} · atualizado{" "}
-                              em {updatedLabel(caseItem.updatedAt)}
+                              <span className="sr-only">{copy("Responsável e atualização:", "Owner and update:")} </span>
+                              {caseItem.agentName} · {copy("atualizado em {date}", "updated on {date}", { date: updatedLabel(caseItem.updatedAt) })}
                             </small>
                           </div>
                         </div>
 
                         <div className="cases-row-product">
-                          <span className="sr-only">Produto: </span>
+                          <span className="sr-only">{copy("Produto:", "Product:")} </span>
                           <strong>
-                            {PRODUCT_LABEL[caseItem.productType] ??
+                            {productLabel[caseItem.productType] ??
                               caseItem.productType}
                           </strong>
                           <small>
-                            <span className="sr-only">Objetivo: </span>
-                            {OBJECTIVE_LABEL[caseItem.objective] ??
+                            <span className="sr-only">{copy("Objetivo:", "Objective:")} </span>
+                            {objectiveLabel[caseItem.objective] ??
                               caseItem.objective}
                           </small>
                         </div>
 
                         <div className="cases-row-values">
                           <strong>
-                            <span className="sr-only">Cobertura: </span>
+                            <span className="sr-only">{copy("Cobertura:", "Coverage:")} </span>
                             {moneyLabel(caseItem.targetCoverage)}
                           </strong>
                           <small>
-                            <span className="sr-only">Orçamento mensal: </span>
-                            {moneyLabel(caseItem.monthlyBudget, "/mês")}
+                            <span className="sr-only">{copy("Orçamento mensal:", "Monthly budget:")} </span>
+                            {moneyLabel(caseItem.monthlyBudget, copy("/mês", "/month"))}
                           </small>
                         </div>
 
@@ -601,30 +573,29 @@ export function CasesBoard({
           aria-labelledby="cases-navigation-title"
         >
           <div>
-            <p>Próxima etapa</p>
-            <h2 id="cases-navigation-title">Tudo continua conectado.</h2>
+            <p>{copy("Próxima etapa", "Next stage")}</p>
+            <h2 id="cases-navigation-title">{copy("Tudo continua conectado.", "Everything stays connected.")}</h2>
             <p>
-              Avance pelo relacionamento sem perder o histórico, as pendências
-              ou a próxima ação.
+              {copy("Avance pelo relacionamento sem perder o histórico, as pendências ou a próxima ação.", "Move the relationship forward without losing history, pending items, or the next action.")}
             </p>
           </div>
 
-          <nav aria-label="Atalhos da operação">
+          <nav aria-label={copy("Atalhos da operação", "Operation shortcuts")}>
             {[
               {
                 href: "/agent/cases/new",
-                label: "Novo atendimento",
-                detail: "Registre a oportunidade e defina a próxima ação.",
+                label: copy("Novo atendimento", "New case"),
+                detail: copy("Registre a oportunidade e defina a próxima ação.", "Register the opportunity and define the next action."),
               },
               {
                 href: "/agent/clients",
-                label: "Clientes",
-                detail: "Consulte histórico e dados do relacionamento.",
+                label: copy("Clientes", "Clients"),
+                detail: copy("Consulte histórico e dados do relacionamento.", "Review relationship history and details."),
               },
               {
                 href: "/agent/activities",
-                label: "Atividades",
-                detail: "Revise retornos e pendências da operação.",
+                label: copy("Atividades", "Activities"),
+                detail: copy("Revise retornos e pendências da operação.", "Review follow-ups and pending items."),
               },
             ].map((item) => (
               <Link href={item.href} key={item.href}>
@@ -640,9 +611,9 @@ export function CasesBoard({
           <div className="cases-navigation-foot">
             <span>
               <i aria-hidden="true" />
-              Fluxo do CRM
+              {copy("Fluxo do CRM", "CRM flow")}
             </span>
-            <b>Atendimento → Relacionamento</b>
+            <b>{copy("Atendimento → Relacionamento", "Case → Relationship")}</b>
           </div>
         </aside>
       </div>
@@ -665,9 +636,9 @@ export function CasesBoard({
         key={followUpTarget?.caseId ?? "closed"}
         open={Boolean(followUpTarget)}
         onClose={() => setFollowUpTarget(null)}
-        prospectName={followUpTarget?.prospectName ?? "este lead"}
+        prospectName={followUpTarget?.prospectName ?? copy("este lead", "this lead")}
         onSubmit={async ({ title, scheduledAt }) => {
-          if (!followUpTarget) return { ok: false, message: "Lead não encontrado." };
+          if (!followUpTarget) return { ok: false, message: copy("Lead não encontrado.", "Lead not found.") };
           const result = await moveCaseAndScheduleAction({
             caseId: followUpTarget.caseId,
             stageId: followUpTarget.stageId,

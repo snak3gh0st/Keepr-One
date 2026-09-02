@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useDeferredValue,
   useId,
   useMemo,
@@ -10,6 +11,7 @@ import {
 import Link from "next/link";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 type CommissionType = "DIRECT" | "OVERRIDE";
 
@@ -30,23 +32,8 @@ type SortMode = "period-desc" | "period-asc" | "amount-desc" | "amount-asc";
 type CommissionRecord = Record_ & { period: string; numericAmount: number };
 
 const ROWS_PER_PAGE = 12;
-const COUNT = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
-const MONEY_NUMBER = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-const PERIOD = new Intl.DateTimeFormat("pt-BR", {
-  month: "long",
-  year: "numeric",
-  timeZone: "UTC",
-});
-const PERIOD_LABEL_CACHE = new Map<string, string>();
-
-function periodLabel(period: string) {
-  if (period === "sem-periodo") return "Sem data informada";
-  const cached = PERIOD_LABEL_CACHE.get(period);
-  if (cached) return cached;
-
+function periodLabel(period: string, locale: string, noDateLabel: string) {
+  if (period === "sem-periodo") return noDateLabel;
   const match = /^(\d{4})-(\d{2})$/.exec(period);
   if (!match) return period;
 
@@ -54,9 +41,11 @@ function periodLabel(period: string) {
   const month = Number(match[2]);
   if (month < 1 || month > 12) return period;
 
-  const label = PERIOD.format(new Date(Date.UTC(year, month - 1, 1)));
-  PERIOD_LABEL_CACHE.set(period, label);
-  return label;
+  return new Intl.DateTimeFormat(locale, {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, 1)));
 }
 
 function paginationItems(page: number, pageCount: number) {
@@ -87,7 +76,17 @@ function MoneyValue({
   compact?: boolean;
   inverse?: boolean;
 }) {
-  const [whole, fraction = "00"] = MONEY_NUMBER.format(Math.abs(value)).split(".");
+  const { copy, locale } = useI18n();
+  const formatted = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).formatToParts(Math.abs(value));
+  const whole = formatted
+    .filter((part) => part.type === "integer" || part.type === "group")
+    .map((part) => part.value)
+    .join("");
+  const fraction = formatted.find((part) => part.type === "fraction")?.value ?? "00";
+  const decimal = formatted.find((part) => part.type === "decimal")?.value ?? ".";
 
   return (
     <span
@@ -95,16 +94,34 @@ function MoneyValue({
       data-compact={compact || undefined}
       data-inverse={inverse || undefined}
       data-negative={value < 0 || undefined}
-      aria-label={`${value < 0 ? "menos " : ""}${Math.abs(value).toFixed(2)} dólares`}
+      aria-label={copy(
+        `${value < 0 ? "menos " : ""}{amount} dólares`,
+        `${value < 0 ? "minus " : ""}{amount} dollars`,
+        { amount: Math.abs(value).toFixed(2) },
+      )}
     >
       <span>US$</span>
       <strong>{value < 0 ? `−${whole}` : whole}</strong>
-      <small>.{fraction}</small>
+      <small>{decimal}{fraction}</small>
     </span>
   );
 }
 
 export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
+  const { copy, locale } = useI18n();
+  const count = useMemo(
+    () => new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }),
+    [locale],
+  );
+  const moneyNumber = useMemo(
+    () => new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    [locale],
+  );
+  const formatPeriod = useCallback(
+    (period: string) =>
+      periodLabel(period, locale, copy("Sem data informada", "Date not provided")),
+    [copy, locale],
+  );
   const root = useRef<HTMLDivElement>(null);
   const listStart = useRef<HTMLElement>(null);
   const searchId = useId();
@@ -174,7 +191,7 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
   );
 
   const filteredRecords = useMemo(() => {
-    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase("pt-BR");
+    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase(locale);
 
     const result = records.filter((record) => {
       const matchesOrigin =
@@ -191,12 +208,14 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
       return [
         record.policyNumber ?? "",
         record.agentName,
-        periodLabel(record.period),
-        record.type === "DIRECT" ? "direta" : "repasse equipe override",
+        formatPeriod(record.period),
+        record.type === "DIRECT"
+          ? copy("direta", "direct")
+          : copy("repasse equipe override", "team override"),
         record.numericAmount.toFixed(2),
       ]
         .join(" ")
-        .toLocaleLowerCase("pt-BR")
+        .toLocaleLowerCase(locale)
         .includes(normalizedQuery);
     });
 
@@ -228,7 +247,7 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
         right.numericAmount - left.numericAmount
       );
     });
-  }, [deferredQuery, origin, periodFilter, records, sortMode]);
+  }, [copy, deferredQuery, formatPeriod, locale, origin, periodFilter, records, sortMode]);
 
   const filteredSummary = useMemo(() => {
     let total = 0;
@@ -446,22 +465,38 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
   const metricItems = [
     {
       key: "all" as const,
-      label: "Saldo do extrato",
-      detail: `${COUNT.format(records.length)} lançamentos em ${COUNT.format(summary.periods)} período${summary.periods === 1 ? "" : "s"}`,
+      label: copy("Saldo do extrato", "Statement balance"),
+      detail: copy(
+        "{entries} lançamentos em {periods} {periodLabel}",
+        "{entries} entries across {periods} {periodLabel}",
+        {
+          entries: count.format(records.length),
+          periods: count.format(summary.periods),
+          periodLabel: summary.periods === 1 ? copy("período", "period") : copy("períodos", "periods"),
+        },
+      ),
       value: summary.total,
       fill: Math.abs(summary.total) / metricScale,
     },
     {
       key: "direct" as const,
-      label: "Produção direta",
-      detail: `${COUNT.format(summary.directCount)} lançamentos da sua produção`,
+      label: copy("Produção direta", "Direct production"),
+      detail: copy(
+        "{count} lançamentos da sua produção",
+        "{count} entries from your production",
+        { count: count.format(summary.directCount) },
+      ),
       value: summary.direct,
       fill: Math.abs(summary.direct) / metricScale,
     },
     {
       key: "override" as const,
-      label: "Repasses da equipe",
-      detail: `${COUNT.format(summary.overrideCount)} repasses da sua hierarquia`,
+      label: copy("Repasses da equipe", "Team overrides"),
+      detail: copy(
+        "{count} repasses da sua hierarquia",
+        "{count} overrides from your hierarchy",
+        { count: count.format(summary.overrideCount) },
+      ),
       value: summary.override,
       fill: Math.abs(summary.override) / metricScale,
     },
@@ -471,7 +506,7 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
     <div ref={root} className="commissions-workspace">
       {records.length > 0 ? (
         <>
-          <section className="commission-metrics" aria-label="Resumo do extrato">
+          <section className="commission-metrics" aria-label={copy("Resumo do extrato", "Statement summary")}>
             {metricItems.map((item) => (
               <button
                 key={item.key}
@@ -505,24 +540,28 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
           <section className="commission-command-deck" data-commission-control>
             <header className="commission-command-heading">
               <div>
-                <h2>Encontre cada valor sem perder a origem.</h2>
+                <h2>{copy("Encontre cada valor sem perder a origem.", "Find every amount without losing its source.")}</h2>
                 <p>
-                  Busque por apólice ou agente, selecione o período e compare
-                  produção direta com repasses.
+                  {copy(
+                    "Busque por apólice ou agente, selecione o período e compare produção direta com repasses.",
+                    "Search by policy or agent, select a period, and compare direct production with overrides.",
+                  )}
                 </p>
               </div>
               <div className="commission-command-balance" aria-live="polite">
-                <span>Saldo desta visão</span>
+                <span>{copy("Saldo desta visão", "Balance in this view")}</span>
                 <MoneyValue value={filteredSummary.total} compact />
                 <small>
-                  {COUNT.format(filteredRecords.length)} {filteredRecords.length === 1 ? "lançamento" : "lançamentos"}
+                  {count.format(filteredRecords.length)} {filteredRecords.length === 1
+                    ? copy("lançamento", "entry")
+                    : copy("lançamentos", "entries")}
                 </small>
               </div>
             </header>
 
             <div className="commission-command-grid">
               <label htmlFor={searchId} className="commission-search-control">
-                <span>Buscar no extrato</span>
+                <span>{copy("Buscar no extrato", "Search statement")}</span>
                 <span className="commission-search-field">
                   <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
                     <circle cx="8.7" cy="8.7" r="4.8" />
@@ -540,12 +579,12 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                     onKeyDown={(event) => {
                       if (event.key === "Escape") setQuery("");
                     }}
-                    placeholder="Apólice, agente, período ou valor"
+                    placeholder={copy("Apólice, agente, período ou valor", "Policy, agent, period, or amount")}
                   />
                   {query ? (
                     <button
                       type="button"
-                      aria-label="Limpar busca"
+                      aria-label={copy("Limpar busca", "Clear search")}
                       onClick={() => {
                         setQuery("");
                         setPage(1);
@@ -560,7 +599,7 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
               </label>
 
               <label htmlFor={periodId} className="commission-select-control">
-                <span>Período</span>
+                <span>{copy("Período", "Period")}</span>
                 <select
                   id={periodId}
                   value={periodFilter}
@@ -569,17 +608,17 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                     setPage(1);
                   }}
                 >
-                  <option value="all">Todos os períodos</option>
+                  <option value="all">{copy("Todos os períodos", "All periods")}</option>
                   {periodOptions.map((period) => (
                     <option key={period} value={period}>
-                      {periodLabel(period)}
+                      {formatPeriod(period)}
                     </option>
                   ))}
                 </select>
               </label>
 
               <label htmlFor={sortId} className="commission-select-control">
-                <span>Ordenar</span>
+                <span>{copy("Ordenar", "Sort")}</span>
                 <select
                   id={sortId}
                   value={sortMode}
@@ -588,24 +627,24 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                     setPage(1);
                   }}
                 >
-                  <option value="period-desc">Mais recentes</option>
-                  <option value="period-asc">Mais antigos</option>
-                  <option value="amount-desc">Maior valor</option>
-                  <option value="amount-asc">Menor valor</option>
+                  <option value="period-desc">{copy("Mais recentes", "Newest")}</option>
+                  <option value="period-asc">{copy("Mais antigos", "Oldest")}</option>
+                  <option value="amount-desc">{copy("Maior valor", "Highest amount")}</option>
+                  <option value="amount-asc">{copy("Menor valor", "Lowest amount")}</option>
                 </select>
               </label>
             </div>
 
             <fieldset className="commission-origin-accordion">
-              <legend>Origem do lançamento</legend>
+              <legend>{copy("Origem do lançamento", "Entry source")}</legend>
               <div>
                 {(
                   [
-                    ["all", "Todos", records.length, summary.total],
-                    ["direct", "Direta", summary.directCount, summary.direct],
-                    ["override", "Equipe", summary.overrideCount, summary.override],
+                    ["all", copy("Todos", "All"), records.length, summary.total],
+                    ["direct", copy("Direta", "Direct"), summary.directCount, summary.direct],
+                    ["override", copy("Equipe", "Team"), summary.overrideCount, summary.override],
                   ] as const
-                ).map(([value, label, count, amount]) => (
+                ).map(([value, label, entryCount, amount]) => (
                   <button
                     key={value}
                     type="button"
@@ -614,8 +653,8 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                     onClick={() => selectOrigin(value)}
                   >
                     <span>{label}</span>
-                    <small>{COUNT.format(count)}</small>
-                    <strong>US$ {MONEY_NUMBER.format(amount)}</strong>
+                    <small>{count.format(entryCount)}</small>
+                    <strong>US$ {moneyNumber.format(amount)}</strong>
                   </button>
                 ))}
               </div>
@@ -627,7 +666,7 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                 className="commission-clear-controls"
                 onClick={resetFilters}
               >
-                Limpar filtros
+                {copy("Limpar filtros", "Clear filters")}
                 <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
                   <path d="m5.5 5.5 7 7M12.5 5.5l-7 7" />
                 </svg>
@@ -636,15 +675,15 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
           </section>
 
           <div className="commission-browser" data-commission-control>
-            <aside className="commission-preview" aria-label="Lançamento selecionado">
+            <aside className="commission-preview" aria-label={copy("Lançamento selecionado", "Selected entry")}>
               {selected ? (
                 <div data-commission-preview-body>
                   <header>
-                    <span>Lançamento selecionado</span>
+                    <span>{copy("Lançamento selecionado", "Selected entry")}</span>
                     <div>
                       <button
                         type="button"
-                        aria-label="Lançamento anterior"
+                        aria-label={copy("Lançamento anterior", "Previous entry")}
                         onClick={() => changeSelected(-1)}
                       >
                         <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
@@ -653,7 +692,7 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                       </button>
                       <button
                         type="button"
-                        aria-label="Próximo lançamento"
+                        aria-label={copy("Próximo lançamento", "Next entry")}
                         onClick={() => changeSelected(1)}
                       >
                         <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
@@ -665,7 +704,7 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
 
                   <div className="commission-preview-index">
                     <span>
-                      {COUNT.format(activeIndex + 1)} de {COUNT.format(filteredRecords.length)}
+                      {count.format(activeIndex + 1)} {copy("de", "of")} {count.format(filteredRecords.length)}
                     </span>
                     <i />
                   </div>
@@ -673,46 +712,48 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                   <MoneyValue value={selected.numericAmount} inverse />
                   <p className="commission-preview-caption">
                     {selected.numericAmount < 0
-                      ? "Valor negativo registrado no extrato"
+                      ? copy("Valor negativo registrado no extrato", "Negative amount recorded in the statement")
                       : selected.type === "DIRECT"
-                        ? "Comissão da sua produção direta"
-                        : "Repasse gerado pela produção da equipe"}
+                        ? copy("Comissão da sua produção direta", "Commission from your direct production")
+                        : copy("Repasse gerado pela produção da equipe", "Override generated by team production")}
                   </p>
 
                   <dl>
                     <div>
-                      <dt>Período</dt>
-                      <dd>{periodLabel(selected.period)}</dd>
+                      <dt>{copy("Período", "Period")}</dt>
+                      <dd>{formatPeriod(selected.period)}</dd>
                     </div>
                     <div>
-                      <dt>Apólice</dt>
-                      <dd>{selected.policyNumber ?? "Não informada"}</dd>
+                      <dt>{copy("Apólice", "Policy")}</dt>
+                      <dd>{selected.policyNumber ?? copy("Não informada", "Not provided")}</dd>
                     </div>
                     <div>
-                      <dt>Agente de origem</dt>
+                      <dt>{copy("Agente de origem", "Source agent")}</dt>
                       <dd>{selected.agentName}</dd>
                     </div>
                     <div>
-                      <dt>Origem</dt>
+                      <dt>{copy("Origem", "Source")}</dt>
                       <dd>
                         {selected.type === "DIRECT"
-                          ? "Produção direta"
-                          : `Repasse · nível ${selected.level}`}
+                          ? copy("Produção direta", "Direct production")
+                          : copy("Repasse · nível {level}", "Override · level {level}", { level: selected.level })}
                       </dd>
                     </div>
                   </dl>
 
                   {selected.policyId ? (
                     <Link href={`/agent/policies/${selected.policyId}`}>
-                      Abrir apólice
+                      {copy("Abrir apólice", "Open policy")}
                       <svg aria-hidden="true" viewBox="0 0 18 18" fill="none">
                         <path d="M5 13 13 5M7 5h6v6" />
                       </svg>
                     </Link>
                   ) : (
                     <p className="commission-preview-note">
-                      Esta apólice não está na carteira atual, mas o número foi
-                      preservado para conferência.
+                      {copy(
+                        "Esta apólice não está na carteira atual, mas o número foi preservado para conferência.",
+                        "This policy is not in the current book, but its number was preserved for reconciliation.",
+                      )}
                     </p>
                   )}
                 </div>
@@ -728,12 +769,12 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
             >
               <header className="commission-results-heading">
                 <div>
-                  <h2 id="commission-results-title">Lançamentos</h2>
-                  <p>Selecione uma linha para conferir todos os detalhes.</p>
+                  <h2 id="commission-results-title">{copy("Lançamentos", "Entries")}</h2>
+                  <p>{copy("Selecione uma linha para conferir todos os detalhes.", "Select a row to review all details.")}</p>
                 </div>
                 <p aria-live="polite">
                   <strong>{pageStart}–{pageEnd}</strong>
-                  <span>de {COUNT.format(filteredRecords.length)}</span>
+                  <span>{copy("de", "of")} {count.format(filteredRecords.length)}</span>
                 </p>
               </header>
 
@@ -746,13 +787,15 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                       <section key={group.period} className="commission-period-group">
                         <header>
                           <div>
-                            <time dateTime={group.period}>{periodLabel(group.period)}</time>
+                            <time dateTime={group.period}>{formatPeriod(group.period)}</time>
                             <span>
-                              {COUNT.format(periodSummary?.count ?? group.rows.length)} {periodSummary?.count === 1 ? "lançamento" : "lançamentos"}
+                              {count.format(periodSummary?.count ?? group.rows.length)} {periodSummary?.count === 1
+                                ? copy("lançamento", "entry")
+                                : copy("lançamentos", "entries")}
                             </span>
                           </div>
                           <div>
-                            <span>Subtotal do período</span>
+                            <span>{copy("Subtotal do período", "Period subtotal")}</span>
                             <MoneyValue value={periodSummary?.total ?? 0} compact />
                           </div>
                         </header>
@@ -764,15 +807,22 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                                 type="button"
                                 data-active={selected?.id === record.id || undefined}
                                 aria-pressed={selected?.id === record.id}
-                                aria-label={`Ver lançamento da apólice ${record.policyNumber ?? "não informada"}, ${MONEY_NUMBER.format(record.numericAmount)} dólares`}
+                                aria-label={copy(
+                                  "Ver lançamento da apólice {policy}, {amount} dólares",
+                                  "View entry for policy {policy}, {amount} dollars",
+                                  {
+                                    policy: record.policyNumber ?? copy("não informada", "not provided"),
+                                    amount: moneyNumber.format(record.numericAmount),
+                                  },
+                                )}
                                 onClick={() => setSelectedId(record.id)}
                               >
                                 <span className="commission-row-policy">
-                                  <small>Apólice</small>
-                                  <strong>{record.policyNumber ?? "Não informada"}</strong>
+                                  <small>{copy("Apólice", "Policy")}</small>
+                                  <strong>{record.policyNumber ?? copy("Não informada", "Not provided")}</strong>
                                 </span>
                                 <span className="commission-row-agent">
-                                  <small>Agente de origem</small>
+                                  <small>{copy("Agente de origem", "Source agent")}</small>
                                   <strong>{record.agentName}</strong>
                                 </span>
                                 <span
@@ -782,10 +832,10 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                                 >
                                   <i />
                                   {record.numericAmount < 0
-                                    ? "Valor negativo"
+                                    ? copy("Valor negativo", "Negative amount")
                                     : record.type === "DIRECT"
-                                      ? "Direta"
-                                      : `Repasse · N${record.level}`}
+                                      ? copy("Direta", "Direct")
+                                      : copy("Repasse · N{level}", "Override · L{level}", { level: record.level })}
                                 </span>
                                 <MoneyValue value={record.numericAmount} compact />
                                 <span className="commission-row-arrow" aria-hidden="true">
@@ -808,27 +858,29 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                     <i />
                     <i />
                   </span>
-                  <h3>Nenhum lançamento nesta visão.</h3>
+                  <h3>{copy("Nenhum lançamento nesta visão.", "No entries in this view.")}</h3>
                   <p>
-                    Ajuste a busca ou volte ao extrato completo para continuar a
-                    conferência.
+                    {copy(
+                      "Ajuste a busca ou volte ao extrato completo para continuar a conferência.",
+                      "Adjust your search or return to the full statement to continue reconciling.",
+                    )}
                   </p>
                   <button type="button" onClick={resetFilters}>
-                    Limpar filtros
+                    {copy("Limpar filtros", "Clear filters")}
                   </button>
                 </div>
               )}
 
               {pageCount > 1 ? (
-                <nav className="commission-pagination" aria-label="Paginação dos lançamentos">
+                <nav className="commission-pagination" aria-label={copy("Paginação dos lançamentos", "Entry pagination")}>
                   <p>
                     <strong>{pageStart}–{pageEnd}</strong>
-                    <span>de {COUNT.format(filteredRecords.length)}</span>
+                    <span>{copy("de", "of")} {count.format(filteredRecords.length)}</span>
                   </p>
                   <div>
                     <button
                       type="button"
-                      aria-label="Página anterior"
+                      aria-label={copy("Página anterior", "Previous page")}
                       disabled={currentPage <= 1}
                       onClick={() => changePage(currentPage - 1)}
                     >
@@ -843,7 +895,7 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                         <button
                           key={item}
                           type="button"
-                          aria-label={`Ir para a página ${item}`}
+                          aria-label={copy("Ir para a página {page}", "Go to page {page}", { page: item })}
                           aria-current={item === currentPage ? "page" : undefined}
                           onClick={() => changePage(item)}
                         >
@@ -853,7 +905,7 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                     )}
                     <button
                       type="button"
-                      aria-label="Próxima página"
+                      aria-label={copy("Próxima página", "Next page")}
                       disabled={currentPage >= pageCount}
                       onClick={() => changePage(currentPage + 1)}
                     >
@@ -873,9 +925,10 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
               <path d="M10 8.5v4M10 6.2v.2" />
             </svg>
             <p>
-              Valores em dólares americanos. Lançamentos negativos reduzem o
-              saldo da visão; produção direta e repasses seguem a classificação
-              recebida da operação.
+              {copy(
+                "Valores em dólares americanos. Lançamentos negativos reduzem o saldo da visão; produção direta e repasses seguem a classificação recebida da operação.",
+                "Amounts are in U.S. dollars. Negative entries reduce the balance in this view; direct production and overrides follow the classification received from operations.",
+              )}
             </p>
           </aside>
         </>
@@ -886,12 +939,14 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
             <i />
             <i />
           </span>
-          <h2>Seu extrato começa com a primeira comissão.</h2>
+          <h2>{copy("Seu extrato começa com a primeira comissão.", "Your statement begins with the first commission.")}</h2>
           <p>
-            Quando os lançamentos forem importados, você poderá conferir valor,
-            origem e apólice neste espaço.
+            {copy(
+              "Quando os lançamentos forem importados, você poderá conferir valor, origem e apólice neste espaço.",
+              "Once entries are imported, you can review the amount, source, and policy here.",
+            )}
           </p>
-          <Link href="/agent/policies">Ver apólices</Link>
+          <Link href="/agent/policies">{copy("Ver apólices", "View policies")}</Link>
         </section>
       )}
     </div>

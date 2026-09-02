@@ -7,18 +7,19 @@ import { requestIllustrationPdf } from './actions'
 import { sendConnectorMessage } from '@/app/agent/integrations/national-life/NationalLifeConnectorClient'
 import { ForesightActivityIndicator } from './ForesightActivityIndicator'
 import { KBotTaskTrail } from '@/components/kbot/KBotAvatar'
+import { useI18n } from '@/components/i18n/LanguageProvider'
 
-const PHASE_COPY: Record<string, string> = {
-  OPENING_FORESIGHT: 'K-Bot está abrindo o Foresight…',
-  OPENING_CASE: 'K-Bot está abrindo um novo caso…',
-  FILLING_CLIENT: 'K-Bot está preenchendo os dados do cliente…',
-  CONFIGURING_PRODUCT: 'K-Bot está preenchendo o produto e os valores…',
-  CALCULATING: 'K-Bot está esperando o cálculo da National Life…',
-  VERIFYING_VALUES: 'K-Bot está conferindo os valores da National Life…',
-  SAVING_CASE: 'K-Bot está salvando a ilustração…',
-  GENERATING_PDF: 'K-Bot está criando o PDF oficial…',
-  UPLOADING_PDF: 'K-Bot está trazendo e conferindo o PDF…',
-  COMPLETED: 'K-Bot concluiu a ilustração oficial.',
+const PHASE_COPY: Record<string, { pt: string; en: string }> = {
+  OPENING_FORESIGHT: { pt: 'K-Bot está abrindo o Foresight…', en: 'K-Bot is opening Foresight…' },
+  OPENING_CASE: { pt: 'K-Bot está abrindo um novo caso…', en: 'K-Bot is opening a new case…' },
+  FILLING_CLIENT: { pt: 'K-Bot está preenchendo os dados do cliente…', en: 'K-Bot is entering the client data…' },
+  CONFIGURING_PRODUCT: { pt: 'K-Bot está preenchendo o produto e os valores…', en: 'K-Bot is entering the product and amounts…' },
+  CALCULATING: { pt: 'K-Bot está esperando o cálculo da National Life…', en: 'K-Bot is waiting for National Life’s calculation…' },
+  VERIFYING_VALUES: { pt: 'K-Bot está conferindo os valores da National Life…', en: 'K-Bot is checking the National Life values…' },
+  SAVING_CASE: { pt: 'K-Bot está salvando a ilustração…', en: 'K-Bot is saving the illustration…' },
+  GENERATING_PDF: { pt: 'K-Bot está criando o PDF oficial…', en: 'K-Bot is creating the official PDF…' },
+  UPLOADING_PDF: { pt: 'K-Bot está trazendo e conferindo o PDF…', en: 'K-Bot is retrieving and checking the PDF…' },
+  COMPLETED: { pt: 'K-Bot concluiu a ilustração oficial.', en: 'K-Bot completed the official illustration.' },
 }
 
 function illustrationTrailIndex(phase: string | null): number {
@@ -46,6 +47,7 @@ export function IllustrationPdfButton({
   status?: 'WORKING' | 'WAITING_FOR_KBOT' | 'BLOCKED' | 'FAILED'
   safeErrorCode?: string | null
 }) {
+  const { copy } = useI18n()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [message, setMessage] = useState<string | null>(null)
@@ -80,10 +82,12 @@ export function IllustrationPdfButton({
 
   const trailIndex = illustrationTrailIndex(connectorPhase)
   const generatingLabel = connectorPhase
-    ? PHASE_COPY[connectorPhase] ?? 'K-Bot está trabalhando no Foresight…'
+    ? PHASE_COPY[connectorPhase]
+      ? copy(PHASE_COPY[connectorPhase].pt, PHASE_COPY[connectorPhase].en)
+      : copy('K-Bot está trabalhando no Foresight…', 'K-Bot is working in Foresight…')
     : pending
-      ? 'K-Bot está iniciando…'
-      : 'K-Bot está trabalhando no Foresight…'
+      ? copy('K-Bot está iniciando…', 'K-Bot is starting…')
+      : copy('K-Bot está trabalhando no Foresight…', 'K-Bot is working in Foresight…')
 
   if (status === 'WAITING_FOR_KBOT') {
     return (
@@ -91,7 +95,7 @@ export function IllustrationPdfButton({
         href="/agent/integrations/national-life"
         className="text-teal transition-colors hover:text-teal-deep"
       >
-        Conectar K-Bot para continuar
+        {copy('Conectar K-Bot para continuar', 'Connect K-Bot to continue')}
       </Link>
     )
   }
@@ -108,7 +112,7 @@ export function IllustrationPdfButton({
         href="/agent/illustrations/new"
         className="text-teal transition-colors hover:text-teal-deep"
       >
-        Revisar e criar novo cenário
+        {copy('Revisar e criar novo cenário', 'Review and create a new scenario')}
       </Link>
     )
   }
@@ -128,7 +132,7 @@ export function IllustrationPdfButton({
               return
             }
             if (result.completed) {
-              setMessage('A ilustração oficial já foi gerada na National Life.')
+              setMessage(copy('A ilustração oficial já foi gerada na National Life.', 'The official illustration has already been generated at National Life.'))
               router.refresh()
               return
             }
@@ -144,25 +148,37 @@ export function IllustrationPdfButton({
               }
             }
             setMessage(result.retryingLogin
-              ? 'K-Bot vai tentar a credencial protegida uma vez. Se a National Life pedir MFA, conclua a verificação para continuar.'
+              ? copy(
+                  'K-Bot vai tentar a credencial protegida uma vez. Se a National Life pedir MFA, conclua a verificação para continuar.',
+                  'K-Bot will try the protected credential once. If National Life requests MFA, complete the verification to continue.',
+                )
               : result.duplicate
-                ? 'Retomando a geração oficial já registrada.'
-                : 'K-Bot iniciou a ilustração oficial. Você pode sair desta página; se a sessão expirar, avisaremos para entrar novamente.')
+                ? copy('Retomando a geração oficial já registrada.', 'Resuming the official generation already on record.')
+                : copy(
+                    'K-Bot iniciou a ilustração oficial. Você pode sair desta página; se a sessão expirar, avisaremos para entrar novamente.',
+                    'K-Bot started the official illustration. You can leave this page; if the session expires, we will ask you to sign in again.',
+                  ))
             router.refresh()
           })
         }
         className="text-teal transition-colors hover:text-teal-deep disabled:text-ink-muted"
       >
         {generating ? <ForesightActivityIndicator label={generatingLabel} /> :
-          status === 'BLOCKED' ? 'Tentar login novamente' :
-            status === 'FAILED' ? 'Tentar novamente' : 'Gerar ilustração oficial'}
+          status === 'BLOCKED' ? copy('Tentar login novamente', 'Try signing in again') :
+            status === 'FAILED' ? copy('Tentar novamente', 'Try again') : copy('Gerar ilustração oficial', 'Generate official illustration')}
       </button>
       {generating && trailIndex >= 0 && (
         <div className="mt-3 max-w-2xl">
           <KBotTaskTrail
-            label="Etapas da ilustração pelo K-Bot"
+            label={copy('Etapas da ilustração pelo K-Bot', 'K-Bot illustration steps')}
             currentIndex={trailIndex}
-            steps={['Abrir Foresight', 'Preencher ilustração', 'Calcular e conferir', 'Salvar e criar PDF', 'Trazer para o Keepr One']}
+            steps={[
+              copy('Abrir Foresight', 'Open Foresight'),
+              copy('Preencher ilustração', 'Complete illustration'),
+              copy('Calcular e conferir', 'Calculate and check'),
+              copy('Salvar e criar PDF', 'Save and create PDF'),
+              copy('Trazer para a Keepr One', 'Bring into Keepr One'),
+            ]}
           />
         </div>
       )}

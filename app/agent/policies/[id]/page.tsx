@@ -34,8 +34,12 @@ import {
   getNationalLifeLocalConnectorConfig,
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
+import { getServerI18n } from '@/lib/i18n/server'
+import { localeFor } from '@/lib/i18n/config'
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { copy, language } = await getServerI18n()
+  const locale = localeFor(language)
   const { id } = await params
   const session = await requireRole('ADMIN', 'AGENT')
 
@@ -154,7 +158,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       .map((record) => ({
         id: record.id,
         agentName: record.writingAgentName || '—',
-        typeLabel: record.type === 'DIRECT' ? 'Direta' : 'Repasse da equipe',
+        typeLabel: record.type === 'DIRECT' ? copy('Direta', 'Direct') : copy('Repasse da equipe', 'Team override'),
         level: record.level,
         period: record.period,
         amount: record.amount,
@@ -175,7 +179,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       return {
         id: row.id,
         date: text(raw.DocumentDate) || '—',
-        type: text(raw.DocumentType) || text(raw.DocumentCategory) || 'Documento',
+        type: text(raw.DocumentType) || text(raw.DocumentCategory) || copy('Documento', 'Document'),
         storedDocumentId: storedBySourceRow.get(row.id) ?? null,
       }
     })
@@ -199,7 +203,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     (doc) => !doc.storedPath.includes('/illustrations/') && doc.provider !== 'NATIONAL_LIFE',
   )
   const illustrationDocuments = policy.documents.filter((doc) => doc.storedPath.includes('/illustrations/'))
-  const money = new Intl.NumberFormat('en-US', {
+  const money = new Intl.NumberFormat(locale, {
     style: 'currency',
     currency: 'USD',
   })
@@ -234,30 +238,30 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     <Shell role={session.user.role as 'ADMIN' | 'AGENT'} userName={session.user.name}>
       <PageHeader
         title={policy.policyNumber}
-        eyebrow="Detalhe da apólice"
-        description={`Contrato de ${policy.client.name} com documentos, revisão e comissão organizados em uma única visão.`}
+        eyebrow={copy('Detalhe da apólice', 'Policy details')}
+        description={copy('Contrato de {client} com documentos, revisão e comissão organizados em uma única visão.', '{client}’s contract with documents, reviews, and commissions organized in one view.', { client: policy.client.name })}
       >
         <Link
           href="/agent/policies"
           className="module-detail-back"
-          aria-label="Voltar para a lista de apólices"
+          aria-label={copy('Voltar para a lista de apólices', 'Back to policy list')}
         >
           <span className="module-detail-back-icon" aria-hidden="true">
             <svg viewBox="0 0 20 20" fill="none">
               <path d="m11.75 5.25-4.5 4.75 4.5 4.75M7.5 10h7.25" />
             </svg>
           </span>
-          <span>Voltar para apólices</span>
+          <span>{copy('Voltar para apólices', 'Back to policies')}</span>
         </Link>
       </PageHeader>
 
       <ModuleSummary
-        label={`Resumo da apólice ${policy.policyNumber}`}
+        label={copy('Resumo da apólice {number}', 'Policy {number} summary', { number: policy.policyNumber })}
         items={[
-          { label: 'Seguradora', value: policy.carrier, detail: 'Companhia responsável pelo contrato', compact: true },
-          { label: 'Produto', value: policy.product, detail: 'Solução vinculada à apólice', compact: true },
-          { label: 'Prêmio', value: premium, detail: 'Valor registrado no contrato', tone: 'green' },
-          { label: 'Status', value: policyStatusLabel[policy.status] ?? policy.status, detail: 'Situação atual da cobertura', compact: true },
+          { label: copy('Seguradora', 'Carrier'), value: policy.carrier, detail: copy('Companhia responsável pelo contrato', 'Company responsible for the contract'), compact: true },
+          { label: copy('Produto', 'Product'), value: policy.product, detail: copy('Solução vinculada à apólice', 'Solution linked to the policy'), compact: true },
+          { label: copy('Prêmio', 'Premium'), value: premium, detail: copy('Valor registrado no contrato', 'Amount recorded in the contract'), tone: 'green' },
+          { label: copy('Status', 'Status'), value: language === 'PT' ? policyStatusLabel[policy.status] ?? policy.status : ({ INFORCE: 'In force', APPROVED: 'Approved', PENDING: 'Pending', LAPSED: 'Lapsed', CANCELLED: 'Cancelled' } as Record<string, string>)[policy.status] ?? policy.status, detail: copy('Situação atual da cobertura', 'Current coverage status'), compact: true },
         ]}
       />
 
@@ -267,16 +271,16 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       {atRiskEvents.length > 0 && (
         <section className="module-main-surface border-l-2 border-danger">
           <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-danger">
-            Atenção
+            {copy('Atenção', 'Attention')}
           </p>
           <h2 className="mb-4 mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">
             {atRiskEvents.length === 1
-              ? 'A seguradora registrou um sinal de risco nesta apólice'
-              : `A seguradora registrou ${atRiskEvents.length} sinais de risco nesta apólice`}
+              ? copy('A seguradora registrou um sinal de risco nesta apólice', 'The carrier recorded a risk signal for this policy')
+              : copy('A seguradora registrou {count} sinais de risco nesta apólice', 'The carrier recorded {count} risk signals for this policy', { count: atRiskEvents.length })}
           </h2>
           {serviceSourceUpdatedAt && (
             <p className="mb-4 text-xs text-ink-muted">
-              Fonte atualizada em {serviceSourceUpdatedAt.toLocaleString('pt-BR', {
+              {copy('Fonte atualizada em', 'Source updated on')} {serviceSourceUpdatedAt.toLocaleString(locale, {
                 dateStyle: 'medium',
                 timeStyle: 'short',
                 timeZone: 'America/New_York',
@@ -287,11 +291,11 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             {atRiskEvents.slice(0, 5).map((event) => (
               <li key={event.id} className="border-t border-border-steel pt-3 first:border-t-0 first:pt-0">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-sm font-semibold text-ink">{event.reason ?? 'Contato'}</p>
+                  <p className="text-sm font-semibold text-ink">{event.reason ?? copy('Contato', 'Contact')}</p>
                   <p className="text-xs text-ink-muted">
                     {event.occurredAt
-                      ? event.occurredAt.toLocaleDateString('pt-BR', { timeZone: 'UTC' })
-                      : 'sem data'}
+                      ? event.occurredAt.toLocaleDateString(locale, { timeZone: 'UTC' })
+                      : copy('sem data', 'no date')}
                     {event.category ? ` • ${event.category}` : ''}
                   </p>
                 </div>
@@ -303,7 +307,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           </ul>
           {(carrierContact.phone || carrierContact.email) && (
             <p className="mt-4 border-t border-border-steel pt-3 text-sm text-ink-muted">
-              Contato registrado na seguradora:{' '}
+              {copy('Contato registrado na seguradora:', 'Contact recorded by the carrier:')}{' '}
               {[carrierContact.phone, carrierContact.email].filter(Boolean).join(' • ')}
             </p>
           )}
@@ -312,23 +316,23 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
       <div className="module-content-grid">
         <section className="module-main-surface">
-          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">Resultado financeiro</p>
-          <h2 className="mb-5 mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">Comissão gerada por esta apólice</h2>
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">{copy('Resultado financeiro', 'Financial result')}</p>
+          <h2 className="mb-5 mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">{copy('Comissão gerada por esta apólice', 'Commission generated by this policy')}</h2>
           <Table>
             <Thead>
               <tr>
-                <Th>Agente</Th>
-                <Th>Tipo</Th>
-                <Th>Nível</Th>
-                <Th>Período</Th>
-                <Th className="text-right">Valor</Th>
+                <Th>{copy('Agente', 'Agent')}</Th>
+                <Th>{copy('Tipo', 'Type')}</Th>
+                <Th>{copy('Nível', 'Level')}</Th>
+                <Th>{copy('Período', 'Period')}</Th>
+                <Th className="text-right">{copy('Valor', 'Amount')}</Th>
               </tr>
             </Thead>
             <tbody>
               {visibleCommissionRecords.map((record, i) => (
                 <Tr key={record.id} index={i}>
                   <Td>{record.agent.user.name}</Td>
-                  <Td>{record.type === 'DIRECT' ? 'Direta' : 'Repasse da equipe'}</Td>
+                  <Td>{record.type === 'DIRECT' ? copy('Direta', 'Direct') : copy('Repasse da equipe', 'Team override')}</Td>
                   <Td className="text-ink-muted">{record.level}</Td>
                   <Td className="font-mono">{record.period}</Td>
                   <TdNum>${record.amount.toString()}</TdNum>
@@ -346,20 +350,20 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             </tbody>
           </Table>
           {visibleCommissionRecords.length === 0 && carrierCommissions.length === 0 && (
-            <EmptyState>Nenhuma comissão registrada ainda.</EmptyState>
+            <EmptyState>{copy('Nenhuma comissão registrada ainda.', 'No commissions recorded yet.')}</EmptyState>
           )}
 
           {serviceEvents.length > 0 && (
             <div className="mt-8 border-t border-border-steel pt-6">
               <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal">
-                Registrado pela seguradora
+                {copy('Registrado pela seguradora', 'Recorded by the carrier')}
               </p>
               <h2 className="mb-5 mt-2 text-2xl font-medium tracking-[-0.04em] text-ink">
-                Histórico de atendimento
+                {copy('Histórico de atendimento', 'Service history')}
               </h2>
               {serviceSourceUpdatedAt && (
                 <p className="mb-4 text-xs text-ink-muted">
-                  Fonte atualizada em {serviceSourceUpdatedAt.toLocaleString('pt-BR', {
+                  {copy('Fonte atualizada em', 'Source updated on')} {serviceSourceUpdatedAt.toLocaleString(locale, {
                     dateStyle: 'medium',
                     timeStyle: 'short',
                     timeZone: 'America/New_York',
@@ -369,10 +373,10 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               <Table>
                 <Thead>
                   <tr>
-                    <Th>Data</Th>
-                    <Th>Motivo</Th>
-                    <Th>Categoria</Th>
-                    <Th>Atendente</Th>
+                    <Th>{copy('Data', 'Date')}</Th>
+                    <Th>{copy('Motivo', 'Reason')}</Th>
+                    <Th>{copy('Categoria', 'Category')}</Th>
+                    <Th>{copy('Atendente', 'Representative')}</Th>
                   </tr>
                 </Thead>
                 <tbody>
@@ -380,7 +384,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                     <Tr key={event.id}>
                       <Td>
                         {event.occurredAt
-                          ? event.occurredAt.toLocaleDateString('pt-BR', { timeZone: 'UTC' })
+                          ? event.occurredAt.toLocaleDateString(locale, { timeZone: 'UTC' })
                           : '—'}
                       </Td>
                       <Td>
@@ -396,7 +400,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               </Table>
               {serviceEvents.length > 25 && (
                 <p className="mt-3 text-xs text-ink-muted">
-                  Mostrando os 25 atendimentos mais recentes de {serviceEvents.length}.
+                  {copy('Mostrando os 25 atendimentos mais recentes de {count}.', 'Showing the 25 most recent service events out of {count}.', { count: serviceEvents.length })}
                 </p>
               )}
             </div>
@@ -404,14 +408,14 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         </section>
         <aside className="space-y-4 lg:sticky lg:top-[5.75rem]">
           <section className="module-main-surface">
-            <h2 className="text-base font-semibold text-ink">Cliente</h2>
+            <h2 className="text-base font-semibold text-ink">{copy('Cliente', 'Client')}</h2>
             <p className="mt-2 text-sm text-ink">{policy.client.name}</p>
             {policy.client.email && <p className="mt-1 text-xs text-ink-muted">{policy.client.email}</p>}
             {/* Falling back rather than duplicating: the carrier's contact is
                 only worth showing when we do not already have our own. */}
             {!policy.client.email && carrierContact.email && (
               <p className="mt-1 text-xs text-ink-muted">
-                {carrierContact.email} <span className="text-ink-muted/70">— via National Life</span>
+                {carrierContact.email} <span className="text-ink-muted/70">— {copy('via National Life', 'via National Life')}</span>
               </p>
             )}
             {carrierContact.phone && (
@@ -441,7 +445,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             }))}
           />
           <section className="module-main-surface">
-            <h2 className="mb-3 text-base font-semibold text-ink">Documentos</h2>
+            <h2 className="mb-3 text-base font-semibold text-ink">{copy('Documentos', 'Documents')}</h2>
             <ul className="divide-y divide-border-steel rounded-md border border-border-steel bg-panel">
               {policyDocuments.map((doc) => (
                 <li key={doc.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
@@ -455,7 +459,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             {carrierDocuments.length > 0 && (
               <>
                 <p className="mt-4 text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">
-                  Na National Life
+                  {copy('Na National Life', 'At National Life')}
                 </p>
                 <ul className="mt-2 divide-y divide-border-steel rounded-md border border-border-steel bg-panel">
                   {carrierDocuments.map((doc) => (
@@ -471,7 +475,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                           rel="noopener noreferrer"
                           className="font-semibold text-teal hover:text-teal-deep"
                         >
-                          Abrir no Keepr One
+                          {copy('Abrir na Keepr One', 'Open in Keepr One')}
                         </a>
                       ) : localConnector.enabled ? (
                         <NationalLifeDocumentButton
@@ -483,25 +487,25 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                   ))}
                 </ul>
                 <p className="mt-2 text-xs text-ink-muted">
-                  Os arquivos ficam na National Life até você pedir. Depois de validados, ficam disponíveis no Keepr One.
+                  {copy('Os arquivos ficam na National Life até você pedir. Depois de validados, ficam disponíveis na Keepr One.', 'Files remain at National Life until you request them. After validation, they become available in Keepr One.')}
                 </p>
               </>
             )}
             {policyDocuments.length === 0 && carrierDocuments.length === 0 && (
-              <EmptyState>Nenhum documento ainda.</EmptyState>
+              <EmptyState>{copy('Nenhum documento ainda.', 'No documents yet.')}</EmptyState>
             )}
 
             <PolicyUploadForm
               policyId={policy.id}
               documentKind="DOCUMENT"
-              label="Enviar documento"
-              pendingLabel="Enviando…"
+              label={copy('Enviar documento', 'Upload document')}
+              pendingLabel={copy('Enviando…', 'Uploading…')}
             />
           </section>
           <section className="module-main-surface">
-            <h2 className="mb-3 text-base font-semibold text-ink">Ilustrações</h2>
+            <h2 className="mb-3 text-base font-semibold text-ink">{copy('Ilustrações', 'Illustrations')}</h2>
             <p className="mb-4 text-sm text-ink-muted">
-              Aqui ficam as ilustrações vinculadas à apólice para consulta do time.
+              {copy('Aqui ficam as ilustrações vinculadas à apólice para consulta do time.', 'Illustrations linked to the policy are available here for the team to review.')}
             </p>
             <ul className="divide-y divide-border-steel rounded-md border border-border-steel bg-panel">
               {illustrationDocuments.map((doc) => (
@@ -513,13 +517,13 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                 </li>
               ))}
             </ul>
-            {illustrationDocuments.length === 0 && <EmptyState>Nenhuma ilustração anexada ainda.</EmptyState>}
+            {illustrationDocuments.length === 0 && <EmptyState>{copy('Nenhuma ilustração anexada ainda.', 'No illustrations attached yet.')}</EmptyState>}
 
             <PolicyUploadForm
               policyId={policy.id}
               documentKind="ILLUSTRATION"
-              label="Enviar ilustração"
-              pendingLabel="Enviando…"
+              label={copy('Enviar ilustração', 'Upload illustration')}
+              pendingLabel={copy('Enviando…', 'Uploading…')}
             />
             <div className="mt-4">
               {illustrationRequestUrl ? (
@@ -529,11 +533,11 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                   rel="noreferrer"
                   className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-border-steel bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-[background-color,border-color,color,transform] duration-150 hover:border-teal hover:bg-teal-pale/40 focus-visible:ring-[3px] focus-visible:ring-teal-pale focus-visible:outline-none"
                 >
-                  Solicitar ilustração no parceiro
+                  {copy('Solicitar ilustração no parceiro', 'Request illustration from partner')}
                 </a>
               ) : (
                 <p className="text-xs text-ink-muted">
-                  Configure <span className="font-mono">ILLUSTRATION_REQUEST_URL</span> no ambiente para ativar o botão de solicitação.
+                  {copy('Configure', 'Configure')} <span className="font-mono">ILLUSTRATION_REQUEST_URL</span> {copy('no ambiente para ativar o botão de solicitação.', 'in the environment to enable the request button.')}
                 </p>
               )}
             </div>

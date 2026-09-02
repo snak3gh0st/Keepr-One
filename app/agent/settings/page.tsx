@@ -9,8 +9,10 @@ import { getNationalLifeLocalConnectorConfig } from "@/lib/national-life/local-c
 import { getKBotCredentialWebConfig } from "@/lib/national-life/credentials/config";
 import { getNationalLifeCredentialSummary } from "@/lib/national-life/credentials/settings-service";
 import { SettingsForms } from "./SettingsForms";
+import { getServerI18n } from "@/lib/i18n/server";
 
 export default async function AgentSettingsPage() {
+  const { copy } = await getServerI18n();
   const agent = await getCurrentAgent();
   const [access, user, credentialSummary] = await Promise.all([
     getCurrentAgentAccess(),
@@ -27,7 +29,7 @@ export default async function AgentSettingsPage() {
   ]);
 
   if (!user) {
-    throw new Error("Usuário da conta não encontrado.");
+    throw new Error(copy("Usuário da conta não encontrado.", "Account user not found."));
   }
   const kbot = getNationalLifeLocalConnectorConfig();
   const credentialConfig = getKBotCredentialWebConfig();
@@ -39,9 +41,9 @@ export default async function AgentSettingsPage() {
   return (
     <Shell role="AGENT" userName={user.name}>
       <PageHeader
-        title="Configurações da conta"
-        eyebrow="Conta e segurança"
-        description="Atualize seus dados pessoais, credenciais de acesso e a identificação da sua agência em um só lugar."
+        title={copy("Configurações da conta", "Account settings")}
+        eyebrow={copy("Conta e segurança", "Account and security")}
+        description={copy("Atualize seus dados pessoais, credenciais de acesso e a identificação da sua agência em um só lugar.", "Update your personal details, sign-in credentials, and agency identity in one place.")}
       />
 
       <SettingsForms

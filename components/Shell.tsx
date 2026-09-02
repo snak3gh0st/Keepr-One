@@ -20,6 +20,9 @@ import { NavIcon, type NavIconName } from "@/components/NavIcon";
 import { CarrierSyncBadge } from "@/components/CarrierSyncBadge";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { TrialCountdown } from "@/components/trial";
+import { LanguageSwitcher } from "@/components/i18n/LanguageSwitcher";
+import { useI18n } from "@/components/i18n/LanguageProvider";
+import type { MessageKey } from "@/lib/i18n/catalog";
 import type { JacketTone, PromotionIdentity } from "@/lib/promotion-journey";
 
 gsap.registerPlugin(useGSAP);
@@ -42,98 +45,98 @@ const JACKET_STEP: Record<JacketTone, number> = {
 
 type NavItem = {
   href: string;
-  label: string;
-  mobileLabel?: string;
+  labelKey: MessageKey;
+  mobileLabelKey?: MessageKey;
   icon: NavIconName;
-  group?: string;
+  groupKey?: MessageKey;
   matches?: string[];
 };
 
 const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
   ADMIN: [
-    { href: "/admin", label: "Painel", icon: "grid" },
-    { href: "/admin/agents", label: "Hierarquia", icon: "hierarchy" },
-    { href: "/admin/pipeline", label: "Pipeline", icon: "layers" },
-    { href: "/admin/production", label: "Produção", icon: "chart" },
-    { href: "/admin/commission-plans", label: "Planos de comissão", icon: "layers" },
-    { href: "/admin/import", label: "Importar dados", icon: "upload" },
-    { href: "/admin/audit", label: "Auditoria", icon: "audit" },
-    { href: "/admin/integrations/national-life", label: "Integrações", icon: "link" },
+    { href: "/admin", labelKey: "nav.dashboard", icon: "grid" },
+    { href: "/admin/agents", labelKey: "nav.hierarchy", icon: "hierarchy" },
+    { href: "/admin/pipeline", labelKey: "nav.pipeline", icon: "layers" },
+    { href: "/admin/production", labelKey: "nav.production", icon: "chart" },
+    { href: "/admin/commission-plans", labelKey: "nav.commissionPlans", icon: "layers" },
+    { href: "/admin/import", labelKey: "nav.importData", icon: "upload" },
+    { href: "/admin/audit", labelKey: "nav.audit", icon: "audit" },
+    { href: "/admin/integrations/national-life", labelKey: "nav.integrations", icon: "link" },
   ],
   AGENT: [
-    { href: "/agent", label: "Hoje", icon: "grid", group: "Operação" },
-    { href: "/agent/calendar", label: "Agenda", icon: "calendar", group: "Operação" },
+    { href: "/agent", labelKey: "nav.today", icon: "grid", groupKey: "nav.group.operations" },
+    { href: "/agent/calendar", labelKey: "nav.calendar", icon: "calendar", groupKey: "nav.group.operations" },
     {
       href: "/agent/cases",
-      label: "CRM",
+      labelKey: "nav.crm",
       icon: "layers",
-      group: "Operação",
+      groupKey: "nav.group.operations",
       matches: ["/agent/cases", "/agent/clients", "/agent/activities"],
     },
     {
       href: "/agent/mensagens",
-      label: "Mensagens",
+      labelKey: "nav.messages",
       icon: "chat",
-      group: "Operação",
+      groupKey: "nav.group.operations",
     },
-    { href: "/agent/policies", label: "Apólices", icon: "document", group: "Carteira" },
+    { href: "/agent/policies", labelKey: "nav.policies", icon: "document", groupKey: "nav.group.portfolio" },
     // The quotes were being written to the database and shown nowhere: the
     // screen that asked for one displayed it until the page reloaded, and
     // there was no route that listed them.
-    { href: "/agent/illustrations", label: "Ilustrações", icon: "document", group: "Carteira" },
-    { href: "/agent/commissions", label: "Comissões", icon: "money", group: "Carteira" },
-    { href: "/agent/journey", label: "Jornada", icon: "chart", group: "Carteira" },
-    { href: "/agent/agency", label: "Agência", mobileLabel: "Agência", icon: "users", group: "Gestão" },
-    { href: "/agent/hierarchy", label: "Equipe", icon: "hierarchy", group: "Gestão" },
+    { href: "/agent/illustrations", labelKey: "nav.illustrations", icon: "document", groupKey: "nav.group.portfolio" },
+    { href: "/agent/commissions", labelKey: "nav.commissions", icon: "money", groupKey: "nav.group.portfolio" },
+    { href: "/agent/journey", labelKey: "nav.journey", icon: "chart", groupKey: "nav.group.portfolio" },
+    { href: "/agent/agency", labelKey: "nav.agency", mobileLabelKey: "nav.agency", icon: "users", groupKey: "nav.group.management" },
+    { href: "/agent/hierarchy", labelKey: "nav.team", icon: "hierarchy", groupKey: "nav.group.management" },
     {
       href: "/agent/integrations",
-      label: "Integrações",
+      labelKey: "nav.integrations",
       icon: "link",
-      group: "Conta",
+      groupKey: "nav.group.account",
       matches: ["/agent/integrations"],
     },
-    { href: "/agent/settings", label: "Configurações", mobileLabel: "Conta", icon: "settings", group: "Conta" },
+    { href: "/agent/settings", labelKey: "nav.settings", mobileLabelKey: "common.account", icon: "settings", groupKey: "nav.group.account" },
   ],
-  CLIENT: [{ href: "/client", label: "Minhas apólices", icon: "document" }],
+  CLIENT: [{ href: "/client", labelKey: "nav.myPolicies", icon: "document" }],
 };
 
-const PAGE_NAMES: Record<string, string> = {
-  "/admin": "Painel administrativo",
-  "/admin/agents": "Agentes e hierarquia",
-  "/admin/pipeline": "Pipeline de casos",
-  "/admin/production": "Produção por agente",
-  "/admin/commission-plans": "Planos de comissão",
-  "/admin/import": "Importar dados",
-  "/admin/audit": "Auditoria",
-  "/admin/integrations/national-life": "Saúde da integração National Life",
-  "/agent": "Hoje",
-  "/agent/calendar": "Agenda",
-  "/agent/cases": "CRM · Oportunidades",
-  "/agent/cases/new": "Novo atendimento",
-  "/agent/activities": "CRM · Atividades",
-  "/agent/illustrations": "Ilustrações",
-  "/agent/illustrations/new": "Nova ilustração",
-  "/agent/hierarchy": "Equipe",
-  "/agent/agency": "Agência",
-  "/agent/clients": "CRM · Clientes",
-  "/agent/mensagens": "Mensagens",
-  "/agent/policies": "Apólices",
-  "/agent/policies/new": "Sobre apólices",
-  "/agent/commissions": "Extrato de comissões",
-  "/agent/journey": "Jornada de promoção",
-  "/agent/integrations/national-life": "Conexão National Life",
-  "/agent/integrations": "Integrações",
-  "/agent/integrations/google-calendar": "Google Calendar",
-  "/agent/integrations/google-calendar/scheduling": "Link de agendamento",
-  "/agent/settings": "Configurações da conta",
-  "/client": "Minhas apólices",
+const PAGE_NAMES: Record<string, MessageKey> = {
+  "/admin": "page.admin",
+  "/admin/agents": "page.adminAgents",
+  "/admin/pipeline": "page.adminPipeline",
+  "/admin/production": "page.adminProduction",
+  "/admin/commission-plans": "page.adminCommissionPlans",
+  "/admin/import": "page.adminImport",
+  "/admin/audit": "page.adminAudit",
+  "/admin/integrations/national-life": "page.adminNationalLife",
+  "/agent": "page.today",
+  "/agent/calendar": "page.calendar",
+  "/agent/cases": "page.crmOpportunities",
+  "/agent/cases/new": "page.newService",
+  "/agent/activities": "page.crmActivities",
+  "/agent/illustrations": "page.illustrations",
+  "/agent/illustrations/new": "page.newIllustration",
+  "/agent/hierarchy": "page.team",
+  "/agent/agency": "page.agency",
+  "/agent/clients": "page.crmClients",
+  "/agent/mensagens": "page.messages",
+  "/agent/policies": "page.policies",
+  "/agent/policies/new": "page.aboutPolicies",
+  "/agent/commissions": "page.commissions",
+  "/agent/journey": "page.promotionJourney",
+  "/agent/integrations/national-life": "page.nationalLife",
+  "/agent/integrations": "page.integrations",
+  "/agent/integrations/google-calendar": "page.googleCalendar",
+  "/agent/integrations/google-calendar/scheduling": "page.schedulingLink",
+  "/agent/settings": "page.accountSettings",
+  "/client": "page.myPolicies",
 };
 
-function resolvePageName(pathname: string, role: "ADMIN" | "AGENT" | "CLIENT") {
-  if (PAGE_NAMES[pathname]) return PAGE_NAMES[pathname];
-  if (/^\/agent\/cases\/[^/]+$/.test(pathname)) return "Detalhe da oportunidade";
-  if (/^\/agent\/policies\/[^/]+$/.test(pathname)) return "Detalhe da apólice";
-  return role === "ADMIN" ? "Operação" : role === "AGENT" ? "Minha operação" : "Minha conta";
+function resolvePageName(pathname: string, role: "ADMIN" | "AGENT" | "CLIENT", t: (key: MessageKey) => string) {
+  if (PAGE_NAMES[pathname]) return t(PAGE_NAMES[pathname]);
+  if (/^\/agent\/cases\/[^/]+$/.test(pathname)) return t("page.caseDetail");
+  if (/^\/agent\/policies\/[^/]+$/.test(pathname)) return t("page.policyDetail");
+  return role === "ADMIN" ? t("page.operation") : role === "AGENT" ? t("page.myOperation") : t("page.myAccount");
 }
 
 export function Shell({
@@ -152,6 +155,7 @@ export function Shell({
   const root = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const router = useRouter();
+  const { t, language, isChanging } = useI18n();
   const isJourney = role === "AGENT" && pathname === "/agent/journey";
   const promotionContext = useAgentPromotionContext();
   const agentAccess = useAgentAccessContext();
@@ -168,34 +172,34 @@ export function Shell({
   );
   const mobileItemWidth =
     role === "AGENT" ? "w-1/5 min-w-[68px]" : role === "CLIENT" ? "w-full" : "w-[78px]";
-  const currentPage = resolvePageName(pathname, role);
+  const currentPage = resolvePageName(pathname, role, t);
   const roleLabel =
     role === "ADMIN"
-      ? "Administração"
+      ? t("role.administration")
       : role === "CLIENT"
-        ? "Portal do cliente"
+        ? t("role.clientPortal")
         : agentAccess?.kind === "AGENCY_OWNER"
-          ? "Plano Agência"
+          ? t("role.agencyPlan")
           : agentAccess?.kind === "AGENCY_MEMBER"
-            ? "Agente convidado"
-            : "Plano Agente";
+            ? t("role.invitedAgent")
+            : t("role.agentPlan");
   const workspaceLabel =
     role !== "AGENT"
       ? role === "ADMIN"
-        ? "Operação da plataforma"
-        : "Conta individual"
+        ? t("workspace.platform")
+        : t("workspace.individualAccount")
       : agentAccess?.kind === "AGENCY_OWNER"
-        ? agentAccess.agencyName ?? "Agência conectada"
+        ? agentAccess.agencyName ?? t("workspace.connectedAgency")
         : agentAccess?.kind === "AGENCY_MEMBER"
-          ? `Vinculado a ${agentAccess.agencyName ?? "uma agência"}`
-          : "Operação individual";
+          ? t("workspace.linkedAgency", { agency: agentAccess.agencyName ?? t("workspace.anAgency") })
+          : t("workspace.individualOperation");
   const quickAction =
     role === "AGENT" && pathname === "/agent/calendar"
-      ? { href: "/agent/calendar?create=1", label: "Novo compromisso" }
+      ? { href: "/agent/calendar?create=1", label: t("action.newAppointment") }
       : role === "AGENT" && pathname === "/agent"
-      ? { href: "/agent/cases/new", label: "Novo atendimento" }
+      ? { href: "/agent/cases/new", label: t("action.newService") }
       : role === "ADMIN" && pathname === "/admin"
-        ? { href: "/admin/import", label: "Importar dados" }
+        ? { href: "/admin/import", label: t("action.importData") }
         : null;
   const achievementTone =
     activePromotionIdentity?.tone !== "standard"
@@ -340,7 +344,7 @@ export function Shell({
       data-shell-module={isJourney ? "journey" : undefined}
     >
       <a href="#main-content" className="sr-only fixed left-3 top-3 z-50 rounded-full bg-paper px-4 py-2.5 text-sm font-semibold text-ink shadow-[var(--shadow-overlay)] focus:not-sr-only">
-        Ir para o conteúdo
+        {t("common.skipToContent")}
       </a>
 
       <div className="shell-mobile-header flex items-center justify-between border-b border-white/[0.08] bg-[#0a0a0a] px-4 py-2.5 text-white md:hidden">
@@ -351,7 +355,7 @@ export function Shell({
           {role === "AGENT" ? (
             <Link
               href="/agent/settings"
-              aria-label="Abrir configurações da conta"
+              aria-label={t("common.openAccountSettings")}
               className="flex min-h-11 min-w-11 items-center justify-center rounded-full border border-white/[0.12] text-white/65 transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75"
             >
               <NavIcon name="settings" />
@@ -362,13 +366,13 @@ export function Shell({
             onClick={handleSignOut}
             className="shell-signout min-h-11 rounded-full border border-white/[0.12] px-3 py-1.5 text-xs font-semibold text-white/65 hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75"
           >
-            Sair
+            {t("common.signOut")}
           </button>
         </div>
       </div>
 
       <nav
-        aria-label="Navegação principal"
+        aria-label={t("common.mainNavigation")}
         className="shell-navigation fixed inset-x-0 bottom-0 z-30 flex shrink-0 border-t border-white/[0.08] bg-[#090909] pb-[env(safe-area-inset-bottom)] text-white shadow-[0_-16px_48px_rgba(0,0,0,0.22)] md:sticky md:top-0 md:h-screen md:w-[272px] md:flex-col md:self-start md:border-r md:border-t-0 md:border-white/[0.07] md:pb-0 md:shadow-[16px_0_56px_rgba(0,0,0,0.12)]"
       >
         <div aria-hidden className="pointer-events-none absolute inset-0 hidden overflow-hidden md:block">
@@ -381,7 +385,7 @@ export function Shell({
             <Logo size={34} className="text-xl text-white" />
           </span>
           <div className="mt-7 rounded-2xl border border-white/[0.11] bg-white/[0.035] px-4 py-3.5">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">Workspace</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">{t("common.workspace")}</p>
             <p className="mt-1.5 text-sm font-medium text-white/88">{workspaceLabel}</p>
           </div>
         </div>
@@ -390,7 +394,7 @@ export function Shell({
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">{roleLabel}</p>
         </div>
 
-        <ul className="relative flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain md:flex-1 md:snap-none md:flex-col md:gap-1.5 md:overflow-y-auto md:px-3">
+        <ul className="relative flex min-w-0 flex-1 snap-x snap-mandatory overflow-x-auto overscroll-x-contain md:w-full md:snap-none md:flex-col md:gap-1.5 md:overflow-y-auto md:px-3">
           {items.map((item, index) => {
             const matchPaths = item.matches ?? [item.href];
             const itemHref =
@@ -402,7 +406,8 @@ export function Shell({
               return pathname === matchPath || (isSection && pathname.startsWith(`${matchPath}/`));
             });
             const beginsGroup =
-              item.group && (index === 0 || items[index - 1]?.group !== item.group);
+              item.groupKey && (index === 0 || items[index - 1]?.groupKey !== item.groupKey);
+            const itemLabel = t(item.labelKey);
 
             return (
               <Fragment key={item.href}>
@@ -412,14 +417,14 @@ export function Shell({
                     className={`hidden px-3.5 pb-1 pt-4 md:block ${index === 0 ? "md:pt-1" : ""}`}
                   >
                     <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.17em] text-white/35">
-                      {item.group}
+                      {item.groupKey ? t(item.groupKey) : null}
                     </span>
                   </li>
                 )}
                 <li className={`${mobileItemWidth} shrink-0 snap-start md:w-auto md:flex-none`}>
                   <Link
                     href={itemHref}
-                    aria-label={item.label}
+                    aria-label={itemLabel}
                     aria-current={active ? "page" : undefined}
                     className={`shell-nav-link group flex flex-1 flex-col items-center gap-1.5 whitespace-nowrap px-1 py-2.5 text-center text-[10px] font-semibold transition-all duration-300 focus-visible:outline-white/75 md:flex-row md:rounded-xl md:px-3.5 md:py-3 md:text-left md:text-[13px] ${
                       active
@@ -430,13 +435,13 @@ export function Shell({
                     <span className="transition-transform duration-500 ease-out group-hover:scale-105">
                       <NavIcon name={item.icon} />
                     </span>
-                    {item.mobileLabel ? (
+                    {item.mobileLabelKey ? (
                       <>
-                        <span className="md:hidden">{item.mobileLabel}</span>
-                        <span className="hidden md:inline">{item.label}</span>
+                        <span className="md:hidden">{t(item.mobileLabelKey)}</span>
+                        <span className="hidden md:inline">{itemLabel}</span>
                       </>
                     ) : (
-                      <span>{item.label}</span>
+                      <span>{itemLabel}</span>
                     )}
                   </Link>
                 </li>
@@ -445,35 +450,51 @@ export function Shell({
           })}
         </ul>
 
-        <div className="relative hidden px-3 pb-4 pt-3 md:block">
-          <div className="rounded-2xl border border-white/[0.11] bg-white/[0.04] p-3">
+        <div
+          className="relative flex shrink-0 items-center border-l border-white/[0.08] px-2 md:block md:w-full md:border-l-0 md:px-3 md:pb-4 md:pt-3"
+          data-shell-nav-footer
+        >
+          <div className="md:rounded-2xl md:border md:border-white/[0.11] md:bg-white/[0.04] md:p-3">
             {role === "AGENT" ? (
               <Link
                 href="/agent/settings"
-                aria-label={`Abrir configurações de ${userName || "conta conectada"}`}
-                className="flex min-w-0 items-center gap-3 rounded-xl focus-visible:outline-white/75"
+                aria-label={t("common.openUserSettings", { name: userName || t("common.connectedAccount") })}
+                className="hidden min-w-0 items-center gap-3 rounded-xl focus-visible:outline-white/75 md:flex"
               >
-                <Avatar name={userName || "Conta"} />
+                <Avatar name={userName || t("common.account")} />
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-white">{userName || "Conta conectada"}</p>
-                  <p className="mt-0.5 text-[11px] text-white/55">{roleLabel} · Configurações</p>
+                  <p className="truncate text-sm font-medium text-white">{userName || t("common.connectedAccount")}</p>
+                  <p className="mt-0.5 text-[11px] text-white/55">{roleLabel} · {t("common.settings")}</p>
                 </div>
               </Link>
             ) : (
-              <div className="flex min-w-0 items-center gap-3">
-                <Avatar name={userName || "Conta"} />
+              <div className="hidden min-w-0 items-center gap-3 md:flex">
+                <Avatar name={userName || t("common.account")} />
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-white">{userName || "Conta conectada"}</p>
+                  <p className="truncate text-sm font-medium text-white">{userName || t("common.connectedAccount")}</p>
                   <p className="mt-0.5 text-[11px] text-white/55">{roleLabel}</p>
                 </div>
               </div>
             )}
+
+            <div className="flex items-center justify-between gap-3 md:mt-3 md:border-t md:border-white/[0.08] md:pt-3">
+              <div className="hidden min-w-0 md:block">
+                <p className="text-xs font-semibold text-white/85">{t("language.label")}</p>
+                <p className="mt-0.5 truncate text-xs text-white/45">
+                  {isChanging
+                    ? t("language.saving")
+                    : t(language === "PT" ? "language.portuguese" : "language.english")}
+                </p>
+              </div>
+              <LanguageSwitcher inverse errorPlacement="above" size="navigation" />
+            </div>
+
             <button
               type="button"
               onClick={handleSignOut}
-              className="mt-3 flex min-h-9 w-full items-center justify-center rounded-xl border border-white/[0.1] text-xs font-semibold text-white/65 transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75"
+              className="mt-3 hidden min-h-9 w-full items-center justify-center rounded-xl border border-white/[0.1] text-xs font-semibold text-white/65 transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75 md:flex"
             >
-              Sair da conta
+              {t("common.signOutAccount")}
             </button>
           </div>
         </div>
@@ -483,7 +504,7 @@ export function Shell({
         <div
           className="shell-topbar sticky top-0 z-20 border-b border-border-steel/65 bg-canvas/88 px-4 backdrop-blur-xl sm:px-6 md:px-9 lg:px-12"
           data-achievement-tone={hasAchievement ? achievementTone : undefined}
-          aria-label={hasAchievement ? `Conquista atual: ${rankJacket}` : undefined}
+          aria-label={hasAchievement && rankJacket ? t("common.currentAchievement", { achievement: rankJacket }) : undefined}
         >
           {achievementTone === "black" && (
             <span
@@ -560,7 +581,7 @@ export function Shell({
                       "--achievement-progress": `${achievementStep * 20}%`,
                     } as CSSProperties
                   }
-                  aria-label={`${achievementStep} de ${JACKET_TONES.length} Jackets conquistadas`}
+                  aria-label={t("common.jacketsEarned", { current: achievementStep, total: JACKET_TONES.length })}
                   data-achievement-reveal
                 >
                   <span aria-hidden="true" className="shell-achievement-track">
@@ -582,7 +603,7 @@ export function Shell({
                   className="shell-journey-link hidden min-h-9 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold md:inline-flex"
                   data-achievement-reveal
                 >
-                  Ver jornada
+                  {t("common.viewJourney")}
                   <svg aria-hidden="true" viewBox="0 0 14 14" fill="none">
                     <path d="M3.25 10.75 10.75 3.25M5 3.25h5.75V9" />
                   </svg>
@@ -617,7 +638,7 @@ export function Shell({
                   endsAt={trial.endsAt}
                   initialRemainingSeconds={trial.initialRemainingSeconds}
                   actionHref="/agent/agency"
-                  actionLabel="Ver plano"
+                  actionLabel={t("common.viewPlan")}
                   onExpire={handleTrialExpire}
                 />
               </div>

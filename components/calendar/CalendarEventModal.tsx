@@ -2,6 +2,8 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { OverlaySurface } from "@/components/overlays/OverlaySurface";
+import { useI18n } from "@/components/i18n/LanguageProvider";
+import { localizedCrmStageName } from "@/components/crm/i18n";
 import type {
   CalendarCaseOption,
   CalendarAvailabilityResult,
@@ -12,6 +14,7 @@ import type {
 } from "./types";
 
 type ModalMode = "create" | "edit" | "details";
+type Copy = (portuguese: string, english: string, values?: Record<string, string | number>) => string;
 
 export type CalendarEventModalProps = {
   open: boolean;
@@ -88,14 +91,14 @@ function inputSeed(props: CalendarEventModalProps) {
   };
 }
 
-function friendlyDate(event: CalendarEventView) {
+function friendlyDate(event: CalendarEventView, locale: string, copy: Copy) {
   if (event.allDay && event.startDate) {
-    return new Intl.DateTimeFormat("pt-BR", { dateStyle: "full" }).format(
+    return new Intl.DateTimeFormat(locale, { dateStyle: "full" }).format(
       new Date(`${event.startDate}T12:00:00`),
     );
   }
-  if (!event.startsAt) return "Horário a definir";
-  return new Intl.DateTimeFormat("pt-BR", {
+  if (!event.startsAt) return copy("Horário a definir", "Time to be determined");
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "full",
     timeStyle: "short",
     timeZone: event.timeZone,
@@ -112,34 +115,34 @@ function durationLabel(event: CalendarEventView) {
   return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
 }
 
-function endLabel(event: CalendarEventView) {
+function endLabel(event: CalendarEventView, locale: string, copy: Copy) {
   if (event.allDay) {
-    if (!event.endDate) return "Dia inteiro";
+    if (!event.endDate) return copy("Dia inteiro", "All day");
     const inclusiveEnd = shiftDate(event.endDate, -1);
-    return new Intl.DateTimeFormat("pt-BR", { dateStyle: "long" }).format(new Date(`${inclusiveEnd}T12:00:00`));
+    return new Intl.DateTimeFormat(locale, { dateStyle: "long" }).format(new Date(`${inclusiveEnd}T12:00:00`));
   }
-  if (!event.endsAt) return "Término a definir";
-  return new Intl.DateTimeFormat("pt-BR", {
+  if (!event.endsAt) return copy("Término a definir", "End time to be determined");
+  return new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: event.timeZone,
   }).format(new Date(event.endsAt));
 }
 
-function reminderLabel(minutes: number | null) {
+function reminderLabel(minutes: number | null, copy: Copy) {
   if (minutes === null) return null;
-  if (minutes === 60) return "1 hora antes";
-  if (minutes > 60 && minutes % 60 === 0) return `${minutes / 60} horas antes`;
-  return `${minutes} minutos antes`;
+  if (minutes === 60) return copy("1 hora antes", "1 hour before");
+  if (minutes > 60 && minutes % 60 === 0) return copy("{count} horas antes", "{count} hours before", { count: minutes / 60 });
+  return copy("{count} minutos antes", "{count} minutes before", { count: minutes });
 }
 
-function recurrenceLabel(event: CalendarEventView) {
+function recurrenceLabel(event: CalendarEventView, copy: Copy) {
   const rule = event.recurrence.find((item) => item.startsWith("RRULE:"));
-  if (rule?.includes("FREQ=DAILY")) return "Repete diariamente";
-  if (rule?.includes("FREQ=WEEKLY")) return "Repete semanalmente";
-  if (rule?.includes("FREQ=MONTHLY")) return "Repete mensalmente";
-  if (rule?.includes("FREQ=YEARLY")) return "Repete anualmente";
-  if (rule || event.providerRecurringEventId) return "Faz parte de uma série recorrente";
+  if (rule?.includes("FREQ=DAILY")) return copy("Repete diariamente", "Repeats daily");
+  if (rule?.includes("FREQ=WEEKLY")) return copy("Repete semanalmente", "Repeats weekly");
+  if (rule?.includes("FREQ=MONTHLY")) return copy("Repete mensalmente", "Repeats monthly");
+  if (rule?.includes("FREQ=YEARLY")) return copy("Repete anualmente", "Repeats yearly");
+  if (rule || event.providerRecurringEventId) return copy("Faz parte de uma série recorrente", "Part of a recurring series");
   return null;
 }
 
@@ -167,6 +170,7 @@ export function CalendarEventModal(props: CalendarEventModalProps) {
 function CalendarEventDetails(
   props: CalendarEventModalProps & { event: CalendarEventView },
 ) {
+  const { copy, locale } = useI18n();
   const { event } = props;
   const [error, setError] = useState<string | null>(null);
   const [caseId, setCaseId] = useState(event.case?.id ?? "");
@@ -199,45 +203,45 @@ function CalendarEventDetails(
     <article className="calendar-event-details">
       <header>
         <div>
-          <span>Compromisso</span>
+          <span>{copy("Compromisso", "Event")}</span>
           <h2 id="calendar-event-modal-title">{event.title}</h2>
-          <p id="calendar-event-modal-description">{friendlyDate(event)}</p>
+          <p id="calendar-event-modal-description">{friendlyDate(event, locale, copy)}</p>
         </div>
-        <button type="button" onClick={props.onClose} aria-label="Fechar detalhes">×</button>
+        <button type="button" onClick={props.onClose} aria-label={copy("Fechar detalhes", "Close details")}>×</button>
       </header>
 
       <div className="calendar-event-detail-rail">
         <span style={{ background: event.calendarColor }} aria-hidden="true" />
         <p>{event.calendarName}</p>
-        <small>{event.syncStatus === "SYNCED" ? "Sincronizado" : event.syncStatus === "ERROR" ? "Falha na sincronização" : "Sincronização pendente"}</small>
+        <small>{event.syncStatus === "SYNCED" ? copy("Sincronizado", "Synced") : event.syncStatus === "ERROR" ? copy("Falha na sincronização", "Sync failed") : copy("Sincronização pendente", "Sync pending")}</small>
       </div>
 
       <dl className="calendar-event-detail-list">
-        <div><dt>Término</dt><dd>{endLabel(event)}{durationLabel(event) ? ` · ${durationLabel(event)}` : ""}</dd></div>
-        {reminderLabel(event.reminderMinutes) ? <div><dt>Lembrete</dt><dd>{reminderLabel(event.reminderMinutes)}</dd></div> : null}
-        {recurrenceLabel(event) ? <div><dt>Recorrência</dt><dd>{recurrenceLabel(event)}</dd></div> : null}
+        <div><dt>{copy("Término", "End")}</dt><dd>{endLabel(event, locale, copy)}{durationLabel(event) ? ` · ${durationLabel(event)}` : ""}</dd></div>
+        {reminderLabel(event.reminderMinutes, copy) ? <div><dt>{copy("Lembrete", "Reminder")}</dt><dd>{reminderLabel(event.reminderMinutes, copy)}</dd></div> : null}
+        {recurrenceLabel(event, copy) ? <div><dt>{copy("Recorrência", "Recurrence")}</dt><dd>{recurrenceLabel(event, copy)}</dd></div> : null}
         {event.case ? (
           <div><dt>Lead</dt><dd><a href={`/agent/cases/${event.case.id}`}>{event.case.name} ↗</a></dd></div>
         ) : null}
-        {event.location ? <div><dt>Local</dt><dd>{event.location}</dd></div> : null}
-        {event.meetingUrl ? <div><dt>Reunião</dt><dd><a href={event.meetingUrl} target="_blank" rel="noreferrer">Abrir videochamada ↗</a></dd></div> : null}
-        {event.description ? <div><dt>Notas</dt><dd>{event.description}</dd></div> : null}
+        {event.location ? <div><dt>{copy("Local", "Location")}</dt><dd>{event.location}</dd></div> : null}
+        {event.meetingUrl ? <div><dt>{copy("Reunião", "Meeting")}</dt><dd><a href={event.meetingUrl} target="_blank" rel="noreferrer">{copy("Abrir videochamada", "Open video call")} ↗</a></dd></div> : null}
+        {event.description ? <div><dt>{copy("Notas", "Notes")}</dt><dd>{event.description}</dd></div> : null}
         {event.attendees.length ? (
-          <div><dt>Convidados</dt><dd><ul className="calendar-attendee-status-list">{event.attendees.map((attendee) => <li key={attendee.email}><span>{attendee.name || attendee.email}</span><small>{attendeeStatus(attendee.responseStatus)}</small></li>)}</ul></dd></div>
+          <div><dt>{copy("Convidados", "Guests")}</dt><dd><ul className="calendar-attendee-status-list">{event.attendees.map((attendee) => <li key={attendee.email}><span>{attendee.name || attendee.email}</span><small>{attendeeStatus(attendee.responseStatus, copy)}</small></li>)}</ul></dd></div>
         ) : null}
       </dl>
 
       {event.syncStatus === "ERROR" && props.onRetrySync ? (
         <div className="calendar-sync-recovery" role="status">
-          <div><strong>O Google ainda não recebeu esta alteração.</strong><p>O compromisso continua salvo na Keepr One. Você pode reenviar a mesma tentativa sem criar duplicidade.</p></div>
-          <button type="button" onClick={() => resolve(props.onRetrySync)} disabled={pending}>Tentar novamente</button>
+          <div><strong>{copy("O Google ainda não recebeu esta alteração.", "Google has not received this change yet.")}</strong><p>{copy("O compromisso continua salvo na Keepr One. Você pode reenviar a mesma tentativa sem criar duplicidade.", "The event remains saved in Keepr One. You can retry without creating a duplicate.")}</p></div>
+          <button type="button" onClick={() => resolve(props.onRetrySync)} disabled={pending}>{copy("Tentar novamente", "Try again")}</button>
         </div>
       ) : null}
 
       {!event.case && props.onAssociateCase && props.cases?.length ? (
         <div className="calendar-event-associate">
-          <div><span>Conectar ao CRM</span><p>Associe esta reunião a um lead para incluí-la no histórico do atendimento.</p></div>
-          <div><select value={caseId} onChange={(item) => setCaseId(item.target.value)} aria-label="Escolher lead"><option value="">Escolha um lead</option>{props.cases.map((item) => <option key={item.id} value={item.id}>{item.name}{item.stage ? ` · ${item.stage}` : ""}</option>)}</select><button type="button" onClick={associateCase} disabled={!caseId || pending}>Associar</button></div>
+          <div><span>{copy("Conectar ao CRM", "Connect to CRM")}</span><p>{copy("Associe esta reunião a um lead para incluí-la no histórico do atendimento.", "Link this meeting to a lead to include it in the case history.")}</p></div>
+          <div><select value={caseId} onChange={(item) => setCaseId(item.target.value)} aria-label={copy("Escolher lead", "Choose lead")}><option value="">{copy("Escolha um lead", "Choose a lead")}</option>{props.cases.map((item) => <option key={item.id} value={item.id}>{item.name}{item.stage ? ` · ${localizedCrmStageName(copy, { name: item.stage, systemKey: item.stageSystemKey ?? null })}` : ""}</option>)}</select><button type="button" onClick={associateCase} disabled={!caseId || pending}>{copy("Associar", "Link")}</button></div>
         </div>
       ) : null}
 
@@ -245,22 +249,22 @@ function CalendarEventDetails(
 
       {confirmCancellation ? (
         <section className="calendar-cancel-confirmation" role="alert" aria-live="assertive">
-          <strong>Cancelar “{event.title}”?</strong>
-          <p>{friendlyDate(event)}. {event.attendees.length ? `${event.attendees.length} ${event.attendees.length === 1 ? "convidado será avisado" : "convidados serão avisados"} pelo Google.` : "Este compromisso será removido da sua agenda."}</p>
-          <div><button type="button" onClick={() => setConfirmCancellation(false)} disabled={pending}>Voltar</button><button type="button" className="calendar-danger-confirm" onClick={() => resolve(props.onCancelEvent)} disabled={pending}>{pending ? "Cancelando…" : "Cancelar compromisso"}</button></div>
+          <strong>{copy("Cancelar “{title}”?", "Cancel “{title}”?", { title: event.title })}</strong>
+          <p>{friendlyDate(event, locale, copy)}. {event.attendees.length ? copy("{count} {guests} pelo Google.", "Google will notify {count} {guests}.", { count: event.attendees.length, guests: event.attendees.length === 1 ? copy("convidado será avisado", "guest") : copy("convidados serão avisados", "guests") }) : copy("Este compromisso será removido da sua agenda.", "This event will be removed from your calendar.")}</p>
+          <div><button type="button" onClick={() => setConfirmCancellation(false)} disabled={pending}>{copy("Voltar", "Back")}</button><button type="button" className="calendar-danger-confirm" onClick={() => resolve(props.onCancelEvent)} disabled={pending}>{pending ? copy("Cancelando…", "Canceling…") : copy("Cancelar compromisso", "Cancel event")}</button></div>
         </section>
       ) : null}
 
       <footer>
         {event.canDelete && props.onDelete ? (
-          <button type="button" className="calendar-danger-action" onClick={() => resolve(props.onDelete)} disabled={pending}>Excluir</button>
+          <button type="button" className="calendar-danger-action" onClick={() => resolve(props.onDelete)} disabled={pending}>{copy("Excluir", "Delete")}</button>
         ) : event.canEdit && props.onCancelEvent && event.status !== "CANCELLED" ? (
-          <button type="button" className="calendar-danger-action" onClick={() => setConfirmCancellation(true)} disabled={pending || confirmCancellation}>Cancelar compromisso</button>
+          <button type="button" className="calendar-danger-action" onClick={() => setConfirmCancellation(true)} disabled={pending || confirmCancellation}>{copy("Cancelar compromisso", "Cancel event")}</button>
         ) : <span />}
         <div>
-          <button type="button" onClick={props.onClose}>Fechar</button>
+          <button type="button" onClick={props.onClose}>{copy("Fechar", "Close")}</button>
           {event.canEdit && props.onRequestEdit ? (
-            <button type="button" className="calendar-primary-action" onClick={() => props.onRequestEdit?.(event)} disabled={pending}>Editar</button>
+            <button type="button" className="calendar-primary-action" onClick={() => props.onRequestEdit?.(event)} disabled={pending}>{copy("Editar", "Edit")}</button>
           ) : null}
         </div>
       </footer>
@@ -269,6 +273,7 @@ function CalendarEventDetails(
 }
 
 function CalendarEventEditor(props: CalendarEventModalProps) {
+  const { copy } = useI18n();
   const seed = useMemo(() => inputSeed(props), [props]);
   const [values, setValues] = useState(seed);
   const [error, setError] = useState<string | null>(null);
@@ -327,13 +332,13 @@ function CalendarEventEditor(props: CalendarEventModalProps) {
   }
 
   function submit(allowConflict = false) {
-    if (!values.title.trim()) return setError("Dê um título ao compromisso.");
-    if (!values.calendarId) return setError("Escolha um calendário disponível.");
+    if (!values.title.trim()) return setError(copy("Dê um título ao compromisso.", "Add a title to the event."));
+    if (!values.calendarId) return setError(copy("Escolha um calendário disponível.", "Choose an available calendar."));
     if (values.allDay ? !values.startDate : !values.startsAtLocal || !values.endsAtLocal) {
-      return setError("Informe quando esse compromisso acontece.");
+      return setError(copy("Informe quando esse compromisso acontece.", "Enter when this event takes place."));
     }
     if (!values.allDay && values.endsAtLocal <= values.startsAtLocal) {
-      return setError("O término precisa ser posterior ao início.");
+      return setError(copy("O término precisa ser posterior ao início.", "The end must be after the start."));
     }
 
     startTransition(async () => {
@@ -375,57 +380,57 @@ function CalendarEventEditor(props: CalendarEventModalProps) {
     <form className="calendar-event-form" onSubmit={(event) => { event.preventDefault(); submit(); }}>
       <header>
         <div>
-          <span>{props.mode === "edit" ? "Editar compromisso" : "Novo compromisso"}</span>
-          <h2 id="calendar-event-modal-title">{props.mode === "edit" ? "Ajuste sem perder o ritmo." : "Reserve o próximo passo."}</h2>
-          <p id="calendar-event-modal-description">Vincule o compromisso ao lead para manter atendimento e agenda no mesmo fluxo.</p>
+          <span>{props.mode === "edit" ? copy("Editar compromisso", "Edit event") : copy("Novo compromisso", "New event")}</span>
+          <h2 id="calendar-event-modal-title">{props.mode === "edit" ? copy("Ajuste sem perder o ritmo.", "Make changes without losing momentum.") : copy("Reserve o próximo passo.", "Schedule the next step.")}</h2>
+          <p id="calendar-event-modal-description">{copy("Vincule o compromisso ao lead para manter atendimento e agenda no mesmo fluxo.", "Link the event to the lead to keep the case and calendar in one flow.")}</p>
         </div>
-        <button type="button" onClick={props.onClose} aria-label="Fechar formulário">×</button>
+        <button type="button" onClick={props.onClose} aria-label={copy("Fechar formulário", "Close form")}>×</button>
       </header>
 
       <div className="calendar-form-grid">
-        <label className="calendar-field calendar-field-wide"><span>Título</span><input autoFocus value={values.title} maxLength={180} onChange={(event) => patch("title", event.target.value)} placeholder="Ex.: Revisar proposta com cliente" /></label>
-        <label className="calendar-field"><span>Lead ou cliente</span><select value={values.caseId} onChange={(event) => { const caseId = event.target.value; patch("caseId", caseId); const selected = props.cases?.find((item) => item.id === caseId); if (selected?.email && !attendeeList.includes(selected.email.toLowerCase())) patch("attendeeEmails", [...attendeeList, selected.email.toLowerCase()].join(", ")); }}><option value="">Sem vínculo ao CRM</option>{props.cases?.map((item) => <option key={item.id} value={item.id}>{item.name}{item.stage ? ` · ${item.stage}` : ""}</option>)}</select></label>
-        <label className="calendar-field"><span>Calendário</span><select value={values.calendarId} onChange={(event) => patch("calendarId", event.target.value)}>{writableCalendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}{calendar.isDefault ? " · padrão" : ""}</option>)}</select></label>
+        <label className="calendar-field calendar-field-wide"><span>{copy("Título", "Title")}</span><input autoFocus value={values.title} maxLength={180} onChange={(event) => patch("title", event.target.value)} placeholder={copy("Ex.: Revisar proposta com cliente", "E.g. Review proposal with client")} /></label>
+        <label className="calendar-field"><span>{copy("Lead ou cliente", "Lead or client")}</span><select value={values.caseId} onChange={(event) => { const caseId = event.target.value; patch("caseId", caseId); const selected = props.cases?.find((item) => item.id === caseId); if (selected?.email && !attendeeList.includes(selected.email.toLowerCase())) patch("attendeeEmails", [...attendeeList, selected.email.toLowerCase()].join(", ")); }}><option value="">{copy("Sem vínculo ao CRM", "Not linked to CRM")}</option>{props.cases?.map((item) => <option key={item.id} value={item.id}>{item.name}{item.stage ? ` · ${localizedCrmStageName(copy, { name: item.stage, systemKey: item.stageSystemKey ?? null })}` : ""}</option>)}</select></label>
+        <label className="calendar-field"><span>{copy("Calendário", "Calendar")}</span><select value={values.calendarId} onChange={(event) => patch("calendarId", event.target.value)}>{writableCalendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}{calendar.isDefault ? copy(" · padrão", " · default") : ""}</option>)}</select></label>
 
-        <label className="calendar-all-day"><input type="checkbox" checked={values.allDay} onChange={(event) => patch("allDay", event.target.checked)} /><span>Dia inteiro</span></label>
+        <label className="calendar-all-day"><input type="checkbox" checked={values.allDay} onChange={(event) => patch("allDay", event.target.checked)} /><span>{copy("Dia inteiro", "All day")}</span></label>
         {values.allDay ? (
           <>
-            <label className="calendar-field"><span>Data</span><input type="date" value={values.startDate} onChange={(event) => patch("startDate", event.target.value)} /></label>
-            <label className="calendar-field"><span>Até</span><input type="date" min={values.startDate} value={values.endDate} onChange={(event) => patch("endDate", event.target.value)} /></label>
+            <label className="calendar-field"><span>{copy("Data", "Date")}</span><input type="date" value={values.startDate} onChange={(event) => patch("startDate", event.target.value)} /></label>
+            <label className="calendar-field"><span>{copy("Até", "Through")}</span><input type="date" min={values.startDate} value={values.endDate} onChange={(event) => patch("endDate", event.target.value)} /></label>
           </>
         ) : (
           <>
-            <label className="calendar-field"><span>Início</span><input type="datetime-local" value={values.startsAtLocal} onChange={(event) => { patch("startsAtLocal", event.target.value); setAvailability(null); if (typeof duration === "number") { const end = new Date(new Date(event.target.value).getTime() + duration * 60_000); const offset = end.getTimezoneOffset(); patch("endsAtLocal", new Date(end.getTime() - offset * 60_000).toISOString().slice(0, 16)); } }} /></label>
-            <label className="calendar-field"><span>Término</span><input type="datetime-local" min={values.startsAtLocal} value={values.endsAtLocal} onChange={(event) => { patch("endsAtLocal", event.target.value); setDuration("custom"); setAvailability(null); }} /></label>
-            <fieldset className="calendar-duration-options calendar-field-wide"><legend>Duração</legend><div>{[15, 30, 45, 60, 90].map((minutes) => <button key={minutes} type="button" data-active={duration === minutes || undefined} aria-pressed={duration === minutes} onClick={() => applyDuration(minutes)}>{minutes < 60 ? `${minutes} min` : minutes === 60 ? "1 h" : "1 h 30"}</button>)}<span data-active={duration === "custom" || undefined}>Personalizada</span></div></fieldset>
-            {props.onCheckAvailability ? <div className="calendar-availability calendar-field-wide"><button type="button" onClick={checkAvailability} disabled={checkingAvailability || !values.startsAtLocal || !values.endsAtLocal}>{checkingAvailability ? "Verificando…" : "Ver disponibilidade"}</button>{availability?.ok ? availability.conflicts.length ? <div data-conflict><strong>{availability.conflicts.length === 1 ? "Existe um conflito nesse horário." : `${availability.conflicts.length} conflitos nesse horário.`}</strong><ul>{availability.conflicts.map((conflict) => <li key={conflict.id}>{conflict.title}</li>)}</ul>{availability.suggestedSlots.length ? <div className="calendar-slot-suggestions"><span>Horários livres próximos</span>{availability.suggestedSlots.map((slot) => <button type="button" key={slot.startsAtLocal} onClick={() => { patch("startsAtLocal", slot.startsAtLocal); patch("endsAtLocal", slot.endsAtLocal); setAvailability(null); }}>{slot.label}</button>)}</div> : null}</div> : <p data-free>✓ Horário livre na sua agenda.</p> : availability && !availability.ok ? <p role="alert" data-conflict>{availability.message}</p> : null}</div> : null}
+            <label className="calendar-field"><span>{copy("Início", "Start")}</span><input type="datetime-local" value={values.startsAtLocal} onChange={(event) => { patch("startsAtLocal", event.target.value); setAvailability(null); if (typeof duration === "number") { const end = new Date(new Date(event.target.value).getTime() + duration * 60_000); const offset = end.getTimezoneOffset(); patch("endsAtLocal", new Date(end.getTime() - offset * 60_000).toISOString().slice(0, 16)); } }} /></label>
+            <label className="calendar-field"><span>{copy("Término", "End")}</span><input type="datetime-local" min={values.startsAtLocal} value={values.endsAtLocal} onChange={(event) => { patch("endsAtLocal", event.target.value); setDuration("custom"); setAvailability(null); }} /></label>
+            <fieldset className="calendar-duration-options calendar-field-wide"><legend>{copy("Duração", "Duration")}</legend><div>{[15, 30, 45, 60, 90].map((minutes) => <button key={minutes} type="button" data-active={duration === minutes || undefined} aria-pressed={duration === minutes} onClick={() => applyDuration(minutes)}>{minutes < 60 ? `${minutes} min` : minutes === 60 ? "1 h" : "1 h 30"}</button>)}<span data-active={duration === "custom" || undefined}>{copy("Personalizada", "Custom")}</span></div></fieldset>
+            {props.onCheckAvailability ? <div className="calendar-availability calendar-field-wide"><button type="button" onClick={checkAvailability} disabled={checkingAvailability || !values.startsAtLocal || !values.endsAtLocal}>{checkingAvailability ? copy("Verificando…", "Checking…") : copy("Ver disponibilidade", "Check availability")}</button>{availability?.ok ? availability.conflicts.length ? <div data-conflict><strong>{availability.conflicts.length === 1 ? copy("Existe um conflito nesse horário.", "There is a conflict at this time.") : copy("{count} conflitos nesse horário.", "{count} conflicts at this time.", { count: availability.conflicts.length })}</strong><ul>{availability.conflicts.map((conflict) => <li key={conflict.id}>{conflict.title}</li>)}</ul>{availability.suggestedSlots.length ? <div className="calendar-slot-suggestions"><span>{copy("Horários livres próximos", "Nearby available times")}</span>{availability.suggestedSlots.map((slot) => <button type="button" key={slot.startsAtLocal} onClick={() => { patch("startsAtLocal", slot.startsAtLocal); patch("endsAtLocal", slot.endsAtLocal); setAvailability(null); }}>{slot.label}</button>)}</div> : null}</div> : <p data-free>✓ {copy("Horário livre na sua agenda.", "This time is available on your calendar.")}</p> : availability && !availability.ok ? <p role="alert" data-conflict>{availability.message}</p> : null}</div> : null}
           </>
         )}
 
-        <label className="calendar-field"><span>Local</span><input value={values.location} maxLength={240} onChange={(event) => patch("location", event.target.value)} placeholder="Online, escritório…" /></label>
-        <label className="calendar-field"><span>Lembrete</span><select value={values.reminderMinutes ?? ""} onChange={(event) => patch("reminderMinutes", Number(event.target.value))}><option value="" disabled>Selecione</option>{[5, 10, 15, 30, 60].map((minutes) => <option key={minutes} value={minutes}>{minutes === 60 ? "1 hora antes" : `${minutes} minutos antes`}</option>)}</select></label>
-        <div className="calendar-attendees calendar-field-wide"><span>Convidados</span><div className="calendar-attendee-entry"><input type="email" value={attendeeDraft} onChange={(event) => setAttendeeDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); addAttendee(); } }} placeholder="email@cliente.com" /><button type="button" onClick={addAttendee}>Adicionar</button></div>{attendeeList.length ? <ul>{attendeeList.map((email) => <li key={email}><span>{email}</span><button type="button" onClick={() => removeAttendee(email)} aria-label={`Remover ${email}`}>×</button></li>)}</ul> : null}</div>
+        <label className="calendar-field"><span>{copy("Local", "Location")}</span><input value={values.location} maxLength={240} onChange={(event) => patch("location", event.target.value)} placeholder={copy("Online, escritório…", "Online, office…")} /></label>
+        <label className="calendar-field"><span>{copy("Lembrete", "Reminder")}</span><select value={values.reminderMinutes ?? ""} onChange={(event) => patch("reminderMinutes", Number(event.target.value))}><option value="" disabled>{copy("Selecione", "Select")}</option>{[5, 10, 15, 30, 60].map((minutes) => <option key={minutes} value={minutes}>{minutes === 60 ? copy("1 hora antes", "1 hour before") : copy("{count} minutos antes", "{count} minutes before", { count: minutes })}</option>)}</select></label>
+        <div className="calendar-attendees calendar-field-wide"><span>{copy("Convidados", "Guests")}</span><div className="calendar-attendee-entry"><input type="email" value={attendeeDraft} onChange={(event) => setAttendeeDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); addAttendee(); } }} placeholder="email@cliente.com" /><button type="button" onClick={addAttendee}>{copy("Adicionar", "Add")}</button></div>{attendeeList.length ? <ul>{attendeeList.map((email) => <li key={email}><span>{email}</span><button type="button" onClick={() => removeAttendee(email)} aria-label={copy("Remover {email}", "Remove {email}", { email })}>×</button></li>)}</ul> : null}</div>
         <div className="calendar-form-toggles calendar-field-wide">
-          <label><input type="checkbox" checked={Boolean(props.event?.meetingUrl) || values.createGoogleMeet} disabled={Boolean(props.event?.meetingUrl) || !dataHasGoogle(props.calendars)} onChange={(event) => patch("createGoogleMeet", event.target.checked)} /><span><strong>{props.event?.meetingUrl ? "Google Meet ativo" : "Criar Google Meet"}</strong><small>{props.event?.meetingUrl ? "O link existente será preservado." : "O link será gerado pelo Google após salvar."}</small></span></label>
-          <label><input type="checkbox" checked={values.sendInvites} onChange={(event) => patch("sendInvites", event.target.checked)} /><span><strong>Enviar convites</strong><small>Notificar os convidados por e-mail sobre esta criação ou alteração.</small></span></label>
+          <label><input type="checkbox" checked={Boolean(props.event?.meetingUrl) || values.createGoogleMeet} disabled={Boolean(props.event?.meetingUrl) || !dataHasGoogle(props.calendars)} onChange={(event) => patch("createGoogleMeet", event.target.checked)} /><span><strong>{props.event?.meetingUrl ? copy("Google Meet ativo", "Google Meet active") : copy("Criar Google Meet", "Create Google Meet")}</strong><small>{props.event?.meetingUrl ? copy("O link existente será preservado.", "The existing link will be preserved.") : copy("O link será gerado pelo Google após salvar.", "Google will generate the link after you save.")}</small></span></label>
+          <label><input type="checkbox" checked={values.sendInvites} onChange={(event) => patch("sendInvites", event.target.checked)} /><span><strong>{copy("Enviar convites", "Send invitations")}</strong><small>{copy("Notificar os convidados por e-mail sobre esta criação ou alteração.", "Notify guests by email about this creation or change.")}</small></span></label>
         </div>
-        <label className="calendar-field calendar-field-wide"><span>Notas</span><textarea value={values.description} maxLength={3000} onChange={(event) => patch("description", event.target.value)} placeholder="Inclua apenas o necessário para este encontro." /></label>
+        <label className="calendar-field calendar-field-wide"><span>{copy("Notas", "Notes")}</span><textarea value={values.description} maxLength={3000} onChange={(event) => patch("description", event.target.value)} placeholder={copy("Inclua apenas o necessário para este encontro.", "Include only what is needed for this meeting.")} /></label>
       </div>
 
-      <p className="calendar-timezone-note">Horários em {props.timeZone}</p>
+      <p className="calendar-timezone-note">{copy("Horários em {timeZone}", "Times in {timeZone}", { timeZone: props.timeZone })}</p>
       {error ? <p className="calendar-form-error" role="alert">{error}</p> : null}
 
-      {conflictReview ? <section className="calendar-conflict-confirmation" role="alert" aria-live="assertive"><strong>{conflictReview.message}</strong><p>Revise o horário ou confirme que deseja manter a sobreposição.</p><ul>{conflictReview.conflicts.map((conflict) => <li key={conflict.id}>{conflict.title}</li>)}</ul></section> : null}
+      {conflictReview ? <section className="calendar-conflict-confirmation" role="alert" aria-live="assertive"><strong>{conflictReview.message}</strong><p>{copy("Revise o horário ou confirme que deseja manter a sobreposição.", "Review the time or confirm that you want to keep the overlap.")}</p><ul>{conflictReview.conflicts.map((conflict) => <li key={conflict.id}>{conflict.title}</li>)}</ul></section> : null}
 
       <footer>
-        {conflictReview ? <><button type="button" onClick={() => { setConflictReview(null); setAvailability(null); }} disabled={pending}>Voltar e ajustar</button><button type="button" className="calendar-danger-confirm" onClick={() => submit(true)} disabled={pending}>{pending ? "Salvando…" : "Agendar mesmo assim"}</button></> : <><button type="button" onClick={props.onClose} disabled={pending}>Cancelar</button><button type="submit" className="calendar-primary-action" disabled={pending || !writableCalendars.length}>{pending ? "Salvando…" : props.mode === "edit" ? "Salvar alterações" : "Criar compromisso"}<span aria-hidden="true">→</span></button></>}
+        {conflictReview ? <><button type="button" onClick={() => { setConflictReview(null); setAvailability(null); }} disabled={pending}>{copy("Voltar e ajustar", "Go back and adjust")}</button><button type="button" className="calendar-danger-confirm" onClick={() => submit(true)} disabled={pending}>{pending ? copy("Salvando…", "Saving…") : copy("Agendar mesmo assim", "Schedule anyway")}</button></> : <><button type="button" onClick={props.onClose} disabled={pending}>{copy("Cancelar", "Cancel")}</button><button type="submit" className="calendar-primary-action" disabled={pending || !writableCalendars.length}>{pending ? copy("Salvando…", "Saving…") : props.mode === "edit" ? copy("Salvar alterações", "Save changes") : copy("Criar compromisso", "Create event")}<span aria-hidden="true">→</span></button></>}
       </footer>
     </form>
   );
 }
 
-function attendeeStatus(value?: string) {
-  return ({ ACCEPTED: "Confirmado", DECLINED: "Recusou", TENTATIVE: "Talvez", NEEDS_ACTION: "Aguardando resposta" } as Record<string, string>)[value ?? ""] ?? "Aguardando resposta";
+function attendeeStatus(value: string | undefined, copy: Copy) {
+  return ({ ACCEPTED: copy("Confirmado", "Accepted"), DECLINED: copy("Recusou", "Declined"), TENTATIVE: copy("Talvez", "Tentative"), NEEDS_ACTION: copy("Aguardando resposta", "Awaiting response") } as Record<string, string>)[value ?? ""] ?? copy("Aguardando resposta", "Awaiting response");
 }
 
 function dataHasGoogle(calendars: CalendarSourceView[]) {

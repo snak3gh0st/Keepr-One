@@ -16,6 +16,37 @@ const actionMocks = vi.hoisted(() => ({
   completeOnboardingAction: vi.fn(),
 }));
 
+const i18nMock = vi.hoisted(() => ({
+  language: "PT" as "PT" | "EN",
+  changeLanguage: vi.fn(),
+}));
+
+vi.mock("@/components/i18n/LanguageProvider", () => ({
+  useI18n: () => ({
+    language: i18nMock.language,
+    locale: i18nMock.language === "PT" ? "pt-BR" : "en-US",
+    isChanging: false,
+    error: null,
+    changeLanguage: i18nMock.changeLanguage,
+    copy: (
+      portuguese: string,
+      english: string,
+      values: Record<string, string | number> = {},
+    ) => (i18nMock.language === "PT" ? portuguese : english)
+      .replace(/\{(\w+)\}/g, (_, token: string) => String(values[token] ?? `{${token}}`)),
+    t: (key: string, values: Record<string, string | number> = {}) => {
+      const messages: Record<string, { PT: string; EN: string }> = {
+        "language.label": { PT: "Idioma", EN: "Language" },
+        "language.portuguese": { PT: "Português", EN: "Portuguese" },
+        "language.english": { PT: "Inglês", EN: "English" },
+        "language.changeTo": { PT: "Alterar idioma para {language}", EN: "Change language to {language}" },
+      };
+      return (messages[key]?.[i18nMock.language] ?? key)
+        .replace(/\{(\w+)\}/g, (_, token: string) => String(values[token] ?? `{${token}}`));
+    },
+  }),
+}));
+
 vi.mock("@/app/onboarding/actions", () => actionMocks);
 vi.mock("./OnboardingMotion", () => ({
   OnboardingMotion: ({ children }: { children: React.ReactNode }) => children,
@@ -72,6 +103,7 @@ const BASE_PROPS = {
 };
 
 beforeEach(() => {
+  i18nMock.language = "PT";
   for (const action of Object.values(actionMocks)) {
     action.mockResolvedValue(INITIAL_ONBOARDING_ACTION_STATE);
   }
@@ -83,6 +115,31 @@ afterEach(() => {
 });
 
 describe("OnboardingExperience", () => {
+  it("uses the shared persisted-language control outside the main Shell", async () => {
+    const user = userEvent.setup();
+    render(<OnboardingExperience {...BASE_PROPS} />);
+
+    await user.click(screen.getByRole("button", { name: "Alterar idioma para Inglês" }));
+
+    expect(i18nMock.changeLanguage).toHaveBeenCalledWith("EN");
+  });
+
+  it("renders the complete onboarding experience and language control in English", () => {
+    i18nMock.language = "EN";
+
+    render(<OnboardingExperience {...BASE_PROPS} />);
+
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Your entire operation starts in the right place.",
+    );
+    expect(screen.getByRole("group", { name: "Language" })).toBeVisible();
+    expect(screen.getByLabelText(/Full name/)).toBeEnabled();
+    expect(screen.getByRole("heading", {
+      name: "Bring Google Calendar into your Keepr One Calendar.",
+    })).toBeVisible();
+    expect(screen.getByText(/Your progress is saved/)).toBeVisible();
+  });
+
   it("renders the resumable flow, exact bento geometry and required NPN", () => {
     const { container } = render(<OnboardingExperience {...BASE_PROPS} />);
 

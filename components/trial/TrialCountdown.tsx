@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
+import { useI18n } from "@/components/i18n/LanguageProvider";
+import type { UserLanguage } from "@/lib/i18n/config";
 
 const SECONDS_PER_MINUTE = 60;
 const SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE;
@@ -47,32 +49,24 @@ type CountdownParts = {
 
 const PHASE_CONTENT: Record<
   TrialCountdownPhase,
-  { label: string; description: string; shell: string; dot: string; badge: string }
+  { shell: string; dot: string; badge: string }
 > = {
   normal: {
-    label: "Teste gratuito ativo",
-    description: "Acesso completo disponível durante o período de avaliação.",
     shell: "border-teal/20 bg-teal-pale/45",
     dot: "bg-success",
     badge: "bg-paper text-teal-deep",
   },
   "last-7-days": {
-    label: "Últimos 7 dias",
-    description: "Seu período gratuito termina em breve.",
     shell: "border-gold/30 bg-gold-pale/65",
     dot: "bg-gold-ink",
     badge: "bg-paper text-gold-ink",
   },
   "last-24-hours": {
-    label: "Últimas 24 horas",
-    description: "Seu período gratuito termina hoje.",
     shell: "border-danger/25 bg-danger-pale/70",
     dot: "bg-danger",
     badge: "bg-paper text-danger",
   },
   expired: {
-    label: "Período gratuito encerrado",
-    description: "Escolha um plano para continuar usando a plataforma.",
     shell: "border-border-steel bg-panel",
     dot: "bg-ink-muted",
     badge: "bg-paper text-ink-muted",
@@ -137,12 +131,15 @@ function plural(value: number, singular: string, pluralForm: string): string {
   return `${value} ${value === 1 ? singular : pluralForm}`;
 }
 
-function accessibleTimeLabel(parts: CountdownParts): string {
+function accessibleTimeLabel(parts: CountdownParts, language: UserLanguage): string {
+  const labels = language === "PT"
+    ? { day: ["dia", "dias"], hour: ["hora", "horas"], minute: ["minuto", "minutos"], second: ["segundo", "segundos"] }
+    : { day: ["day", "days"], hour: ["hour", "hours"], minute: ["minute", "minutes"], second: ["second", "seconds"] };
   return [
-    plural(parts.days, "dia", "dias"),
-    plural(parts.hours, "hora", "horas"),
-    plural(parts.minutes, "minuto", "minutos"),
-    plural(parts.seconds, "segundo", "segundos"),
+    plural(parts.days, labels.day[0], labels.day[1]),
+    plural(parts.hours, labels.hour[0], labels.hour[1]),
+    plural(parts.minutes, labels.minute[0], labels.minute[1]),
+    plural(parts.seconds, labels.second[0], labels.second[1]),
   ].join(", ");
 }
 
@@ -171,6 +168,7 @@ function CountdownUnit({
  * the already-authorized trial window.
  */
 export function TrialCountdown(props: TrialCountdownProps) {
+  const { copy, language } = useI18n();
   const statusId = useId();
   const expiredSourceRef = useRef<string | null>(null);
   const { onExpire } = props;
@@ -187,12 +185,30 @@ export function TrialCountdown(props: TrialCountdownProps) {
     initialRemainingSeconds - elapsedSeconds,
   );
   const phase = getTrialCountdownPhase(remainingSeconds);
-  const content = PHASE_CONTENT[phase];
+  const phaseStyle = PHASE_CONTENT[phase];
+  const content = {
+    normal: {
+      label: copy("Teste gratuito ativo", "Free trial active"),
+      description: copy("Acesso completo disponível durante o período de avaliação.", "Full access is available during your trial."),
+    },
+    "last-7-days": {
+      label: copy("Últimos 7 dias", "Last 7 days"),
+      description: copy("Seu período gratuito termina em breve.", "Your free trial ends soon."),
+    },
+    "last-24-hours": {
+      label: copy("Últimas 24 horas", "Last 24 hours"),
+      description: copy("Seu período gratuito termina hoje.", "Your free trial ends today."),
+    },
+    expired: {
+      label: copy("Período gratuito encerrado", "Free trial ended"),
+      description: copy("Escolha um plano para continuar usando a plataforma.", "Choose a plan to keep using the platform."),
+    },
+  }[phase];
   const parts = splitCountdown(remainingSeconds);
   const timerLabel =
     phase === "expired"
-      ? "O período gratuito foi encerrado. Tempo restante: zero."
-      : `Tempo restante do período gratuito: ${accessibleTimeLabel(parts)}.`;
+      ? copy("O período gratuito foi encerrado. Tempo restante: zero.", "The free trial has ended. Time remaining: zero.")
+      : copy("Tempo restante do período gratuito: {time}.", "Free trial time remaining: {time}.", { time: accessibleTimeLabel(parts, language) });
 
   useEffect(() => {
     if (initialRemainingSeconds <= 0) return;
@@ -237,7 +253,7 @@ export function TrialCountdown(props: TrialCountdownProps) {
 
   return (
     <section
-      className={`trial-countdown w-full rounded-xl border px-4 py-3.5 transition-colors duration-200 motion-reduce:transition-none sm:px-5 ${content.shell} ${props.className ?? ""}`}
+      className={`trial-countdown w-full rounded-xl border px-4 py-3.5 transition-colors duration-200 motion-reduce:transition-none sm:px-5 ${phaseStyle.shell} ${props.className ?? ""}`}
       data-state={phase}
       aria-labelledby={statusId}
     >
@@ -246,13 +262,13 @@ export function TrialCountdown(props: TrialCountdownProps) {
           <div className="flex flex-wrap items-center gap-2">
             <span
               id={statusId}
-              className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-semibold ${content.badge}`}
+              className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-semibold ${phaseStyle.badge}`}
               aria-live="polite"
               aria-atomic="true"
             >
               <span
                 aria-hidden="true"
-                className={`h-1.5 w-1.5 shrink-0 rounded-full ${content.dot}`}
+                className={`h-1.5 w-1.5 shrink-0 rounded-full ${phaseStyle.dot}`}
               />
               {content.label}
             </span>
@@ -269,17 +285,17 @@ export function TrialCountdown(props: TrialCountdownProps) {
             aria-label={timerLabel}
             className="grid w-full shrink-0 grid-cols-4 divide-x divide-border-steel overflow-hidden rounded-lg border border-border-steel bg-paper sm:w-auto"
           >
-            <CountdownUnit value={parts.days} label="dias" />
-            <CountdownUnit value={parts.hours} label="horas" />
+            <CountdownUnit value={parts.days} label={copy("dias", "days")} />
+            <CountdownUnit value={parts.hours} label={copy("horas", "hours")} />
             <CountdownUnit value={parts.minutes} label="min" />
-            <CountdownUnit value={parts.seconds} label="seg" />
+            <CountdownUnit value={parts.seconds} label={copy("seg", "sec")} />
           </div>
           {props.actionHref ? (
             <Link
               href={props.actionHref}
               className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-lg bg-rail-strong px-4 text-xs font-semibold text-paper transition-colors hover:bg-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rail-strong"
             >
-              {props.actionLabel ?? "Ver plano"}
+              {props.actionLabel ?? copy("Ver plano", "View plan")}
             </Link>
           ) : null}
         </div>

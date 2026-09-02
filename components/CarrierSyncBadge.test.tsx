@@ -7,10 +7,20 @@ import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 const mocks = vi.hoisted(() => ({
   pathname: '/agent',
   sendConnectorMessage: vi.fn(),
+  copy: (_pt: string, en: string, values: Record<string, string | number> = {}) =>
+    en.replace(/\{(\w+)\}/g, (_match, token: string) => String(values[token] ?? `{${token}}`)),
 }))
 
 vi.mock('next/navigation', () => ({
   usePathname: () => mocks.pathname,
+}))
+
+vi.mock('@/components/i18n/LanguageProvider', () => ({
+  useI18n: () => ({
+    language: 'EN',
+    locale: 'en-US',
+    copy: mocks.copy,
+  }),
 }))
 
 vi.mock('@/app/agent/integrations/national-life/NationalLifeConnectorClient', () => ({

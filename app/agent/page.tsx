@@ -21,7 +21,6 @@ import {
 } from '@/lib/national-life/local-connector/config'
 import { Shell } from '@/components/Shell'
 import { ErrorBanner } from '@/components/ErrorBanner'
-import { policyStatusLabel } from '@/components/StatusPill'
 import { TrendChart } from '@/components/TrendChart'
 import {
   KeeprDashboardMotion,
@@ -47,6 +46,9 @@ import { mapDomainCalendarConnectionToUi, mapDomainCalendarEventToUi } from '@/c
 import { TodayMeetingsSection } from '@/components/calendar/TodayMeetingsSection'
 import { UpcomingMeetingsSection } from '@/components/calendar/UpcomingMeetingsSection'
 import type { CalendarConnectionView, CalendarEventView, CalendarSourceView } from '@/components/calendar/types'
+import { getServerI18n } from '@/lib/i18n/server'
+import { formatCurrency as formatLocalizedCurrency, formatNumber } from '@/lib/i18n/format'
+import type { UserLanguage } from '@/lib/i18n/config'
 
 const NATIONAL_LIFE_DASHBOARD_FINANCIAL_GRID_KEYS = [
   ...COMMISSION_EARNING_GRID_KEYS,
@@ -57,9 +59,11 @@ const NATIONAL_LIFE_DASHBOARD_FINANCIAL_GRID_KEYS = [
 function BreakdownList({
   title,
   rows,
+  emptyLabel,
 }: {
   title: string
   rows: { label: string; count: number }[]
+  emptyLabel: string
 }) {
   const max = Math.max(1, ...rows.map((r) => r.count))
   return (
@@ -80,7 +84,7 @@ function BreakdownList({
             </span>
           </li>
         ))}
-        {rows.length === 0 && <li className="text-sm text-ink-muted">Nenhum dado disponível ainda.</li>}
+        {rows.length === 0 && <li className="text-sm text-ink-muted">{emptyLabel}</li>}
       </ul>
     </div>
   )
@@ -120,43 +124,48 @@ function PriorityRow({
   )
 }
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(value)
+function formatCurrency(value: number, language: UserLanguage): string {
+  return formatLocalizedCurrency(value, language, 'USD', { maximumFractionDigits: 0 })
 }
 
-function formatCurrencyNumber(value: number): string {
-  return new Intl.NumberFormat('en-US', {
+function formatCurrencyNumber(value: number, language: UserLanguage): string {
+  return formatNumber(value, language, {
     maximumFractionDigits: 0,
-  }).format(value)
+  })
 }
 
-function formatMonthName(period: string): string {
-  return new Intl.DateTimeFormat('pt-BR', {
+function formatMonthName(period: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
     month: 'long',
     timeZone: 'UTC',
   }).format(new Date(`${period}-01T00:00:00.000Z`))
 }
 
-function formatMonthShort(period: string): string {
-  return new Intl.DateTimeFormat('en-US', {
+function formatMonthShort(period: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
     month: 'short',
     timeZone: 'UTC',
   }).format(new Date(`${period}-01T00:00:00.000Z`))
 }
 
-function Delta({ value }: { value: number | null }) {
+function Delta({
+  value,
+  copy,
+  language,
+}: {
+  value: number | null
+  copy: (portuguese: string, english: string) => string
+  language: UserLanguage
+}) {
   if (value === null) return null
   const positive = value > 0
   const negative = value < 0
+  const formattedValue = formatNumber(Math.abs(value), language, { maximumFractionDigits: 0 })
   const accessibleLabel = positive
-    ? `Aumento de ${Math.abs(value).toFixed(0)} por cento`
+    ? copy(`Aumento de ${formattedValue} por cento`, `Increase of ${formattedValue} percent`)
     : negative
-      ? `Queda de ${Math.abs(value).toFixed(0)} por cento`
-      : 'Sem variação percentual'
+      ? copy(`Queda de ${formattedValue} por cento`, `Decrease of ${formattedValue} percent`)
+      : copy('Sem variação percentual', 'No percentage change')
   const toneClass = positive
     ? 'bg-success-pale text-success'
     : negative
@@ -169,7 +178,7 @@ function Delta({ value }: { value: number | null }) {
       className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-mono text-[11px] font-semibold ${toneClass}`}
     >
       <span aria-hidden>{positive ? '↗' : negative ? '↘' : '→'}</span>
-      {Math.abs(value).toFixed(0)}%
+      {formattedValue}%
     </span>
   )
 }
@@ -188,6 +197,8 @@ export default async function AgentDashboard({
   searchParams: Promise<{ preview?: string }>
 }) {
   const { preview } = await searchParams
+  const { copy, language } = await getServerI18n()
+  const locale = language === 'PT' ? 'pt-BR' : 'en-US'
   const localPromotionPreview = getLocalPromotionPreview(preview)
   const agent = await getCurrentAgent()
   const [user, access, promotion] = await Promise.all([
@@ -513,20 +524,20 @@ export default async function AgentDashboard({
     console.error('AgentDashboard calendar query error', error)
   }
 
-  const firstName = ((user?.name ?? '').trim() || 'Agente').split(/\s+/)[0]
+  const firstName = ((user?.name ?? '').trim() || copy('Agente', 'Agent')).split(/\s+/)[0]
   const commissionDelta = loadError ? null : percentChange(commissionThisMonth, commissionLastMonth)
-  const currentMonthName = formatMonthName(currentP)
-  const previousMonthName = formatMonthName(previousP)
-  const currentPeriodLabel = `${formatMonthShort(currentP)} ${currentP.slice(0, 4)}`
-  const commissionNumberValue = loadError ? '—' : formatCurrencyNumber(commissionThisMonth)
+  const currentMonthName = formatMonthName(currentP, locale)
+  const previousMonthName = formatMonthName(previousP, locale)
+  const currentPeriodLabel = `${formatMonthShort(currentP, locale)} ${currentP.slice(0, 4)}`
+  const commissionNumberValue = loadError ? '—' : formatCurrencyNumber(commissionThisMonth, language)
   const hasCommissionComparison = commissionDelta !== null && commissionLastMonth !== 0
   const hasNoPreviousCommissionValue = !loadError && commissionThisMonth > 0 && commissionLastMonth === 0
   const commissionTrendMap = new Map(commissionByPeriod.map((bucket) => [bucket.period, bucket.total]))
   const commissionTrend = Array.from({ length: 6 }, (_, index) => {
     const period = shiftPeriod(currentP, index - 5)
     return {
-      label: formatMonthShort(period),
-      tooltipLabel: new Intl.DateTimeFormat('pt-BR', {
+      label: formatMonthShort(period, locale),
+      tooltipLabel: new Intl.DateTimeFormat(locale, {
         month: 'long',
         year: 'numeric',
         timeZone: 'UTC',
@@ -534,46 +545,86 @@ export default async function AgentDashboard({
       value: commissionTrendMap.get(period) ?? 0,
     }
   })
-  const moneyValue = (value: number) => loadError ? '—' : formatCurrency(value)
-  const countValue = (value: number) => loadError ? '—' : String(value)
+  const moneyValue = (value: number) => loadError ? '—' : formatCurrency(value, language)
+  const countValue = (value: number) => loadError ? '—' : formatNumber(value, language, { maximumFractionDigits: 0 })
   const followUpsOverdue = dueFollowUpItems.filter((item) => item.overdue)
   const followUpsToday = dueFollowUpItems.filter((item) => !item.overdue)
+  const localizedPolicyStatusLabel: Record<string, string> = {
+    INFORCE: copy('Em vigor', 'In force'),
+    APPROVED: copy('Aprovada', 'Approved'),
+    PENDING: copy('Pendente', 'Pending'),
+    LAPSED: copy('Lapsada', 'Lapsed'),
+    CANCELLED: copy('Cancelada', 'Cancelled'),
+  }
   const pulseMetrics = [
-    { label: 'Oportunidades ativas', value: countValue(openCases) },
-    { label: 'Comissão esperada', value: moneyValue(txnExpected) },
-    { label: 'Apólices', value: countValue(policyCount) },
+    { label: copy('Oportunidades ativas', 'Active opportunities'), value: countValue(openCases) },
+    { label: copy('Comissão esperada', 'Expected commission'), value: moneyValue(txnExpected) },
+    { label: copy('Apólices', 'Policies'), value: countValue(policyCount) },
     ...(access.canManageTeam
-      ? [{ label: 'Equipe', value: countValue(teamAgentIds.length) }]
+      ? [{ label: copy('Equipe', 'Team'), value: countValue(teamAgentIds.length) }]
       : []),
-    { label: 'Revisões', value: countValue(dueReviews) },
+    { label: copy('Revisões', 'Reviews'), value: countValue(dueReviews) },
   ]
   const signals: OperationSignal[] = loadError ? [] : [
     {
-      title: dueFollowUps > 0 ? `${dueFollowUps} retornos podem destravar seu pipeline hoje.` : 'Seu pipeline está pronto para a próxima oportunidade.',
+      title: dueFollowUps > 0
+        ? copy(
+            `${formatNumber(dueFollowUps, language)} retornos podem destravar seu funil hoje.`,
+            `${formatNumber(dueFollowUps, language)} follow-ups can unlock your pipeline today.`,
+          )
+        : copy('Seu funil está pronto para a próxima oportunidade.', 'Your pipeline is ready for the next opportunity.'),
       description: dueFollowUps > 0
-        ? 'Comece pelos contatos que já chegaram ao prazo e transforme pendências em avanço real.'
-        : 'A fila de contatos está em dia. Use o espaço para abrir uma nova oportunidade.',
-      action: dueFollowUps > 0 ? 'Revisar retornos' : 'Novo atendimento',
+        ? copy(
+            'Comece pelos contatos que já chegaram ao prazo e transforme pendências em avanço real.',
+            'Start with the contacts that are already due and turn pending work into real progress.',
+          )
+        : copy(
+            'A fila de contatos está em dia. Use o espaço para abrir uma nova oportunidade.',
+            'Your contact queue is up to date. Use the extra room to open a new opportunity.',
+          ),
+      action: dueFollowUps > 0 ? copy('Revisar retornos', 'Review follow-ups') : copy('Novo atendimento', 'New case'),
       href: dueFollowUps > 0 ? '/agent/activities' : '/agent/cases/new',
       tone: 'mint',
     },
     {
-      title: atRiskPolicies > 0 ? `${atRiskPolicies} apólices merecem atenção antes da próxima revisão.` : 'Sua carteira não apresenta alertas críticos.',
+      title: atRiskPolicies > 0
+        ? copy(
+            `${formatNumber(atRiskPolicies, language)} apólices merecem atenção antes da próxima revisão.`,
+            `${formatNumber(atRiskPolicies, language)} policies need attention before the next review.`,
+          )
+        : copy('Sua carteira não apresenta alertas críticos.', 'Your book has no critical alerts.'),
       description: atRiskPolicies > 0
-        ? 'Revise os sinais de risco e planeje um contato proativo antes que a relação com o cliente esfrie.'
-        : 'Mantenha o ritmo de acompanhamento para preservar retenção e confiança.',
-      action: 'Abrir carteira',
+        ? copy(
+            'Revise os sinais de risco e planeje um contato proativo antes que a relação com o cliente esfrie.',
+            'Review the risk signals and plan proactive outreach before the client relationship cools.',
+          )
+        : copy(
+            'Mantenha o ritmo de acompanhamento para preservar retenção e confiança.',
+            'Keep up your follow-up rhythm to preserve retention and trust.',
+          ),
+      action: copy('Abrir carteira', 'Open book'),
       href: '/agent/policies',
       tone: 'amber',
     },
     {
-      title: txnExpected > txnPaid ? 'Existe receita esperada pronta para acompanhamento.' : 'Sua produção está alinhada com os pagamentos registrados.',
+      title: txnExpected > txnPaid
+        ? copy('Existe receita esperada pronta para acompanhamento.', 'Expected revenue is ready for follow-up.')
+        : copy('Sua produção está alinhada com os pagamentos registrados.', 'Your production is aligned with recorded payments.'),
       description: txnExpected > txnPaid
-        ? `A diferença atual entre o esperado e o pago é de ${formatCurrency(Math.max(0, txnExpected - txnPaid))}.`
+        ? copy(
+            `A diferença atual entre o esperado e o pago é de ${formatCurrency(Math.max(0, txnExpected - txnPaid), language)}.`,
+            `The current difference between expected and paid is ${formatCurrency(Math.max(0, txnExpected - txnPaid), language)}.`,
+          )
         : access.canManageTeam
-          ? 'Use o extrato para acompanhar detalhes, repasses e movimentos da sua equipe.'
-          : 'Use o extrato para acompanhar os detalhes e movimentos da sua produção.',
-      action: 'Ver comissões',
+          ? copy(
+              'Use o extrato para acompanhar detalhes, repasses e movimentos da sua equipe.',
+              'Use the statement to track your team details, splits, and movements.',
+            )
+          : copy(
+              'Use o extrato para acompanhar os detalhes e movimentos da sua produção.',
+              'Use the statement to track the details and movements of your production.',
+            ),
+      action: copy('Ver comissões', 'View commissions'),
       href: '/agent/commissions',
       tone: 'violet',
     },
@@ -590,7 +641,10 @@ export default async function AgentDashboard({
         {loadError && (
           <div className="mb-5">
             <ErrorBanner>
-              Não foi possível carregar seus dados agora. Os números abaixo podem estar incompletos — tente atualizar a página.
+              {copy(
+                'Não foi possível carregar seus dados agora. Os números abaixo podem estar incompletos — tente atualizar a página.',
+                'We could not load your data right now. The numbers below may be incomplete — try refreshing the page.',
+              )}
             </ErrorBanner>
           </div>
         )}
@@ -607,14 +661,14 @@ export default async function AgentDashboard({
               <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                 <div className="max-w-4xl">
                   <p data-hero-reveal className="text-xs font-semibold uppercase tracking-[0.18em] text-mint">
-                    Bom dia, {firstName}!
+                    {copy(`Bom dia, ${firstName}!`, `Good morning, ${firstName}!`)}
                   </p>
                   <h1
                     id="agent-financial-title"
                     data-hero-reveal
                     className="mt-4 max-w-4xl text-[clamp(2.35rem,4.1vw,4.35rem)] font-medium leading-[0.98] tracking-[-0.06em]"
                   >
-                    Suas comissões de {currentMonthName}.
+                    {copy(`Suas comissões de ${currentMonthName}.`, `Your ${currentMonthName} commissions.`)}
                   </h1>
                 </div>
                 <Link
@@ -622,17 +676,22 @@ export default async function AgentDashboard({
                   href="/agent/commissions"
                   className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-white/15 px-4 py-2.5 text-xs font-semibold text-paper/78 transition-colors hover:bg-white hover:text-rail-strong"
                 >
-                  Ver extrato <span aria-hidden>↗</span>
+                  {copy('Ver extrato', 'View statement')} <span aria-hidden>↗</span>
                 </Link>
               </div>
 
               <div data-hero-reveal className="mt-7">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-paper/42">
-                  Total registrado <span aria-hidden>·</span> USD
+                  {copy('Total registrado', 'Recorded total')} <span aria-hidden>·</span> USD
                 </p>
                 <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3">
                   <p
-                    aria-label={loadError ? 'Total de comissões indisponível' : `Total de ${formatCurrency(commissionThisMonth)} em comissões`}
+                    aria-label={loadError
+                      ? copy('Total de comissões indisponível', 'Commission total unavailable')
+                      : copy(
+                          `Total de ${formatCurrency(commissionThisMonth, language)} em comissões`,
+                          `Total commissions of ${formatCurrency(commissionThisMonth, language)}`,
+                        )}
                     className="flex items-start gap-2"
                   >
                     {!loadError && (
@@ -647,14 +706,19 @@ export default async function AgentDashboard({
 
                   {hasCommissionComparison && (
                     <div className="pb-1 sm:pb-2">
-                      <Delta value={commissionDelta} />
-                      <p className="mt-2 text-xs text-paper/48">em relação a {previousMonthName}</p>
+                      <Delta value={commissionDelta} copy={copy} language={language} />
+                      <p className="mt-2 text-xs text-paper/48">
+                        {copy(`em relação a ${previousMonthName}`, `compared with ${previousMonthName}`)}
+                      </p>
                     </div>
                   )}
 
                   {hasNoPreviousCommissionValue && (
                     <p className="pb-1 text-xs text-paper/48 sm:pb-2">
-                      Sem valor registrado em {previousMonthName}
+                      {copy(
+                        `Sem valor registrado em ${previousMonthName}`,
+                        `No value recorded in ${previousMonthName}`,
+                      )}
                     </p>
                   )}
                 </div>
@@ -662,8 +726,12 @@ export default async function AgentDashboard({
 
               <div data-hero-reveal className="mt-7 rounded-[20px] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
                 <div className="mb-4 flex items-center justify-between">
-                  <p className="text-xs font-medium text-paper/52">Comissões registradas · 6 meses</p>
-                  <p className="font-mono text-xs text-paper/46">Período {currentPeriodLabel}</p>
+                  <p className="text-xs font-medium text-paper/52">
+                    {copy('Comissões registradas · 6 meses', 'Recorded commissions · 6 months')}
+                  </p>
+                  <p className="font-mono text-xs text-paper/46">
+                    {copy(`Período ${currentPeriodLabel}`, `Period ${currentPeriodLabel}`)}
+                  </p>
                 </div>
                 <TrendChart
                   data={commissionTrend}
@@ -671,29 +739,29 @@ export default async function AgentDashboard({
                   tone="onDark"
                   interactive
                   chartHeight={124}
-                  ariaLabel="Comissões registradas nos últimos seis meses"
+                  ariaLabel={copy('Comissões registradas nos últimos seis meses', 'Commissions recorded in the last six months')}
                 />
               </div>
 
               <div data-hero-reveal className="mt-5 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-3">
                 {[
                   {
-                    label: 'Esperada',
+                    label: copy('Esperada', 'Expected'),
                     value: txnExpected,
                     tone: 'text-paper',
-                    detail: includesCarrierExpected ? 'Projetada pela National Life' : null,
+                    detail: includesCarrierExpected ? copy('Projetada pela National Life', 'Projected by National Life') : null,
                   },
                   {
-                    label: 'Paga',
+                    label: copy('Paga', 'Paid'),
                     value: txnPaid,
                     tone: 'text-mint',
-                    detail: includesCarrierPaid ? 'Líquida confirmada pela National Life' : null,
+                    detail: includesCarrierPaid ? copy('Líquida confirmada pela National Life', 'Net amount confirmed by National Life') : null,
                   },
                   {
-                    label: 'Chargebacks',
+                    label: copy('Estornos', 'Chargebacks'),
                     value: txnChargeback,
                     tone: 'text-[oklch(0.78_0.12_68)]',
-                    detail: includesCarrierChargeback ? 'Saldo mais recente da National Life' : null,
+                    detail: includesCarrierChargeback ? copy('Saldo mais recente da National Life', 'Latest balance from National Life') : null,
                   },
                 ].map((metric) => (
                   <div key={metric.label} className="bg-rail-strong/80 px-4 py-3.5">
@@ -709,24 +777,31 @@ export default async function AgentDashboard({
           <aside data-hero-reveal className="relative flex flex-col border-t border-border-steel bg-[#f4f4f1] p-6 text-ink sm:p-7 lg:col-span-4 lg:border-l lg:border-t-0 lg:p-8">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-muted">Sua fila</p>
-                <h2 className="mt-2 text-2xl font-medium tracking-[-0.035em] text-ink">Prioridades de hoje</h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-muted">
+                  {copy('Sua fila', 'Your queue')}
+                </p>
+                <h2 className="mt-2 text-2xl font-medium tracking-[-0.035em] text-ink">
+                  {copy('Prioridades de hoje', "Today's priorities")}
+                </h2>
               </div>
               <span className="flex h-10 w-10 items-center justify-center rounded-full bg-rail-strong text-sm font-semibold text-paper">
                 {loadError ? '—' : dueFollowUps + openRequirements + atRiskPolicies + dueReviews}
               </span>
             </div>
             <p className="mt-4 max-w-xs text-sm leading-6 text-ink-muted">
-              Comece pelo que pode destravar resultado ou proteger sua carteira hoje.
+              {copy(
+                'Comece pelo que pode destravar resultado ou proteger sua carteira hoje.',
+                'Start with what can unlock results or protect your book today.',
+              )}
             </p>
             <div className="mt-6 flex flex-col gap-1">
-              <PriorityRow href="/agent/activities" label="Retornos pendentes" value={loadError ? null : dueFollowUps} tone="danger" />
-              <PriorityRow href="/agent/activities" label="Pendências abertas" value={loadError ? null : openRequirements} tone="amber" />
-              <PriorityRow href="/agent/policies" label="Apólices em risco" value={loadError ? null : atRiskPolicies} tone="danger" />
-              <PriorityRow href="/agent/policies" label="Revisões anuais" value={loadError ? null : dueReviews} tone="mint" />
+              <PriorityRow href="/agent/activities" label={copy('Retornos pendentes', 'Pending follow-ups')} value={loadError ? null : dueFollowUps} tone="danger" />
+              <PriorityRow href="/agent/activities" label={copy('Pendências abertas', 'Open requirements')} value={loadError ? null : openRequirements} tone="amber" />
+              <PriorityRow href="/agent/policies" label={copy('Apólices em risco', 'Policies at risk')} value={loadError ? null : atRiskPolicies} tone="danger" />
+              <PriorityRow href="/agent/policies" label={copy('Revisões anuais', 'Annual reviews')} value={loadError ? null : dueReviews} tone="mint" />
             </div>
             <Link href="/agent/activities" className="mt-auto inline-flex min-h-11 w-full items-center justify-center rounded-full bg-rail-strong px-4 py-3 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5">
-              Abrir fila completa
+              {copy('Abrir fila completa', 'Open full queue')}
             </Link>
           </aside>
         </section>
@@ -756,13 +831,15 @@ export default async function AgentDashboard({
           >
             <div className="flex flex-col gap-3 border-b border-border-steel/75 pb-5 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-deep">Agenda acionável</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-deep">
+                  {copy('Agenda acionável', 'Actionable schedule')}
+                </p>
                 <h2 id="today-follow-ups-title" className="mt-2 max-w-4xl text-2xl font-medium tracking-[-0.04em] text-ink sm:text-3xl">
-                  Seus contatos de hoje, prontos para avançar.
+                  {copy('Seus contatos de hoje, prontos para avançar.', "Today's contacts, ready to move forward.")}
                 </h2>
               </div>
               <Link href="/agent/activities#follow-ups" className="inline-flex min-h-10 w-fit items-center rounded-full border border-border-steel bg-paper px-4 text-xs font-semibold text-ink transition-colors hover:border-teal/35 hover:bg-teal-pale">
-                Ver agenda completa <span aria-hidden className="ml-1.5">↗</span>
+                {copy('Ver agenda completa', 'View full schedule')} <span aria-hidden className="ml-1.5">↗</span>
               </Link>
             </div>
 
@@ -770,7 +847,7 @@ export default async function AgentDashboard({
               {followUpsOverdue.length > 0 && (
                 <div>
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <h3 className="text-sm font-semibold text-ink">Follow-ups atrasados</h3>
+                    <h3 className="text-sm font-semibold text-ink">{copy('Retornos atrasados', 'Overdue follow-ups')}</h3>
                     <span className="rounded-full bg-danger-pale px-2.5 py-1 font-mono text-[10px] font-semibold text-danger">
                       {followUpsOverdue.length}
                     </span>
@@ -786,7 +863,7 @@ export default async function AgentDashboard({
               {followUpsToday.length > 0 && (
                 <div className={followUpsOverdue.length === 0 ? "lg:col-span-2" : undefined}>
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <h3 className="text-sm font-semibold text-ink">Follow-ups de hoje</h3>
+                    <h3 className="text-sm font-semibold text-ink">{copy('Retornos de hoje', "Today's follow-ups")}</h3>
                     <span className="rounded-full bg-teal-pale px-2.5 py-1 font-mono text-[10px] font-semibold text-teal-deep">
                       {followUpsToday.length}
                     </span>
@@ -830,17 +907,22 @@ export default async function AgentDashboard({
           journeyHref={journeyHref}
         />
 
-        <section aria-label="Resumo da operação" className="mt-12 grid grid-flow-dense grid-cols-1 gap-4 lg:grid-cols-12">
+        <section aria-label={copy('Resumo da operação', 'Operation summary')} className="mt-12 grid grid-flow-dense grid-cols-1 gap-4 lg:grid-cols-12">
           <Link href="/agent/cases" className="keepr-card keepr-card-interactive group relative min-h-[250px] overflow-hidden rounded-[28px] p-7 lg:col-span-4" data-stack-card>
             <div aria-hidden className="absolute -bottom-20 -right-12 h-52 w-52 rounded-full bg-teal-pale transition-transform duration-700 ease-out group-hover:scale-105" />
             <div className="relative flex h-full flex-col justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-muted">Pipeline</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-muted">{copy('Funil', 'Pipeline')}</p>
                 <p className="mt-4 font-mono text-5xl font-medium tracking-[-0.06em] tabular-nums text-ink">{countValue(openCases)}</p>
-                <p className="mt-2 text-sm text-ink-muted">oportunidades ativas em andamento</p>
+                <p className="mt-2 text-sm text-ink-muted">{copy('oportunidades ativas em andamento', 'active opportunities in progress')}</p>
               </div>
               <div className="mt-8 flex items-center justify-between border-t border-border-steel/70 pt-4 text-xs">
-                <span className="text-ink-muted">{countValue(awaitingIllustration)} aguardando ilustração</span>
+                <span className="text-ink-muted">
+                  {copy(
+                    `${countValue(awaitingIllustration)} aguardando ilustração`,
+                    `${countValue(awaitingIllustration)} awaiting illustration`,
+                  )}
+                </span>
                 <span aria-hidden className="text-ink">↗</span>
               </div>
             </div>
@@ -850,12 +932,17 @@ export default async function AgentDashboard({
             <div aria-hidden className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-gold-pale transition-transform duration-700 ease-out group-hover:scale-105" />
             <div className="relative flex h-full flex-col justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-muted">Carteira</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-muted">{copy('Carteira', 'Book')}</p>
                 <p className="mt-4 font-mono text-5xl font-medium tracking-[-0.06em] tabular-nums text-ink">{countValue(policyCount)}</p>
-                <p className="mt-2 text-sm text-ink-muted">apólices sob seu cuidado</p>
+                <p className="mt-2 text-sm text-ink-muted">{copy('apólices sob seu cuidado', 'policies under your care')}</p>
               </div>
               <div className="mt-8 flex items-center justify-between border-t border-border-steel/70 pt-4 text-xs">
-                <span className="text-ink-muted">{countValue(atRiskPolicies)} sinais de risco</span>
+                <span className="text-ink-muted">
+                  {copy(
+                    `${countValue(atRiskPolicies)} sinais de risco`,
+                    `${countValue(atRiskPolicies)} risk signals`,
+                  )}
+                </span>
                 <span aria-hidden className="text-ink">↗</span>
               </div>
             </div>
@@ -866,12 +953,17 @@ export default async function AgentDashboard({
               <div aria-hidden className="absolute -bottom-24 left-1/3 h-56 w-56 rounded-full bg-[oklch(0.91_0.045_286)] transition-transform duration-700 ease-out group-hover:scale-105" />
               <div className="relative flex h-full flex-col justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-muted">Rede</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-muted">{copy('Rede', 'Network')}</p>
                   <p className="mt-4 font-mono text-5xl font-medium tracking-[-0.06em] tabular-nums text-ink">{countValue(teamAgentIds.length)}</p>
-                  <p className="mt-2 text-sm text-ink-muted">agentes conectados à sua estrutura</p>
+                  <p className="mt-2 text-sm text-ink-muted">{copy('agentes conectados à sua estrutura', 'agents connected to your structure')}</p>
                 </div>
                 <div className="mt-8 flex items-center justify-between border-t border-border-steel/70 pt-4 text-xs">
-                  <span className="text-ink-muted">{moneyValue(commissionTotalAmount)} em comissões</span>
+                  <span className="text-ink-muted">
+                    {copy(
+                      `${moneyValue(commissionTotalAmount)} em comissões`,
+                      `${moneyValue(commissionTotalAmount)} in commissions`,
+                    )}
+                  </span>
                   <span aria-hidden className="text-ink">↗</span>
                 </div>
               </div>
@@ -882,27 +974,35 @@ export default async function AgentDashboard({
         <section className="py-24 sm:py-32" aria-labelledby="portfolio-panorama-title">
           <div className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.17em] text-teal-deep">Leitura da carteira</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.17em] text-teal-deep">
+                {copy('Leitura da carteira', 'Book overview')}
+              </p>
               <h2 id="portfolio-panorama-title" className="mt-3 max-w-4xl text-3xl font-medium tracking-[-0.045em] text-ink sm:text-5xl">
-                Panorama sem ruído.
+                {copy('Panorama sem ruído.', 'A clear panorama.')}
               </h2>
             </div>
             <p className="max-w-md text-sm leading-6 text-ink-muted">
-              Passe o cursor para aprofundar cada recorte e identificar onde sua carteira está concentrada.
+              {copy(
+                'Passe o cursor para aprofundar cada recorte e identificar onde sua carteira está concentrada.',
+                'Hover over each segment to explore it and identify where your book is concentrated.',
+              )}
             </p>
           </div>
           <div className="keepr-card flex flex-col overflow-hidden rounded-[28px] md:flex-row" data-stack-card>
             <BreakdownList
-              title="Por status"
-              rows={byStatus.map((s) => ({ label: policyStatusLabel[s.status] ?? s.status, count: safeGroupCount(s._count) }))}
+              title={copy('Por status', 'By status')}
+              rows={byStatus.map((s) => ({ label: localizedPolicyStatusLabel[s.status] ?? s.status, count: safeGroupCount(s._count) }))}
+              emptyLabel={copy('Nenhuma apólice para exibir.', 'No policies to display.')}
             />
             <BreakdownList
-              title="Por carrier"
+              title={copy('Por seguradora', 'By carrier')}
               rows={byCarrier.map((c) => ({ label: c.carrier, count: safeGroupCount(c._count) }))}
+              emptyLabel={copy('Nenhuma seguradora para exibir.', 'No carriers to display.')}
             />
             <BreakdownList
-              title="Por produto"
+              title={copy('Por produto', 'By product')}
               rows={byProduct.map((p) => ({ label: p.product, count: safeGroupCount(p._count) }))}
+              emptyLabel={copy('Nenhum produto para exibir.', 'No products to display.')}
             />
           </div>
         </section>
@@ -913,13 +1013,15 @@ export default async function AgentDashboard({
           <div className="relative overflow-hidden rounded-[32px] bg-mint p-8 text-rail-strong sm:p-12 lg:flex lg:items-end lg:justify-between lg:gap-12">
             <div aria-hidden className="absolute -right-12 -top-20 h-64 w-64 rounded-full border-[42px] border-rail-strong/8" />
             <div className="relative max-w-4xl">
-              <p className="text-xs font-semibold uppercase tracking-[0.17em] text-rail-strong/55">Mantenha o ritmo</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.17em] text-rail-strong/55">
+                {copy('Mantenha o ritmo', 'Keep the momentum')}
+              </p>
               <h2 className="mt-4 max-w-5xl text-3xl font-medium leading-[1.02] tracking-[-0.05em] sm:text-5xl">
-                A próxima oportunidade pode começar agora.
+                {copy('A próxima oportunidade pode começar agora.', 'Your next opportunity can start now.')}
               </h2>
             </div>
             <Link href="/agent/cases/new" className="relative mt-8 inline-flex min-h-12 shrink-0 items-center justify-center rounded-full bg-rail-strong px-6 py-3 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-1 lg:mt-0">
-              Novo atendimento
+              {copy('Novo atendimento', 'New case')}
             </Link>
           </div>
         </section>

@@ -1,5 +1,7 @@
 "use client";
 
+import { useI18n } from "@/components/i18n/LanguageProvider";
+
 export function Pagination({
   page,
   pageCount,
@@ -11,10 +13,11 @@ export function Pagination({
   onPageChange: (page: number) => void;
   className?: string;
 }) {
+  const { copy } = useI18n();
   if (pageCount <= 1) return null;
   return (
     <nav
-      aria-label="Paginação"
+      aria-label={copy("Paginação", "Pagination")}
       className={`mt-4 flex items-center justify-between gap-3 border-t border-border-steel pt-4 ${className}`}
     >
       <button
@@ -23,10 +26,10 @@ export function Pagination({
         disabled={page <= 1}
         className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border-steel bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-[border-color,background-color,transform] duration-300 hover:-translate-y-0.5 hover:border-teal hover:bg-panel focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:border-border-steel"
       >
-        <span aria-hidden>←</span> Anterior
+        <span aria-hidden>←</span> {copy("Anterior", "Previous")}
       </button>
       <span className="font-mono text-xs text-ink-muted">
-        Página {page} de {pageCount}
+        {copy(`Página ${page} de ${pageCount}`, `Page ${page} of ${pageCount}`)}
       </span>
       <button
         type="button"
@@ -34,7 +37,7 @@ export function Pagination({
         disabled={page >= pageCount}
         className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border-steel bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-[border-color,background-color,transform] duration-300 hover:-translate-y-0.5 hover:border-teal hover:bg-panel focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:border-border-steel"
       >
-        Próxima <span aria-hidden>→</span>
+        {copy("Próxima", "Next")} <span aria-hidden>→</span>
       </button>
     </nav>
   );

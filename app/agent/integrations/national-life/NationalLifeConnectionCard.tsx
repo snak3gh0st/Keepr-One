@@ -11,6 +11,7 @@ import {
 } from './actions'
 import { NationalLifeBrowserModal } from './NationalLifeBrowserModal'
 import type { ActiveNationalLifeAttempt } from './useNationalLifeConnectionAttempt'
+import { useI18n } from '@/components/i18n/LanguageProvider'
 
 type SerializableSessionSummary = Omit<
   AgentSessionSummary,
@@ -22,7 +23,7 @@ type SerializableSessionSummary = Omit<
   illustrationSsoCheckedAt: Date | string | null
 }
 
-function formatDateTime(value: Date | string | null) {
+function formatDateTime(value: Date | string | null, locale: string) {
   if (!value) {
     return '—'
   }
@@ -30,7 +31,7 @@ function formatDateTime(value: Date | string | null) {
   if (Number.isNaN(date.getTime())) {
     return '—'
   }
-  return new Intl.DateTimeFormat('en-US', {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(date)
@@ -41,6 +42,7 @@ export function NationalLifeConnectionCard({
 }: {
   summary: SerializableSessionSummary | null
 }) {
+  const { copy, locale } = useI18n()
   const router = useRouter()
   const [attempt, setAttempt] = useState<ActiveNationalLifeAttempt | null>(null)
   const [busy, setBusy] = useState<'connect' | 'disconnect' | null>(null)
@@ -77,7 +79,7 @@ export function NationalLifeConnectionCard({
         setMessage({ kind: 'error', text: result.message })
         return
       }
-      setMessage({ kind: 'success', text: 'National Life disconnected.' })
+      setMessage({ kind: 'success', text: copy('National Life desconectada.', 'National Life disconnected.') })
       router.refresh()
     } finally {
       setBusy(null)
@@ -86,7 +88,7 @@ export function NationalLifeConnectionCard({
 
   function handleAuthenticated() {
     setAttempt(null)
-    setMessage({ kind: 'success', text: 'National Life connected' })
+    setMessage({ kind: 'success', text: copy('National Life conectada', 'National Life connected') })
     router.refresh()
   }
 
@@ -110,17 +112,18 @@ export function NationalLifeConnectionCard({
                 <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
                   National Life
                 </h2>
-                <p className="text-sm text-ink-muted">Agent portal</p>
+                <p className="text-sm text-ink-muted">{copy('Portal do agente', 'Agent portal')}</p>
               </div>
             </div>
             <p className="mt-5 text-sm leading-6 text-ink-muted">
-              Sign in on the official National Life portal. Keepr One keeps the
-              signed-in session by default. Protected credential storage is optional
-              and can be enabled or revoked under Settings.
+              {copy(
+                'Entre no portal oficial da National Life. Por padrão, a Keepr One mantém apenas a sessão autenticada. O armazenamento protegido de credenciais é opcional e pode ser ativado ou revogado nas Configurações.',
+                'Sign in on the official National Life portal. Keepr One keeps the signed-in session by default. Protected credential storage is optional and can be enabled or revoked under Settings.',
+              )}
             </p>
             <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-ink">
               <span className="h-2 w-2 rounded-full bg-success" />
-              Protected K-Bot sign-in is always opt-in
+              {copy('O login protegido do K-Bot é sempre opcional', 'Protected K-Bot sign-in is always opt-in')}
             </p>
           </div>
 
@@ -133,7 +136,7 @@ export function NationalLifeConnectionCard({
                   : 'bg-panel text-ink-muted'
             }`}
           >
-            {connected ? 'Connected' : summary ? 'Reconnect needed' : 'Not connected'}
+            {connected ? copy('Conectado', 'Connected') : summary ? copy('Reconexão necessária', 'Reconnect needed') : copy('Não conectado', 'Not connected')}
           </span>
         </div>
 
@@ -141,15 +144,15 @@ export function NationalLifeConnectionCard({
           <dl className="grid divide-y divide-border-steel border-b border-border-steel sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             <div className="px-5 py-4 sm:px-6">
               <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                Last connected
+                {copy('Última conexão', 'Last connected')}
               </dt>
               <dd className="mt-2 font-mono text-sm text-ink">
-                {formatDateTime(summary.lastConnectedAt)}
+                {formatDateTime(summary.lastConnectedAt, locale)}
               </dd>
             </div>
             <div className="px-5 py-4 sm:px-6">
               <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                Last checked
+                {copy('Última verificação', 'Last checked')}
               </dt>
               {/* Written only after an authenticated page answered, so this is a
                   successful check and not merely the last attempt. It replaced a
@@ -157,12 +160,12 @@ export function NationalLifeConnectionCard({
                   cookie: the portal answered authenticated three minutes past it.
                   No cookie predicts when the session dies — only a check. */}
               <dd className="mt-2 font-mono text-sm text-ink">
-                {formatDateTime(summary.lastUsedAt)}
+                {formatDateTime(summary.lastUsedAt, locale)}
               </dd>
             </div>
             <div className="px-5 py-4 sm:px-6">
               <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                Illustrations (Foresight)
+                {copy('Ilustrações (Foresight)', 'Illustrations (Foresight)')}
               </dt>
               {/* The PDF path sits behind the carrier's Auth0 tenant, which dies
                   while the portal session lives. Knowing before clicking beats
@@ -174,14 +177,14 @@ export function NationalLifeConnectionCard({
                 }`}
               >
                 {summary.illustrationSsoReachable === null
-                  ? 'Not checked yet'
+                  ? copy('Ainda não verificado', 'Not checked yet')
                   : summary.illustrationSsoReachable
-                    ? 'Available'
-                    : 'Sign in again'}
+                    ? copy('Disponível', 'Available')
+                    : copy('Entre novamente', 'Sign in again')}
               </dd>
               {summary.illustrationSsoCheckedAt && (
                 <p className="mt-1 text-xs text-ink-muted">
-                  on {formatDateTime(summary.illustrationSsoCheckedAt)}
+                  {copy('em {date}', 'on {date}', { date: formatDateTime(summary.illustrationSsoCheckedAt, locale) })}
                 </p>
               )}
             </div>
@@ -196,7 +199,7 @@ export function NationalLifeConnectionCard({
               disabled={busy !== null}
               onClick={handleConnect}
             >
-              {busy === 'connect' ? 'Opening secure session...' : 'Connect National Life'}
+              {busy === 'connect' ? copy('Abrindo sessão segura...', 'Opening secure session...') : copy('Conectar National Life', 'Connect National Life')}
             </Button>
           )}
           {summary && (
@@ -206,7 +209,7 @@ export function NationalLifeConnectionCard({
               disabled={busy !== null}
               onClick={handleDisconnect}
             >
-              {busy === 'disconnect' ? 'Disconnecting...' : 'Disconnect'}
+              {busy === 'disconnect' ? copy('Desconectando...', 'Disconnecting...') : copy('Desconectar', 'Disconnect')}
             </Button>
           )}
           {connected && (
@@ -214,7 +217,7 @@ export function NationalLifeConnectionCard({
               href="/agent/integrations/national-life/data"
               className="inline-flex items-center border border-white/15 px-4 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-white/[0.06]"
             >
-              View synced data
+              {copy('Ver dados sincronizados', 'View synced data')}
             </Link>
           )}
           {message && (
@@ -226,7 +229,7 @@ export function NationalLifeConnectionCard({
             >
               {message.text}
               {message.kind === 'error' && !connected && (
-                <span className="ml-1">You can connect again at any time.</span>
+                <span className="ml-1">{copy('Você pode conectar novamente a qualquer momento.', 'You can connect again at any time.')}</span>
               )}
             </p>
           )}

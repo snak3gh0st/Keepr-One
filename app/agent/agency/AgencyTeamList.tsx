@@ -1,3 +1,7 @@
+"use client";
+
+import { useI18n } from "@/components/i18n/LanguageProvider";
+
 export type AgencyTeamMember = {
   id: string;
   name: string;
@@ -28,11 +32,13 @@ export function AgencyTeamList({
   members: AgencyTeamMember[];
   agencyName: string;
 }) {
+  const { copy } = useI18n();
+
   if (members.length === 0) {
     return (
       <div className="agency-team-empty">
-        <strong>A equipe ainda não possui vínculos ativos.</strong>
-        <span>Envie o primeiro convite para começar a formar a equipe.</span>
+        <strong>{copy("A equipe ainda não possui vínculos ativos.", "The team has no active connections yet.")}</strong>
+        <span>{copy("Envie o primeiro convite para começar a formar a equipe.", "Send the first invitation to start building the team.")}</span>
       </div>
     );
   }
@@ -41,16 +47,19 @@ export function AgencyTeamList({
     <div
       className="agency-team-table"
       role="table"
-      aria-label={`Equipe e assinaturas da ${agencyName}`}
+      aria-label={copy(
+        `Equipe e assinaturas da ${agencyName}`,
+        `${agencyName} team and subscriptions`,
+      )}
       aria-colcount={4}
       aria-rowcount={members.length + 1}
     >
       <div className="agency-team-table-head" role="rowgroup">
         <div role="row">
-          <span role="columnheader">Integrante</span>
-          <span role="columnheader">Vínculo</span>
-          <span role="columnheader">Assinatura</span>
-          <span role="columnheader">Mensalidade</span>
+          <span role="columnheader">{copy("Integrante", "Member")}</span>
+          <span role="columnheader">{copy("Vínculo", "Connection")}</span>
+          <span role="columnheader">{copy("Assinatura", "Subscription")}</span>
+          <span role="columnheader">{copy("Mensalidade", "Monthly fee")}</span>
         </div>
       </div>
 
@@ -65,11 +74,11 @@ export function AgencyTeamList({
               </div>
             </div>
 
-            <div className="agency-team-cell" role="cell" data-label="Vínculo">
+            <div className="agency-team-cell" role="cell" data-label={copy("Vínculo", "Connection")}>
               <span>{member.role}</span>
             </div>
 
-            <div className="agency-team-cell" role="cell" data-label="Assinatura">
+            <div className="agency-team-cell" role="cell" data-label={copy("Assinatura", "Subscription")}>
               <span className="agency-team-status" data-tone={member.statusTone}>
                 {member.statusLabel}
               </span>
@@ -78,7 +87,7 @@ export function AgencyTeamList({
             <div
               className="agency-team-cell agency-team-price"
               role="cell"
-              data-label="Mensalidade"
+              data-label={copy("Mensalidade", "Monthly fee")}
             >
               <strong>{member.priceLabel}</strong>
             </div>

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { FollowUpModal } from "./FollowUpModal";
+import { useI18n } from "@/components/i18n/LanguageProvider";
 
 type Result = { ok: true } | { ok: false; message: string };
 
@@ -13,12 +14,6 @@ export type FollowUpItem = {
   completedAt: string | null;
   cancelledAt: string | null;
 };
-
-const DATE_TIME = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: "America/New_York",
-  dateStyle: "long",
-  timeStyle: "short",
-});
 
 function dateInputValue(iso: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -66,6 +61,12 @@ export function FollowUpPanel({
   onRefresh: () => void;
   now: string;
 }) {
+  const { copy, locale } = useI18n();
+  const dateTime = useMemo(() => new Intl.DateTimeFormat(locale, {
+    timeZone: "America/New_York",
+    dateStyle: "long",
+    timeStyle: "short",
+  }), [locale]);
   const [modal, setModal] = useState<
     | { mode: "create" }
     | { mode: "reschedule"; followUp: FollowUpItem }
@@ -106,9 +107,9 @@ export function FollowUpPanel({
     <section className="crm-followup-panel" aria-labelledby="lead-followup-title">
       <header>
         <div>
-          <span>Próximo contato</span>
+          <span>{copy("Próximo contato", "Next contact")}</span>
           <h2 id="lead-followup-title">Follow-up</h2>
-          <p>Mantenha o ritmo do relacionamento sem depender da memória.</p>
+          <p>{copy("Mantenha o ritmo do relacionamento sem depender da memória.", "Keep the relationship moving without relying on memory.")}</p>
         </div>
         <button
           type="button"
@@ -117,22 +118,22 @@ export function FollowUpPanel({
           }
         >
           <span aria-hidden="true">{next ? "↻" : "+"}</span>
-          {next ? "Reagendar follow-up" : "Agendar follow-up"}
+          {next ? copy("Reagendar follow-up", "Reschedule follow-up") : copy("Agendar follow-up", "Schedule follow-up")}
         </button>
       </header>
 
       {next ? (
         <article className="crm-followup-next" data-overdue={overdue || undefined}>
           <div className="crm-followup-date">
-            <span>{overdue ? "Atrasado" : "Agendado"}</span>
-            <strong>{DATE_TIME.format(new Date(next.scheduledAt))}</strong>
+            <span>{overdue ? copy("Atrasado", "Overdue") : copy("Agendado", "Scheduled")}</span>
+            <strong>{dateTime.format(new Date(next.scheduledAt))}</strong>
           </div>
           <div className="crm-followup-copy">
             <strong>{next.title}</strong>
             <p>
               {overdue
-                ? "Este contato continua na sua fila de Hoje até ser resolvido."
-                : `Próximo follow-up com ${prospectName}.`}
+                ? copy("Este contato continua na sua fila de Hoje até ser resolvido.", "This contact remains in your Today queue until it is resolved.")
+                : copy("Próximo follow-up com {name}.", "Next follow-up with {name}.", { name: prospectName })}
             </p>
           </div>
           <div className="crm-followup-actions">
@@ -141,7 +142,7 @@ export function FollowUpPanel({
               disabled={pending}
               onClick={() => setModal({ mode: "reschedule", followUp: next })}
             >
-              Reagendar
+              {copy("Reagendar", "Reschedule")}
             </button>
             <button
               type="button"
@@ -150,7 +151,7 @@ export function FollowUpPanel({
                 resolve(() => onComplete(next.id), () => setCompletedPrompt(true))
               }
             >
-              Marcar como realizado
+              {copy("Marcar como realizado", "Mark as completed")}
             </button>
             <button
               type="button"
@@ -158,7 +159,7 @@ export function FollowUpPanel({
               disabled={pending}
               onClick={() => resolve(() => onCancel(next.id))}
             >
-              Cancelar
+              {copy("Cancelar", "Cancel")}
             </button>
           </div>
         </article>
@@ -166,11 +167,11 @@ export function FollowUpPanel({
         <div className="crm-followup-empty">
           <span aria-hidden="true"><i /></span>
           <div>
-            <strong>Nenhum follow-up pendente.</strong>
-            <p>Defina o próximo contato para manter este lead em movimento.</p>
+            <strong>{copy("Nenhum follow-up pendente.", "No pending follow-ups.")}</strong>
+            <p>{copy("Defina o próximo contato para manter este lead em movimento.", "Set the next contact to keep this lead moving.")}</p>
           </div>
           <button type="button" onClick={() => setModal({ mode: "create" })}>
-            Definir uma data
+            {copy("Definir uma data", "Set a date")}
           </button>
         </div>
       )}
@@ -178,8 +179,8 @@ export function FollowUpPanel({
       {completedPrompt ? (
         <div className="crm-followup-success" role="status">
           <div>
-            <strong>Follow-up realizado.</strong>
-            <p>Deseja agendar o próximo?</p>
+            <strong>{copy("Follow-up realizado.", "Follow-up completed.")}</strong>
+            <p>{copy("Deseja agendar o próximo?", "Would you like to schedule the next one?")}</p>
           </div>
           <button
             type="button"
@@ -188,17 +189,17 @@ export function FollowUpPanel({
               setModal({ mode: "create" });
             }}
           >
-            Agendar próximo
+            {copy("Agendar próximo", "Schedule next")}
           </button>
           <button type="button" className="quiet" onClick={() => setCompletedPrompt(false)}>
-            Agora não
+            {copy("Agora não", "Not now")}
           </button>
         </div>
       ) : null}
 
       {history.length > 0 ? (
         <div className="crm-followup-history">
-          <h3>Histórico recente</h3>
+          <h3>{copy("Histórico recente", "Recent history")}</h3>
           <ol>
             {history.map((item) => (
               <li key={item.id}>
@@ -206,8 +207,8 @@ export function FollowUpPanel({
                 <div>
                   <strong>{item.title}</strong>
                   <small>
-                    {item.status === "COMPLETED" ? "Realizado" : "Cancelado"} ·{" "}
-                    {DATE_TIME.format(new Date(item.completedAt ?? item.cancelledAt ?? item.scheduledAt))}
+                    {item.status === "COMPLETED" ? copy("Realizado", "Completed") : copy("Cancelado", "Cancelled")} ·{" "}
+                    {dateTime.format(new Date(item.completedAt ?? item.cancelledAt ?? item.scheduledAt))}
                   </small>
                 </div>
               </li>
@@ -238,7 +239,7 @@ export function FollowUpPanel({
             ? timeInputValue(modal.followUp.scheduledAt)
             : undefined
         }
-        submitLabel={modal?.mode === "reschedule" ? "Salvar nova data" : "Agendar follow-up"}
+        submitLabel={modal?.mode === "reschedule" ? copy("Salvar nova data", "Save new date") : copy("Agendar follow-up", "Schedule follow-up")}
         onSubmit={async (input) => {
           const result =
             modal?.mode === "reschedule"
