@@ -1149,7 +1149,8 @@ describe('automatic carrier login recovery', () => {
         authEpoch: 5, leaseId: 'lease_old', attemptedAt: '2026-09-01T20:00:00.000Z',
       },
     }
-    tabs.query.mockResolvedValue([{ id: 17, active: true, url: authUrl }])
+    tabs.query.mockResolvedValue([])
+    tabs.create.mockResolvedValueOnce({ id: 17, active: false, url: undefined })
     tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
     let lastEventType = 'AUTH_RETRY_REQUESTED'
     vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
@@ -1173,6 +1174,7 @@ describe('automatic carrier login recovery', () => {
     emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
     await flush()
 
+    expect(tabs.create).toHaveBeenCalledWith({ active: false })
     expect(tabs.update).toHaveBeenCalledWith(17, { url: `${NLG}/agent/auth/login` })
     expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
       request.pathname.endsWith('/credential-leases'))).toHaveLength(0)

@@ -1509,7 +1509,7 @@ async function restartRetriedCommandAuthentication(
   const previous = await readCommandState()
   let tab = await findBoundCommandTab(previous.carrierTabId, hint)
   if (tab?.id === undefined) {
-    tab = await chrome.tabs.create({ active: true })
+    tab = await chrome.tabs.create({ active: false })
   }
   if (tab.id === undefined) throw new Error('COMMAND_TAB_UNAVAILABLE')
 
