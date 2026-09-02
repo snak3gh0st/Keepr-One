@@ -98,6 +98,10 @@ describe('National Life authentication page contract', () => {
     expect(acknowledgement).toEqual({ ok: true, code: 'SUBMITTED' })
     expect(page.window.document.querySelector<HTMLInputElement>('#email')?.value).toBe('sentinel-user')
     expect(page.window.document.querySelector<HTMLInputElement>('#password')?.value).toBe('sentinel-pass')
+    // O login normal da National Life mantém a confiança já escolhida pelo
+    // usuário. O K-Bot preenche somente usuário e senha; ele não desmarca nem
+    // substitui a preferência "Remember this device" do portal.
+    expect(page.window.document.querySelector<HTMLInputElement>('#chkRememberMe')?.checked).toBe(true)
     expect(submitted).toHaveBeenCalledTimes(1)
     expect(JSON.stringify(acknowledgement)).not.toMatch(/sentinel|username|password/)
 

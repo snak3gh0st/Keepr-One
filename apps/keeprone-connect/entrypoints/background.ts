@@ -1628,6 +1628,7 @@ function safeCredentialFallbackCode(error: unknown) {
     'CREDENTIAL_RATE_LIMITED',
     'DEVICE_ENCRYPTION_KEY_REQUIRED',
     'CLIENT_TOO_OLD',
+    'CREDENTIAL_AUTH_STATE_EXPIRED',
   ].includes(error.code)) return error.code
   return 'CREDENTIAL_BROKER_UNAVAILABLE'
 }
