@@ -97,6 +97,8 @@ const foresightArtifactRepository = {
     illustrationId: string
     monthlyPremium: number
     annualPremium: number
+    requestedTermDuration?: '10-G' | '15-G' | '20-G' | '30-G' | 'ART'
+    confirmedTermDuration?: '10-G' | '15-G' | '20-G' | '30-G' | 'ART'
   }) {
     const existing = await prisma.illustration.findFirst({
       where: {
@@ -111,7 +113,19 @@ const foresightArtifactRepository = {
       throw new ConnectorCommandError('EVENT_INVALID')
     }
     const rawPayload = existing.rawPayload && typeof existing.rawPayload === 'object' &&
-      !Array.isArray(existing.rawPayload) ? existing.rawPayload : {}
+      !Array.isArray(existing.rawPayload) ? existing.rawPayload as Record<string, unknown> : {}
+    const rawDraft = rawPayload.foresightTermDraft
+    const draft = rawDraft && typeof rawDraft === 'object' && !Array.isArray(rawDraft)
+      ? rawDraft as Record<string, unknown> : null
+    const termDurations = new Set(['10-G', '15-G', '20-G', '30-G', 'ART'])
+    const draftDuration = draft?.termDuration
+    const requestedTermDuration = input.requestedTermDuration ?? draftDuration
+    const confirmedTermDuration = input.confirmedTermDuration ?? requestedTermDuration
+    if (typeof draftDuration !== 'string' || !termDurations.has(draftDuration) ||
+      requestedTermDuration !== draftDuration || typeof confirmedTermDuration !== 'string' ||
+      !termDurations.has(confirmedTermDuration)) {
+      throw new ConnectorCommandError('EVENT_INVALID')
+    }
     const updated = await prisma.illustration.updateMany({
       where: {
         id: input.illustrationId,
@@ -130,6 +144,8 @@ const foresightArtifactRepository = {
             confirmedFaceAmount: faceAmount,
             confirmedMonthlyPremium: input.monthlyPremium,
             confirmedAnnualPremium: input.annualPremium,
+            requestedTermDuration,
+            confirmedTermDuration,
           },
         },
       },
@@ -217,7 +233,12 @@ const applicationDraftReceiptRepository = {
 }
 
 function commandErrorResponse(error: ConnectorCommandError): Response {
-  const status = error.code === 'COMMAND_NOT_FOUND' ? 404
+  const status = [
+    'FORESIGHT_TERM_PDF_INVALID',
+    'FORESIGHT_TERM_PREMIUM_MISSING',
+    'FORESIGHT_TERM_PREMIUM_MISMATCH',
+  ].includes(error.code) ? 422
+    : error.code === 'COMMAND_NOT_FOUND' ? 404
     : error.code === 'COMMAND_EXPIRED' ? 410
       : error.code === 'CONFIRMATION_REQUIRED' ? 409
         : 400
@@ -259,6 +280,27 @@ export async function POST(
         deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
       },
     )
+    if (event.type === 'COMMAND_STARTED') {
+      // The MFA lease is terminal before the user finishes the carrier step.
+      // COMMAND_STARTED is therefore the first server-side proof that the same
+      // command recovered, so retire its warning without making event delivery
+      // depend on notification cleanup.
+      try {
+        await prisma.notification.updateMany({
+          where: {
+            type: 'NATIONAL_LIFE_MFA_REQUIRED',
+            readAt: null,
+            dedupeKey: {
+              startsWith: `national-life-mfa-required:CONNECTOR_COMMAND:${params.commandId}:`,
+            },
+          },
+          data: { readAt: new Date() },
+        })
+      } catch {
+        // The command event is already durable and must not be retried merely
+        // because a presentation-only notification could not be retired.
+      }
+    }
     return new Response(null, { status: 204, headers: NO_STORE })
   } catch (error) {
     if (error instanceof LocalConnectorSignatureError) {

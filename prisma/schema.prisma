@@ -362,6 +362,11 @@ enum AgencyInvitationStatus {
   EXPIRED
 }
 
+enum AgencyInvitationCheckoutStatus {
+  PENDING
+  FINALIZED
+}
+
 /// Declares the commercial shape chosen by the inviting agency. It remains
 /// nullable only so invitations created before this field existed can expire
 /// or be reissued without an unsafe guessed backfill.
@@ -448,23 +453,24 @@ model User {
   /// users retain the product's historical New York behavior after migration.
   timeZone  String   @default("America/New_York")
 
-  agent                Agent?
-  client               Client?
-  imports              ImportBatch[]
-  auditLogs            AuditLog[]
-  emailVerified        Boolean               @default(false)
-  image                String?
-  updatedAt            DateTime              @updatedAt
-  sessions             Session[]
-  accounts             Account[]
-  uploadedDocuments    PolicyDocument[]
-  createdFollowUps     FollowUp[]            @relation("FollowUpCreator")
-  notifications        Notification[]        @relation("NotificationRecipient")
-  calendarIntegrations CalendarIntegration[]
-  calendarEvents       CalendarEvent[]       @relation("CalendarEventOwner")
-  calendarOAuthStates  CalendarOAuthState[]
-  schedulingPage       SchedulingPage?       @relation("SchedulingPageOwner")
-  schedulingBookings   SchedulingBooking[]   @relation("SchedulingBookingOwner")
+  agent                     Agent?
+  client                    Client?
+  imports                   ImportBatch[]
+  auditLogs                 AuditLog[]
+  emailVerified             Boolean                    @default(false)
+  image                     String?
+  updatedAt                 DateTime                   @updatedAt
+  sessions                  Session[]
+  accounts                  Account[]
+  uploadedDocuments         PolicyDocument[]
+  createdFollowUps          FollowUp[]                 @relation("FollowUpCreator")
+  notifications             Notification[]             @relation("NotificationRecipient")
+  calendarIntegrations      CalendarIntegration[]
+  calendarEvents            CalendarEvent[]            @relation("CalendarEventOwner")
+  calendarOAuthStates       CalendarOAuthState[]
+  schedulingPage            SchedulingPage?            @relation("SchedulingPageOwner")
+  schedulingBookings        SchedulingBooking[]        @relation("SchedulingBookingOwner")
+  agencyInvitationCheckouts AgencyInvitationCheckout[]
 
   @@map("user")
 }
@@ -507,6 +513,7 @@ model Agent {
   nationalLifeConnectorPairings         NationalLifeConnectorPairing[]
   nationalLifeConnectorDevices          NationalLifeConnectorDevice[]
   nationalLifeConnectorCommands         NationalLifeConnectorCommand[]
+  nationalLifeCredentialLeases          NationalLifeCredentialLease[]
   nationalLifeExportUploads             NationalLifeExportUpload[]
   nationalLifeDocumentTransfers         NationalLifeDocumentTransfer[]
   messagingAccount                      AgentMessagingAccount?
@@ -595,15 +602,51 @@ model AgencyInvitation {
   createdAt            DateTime                      @default(now())
   updatedAt            DateTime                      @updatedAt
 
-  agency             Agency            @relation(fields: [agencyId], references: [id], onDelete: Restrict)
-  invitedBy          Agent             @relation("AgencyInvitationInviter", fields: [invitedByAgentId], references: [id], onDelete: Restrict)
-  acceptedAgent      Agent?            @relation("AgencyInvitationAcceptedAgent", fields: [acceptedAgentId], references: [id], onDelete: Restrict)
-  acceptedMembership AgencyMembership? @relation("AgencyInvitationAcceptedMembership", fields: [acceptedMembershipId], references: [id], onDelete: Restrict)
+  agency             Agency                    @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+  invitedBy          Agent                     @relation("AgencyInvitationInviter", fields: [invitedByAgentId], references: [id], onDelete: Restrict)
+  acceptedAgent      Agent?                    @relation("AgencyInvitationAcceptedAgent", fields: [acceptedAgentId], references: [id], onDelete: Restrict)
+  acceptedMembership AgencyMembership?         @relation("AgencyInvitationAcceptedMembership", fields: [acceptedMembershipId], references: [id], onDelete: Restrict)
+  checkout           AgencyInvitationCheckout?
 
   @@index([agencyId, status])
   @@index([agencyId, recruitmentStage, status])
   @@index([invitedByAgentId])
   @@index([acceptedAgentId])
+}
+
+/// Holds a billing handoff without creating an account, membership, or access.
+/// Provider-confirmed finalization is the only path that consumes these fields.
+model AgencyInvitationCheckout {
+  id                      String                         @id @default(cuid())
+  invitationId            String                         @unique
+  email                   String
+  name                    String
+  agencyName              String?
+  passwordHash            String?
+  userId                  String?
+  plan                    PlatformPlan
+  inviterRole             AgencyMembershipRole
+  status                  AgencyInvitationCheckoutStatus @default(PENDING)
+  unitAmountCents         Int
+  acceptedTermsAt         DateTime
+  checkoutExpiresAt       DateTime
+  attemptNumber           Int                            @default(1)
+  stripeCheckoutSessionId String?                        @unique
+  stripeCustomerId        String?
+  stripeSubscriptionId    String?                        @unique
+  stripeProductId         String
+  stripePriceId           String
+  platformSubscriptionId  String?                        @unique
+  finalizedAt             DateTime?
+  createdAt               DateTime                       @default(now())
+  updatedAt               DateTime                       @updatedAt
+
+  invitation           AgencyInvitation      @relation(fields: [invitationId], references: [id], onDelete: Restrict)
+  user                 User?                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  platformSubscription PlatformSubscription? @relation(fields: [platformSubscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([status, updatedAt])
+  @@index([userId])
 }
 
 /// A subscription has exactly one subject. Individual plans point to an Agent,
@@ -632,9 +675,10 @@ model PlatformSubscription {
   createdAt            DateTime                   @default(now())
   updatedAt            DateTime                   @updatedAt
 
-  agent            Agent?            @relation("AgentPlatformSubscriptions", fields: [agentId], references: [id], onDelete: Restrict)
-  agency           Agency?           @relation(fields: [agencyId], references: [id], onDelete: Restrict)
-  agencyMembership AgencyMembership? @relation(fields: [agencyMembershipId], references: [id], onDelete: Restrict)
+  agent              Agent?                    @relation("AgentPlatformSubscriptions", fields: [agentId], references: [id], onDelete: Restrict)
+  agency             Agency?                   @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+  agencyMembership   AgencyMembership?         @relation(fields: [agencyMembershipId], references: [id], onDelete: Restrict)
+  invitationCheckout AgencyInvitationCheckout?
 
   @@index([agentId, status])
   @@index([agencyId, status])
@@ -1611,21 +1655,30 @@ model SchedulingEmailJob {
 }
 
 model AgentIntegrationCredential {
-  id              String    @id @default(cuid())
-  agentId         String
-  agent           Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  provider        String
-  maskedUsername  String
-  keyVersion      String
-  algorithm       String
-  iv              String
-  ciphertext      String
-  authTag         String
-  status          String    @default("UNTESTED")
-  lastTestedAt    DateTime?
-  lastSucceededAt DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                 String                        @id @default(cuid())
+  agentId            String
+  agent              Agent                         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  provider           String
+  maskedUsername     String
+  keyVersion         String?
+  algorithm          String?
+  iv                 String?
+  ciphertext         String?
+  authTag            String?
+  formatVersion      Int                           @default(1)
+  encryptionProvider String                        @default("LEGACY_LOCAL_AES")
+  encryptedPayload   String?
+  autoLoginEnabled   Boolean                       @default(false)
+  status             String                        @default("UNTESTED")
+  consentedAt        DateTime?
+  lastLeasedAt       DateTime?
+  lastTestedAt       DateTime?
+  lastSucceededAt    DateTime?
+  lastRejectedAt     DateTime?
+  revokedAt          DateTime?
+  createdAt          DateTime                      @default(now())
+  updatedAt          DateTime                      @updatedAt
+  leases             NationalLifeCredentialLease[]
 
   @@unique([agentId, provider])
   @@index([provider, status])
@@ -1774,6 +1827,9 @@ model NationalLifeSyncRun {
   provider          String                                 @default("NATIONAL_LIFE")
   executionSource   String                                 @default("REMOTE")
   state             NationalLifeSyncRunState               @default(QUEUED)
+  authState         String                                 @default("READY")
+  authEpoch         Int                                    @default(0)
+  authRequiredAt    DateTime?
   totalStages       Int
   completedStages   Int                                    @default(0)
   failedStages      Int                                    @default(0)
@@ -1825,25 +1881,28 @@ model NationalLifeConnectorPairing {
 }
 
 model NationalLifeConnectorDevice {
-  id                  String                                 @id @default(cuid())
-  agentId             String
-  agent               Agent                                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  label               String
-  publicKeyJwk        Json
-  publicKeyThumbprint String                                 @unique
-  status              String                                 @default("ACTIVE")
-  lastSeenAt          DateTime?
-  revokedAt           DateTime?
-  createdAt           DateTime                               @default(now())
-  updatedAt           DateTime                               @updatedAt
-  replays             NationalLifeConnectorReplay[]
-  stageReceipts       NationalLifeConnectorStageReceipt[]
-  stageCompletions    NationalLifeConnectorStageCompletion[]
-  stageFailures       NationalLifeConnectorStageFailure[]
-  syncRuns            NationalLifeSyncRun[]
-  commands            NationalLifeConnectorCommand[]
-  exportUploads       NationalLifeExportUpload[]
-  documentTransfers   NationalLifeDocumentTransfer[]
+  id                      String                                 @id @default(cuid())
+  agentId                 String
+  agent                   Agent                                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  label                   String
+  publicKeyJwk            Json
+  publicKeyThumbprint     String                                 @unique
+  encryptionPublicKeyJwk  Json?
+  encryptionKeyThumbprint String?                                @unique
+  status                  String                                 @default("ACTIVE")
+  lastSeenAt              DateTime?
+  revokedAt               DateTime?
+  createdAt               DateTime                               @default(now())
+  updatedAt               DateTime                               @updatedAt
+  replays                 NationalLifeConnectorReplay[]
+  stageReceipts           NationalLifeConnectorStageReceipt[]
+  stageCompletions        NationalLifeConnectorStageCompletion[]
+  stageFailures           NationalLifeConnectorStageFailure[]
+  syncRuns                NationalLifeSyncRun[]
+  commands                NationalLifeConnectorCommand[]
+  exportUploads           NationalLifeExportUpload[]
+  documentTransfers       NationalLifeDocumentTransfer[]
+  credentialLeases        NationalLifeCredentialLease[]
 
   @@index([agentId, status])
 }
@@ -1861,6 +1920,9 @@ model NationalLifeConnectorCommand {
   runId                String
   capability           String
   state                NationalLifeConnectorCommandState         @default(QUEUED)
+  authState            String                                    @default("READY")
+  authEpoch            Int                                       @default(0)
+  authRequiredAt       DateTime?
   target               Json?
   params               Json
   payloadHash          String
@@ -1880,6 +1942,30 @@ model NationalLifeConnectorCommand {
   @@index([agentId, state, createdAt])
   @@index([deviceId, state, createdAt])
   @@index([expiresAt])
+}
+
+model NationalLifeCredentialLease {
+  id            String                      @id @default(cuid())
+  agentId       String
+  agent         Agent                       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  credentialId  String
+  credential    AgentIntegrationCredential  @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  deviceId      String
+  device        NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  operationKind String
+  operationId   String
+  authEpoch     Int
+  status        String                      @default("ISSUED")
+  outcome       String?
+  issuedAt      DateTime                    @default(now())
+  expiresAt     DateTime
+  reportedAt    DateTime?
+  createdAt     DateTime                    @default(now())
+  updatedAt     DateTime                    @updatedAt
+
+  @@unique([deviceId, operationKind, operationId, authEpoch])
+  @@index([agentId, issuedAt])
+  @@index([status, expiresAt])
 }
 
 model NationalLifeConnectorCommandEvent {

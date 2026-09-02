@@ -8,6 +8,17 @@ access before Stripe reports the subscription as trialing or active.
 
 Let an entitled KeeprOne agent prepare and submit a National Life iGO application through K-Bot without coupling that work to National Life sync or Foresight illustration execution.
 
+Every Application starts from exactly one completed official Illustration. The
+Illustration is the source of the product, Term duration when applicable,
+carrier-confirmed face amount and premium, insured identity, and immutable input
+hash. A case is linked or created from that Illustration; selecting an unrelated
+case is not the entry point.
+
+The agent request remains sealed for audit. Carrier-confirmed values are stored
+as a separate result and drive the Application. When National Life confirms a
+different valid Term duration, KeeprOne shows requested versus confirmed and
+uses the confirmed duration in the official PDF and iGO draft.
+
 ## Product boundary
 
 - KeeprOne owns intake, readiness, consent, document inventory, paid entitlement, audit history, and user-facing status.
@@ -24,7 +35,7 @@ Stripe product and price IDs come from dedicated environment variables. A missin
 
 ## Application lifecycle
 
-1. **Not started** — show the add-on value and activation state.
+1. **Illustration ready** — the official PDF and carrier-confirmed values are present; show the Application action on that Illustration.
 2. **Collecting information** — agent completes the KeeprOne intake and uploads required documents.
 3. **Ready for review** — all locally required fields are present; show a human-readable review.
 4. **Preparing in iGO** — explicit confirmation creates one idempotent K-Bot draft command.

@@ -61,6 +61,14 @@ vi.mock('@/components/PageHeader', () => ({
 vi.mock('../IllustrationPdfButton', () => ({
   IllustrationPdfButton: () => <button>Gerar PDF</button>,
 }))
+vi.mock('../StartApplicationFromIllustrationButton', () => ({
+  StartApplicationFromIllustrationButton: ({ illustrationId }: { illustrationId: string }) => (
+    <button>Application de {illustrationId}</button>
+  ),
+}))
+vi.mock('../TermPdfReconciliationButton', () => ({
+  TermPdfReconciliationButton: () => <button>Conferir PDF Term</button>,
+}))
 
 import IllustrationDetailPage from './page'
 
@@ -116,6 +124,7 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('Prêmio mensal informado')).toBeTruthy()
     expect(screen.getByText('Informado pelo agente para a ilustração')).toBeTruthy()
     expect(screen.queryByText('O que a seguradora respondeu')).toBeNull()
+    expect(screen.queryByText(/Application de illustration-1/)).toBeNull()
   })
 
   it('shows the material Foresight choices that will be verified before a carrier save', async () => {
@@ -192,6 +201,7 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('Prêmio anual confirmado')).toBeTruthy()
     expect(screen.getByText(/US\$\s*4\.200,00$/)).toBeTruthy()
     expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Application de illustration-solved-iul' })).toBeTruthy()
     expect(screen.getByText('Resolvido pelo prêmio mensal')).toBeTruthy()
     expect(screen.getByText('Based on Target Premium')).toBeTruthy()
     expect(screen.getByText('Pedido do agente')).toBeTruthy()
@@ -224,6 +234,7 @@ describe('Illustration detail page', () => {
         foresightTermResult: {
           source: 'OFFICIAL_PDF', premiumMode: 'Monthly', confirmedFaceAmount: 500_000,
           confirmedMonthlyPremium: 62.92, confirmedAnnualPremium: 755.04,
+          requestedTermDuration: '20-G', confirmedTermDuration: '15-G',
         },
       },
     })
@@ -236,7 +247,48 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('Total anual no modo mensal')).toBeTruthy()
     expect(screen.getAllByText(/US\$\s*755,04/).length).toBeGreaterThan(0)
     expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
+    expect(screen.getAllByText('Prazo solicitado').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('20-G').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Prazo confirmado pela National Life').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('15-G').length).toBeGreaterThan(0)
+    expect(screen.getByText(/este é o prazo usado no PDF oficial e na Application/)).toBeTruthy()
     expect(screen.queryByText('Prêmio mensal informado')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Application de illustration-term-result' })).toBeTruthy()
+  })
+
+  it('does not label an uploaded Term PDF as verified until its premiums are reconciled', async () => {
+    mocks.getCommandStatuses.mockResolvedValue(new Map([
+      ['illustration-term-pending', { state: 'FAILED', safeErrorCode: 'FORESIGHT_TERM_PREMIUM_MISSING' }],
+    ]))
+    mocks.findFirstIllustration.mockResolvedValue({
+      id: 'illustration-term-pending',
+      createdAt: new Date('2026-09-01T15:00:00.000Z'),
+      insuredName: 'KBot Term Smoke',
+      insuredDateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+      productName: 'LSW Term',
+      faceAmount: 500_000,
+      premium: null,
+      targetPremium: null,
+      targetPremiumSource: null,
+      documentFetchedAt: new Date('2026-09-01T15:02:00.000Z'),
+      documentMimeType: 'application/pdf',
+      caseId: null,
+      rawPayload: {
+        foresightTermDraft: {
+          schemaVersion: 1, carrierProduct: 'LSW Term', firstName: 'KBot', lastName: 'Term Smoke',
+          dateOfBirth: '1990-01-01', issueState: 'FL', gender: 'Male', rateClass: 'Standard_NT',
+          faceAmount: 500_000, premiumMode: 'Monthly', termDuration: '20-G',
+        },
+      },
+    })
+
+    render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-term-pending' }) }))
+
+    expect(screen.getByText('Não foi possível conferir o PDF Term')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Abrir PDF recebido' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Conferir PDF Term' })).toBeTruthy()
+    expect(screen.queryByText('Prazo confirmado pela National Life')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Application de illustration-term-pending/ })).toBeNull()
   })
 
   it('explains when the carrier confirms values different from the agent input', async () => {

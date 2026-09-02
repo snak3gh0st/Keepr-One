@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import {
   buildForesightTermClientTarget,
   FORESIGHT_TERM_FUNDING_MENU_ID,
+  foresightTermReadbackError,
+  resolveForesightTermDuration,
 } from './foresight-term-executor'
 import { parseForesightTermIllustrationSnapshot } from './foresight-term-contract'
 import {
@@ -58,6 +60,90 @@ describe('Foresight Term client target', () => {
     expect(workflow).toContain("'updatePremium'")
     expect(workflow).toContain("'updateTermProduct'")
     expect(workflow).not.toContain("'updateDeathBenefitSchedule'")
+    expect(workflow.match(/await waitForCarrierIdle\(\)/g)).toHaveLength(3)
+  })
+
+  it('lets each Term client postback begin before waiting for carrier idle', () => {
+    const source = readFileSync(
+      new URL('../entrypoints/foresight-main.content.ts', import.meta.url),
+      'utf8',
+    )
+    const workflow = source.slice(
+      source.indexOf('const applyTermClient'),
+      source.indexOf('const applyTermFunding'),
+    )
+    const retry = source.slice(
+      source.indexOf('const retryTermClientPostback'),
+      source.indexOf('const applyTermClient'),
+    )
+
+    expect(source).toContain('minimumSettleMs = 0')
+    expect(retry).toContain("await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT', minimumSettleMs)")
+    expect(workflow).toContain("retryTermClientPostback(700, 'FORESIGHT_TERM_CLIENT_JURISDICTION_WRITE_MISMATCH'")
+    expect(workflow).toContain("retryTermClientPostback(500, 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH'")
+    expect(workflow.match(/retryTermClientPostback\(600,/g)).toHaveLength(2)
+  })
+
+  it('retries only the failed Term client postback and verifies it before moving on', () => {
+    const source = readFileSync(
+      new URL('../entrypoints/foresight-main.content.ts', import.meta.url),
+      'utf8',
+    )
+    const workflow = source.slice(
+      source.indexOf('const applyTermClient'),
+      source.indexOf('const applyTermFunding'),
+    )
+
+    expect(source).toContain('const retryTermClientPostback')
+    expect(source).toContain('for (let attempt = 0; attempt < 2; attempt += 1)')
+    expect(workflow.match(/retryTermClientPostback\(/g)).toHaveLength(5)
+    expect(workflow).toContain("'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH'")
+    expect(workflow).toContain("'FORESIGHT_TERM_CLIENT_INFORMATION_WRITE_MISMATCH'")
+  })
+
+  it('uses a valid duration returned by the carrier as an explicit fallback', () => {
+    const snapshot = parseForesightTermIllustrationSnapshot({
+      schemaVersion: 1,
+      illustrationId: 'ill_term_readback',
+      caseId: null,
+      carrierCaseName: 'KEEPRONE-TERM-READBACK',
+      product: { carrierName: 'LSW Term', kind: 'TERM' },
+      insured: {
+        firstName: 'Paulo',
+        lastName: 'Loureiro Campos',
+        dateOfBirth: '1988-06-02',
+        issueState: 'FL',
+      },
+      underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
+      faceAmount: 1_000_000,
+      premiumMode: 'Monthly',
+      termDuration: '20-G',
+      reports: ['NAIC_ILLUSTRATION'],
+    })!
+    const client = {
+      firstName: 'Paulo',
+      lastName: 'Loureiro Campos',
+      dateOfBirth: '06/02/1988',
+      issueState: 'FL',
+      gender: 'Male',
+      rateClass: 'Standard_NT',
+    }
+    const funding = {
+      designType: 'Specify Face Amount',
+      faceAmount: '$1,000,000',
+      premiumMode: 'Monthly',
+      termDuration: '15-G',
+    }
+
+    expect(foresightTermReadbackError(snapshot, client, funding)).toBeNull()
+    expect(resolveForesightTermDuration(snapshot, funding.termDuration)).toEqual({
+      requestedTermDuration: '20-G',
+      confirmedTermDuration: '15-G',
+    })
+    expect(foresightTermReadbackError(snapshot, client, {
+      ...funding,
+      termDuration: '25-G',
+    })).toBe('FORESIGHT_TERM_DURATION_READBACK_MISMATCH')
   })
 
   it('matches the Term duration from the report section around the NAIC checkbox', () => {
@@ -71,6 +157,39 @@ describe('Foresight Term client target', () => {
       checkbox as unknown as HTMLInputElement,
       '20-G',
     )).toBe(true)
+  })
+
+  it('waits for the exact report selection to stabilize before reading it back', () => {
+    const source = readFileSync(
+      new URL('./foresight-term-executor.ts', import.meta.url),
+      'utf8',
+    )
+    const workflow = source.slice(
+      source.indexOf('async function verifyReports'),
+      source.indexOf('async function saveCase'),
+    )
+
+    expect(workflow).toContain('await waitFor(() => {')
+    expect(workflow).toContain('frameDocument(MAIN_FRAME_ID)')
+    expect(workflow).toContain("'FORESIGHT_REPORT_SELECTION_MISMATCH'")
+  })
+
+  it('safely resumes a matching in-progress Term case instead of overwriting it', () => {
+    const source = readFileSync(
+      new URL('./foresight-term-executor.ts', import.meta.url),
+      'utf8',
+    )
+    const workflow = source.slice(
+      source.indexOf('async function openTerm'),
+      source.indexOf('function readClient'),
+    )
+
+    expect(source).toContain("const MODULE_LANDING_PATH = '/NWI/ProductWorkflow/ModuleLandingPage.aspx'")
+    expect(workflow).toContain('document.body?.innerText.includes(snapshot.product.carrierName)')
+    expect(workflow).toContain('click(document, TERM_CLIENT_MENU_ID)')
+    expect(workflow).toContain('existing: true')
+    expect(workflow.indexOf('click(document, TERM_CLIENT_MENU_ID)'))
+      .toBeLessThan(workflow.indexOf('click(document, NEW_ILLUSTRATION_ID)'))
   })
 
   it('selects only optional report pages, not their nested settings', () => {

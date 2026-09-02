@@ -22,6 +22,8 @@ const MAIN_FRAME_ID = 'ctl00_mobilityPH_iframeMain'
 const MODAL_FRAME_ID = 'ctl00_mobilityPH_modalDialog__Iframe'
 const MAIN_CHANNEL = 'FYNTRA_FORESIGHT_CONNECTOR_V1'
 const NEW_ILLUSTRATION_ID = 'ctl00_mobilityPH_verticalMenu_ActivitiesNewIllustration_0'
+const TERM_CLIENT_MENU_ID = 'ctl00_mobilityPH_verticalMenu_Client_0'
+const MODULE_LANDING_PATH = '/NWI/ProductWorkflow/ModuleLandingPage.aspx'
 const SAVE_AS_ID = 'ctl00_mobilityPH_ucInfoContainer_lnkSaveAs'
 const SAVE_NAME_ID = 'ctl00_mobilityPH_panelContent_txtItemName'
 const SAVE_FOLDER_ID = 'ctl00_mobilityPH_panelContent_cboFolder'
@@ -204,6 +206,25 @@ export function buildForesightTermClientTarget(snapshot: ForesightTermIllustrati
 }
 
 async function openTerm(snapshot: ForesightTermIllustrationSnapshotV1): Promise<{ doc: Document; existing: boolean }> {
+  // After an interrupted Term run, Foresight can restore its in-progress case
+  // at ModuleLandingPage rather than the case list. Resume only when the
+  // active product is the requested Term product; the existing/readback path
+  // performs no writes, so a mismatched open case cannot be overwritten.
+  const landing = await waitFor(() => {
+    const path = framePath(MAIN_FRAME_ID)
+    if (path === '/NWI/Main/StartPage.aspx') return 'START' as const
+    if (path === MODULE_LANDING_PATH &&
+      document.getElementById(TERM_CLIENT_MENU_ID) instanceof HTMLElement &&
+      document.body?.innerText.includes(snapshot.product.carrierName)) return 'RESUME' as const
+    return null
+  }, 'FORESIGHT_NAVIGATION_TIMEOUT')
+  if (landing === 'RESUME') {
+    click(document, TERM_CLIENT_MENU_ID)
+    return {
+      doc: await waitForFramePath((path) => /\/NWI\/.*\/client\.aspx$/i.test(path)),
+      existing: true,
+    }
+  }
   const start = await waitForFramePath((path) => path === '/NWI/Main/StartPage.aspx')
   const existing = [...start.querySelectorAll<HTMLAnchorElement>('a')].filter((link) => link.textContent?.trim() === snapshot.carrierCaseName)
   if (existing.length > 1) fail('FORESIGHT_CASE_AMBIGUOUS')
@@ -271,6 +292,55 @@ function readFunding(doc: Document) {
   }
 }
 
+type ForesightTermClientReadback = ReturnType<typeof readClient>
+type ForesightTermFundingReadback = ReturnType<typeof readFunding>
+const TERM_DURATIONS = new Set<ForesightTermIllustrationSnapshotV1['termDuration']>([
+  '10-G', '15-G', '20-G', '30-G', 'ART',
+])
+
+function isTermDuration(value: string): value is ForesightTermIllustrationSnapshotV1['termDuration'] {
+  return TERM_DURATIONS.has(value as ForesightTermIllustrationSnapshotV1['termDuration'])
+}
+
+export function resolveForesightTermDuration(
+  snapshot: ForesightTermIllustrationSnapshotV1,
+  observed: string,
+): {
+  requestedTermDuration: ForesightTermIllustrationSnapshotV1['termDuration']
+  confirmedTermDuration: ForesightTermIllustrationSnapshotV1['termDuration']
+} {
+  if (!isTermDuration(observed)) fail('FORESIGHT_TERM_DURATION_READBACK_MISMATCH')
+  return {
+    requestedTermDuration: snapshot.termDuration,
+    confirmedTermDuration: observed,
+  }
+}
+
+export function foresightTermReadbackError(
+  snapshot: ForesightTermIllustrationSnapshotV1,
+  client: ForesightTermClientReadback,
+  funding: ForesightTermFundingReadback,
+): string | null {
+  if (client.firstName !== snapshot.insured.firstName ||
+    client.lastName !== snapshot.insured.lastName ||
+    client.dateOfBirth !== foresightClientBirthDate(snapshot.insured.dateOfBirth) ||
+    client.issueState !== snapshot.insured.issueState ||
+    client.gender !== snapshot.underwriting.gender ||
+    client.rateClass !== snapshot.underwriting.rateClass) {
+    return 'FORESIGHT_TERM_CLIENT_READBACK_MISMATCH'
+  }
+  if (funding.designType !== 'Specify Face Amount' || funding.premiumMode !== 'Monthly') {
+    return 'FORESIGHT_TERM_FUNDING_READBACK_MISMATCH'
+  }
+  if (funding.faceAmount.replace(/[$,]/g, '') !== String(snapshot.faceAmount)) {
+    return 'FORESIGHT_TERM_FACE_AMOUNT_READBACK_MISMATCH'
+  }
+  if (!isTermDuration(funding.termDuration)) {
+    return 'FORESIGHT_TERM_DURATION_READBACK_MISMATCH'
+  }
+  return null
+}
+
 async function fillFunding(doc: Document, snapshot: ForesightTermIllustrationSnapshotV1) {
   await applyInMainWorld('APPLY_TERM_FUNDING', {
     designType: optionValue(doc, TERM_FIELDS.funding.designType, 'Specify Face Amount'),
@@ -294,15 +364,22 @@ async function reportsDocument(): Promise<Document> {
   }, 'FORESIGHT_REPORT_SELECTION_MISMATCH')
 }
 
-async function verifyReports(doc: Document, duration: string): Promise<void> {
+async function verifyReports(duration: string): Promise<void> {
   await applyInMainWorld('APPLY_TERM_REPORTS', { duration })
-  doc = await reportsDocument()
-  const groups = [...doc.querySelectorAll<HTMLInputElement>('input[type="checkbox"][id$="_chkGroup"]')].filter((checkbox) => checkbox.checked)
-  if (groups.length !== 1 || !isForesightTermNaicReportGroup(groups[0]!, duration)) fail('FORESIGHT_REPORT_SELECTION_MISMATCH')
-  const extras = [...doc.querySelectorAll<HTMLInputElement>(
-    FORESIGHT_TERM_OPTIONAL_REPORT_SELECTOR,
-  )].filter((checkbox) => checkbox.checked)
-  if (extras.length) fail('FORESIGHT_REPORT_SELECTION_MISMATCH')
+  // Report selection is an ASP.NET postback. The desired checkbox can be
+  // visible while a carrier response still restores the previous selection;
+  // keep reacquiring the frame until the exact final state is observable.
+  await waitFor(() => {
+    const doc = frameDocument(MAIN_FRAME_ID)
+    if (!doc) return null
+    const groups = [...doc.querySelectorAll<HTMLInputElement>('input[type="checkbox"][id$="_chkGroup"]')]
+      .filter((checkbox) => checkbox.checked)
+    if (groups.length !== 1 || !isForesightTermNaicReportGroup(groups[0]!, duration)) return null
+    const extras = [...doc.querySelectorAll<HTMLInputElement>(
+      FORESIGHT_TERM_OPTIONAL_REPORT_SELECTOR,
+    )].filter((checkbox) => checkbox.checked)
+    return extras.length === 0 ? true : null
+  }, 'FORESIGHT_REPORT_SELECTION_MISMATCH')
 }
 
 async function saveCase(caseName: string): Promise<void> {
@@ -336,10 +413,12 @@ export async function executeForesightTermIllustration(input: {
   input.onProgress?.('CONFIGURING_PRODUCT')
   const fundingDoc = await fundingDocument()
   const funding = opened.existing ? readFunding(fundingDoc) : await fillFunding(fundingDoc, input.snapshot)
-  if (client.firstName !== input.snapshot.insured.firstName || client.lastName !== input.snapshot.insured.lastName || client.dateOfBirth !== foresightClientBirthDate(input.snapshot.insured.dateOfBirth) || client.issueState !== input.snapshot.insured.issueState || client.gender !== input.snapshot.underwriting.gender || client.rateClass !== input.snapshot.underwriting.rateClass || funding.designType !== 'Specify Face Amount' || funding.faceAmount.replace(/[$,]/g, '') !== String(input.snapshot.faceAmount) || funding.premiumMode !== 'Monthly' || funding.termDuration !== input.snapshot.termDuration) fail('FORESIGHT_TERM_READBACK_MISMATCH')
+  const readbackError = foresightTermReadbackError(input.snapshot, client, funding)
+  if (readbackError) fail(readbackError)
+  const termDuration = resolveForesightTermDuration(input.snapshot, funding.termDuration)
   input.onProgress?.('VERIFYING_VALUES')
-  const reports = await reportsDocument()
-  await verifyReports(reports, input.snapshot.termDuration)
+  await reportsDocument()
+  await verifyReports(termDuration.confirmedTermDuration)
   if (!opened.existing) {
     input.onProgress?.('SAVING_CASE')
     await saveCase(input.snapshot.carrierCaseName)
@@ -353,6 +432,8 @@ export async function executeForesightTermIllustration(input: {
       caseFingerprint: await caseFingerprint(input.snapshot),
       carrierCaseName: input.snapshot.carrierCaseName,
       carrierProduct: input.snapshot.product.carrierName,
+      requestedTermDuration: termDuration.requestedTermDuration,
+      confirmedTermDuration: termDuration.confirmedTermDuration,
       release,
       reportCode: 'NAIC_ILLUSTRATION',
       documentSha256: await sha256Hex(pdf),

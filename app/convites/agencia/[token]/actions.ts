@@ -17,12 +17,13 @@ import { findActiveAgencyInvitationAuthority } from '@/lib/agency-invitation-aut
 import { getDownlineIds } from '@/lib/hierarchy'
 import { getAgencyInvitationPriceCents } from '@/lib/plans'
 import { prisma } from '@/lib/prisma'
+import { createStripeAgencyInvitationCheckout } from '@/lib/stripe/agency-invitation-checkout'
 
 type AcceptedPlan = 'AGENT_AGENCY_MEMBER' | 'AGENCY'
 type AgencyInvitationIntendedType = 'AGENT' | 'AGENCY'
 
 export type AgencyInvitationAcceptanceState = {
-  status: 'idle' | 'success' | 'error'
+  status: 'idle' | 'checkout' | 'success' | 'error'
   message: string
   fieldErrors?: Record<string, string[]>
   nextUrl?: string
@@ -234,14 +235,7 @@ export async function acceptAgencyInvitationAction(
   if (input.acceptedTerms !== 'on') {
     return actionError('Aceite os termos para confirmar o plano.', 'acceptedTerms')
   }
-  // A local acceptance is deliberately unavailable unless a developer opted
-  // into the simulator. Even with a copied true value, production always fails
-  // before a transaction or any other write can begin.
-  if (!isLocalBillingSimulationEnabled()) {
-    return actionError(
-      'A assinatura ainda não pode ser ativada aqui. Nenhuma cobrança ou alteração foi realizada.',
-    )
-  }
+  const simulationEnabled = isLocalBillingSimulationEnabled()
 
   const tokenHash = hashAgencyInvitationToken(input.token)
   const now = new Date()
@@ -321,6 +315,99 @@ export async function acceptAgencyInvitationAction(
   }
 
   const passwordHash = existingUser ? null : await hashPassword(input.password)
+
+  if (!simulationEnabled) {
+    try {
+      const inviterAuthority = await findActiveAgencyInvitationAuthority(prisma, {
+        agencyId: invitation.agency.id,
+        agentId: invitation.invitedBy.id,
+        now,
+      })
+      if (!inviterAuthority) {
+        return actionError(
+          'A agência que enviou este convite não possui autorização e assinatura ativas.',
+        )
+      }
+
+      const currentProviderSubscription = existingUser?.agent
+        ? await prisma.platformSubscription.findFirst({
+            where: {
+              status: { in: ['TRIALING', 'ACTIVE', 'PAST_DUE'] },
+              stripeSubscriptionId: { not: null },
+              OR: [
+                { agentId: existingUser.agent.id },
+                {
+                  agencyMembership: {
+                    agentId: existingUser.agent.id,
+                    endedAt: null,
+                  },
+                },
+                {
+                  agency: {
+                    memberships: {
+                      some: {
+                        agentId: existingUser.agent.id,
+                        role: 'OWNER',
+                        endedAt: null,
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+            select: {
+              id: true,
+              stripeCustomerId: true,
+              stripeSubscriptionId: true,
+            },
+          })
+        : null
+      if (currentProviderSubscription) {
+        return actionError(
+          'Esta conta já possui uma assinatura vinculada à Stripe. A troca de plano precisa ser concluída pelo suporte antes de aceitar este convite.',
+        )
+      }
+
+      const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.trim()
+        || process.env.BETTER_AUTH_URL?.trim()
+      if (!configuredOrigin) throw new Error('APP_ORIGIN_MISSING')
+
+      const checkout = await createStripeAgencyInvitationCheckout({
+        invitationId: invitation.id,
+        invitedEmail,
+        name: existingUser?.agent ? invitation.name ?? 'Usuário convidado' : input.name,
+        agencyName: plan === 'AGENCY'
+          ? input.agencyName || existingOwnedAgency?.agency.name || null
+          : null,
+        passwordHash,
+        userId: existingUser?.id ?? null,
+        plan,
+        inviterRole: inviterAuthority.role,
+        unitAmountCents,
+        acceptedTermsAt: now,
+        invitationExpiresAt: invitation.expiresAt,
+        origin: configuredOrigin.replace(/\/$/, ''),
+        invitationToken: input.token,
+        stripeCustomerId: null,
+      })
+
+      return {
+        status: 'checkout',
+        message: 'Checkout seguro preparado. Você será direcionado para a Stripe.',
+        nextUrl: checkout.checkoutUrl,
+        createdAccount: false,
+      }
+    } catch (error) {
+      console.error('Agency invitation Checkout creation failed', {
+        code: error instanceof Error ? error.message : 'UNKNOWN',
+        invitationId: invitation.id,
+      })
+      return actionError(
+        'Não foi possível abrir o pagamento agora. Nenhuma conta, vínculo ou cobrança foi criada.',
+      )
+    }
+  }
+
   const currentPeriodEnd = subscriptionPeriodEnd(now)
 
   try {

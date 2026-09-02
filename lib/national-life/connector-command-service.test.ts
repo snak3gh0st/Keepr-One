@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Prisma } from '@prisma/client'
-import type { ConnectorCommandRepository } from './connector-command-service'
+import type { ConnectorAuthenticationRetryRepository } from './connector-command-service'
 import type { ConnectorCommandState } from './connector-command-contract'
 import {
   ConnectorCommandError,
@@ -8,6 +8,7 @@ import {
   createPrismaConnectorCommandRepository,
   issueConnectorCommand,
   recordConnectorCommandEvent,
+  retryConnectorCommandAuthentication,
 } from './connector-command-service'
 
 const now = new Date('2026-08-10T20:00:00.000Z')
@@ -22,15 +23,18 @@ type MemoryCommand = {
   requiresConfirmation: boolean
   confirmationState: 'NOT_REQUIRED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'
   state: ConnectorCommandState
+  authState: string
+  authEpoch: number
+  authRequiredAt: Date | null
   expiresAt: Date
   target: Prisma.JsonValue | null
   params: Prisma.JsonValue
-  events: Array<{ sequence: number }>
+  events: Array<{ sequence: number; type: string }>
 } & Record<string, unknown>
 
 function createRepository() {
   const commands = new Map<string, MemoryCommand>()
-  const repository: ConnectorCommandRepository = {
+  const repository: ConnectorAuthenticationRetryRepository = {
     async findByAgentIdempotencyKey(input) {
       return [...commands.values()].find(
         (command) => command.agentId === input.agentId && command.idempotencyKey === input.idempotencyKey,
@@ -52,7 +56,24 @@ function createRepository() {
     async createConfirmation() {},
     async approveConfirmation() {},
     async appendEvent(input) {
-      commands.get(input.commandId)?.events.push({ sequence: input.sequence })
+      commands.get(input.commandId)?.events.push({ sequence: input.sequence, type: input.type })
+    },
+    async retryAuthentication(input) {
+      const command = commands.get(input.commandId)
+      if (
+        !command ||
+        command.agentId !== input.agentId ||
+        command.state !== 'AUTH_REQUIRED' ||
+        command.authState !== 'AUTH_REQUIRED' ||
+        command.confirmationState !== 'APPROVED' ||
+        command.expiresAt <= input.now
+      ) return false
+      command.state = 'QUEUED'
+      command.authState = 'READY'
+      command.authRequiredAt = null
+      command.safeErrorCode = null
+      command.events.push({ sequence: input.sequence, type: 'AUTH_RETRY_REQUESTED' })
+      return true
     },
   }
   return { repository, commands }
@@ -114,6 +135,132 @@ describe('connector command service', () => {
 
     expect(first).toMatchObject({ duplicate: false, command: { capability: 'FORESIGHT_INVENTORY' } })
     expect(duplicate).toMatchObject({ duplicate: true, command: { commandId: first.command.commandId } })
+  })
+
+  it('increments auth epoch once, preserves it for MFA, and increments the next episode', async () => {
+    const { repository, commands } = createRepository()
+    const issued = await issueConnectorCommand(repository, {
+      agentId: 'agent_1',
+      deviceId: 'device_1',
+      capability: 'FORESIGHT_INVENTORY',
+      target: null,
+      params: {},
+      idempotencyKey: 'auth-epoch-command',
+      expiresAt: new Date(now.getTime() + 10 * 60_000),
+      now,
+    })
+    const event = (sequence: number, type: 'AUTH_REQUIRED' | 'MFA_REQUIRED' | 'COMMAND_STARTED') => ({
+      protocolVersion: 1,
+      eventId: `event_${sequence}`,
+      commandId: issued.command.commandId,
+      runId: issued.command.runId,
+      sequence,
+      type,
+      emittedAt: new Date(now.getTime() + sequence * 1_000).toISOString(),
+      payload: null,
+      error: null,
+    })
+
+    await recordConnectorCommandEvent(repository, { agentId: 'agent_1', event: event(1, 'AUTH_REQUIRED'), now })
+    await recordConnectorCommandEvent(repository, { agentId: 'agent_1', event: event(2, 'AUTH_REQUIRED'), now })
+    await recordConnectorCommandEvent(repository, { agentId: 'agent_1', event: event(3, 'MFA_REQUIRED'), now })
+    expect(commands.get(issued.command.commandId)).toMatchObject({
+      state: 'AUTH_REQUIRED', authState: 'MFA_REQUIRED', authEpoch: 1,
+    })
+
+    await recordConnectorCommandEvent(repository, { agentId: 'agent_1', event: event(4, 'COMMAND_STARTED'), now })
+    await recordConnectorCommandEvent(repository, { agentId: 'agent_1', event: event(5, 'AUTH_REQUIRED'), now })
+    expect(commands.get(issued.command.commandId)).toMatchObject({
+      state: 'AUTH_REQUIRED', authState: 'AUTH_REQUIRED', authEpoch: 2,
+    })
+  })
+
+  it('requeues an approved password-login pause only after an explicit user retry', async () => {
+    const { repository, commands } = createRepository()
+    const issued = await issueConnectorCommand(repository, {
+      agentId: 'agent_1',
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_1' },
+      params: { illustrationId: 'illustration_1', inputHash: 'a'.repeat(64) },
+      idempotencyKey: 'illustration:auth-retry:1',
+      expiresAt: new Date(now.getTime() + 10 * 60_000),
+      now,
+    })
+    await approveConnectorCommand(repository, {
+      agentId: 'agent_1',
+      commandId: issued.command.commandId,
+      payloadHash: issued.payloadHash,
+      confirmedByUserId: 'user_1',
+      now,
+    })
+    await recordConnectorCommandEvent(repository, {
+      agentId: 'agent_1',
+      event: {
+        protocolVersion: 1,
+        eventId: 'event_auth_required',
+        commandId: issued.command.commandId,
+        runId: issued.command.runId,
+        sequence: 2,
+        type: 'AUTH_REQUIRED',
+        emittedAt: now.toISOString(),
+        payload: { action: 'SIGN_IN_TO_CONTINUE' },
+        error: null,
+      },
+      now,
+    })
+
+    await retryConnectorCommandAuthentication(repository, {
+      agentId: 'agent_1',
+      commandId: issued.command.commandId,
+      now,
+    })
+
+    expect(commands.get(issued.command.commandId)).toMatchObject({
+      state: 'QUEUED',
+      confirmationState: 'APPROVED',
+      authState: 'READY',
+      authEpoch: 1,
+      authRequiredAt: null,
+      events: [
+        { sequence: 0, type: 'WAITING_FOR_CONFIRMATION' },
+        { sequence: 1, type: 'COMMAND_ACCEPTED' },
+        { sequence: 2, type: 'AUTH_REQUIRED' },
+        { sequence: 3, type: 'AUTH_RETRY_REQUESTED' },
+      ],
+    })
+  })
+
+  it('rejects an authentication reset event reported by a connector', async () => {
+    const { repository, commands } = createRepository()
+    const issued = await issueConnectorCommand(repository, {
+      agentId: 'agent_1',
+      capability: 'FORESIGHT_INVENTORY',
+      target: null,
+      params: {},
+      idempotencyKey: 'connector-cannot-reset-auth',
+      expiresAt: new Date(now.getTime() + 10 * 60_000),
+      now,
+    })
+
+    await expect(recordConnectorCommandEvent(repository, {
+      agentId: 'agent_1',
+      event: {
+        protocolVersion: 1,
+        eventId: 'event_retry_requested',
+        commandId: issued.command.commandId,
+        runId: issued.command.runId,
+        sequence: 1,
+        type: 'AUTH_RETRY_REQUESTED',
+        emittedAt: now.toISOString(),
+        payload: { action: 'RETRY_AUTOMATIC_LOGIN' },
+        error: null,
+      },
+      now,
+    })).rejects.toMatchObject({ code: 'EVENT_INVALID' } satisfies Partial<ConnectorCommandError>)
+
+    expect(commands.get(issued.command.commandId)?.events).toEqual([
+      { sequence: 0, type: 'COMMAND_ACCEPTED' },
+    ])
   })
 
   it('blocks submission until the exact reviewed payload hash is approved', async () => {

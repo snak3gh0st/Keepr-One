@@ -44,7 +44,7 @@ export function IllustrationPdfButton({
   illustrationId: string
   extensionId?: string
   disabled?: boolean
-  status?: 'WORKING' | 'BLOCKED' | 'FAILED'
+  status?: 'WORKING' | 'WAITING_FOR_KBOT' | 'BLOCKED' | 'FAILED'
   safeErrorCode?: string | null
 }) {
   const { copy } = useI18n()
@@ -88,6 +88,17 @@ export function IllustrationPdfButton({
     : pending
       ? copy('K-Bot está iniciando…', 'K-Bot is starting…')
       : copy('K-Bot está trabalhando no Foresight…', 'K-Bot is working in Foresight…')
+
+  if (status === 'WAITING_FOR_KBOT') {
+    return (
+      <Link
+        href="/agent/integrations/national-life"
+        className="text-teal transition-colors hover:text-teal-deep"
+      >
+        {copy('Conectar K-Bot para continuar', 'Connect K-Bot to continue')}
+      </Link>
+    )
+  }
 
   if (status === 'FAILED' && [
     'FORESIGHT_PREMIUM_WRITE_MISMATCH',
@@ -136,16 +147,24 @@ export function IllustrationPdfButton({
                 // direct page-to-extension channel is temporarily unavailable.
               }
             }
-            setMessage(result.duplicate
-              ? copy('Retomando a geração oficial já registrada.', 'Resuming the official generation already on record.')
-              : copy('K-Bot iniciou a ilustração oficial. Você pode sair desta página; se a sessão expirar, avisaremos para entrar novamente.', 'K-Bot started the official illustration. You can leave this page; if the session expires, we will ask you to sign in again.'))
+            setMessage(result.retryingLogin
+              ? copy(
+                  'K-Bot vai tentar a credencial protegida uma vez. Se a National Life pedir MFA, conclua a verificação para continuar.',
+                  'K-Bot will try the protected credential once. If National Life requests MFA, complete the verification to continue.',
+                )
+              : result.duplicate
+                ? copy('Retomando a geração oficial já registrada.', 'Resuming the official generation already on record.')
+                : copy(
+                    'K-Bot iniciou a ilustração oficial. Você pode sair desta página; se a sessão expirar, avisaremos para entrar novamente.',
+                    'K-Bot started the official illustration. You can leave this page; if the session expires, we will ask you to sign in again.',
+                  ))
             router.refresh()
           })
         }
         className="text-teal transition-colors hover:text-teal-deep disabled:text-ink-muted"
       >
         {generating ? <ForesightActivityIndicator label={generatingLabel} /> :
-          status === 'BLOCKED' ? copy('Continuar após login', 'Continue after signing in') :
+          status === 'BLOCKED' ? copy('Tentar login novamente', 'Try signing in again') :
             status === 'FAILED' ? copy('Tentar novamente', 'Try again') : copy('Gerar ilustração oficial', 'Generate official illustration')}
       </button>
       {generating && trailIndex >= 0 && (

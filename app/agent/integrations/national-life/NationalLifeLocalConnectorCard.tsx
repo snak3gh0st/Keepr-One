@@ -160,6 +160,20 @@ const stateCopyPt: Record<Exclude<ConnectorState, 'error'>, string> = {
 /// margem aqui é o que evita chamar de demorado um sync saudável.
 const STALL_LIMIT = 45
 const ACTIVE_SYNC_STATUSES = new Set(['STARTING', 'NAVIGATING', 'EXTRACTING', 'UPLOADING'])
+const AUTH_RETRY_CODES = new Set([
+  'CREDENTIAL_AUTH_STATE_EXPIRED',
+  'CREDENTIAL_BROKER_UNAVAILABLE',
+  'CREDENTIAL_RATE_LIMITED',
+  'CREDENTIAL_LEASE_ALREADY_ISSUED',
+  'DEVICE_ENCRYPTION_KEY_REQUIRED',
+])
+const AUTH_WAIT_EXPIRED_MS = 5 * 60_000
+
+function authWaitExpired(authRequiredAt: string | undefined): boolean {
+  if (!authRequiredAt) return false
+  const requiredAt = Date.parse(authRequiredAt)
+  return Number.isFinite(requiredAt) && Date.now() - requiredAt > AUTH_WAIT_EXPIRED_MS
+}
 
 /// O que prova que o run andou desde a última consulta. `uploads` é o único
 /// campo que se move dentro de uma única grade grande.
@@ -592,12 +606,13 @@ export function NationalLifeLocalConnectorCard({
           void watchSyncProgressRef.current()
           return
         }
-        // The database is authoritative once a run reaches a terminal state.
-        // A service worker can retain the last transient portal error after the
-        // server has already accepted and completed every stage; surfacing that
-        // stale error beside an up-to-date 13/13 panel makes a healthy sync look
-        // broken after a reload.
-        if (status.sync?.status === 'ERROR' && status.sync.runId) {
+        // The database wins over any transient extension state. In particular,
+        // a server-timed-out run must not leave the card permanently claiming
+        // that a login is still being processed.
+        if (
+          status.sync?.runId &&
+          (status.sync.status === 'AUTH_REQUIRED' || status.sync.status === 'ERROR')
+        ) {
           if (status.sync.runId === latestRun?.runId && latestRun.state === 'COMPLETED') {
             setErrorCode(null)
             setState('idle')
@@ -624,7 +639,16 @@ export function NationalLifeLocalConnectorCard({
             return
           }
         }
-        if (status.sync?.status === 'AUTH_REQUIRED') setState('login-required')
+        if (status.sync?.status === 'AUTH_REQUIRED') {
+          if (
+            (status.sync.errorCode && AUTH_RETRY_CODES.has(status.sync.errorCode)) ||
+            authWaitExpired(status.sync.authRequiredAt)
+          ) {
+            fail(status.sync.errorCode ?? 'CREDENTIAL_AUTH_STATE_EXPIRED')
+          } else {
+            setState('login-required')
+          }
+        }
         // Um ERROR gravado tem de sobreviver ao F5. Antes, recarregar a página
         // devolvia o cartão ao repouso como se nada tivesse acontecido.
         if (status.sync?.status === 'ERROR') fail(status.sync.errorCode ?? null)
@@ -810,7 +834,10 @@ export function NationalLifeLocalConnectorCard({
           </span>
         </div>
         <p className="mt-6 max-w-2xl text-sm leading-6 text-ink-muted">
-          {copy('O K-Bot executa as etapas aprovadas da National Life na sua sessão do navegador. Sua senha nunca passa pela Keepr One.', 'K-Bot operates the approved National Life steps in your browser session. Your password never passes through Keepr One.')}
+          {copy(
+            'O K-Bot executa as etapas aprovadas da National Life na sessão do seu navegador. Por padrão, você entra diretamente na National Life. Se optar por isso nas Configurações, a Keepr One protege sua credencial para uma tentativa de login do K-Bot quando essa sessão expirar.',
+            'K-Bot operates the approved National Life steps in your browser session. By default, you sign in directly on National Life. If you opt in under Settings, Keepr One protects your credential for one K-Bot login attempt when that session expires.',
+          )}
           {installMode === 'pilot'
             ? copy(' Neste piloto, carregue a extensão descompactada usando o ID configurado para este ambiente.', ' In this pilot, load the unpacked extension using the ID configured for this environment.')
             : null}

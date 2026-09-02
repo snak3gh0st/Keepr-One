@@ -75,6 +75,32 @@ describe('popupStatusText', () => {
   it('asks for login instead of showing a stale work step', () => {
     expect(popupCommandStatusText({ status: 'AUTH_REQUIRED', phase: 'OPENING_FORESIGHT' })).toMatch(/Sign in/i)
   })
+
+  it('distinguishes automatic login, MFA, rejection and broker fallback', () => {
+    const attempt = {
+      operationKind: 'SYNC_RUN' as const,
+      operationId: 'run_1',
+      authEpoch: 1,
+      leaseId: 'lease_1',
+      attemptedAt: '2026-09-01T20:00:00.000Z',
+    }
+    expect(popupSyncStatusText(ready, {
+      status: 'AUTH_REQUIRED', credentialAttempt: attempt,
+      errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
+    })).toMatch(/saved credential/i)
+    expect(popupSyncStatusText(ready, {
+      status: 'AUTH_REQUIRED', credentialAttempt: attempt, errorCode: 'MFA_REQUIRED',
+    })).toMatch(/entered.*saved credential.*verification/i)
+    expect(popupSyncStatusText(ready, {
+      status: 'AUTH_REQUIRED', credentialAttempt: attempt, errorCode: 'CREDENTIAL_REJECTED',
+    })).toMatch(/rejected.*disabled/i)
+    expect(popupSyncStatusText(ready, {
+      status: 'AUTH_REQUIRED', errorCode: 'CREDENTIAL_BROKER_UNAVAILABLE',
+    })).toMatch(/unavailable.*manually/i)
+    expect(popupSyncStatusText(ready, {
+      status: 'AUTH_REQUIRED', errorCode: 'CREDENTIAL_NOT_CONFIGURED',
+    })).toMatch(/No saved credential.*manually/i)
+  })
 })
 
 describe('popupCanRetry', () => {

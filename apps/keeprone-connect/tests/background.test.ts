@@ -14,6 +14,11 @@ vi.mock('../lib/signed-client', () => ({
 vi.mock('../lib/key-store', () => ({
   clearDeviceKeys: vi.fn(),
   getOrCreateDeviceKey: vi.fn(),
+  getOrCreateCredentialEncryptionKey: vi.fn(),
+  readCredentialDecryptionKey: vi.fn(),
+}))
+vi.mock('../lib/credential-envelope', () => ({
+  openSealedCredentialLease: vi.fn(),
 }))
 
 import {
@@ -23,8 +28,15 @@ import {
   signedJsonRequest,
 } from '../lib/signed-client'
 import { sha256ForesightSnapshot } from '../lib/foresight-contract'
+import { sha256ForesightTermSnapshot } from '../lib/foresight-term-contract'
 import { sha256FlexLifeQuoteSnapshot } from '../lib/flexlife-quote-contract'
 import { sha256IgoApplicationDossier } from '../lib/igo-contract'
+import {
+  getOrCreateCredentialEncryptionKey,
+  getOrCreateDeviceKey,
+  readCredentialDecryptionKey,
+} from '../lib/key-store'
+import { openSealedCredentialLease } from '../lib/credential-envelope'
 
 const NLG = 'https://www.nationallife.com'
 const NLG_AUTH0 = 'https://nlg-prod.auth0.com'
@@ -102,7 +114,7 @@ function register(name: string) {
   }
 }
 
-async function defaultTabMessageResponse(tabId: number, message: unknown) {
+async function defaultTabMessageResponse(tabId: number, message: unknown): Promise<unknown> {
   void tabId
   const value = message as {
     type?: string
@@ -252,6 +264,7 @@ async function defaultTabMessageResponse(tabId: number, message: unknown) {
 const tabs = {
   query: vi.fn(async () => [] as unknown[]),
   update: vi.fn(async () => undefined),
+  reload: vi.fn(async () => undefined),
   create: vi.fn(async () => ({ id: 4, active: false, url: undefined })),
   remove: vi.fn(async () => undefined),
   // Tipado com os dois argumentos reais para que um teste possa afirmar sobre a
@@ -346,12 +359,705 @@ beforeEach(() => {
     documentBytes: FORESIGHT_PDF.byteLength,
   })
   tabs.query.mockResolvedValue([])
-  storage.device = { deviceId: 'device-1', baseUrl: 'http://localhost:3000', status: 'READY' }
+  storage.device = {
+    deviceId: 'device-1', baseUrl: 'http://localhost:3000', status: 'READY',
+    credentialEncryptionKeyRegistered: true,
+  }
+  vi.mocked(getOrCreateDeviceKey).mockResolvedValue({ kty: 'EC', crv: 'P-256' })
+  vi.mocked(getOrCreateCredentialEncryptionKey).mockResolvedValue({
+    kty: 'RSA', alg: 'RSA-OAEP-256', use: 'enc', key_ops: ['encrypt'], ext: true,
+    e: 'AQAB', n: 'public-modulus',
+  })
+  vi.mocked(readCredentialDecryptionKey).mockResolvedValue({
+    type: 'private', extractable: false, usages: ['decrypt'],
+  } as CryptoKey)
+  vi.mocked(openSealedCredentialLease).mockResolvedValue({
+    formatVersion: 1,
+    username: 'synthetic-carrier-user',
+    password: 'synthetic-carrier-password',
+  })
   vi.stubGlobal('chrome', chromeStub)
   vi.stubGlobal('defineBackground', (main: unknown) => main)
   // The extension's own vitest config substitutes this at build time; the repo-root
   // config does not, and without it every allowed-origin check fails.
   vi.stubGlobal('__KEEPR_ORIGIN__', 'http://localhost:3000')
+})
+
+describe('credential encryption key enrollment', () => {
+  it('includes the public encryption key when pairing and never sends private fields', async () => {
+    storage.device = { status: 'UNPAIRED' }
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(
+      JSON.stringify({ deviceId: 'device-paired' }),
+      { status: 201, headers: { 'content-type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+    await bootBackground()
+    const sendResponse = vi.fn()
+
+    emit(
+      'runtime.onMessageExternal',
+      {
+        type: 'PAIR_CONNECTOR',
+        code: 'NL-secret-pairing-code',
+        label: 'Este computador',
+        baseUrl: 'http://localhost:3000',
+      },
+      EXTERNAL_SENDER,
+      sendResponse,
+    )
+    await flush()
+
+    const pairingCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/pairings/exchange'))
+    const body = JSON.parse(String(pairingCall?.[1]?.body))
+    expect(body.encryptionPublicKeyJwk).toMatchObject({
+      kty: 'RSA', alg: 'RSA-OAEP-256', use: 'enc', key_ops: ['encrypt'], ext: true,
+    })
+    expect(JSON.stringify(body.encryptionPublicKeyJwk)).not.toMatch(
+      /"d"|"p"|"q"|"dp"|"dq"|"qi"/,
+    )
+    expect(storage.device).toMatchObject({
+      deviceId: 'device-paired', credentialEncryptionKeyRegistered: true,
+    })
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, deviceId: 'device-paired' })
+  })
+
+  it('registers once after upgrading an already paired device', async () => {
+    storage.device = {
+      deviceId: 'device-1', baseUrl: 'http://localhost:3000', status: 'READY',
+    }
+
+    await bootBackground()
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith({
+      baseUrl: 'http://localhost:3000',
+      deviceId: 'device-1',
+      method: 'POST',
+      pathname: '/api/agent/integrations/national-life/local-connector/devices/encryption-key',
+      body: {
+        schemaVersion: 1,
+        publicKeyJwk: expect.objectContaining({ kty: 'RSA', alg: 'RSA-OAEP-256' }),
+      },
+    })
+    expect(storage.device).toMatchObject({ credentialEncryptionKeyRegistered: true })
+
+    vi.mocked(signedJsonRequest).mockClear()
+    await bootBackground()
+    await flush()
+    expect(signedJsonRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/devices/encryption-key',
+    }))
+  })
+})
+
+describe('automatic carrier login recovery', () => {
+  const authUrl = `${NLG_AUTH0}/login?state=pending`
+  const sealed = {
+    schemaVersion: 1,
+    leaseId: 'lease_1',
+    expiresAt: '2026-09-01T21:01:00.000Z',
+    operation: { kind: 'SYNC_RUN', id: 'run-1', authEpoch: 3 },
+    keyAlgorithm: 'RSA-OAEP-256',
+    contentAlgorithm: 'AES-256-GCM',
+    wrappedKey: 'sealed-only-in-memory',
+    iv: 'sealed-only-in-memory',
+    ciphertext: 'sealed-only-in-memory',
+  }
+
+  function authResponder(classification: 'LOGIN' | 'MFA' | 'REJECTED' | 'UNKNOWN') {
+    return async (tabId: number, message: unknown) => {
+      const value = message as { type?: string }
+      if (value.type === 'CLASSIFY_CARRIER_AUTH_PAGE') {
+        return { ok: true, code: classification }
+      }
+      if (value.type === 'SUBMIT_CARRIER_CREDENTIAL') {
+        return { ok: true, code: 'SUBMITTED' }
+      }
+      return defaultTabMessageResponse(tabId, message)
+    }
+  }
+
+  function brokerResponder() {
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/auth-state')) return { authEpoch: 3 } as never
+      if (request.pathname.endsWith('/credential-leases')) return sealed as never
+      return {} as never
+    })
+  }
+
+  it('obtains one lease, opens it locally and submits the exact login once', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    brokerResponder()
+    await bootBackground()
+
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    await flush()
+
+    const leaseCalls = vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))
+    expect(leaseCalls).toHaveLength(1)
+    expect(openSealedCredentialLease).toHaveBeenCalledWith(sealed, expect.anything(), {
+      operation: { kind: 'SYNC_RUN', id: 'run-1', authEpoch: 3 },
+    })
+    expect(tabs.sendMessage).toHaveBeenCalledWith(7, {
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+      credential: {
+        formatVersion: 1,
+        username: 'synthetic-carrier-user',
+        password: 'synthetic-carrier-password',
+      },
+    })
+    expect(storage.sync).toMatchObject({
+      status: 'AUTH_REQUIRED',
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 3, leaseId: 'lease_1',
+      },
+    })
+    expect(JSON.stringify(storage)).not.toMatch(
+      /synthetic-carrier-user|synthetic-carrier-password|wrappedKey|ciphertext|"iv"/,
+    )
+  })
+
+  it('reloads an already-open Auth0 page once, then leases when the content script is ready', async () => {
+    await bootBackground()
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'NAVIGATING',
+    }
+    let classifications = 0
+    tabs.sendMessage.mockImplementation(async (tabId: number, message: unknown) => {
+      const value = message as { type?: string }
+      if (value.type === 'CLASSIFY_CARRIER_AUTH_PAGE') {
+        classifications += 1
+        if (classifications === 1) throw new Error('auth content script is still loading')
+        return { ok: true, code: 'LOGIN' }
+      }
+      if (value.type === 'SUBMIT_CARRIER_CREDENTIAL') return { ok: true, code: 'SUBMITTED' }
+      return defaultTabMessageResponse(tabId, message)
+    })
+    brokerResponder()
+
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    await flush()
+
+    expect(tabs.reload).toHaveBeenCalledTimes(1)
+    expect(tabs.reload).toHaveBeenCalledWith(7)
+    expect(storage.sync).toMatchObject({
+      status: 'AUTH_REQUIRED',
+      credentialPageReloadedAt: expect.any(String),
+    })
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(0)
+
+    const readyResponse = vi.fn()
+    emit(
+      'runtime.onMessage',
+      { type: 'CARRIER_AUTH_PAGE_READY' },
+      { id: chromeStub.runtime.id, tab: { id: 7 }, url: authUrl },
+      readyResponse,
+    )
+    await flush()
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(1)
+    expect(tabs.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+    }))
+    expect(readyResponse).toHaveBeenCalledWith({ ok: true })
+  })
+
+  it('never reloads the same unsupported Auth0 episode twice', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+      credentialPageReloadedAt: '2026-09-01T21:00:00.000Z',
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('UNKNOWN'))
+
+    await bootBackground()
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    await flush()
+
+    expect(tabs.reload).not.toHaveBeenCalled()
+    expect(storage.sync).toMatchObject({
+      status: 'AUTH_REQUIRED',
+      credentialPageReloadedAt: '2026-09-01T21:00:00.000Z',
+      errorCode: 'CREDENTIAL_PAGE_UNSUPPORTED',
+    })
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(0)
+  })
+
+  it('recovers a stale pre-lease marker after service-worker eviction', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+      errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 0,
+        attemptedAt: '2026-09-01T20:00:00.000Z',
+      },
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    brokerResponder()
+
+    await bootBackground()
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(1)
+    expect(tabs.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+    }))
+    expect(storage.sync).toMatchObject({
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 3, leaseId: 'lease_1',
+      },
+    })
+  })
+
+  it('does not duplicate a fresh pre-lease request that may still be in flight', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+      errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 0,
+        attemptedAt: new Date().toISOString(),
+      },
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    brokerResponder()
+
+    await bootBackground()
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(0)
+    expect(tabs.sendMessage).not.toHaveBeenCalledWith(7, expect.objectContaining({
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+    }))
+  })
+
+  it('retries a command login once when Auth0 reports readiness, even if it signals twice', async () => {
+    storage.command = {
+      commandId: 'cmd-1', runId: 'command-run-1', carrierTabId: 7,
+      status: 'AUTH_REQUIRED', nextEventSequence: 3,
+    }
+    const commandSealed = {
+      ...sealed,
+      operation: { kind: 'CONNECTOR_COMMAND' as const, id: 'cmd-1', authEpoch: 3 },
+    }
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/credential-leases')) return commandSealed as never
+      return {} as never
+    })
+    await bootBackground()
+
+    for (const respond of [vi.fn(), vi.fn()]) {
+      emit(
+        'runtime.onMessage',
+        { type: 'CARRIER_AUTH_PAGE_READY' },
+        { id: chromeStub.runtime.id, tab: { id: 7 }, url: authUrl },
+        respond,
+      )
+    }
+    await flush()
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(1)
+    expect(tabs.sendMessage.mock.calls.filter(([, message]) =>
+      (message as { type?: string }).type === 'SUBMIT_CARRIER_CREDENTIAL')).toHaveLength(1)
+  })
+
+  it('closes an issued lease as unknown when the exact login submit cannot be completed', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(async (tabId: number, message: unknown) => {
+      const value = message as { type?: string }
+      if (value.type === 'CLASSIFY_CARRIER_AUTH_PAGE') {
+        return { ok: true, code: 'LOGIN' }
+      }
+      if (value.type === 'SUBMIT_CARRIER_CREDENTIAL') {
+        throw new Error('content script unavailable')
+      }
+      return defaultTabMessageResponse(tabId, message)
+    })
+    brokerResponder()
+    await bootBackground()
+
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease_1/result',
+      body: { schemaVersion: 1, outcome: 'UNKNOWN_PAGE' },
+    }))
+    expect(storage.sync).toMatchObject({
+      status: 'AUTH_REQUIRED',
+      errorCode: 'CREDENTIAL_PAGE_UNSUPPORTED',
+      credentialAttempt: { leaseId: 'lease_1' },
+    })
+  })
+
+  it('survives service-worker eviction without a second lease or submit', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 3,
+        leaseId: 'lease_1', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    brokerResponder()
+
+    await bootBackground()
+    await bootBackground()
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(0)
+    expect(tabs.sendMessage).not.toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ type: 'SUBMIT_CARRIER_CREDENTIAL' }),
+    )
+  })
+
+  it('does not retry an ambiguous lease response', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/credential-leases')) throw new TypeError('Failed to fetch')
+      return {} as never
+    })
+    await bootBackground()
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    await flush()
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    await flush()
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(1)
+    expect(storage.sync).toMatchObject({
+      errorCode: 'CREDENTIAL_BROKER_UNAVAILABLE',
+      credentialAttempt: { operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 0 },
+    })
+  })
+
+  it('reports authenticated proof, clears the attempt and resumes the same sync', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 3,
+        leaseId: 'lease_1', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    brokerResponder()
+    await bootBackground()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease_1/result',
+      body: { schemaVersion: 1, outcome: 'AUTHENTICATED' },
+    }))
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs/run-1/auth-state',
+      body: { state: 'RESTORED' },
+    }))
+    expect(storage.sync).toMatchObject({ status: 'EXTRACTING', authRenewalPending: false })
+    expect((storage.sync as Record<string, unknown>).credentialAttempt).toBeUndefined()
+  })
+
+  it('settles a command credential lease after the command has already started', async () => {
+    storage.command = {
+      commandId: 'cmd-1', runId: 'command-run-1', carrierTabId: 17,
+      nextEventSequence: 4, status: 'RUNNING', phase: 'OPENING_FORESIGHT',
+      errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
+      credentialAttempt: {
+        operationKind: 'CONNECTOR_COMMAND', operationId: 'cmd-1', authEpoch: 3,
+        leaseId: 'lease_1', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    await bootBackground()
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return undefined as never
+      return {} as never
+    })
+    const commandWrites: Array<Record<string, unknown>> = []
+    const set = chromeStub.storage.local.set
+    chromeStub.storage.local.set = async (value) => {
+      if (value.command && typeof value.command === 'object') {
+        commandWrites.push(value.command as Record<string, unknown>)
+      }
+      await set(value)
+    }
+
+    emit('tabs.onUpdated', 17, { status: 'complete' }, {
+      id: 17, active: true, url: `${NLG}${NEW_BUSINESS_PATH}`,
+    })
+    await flush()
+    chromeStub.storage.local.set = set
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease_1/result',
+      body: { schemaVersion: 1, outcome: 'AUTHENTICATED' },
+    }))
+    const settled = commandWrites.find((write) => write.status === 'RUNNING')
+    expect(settled).toMatchObject({
+      commandId: 'cmd-1', status: 'RUNNING', phase: 'OPENING_FORESIGHT',
+    })
+    expect(settled).not.toHaveProperty('credentialAttempt')
+    expect(settled).not.toHaveProperty('errorCode')
+  })
+
+  it('settles a command credential lease after Auth0 lands directly in authenticated Foresight', async () => {
+    storage.command = {
+      commandId: 'cmd-1', runId: 'command-run-1', carrierTabId: 17,
+      nextEventSequence: 4, status: 'RUNNING', phase: 'OPENING_FORESIGHT',
+      errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
+      credentialAttempt: {
+        operationKind: 'CONNECTOR_COMMAND', operationId: 'cmd-1', authEpoch: 3,
+        leaseId: 'lease_1', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    await bootBackground()
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return undefined as never
+      return {} as never
+    })
+
+    emit('tabs.onUpdated', 17, { status: 'complete' }, {
+      id: 17,
+      active: true,
+      url: `${NLG}/NWI/Main/Layout.aspx?SessionTokenId=${'a'.repeat(32)}`,
+    })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease_1/result',
+      body: { schemaVersion: 1, outcome: 'AUTHENTICATED' },
+    }))
+    expect(storage.command).not.toHaveProperty('credentialAttempt')
+    expect(storage.command).not.toHaveProperty('errorCode')
+  })
+
+  it('does not treat a tokenless Foresight shell as authenticated login proof', async () => {
+    storage.command = {
+      commandId: 'cmd-1', runId: 'command-run-1', carrierTabId: 17,
+      nextEventSequence: 4, status: 'RUNNING', phase: 'OPENING_FORESIGHT',
+      credentialAttempt: {
+        operationKind: 'CONNECTOR_COMMAND', operationId: 'cmd-1', authEpoch: 3,
+        leaseId: 'lease_1', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    await bootBackground()
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return undefined as never
+      return {} as never
+    })
+
+    emit('tabs.onUpdated', 17, { status: 'complete' }, {
+      id: 17, active: true, url: `${NLG}/NWI/Main/Layout.aspx`,
+    })
+    await flush()
+
+    expect(signedJsonRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease_1/result',
+    }))
+  })
+
+  it('settles login when a command worker wakes already inside authenticated Foresight', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd-foresight-wake',
+      runId: 'run-foresight-wake',
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'ill-wake' },
+      params: { illustrationId: 'ill-wake', inputHash: 'a'.repeat(64) },
+      idempotencyKey: 'illustration:ill-wake',
+      issuedAt: '2026-09-01T21:00:00.000Z',
+      expiresAt: '2026-09-01T22:00:00.000Z',
+      requiresConfirmation: true,
+    }
+    storage.command = {
+      commandId: command.commandId, runId: command.runId, carrierTabId: 17,
+      nextEventSequence: 3, status: 'AUTH_REQUIRED', phase: 'OPENING_FORESIGHT',
+      credentialAttempt: {
+        operationKind: 'CONNECTOR_COMMAND', operationId: command.commandId, authEpoch: 2,
+        leaseId: 'lease-wake', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    tabs.query.mockResolvedValue([{
+      id: 17,
+      active: false,
+      url: `${NLG}/NWI/Main/Layout.aspx?SessionTokenId=${'b'.repeat(32)}`,
+    }])
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'AUTH_REQUIRED', nextEventSequence: 3, lastEventType: 'AUTH_REQUIRED',
+      } as never
+      if (request.pathname.endsWith('/input')) return {} as never
+      return {} as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease-wake/result',
+      body: { schemaVersion: 1, outcome: 'AUTHENTICATED' },
+    }))
+  })
+
+  it('settles login when an iGO worker wakes on the authenticated National Life tools page', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd-igo-wake',
+      runId: 'run-igo-wake',
+      capability: 'PREPARE_APPLICATION_DRAFT',
+      target: { kind: 'APPLICATION', id: 'app-wake' },
+      params: { applicationId: 'app-wake', payloadHash: 'c'.repeat(64) },
+      idempotencyKey: 'igo:app-wake',
+      issuedAt: '2026-09-01T21:00:00.000Z',
+      expiresAt: '2026-09-01T22:00:00.000Z',
+      requiresConfirmation: true,
+    }
+    storage.command = {
+      commandId: command.commandId, runId: command.runId, carrierTabId: 17,
+      nextEventSequence: 3, status: 'AUTH_REQUIRED', phase: 'OPENING_IGO',
+      credentialAttempt: {
+        operationKind: 'CONNECTOR_COMMAND', operationId: command.commandId, authEpoch: 2,
+        leaseId: 'lease-igo-wake', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    tabs.query.mockResolvedValue([{
+      id: 17,
+      active: false,
+      url: `${NLG}/agent/tools/business-tools/national-life-tools`,
+    }])
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'AUTH_REQUIRED', nextEventSequence: 3, lastEventType: 'AUTH_REQUIRED',
+      } as never
+      return {} as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease-igo-wake/result',
+      body: { schemaVersion: 1, outcome: 'AUTHENTICATED' },
+    }))
+  })
+
+  it.each([
+    ['MFA', 'MFA_REQUIRED'],
+    ['REJECTED', 'CREDENTIAL_REJECTED'],
+  ] as const)('reports %s once and waits for manual recovery', async (classification, errorCode) => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 3,
+        leaseId: 'lease_1', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder(classification))
+    brokerResponder()
+    await bootBackground()
+
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease_1/result',
+      body: { schemaVersion: 1, outcome: classification === 'MFA' ? 'MFA_REQUIRED' : 'REJECTED' },
+    }))
+    expect(storage.sync).toMatchObject({ status: 'AUTH_REQUIRED', errorCode })
+    expect(tabs.sendMessage).not.toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ type: 'SUBMIT_CARRIER_CREDENTIAL' }),
+    )
+  })
+
+  it('uses the same one-shot login recovery for illustration and iGO commands', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'command_auth_1',
+      runId: 'command_run_1',
+      capability: 'READ_POLICY_DETAIL',
+      target: { kind: 'POLICY', id: 'policy_1', carrierExternalId: 'LS1473219' },
+      params: { policyNumber: 'LS1473219', navigatePath: POLICY_DETAIL_PATH },
+      idempotencyKey: 'command_auth_1',
+      issuedAt: '2026-09-01T20:00:00.000Z',
+      expiresAt: '2026-09-01T22:00:00.000Z',
+      requiresConfirmation: false,
+    }
+    const commandSealed = {
+      ...sealed,
+      operation: { kind: 'CONNECTOR_COMMAND', id: command.commandId, authEpoch: 5 },
+    }
+    storage.sync = { status: 'IDLE' }
+    storage.command = {
+      commandId: command.commandId,
+      runId: command.runId,
+      carrierTabId: 17,
+      nextEventSequence: 2,
+      status: 'AUTH_REQUIRED',
+    }
+    tabs.query.mockResolvedValue([{ id: 17, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) {
+        return {
+          command, state: 'AUTH_REQUIRED', nextEventSequence: 2, lastEventType: 'AUTH_REQUIRED',
+        } as never
+      }
+      if (request.pathname.endsWith('/credential-leases')) return commandSealed as never
+      return {} as never
+    })
+    await bootBackground()
+
+    emit('tabs.onUpdated', 17, { status: 'complete' }, { id: 17, active: true, url: authUrl })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases',
+      body: expect.objectContaining({
+        operation: { kind: 'CONNECTOR_COMMAND', id: command.commandId },
+      }),
+    }))
+    expect(tabs.sendMessage).toHaveBeenCalledWith(17, expect.objectContaining({
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+    }))
+    expect(storage.command).toMatchObject({
+      status: 'AUTH_REQUIRED',
+      credentialAttempt: {
+        operationKind: 'CONNECTOR_COMMAND', operationId: command.commandId,
+        authEpoch: 5, leaseId: 'lease_1',
+      },
+    })
+  })
 })
 
 describe('empurrão de atualização no caminho real', () => {
@@ -881,8 +1587,8 @@ describe('background plan executor', () => {
     expect(storage.command).toMatchObject({ status: 'COMPLETED', nextEventSequence: 4 })
   })
 
-  it('reuses the latest Foresight tab for a new illustration command', async () => {
-    storage.command = { status: 'COMPLETED', carrierTabId: 12 }
+  it('resets the latest Foresight tab for a new or hash-mismatched illustration command', async () => {
+    storage.command = { status: 'ERROR', carrierTabId: 12, termInputHash: 'b'.repeat(64) }
     tabs.query.mockResolvedValue([
       { id: 44, active: false, lastAccessed: 20, url: `${NLG}/NWI/Main/Layout.aspx` },
       { id: 45, active: false, lastAccessed: 10, url: `${NLG}/NWI/Main/Layout.aspx` },
@@ -911,6 +1617,91 @@ describe('background plan executor', () => {
     expect(tabs.update).toHaveBeenCalledWith(44, { url: `${NLG}/agent/sso/foresight` })
     expect(tabs.create).not.toHaveBeenCalled()
     expect(storage.command).toMatchObject({ carrierTabId: 44, status: 'NAVIGATING' })
+  })
+
+  it('resumes only the exact interrupted Term case without reopening Foresight', async () => {
+    const snapshot = {
+      schemaVersion: 1,
+      illustrationId: 'ill_term_resume',
+      caseId: null,
+      carrierCaseName: 'KEEPRONE_TERM_RESUME',
+      product: { carrierName: 'LSW Term', kind: 'TERM' },
+      insured: { firstName: 'Synthetic', lastName: 'Test', dateOfBirth: '1990-01-01', issueState: 'FL' },
+      underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
+      faceAmount: 100_000,
+      premiumMode: 'Monthly',
+      termDuration: '20-G',
+      reports: ['NAIC_ILLUSTRATION'],
+    } as const
+    const inputHash = await sha256ForesightTermSnapshot(snapshot)
+    storage.command = {
+      commandId: 'cmd_term_interrupted',
+      runId: 'run_term_interrupted',
+      carrierTabId: 44,
+      termInputHash: inputHash,
+      status: 'ERROR',
+    }
+    tabs.query.mockResolvedValue([
+      { id: 44, active: false, lastAccessed: 20, url: `${NLG}/NWI/Main/Layout.aspx` },
+    ])
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_term_resume',
+      runId: 'run_term_resume',
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: snapshot.illustrationId },
+      params: { illustrationId: snapshot.illustrationId, inputHash },
+      idempotencyKey: `illustration:${snapshot.illustrationId}:${inputHash}`,
+      issuedAt: '2026-09-01T18:00:00.000Z',
+      expiresAt: '2026-09-01T18:30:00.000Z',
+      requiresConfirmation: true,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'QUEUED', nextEventSequence: 1, lastEventType: 'COMMAND_ACCEPTED',
+      } as never
+      if (request.pathname.endsWith('/commands/cmd_term_resume/input')) {
+        return { inputHash, snapshot } as never
+      }
+      return undefined as never
+    })
+    tabs.sendMessage.mockImplementationOnce(async (_tabId, message) => {
+      const request = message as { type?: string; token: string; correlationId: string }
+      if (request.type !== 'EXECUTE_FORESIGHT_ILLUSTRATION') return defaultTabMessageResponse(_tabId, message)
+      return {
+        ok: true,
+        type: 'FORESIGHT_ILLUSTRATION_SAVED',
+        token: request.token,
+        correlationId: request.correlationId,
+        receipt: {
+          inputHash,
+          caseFingerprint: `case_${'c'.repeat(64)}`,
+          carrierCaseName: snapshot.carrierCaseName,
+          carrierProduct: snapshot.product.carrierName,
+          requestedTermDuration: snapshot.termDuration,
+          confirmedTermDuration: snapshot.termDuration,
+          release: '5.3.65.31',
+          reportCode: 'NAIC_ILLUSTRATION',
+          documentSha256: FORESIGHT_PDF_HASH,
+          documentBytes: FORESIGHT_PDF.byteLength,
+          saved: true,
+        },
+        document: { contentType: 'application/pdf', pdfBase64: FORESIGHT_PDF_BASE64 },
+      }
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    expect(tabs.update).not.toHaveBeenCalledWith(44, { url: `${NLG}/agent/sso/foresight` })
+    await vi.waitFor(() => expect(tabs.sendMessage).toHaveBeenCalled())
+    expect(tabs.sendMessage).toHaveBeenCalledWith(44, expect.objectContaining({
+      type: 'EXECUTE_FORESIGHT_ILLUSTRATION', inputHash, snapshot,
+    }))
+    await vi.waitFor(() => expect(storage.command).toMatchObject({
+      status: 'COMPLETED', carrierTabId: 44,
+    }))
   })
 
   it('executes an on-demand policy detail command in its own inactive tab', async () => {
@@ -1150,6 +1941,51 @@ describe('background plan executor', () => {
       pathname: '/api/agent/integrations/national-life/local-connector/runs',
     }))
     expect(tabs.create).not.toHaveBeenCalled()
+  })
+
+  it('reclaims a timed-out auth wait and keeps the server checkpoint', async () => {
+    storage.sync = {
+      runId: 'run-resume',
+      plan: THREE_STAGE_PLAN,
+      stageIndex: 1,
+      carrierTabId: 7,
+      status: 'AUTH_REQUIRED',
+      authRenewalPending: true,
+      authRequiredAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-resume', authEpoch: 1,
+        leaseId: 'lease-old', attemptedAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+      },
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG_AUTH0}/login?state=stale` }])
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/runs')) return {
+        runId: 'run-resume',
+        stages: THREE_STAGE_PLAN,
+        completedStages: 1,
+        nextStageIndex: 1,
+        reopened: true,
+      } as never
+      if (request.pathname.endsWith('/auth-state')) return { authEpoch: 2 } as never
+      return {} as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-scheduled-sync' })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs',
+    }))
+    expect(readSync()).toMatchObject({
+      runId: 'run-resume', stageIndex: 1, status: 'AUTH_REQUIRED',
+      authRenewalPending: true,
+    })
+    expect(readSync().credentialAttempt).toBeUndefined()
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs/run-resume/auth-state',
+      body: { state: 'REQUIRED' },
+    }))
   })
 
   it('forwards an explicit full refresh to the run endpoint', async () => {
@@ -2159,9 +2995,10 @@ describe('background plan executor', () => {
     tabs.query.mockResolvedValue([{ id: 12, active: true, url: `${NLG_AUTH0}/login?state=pending` }])
     await bootBackground()
 
-    // Recovery and watchdog passes are passive during user-paced login. The tab
-    // was already activated when Auth0 first appeared; repeatedly activating it
-    // here would steal focus once a minute.
+    // A build loaded after this page opened needs one reload to inject the
+    // current login handler. It must still neither open another tab nor steal
+    // focus through tabs.update.
+    expect(tabs.reload).toHaveBeenCalledTimes(1)
     expect(tabs.update).not.toHaveBeenCalled()
     expect(tabs.create).not.toHaveBeenCalled()
     expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED', stageIndex: 0 })
@@ -2180,6 +3017,7 @@ describe('background plan executor', () => {
     }
 
     expect(signedJsonRequest).not.toHaveBeenCalled()
+    expect(tabs.reload).toHaveBeenCalledTimes(1)
     expect(tabs.update).not.toHaveBeenCalled()
     expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED', runId: 'run-1' })
   })

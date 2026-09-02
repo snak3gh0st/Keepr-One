@@ -9,6 +9,7 @@ vi.mock('../lib/foresight-term-executor', () => ({ executeForesightTermIllustrat
 
 type Listener = (value: unknown, sender: unknown, respond: (value: unknown) => void) => boolean | void
 let listener: Listener | undefined
+const runtimeSendMessage = vi.fn()
 
 const snapshot = {
   schemaVersion: 1,
@@ -54,6 +55,8 @@ beforeEach(() => {
   vi.resetModules()
   mocks.execute.mockReset()
   mocks.executeTerm.mockReset()
+  runtimeSendMessage.mockReset()
+  runtimeSendMessage.mockResolvedValue({ ok: true })
   listener = undefined
   const fakeWindow = {}
   vi.stubGlobal('window', fakeWindow)
@@ -61,7 +64,10 @@ beforeEach(() => {
   vi.stubGlobal('location', { pathname: '/NWI/Main/Layout.aspx' })
   vi.stubGlobal('defineContentScript', (config: unknown) => config)
   vi.stubGlobal('chrome', {
-    runtime: { onMessage: { addListener: (value: Listener) => { listener = value } } },
+    runtime: {
+      sendMessage: runtimeSendMessage,
+      onMessage: { addListener: (value: Listener) => { listener = value } },
+    },
   })
 })
 
@@ -119,7 +125,8 @@ describe('Foresight isolated-world executor', () => {
     } as const
     const receipt = {
       inputHash: 'a'.repeat(64), caseFingerprint: `case_${'b'.repeat(64)}`,
-      carrierCaseName: termSnapshot.carrierCaseName, carrierProduct: 'LSW Term', release: '5.3.65.31',
+      carrierCaseName: termSnapshot.carrierCaseName, carrierProduct: 'LSW Term',
+      requestedTermDuration: '20-G', confirmedTermDuration: '15-G', release: '5.3.65.31',
       reportCode: 'NAIC_ILLUSTRATION', documentSha256: 'c'.repeat(64), documentBytes: 9, saved: true,
     } as const
     const document = { contentType: 'application/pdf', pdfBase64: 'JVBERi0xLjcK' } as const
@@ -156,6 +163,35 @@ describe('Foresight isolated-world executor', () => {
       }, {}, resolve)
     })
     expect(mocks.execute).toHaveBeenCalledWith({ inputHash: receipt.inputHash, snapshot: premiumSolvedSnapshot, onProgress: expect.any(Function) })
+    expect(response).toEqual(expect.objectContaining({ ok: true, receipt, document }))
+  })
+
+  it('flushes ordered progress before returning the carrier result', async () => {
+    const receipt = {
+      inputHash: 'a'.repeat(64), caseFingerprint: `case_${'b'.repeat(64)}`,
+      carrierCaseName: snapshot.carrierCaseName, productCode: '956', release: '5.3.65.31',
+      reportCode: 'NAIC_ILLUSTRATION', documentSha256: 'c'.repeat(64), documentBytes: 9, saved: true,
+    } as const
+    const document = { contentType: 'application/pdf', pdfBase64: 'JVBERi0xLjcK' } as const
+    mocks.execute.mockImplementation(async ({ onProgress }) => {
+      onProgress('OPENING_CASE')
+      onProgress('VERIFYING_VALUES')
+      return { receipt, document }
+    })
+    const content = (await import('../entrypoints/foresight.content')).default as unknown as { main(): void }
+    content.main()
+
+    const response = await new Promise<unknown>((resolve) => {
+      listener?.({
+        type: 'EXECUTE_FORESIGHT_ILLUSTRATION', token: 't'.repeat(32), correlationId: 'c'.repeat(16),
+        inputHash: receipt.inputHash, snapshot,
+      }, {}, resolve)
+    })
+
+    expect(runtimeSendMessage.mock.calls.map(([message]) => message)).toEqual([
+      { type: 'FORESIGHT_PROGRESS', phase: 'OPENING_CASE' },
+      { type: 'FORESIGHT_PROGRESS', phase: 'VERIFYING_VALUES' },
+    ])
     expect(response).toEqual(expect.objectContaining({ ok: true, receipt, document }))
   })
 })

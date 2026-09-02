@@ -515,6 +515,20 @@ export async function revokeAgencyInvitationAction(
   const invitationManagerScope = access.kind === "AGENCY_OWNER"
     ? {}
     : { invitedByAgentId: access.agentId };
+  const revokedAt = new Date();
+  const revocableCheckout = {
+    OR: [
+      { checkout: { is: null } },
+      {
+        checkout: {
+          is: {
+            status: "PENDING" as const,
+            checkoutExpiresAt: { lte: revokedAt },
+          },
+        },
+      },
+    ],
+  };
 
   try {
     await prisma.$transaction(async (transaction) => {
@@ -524,6 +538,7 @@ export async function revokeAgencyInvitationAction(
           agencyId,
           ...invitationManagerScope,
           status: "PENDING",
+          ...revocableCheckout,
         },
         select: {
           id: true,
@@ -537,13 +552,13 @@ export async function revokeAgencyInvitationAction(
         );
       }
 
-      const revokedAt = new Date();
       const revoked = await transaction.agencyInvitation.updateMany({
         where: {
           id: invitation.id,
           agencyId,
           ...invitationManagerScope,
           status: "PENDING",
+          ...revocableCheckout,
         },
         data: {
           status: "REVOKED",

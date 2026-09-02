@@ -37,6 +37,34 @@ const FORESIGHT_PHASE_TEXT: Record<string, string> = {
   COMPLETED: 'K-Bot completed the official illustration.',
 }
 
+function authenticationStatusText(state: Pick<SyncState, 'errorCode' | 'credentialAttempt'>) {
+  switch (state.errorCode) {
+    case 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS':
+      return state.credentialAttempt?.leaseId
+        ? 'K-Bot entered your saved credential and is waiting for National Life.'
+        : 'K-Bot is securely loading your saved National Life credential…'
+    case 'MFA_REQUIRED':
+      return 'K-Bot entered your saved credential. Complete National Life verification to continue.'
+    case 'CREDENTIAL_REJECTED':
+    case 'CREDENTIAL_AUTO_LOGIN_DISABLED':
+      return 'National Life rejected the saved credential, so automatic login was disabled. Sign in manually and update it in Keepr One Settings.'
+    case 'CREDENTIAL_BROKER_UNAVAILABLE':
+      return 'Secure credential access is unavailable. Sign in to National Life manually; K-Bot will continue afterward.'
+    case 'CREDENTIAL_NOT_CONFIGURED':
+      return 'No saved credential for National Life is configured. Sign in manually or enable it in Keepr One Settings.'
+    case 'CREDENTIAL_RATE_LIMITED':
+    case 'CREDENTIAL_LEASE_ALREADY_ISSUED':
+      return 'Automatic login will not retry this session. Sign in to National Life manually to continue safely.'
+    case 'CREDENTIAL_CAPTCHA_REQUIRED':
+      return 'National Life requires a CAPTCHA. Complete it manually and K-Bot will continue afterward.'
+    case 'CREDENTIAL_PAGE_UNSUPPORTED':
+    case 'DEVICE_ENCRYPTION_KEY_REQUIRED':
+      return 'Automatic login is unavailable on this page. Sign in to National Life manually.'
+    default:
+      return undefined
+  }
+}
+
 export function popupStatusText(
   device: DeviceState,
   sync: SyncState,
@@ -50,9 +78,17 @@ export function popupStatusText(
     return 'Connect this computer from the National Life page in Keepr One.'
   }
   if (command?.status === 'ERROR') return connectorFailure(command.errorCode).message
+  if (command?.status === 'AUTH_REQUIRED' || command?.status === 'MFA_REQUIRED') {
+    const authText = authenticationStatusText(command)
+    if (authText) return authText
+  }
   const commandText = command ? COMMAND_STATUS_TEXT[command.status] : undefined
   if (commandText && command?.status !== 'COMPLETED') return commandText
   if (sync.status === 'ERROR') return connectorFailure(sync.errorCode).message
+  if (sync.status === 'AUTH_REQUIRED') {
+    const authText = authenticationStatusText(sync)
+    if (authText) return authText
+  }
   if (commandText) return commandText
   return STATUS_TEXT[sync.status]
 }
@@ -64,7 +100,7 @@ export function popupSyncStatusText(device: DeviceState, sync: SyncState): strin
 export function popupCommandStatusText(command: CommandState): string {
   if (command.status === 'ERROR') return connectorFailure(command.errorCode).message
   if (command.status === 'AUTH_REQUIRED' || command.status === 'MFA_REQUIRED') {
-    return COMMAND_STATUS_TEXT[command.status]!
+    return authenticationStatusText(command) ?? COMMAND_STATUS_TEXT[command.status]!
   }
   if (command.phase && FORESIGHT_PHASE_TEXT[command.phase]) return FORESIGHT_PHASE_TEXT[command.phase]!
   return COMMAND_STATUS_TEXT[command.status] ?? 'K-Bot is ready for the next National Life task.'

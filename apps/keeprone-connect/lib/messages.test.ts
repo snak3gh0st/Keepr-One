@@ -68,6 +68,17 @@ describe('message validation', () => {
       type: 'START_NATIONAL_LIFE_COMMAND',
       commandId: '../cmd',
     })).toBeNull()
+    expect(parseExternalMessage({
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+      username: 'must-not-cross',
+      password: 'must-not-cross',
+    })).toBeNull()
+    expect(parseBridgeMessage({
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+      token: 't'.repeat(32),
+      correlationId: 'c'.repeat(16),
+      password: 'must-not-cross',
+    })).toBeNull()
   })
 
   const rawChunk = {

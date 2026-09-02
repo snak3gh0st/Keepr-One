@@ -12,6 +12,8 @@ import { PageHeader } from '@/components/PageHeader'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
 import { getServerI18n } from '@/lib/i18n/server'
 import { localeFor } from '@/lib/i18n/config'
+import { KBotAvatar } from '@/components/kbot/KBotAvatar'
+import { StartApplicationFromIllustrationButton } from './StartApplicationFromIllustrationButton'
 
 const currency = (value: number, locale: string) =>
   new Intl.NumberFormat(locale, {
@@ -20,9 +22,15 @@ const currency = (value: number, locale: string) =>
     maximumFractionDigits: 0,
   }).format(value)
 
-export default async function IllustrationsPage() {
+export default async function IllustrationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ intent?: string }>
+}) {
   const { copy, language } = await getServerI18n()
   const locale = localeFor(language)
+  const { intent } = await searchParams
+  const applicationIntent = intent === 'application'
   const agent = await getCurrentAgent()
   const localConnector = getNationalLifeLocalConnectorConfig()
   const [user, illustrations, pdfStatus] = await Promise.all([
@@ -43,6 +51,7 @@ export default async function IllustrationsPage() {
         targetPremiumSource: true,
         productName: true,
         documentFetchedAt: true,
+        documentMimeType: true,
         client: { select: { id: true, name: true } },
       },
     }),
@@ -57,6 +66,9 @@ export default async function IllustrationsPage() {
     }
     if (status.state === 'BLOCKED') {
       return 'K-Bot is waiting for you to sign in to National Life before continuing the same request.'
+    }
+    if (status.state === 'WAITING_FOR_KBOT') {
+      return 'K-Bot is waiting to connect on this computer before starting the same request.'
     }
     switch (status.safeErrorCode) {
       case 'FORESIGHT_SSO_EXPIRED':
@@ -77,6 +89,25 @@ export default async function IllustrationsPage() {
         return 'Foresight could not calculate a valid scenario with this source amount. Review the face amount or premium and generate a new illustration; no PDF was issued.'
       case 'FORESIGHT_CLIENT_READBACK_TIMEOUT':
         return 'Foresight did not confirm the insured data. Review the date of birth, state, and risk profile before trying again; no PDF was issued.'
+      case 'FORESIGHT_TERM_CLIENT_JURISDICTION_WRITE_MISMATCH':
+      case 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH':
+      case 'FORESIGHT_TERM_CLIENT_INFORMATION_WRITE_MISMATCH':
+      case 'FORESIGHT_TERM_CLIENT_RISK_WRITE_MISMATCH':
+      case 'FORESIGHT_TERM_CLIENT_OWNER_WRITE_MISMATCH':
+        return 'Foresight did not confirm a Term client-data step after one safe retry. No PDF was issued, and K-Bot will not keep trying on its own.'
+      case 'FORESIGHT_TERM_FUNDING_TIMEOUT':
+        return 'Foresight was still updating the Term scenario and did not confirm the values in time. Generate it again; no PDF was issued.'
+      case 'FORESIGHT_TERM_DURATION_READBACK_MISMATCH':
+        return 'Foresight changed the Term duration during the update. Review the duration and generate it again; no PDF was issued.'
+      case 'FORESIGHT_TERM_PREMIUM_MISSING':
+      case 'FORESIGHT_TERM_PREMIUM_MISMATCH':
+      case 'FORESIGHT_TERM_PDF_INVALID':
+        return 'The Term PDF was received, but the premiums could not be verified. Try verifying this PDF again; if the issue persists, generate a new illustration.'
+      case 'FORESIGHT_TERM_CLIENT_READBACK_MISMATCH':
+        return 'Foresight returned insured data that differs from the Term request. Review the scenario and generate it again; no PDF was issued.'
+      case 'FORESIGHT_TERM_FACE_AMOUNT_READBACK_MISMATCH':
+      case 'FORESIGHT_TERM_FUNDING_READBACK_MISMATCH':
+        return 'Foresight returned a face amount or billing value that differs from the Term request. Review the scenario and generate it again; no PDF was issued.'
       case 'FORESIGHT_SOLVE_READBACK_TIMEOUT':
       case 'FORESIGHT_SOLVE_READBACK_MISMATCH':
       case 'FORESIGHT_RESPONSE_INVALID':
@@ -103,6 +134,30 @@ export default async function IllustrationsPage() {
         </Link>
       </PageHeader>
 
+      {applicationIntent ? (
+        <section className="mb-5 flex flex-col gap-4 rounded-xl border border-border-steel bg-paper p-4 sm:flex-row sm:items-center">
+          <KBotAvatar state="idle" size="sm" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">K-Bot · iGO Application</p>
+            <h2 className="mt-1 text-base font-semibold text-ink">
+              {copy('Escolha a ilustração que originará a proposta.', 'Choose the illustration that will start the application.')}
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm leading-5 text-ink-muted">
+              {copy(
+                'Use uma ilustração com PDF oficial. Produto, prazo, capital e prêmio confirmados serão vinculados automaticamente ao novo dossiê.',
+                'Use an illustration with an official PDF. The confirmed product, duration, face amount, and premium will be linked to the new case automatically.',
+              )}
+            </p>
+          </div>
+          <Link
+            href="/agent/illustrations/new"
+            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md border border-border-steel bg-paper px-4 py-2 text-sm font-semibold text-teal-deep transition-colors hover:border-teal hover:bg-teal-pale"
+          >
+            {copy('Nova ilustração', 'New illustration')}
+          </Link>
+        </section>
+      ) : null}
+
       <section className="module-main-surface">
         <Table>
           <Thead>
@@ -114,6 +169,7 @@ export default async function IllustrationsPage() {
               <Th className="text-right">{copy("Capital segurado", "Face amount")}</Th>
               <Th className="text-right">{copy("Prêmio mensal", "Monthly premium")}</Th>
               <Th>{copy("Documento", "Document")}</Th>
+              <Th>{copy('Proposta', 'Application')}</Th>
             </tr>
           </Thead>
           <tbody>
@@ -121,12 +177,18 @@ export default async function IllustrationsPage() {
               const status = pdfStatus.get(illustration.id)
               const hasCarrierPremium = Boolean(illustration.documentFetchedAt && illustration.premium)
               const premium = hasCarrierPremium ? illustration.premium : illustration.targetPremium
+              const canStartApplication = Boolean(
+                illustration.documentFetchedAt &&
+                illustration.documentMimeType === 'application/pdf' &&
+                illustration.faceAmount &&
+                illustration.premium,
+              )
               return (
               <Tr key={illustration.id}>
                 <Td>{instant(illustration.createdAt)}</Td>
                 <Td>
                   <Link
-                    href={`/agent/illustrations/${illustration.id}`}
+                    href={`/agent/illustrations/${illustration.id}${applicationIntent ? '?intent=application' : ''}`}
                     className="text-teal hover:text-teal-deep"
                   >
                     {illustration.insuredName ?? '—'}
@@ -198,6 +260,15 @@ export default async function IllustrationsPage() {
                         </p>
                       )}
                     </>
+                  )}
+                </Td>
+                <Td>
+                  {canStartApplication ? (
+                    <StartApplicationFromIllustrationButton illustrationId={illustration.id} compact />
+                  ) : (
+                    <span className="text-xs leading-5 text-ink-muted">
+                      {copy('Disponível após o PDF oficial', 'Available after the official PDF')}
+                    </span>
                   )}
                 </Td>
               </Tr>

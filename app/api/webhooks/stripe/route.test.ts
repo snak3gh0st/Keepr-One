@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   constructEvent: vi.fn(),
   syncSubscription: vi.fn(),
   syncAddonSubscription: vi.fn(),
+  syncInvitationSubscription: vi.fn(),
   retrieveSubscription: vi.fn(),
 }))
 
@@ -18,6 +19,9 @@ vi.mock('@/lib/stripe/application-addon-subscription', () => ({
 }))
 vi.mock('@/lib/stripe/platform-subscription', () => ({
   syncStripePlatformSubscription: mocks.syncSubscription,
+}))
+vi.mock('@/lib/stripe/agency-invitation-subscription', () => ({
+  syncStripeAgencyInvitationSubscription: mocks.syncInvitationSubscription,
 }))
 
 import { POST } from './route'
@@ -77,5 +81,27 @@ describe('Stripe subscription webhook', () => {
     expect(response.status).toBe(200)
     expect(mocks.syncAddonSubscription).toHaveBeenCalledWith('sub_addon')
     expect(mocks.syncSubscription).not.toHaveBeenCalled()
+  })
+
+  it('routes an invited plan only to the provider-confirmed invitation finalizer', async () => {
+    mocks.constructEvent.mockReturnValue({
+      id: 'evt_invitation',
+      type: 'customer.subscription.created',
+      data: { object: { id: 'sub_invitation' } },
+    })
+    mocks.retrieveSubscription.mockResolvedValue({
+      metadata: { keeprOneAgencyInvitationCheckoutId: 'invite-checkout-1' },
+    })
+
+    const response = await POST(new Request('https://app.keeprone.com/api/webhooks/stripe', {
+      method: 'POST',
+      headers: { 'stripe-signature': 'valid' },
+      body: '{}',
+    }))
+
+    expect(response.status).toBe(200)
+    expect(mocks.syncInvitationSubscription).toHaveBeenCalledWith('sub_invitation')
+    expect(mocks.syncSubscription).not.toHaveBeenCalled()
+    expect(mocks.syncAddonSubscription).not.toHaveBeenCalled()
   })
 })

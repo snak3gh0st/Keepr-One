@@ -17,6 +17,8 @@ import {
   INITIAL_SETTINGS_ACTION_STATE,
   type SettingsActionState,
 } from "./state";
+import { KBotCredentialSettings } from "./KBotCredentialSettings";
+import type { NationalLifeCredentialSummary } from "@/lib/national-life/credentials/settings-service";
 
 type AccessKind = "INDIVIDUAL" | "AGENCY_MEMBER" | "AGENCY_OWNER";
 
@@ -40,6 +42,11 @@ export type SettingsFormsProps = {
     name: string | null;
     subscriptionStatus: string | null;
     canEditAgency: boolean;
+  };
+  kbot: {
+    enabled: boolean;
+    credentialBrokerEnabled: boolean;
+    credentialSummary: NationalLifeCredentialSummary;
   };
 };
 
@@ -574,6 +581,33 @@ function SecuritySettings({
   );
 }
 
+function KBotSettings({
+  kbot,
+}: {
+  kbot: SettingsFormsProps["kbot"];
+}) {
+  const { copy } = useI18n();
+  return (
+    <section id="kbot" aria-labelledby="settings-kbot-title" className={SECTION_CLASS}>
+      <SectionHeading
+        id="settings-kbot-title"
+        title={copy("K-Bot e National Life", "K-Bot and National Life")}
+        description={copy(
+          "Controle a conexão do K-Bot neste computador e revise como a autenticação da seguradora funciona.",
+          "Control K-Bot's connection on this computer and review how carrier authentication works.",
+        )}
+      />
+      <div className="mt-6">
+        <KBotCredentialSettings
+          connectorEnabled={kbot.enabled}
+          credentialBrokerEnabled={kbot.credentialBrokerEnabled}
+          summary={kbot.credentialSummary}
+        />
+      </div>
+    </section>
+  );
+}
+
 function subscriptionLabel(status: string | null, copy: (pt: string, en: string) => string) {
   const labels: Record<string, string> = {
     TRIALING: copy("Período de teste", "Trial period"),
@@ -687,12 +721,14 @@ export function SettingsForms({
   professional,
   security,
   agency,
+  kbot,
 }: SettingsFormsProps) {
   const { copy } = useI18n();
   const sections = [
     { href: "#perfil", label: copy("Perfil", "Profile") },
     { href: "#profissional", label: copy("Dados profissionais", "Professional details") },
     { href: "#seguranca", label: copy("Segurança", "Security") },
+    { href: "#kbot", label: copy("K-Bot e National Life", "K-Bot and National Life") },
     { href: "#agencia", label: copy("Agência", "Agency") },
   ] as const;
   return (
@@ -722,6 +758,7 @@ export function SettingsForms({
         <PersonalProfileForm personal={personal} />
         <ProfessionalProfile professional={professional} />
         <SecuritySettings security={security} />
+        <KBotSettings kbot={kbot} />
         <AgencySettings agency={agency} />
       </div>
     </div>

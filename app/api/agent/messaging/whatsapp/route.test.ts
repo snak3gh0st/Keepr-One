@@ -1,16 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Prisma } from '@prisma/client'
+import { WhatsappRequestError } from '@/lib/messaging/whatsapp-client'
 
 const mocks = vi.hoisted(() => ({
   sameOrigin: vi.fn(),
   getCurrentAgentWithoutOnboarding: vi.fn(),
   ensureAgentInbox: vi.fn(),
   accountFindUnique: vi.fn(),
+  channelFindUnique: vi.fn(),
   channelUpsert: vi.fn(),
   createInstance: vi.fn(),
   fetchQrCode: vi.fn(),
   connectionState: vi.fn(),
   connectionIdentity: vi.fn(),
+  logoutInstance: vi.fn(),
   enforcePrivateChatSettings: vi.fn(),
   linkToInbox: vi.fn(),
 }))
@@ -34,6 +37,7 @@ vi.mock('@/lib/messaging/whatsapp-client', async (importOriginal) => {
       fetchQrCode: mocks.fetchQrCode,
       connectionState: mocks.connectionState,
       connectionIdentity: mocks.connectionIdentity,
+      logoutInstance: mocks.logoutInstance,
       enforcePrivateChatSettings: mocks.enforcePrivateChatSettings,
       linkToInbox: mocks.linkToInbox,
     })),
@@ -42,11 +46,14 @@ vi.mock('@/lib/messaging/whatsapp-client', async (importOriginal) => {
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     agentMessagingAccount: { findUnique: mocks.accountFindUnique },
-    agentMessagingChannel: { upsert: mocks.channelUpsert },
+    agentMessagingChannel: {
+      findUnique: mocks.channelFindUnique,
+      upsert: mocks.channelUpsert,
+    },
   },
 }))
 
-import { POST } from './route'
+import { DELETE, GET, POST } from './route'
 
 function request() {
   return new Request('https://app.keeprone.com/api/agent/messaging/whatsapp', {
@@ -71,6 +78,13 @@ beforeEach(() => {
   mocks.connectionIdentity.mockResolvedValue({
     externalPhoneNumberId: '15617260051@s.whatsapp.net',
     normalizedPhoneE164: '+15617260051',
+  })
+  mocks.logoutInstance.mockResolvedValue(undefined)
+  mocks.channelFindUnique.mockResolvedValue({
+    provider: 'EVOLUTION',
+    status: 'CONNECTED',
+    normalizedPhoneE164: '+15617260051',
+    evolutionInstanceName: 'agent-agent-1',
   })
   mocks.channelUpsert.mockResolvedValue({})
 })
@@ -136,5 +150,94 @@ describe('agent WhatsApp ownership boundary', () => {
 
     expect(response.status).toBe(409)
     await expect(response.json()).resolves.toEqual({ error: 'PHONE_ALREADY_CONNECTED' })
+  })
+
+  it('releases a stale phone identity while waiting for a new QR connection', async () => {
+    mocks.connectionState.mockResolvedValueOnce('close')
+
+    const response = await POST(request())
+
+    expect(response.status).toBe(200)
+    expect(mocks.channelUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        status: 'WAITING_FOR_USER',
+        normalizedPhoneE164: null,
+        externalPhoneNumberId: null,
+      }),
+    }))
+  })
+
+  it('reports the live connected session even when the local channel record is missing', async () => {
+    mocks.channelFindUnique.mockResolvedValueOnce(null)
+
+    const response = await GET()
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      state: 'open',
+      status: 'CONNECTED',
+      phone: '+15617260051',
+      recorded: false,
+    })
+  })
+
+  it('does not expose a stale provider identity after the session is closed', async () => {
+    mocks.connectionState.mockResolvedValueOnce('close')
+
+    const response = await GET()
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      state: 'close',
+      status: 'DISCONNECTED',
+      phone: null,
+    })
+  })
+
+  it('presents a first-time agent with no Evolution instance as ready to connect', async () => {
+    mocks.connectionState.mockRejectedValueOnce(new WhatsappRequestError(404))
+
+    const response = await GET()
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      state: 'close',
+      status: 'DISCONNECTED',
+      phone: null,
+      recorded: false,
+    })
+  })
+
+  it('treats the Evolution 2.3.7 logout error as success only after live state is closed', async () => {
+    mocks.logoutInstance.mockRejectedValueOnce(new WhatsappRequestError(500))
+    mocks.connectionState.mockResolvedValueOnce('close')
+
+    const response = await DELETE(request())
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      state: 'close',
+      status: 'DISCONNECTED',
+    })
+    expect(mocks.channelUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        status: 'DISCONNECTED',
+        normalizedPhoneE164: null,
+        externalPhoneNumberId: null,
+        verifiedAt: null,
+      }),
+    }))
+  })
+
+  it('does not mark the channel disconnected while the provider remains open', async () => {
+    mocks.connectionState.mockResolvedValueOnce('open')
+
+    const response = await DELETE(request())
+
+    expect(response.status).toBe(502)
+    await expect(response.json()).resolves.toEqual({ error: 'DISCONNECT_FAILED' })
+    expect(mocks.channelUpsert).not.toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ status: 'DISCONNECTED' }),
+    }))
   })
 })

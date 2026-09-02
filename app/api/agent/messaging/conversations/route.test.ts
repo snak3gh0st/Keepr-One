@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentAgent: vi.fn(),
   listInboxes: vi.fn(),
   listConversations: vi.fn(),
+  channelFindUnique: vi.fn(),
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
@@ -14,6 +15,11 @@ vi.mock('@/lib/messaging/agent-chatwoot-context', () => ({
     token: 'agent-token',
     chatwoot: { listInboxes: mocks.listInboxes, listConversations: mocks.listConversations },
   })),
+}))
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    agentMessagingChannel: { findUnique: mocks.channelFindUnique },
+  },
 }))
 
 import { GET } from './route'
@@ -30,6 +36,7 @@ describe('GET /api/agent/messaging/conversations', () => {
         { id: '999', inboxId: '77' },
       ],
     })
+    mocks.channelFindUnique.mockResolvedValue({ status: 'CONNECTED' })
   })
 
   it('returns only conversations from an inbox in the agent account', async () => {
@@ -42,5 +49,31 @@ describe('GET /api/agent/messaging/conversations', () => {
     expect(mocks.listConversations).toHaveBeenCalledWith(expect.objectContaining({
       accountId: '15', token: 'agent-token', status: 'all', page: 1,
     }))
+  })
+
+  it('hides WhatsApp inboxes and conversations when the agent is disconnected', async () => {
+    mocks.channelFindUnique.mockResolvedValue({ status: 'DISCONNECTED' })
+    mocks.listInboxes.mockResolvedValue([
+      { id: '2', name: 'WhatsApp', kind: 'WHATSAPP' },
+      { id: '3', name: 'E-mail', kind: 'EMAIL' },
+    ])
+    mocks.listConversations.mockResolvedValue({
+      total: 2,
+      conversations: [
+        { id: '128', inboxId: '2' },
+        { id: '130', inboxId: '3' },
+      ],
+    })
+
+    const response = await GET(new Request('https://app.example.com/api/agent/messaging/conversations'))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.inboxes).toEqual([{ id: '3', name: 'E-mail', kind: 'EMAIL' }])
+    expect(body.conversations).toEqual([{ id: '130', inboxId: '3' }])
+    expect(mocks.channelFindUnique).toHaveBeenCalledWith({
+      where: { agentId_kind: { agentId: 'agent-1', kind: 'WHATSAPP' } },
+      select: { status: true },
+    })
   })
 })

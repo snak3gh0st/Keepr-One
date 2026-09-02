@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { Buffer } from 'node:buffer'
 import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '../portal-grid-client'
 
 export const LOCAL_CONNECTOR_SCHEMA_VERSION = 3 as const
@@ -59,6 +60,27 @@ export const publicP256JwkSchema = z
   })
   .refine((jwk) => jwk.ext !== false, 'Public key must be extractable')
 
+const rsa3072ModulusSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]+$/)
+  .refine((value) => {
+    const bytes = Buffer.from(value, 'base64url')
+    return bytes.length >= 384 &&
+      bytes.length <= 512 &&
+      bytes[0] !== 0 &&
+      bytes.toString('base64url') === value
+  }, 'RSA modulus must be canonical base64url for a 3072-4096 bit key')
+
+export const publicRsaOaepJwkSchema = z.strictObject({
+  kty: z.literal('RSA'),
+  alg: z.literal('RSA-OAEP-256'),
+  use: z.literal('enc'),
+  key_ops: z.tuple([z.literal('encrypt')]),
+  ext: z.literal(true),
+  e: z.literal('AQAB'),
+  n: rsa3072ModulusSchema,
+})
+
 export const LOCAL_CONNECTOR_MAX_ROW_BYTES = 16 * 1024
 
 /// Shape is intentionally unconstrained: readLimitedBody already caps the whole
@@ -115,3 +137,4 @@ export const localConnectorRawStageEnvelopeSchema = z
 export type LocalConnectorRawStageEnvelope = z.infer<typeof localConnectorRawStageEnvelopeSchema>
 
 export type PublicP256Jwk = z.infer<typeof publicP256JwkSchema>
+export type PublicRsaOaepJwk = z.infer<typeof publicRsaOaepJwkSchema>

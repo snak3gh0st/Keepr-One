@@ -79,7 +79,7 @@ export default async function NationalLifeConnectionPage() {
                 <div className="mt-7 flex flex-wrap gap-2">
                   <span className="inline-flex items-center gap-2 rounded-full bg-teal-pale px-3 py-2 text-xs font-semibold text-teal-deep">
                     <span className="h-1.5 w-1.5 rounded-full bg-teal" aria-hidden="true" />
-                    {copy('Sua senha permanece na National Life', 'Password stays on National Life')}
+                    {copy('O login protegido é opcional', 'Protected sign-in is optional')}
                   </span>
                   <span className="inline-flex items-center gap-2 rounded-full bg-panel px-3 py-2 text-xs font-semibold text-ink-muted">
                     {copy('Sincronização e ilustração permanecem independentes', 'Sync and illustration stay independent')}
@@ -91,7 +91,7 @@ export default async function NationalLifeConnectionPage() {
                 {[
                   ['01', copy('Você escolhe o trabalho', 'You choose the work'), copy('Inicie uma sincronização ou ilustração oficial pela Keepr One.', 'Start a sync or an official illustration from Keepr One.')],
                   ['02', copy('O K-Bot começa a trabalhar', 'K-Bot gets to work'), copy('O K-Bot abre os locais necessários na National Life e segue as mesmas etapas que você seguiria.', 'K-Bot opens the places it needs in National Life and follows the same steps you would.')],
-                  ['03', copy('Você entra quando necessário', 'You sign in when needed'), copy('Seu login sempre acontece diretamente no site da National Life.', 'Your login always happens directly on the National Life website.')],
+                  ['03', copy('O login permanece sob seu controle', 'Sign-in stays under your control'), copy('Você pode entrar por conta própria ou permitir uma tentativa de login protegido do K-Bot. MFA e CAPTCHA permanecem sempre com você.', 'You can sign in yourself or opt in to one protected K-Bot login attempt. MFA and CAPTCHA always stay with you.')],
                   ['04', copy('O K-Bot confere o resultado', 'K-Bot checks the result'), copy('As informações são verificadas e organizadas antes de aparecerem na Keepr One.', 'The information is checked and organized before it appears in Keepr One.')],
                   ['05', copy('Tudo fica pronto aqui', 'Everything is ready here'), copy('Veja as informações atualizadas ou abra o PDF oficial da ilustração.', 'See your updated information or open the official illustration PDF.')],
                 ].map(([number, title, description]) => (

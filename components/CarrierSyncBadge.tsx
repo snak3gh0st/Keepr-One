@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { type CarrierSyncState } from '@/lib/national-life/carrier-sync-state'
 import {
   KBotCornerPresence,
+  type KBotAction,
   type KBotActivityMode,
   type KBotState,
   type KBotTask,
@@ -26,7 +27,7 @@ type CompactSyncStatus = {
 
 type IllustrationActivity = {
   id: string
-  state: 'WORKING' | 'NEEDS_YOU' | 'READY' | 'FAILED'
+  state: 'WORKING' | 'NEEDS_YOU' | 'NEEDS_KBOT' | 'READY' | 'FAILED'
   updatedAt: string
 }
 
@@ -45,6 +46,7 @@ type BadgeResponse = {
   connector?: {
     enabled: boolean
     extensionTarget?: string | null
+    autoLoginEnabled?: boolean
   } | null
 }
 
@@ -63,12 +65,33 @@ type Notice = {
 /// first load.
 export function CarrierSyncBadge({ separated = false }: { separated?: boolean }) {
   const { copy } = useI18n()
+  const quickActions: KBotAction[] = [
+    {
+      href: '/agent/integrations/national-life',
+      badge: 'NL',
+      label: copy('Sincronizar National Life', 'Sync National Life'),
+      detail: copy('Atualize os dados da operadora neste navegador', 'Update your carrier data in this browser'),
+    },
+    {
+      href: '/agent/illustrations/new',
+      badge: 'PDF',
+      label: copy('Criar ilustração', 'Create Illustration'),
+      detail: copy('Prepare uma ilustração oficial de Term ou IUL', 'Prepare a Term or IUL official illustration'),
+    },
+    {
+      href: '/agent/illustrations?intent=application',
+      badge: 'iGO',
+      label: copy('Criar aplicação no iGO', 'Create Application in iGO'),
+      detail: copy('Escolha a ilustração oficial que iniciará a aplicação', 'Choose the official illustration that will start the Application'),
+    },
+  ]
   const [state, setState] = useState<CarrierSyncState | null>(null)
   const [sync, setSync] = useState<CompactSyncStatus | null>(null)
   const [illustration, setIllustration] = useState<IllustrationActivity | null>(null)
   const [application, setApplication] = useState<ApplicationActivity | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [extensionTarget, setExtensionTarget] = useState<string | null | undefined>(undefined)
+  const [autoLoginEnabled, setAutoLoginEnabled] = useState(false)
   const [connectorState, setConnectorState] = useState<BrowserConnectorState>('checking')
   const previousIllustrationState = useRef<IllustrationActivity['state'] | null>(null)
   const previousApplicationState = useRef<ApplicationActivity['state'] | null>(null)
@@ -133,6 +156,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
     setApplication(nextApplication)
     if ('connector' in body) {
       setExtensionTarget(body.connector?.enabled ? body.connector.extensionTarget ?? null : null)
+      setAutoLoginEnabled(Boolean(body.connector?.enabled && body.connector.autoLoginEnabled))
     }
   }, [copy])
 
@@ -187,7 +211,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
   }, [extensionTarget])
 
   const shouldPoll = Boolean(sync?.shouldPoll) || illustration?.state === 'WORKING' ||
-    illustration?.state === 'NEEDS_YOU' || application?.state === 'WORKING' ||
+    illustration?.state === 'NEEDS_YOU' || illustration?.state === 'NEEDS_KBOT' || application?.state === 'WORKING' ||
     application?.state === 'NEEDS_YOU'
 
   useEffect(() => {
@@ -238,6 +262,16 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
           {copy('Sincronização {completed}/{total} · Ilustração', 'Sync {completed}/{total} · Illustration', { completed: sync.completed, total: sync.total })}
         </Link>
       )
+    : illustration?.state === 'NEEDS_KBOT'
+      ? (
+          <Link
+            href="/agent/integrations/national-life"
+            className={`shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-gold ${separated ? 'shell-carrier-separated' : ''}`}
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden="true" />
+            {copy('Reconecte o K-Bot para continuar', 'Reconnect K-Bot to continue')}
+          </Link>
+        )
     : sync
       ? (
           <span className={`shell-connection inline-flex shrink-0 items-center gap-1.5 text-xs text-ink-muted ${separated ? 'shell-carrier-separated' : ''}`}>
@@ -298,6 +332,13 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       id: 'illustration',
       label: copy('Preciso do seu login', 'I need your login'),
       detail: copy('Entre na National Life para eu continuar sua ilustração', 'Sign in to National Life so I can continue your illustration'),
+      state: 'waiting',
+    })
+  } else if (illustration?.state === 'NEEDS_KBOT') {
+    tasks.push({
+      id: 'illustration',
+      label: copy('Ilustração aguardando o K-Bot', 'Illustration waiting for K-Bot'),
+      detail: copy('Reconecte este computador para o K-Bot abrir o Foresight e continuar a mesma solicitação.', 'Reconnect this computer so K-Bot can open Foresight and continue the same request.'),
       state: 'waiting',
     })
   }
@@ -386,6 +427,15 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       detail = copy('{completed} de {total} áreas verificadas.', '{completed} of {total} areas checked.', { completed: sync.completed, total: sync.total })
       actionLabel = copy('Ver atualização', 'View update')
       activityMode = 'sync'
+    } else if (illustration?.state === 'NEEDS_KBOT') {
+      botState = 'waiting'
+      title = copy('Reconecte o K-Bot para iniciar a ilustração', 'Reconnect K-Bot to start the illustration')
+      detail = autoLoginEnabled
+        ? copy('Seu login protegido da National Life está pronto. Reconecte o K-Bot neste computador para continuar a mesma solicitação.', 'Your protected National Life sign-in is ready. Reconnect K-Bot on this computer to continue the same request.')
+        : copy('Reconecte o K-Bot neste computador para ele abrir o Foresight e continuar a mesma solicitação.', 'Reconnect K-Bot on this computer so it can open Foresight and continue the same request.')
+      actionHref = '/agent/integrations/national-life'
+      actionLabel = copy('Reconectar K-Bot', 'Reconnect K-Bot')
+      activityMode = 'illustration'
     } else if (illustration?.state === 'NEEDS_YOU' || state?.kind === 'NEEDS_YOU') {
       botState = 'waiting'
       title = copy('Preciso que você entre na National Life', 'I need you to sign in to National Life')
@@ -408,10 +458,17 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       detail = copy('Instale ou recarregue a extensão para eu trabalhar com a National Life.', 'Install or reload the extension so I can work with National Life.')
       actionLabel = copy('Conectar K-Bot', 'Connect K-Bot')
     } else if (browserConnectorState === 'disconnected') {
-      botState = 'error'
-      title = copy('O K-Bot está desconectado', 'K-Bot is disconnected')
-      detail = copy('Conecte este computador uma vez e permanecerei com você em toda a Keepr One.', 'Connect this computer once and I will stay with you throughout Keepr One.')
-      actionLabel = copy('Conectar K-Bot', 'Connect K-Bot')
+      if (autoLoginEnabled) {
+        botState = 'waiting'
+        title = copy('O K-Bot precisa que este computador seja reconectado', 'K-Bot needs this computer reconnected')
+        detail = copy('Seu login protegido da National Life está pronto. Reconecte o K-Bot para usá-lo quando a operadora solicitar sua entrada.', 'Your protected National Life sign-in is ready. Reconnect K-Bot to use it when the carrier asks you to sign in.')
+        actionLabel = copy('Reconectar K-Bot', 'Reconnect K-Bot')
+      } else {
+        botState = 'error'
+        title = copy('O K-Bot está desconectado', 'K-Bot is disconnected')
+        detail = copy('Conecte este computador uma vez e permanecerei com você em toda a Keepr One.', 'Connect this computer once and I will stay with you throughout Keepr One.')
+        actionLabel = copy('Conectar K-Bot', 'Connect K-Bot')
+      }
     } else if (browserConnectorState === 'checking') {
       title = copy('Estou verificando este navegador', 'I am checking this browser')
       detail = copy('Estarei pronto em instantes.', 'I will be ready in a moment.')
@@ -444,6 +501,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
                 ? 'waiting'
             : null}
         tasks={tasks}
+        quickActions={quickActions}
         announcement={notice?.message}
       />
     )

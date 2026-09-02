@@ -116,11 +116,14 @@ export function NationalLifeConnectionCard({
               </div>
             </div>
             <p className="mt-5 text-sm leading-6 text-ink-muted">
-              {copy('Entre no portal oficial da National Life. A Keepr One mantém apenas a sessão autenticada e nunca a sua senha.', 'Sign in on the official National Life portal. Keepr One keeps only the signed-in session, and never your password.')}
+              {copy(
+                'Entre no portal oficial da National Life. Por padrão, a Keepr One mantém apenas a sessão autenticada. O armazenamento protegido de credenciais é opcional e pode ser ativado ou revogado nas Configurações.',
+                'Sign in on the official National Life portal. Keepr One keeps the signed-in session by default. Protected credential storage is optional and can be enabled or revoked under Settings.',
+              )}
             </p>
             <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-ink">
               <span className="h-2 w-2 rounded-full bg-success" />
-              {copy('A Keepr One nunca armazena sua senha', 'Keepr One never stores your password')}
+              {copy('O login protegido do K-Bot é sempre opcional', 'Protected K-Bot sign-in is always opt-in')}
             </p>
           </div>
 

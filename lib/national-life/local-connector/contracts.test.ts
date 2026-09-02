@@ -3,7 +3,38 @@ import {
   LOCAL_CONNECTOR_MAX_ROW_BYTES,
   LOCAL_CONNECTOR_MAX_RECORDS_TOTAL,
   localConnectorRawStageEnvelopeSchema,
+  publicRsaOaepJwkSchema,
 } from './contracts'
+
+const rsa3072Modulus = Buffer.alloc(384, 1).toString('base64url')
+
+describe('local connector device encryption key', () => {
+  const publicJwk = {
+    kty: 'RSA',
+    alg: 'RSA-OAEP-256',
+    use: 'enc',
+    key_ops: ['encrypt'],
+    ext: true,
+    e: 'AQAB',
+    n: rsa3072Modulus,
+  } as const
+
+  it('accepts a canonical RSA-3072 OAEP public key', () => {
+    expect(publicRsaOaepJwkSchema.parse(publicJwk)).toEqual(publicJwk)
+  })
+
+  it.each(['d', 'p', 'q', 'dp', 'dq', 'qi'])('rejects private JWK component %s', (field) => {
+    expect(publicRsaOaepJwkSchema.safeParse({ ...publicJwk, [field]: 'private' }).success).toBe(false)
+  })
+
+  it('rejects weak or non-canonical moduli', () => {
+    expect(publicRsaOaepJwkSchema.safeParse({
+      ...publicJwk,
+      n: Buffer.alloc(383, 1).toString('base64url'),
+    }).success).toBe(false)
+    expect(publicRsaOaepJwkSchema.safeParse({ ...publicJwk, n: `${rsa3072Modulus}=` }).success).toBe(false)
+  })
+})
 
 describe('local connector raw stage envelope', () => {
   it('accepts a raw carrier row untouched', () => {

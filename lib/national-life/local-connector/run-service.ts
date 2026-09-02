@@ -5,6 +5,7 @@
  */
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { NATIONAL_LIFE_PROVIDER } from '../constants'
+import { CREDENTIAL_AUTH_STATE_MAX_AGE_MS } from '../credentials/contracts'
 import type { NationalLifeGridKey } from '../portal-grid-client'
 import {
   syncConfirmedCasePromotionCreditsSafely,
@@ -212,6 +213,7 @@ export async function startLocalConnectorRun(
   duplicate: boolean
   completedStages: number
   nextStageIndex: number
+  reopened?: true
   resume?: { sequence: number; offset: number; recordCount: number }
 }> {
   const now = input.now ?? new Date()
@@ -231,6 +233,8 @@ export async function startLocalConnectorRun(
     plannedGridKeys: true,
     completedStages: true,
     currentGridKey: true,
+    authState: true,
+    authRequiredAt: true,
     stageCompletions: { select: { gridKey: true } },
     stageFailures: { where: { resolvedAt: null }, select: { gridKey: true } },
   } as const
@@ -315,6 +319,15 @@ export async function startLocalConnectorRun(
     const storedPlan = plannedGridKeys(active)
     const retainedPlan = storedPlan.filter((gridKey) => !DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS.has(gridKey))
     const reopening = active.state === 'FAILED' || active.state === 'PARTIAL'
+    // A credential lease is deliberately available only during a short,
+    // server-observed authentication episode. A run can stay alive longer than
+    // that while its local worker or UI is reloaded. An explicit later START is
+    // therefore allowed to renew only the expired login episode; it must keep
+    // the same run and every durable stage checkpoint.
+    const refreshingExpiredAuth = active.state === 'RUNNING' &&
+      active.authState === 'REQUIRED' &&
+      (!active.authRequiredAt ||
+        now.getTime() - active.authRequiredAt.getTime() > CREDENTIAL_AUTH_STATE_MAX_AGE_MS)
     const addsMissingCommissionParent = reopening &&
       requestedGridKeys.includes('PAID_COMMISSIONS') &&
       retainedPlan.includes('COMMISSIONS_EARNING_REPORT') &&
@@ -344,6 +357,12 @@ export async function startLocalConnectorRun(
       ? activePlan.indexOf('PAID_COMMISSIONS')
       : active.state === 'COMPLETED'
       ? activePlan.length
+      // A failed run can retain the last page it reached even when an earlier
+      // prerequisite did not complete. Its failure rows are resolved below for
+      // the retry, so resume at the first missing completion rather than skip
+      // that prerequisite by trusting the stale current-grid pointer.
+      : active.state === 'FAILED'
+        ? nextUnsettledStageIndex(activePlan, completedKeys, [])
       : active.state === 'PARTIAL' && firstFailedIndex !== undefined
         ? firstFailedIndex
         : currentIndex >= 0
@@ -352,7 +371,7 @@ export async function startLocalConnectorRun(
     const completedStages = completedKeys.filter((key) =>
       activePlan.includes(key as NationalLifeGridKey),
     ).length
-    if (reopening || planChanged) {
+    if (reopening || planChanged || refreshingExpiredAuth) {
       // Reopen only the exact run/device/scope selected above. If another
       // retry won the race, its update count is zero and returning the same
       // run remains safe because both callers share the same durable cursor.
@@ -370,6 +389,12 @@ export async function startLocalConnectorRun(
           ...(reopening
             ? {
                 state: 'RUNNING' as const,
+                // A timed-out run owns a finished authentication episode. The
+                // reopened run keeps its durable data cursor, but the next
+                // login must be a fresh epoch so a new one-shot lease can be
+                // issued safely.
+                authState: 'READY',
+                authRequiredAt: null,
                 safeErrorCode: null,
                 completedAt: null,
                 failedStages: 0,
@@ -378,6 +403,9 @@ export async function startLocalConnectorRun(
             : {
                 failedStages: failedKeys.length,
                 ...(active.state === 'RUNNING' && planChanged ? { startedAt: now } : {}),
+                ...(refreshingExpiredAuth
+                  ? { authState: 'READY', authRequiredAt: null }
+                  : {}),
               }),
           ...(planChanged
             ? {
@@ -470,6 +498,7 @@ export async function startLocalConnectorRun(
         exportEnabled: options?.exportEnabled && !inForceExportExhausted,
       }),
       duplicate: true as const,
+      ...(reopening || refreshingExpiredAuth ? { reopened: true as const } : {}),
       completedStages,
       nextStageIndex,
       ...(resume ? { resume } : {}),

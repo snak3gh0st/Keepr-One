@@ -2,7 +2,12 @@ import 'server-only'
 
 import { createHash, randomBytes, webcrypto } from 'node:crypto'
 import type { Prisma, PrismaClient } from '@prisma/client'
-import { publicP256JwkSchema, type PublicP256Jwk } from './contracts'
+import {
+  publicP256JwkSchema,
+  publicRsaOaepJwkSchema,
+  type PublicP256Jwk,
+} from './contracts'
+import { credentialEncryptionKeyThumbprint } from '../credentials/device-key-service'
 
 export const LOCAL_CONNECTOR_PAIRING_TTL_MS = 5 * 60_000
 
@@ -12,7 +17,10 @@ type PairingDb = Pick<
 >
 
 export class LocalConnectorPairingError extends Error {
-  constructor(readonly code: 'INVALID_PAIRING' | 'DEVICE_EXISTS') {
+  constructor(readonly code:
+    | 'INVALID_PAIRING'
+    | 'DEVICE_EXISTS'
+    | 'DEVICE_ENCRYPTION_KEY_CONFLICT') {
     super(code)
   }
 }
@@ -49,7 +57,13 @@ export function publicKeyThumbprint(jwk: PublicP256Jwk): string {
 
 export async function exchangeLocalConnectorPairing(
   db: PairingDb,
-  input: { code: string; label: string; publicKeyJwk: unknown; now?: Date },
+  input: {
+    code: string
+    label: string
+    publicKeyJwk: unknown
+    encryptionPublicKeyJwk?: unknown
+    now?: Date
+  },
 ) {
   const now = input.now ?? new Date()
   const publicKeyJwk = publicP256JwkSchema.parse(input.publicKeyJwk)
@@ -62,6 +76,21 @@ export async function exchangeLocalConnectorPairing(
   )
   const codeHash = hashPairingCode(input.code)
   const thumbprint = publicKeyThumbprint(publicKeyJwk)
+  const encryptionPublicKeyJwk = input.encryptionPublicKeyJwk === undefined
+    ? null
+    : publicRsaOaepJwkSchema.parse(input.encryptionPublicKeyJwk)
+  if (encryptionPublicKeyJwk) {
+    await webcrypto.subtle.importKey(
+      'jwk',
+      encryptionPublicKeyJwk,
+      { name: 'RSA-OAEP', hash: 'SHA-256' },
+      false,
+      ['encrypt'],
+    )
+  }
+  const encryptionKeyThumbprint = encryptionPublicKeyJwk
+    ? credentialEncryptionKeyThumbprint(encryptionPublicKeyJwk)
+    : null
 
   try {
     return await db.$transaction(async (tx) => {
@@ -73,10 +102,17 @@ export async function exchangeLocalConnectorPairing(
 
       const existing = await tx.nationalLifeConnectorDevice.findUnique({
         where: { publicKeyThumbprint: thumbprint },
-        select: { id: true, agentId: true },
+        select: { id: true, agentId: true, encryptionKeyThumbprint: true },
       })
       if (existing && existing.agentId !== pairing.agentId) {
         throw new LocalConnectorPairingError('DEVICE_EXISTS')
+      }
+      if (
+        existing?.encryptionKeyThumbprint &&
+        encryptionKeyThumbprint &&
+        existing.encryptionKeyThumbprint !== encryptionKeyThumbprint
+      ) {
+        throw new LocalConnectorPairingError('DEVICE_ENCRYPTION_KEY_CONFLICT')
       }
 
       const consumed = await tx.nationalLifeConnectorPairing.updateMany({
@@ -91,6 +127,10 @@ export async function exchangeLocalConnectorPairing(
           data: {
             label: input.label,
             publicKeyJwk: publicKeyJwk as Prisma.InputJsonValue,
+            ...(encryptionPublicKeyJwk && !existing.encryptionKeyThumbprint ? {
+              encryptionPublicKeyJwk: encryptionPublicKeyJwk as Prisma.InputJsonValue,
+              encryptionKeyThumbprint,
+            } : {}),
             status: 'ACTIVE',
             revokedAt: null,
             lastSeenAt: now,
@@ -106,6 +146,10 @@ export async function exchangeLocalConnectorPairing(
           label: input.label,
           publicKeyJwk: publicKeyJwk as Prisma.InputJsonValue,
           publicKeyThumbprint: thumbprint,
+          ...(encryptionPublicKeyJwk ? {
+            encryptionPublicKeyJwk: encryptionPublicKeyJwk as Prisma.InputJsonValue,
+            encryptionKeyThumbprint,
+          } : {}),
           lastSeenAt: now,
           createdAt: now,
           updatedAt: now,

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
   sanitizeStatus: vi.fn(),
   commandFindFirst: vi.fn(),
+  credentialFindUnique: vi.fn(),
   illustrationFindFirst: vi.fn(),
   applicationFindFirst: vi.fn(),
 }))
@@ -17,6 +18,7 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     browserAutomationJob: { count: mocks.count },
     nationalLifeConnectorCommand: { findFirst: mocks.commandFindFirst },
+    agentIntegrationCredential: { findUnique: mocks.credentialFindUnique },
     illustration: { findFirst: mocks.illustrationFindFirst },
     application: { findFirst: mocks.applicationFindFirst },
   },
@@ -48,6 +50,7 @@ beforeEach(() => {
   mocks.commandFindFirst.mockResolvedValue(null)
   mocks.illustrationFindFirst.mockResolvedValue(null)
   mocks.applicationFindFirst.mockResolvedValue(null)
+  mocks.credentialFindUnique.mockResolvedValue(null)
 })
 
 describe('carrier sync badge route', () => {
@@ -119,6 +122,7 @@ describe('carrier sync badge route', () => {
     mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0)
     mocks.commandFindFirst.mockResolvedValue({
       state: 'RUNNING',
+      deviceId: 'device-1',
       target: { kind: 'ILLUSTRATION', id: 'ill-1' },
       safeErrorCode: null,
       expiresAt: new Date('2027-08-27T17:00:00.000Z'),
@@ -135,6 +139,46 @@ describe('carrier sync badge route', () => {
         state: 'WORKING',
         updatedAt: '2026-08-27T15:00:00.000Z',
       },
+    })
+  })
+
+  it('reports a queued illustration without a device as waiting for K-Bot', async () => {
+    mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0)
+    mocks.commandFindFirst.mockResolvedValue({
+      state: 'QUEUED',
+      deviceId: null,
+      target: { kind: 'ILLUSTRATION', id: 'ill-1' },
+      safeErrorCode: null,
+      expiresAt: new Date('2027-08-27T17:00:00.000Z'),
+      updatedAt: new Date('2026-08-27T15:00:00.000Z'),
+    })
+
+    const response = await GET()
+
+    await expect(response.json()).resolves.toEqual({
+      state: { kind: 'IN_SYNC' },
+      connector,
+      illustration: {
+        id: 'ill-1',
+        state: 'NEEDS_KBOT',
+        updatedAt: '2026-08-27T15:00:00.000Z',
+      },
+    })
+  })
+
+  it('exposes only the enabled automatic-sign-in setting to the agent who owns it', async () => {
+    mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0)
+    mocks.credentialFindUnique.mockResolvedValue({ autoLoginEnabled: true })
+
+    const response = await GET()
+
+    await expect(response.json()).resolves.toEqual({
+      state: { kind: 'IN_SYNC' },
+      connector: { ...connector, autoLoginEnabled: true },
+    })
+    expect(mocks.credentialFindUnique).toHaveBeenCalledWith({
+      where: { agentId_provider: { agentId: 'agent-1', provider: NATIONAL_LIFE_PROVIDER } },
+      select: { autoLoginEnabled: true },
     })
   })
 

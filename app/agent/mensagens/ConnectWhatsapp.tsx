@@ -4,49 +4,127 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/Button'
 import { useI18n } from '@/components/i18n/LanguageProvider'
 
-type State = 'idle' | 'starting' | 'waiting' | 'connected' | 'failed'
+type State = 'checking' | 'idle' | 'starting' | 'waiting' | 'connected' | 'disconnecting' | 'failed'
+
+type ConnectWhatsappProps = {
+  onConnectionChange?: (connected: boolean) => void
+}
+
+function formatPhone(phone: string) {
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+1 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`
+  }
+  return phone
+}
 
 /// The agent starts this. Nothing is provisioned before they ask, because a session
 /// created on their behalf is a session with no screen to scan it — which is how
 /// this went wrong the first time.
-export function ConnectWhatsapp() {
+export function ConnectWhatsapp({ onConnectionChange }: ConnectWhatsappProps = {}) {
   const { copy } = useI18n()
-  const [state, setState] = useState<State>('idle')
+  const [state, setState] = useState<State>('checking')
   const [qr, setQr] = useState<string | null>(null)
+  const [phone, setPhone] = useState<string | null>(null)
   const [errorCode, setErrorCode] = useState<string | null>(null)
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+  const onConnectionChangeRef = useRef(onConnectionChange)
+
+  useEffect(() => {
+    onConnectionChangeRef.current = onConnectionChange
+  }, [onConnectionChange])
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const response = await fetch('/api/agent/messaging/whatsapp', { cache: 'no-store' })
+      if (!response.ok) throw new Error('STATUS_UNAVAILABLE')
+      const body = (await response.json()) as {
+        state: string
+        status: string
+        phone: string | null
+      }
+      setPhone(body.phone)
+      setErrorCode(null)
+      const connected = body.state === 'open' && body.status === 'CONNECTED'
+      onConnectionChangeRef.current?.(connected)
+      setState(connected ? 'connected' : 'idle')
+    } catch {
+      setErrorCode('STATUS_UNAVAILABLE')
+      setState('failed')
+    }
+  }, [])
 
   const poll = useCallback(async () => {
-    const response = await fetch('/api/agent/messaging/whatsapp', { method: 'POST' })
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({})) as { error?: string }
-      setErrorCode(body.error ?? 'CONNECT_FAILED')
+    try {
+      const response = await fetch('/api/agent/messaging/whatsapp', { method: 'POST' })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string }
+        setErrorCode(body.error ?? 'CONNECT_FAILED')
+        setState('failed')
+        return
+      }
+      const body = (await response.json()) as {
+        qr: string | null
+        state: string
+        status: string
+        phone: string | null
+      }
+      if (body.state === 'open' && body.status === 'CONNECTED') {
+        setPhone(body.phone)
+        onConnectionChangeRef.current?.(true)
+        setState('connected')
+        return
+      }
+      onConnectionChangeRef.current?.(false)
+      setQr(body.qr)
+      // The provider answers without a code while the session is still starting, so
+      // an absent QR means "not yet", never "broken".
+      setState(body.qr ? 'waiting' : 'starting')
+    } catch {
+      setErrorCode('CONNECT_FAILED')
       setState('failed')
-      return
     }
-    const body = (await response.json()) as {
-      qr: string | null
-      state: string
-      status: string
+  }, [])
+
+  const disconnect = useCallback(async () => {
+    setState('disconnecting')
+    setErrorCode(null)
+    try {
+      const response = await fetch('/api/agent/messaging/whatsapp', { method: 'DELETE' })
+      if (!response.ok) throw new Error('DISCONNECT_FAILED')
+      setPhone(null)
+      setQr(null)
+      setConfirmDisconnect(false)
+      onConnectionChangeRef.current?.(false)
+      setState('idle')
+    } catch {
+      setConfirmDisconnect(false)
+      setErrorCode('DISCONNECT_FAILED')
+      setState('failed')
     }
-    if (body.state === 'open' && body.status === 'CONNECTED') {
-      setState('connected')
-      window.location.reload()
-      return
-    }
-    setQr(body.qr)
-    // The provider answers without a code while the session is still starting, so
-    // an absent QR means "not yet", never "broken".
-    setState(body.qr ? 'waiting' : 'starting')
   }, [])
 
   useEffect(() => {
-    if (state === 'idle' || state === 'connected' || state === 'failed') return
+    const initial = window.setTimeout(() => void loadStatus(), 0)
+    return () => window.clearTimeout(initial)
+  }, [loadStatus])
+
+  useEffect(() => {
+    if (
+      state === 'checking'
+      || state === 'idle'
+      || state === 'connected'
+      || state === 'disconnecting'
+      || state === 'failed'
+    ) return
     timer.current = setInterval(poll, 4000)
     return () => {
       if (timer.current) clearInterval(timer.current)
     }
   }, [state, poll])
+
+  const connected = state === 'connected' || state === 'disconnecting'
 
   return (
     <div className="mx-auto w-full max-w-xl">
@@ -61,9 +139,15 @@ export function ConnectWhatsapp() {
             </svg>
           </span>
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-ink">{copy('Conectar meu WhatsApp', 'Connect my WhatsApp')}</h2>
+            <h2 className="text-lg font-semibold text-ink">
+              {connected
+                ? copy('WhatsApp conectado', 'WhatsApp connected')
+                : copy('Conectar meu WhatsApp', 'Connect my WhatsApp')}
+            </h2>
             <p className="mt-1.5 text-sm leading-6 text-ink-muted">
-              {copy('Suas conversas com clientes passam a aparecer aqui, no seu número de sempre. Você continua usando o WhatsApp normalmente no celular.', 'Your client conversations will appear here using your existing number. You can keep using WhatsApp normally on your phone.')}
+              {connected
+                ? copy('Seu número está ativo e as conversas continuam chegando à sua caixa de mensagens.', 'Your number is active, and conversations continue arriving in your inbox.')
+                : copy('Suas conversas com clientes passam a aparecer aqui, no seu número de sempre. Você continua usando o WhatsApp normalmente no celular.', 'Your client conversations will appear here using your existing number. You can keep using WhatsApp normally on your phone.')}
             </p>
           </div>
         </div>
@@ -71,10 +155,66 @@ export function ConnectWhatsapp() {
         {/* Draft copy — the wording of this risk belongs to the product owner. What it
             must not do is soften it: the number at stake is the agent's entire book of
             contacts, and they are the one who carries the loss. */}
-        <p className="mt-6 rounded-xl border border-danger/20 bg-danger-pale px-4 py-3 text-sm leading-6 text-danger">
-          <strong className="font-semibold">{copy('Antes de conectar, leia.', 'Read this before connecting.')}</strong>{' '}
-          {copy('Esta conexão usa o WhatsApp Web de um jeito que a Meta não autoriza oficialmente. Existe risco de o seu número ser bloqueado — e com ele, seus contatos e conversas. Só conecte se aceitar esse risco.', 'This connection uses WhatsApp Web in a way that Meta does not officially authorize. Your number may be blocked, along with access to your contacts and conversations. Connect only if you accept this risk.')}
-        </p>
+        {!connected && state !== 'checking' && (
+          <p className="mt-6 rounded-xl border border-danger/20 bg-danger-pale px-4 py-3 text-sm leading-6 text-danger">
+            <strong className="font-semibold">{copy('Antes de conectar, leia.', 'Read this before connecting.')}</strong>{' '}
+            {copy('Esta conexão usa o WhatsApp Web de um jeito que a Meta não autoriza oficialmente. Existe risco de o seu número ser bloqueado — e com ele, seus contatos e conversas. Só conecte se aceitar esse risco.', 'This connection uses WhatsApp Web in a way that Meta does not officially authorize. Your number may be blocked, along with access to your contacts and conversations. Connect only if you accept this risk.')}
+          </p>
+        )}
+
+        {state === 'checking' && (
+          <p className="mt-6 flex items-center gap-2.5 text-sm text-ink-muted">
+            <span
+              aria-hidden
+              className="size-4 animate-spin rounded-full border-2 border-border-steel border-t-rail-strong"
+            />
+            {copy('Verificando sua conexão…', 'Checking your connection…')}
+          </p>
+        )}
+
+        {connected && (
+          <div className="mt-6">
+            <div className="rounded-xl border border-success/20 bg-success-pale px-4 py-3">
+              <p className="text-sm font-semibold text-success">{copy('Conexão ativa', 'Active connection')}</p>
+              {phone && <p className="mt-1 text-sm text-ink">{formatPhone(phone)}</p>}
+              <p className="mt-1 text-xs leading-5 text-ink-muted">{copy('Caixa de mensagens pronta para receber novas conversas.', 'Inbox ready to receive new conversations.')}</p>
+            </div>
+
+            {!confirmDisconnect ? (
+              <Button
+                variant="secondary"
+                className="mt-5 w-full sm:w-auto"
+                onClick={() => setConfirmDisconnect(true)}
+              >
+                {copy('Desconectar WhatsApp', 'Disconnect WhatsApp')}
+              </Button>
+            ) : (
+              <div className="mt-5 rounded-xl border border-danger/20 bg-danger-pale px-4 py-4">
+                <p className="text-sm leading-6 text-danger">
+                  {copy('As conversas do WhatsApp deixam de aparecer enquanto o canal estiver desconectado, e novas mensagens deixam de chegar até você conectar novamente.', 'WhatsApp conversations will stop appearing while the channel is disconnected, and new messages will not arrive until you reconnect.')}
+                </p>
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setConfirmDisconnect(false)}
+                    disabled={state === 'disconnecting'}
+                  >
+                    {copy('Cancelar', 'Cancel')}
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={() => void disconnect()}
+                    disabled={state === 'disconnecting'}
+                  >
+                    {state === 'disconnecting'
+                      ? copy('Desconectando…', 'Disconnecting…')
+                      : copy('Sim, desconectar', 'Yes, disconnect')}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {state === 'idle' && (
           <Button
@@ -120,16 +260,23 @@ export function ConnectWhatsapp() {
         )}
 
         {state === 'failed' && (
-          <p
-            role="alert"
-            className="mt-6 rounded-xl border border-danger/20 bg-danger-pale px-4 py-3 text-sm leading-6 text-danger"
-          >
-            {errorCode === 'PHONE_ALREADY_CONNECTED'
-              ? copy('Este número já pertence a outra conta Keepr One. Desconecte-o da conta anterior antes de tentar novamente.', 'This number already belongs to another Keepr One account. Disconnect it from the previous account before trying again.')
-              : errorCode === 'CHATWOOT_ACCOUNT_NOT_READY'
-                ? copy('Sua caixa de mensagens ainda não ficou pronta. Tente novamente em alguns instantes.', 'Your inbox is not ready yet. Please try again in a moment.')
-                : copy('Não consegui validar a conexão completa entre WhatsApp e caixa de mensagens. Tente novamente em alguns instantes.', 'I couldn’t validate the full connection between WhatsApp and the inbox. Please try again in a moment.')}
-          </p>
+          <div className="mt-6">
+            <p
+              role="alert"
+              className="rounded-xl border border-danger/20 bg-danger-pale px-4 py-3 text-sm leading-6 text-danger"
+            >
+              {errorCode === 'PHONE_ALREADY_CONNECTED'
+                ? copy('Este número já pertence a outra conta Keepr One. Desconecte-o da conta anterior antes de tentar novamente.', 'This number already belongs to another Keepr One account. Disconnect it from the previous account before trying again.')
+                : errorCode === 'CHATWOOT_ACCOUNT_NOT_READY'
+                  ? copy('Sua caixa de mensagens ainda não ficou pronta. Tente novamente em alguns instantes.', 'Your inbox is not ready yet. Please try again in a moment.')
+                  : errorCode === 'DISCONNECT_FAILED'
+                    ? copy('A conexão ainda está ativa. Nada foi desconectado; tente novamente em alguns instantes.', 'The connection is still active. Nothing was disconnected; please try again in a moment.')
+                    : copy('Não consegui validar a conexão completa entre WhatsApp e caixa de mensagens. Tente novamente em alguns instantes.', 'I couldn’t validate the full connection between WhatsApp and the inbox. Please try again in a moment.')}
+            </p>
+            <Button variant="secondary" className="mt-4" onClick={() => void loadStatus()}>
+              {copy('Verificar novamente', 'Check again')}
+            </Button>
+          </div>
         )}
       </div>
     </div>

@@ -10,6 +10,7 @@ import {
 /// why" — not lease owners, attempt counts, or an error code in English.
 export type IllustrationPdfStatus =
   | { state: 'WORKING' }
+  | { state: 'WAITING_FOR_KBOT' }
   | { state: 'BLOCKED'; safeErrorCode: string | null }
   | { state: 'FAILED'; safeErrorCode: string | null }
 
@@ -80,6 +81,9 @@ export function latestPdfStatusByIllustration(
 /// Saying "falhou" there sends the agent looking for a problem that is not in
 /// the data. The portal-level reconnect code follows the same blocked path.
 export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
+  if (status.state === 'WAITING_FOR_KBOT') {
+    return 'K-Bot está aguardando conexão neste computador para iniciar o mesmo pedido.'
+  }
   if (status.state === 'WORKING') {
     // The number comes from measuring a full illustration opening in the
     // carrier's tool: minutes, not seconds. Without it, silence reads as broken.
@@ -108,6 +112,25 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
       return 'O Foresight não conseguiu calcular um cenário válido com esse valor de origem. Revise o capital ou prêmio e gere uma nova ilustração; nenhum PDF foi emitido.'
     case 'FORESIGHT_CLIENT_READBACK_TIMEOUT':
       return 'O Foresight não confirmou os dados do segurado. Revise nascimento, estado e perfil de risco antes de tentar novamente; nenhum PDF foi emitido.'
+    case 'FORESIGHT_TERM_CLIENT_JURISDICTION_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_INFORMATION_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_RISK_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_OWNER_WRITE_MISMATCH':
+      return 'O Foresight não confirmou uma etapa do cadastro Term após uma repetição segura. Nenhum PDF foi emitido e o K-Bot não continuará tentando sozinho.'
+    case 'FORESIGHT_TERM_FUNDING_TIMEOUT':
+      return 'O Foresight ainda estava atualizando o cenário Term e não confirmou os valores a tempo. Gere novamente; nenhum PDF foi emitido.'
+    case 'FORESIGHT_TERM_DURATION_READBACK_MISMATCH':
+      return 'O Foresight alterou o prazo do Term durante a atualização. Revise o prazo e gere novamente; nenhum PDF foi emitido.'
+    case 'FORESIGHT_TERM_PREMIUM_MISSING':
+    case 'FORESIGHT_TERM_PREMIUM_MISMATCH':
+    case 'FORESIGHT_TERM_PDF_INVALID':
+      return 'O PDF Term foi recebido, mas os prêmios não puderam ser conferidos. Tente conferir este PDF novamente; se persistir, gere uma nova ilustração.'
+    case 'FORESIGHT_TERM_CLIENT_READBACK_MISMATCH':
+      return 'O Foresight devolveu dados do segurado diferentes do pedido Term. Revise o cenário e gere novamente; nenhum PDF foi emitido.'
+    case 'FORESIGHT_TERM_FACE_AMOUNT_READBACK_MISMATCH':
+    case 'FORESIGHT_TERM_FUNDING_READBACK_MISMATCH':
+      return 'O Foresight devolveu capital ou cobrança diferentes do pedido Term. Revise o cenário e gere novamente; nenhum PDF foi emitido.'
     case 'FORESIGHT_SOLVE_READBACK_TIMEOUT':
     case 'FORESIGHT_SOLVE_READBACK_MISMATCH':
     case 'FORESIGHT_RESPONSE_INVALID':
@@ -123,8 +146,34 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
 
 export function describeIllustrationDelivery(input: {
   documentReady: boolean
+  verified?: boolean
   status?: IllustrationPdfStatus
 }): IllustrationDelivery {
+  if (input.status?.state === 'FAILED' && [
+    'FORESIGHT_TERM_PREMIUM_MISSING',
+    'FORESIGHT_TERM_PREMIUM_MISMATCH',
+    'FORESIGHT_TERM_PDF_INVALID',
+  ].includes(input.status.safeErrorCode ?? '')) {
+    return {
+      eyebrow: 'Revisão necessária',
+      title: 'Não foi possível conferir o PDF Term',
+      detail: illustrationPdfMessage(input.status),
+    }
+  }
+  if (input.documentReady && input.verified === false) {
+    if (input.status?.state === 'FAILED') {
+      return {
+        eyebrow: 'Revisão necessária',
+        title: 'O PDF foi recebido, mas a conferência não terminou',
+        detail: `O arquivo foi recebido, mas o K-Bot não concluiu a conferência do resultado. Nenhum valor foi aceito como oficial. ${illustrationPdfMessage(input.status)}`,
+      }
+    }
+    return {
+      eyebrow: 'Documento recebido',
+      title: 'K-Bot está conferindo o PDF oficial',
+      detail: 'O arquivo foi recebido da National Life, mas os valores ainda não foram aceitos como resultado oficial.',
+    }
+  }
   if (input.documentReady) {
     return {
       eyebrow: 'Documento pronto',
@@ -137,6 +186,13 @@ export function describeIllustrationDelivery(input: {
       eyebrow: 'K-Bot · ação necessária',
       title: 'Conecte a National Life para continuar',
       detail: 'A sessão do navegador expirou. Depois do login, o K-Bot retoma o mesmo pedido.',
+    }
+  }
+  if (input.status?.state === 'WAITING_FOR_KBOT') {
+    return {
+      eyebrow: 'K-Bot · conexão necessária',
+      title: 'Reconecte o K-Bot para iniciar',
+      detail: 'O pedido oficial está salvo. Reconecte o K-Bot neste computador para ele abrir o Foresight e continuar a mesma ilustração.',
     }
   }
   if (input.status?.state === 'WORKING') {

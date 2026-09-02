@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import {
   NATIONAL_LIFE_DISCOVERY_PAGE_KEYS,
   NATIONAL_LIFE_PRIORITY_GRID_KEYS,
@@ -27,6 +27,7 @@ const PERSONAL_PRIORITY_GRID_KEYS = NATIONAL_LIFE_PRIORITY_GRID_KEYS.filter(
 const PERSONAL_STRUCTURED_PRIORITY_GRID_KEYS = STRUCTURED_PRIORITY_GRID_KEYS.filter(
   (gridKey) => PERSONAL_GRID_KEYS.has(gridKey),
 )
+const subscribeToBrowserMount = () => () => {}
 export const NATIONAL_LIFE_SYNC_STARTED_EVENT = 'national-life-sync-started'
 export const NATIONAL_LIFE_RETRY_REMAINING_EVENT = 'national-life-retry-remaining'
 
@@ -192,6 +193,11 @@ export function NationalLifeSyncProgress({
   const { copy, locale } = useI18n()
   const [status, setStatus] = useState<NationalLifeSyncStatus | null>(initialStatus)
   const [pollingEnabled, setPollingEnabled] = useState(Boolean(initialStatus?.shouldPoll))
+  const hydrated = useSyncExternalStore(
+    subscribeToBrowserMount,
+    () => true,
+    () => false,
+  )
 
   useEffect(() => {
     let alive = true
@@ -263,7 +269,7 @@ export function NationalLifeSyncProgress({
   const plannedStructuredSources = Math.max(0, (status.stageCoverage?.length ?? 0) - plannedSnapshotSources)
   const currentPriorityPlan = isCurrentPriorityPlan(status)
   const historicalCompletedPlan = status.state === 'COMPLETED' && !currentPriorityPlan
-  const lastSynced = formatMoment(status.completedAt, locale)
+  const lastSynced = hydrated ? formatMoment(status.completedAt, locale) : null
   // Só depois do fim. No meio do run, "nada novo desta vez" ou "120 gravados"
   // seriam a mesma mentira do "concluído" eterno, apontada para o outro lado.
   const outcome = terminal ? outcomeLine(status, snapshotRecords, copy, locale) : null
@@ -452,7 +458,7 @@ export function NationalLifeSyncProgress({
                       : copy('linhas verificadas', 'rows verified')}
                   </p>
                 )}
-                {stage.verifiedAt && (
+                {hydrated && stage.verifiedAt && (
                   <p className="mt-1 text-[10px] opacity-80">
                     {copy('Confirmado pela National Life em {date}', 'Confirmed by National Life {date}', { date: formatMoment(stage.verifiedAt, locale) ?? '—' })}
                   </p>

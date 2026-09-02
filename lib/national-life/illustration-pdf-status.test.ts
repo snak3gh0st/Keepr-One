@@ -75,6 +75,42 @@ describe('latestPdfStatusByIllustration', () => {
 })
 
 describe('illustrationPdfMessage', () => {
+  it('does not call an unclaimed connector command a running Foresight render', () => {
+    const status = { state: 'WAITING_FOR_KBOT' } as never
+
+    expect(describeIllustrationDelivery({ documentReady: false, status })).toEqual({
+      eyebrow: 'K-Bot · conexão necessária',
+      title: 'Reconecte o K-Bot para iniciar',
+      detail: 'O pedido oficial está salvo. Reconecte o K-Bot neste computador para ele abrir o Foresight e continuar a mesma ilustração.',
+    })
+    expect(illustrationPdfMessage(status)).toBe(
+      'K-Bot está aguardando conexão neste computador para iniciar o mesmo pedido.',
+    )
+  })
+
+  it('never presents an uploaded PDF as verified when its Term reconciliation failed', () => {
+    expect(describeIllustrationDelivery({
+      documentReady: true,
+      status: { state: 'FAILED', safeErrorCode: 'FORESIGHT_TERM_PREMIUM_MISSING' },
+    })).toEqual({
+      eyebrow: 'Revisão necessária',
+      title: 'Não foi possível conferir o PDF Term',
+      detail: 'O PDF Term foi recebido, mas os prêmios não puderam ser conferidos. Tente conferir este PDF novamente; se persistir, gere uma nova ilustração.',
+    })
+  })
+
+  it('does not mask a generic reconciliation failure behind an uploaded file', () => {
+    expect(describeIllustrationDelivery({
+      documentReady: true,
+      verified: false,
+      status: { state: 'FAILED', safeErrorCode: 'DEVICE_REQUEST_FAILED' },
+    })).toEqual({
+      eyebrow: 'Revisão necessária',
+      title: 'O PDF foi recebido, mas a conferência não terminou',
+      detail: 'O arquivo foi recebido, mas o K-Bot não concluiu a conferência do resultado. Nenhum valor foi aceito como oficial. Não foi possível gerar (DEVICE_REQUEST_FAILED).',
+    })
+  })
+
   // The measured failure of 2026-07-31 15:38 UTC. Nothing is wrong with the
   // quote — the carrier's tool wants a login — and the sentence has to say so,
   // or the agent goes looking in the wrong place.
@@ -119,6 +155,11 @@ describe('illustrationPdfMessage', () => {
       illustrationPdfMessage({ state: 'FAILED', safeErrorCode: 'FORESIGHT_CLIENT_READBACK_TIMEOUT' }),
     ).toBe(
       'O Foresight não confirmou os dados do segurado. Revise nascimento, estado e perfil de risco antes de tentar novamente; nenhum PDF foi emitido.',
+    )
+    expect(
+      illustrationPdfMessage({ state: 'FAILED', safeErrorCode: 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH' }),
+    ).toBe(
+      'O Foresight não confirmou uma etapa do cadastro Term após uma repetição segura. Nenhum PDF foi emitido e o K-Bot não continuará tentando sozinho.',
     )
   })
 

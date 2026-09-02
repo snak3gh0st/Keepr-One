@@ -631,6 +631,109 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(screen.getByRole('button', { name: 'Sync National Life' })).toBeEnabled()
   })
 
+  it('does not show stale login wait after the server timed out the run', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        run: {
+          runId: 'run-auth-timeout',
+          state: 'FAILED',
+          safeErrorCode: 'LOCAL_CONNECTOR_TIMEOUT',
+        },
+      }), { status: 200 }),
+    )
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: { runId: 'run-auth-timeout', status: 'AUTH_REQUIRED', stageIndex: 9 },
+        })
+        return
+      }
+      callback({ ok: false, error: 'AUTH_REQUIRED' })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+        latestRun={{ runId: 'run-auth-timeout', state: 'FAILED' }}
+      />,
+    )
+
+    const status = await screen.findByRole('status')
+    await waitFor(() => expect(status).toHaveTextContent('National Life did not respond'))
+    expect(status).not.toHaveTextContent('sign in')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+  })
+
+  it('offers a retry when the protected login episode expired', async () => {
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: {
+            runId: 'run-auth-expired',
+            status: 'AUTH_REQUIRED',
+            stageIndex: 9,
+            errorCode: 'CREDENTIAL_AUTH_STATE_EXPIRED',
+          },
+        })
+        return
+      }
+      callback({ ok: false, error: 'CREDENTIAL_AUTH_STATE_EXPIRED' })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    const status = await screen.findByRole('status')
+    await waitFor(() => expect(status).toHaveTextContent('sync stopped before it finished'))
+    expect(status).not.toHaveTextContent('same task resumes automatically')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+  })
+
+  it('uses the auth timestamp when the expired worker has no error code', async () => {
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: {
+            runId: 'run-auth-expired-without-code',
+            status: 'AUTH_REQUIRED',
+            stageIndex: 9,
+            authRequiredAt: new Date(Date.now() - 6 * 60_000).toISOString(),
+          },
+        })
+        return
+      }
+      callback({ ok: false, error: 'AUTH_REQUIRED' })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    const status = await screen.findByRole('status')
+    await waitFor(() => expect(status).toHaveTextContent('sync stopped before it finished'))
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+  })
+
   it('keeps a server-confirmed partial sync recoverable when the extension retains an error', async () => {
     installChromeMock((message, callback) => {
       if (message.type === 'GET_CONNECTOR_STATUS') {

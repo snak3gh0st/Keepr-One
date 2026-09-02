@@ -61,4 +61,15 @@ describe('local connector auth-state route', () => {
     expect(response.status).toBe(400)
     expect(mocks.record).not.toHaveBeenCalled()
   })
+
+  it('accepts a safe MFA-required state without accepting an MFA response', async () => {
+    const response = await POST(request({ state: 'MFA_REQUIRED' }), {
+      params: Promise.resolve({ runId: 'run-1' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(mocks.record).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      state: 'MFA_REQUIRED',
+    }))
+  })
 })

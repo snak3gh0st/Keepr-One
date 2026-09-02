@@ -494,6 +494,8 @@ describe('local connector command dispatch', () => {
       caseFingerprint: `case_${'b'.repeat(64)}`,
       carrierCaseName,
       carrierProduct: 'NL Term',
+      requestedTermDuration: '20-G',
+      confirmedTermDuration: '15-G',
       release: '5.3.65.31',
       reportCode: 'NAIC_ILLUSTRATION',
       documentSha256: createHash('sha256').update(bytes).digest('hex'),
@@ -533,8 +535,53 @@ describe('local connector command dispatch', () => {
     expect(persistTermResult).toHaveBeenCalledWith({
       agentId: 'agent_1', illustrationId: 'illustration_term_1',
       monthlyPremium: 62.92, annualPremium: 755.04,
+      requestedTermDuration: '20-G', confirmedTermDuration: '15-G',
     })
     expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ payload: { illustration: receipt } }))
+  })
+
+  it('keeps a safe Term PDF reconciliation failure specific for the extension retry state', async () => {
+    const bytes = new TextEncoder().encode('%PDF-1.7\nterm')
+    const inputHash = 'a'.repeat(64)
+    const carrierCaseName = 'KEEPRONE-20260901-ILLTERMFAIL'
+    const persistTermResult = vi.fn()
+    const repo = repository(candidate({
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_term_failure_1' },
+      params: { illustrationId: 'illustration_term_failure_1', inputHash },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+      events: [{ sequence: 0 }, { sequence: 1 }],
+    }))
+
+    await expect(recordDeviceConnectorCommandEvent(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
+      event: {
+        protocolVersion: 1, eventId: 'event_term_failure_1', commandId: 'cmd_1', runId: 'run_1',
+        sequence: 2, type: 'DATA_BATCH', emittedAt: now.toISOString(),
+        payload: {
+          illustration: {
+            inputHash, caseFingerprint: `case_${'b'.repeat(64)}`,
+            carrierCaseName, carrierProduct: 'NL Term',
+            release: '5.3.65.31', reportCode: 'NAIC_ILLUSTRATION',
+            documentSha256: createHash('sha256').update(bytes).digest('hex'),
+            documentBytes: bytes.byteLength, saved: true,
+          },
+        },
+        error: null,
+      },
+      foresightArtifactRepository: {
+        findOwnedArtifact: vi.fn().mockResolvedValue({
+          provider: 'NATIONAL_LIFE_FORESIGHT', externalId: `agent_1:${carrierCaseName}`,
+          productName: 'NL Term', documentBytes: bytes, documentMimeType: 'application/pdf',
+        }),
+        persistTermResult,
+      },
+      extractTermPremiums: vi.fn().mockRejectedValue(new Error('FORESIGHT_TERM_PREMIUM_MISSING')),
+    })).rejects.toMatchObject({ code: 'FORESIGHT_TERM_PREMIUM_MISSING' })
+
+    expect(persistTermResult).not.toHaveBeenCalled()
+    expect(repo.appendEvent).not.toHaveBeenCalled()
   })
 
   it('persists an iGO draft read-back and carrier questions before accepting the event', async () => {
@@ -646,6 +693,7 @@ describe('local connector command dispatch', () => {
         sequence: 2, type: 'DATA_BATCH', emittedAt: now.toISOString(), error: null,
         payload: { illustration: {
           inputHash, caseFingerprint: `case_${'b'.repeat(64)}`, carrierCaseName, carrierProduct: 'NL Term',
+          requestedTermDuration: '20-G', confirmedTermDuration: '20-G',
           release: '5.3.65.31', reportCode: 'NAIC_ILLUSTRATION',
           documentSha256: createHash('sha256').update(bytes).digest('hex'), documentBytes: bytes.byteLength, saved: true,
         } },

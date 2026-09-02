@@ -19,14 +19,20 @@ export function parseForesightTermPremiumText(text: string): {
   annualPremium: number
 } {
   const normalized = text.replace(/\s+/g, ' ').trim()
+  // pdfjs preserves the words but not the carrier's exact spacing. In
+  // particular, Foresight may insert spaces around "$", parentheses or the
+  // Group Bill slash. Match that layout variance, while still requiring one
+  // unique summary and one unique annualized payment row below.
+  const monthlyEft = String.raw`Monthly\s*\(\s*EFT(?:\s*\/\s*Group\s*Bill)?\s*\)`
   const summary = uniqueNumbers(
-    [...normalized.matchAll(/Initial Premium:\s*\$([\d,]+\.\d{2})\s+Monthly\s*\(EFT\)/gi)]
+    [...normalized.matchAll(new RegExp(String.raw`Initial\s+Premium\s*:\s*\$\s*([\d,]+\.\d{2})\s+${monthlyEft}`, 'gi'))]
       .map((match) => money(match[1]!))
       .filter((value): value is number => value !== null),
   )
-  const paymentRows = [...normalized.matchAll(
-    /Monthly\s*\(EFT(?:\/Group Bill)?\)\s+12\s+\$([\d,]+\.\d{2})\s+\$([\d,]+\.\d{2})/gi,
-  )].map((match) => ({
+  const paymentRows = [...normalized.matchAll(new RegExp(
+    String.raw`${monthlyEft}\s+12\s+\$\s*([\d,]+\.\d{2})\s+\$\s*([\d,]+\.\d{2})`,
+    'gi',
+  ))].map((match) => ({
     monthlyPremium: money(match[1]!),
     annualPremium: money(match[2]!),
   })).filter((row): row is { monthlyPremium: number; annualPremium: number } =>
@@ -55,6 +61,18 @@ export async function extractForesightTermPremiums(documentBytes: Uint8Array): P
     new TextDecoder().decode(documentBytes.subarray(0, 5)) !== '%PDF-') {
     throw new Error('FORESIGHT_TERM_PDF_INVALID')
   }
+  // PDF.js needs these primitives while reading certain production PDFs. They
+  // are supplied explicitly so the standalone server image does not depend on
+  // an optional transitive package being present at runtime.
+  const canvas = await import('@napi-rs/canvas')
+  const runtime = globalThis as unknown as Record<string, unknown>
+  runtime.DOMMatrix ??= canvas.DOMMatrix
+  runtime.Path2D ??= canvas.Path2D
+  // The Next server bundle cannot resolve PDF.js' relative fake-worker import.
+  // Providing the official worker handler up front keeps text extraction in
+  // process and avoids a browser-style worker dependency on the server.
+  const worker = await import('pdfjs-dist/legacy/build/pdf.worker.mjs')
+  runtime.pdfjsWorker ??= { WorkerMessageHandler: worker.WorkerMessageHandler }
   const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs')
   const loadingTask = getDocument({
     data: Uint8Array.from(documentBytes),

@@ -135,6 +135,8 @@ export type ForesightArtifactRepository = {
     illustrationId: string
     monthlyPremium: number
     annualPremium: number
+    requestedTermDuration?: '10-G' | '15-G' | '20-G' | '30-G' | 'ART'
+    confirmedTermDuration?: '10-G' | '15-G' | '20-G' | '30-G' | 'ART'
   }) => Promise<void>
 }
 
@@ -170,6 +172,18 @@ function isForesightTermIllustrationReceipt(
   receipt: unknown,
 ): receipt is ForesightTermIllustrationReceipt {
   return parseForesightTermIllustrationReceipt(receipt) !== null
+}
+
+function foresightTermReconciliationError(error: unknown): ConnectorCommandError {
+  const code = error instanceof Error ? error.message : ''
+  if (
+    code === 'FORESIGHT_TERM_PDF_INVALID' ||
+    code === 'FORESIGHT_TERM_PREMIUM_MISSING' ||
+    code === 'FORESIGHT_TERM_PREMIUM_MISMATCH'
+  ) {
+    return new ConnectorCommandError(code)
+  }
+  return new ConnectorCommandError('FORESIGHT_TERM_PDF_INVALID')
 }
 
 function toPublicCommand(candidate: LocalConnectorCommandCandidate): ConnectorCommand {
@@ -420,8 +434,8 @@ export async function recordDeviceConnectorCommandEvent(
       let premiums
       try {
         premiums = await input.extractTermPremiums(artifact.documentBytes)
-      } catch {
-        throw new ConnectorCommandError('EVENT_INVALID')
+      } catch (error) {
+        throw foresightTermReconciliationError(error)
       }
       if (!Number.isFinite(premiums.monthlyPremium) || premiums.monthlyPremium <= 0 ||
         !Number.isFinite(premiums.annualPremium) || premiums.annualPremium <= 0 ||
@@ -433,6 +447,12 @@ export async function recordDeviceConnectorCommandEvent(
         illustrationId: publicCommand.target.id,
         monthlyPremium: premiums.monthlyPremium,
         annualPremium: premiums.annualPremium,
+        ...(receipt.requestedTermDuration && receipt.confirmedTermDuration
+          ? {
+              requestedTermDuration: receipt.requestedTermDuration,
+              confirmedTermDuration: receipt.confirmedTermDuration,
+            }
+          : {}),
       })
     }
   }

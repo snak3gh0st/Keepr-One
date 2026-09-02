@@ -2,6 +2,7 @@ import { FORESIGHT_FLEXLIFE_FIELDS, foresightSolveValue } from '../lib/foresight
 import { isForesightPdf, parseForesightReportUrl } from '../lib/foresight-report'
 import {
   applyForesightAllocationPreference,
+  waitForForesightAsyncWorkerIdle,
   writeForesightControlValueWhenReady,
 } from '../lib/foresight-control-value'
 import {
@@ -21,6 +22,7 @@ type CarrierWindow = Window & {
     sendRequest(path: string, parameters: unknown[]): CarrierDeferred
   }
   $ITCommon?: { sessionTokenId(): string }
+  $ITAsyncWorker?: { _isIdle?: boolean }
   __doPostBack?: (target: string, argument: string) => void
 }
 
@@ -94,6 +96,20 @@ export default defineContentScript({
         throw new Error('FORESIGHT_SCHEMA_MISMATCH')
       }
       ;(value[method] as (...values: unknown[]) => unknown).apply(value, args)
+    }
+    const waitForCarrierIdle = async (
+      timeoutCode = 'FORESIGHT_TERM_FUNDING_TIMEOUT',
+      minimumSettleMs = 0,
+    ) => {
+      // A Foresight component method can return just before its ASP.NET work
+      // is registered in $ITAsyncWorker. Preserve the known settling window,
+      // then require the carrier's queue to become idle before the next write.
+      if (minimumSettleMs > 0) await delay(minimumSettleMs)
+      const idle = await waitForForesightAsyncWorkerIdle({
+        read: () => carrier().win.$ITAsyncWorker,
+        wait: () => delay(100),
+      })
+      if (!idle) throw new Error(timeoutCode)
     }
     const writeScheduleValue = async (id: string, value: number) => {
       const written = await writeForesightControlValueWhenReady({
@@ -287,8 +303,27 @@ export default defineContentScript({
       if (!option) throw new Error('FORESIGHT_SCHEMA_MISMATCH')
       return option.value
     }
+    const retryTermClientPostback = async (
+      minimumSettleMs: number,
+      mismatchCode: string,
+      write: (doc: Document, win: CarrierWindow) => void,
+      matches: (doc: Document) => boolean,
+    ) => {
+      let timedOut = false
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const { doc, win } = carrier()
+        write(doc, win)
+        try {
+          await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT', minimumSettleMs)
+          if (matches(carrier().doc)) return
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== 'FORESIGHT_TERM_CLIENT_TIMEOUT') throw error
+          timedOut = true
+        }
+      }
+      throw new Error(timedOut ? 'FORESIGHT_TERM_CLIENT_TIMEOUT' : mismatchCode)
+    }
     const applyTermClient = async (values: MainRequest['values']) => {
-      let { doc, win } = carrier()
       const fields = {
         jurisdiction: 'ctl00_mobilityPH_panelIllustration_cboJurisdiction',
         firstName: 'ctl00_mobilityPH_panelInsured_ucInsured_txtFirstName',
@@ -298,27 +333,31 @@ export default defineContentScript({
         riskClass: 'ctl00_mobilityPH_panelInsured_ucRisk_cboRiskClass',
         ownerType: 'ctl00_mobilityPH_panelOwner_ucOwner_cboOwnerType',
       }
-      setSelect(doc, fields.jurisdiction, String(values.jurisdiction))
-      element<HTMLSelectElement>(doc, fields.jurisdiction).dispatchEvent(new Event('change', { bubbles: true }))
-      await delay(700)
-
-      ;({ doc, win } = carrier())
-      setInput(doc, fields.firstName, String(values.firstName))
-      setInput(doc, fields.lastName, String(values.lastName))
-      invoke(win, 'ctl00_mobilityPH_panelInsured_ucInsured', 'updateName')
-      await delay(500)
-      setSelect(doc, fields.gender, String(values.gender))
-      setInput(doc, fields.birthDate, String(values.birthDate))
-      invoke(win, 'ctl00_mobilityPH_panelInsured_ucInsured', 'updateInformation')
-      await delay(800)
-
-      ;({ doc, win } = carrier())
-      setSelect(doc, fields.riskClass, String(values.riskClass))
-      invoke(win, 'ctl00_mobilityPH_panelInsured_ucRisk', 'updateInformation')
-      await delay(600)
-      setSelect(doc, fields.ownerType, optionByText(doc, fields.ownerType, 'Same as Insured'))
-      invoke(win, 'ctl00_mobilityPH_panelOwner_ucOwner', 'updateOwnerType')
-      await delay(600)
+      await retryTermClientPostback(700, 'FORESIGHT_TERM_CLIENT_JURISDICTION_WRITE_MISMATCH', (doc) => {
+        setSelect(doc, fields.jurisdiction, String(values.jurisdiction))
+        element<HTMLSelectElement>(doc, fields.jurisdiction).dispatchEvent(new Event('change', { bubbles: true }))
+      }, (doc) => element<HTMLSelectElement>(doc, fields.jurisdiction).value === String(values.jurisdiction))
+      await retryTermClientPostback(500, 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH', (doc, win) => {
+        setInput(doc, fields.firstName, String(values.firstName))
+        setInput(doc, fields.lastName, String(values.lastName))
+        invoke(win, 'ctl00_mobilityPH_panelInsured_ucInsured', 'updateName')
+      }, (doc) => element<HTMLInputElement>(doc, fields.firstName).value === String(values.firstName) &&
+        element<HTMLInputElement>(doc, fields.lastName).value === String(values.lastName))
+      await retryTermClientPostback(800, 'FORESIGHT_TERM_CLIENT_INFORMATION_WRITE_MISMATCH', (doc, win) => {
+        setSelect(doc, fields.gender, String(values.gender))
+        setInput(doc, fields.birthDate, String(values.birthDate))
+        invoke(win, 'ctl00_mobilityPH_panelInsured_ucInsured', 'updateInformation')
+      }, (doc) => element<HTMLSelectElement>(doc, fields.gender).value === String(values.gender) &&
+        element<HTMLInputElement>(doc, fields.birthDate).value === String(values.birthDate))
+      await retryTermClientPostback(600, 'FORESIGHT_TERM_CLIENT_RISK_WRITE_MISMATCH', (doc, win) => {
+        setSelect(doc, fields.riskClass, String(values.riskClass))
+        invoke(win, 'ctl00_mobilityPH_panelInsured_ucRisk', 'updateInformation')
+      }, (doc) => element<HTMLSelectElement>(doc, fields.riskClass).value === String(values.riskClass))
+      await retryTermClientPostback(600, 'FORESIGHT_TERM_CLIENT_OWNER_WRITE_MISMATCH', (doc, win) => {
+        setSelect(doc, fields.ownerType, optionByText(doc, fields.ownerType, 'Same as Insured'))
+        invoke(win, 'ctl00_mobilityPH_panelOwner_ucOwner', 'updateOwnerType')
+      }, (doc) => element<HTMLSelectElement>(doc, fields.ownerType).value ===
+        optionByText(doc, fields.ownerType, 'Same as Insured'))
     }
     const applyTermFunding = async (values: MainRequest['values']) => {
       let { doc, win } = carrier()
@@ -331,15 +370,15 @@ export default defineContentScript({
       setSelect(doc, fields.designType, String(values.designType))
       setWidgetNumber(win, fields.faceAmount, Number(values.faceAmount))
       invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefit', 'updateDeathBenefit')
-      await delay(900)
+      await waitForCarrierIdle()
       ;({ doc, win } = carrier())
       setSelect(doc, fields.premiumMode, String(values.premiumMode))
       invoke(win, 'ctl00_mobilityPH_panelDBO_ucDeathBenefit', 'updatePremium')
-      await delay(700)
+      await waitForCarrierIdle()
       ;({ doc, win } = carrier())
       setSelect(doc, fields.termDuration, String(values.termDuration))
       invoke(win, 'ctl00_mobilityPH_panelTermProduct_ucTermProduct', 'updateTermProduct')
-      await delay(900)
+      await waitForCarrierIdle()
     }
     const applyTermReports = async (values: MainRequest['values']) => {
       const { doc } = carrier()

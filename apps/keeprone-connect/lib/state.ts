@@ -1,5 +1,5 @@
 import { parseStagePlan, type StagePlan } from './capabilities'
-import type { ForesightProgressPhase } from './foresight-progress'
+import { parseForesightProgressPhase, type ForesightProgressPhase } from './foresight-progress'
 
 export type ConnectorStatus = 'UNPAIRED' | 'PAIRING' | 'READY' | 'ERROR'
 export type SyncStatus =
@@ -16,7 +16,18 @@ export type SyncStatus =
 export type DeviceState = {
   deviceId?: string
   baseUrl?: string
+  credentialEncryptionKeyRegistered?: boolean
   status: ConnectorStatus
+}
+
+export type CredentialAttempt = {
+  operationKind: 'SYNC_RUN' | 'CONNECTOR_COMMAND'
+  operationId: string
+  /// Zero is a pre-request marker. The broker-authoritative epoch replaces it
+  /// only after the one-shot response arrives.
+  authEpoch: number
+  leaseId?: string
+  attemptedAt: string
 }
 
 export type SyncState = {
@@ -59,6 +70,15 @@ export type SyncState = {
   /// True only while the carrier asks the agent to renew the browser session.
   /// No credential, cookie or MFA material is ever stored here.
   authRenewalPending?: boolean
+  /// Local age of the visible authentication wait. It contains no carrier or
+  /// user data; it only lets the scheduler distinguish a person actively
+  /// signing in from a server-expired run that must be reconciled.
+  authRequiredAt?: string
+  /// One bounded reload of an already-open carrier login page after an
+  /// extension update. The timestamp is coordination-only and survives service
+  /// worker eviction so recovery cannot become a reload loop.
+  credentialPageReloadedAt?: string
+  credentialAttempt?: CredentialAttempt
   status: SyncStatus
   errorCode?: string
   /// Contador monotônico de lotes enviados neste run. Existe porque `status` e
@@ -99,6 +119,139 @@ export type CommandState = {
   /// Fine-grained, non-sensitive progress for the active official illustration.
   /// It is presentation state only; command events remain the audit authority.
   phase?: CommandProgressPhase
+  /// Hash only, never the illustration input. Lets a new command resume the
+  /// exact same interrupted Term case without re-opening or repopulating it.
+  termInputHash?: string
+  credentialPageReloadedAt?: string
+  credentialAttempt?: CredentialAttempt
+}
+
+const COMMAND_STATUSES = [
+  'IDLE', 'POLLING', 'NAVIGATING', 'RUNNING', 'AUTH_REQUIRED',
+  'MFA_REQUIRED', 'COMPLETED', 'ERROR',
+] as const satisfies readonly CommandStatus[]
+
+const IGO_COMMAND_PHASES = [
+  'OPENING_IGO', 'WAITING_IGO_HANDOFF', 'WRITING_IGO_DRAFT',
+] as const
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function boundedString(value: unknown, max = 240): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= max &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+}
+
+const FORBIDDEN_STORAGE_KEYS = new Set([
+  'username', 'password', 'wrappedkey', 'ciphertext', 'iv',
+])
+
+function containsForbiddenStorageKey(value: unknown, seen = new WeakSet<object>()): boolean {
+  if (!value || typeof value !== 'object') return false
+  if (seen.has(value)) return false
+  seen.add(value)
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsForbiddenStorageKey(entry, seen))
+  }
+  return Object.entries(value as Record<string, unknown>).some(([key, entry]) =>
+    FORBIDDEN_STORAGE_KEYS.has(key.toLowerCase()) || containsForbiddenStorageKey(entry, seen))
+}
+
+export function parseCredentialAttempt(value: unknown): CredentialAttempt | undefined {
+  if (!isRecord(value) || containsForbiddenStorageKey(value)) return undefined
+  const keys = Object.keys(value).sort()
+  const allowed = ['attemptedAt', 'authEpoch', 'leaseId', 'operationId', 'operationKind']
+  if (keys.some((key) => !allowed.includes(key))) return undefined
+  if (
+    (value.operationKind !== 'SYNC_RUN' && value.operationKind !== 'CONNECTOR_COMMAND') ||
+    !boundedString(value.operationId, 128) ||
+    !Number.isInteger(value.authEpoch) || Number(value.authEpoch) < 0 ||
+    typeof value.attemptedAt !== 'string' || !Number.isFinite(Date.parse(value.attemptedAt)) ||
+    (value.leaseId !== undefined && !boundedString(value.leaseId, 128))
+  ) return undefined
+  return {
+    operationKind: value.operationKind,
+    operationId: value.operationId,
+    authEpoch: Number(value.authEpoch),
+    ...(value.leaseId === undefined ? {} : { leaseId: value.leaseId }),
+    attemptedAt: value.attemptedAt,
+  }
+}
+
+function parseCommandProgressPhase(value: unknown): CommandProgressPhase | undefined {
+  return parseForesightProgressPhase(value) ??
+    (typeof value === 'string' && (IGO_COMMAND_PHASES as readonly string[]).includes(value)
+      ? value as CommandProgressPhase
+      : undefined)
+}
+
+/// chrome.storage survives extension upgrades. Treat it as an untrusted
+/// compatibility boundary so a stale or half-written command cannot bind the
+/// new engine to the wrong tab or leave the popup in an impossible state.
+export function parseCommandState(value: unknown): CommandState {
+  if (!isRecord(value) || typeof value.status !== 'string' ||
+    !(COMMAND_STATUSES as readonly string[]).includes(value.status) ||
+    containsForbiddenStorageKey(value)) {
+    return { status: 'IDLE' }
+  }
+
+  const state: CommandState = { status: value.status as CommandStatus }
+  if (boundedString(value.commandId)) state.commandId = value.commandId
+  if (boundedString(value.runId)) state.runId = value.runId
+  if (Number.isInteger(value.carrierTabId) && Number(value.carrierTabId) > 0) {
+    state.carrierTabId = Number(value.carrierTabId)
+  }
+  if (Number.isInteger(value.nextEventSequence) && Number(value.nextEventSequence) >= 0) {
+    state.nextEventSequence = Number(value.nextEventSequence)
+  }
+  if (typeof value.errorCode === 'string' && /^[A-Z0-9_]{1,80}$/.test(value.errorCode)) {
+    state.errorCode = value.errorCode
+  }
+  if (typeof value.updatedAt === 'string' && Number.isFinite(Date.parse(value.updatedAt))) {
+    state.updatedAt = value.updatedAt
+  }
+  const phase = parseCommandProgressPhase(value.phase)
+  if (phase) state.phase = phase
+  if (typeof value.termInputHash === 'string' && /^[a-f0-9]{64}$/.test(value.termInputHash)) {
+    state.termInputHash = value.termInputHash
+  }
+  if (
+    typeof value.credentialPageReloadedAt === 'string' &&
+    Number.isFinite(Date.parse(value.credentialPageReloadedAt))
+  ) {
+    state.credentialPageReloadedAt = value.credentialPageReloadedAt
+  }
+  const credentialAttempt = parseCredentialAttempt(value.credentialAttempt)
+  if (credentialAttempt) state.credentialAttempt = credentialAttempt
+  return state
+}
+
+const SYNC_STATUSES = [
+  'IDLE', 'STARTING', 'NAVIGATING', 'EXTRACTING', 'UPLOADING', 'AUTH_REQUIRED',
+  'COMPLETED', 'PARTIAL', 'ERROR',
+] as const satisfies readonly SyncStatus[]
+
+/// Sync state has a large, independently validated stage/checkpoint surface.
+/// Preserve that compatibility shape while applying a fail-closed secret gate
+/// and a strict parser to the only new nested authentication metadata.
+export function parseSyncState(value: unknown): SyncState {
+  if (!isRecord(value) || typeof value.status !== 'string' ||
+    !(SYNC_STATUSES as readonly string[]).includes(value.status) ||
+    containsForbiddenStorageKey(value)) return { status: 'IDLE' }
+  const state = { ...value } as SyncState
+  delete state.credentialPageReloadedAt
+  if (
+    typeof value.credentialPageReloadedAt === 'string' &&
+    Number.isFinite(Date.parse(value.credentialPageReloadedAt))
+  ) {
+    state.credentialPageReloadedAt = value.credentialPageReloadedAt
+  }
+  delete state.credentialAttempt
+  const credentialAttempt = parseCredentialAttempt(value.credentialAttempt)
+  if (credentialAttempt) state.credentialAttempt = credentialAttempt
+  return state
 }
 
 /// The plan round-trips through chrome.storage.local, which survives extension
@@ -129,20 +282,18 @@ export async function writeDeviceState(value: DeviceState): Promise<void> {
 
 export async function readSyncState(): Promise<SyncState> {
   const result = await chrome.storage.local.get(SYNC_KEY)
-  const value = result[SYNC_KEY] as SyncState | undefined
-  return value ?? { status: 'IDLE' }
+  return parseSyncState(result[SYNC_KEY])
 }
 
 export async function writeSyncState(value: SyncState): Promise<void> {
-  await chrome.storage.local.set({ [SYNC_KEY]: value })
+  await chrome.storage.local.set({ [SYNC_KEY]: parseSyncState(value) })
 }
 
 export async function readCommandState(): Promise<CommandState> {
   const result = await chrome.storage.local.get(COMMAND_KEY)
-  const value = result[COMMAND_KEY] as CommandState | undefined
-  return value ?? { status: 'IDLE' }
+  return parseCommandState(result[COMMAND_KEY])
 }
 
 export async function writeCommandState(value: CommandState): Promise<void> {
-  await chrome.storage.local.set({ [COMMAND_KEY]: value })
+  await chrome.storage.local.set({ [COMMAND_KEY]: parseCommandState(value) })
 }

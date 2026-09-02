@@ -3,6 +3,7 @@ import type Stripe from 'stripe'
 import {
   assertStripePriceMatchesPlan,
   getStripeCatalogEntry,
+  getStripeInvitationCatalogEntry,
 } from './platform-catalog'
 
 afterEach(() => vi.unstubAllEnvs())
@@ -23,8 +24,19 @@ describe('Keepr One Stripe catalog', () => {
     })
   })
 
-  it('does not charge an invited member against a different plan', () => {
-    expect(getStripeCatalogEntry('AGENT_AGENCY_MEMBER')).toBeNull()
+  it('uses dedicated live prices for invited members and invited agencies', () => {
+    expect(getStripeInvitationCatalogEntry('AGENT_AGENCY_MEMBER')).toEqual({
+      productId: 'prod_VB4QfhI3X92UjL',
+      priceId: 'price_1UAiJ0GJWjOaP9iwDnO3AaXc',
+      unitAmountCents: 4_990,
+      currency: 'usd',
+    })
+    expect(getStripeInvitationCatalogEntry('AGENCY')).toEqual({
+      productId: 'prod_VB4QtibDILaHe6',
+      priceId: 'price_1UAiI5GJWjOaP9iwpYSiCHI9',
+      unitAmountCents: 8_990,
+      currency: 'usd',
+    })
   })
 
   it('accepts only the exact active live monthly licensed price', () => {

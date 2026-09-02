@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { prisma } from '@/lib/prisma'
-import type { ApplicationStatus } from '@prisma/client'
+import { Prisma, type ApplicationStatus } from '@prisma/client'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentScopeIds } from '@/lib/agent-access'
 import { canAccessCase } from '@/lib/case-access'
@@ -18,6 +18,7 @@ import {
   rescheduleFollowUp as rescheduleCrmFollowUp,
   scheduleFollowUp as scheduleCrmFollowUp,
   parseCrmLocalDateTime,
+  getOrCreateNewLeadStageId,
 } from '@/lib/crm'
 import { saveApplicationDossier, reviewApplicationDossier } from '@/lib/application-addon/dossier-service'
 import { prismaApplicationDossierRepository } from '@/lib/application-addon/dossier-prisma'
@@ -33,12 +34,20 @@ import {
 } from '@/lib/national-life/connector-command-service'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
 import { getServerI18n } from '@/lib/i18n/server'
+import {
+  ApplicationFromIllustrationError,
+  buildApplicationFromIllustrationSeed,
+} from '@/lib/application-addon/application-from-illustration'
 
 type ActionResult = { ok: true } | { ok: false; message: string }
 type FailureResult = { ok: false; message: string }
 
 export type ApplicationDossierActionResult =
   | { ok: true; ready: boolean; missing: ApplicationDossierMissingItemV2[]; dossierHash?: string }
+  | { ok: false; message: string }
+
+export type StartApplicationFromIllustrationResult =
+  | { ok: true; caseId: string; applicationId: string }
   | { ok: false; message: string }
 
 async function agentScopeIds(): Promise<{ agentId: string; scope: string[] }> {
@@ -171,64 +180,180 @@ type LockedInsuranceCase = {
   assignedAgentId: string
 }
 
-export async function startApplication(caseId: string): Promise<ActionResult> {
-  const { scope } = await agentScopeIds()
+export async function startApplicationFromIllustration(
+  illustrationId: string,
+): Promise<StartApplicationFromIllustrationResult> {
   const agent = await getCurrentAgent()
 
-  const result = await prisma.$transaction(async (tx): Promise<ActionResult> => {
-    // Serialize application starts for this case. The active-application check
-    // must happen after this row lock; otherwise two simultaneous requests can
-    // both observe an empty application list and create duplicates.
-    const [insuranceCase] = await tx.$queryRaw<LockedInsuranceCase[]>`
-      SELECT "id", "assignedAgentId"
-      FROM "InsuranceCase"
-      WHERE "id" = ${caseId}
-      FOR UPDATE
-    `
+  try {
+    const result = await prisma.$transaction(async (tx): Promise<StartApplicationFromIllustrationResult> => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`application-from-illustration:${illustrationId}`}, 0))::text AS lock_result`
+      const illustration = await tx.illustration.findFirst({
+        where: { id: illustrationId, agentId: agent.id },
+        select: {
+          id: true,
+          caseId: true,
+          clientId: true,
+          createdAt: true,
+          productName: true,
+          rawPayload: true,
+          faceAmount: true,
+          premium: true,
+          documentFetchedAt: true,
+          documentMimeType: true,
+          documentBytes: true,
+        },
+      })
+      if (!illustration) {
+        return actionError('Illustration não encontrada.', 'Illustration not found.')
+      }
 
-    if (!insuranceCase || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, insuranceCase)) {
-      return actionError('Caso não encontrado ou fora da sua carteira.', 'Case not found or outside your portfolio.')
-    }
+      const caseId = illustration.caseId ?? `case_${randomUUID()}`
+      const seed = buildApplicationFromIllustrationSeed({
+        id: illustration.id,
+        caseId: illustration.caseId,
+        createdAt: illustration.createdAt,
+        productName: illustration.productName,
+        rawPayload: illustration.rawPayload,
+        documentReady: Boolean(
+          illustration.documentFetchedAt &&
+          illustration.documentMimeType === 'application/pdf' &&
+          illustration.documentBytes?.byteLength,
+        ),
+        faceAmount: illustration.faceAmount == null ? null : Number(illustration.faceAmount),
+        premium: illustration.premium == null ? null : Number(illustration.premium),
+      }, caseId)
 
-    const activeApplication = await tx.application.findFirst({
-      where: { caseId, status: { in: ACTIVE_APPLICATION } },
-      select: { id: true },
-    })
-    if (activeApplication) {
-      return actionError('Já existe uma aplicação em andamento para este caso.', 'An application is already in progress for this case.')
-    }
+      if (illustration.caseId) {
+        const [lockedCase] = await tx.$queryRaw<LockedInsuranceCase[]>`
+          SELECT "id", "assignedAgentId"
+          FROM "InsuranceCase"
+          WHERE "id" = ${caseId}
+          FOR UPDATE
+        `
+        if (!lockedCase || lockedCase.assignedAgentId !== agent.id) {
+          return actionError(
+            'O atendimento vinculado está fora da sua carteira.',
+            'The linked case is outside your portfolio.',
+          )
+        }
+      } else {
+        const crmStageId = await getOrCreateNewLeadStageId(tx, agent.id)
+        const prospect = await tx.prospect.create({
+          data: {
+            firstName: seed.prospect.firstName,
+            lastName: seed.prospect.lastName,
+            dateOfBirth: seed.prospect.dateOfBirth,
+            state: seed.prospect.state,
+            tobaccoStatus: seed.prospect.tobaccoStatus,
+            assignedAgentId: agent.id,
+          },
+          select: { id: true },
+        })
+        await tx.insuranceCase.create({
+          data: {
+            id: caseId,
+            prospectId: prospect.id,
+            assignedAgentId: agent.id,
+            clientId: illustration.clientId,
+            crmStageId,
+            productType: seed.insuranceCase.productType,
+            targetCoverage: seed.insuranceCase.targetCoverage,
+            monthlyBudget: seed.insuranceCase.monthlyBudget,
+            carrier: 'National Life Group',
+          },
+        })
+        const attached = await tx.illustration.updateMany({
+          where: { id: illustration.id, agentId: agent.id, caseId: null },
+          data: { caseId },
+        })
+        if (attached.count !== 1) throw new Error('ILLUSTRATION_ATTACH_CONFLICT')
+        await tx.caseTimelineEvent.create({
+          data: {
+            caseId,
+            type: 'CASE_CREATED',
+            title: 'Atendimento criado a partir da Illustration',
+            body: 'Os dados confirmados na Illustration oficial iniciaram este atendimento.',
+          },
+        })
+      }
 
-    await tx.application.create({
-      data: {
+      const activeApplication = await tx.application.findFirst({
+        where: { caseId, status: { in: ACTIVE_APPLICATION } },
+        select: { id: true, dossier: true },
+      })
+      if (activeApplication) {
+        const dossier = activeApplication.dossier && typeof activeApplication.dossier === 'object' &&
+          !Array.isArray(activeApplication.dossier)
+          ? activeApplication.dossier as Record<string, unknown>
+          : null
+        const coverage = dossier?.coverage && typeof dossier.coverage === 'object' &&
+          !Array.isArray(dossier.coverage)
+          ? dossier.coverage as Record<string, unknown>
+          : null
+        if (coverage?.illustrationId === illustration.id) {
+          return { ok: true, caseId, applicationId: activeApplication.id }
+        }
+        return actionError(
+          'Este atendimento já possui outra Application em andamento.',
+          'This case already has another Application in progress.',
+        )
+      }
+
+      const application = await tx.application.create({
+        data: {
+          caseId,
+          status: 'STARTED',
+          intakeVersion: 2,
+          dossier: seed.dossier as Prisma.InputJsonValue,
+          requirements: { create: STANDARD_REQUIREMENTS.map((title) => ({ title })) },
+        },
+        select: { id: true },
+      })
+      await tx.caseTimelineEvent.create({
+        data: {
+          caseId,
+          type: 'APPLICATION_STARTED',
+          title: 'Application iniciada pela Illustration',
+          body: 'Produto e valores oficiais foram vinculados ao dossiê da Application.',
+        },
+      })
+      await advanceCaseCrmToSystemStage(tx, {
         caseId,
-        status: 'STARTED',
-        requirements: { create: STANDARD_REQUIREMENTS.map((title) => ({ title })) },
-      },
-    })
-    await tx.caseTimelineEvent.create({
-      data: {
-        caseId,
-        type: 'APPLICATION_STARTED',
-        title: 'Aplicação iniciada',
-        body: `Checklist padrão criado com ${STANDARD_REQUIREMENTS.length} requirements.`,
-      },
-    })
-    await advanceCaseCrmToSystemStage(tx, {
-      caseId,
-      systemKey: 'APPLICATION',
-      actorUserId: agent.userId,
+        systemKey: 'APPLICATION',
+        actorUserId: agent.userId,
+      })
+      return { ok: true, caseId, applicationId: application.id }
     })
 
-    return { ok: true }
-  })
-
-  if (!result.ok) return result
-
-  revalidatePath(`/agent/cases/${caseId}`)
-  revalidatePath('/agent/cases')
-  revalidatePath('/agent')
-  revalidatePath('/agent/activities')
-  return result
+    if (result.ok) {
+      revalidatePath(`/agent/illustrations/${illustrationId}`)
+      revalidatePath('/agent/illustrations')
+      revalidatePath(`/agent/cases/${result.caseId}`)
+      revalidatePath('/agent/cases')
+      revalidatePath('/agent')
+    }
+    return result
+  } catch (error) {
+    if (error instanceof ApplicationFromIllustrationError) {
+      return error.code === 'ILLUSTRATION_NOT_OFFICIAL'
+        ? actionError(
+            'Aguarde o PDF oficial da National Life antes de criar a Application.',
+            'Wait for the official National Life PDF before creating the Application.',
+          )
+        : actionError(
+            'A Illustration oficial ainda não possui todos os valores confirmados.',
+            'The official Illustration does not have all confirmed values yet.',
+          )
+    }
+    console.error('APPLICATION_FROM_ILLUSTRATION_FAILED', {
+      code: error instanceof Error ? error.message : 'UNKNOWN',
+    })
+    return actionError(
+      'Não foi possível criar a Application a partir desta Illustration.',
+      'The Application could not be created from this Illustration.',
+    )
+  }
 }
 
 export async function saveKBotApplicationDossier(
@@ -239,7 +364,7 @@ export async function saveKBotApplicationDossier(
     const agent = await getCurrentAgent()
     const application = await prisma.application.findFirst({
       where: { id: applicationId, insuranceCase: { assignedAgentId: agent.id } },
-      select: { caseId: true },
+      select: { caseId: true, dossier: true },
     })
     if (!application) throw new Error('APPLICATION_NOT_FOUND')
     const dossierRecord = dossier && typeof dossier === 'object' && !Array.isArray(dossier)
@@ -249,6 +374,20 @@ export async function saveKBotApplicationDossier(
       ? dossierRecord.coverage as Record<string, unknown> : null
     const illustrationId = typeof coverageRecord?.illustrationId === 'string'
       ? coverageRecord.illustrationId : ''
+    const existingDossier = application.dossier && typeof application.dossier === 'object' &&
+      !Array.isArray(application.dossier)
+      ? application.dossier as Record<string, unknown>
+      : null
+    const existingCoverage = existingDossier?.coverage && typeof existingDossier.coverage === 'object' &&
+      !Array.isArray(existingDossier.coverage)
+      ? existingDossier.coverage as Record<string, unknown>
+      : null
+    const linkedIllustrationId = typeof existingCoverage?.illustrationId === 'string'
+      ? existingCoverage.illustrationId
+      : ''
+    if (linkedIllustrationId && illustrationId !== linkedIllustrationId) {
+      throw new Error('APPLICATION_ILLUSTRATION_IMMUTABLE')
+    }
     const [reviewedDocuments, illustration] = await Promise.all([
       prisma.applicationDocument.findMany({
         where: {
@@ -260,11 +399,18 @@ export async function saveKBotApplicationDossier(
       }),
       illustrationId ? prisma.illustration.findFirst({
         where: { id: illustrationId, caseId: application.caseId, agentId: agent.id },
-        select: { id: true, caseId: true, createdAt: true, productName: true, rawPayload: true },
+        select: {
+          id: true, caseId: true, createdAt: true, productName: true, rawPayload: true,
+          faceAmount: true, premium: true,
+        },
       }) : Promise.resolve(null),
     ])
     const illustrationLink = illustration && coverageRecord
-      ? resolveApplicationIllustrationLink(illustration, {
+      ? resolveApplicationIllustrationLink({
+          ...illustration,
+          faceAmount: illustration.faceAmount == null ? null : Number(illustration.faceAmount),
+          premium: illustration.premium == null ? null : Number(illustration.premium),
+        }, {
           expectedCaseId: application.caseId,
           family: coverageRecord.family === 'TERM' ? 'TERM' : 'IUL',
           carrierProduct: String(coverageRecord.carrierProduct ?? ''),

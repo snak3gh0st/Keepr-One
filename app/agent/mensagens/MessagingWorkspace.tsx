@@ -108,6 +108,24 @@ export function MessagingWorkspace({
     setLoading(false)
   }, [copy, search])
 
+  const handleWhatsappConnectionChange = useCallback((connected: boolean) => {
+    if (!connected) {
+      const whatsappInboxIds = new Set(
+        inboxes.filter((inbox) => inbox.kind === 'WHATSAPP').map((inbox) => inbox.id),
+      )
+      const selectedConversation = conversations.find((conversation) => conversation.id === selectedId)
+      setInboxes((current) => current.filter((inbox) => !whatsappInboxIds.has(inbox.id)))
+      setConversations((current) => current.filter((conversation) => !whatsappInboxIds.has(conversation.inboxId)))
+      if (selectedConversation && whatsappInboxIds.has(selectedConversation.inboxId)) {
+        setSelectedId(null)
+        setMessages([])
+      }
+    }
+    // A successful connection makes the provider inbox visible again and pulls
+    // the current conversations immediately instead of waiting for the timer.
+    void loadConversations(true)
+  }, [conversations, inboxes, loadConversations, selectedId])
+
   const loadMessages = useCallback(async (conversationId: string) => {
     await Promise.resolve()
     setLoadingMessages(true)
@@ -198,7 +216,7 @@ export function MessagingWorkspace({
           <div className="messaging-connection-action">
             {channelMode === 'META_CLOUD'
               ? <ConnectOfficialWhatsapp />
-              : <ConnectWhatsapp />}
+              : <ConnectWhatsapp onConnectionChange={handleWhatsappConnectionChange} />}
           </div>
         </div>
       )}

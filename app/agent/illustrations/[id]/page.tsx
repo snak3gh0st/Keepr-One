@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { flexLifeProductLabel } from '@/lib/national-life/flex-life'
 import { buildForesightIllustrationSnapshot } from '@/lib/national-life/foresight-illustration-contract'
+import { resolveForesightTermDurationResult } from '@/lib/national-life/foresight-term-contract'
 import { IllustrationPdfButton } from '../IllustrationPdfButton'
 import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
 import { getIllustrationCommandStatuses } from '@/lib/national-life/illustration-command-status'
@@ -18,6 +19,8 @@ import { PageHeader } from '@/components/PageHeader'
 import { ForesightActivityIndicator } from '../ForesightActivityIndicator'
 import { getServerI18n } from '@/lib/i18n/server'
 import { localeFor } from '@/lib/i18n/config'
+import { StartApplicationFromIllustrationButton } from '../StartApplicationFromIllustrationButton'
+import { TermPdfReconciliationButton } from '../TermPdfReconciliationButton'
 
 const currency = (value: number, locale: string) =>
   new Intl.NumberFormat(locale, {
@@ -72,10 +75,69 @@ const day = (value: Date, locale: string) =>
   new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeZone: 'UTC' }).format(value)
 
 const instant = (value: Date, locale: string) =>
-  new Intl.DateTimeFormat(locale, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(value)
+  new Intl.DateTimeFormat(locale, { dateStyle: 'short' }).format(value)
+
+function englishIllustrationPdfMessage(
+  status: Parameters<typeof illustrationPdfMessage>[0],
+): string {
+  if (status.state === 'WAITING_FOR_KBOT') {
+    return 'K-Bot is waiting to connect on this computer before starting the same request.'
+  }
+  if (status.state === 'WORKING') {
+    return 'K-Bot is doing in Foresight what you would do: entering the scenario, waiting for the calculation, and preparing the PDF. Typical estimate: 2–5 minutes.'
+  }
+  if (status.state === 'BLOCKED') {
+    return 'K-Bot is waiting for you to sign in to National Life before continuing the same request.'
+  }
+
+  switch (status.safeErrorCode) {
+    case 'FORESIGHT_SSO_EXPIRED':
+      return 'The carrier requested a new sign-in. Reconnect the integration and request it again.'
+    case 'CARRIER_BROWSER_BUSY':
+      return 'The carrier was busy. You can request it again.'
+    case 'FORESIGHT_REPORT_FAILED':
+      return 'The carrier did not finish generating the document. You can request it again.'
+    case 'FORESIGHT_REPORT_TIMEOUT':
+      return 'The carrier took longer than expected. You can request it again.'
+    case 'FORESIGHT_ARTIFACT_MISSING':
+      return 'The case was completed without a verifiable PDF. Generate it again.'
+    case 'COMMAND_EXPIRED':
+      return 'The attempt expired before it finished. You can request it again.'
+    case 'FORESIGHT_PREMIUM_WRITE_MISMATCH':
+      return 'Foresight did not accept the monthly premium entered for this scenario. Review the premium and generate a new illustration; no PDF was issued.'
+    case 'FORESIGHT_CALCULATION_UNAVAILABLE':
+      return 'Foresight could not calculate a valid scenario with this source amount. Review the face amount or premium and generate a new illustration; no PDF was issued.'
+    case 'FORESIGHT_CLIENT_READBACK_TIMEOUT':
+      return 'Foresight did not confirm the insured data. Review the date of birth, state, and risk profile before trying again; no PDF was issued.'
+    case 'FORESIGHT_TERM_CLIENT_JURISDICTION_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_INFORMATION_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_RISK_WRITE_MISMATCH':
+    case 'FORESIGHT_TERM_CLIENT_OWNER_WRITE_MISMATCH':
+      return 'Foresight did not confirm a Term client-data step after one safe retry. No PDF was issued, and K-Bot will not keep trying on its own.'
+    case 'FORESIGHT_TERM_FUNDING_TIMEOUT':
+      return 'Foresight was still updating the Term scenario and did not confirm the values in time. Generate it again; no PDF was issued.'
+    case 'FORESIGHT_TERM_DURATION_READBACK_MISMATCH':
+      return 'Foresight changed the Term duration during the update. Review the duration and generate it again; no PDF was issued.'
+    case 'FORESIGHT_TERM_PREMIUM_MISSING':
+    case 'FORESIGHT_TERM_PREMIUM_MISMATCH':
+    case 'FORESIGHT_TERM_PDF_INVALID':
+      return 'The Term PDF was received, but the premiums could not be verified. Try verifying this PDF again; if the issue persists, generate a new illustration.'
+    case 'FORESIGHT_TERM_CLIENT_READBACK_MISMATCH':
+      return 'Foresight returned insured data that differs from the Term request. Review the scenario and generate it again; no PDF was issued.'
+    case 'FORESIGHT_TERM_FACE_AMOUNT_READBACK_MISMATCH':
+    case 'FORESIGHT_TERM_FUNDING_READBACK_MISMATCH':
+      return 'Foresight returned a face amount or billing value that differs from the Term request. Review the scenario and generate it again; no PDF was issued.'
+    case 'FORESIGHT_SOLVE_READBACK_TIMEOUT':
+    case 'FORESIGHT_SOLVE_READBACK_MISMATCH':
+    case 'FORESIGHT_RESPONSE_INVALID':
+      return 'Foresight did not return a verifiable result for this scenario. Review the source amount and generate a new illustration; no PDF was issued.'
+    case null:
+      return 'The PDF could not be generated.'
+    default:
+      return `The PDF could not be generated (${status.safeErrorCode}).`
+  }
+}
 
 function Fact({ label, value }: { label: string; value: string | null }) {
   return (
@@ -117,36 +179,102 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
   const documentReady = illustration.documentFetchedAt && illustration.documentMimeType === 'application/pdf'
   const foresightResult = documentReady ? foresightResultFrom(illustration.rawPayload) : null
   const isTermProduct = illustration.productName === 'NL Term' || illustration.productName === 'LSW Term'
-  const hasCarrierPremium = Boolean(documentReady && illustration.premium)
+  const termDurationResult = isTermProduct ? (() => {
+    try {
+      return resolveForesightTermDurationResult(illustration)
+    } catch {
+      return null
+    }
+  })() : null
+  const resultVerified = Boolean(documentReady && foresightResult)
+  const needsTermReconciliation = Boolean(isTermProduct && documentReady && !foresightResult)
+  const hasCarrierPremium = Boolean(foresightResult && illustration.premium)
   const premiumValue = hasCarrierPremium ? illustration.premium : illustration.targetPremium
   const carrierAdjustedPremium = foresightResult?.solveBasis === 'PREMIUM' &&
     Math.abs(foresightResult.requestedAmount - foresightResult.confirmedMonthlyPremium) > 0.005
   const carrierAdjustedFace = foresightResult?.solveBasis === 'DEATH_BENEFIT' &&
     Math.abs(foresightResult.requestedAmount - foresightResult.confirmedFaceAmount) > 0.005
-  const deliveryPt = describeIllustrationDelivery({ documentReady: Boolean(documentReady), status: commandStatus })
+  const deliveryPt = describeIllustrationDelivery({
+    documentReady: Boolean(documentReady),
+    verified: resultVerified,
+    status: commandStatus,
+  })
+  const termVerificationFailed = commandStatus?.state === 'FAILED' && [
+    'FORESIGHT_TERM_PREMIUM_MISSING',
+    'FORESIGHT_TERM_PREMIUM_MISMATCH',
+    'FORESIGHT_TERM_PDF_INVALID',
+  ].includes(commandStatus.safeErrorCode ?? '')
   const delivery = language === 'PT'
     ? deliveryPt
-    : documentReady
-      ? { eyebrow: 'Document ready', title: 'Official PDF verified', detail: 'The file was received from Foresight and verified before becoming available here.' }
-      : commandStatus?.state === 'BLOCKED'
-        ? { eyebrow: 'K-Bot · action required', title: 'Connect National Life to continue', detail: 'The browser session expired. After you sign in, K-Bot resumes the same request.' }
-        : commandStatus?.state === 'WORKING'
-          ? { eyebrow: 'K-Bot at work', title: 'K-Bot is generating the official illustration', detail: 'K-Bot is filling in the case, checking the National Life calculation, and preparing the PDF. Typical estimate: 2–5 minutes; you can keep working.' }
-          : commandStatus?.state === 'FAILED'
-            ? { eyebrow: 'Review required', title: 'Foresight did not accept this scenario', detail: copy(illustrationPdfMessage(commandStatus), 'Foresight could not complete this scenario. Review the source amount and generate a new illustration; no PDF was issued.') }
-            : { eyebrow: 'Request prepared', title: 'Ready to send to Foresight', detail: 'Review the instructions below and start official generation when you are ready.' }
+    : termVerificationFailed && commandStatus?.state === 'FAILED'
+      ? {
+          eyebrow: 'Review required',
+          title: 'The Term PDF could not be verified',
+          detail: englishIllustrationPdfMessage(commandStatus),
+        }
+      : documentReady && !resultVerified
+        ? commandStatus?.state === 'FAILED'
+          ? {
+              eyebrow: 'Review required',
+              title: 'The PDF was received, but verification did not finish',
+              detail: `The file was received, but K-Bot did not finish verifying the result. No value was accepted as official. ${englishIllustrationPdfMessage(commandStatus)}`,
+            }
+          : {
+              eyebrow: 'Document received',
+              title: 'K-Bot is verifying the official PDF',
+              detail: 'The file was received from National Life, but its values have not yet been accepted as the official result.',
+            }
+        : resultVerified
+          ? {
+              eyebrow: 'Document ready',
+              title: 'Official PDF verified',
+              detail: 'The file was received from Foresight and verified before becoming available here.',
+            }
+          : commandStatus?.state === 'BLOCKED'
+            ? {
+                eyebrow: 'K-Bot · action required',
+                title: 'Connect National Life to continue',
+                detail: 'The browser session expired. After you sign in, K-Bot resumes the same request.',
+              }
+            : commandStatus?.state === 'WAITING_FOR_KBOT'
+              ? {
+                  eyebrow: 'K-Bot · connection required',
+                  title: 'Reconnect K-Bot to start',
+                  detail: 'The official request is saved. Reconnect K-Bot on this computer so it can open Foresight and continue the same illustration.',
+                }
+              : commandStatus?.state === 'WORKING'
+                ? {
+                    eyebrow: 'K-Bot at work',
+                    title: 'K-Bot is generating the official illustration',
+                    detail: 'K-Bot is entering the case, checking the National Life calculation, and preparing the PDF. Typical estimate: 2–5 minutes; you can keep working.',
+                  }
+                : commandStatus?.state === 'FAILED'
+                  ? {
+                      eyebrow: 'Review required',
+                      title: 'Foresight did not accept this scenario',
+                      detail: englishIllustrationPdfMessage(commandStatus),
+                    }
+                  : {
+                      eyebrow: 'Request prepared',
+                      title: 'Ready to send to Foresight',
+                      detail: 'Review the instructions below and start official generation when you are ready.',
+                    }
   const isGenerating = commandStatus?.state === 'WORKING'
-  const foresightStep = documentReady
+  const foresightStep = resultVerified
     ? copy('Caso salvo', 'Case saved')
+    : documentReady
+      ? copy('Conferência do PDF pendente', 'PDF verification pending')
     : commandStatus?.state === 'BLOCKED'
       ? copy('Aguardando login', 'Waiting for sign-in')
+      : commandStatus?.state === 'WAITING_FOR_KBOT'
+        ? copy('Aguardando K-Bot neste computador', 'Waiting for K-Bot on this computer')
       : commandStatus?.state === 'FAILED'
         ? copy('Revisão do cenário necessária', 'Scenario review required')
         : commandStatus?.state === 'WORKING'
           ? copy('Preenchendo, calculando e emitindo', 'Filling in, calculating, and issuing')
           : copy('Aguardando início', 'Waiting to start')
   const commandMessage = commandStatus
-    ? language === 'PT' ? illustrationPdfMessage(commandStatus) : delivery.detail
+    ? language === 'PT' ? illustrationPdfMessage(commandStatus) : englishIllustrationPdfMessage(commandStatus)
     : null
 
   return (
@@ -164,7 +292,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
         </Link>
       </PageHeader>
 
-      <section className="relative overflow-hidden rounded-[1.55rem] border border-border-steel bg-paper p-5 shadow-[0_20px_58px_rgba(15,29,19,0.058)] sm:p-7" aria-live={documentReady ? 'off' : 'polite'}>
+      <section className="relative overflow-hidden rounded-[1.55rem] border border-border-steel bg-paper p-5 shadow-[0_20px_58px_rgba(15,29,19,0.058)] sm:p-7" aria-live={resultVerified ? 'off' : 'polite'}>
         <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full border border-teal/15 shadow-[0_0_0_28px_rgba(31,128,86,0.035),0_0_0_56px_rgba(31,128,86,0.02)]" aria-hidden="true" />
         <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div>
@@ -177,14 +305,24 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
             <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">{delivery.detail}</p>
           </div>
           {documentReady ? (
-            <a
-              href={`/api/illustrations/${illustration.id}/document`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-h-11 items-center justify-center rounded-full bg-rail-strong px-5 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-rail"
-            >
-              {copy('Abrir PDF oficial da National Life', 'Open official National Life PDF')}
-            </a>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <a
+                href={`/api/illustrations/${illustration.id}/document`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-steel bg-paper px-5 py-2.5 text-sm font-semibold text-teal-deep transition-colors hover:border-teal hover:bg-teal-pale"
+              >
+                {resultVerified
+                  ? copy('Abrir PDF oficial', 'Open official PDF')
+                  : copy('Abrir PDF recebido', 'Open received PDF')}
+              </a>
+              {needsTermReconciliation ? (
+                <TermPdfReconciliationButton illustrationId={illustration.id} />
+              ) : null}
+              {foresightResult ? (
+                <StartApplicationFromIllustrationButton illustrationId={illustration.id} />
+              ) : null}
+            </div>
           ) : (
             <IllustrationPdfButton
               illustrationId={illustration.id}
@@ -198,8 +336,16 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
         <ol className="relative mt-6 grid gap-3 border-t border-border-steel pt-5 sm:grid-cols-3" aria-label={copy('Progresso da ilustração', 'Illustration progress')}>
           {[
             [copy('Dados revisados', 'Data reviewed'), copy('Cenário aprovado na Keepr One', 'Scenario approved in Keepr One'), 'complete'],
-            ['K-Bot no Foresight', foresightStep, documentReady ? 'complete' : commandStatus?.state === 'WORKING' || commandStatus?.state === 'BLOCKED' ? 'current' : 'waiting'],
-            [copy('PDF oficial', 'Official PDF'), documentReady ? copy('Recebido e verificado', 'Received and verified') : copy('Aguardando a National Life', 'Waiting for National Life'), documentReady ? 'complete' : 'waiting'],
+            ['K-Bot no Foresight', foresightStep, resultVerified ? 'complete' : commandStatus?.state === 'WORKING' || commandStatus?.state === 'BLOCKED' || commandStatus?.state === 'WAITING_FOR_KBOT' ? 'current' : 'waiting'],
+            [
+              copy('PDF oficial', 'Official PDF'),
+              resultVerified
+                ? copy('Recebido e verificado', 'Received and verified')
+                : documentReady
+                  ? copy('Recebido; conferência pendente', 'Received; verification pending')
+                  : copy('Aguardando a National Life', 'Waiting for National Life'),
+              resultVerified ? 'complete' : 'waiting',
+            ],
           ].map(([title, detail, stepState], index) => (
             <li key={title as string} className="flex items-start gap-3">
               <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-mono font-semibold ${stepState === 'complete' ? 'bg-teal text-paper' : stepState === 'current' ? 'bg-gold text-ink' : 'bg-panel text-ink-muted'}`}>
@@ -212,7 +358,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
             </li>
           ))}
         </ol>
-        {!documentReady && commandStatus && (
+        {!resultVerified && commandStatus && (
           <p className="relative mt-4 border-l-2 border-teal pl-3 text-xs leading-5 text-ink-muted">{commandMessage}</p>
         )}
       </section>
@@ -233,6 +379,15 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                   : copy('{amount} de capital segurado', '{amount} face amount', { amount: currency(foresightResult.requestedAmount, locale) })}
               </p>
               <p className="mt-1 text-xs text-ink-muted">{copy('Valor enviado ao Foresight para cálculo.', 'Amount sent to Foresight for calculation.')}</p>
+              {termDurationResult && (
+                <p className="mt-2 text-xs font-semibold text-ink">
+                  {copy(
+                    'Prazo solicitado: {duration}',
+                    'Requested duration: {duration}',
+                    { duration: termDurationResult.requestedTermDuration },
+                  )}
+                </p>
+              )}
             </div>
             <div className="bg-teal-pale/35 p-5 sm:p-6">
               <p className="text-xs font-semibold uppercase tracking-[0.1em] text-teal-deep">{copy('Confirmação da National Life', 'National Life confirmation')}</p>
@@ -241,6 +396,15 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                 <p className="text-sm font-semibold text-ink">{copy('{amount} por ano', '{amount} per year', { amount: premiumCurrency(foresightResult.confirmedAnnualPremium, locale) })}</p>
               </div>
               <p className="mt-2 text-xs text-ink-muted">{copy('Capital segurado confirmado: {amount}', 'Confirmed face amount: {amount}', { amount: currency(foresightResult.confirmedFaceAmount, locale) })}</p>
+              {termDurationResult && (
+                <p className="mt-1 text-xs font-semibold text-teal-deep">
+                  {copy(
+                    'Prazo confirmado: {duration}',
+                    'Confirmed duration: {duration}',
+                    { duration: termDurationResult.confirmedTermDuration },
+                  )}
+                </p>
+              )}
             </div>
           </div>
         </section>
@@ -260,6 +424,15 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
           </p>
           <dl className="mt-3">
             <Fact label={copy('Produto', 'Product')} value={flexLifeProductLabel(illustration.productName)} />
+            {termDurationResult && (
+              <Fact label={copy('Prazo solicitado', 'Requested duration')} value={termDurationResult.requestedTermDuration} />
+            )}
+            {termDurationResult && foresightResult && (
+              <Fact
+                label={copy('Prazo confirmado pela National Life', 'Duration confirmed by National Life')}
+                value={termDurationResult.confirmedTermDuration}
+              />
+            )}
             <Fact label={copy('Capital segurado', 'Face amount')} value={illustration.faceAmount ? currency(Number(illustration.faceAmount), locale) : null} />
             <Fact label={hasCarrierPremium ? copy('Prêmio mensal confirmado', 'Confirmed monthly premium') : copy('Prêmio mensal informado', 'Entered monthly premium')} value={premiumValue ? premiumCurrency(Number(premiumValue), locale) : null} />
             {foresightResult && (
@@ -301,6 +474,18 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                 {
                   requested: currency(foresightResult.requestedAmount, locale),
                   confirmed: currency(foresightResult.confirmedFaceAmount, locale),
+                },
+              )}
+            </p>
+          )}
+          {termDurationResult?.adjusted && (
+            <p className="mt-4 rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 text-xs leading-5 text-ink">
+              {copy(
+                'Você solicitou {requested}. A National Life confirmou {confirmed}; este é o prazo usado no PDF oficial e na Application.',
+                'You requested {requested}. National Life confirmed {confirmed}; this is the duration used in the official PDF and the application.',
+                {
+                  requested: termDurationResult.requestedTermDuration,
+                  confirmed: termDurationResult.confirmedTermDuration,
                 },
               )}
             </p>
@@ -352,8 +537,8 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
 
       <p className="mt-5 text-xs leading-5 text-ink-muted">
         {copy(
-          'Pedido criado em {date}. Nenhum valor é apresentado como cálculo da National Life antes do PDF oficial.',
-          'Request created on {date}. No value is presented as a National Life calculation before the official PDF.',
+          'Pedido criado em {date}. Nenhum valor é apresentado como cálculo da National Life antes da conferência do PDF oficial.',
+          'Request created on {date}. No value is presented as a National Life calculation before the official PDF is verified.',
           { date: instant(illustration.createdAt, locale) },
         )}
       </p>

@@ -121,6 +121,8 @@ export function ApplicationDossier({
   const beneficiary = Array.isArray(dossier.beneficiaries)
     ? record(dossier.beneficiaries[0])
     : {};
+  const linkedIllustrationId = text(coverage.illustrationId);
+  const linkedIllustration = illustrations.find((illustration) => illustration.id === linkedIllustrationId);
   const [fallbackFirstName, ...fallbackLastName] = prospect.name.trim().split(/\s+/);
   const [productFamily, setProductFamily] = useState(text(coverage.family, text(coverage.product)));
 
@@ -337,7 +339,17 @@ export function ApplicationDossier({
             {productFamily === "TERM" ? <label className={labelClass}>{copy("Prazo do Term", "Term duration")}<select name="termDuration" className={fieldClass} defaultValue={text(coverage.termDuration)}><option value="">{copy("Selecione", "Select")}</option><option value="10-G">{copy("10 anos", "10 years")}</option><option value="15-G">{copy("15 anos", "15 years")}</option><option value="20-G">{copy("20 anos", "20 years")}</option><option value="30-G">{copy("30 anos", "30 years")}</option><option value="ART">ART</option></select></label> : null}
             <label className={labelClass}>{copy("Estado da proposta", "Application state")}<input name="issueState" maxLength={2} className={fieldClass} defaultValue={text(coverage.issueState, text(address.state, prospect.state ?? ""))} /></label>
             <label className={labelClass}>{copy("Tipo de Application", "Application type")}<select name="applicationType" className={fieldClass} defaultValue={text(coverage.applicationType, "FULL")}><option value="FULL">{copy("Application completa", "Full application")}</option><option value="TERM_CONVERSION">{copy("Conversão de Term", "Term conversion")}</option></select></label>
-            <label className={labelClass}>{copy("Illustration revisada", "Reviewed illustration")}<select name="illustrationId" className={fieldClass} defaultValue={text(coverage.illustrationId)}><option value="">{copy("Selecione", "Select")}</option>{illustrations.filter((illustration) => illustration.kind !== "PRELIMINARY").map((illustration) => <option key={illustration.id} value={illustration.id}>{illustration.productName ?? copy("Illustration oficial", "Official illustration")}</option>)}</select></label>
+            {linkedIllustrationId ? (
+              <label className={labelClass}>
+                {copy("Illustration de origem", "Source illustration")}
+                <input type="hidden" name="illustrationId" value={linkedIllustrationId} />
+                <span className={`${fieldClass} flex items-center bg-panel`}>
+                  {linkedIllustration?.productName ?? copy("Illustration oficial vinculada", "Linked official illustration")}
+                </span>
+              </label>
+            ) : (
+              <label className={labelClass}>{copy("Illustration revisada", "Reviewed illustration")}<select name="illustrationId" className={fieldClass} defaultValue=""><option value="">{copy("Selecione", "Select")}</option>{illustrations.filter((illustration) => illustration.kind !== "PRELIMINARY").map((illustration) => <option key={illustration.id} value={illustration.id}>{illustration.productName ?? copy("Illustration oficial", "Official illustration")}</option>)}</select></label>
+            )}
             <label className={labelClass}>{copy("Número do agente na National Life", "National Life agent number")}<input name="carrierNumber" className={fieldClass} defaultValue={text(record(dossier.agent).carrierNumber)} /></label>
             <label className={labelClass}>{copy("Capital segurado", "Face amount")}<input name="faceAmount" type="number" min="1" step="0.01" className={fieldClass} defaultValue={typeof coverage.faceAmount === "number" ? coverage.faceAmount : ""} /></label>
             <label className={labelClass}>{copy("Prêmio planejado", "Planned premium")}<input name="plannedPremium" type="number" min="1" step="0.01" className={fieldClass} defaultValue={typeof coverage.plannedPremium === "number" ? coverage.plannedPremium : ""} /></label>

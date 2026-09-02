@@ -62,6 +62,22 @@ describe('createWhatsappClient', () => {
     expect(state).toBe('open')
   })
 
+  it('fails closed when the provider response has no connection state', async () => {
+    const { http } = recorder([{ instance: {} }])
+    const state = await createWhatsappClient(config(http)).connectionState({ agentId: 'a1' })
+
+    expect(state).toBe('unknown')
+  })
+
+  it('logs out the agent session without deleting its reconnectable instance', async () => {
+    const { http, calls } = recorder([{ status: 'SUCCESS' }])
+
+    await createWhatsappClient(config(http)).logoutInstance({ agentId: 'a1' })
+
+    expect(calls[0]?.url).toBe('http://evo:8080/instance/logout/agent-a1')
+    expect(calls[0]?.init.method).toBe('DELETE')
+  })
+
   it('reads and normalizes the exact connected phone identity', async () => {
     const { http, calls } = recorder([[{
       name: 'agent-a1',
