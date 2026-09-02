@@ -264,6 +264,7 @@ async function defaultTabMessageResponse(tabId: number, message: unknown): Promi
 const tabs = {
   query: vi.fn(async () => [] as unknown[]),
   update: vi.fn(async () => undefined),
+  reload: vi.fn(async () => undefined),
   create: vi.fn(async () => ({ id: 4, active: false, url: undefined })),
   remove: vi.fn(async () => undefined),
   // Tipado com os dois argumentos reais para que um teste possa afirmar sobre a
@@ -463,7 +464,7 @@ describe('automatic carrier login recovery', () => {
     ciphertext: 'sealed-only-in-memory',
   }
 
-  function authResponder(classification: 'LOGIN' | 'MFA' | 'REJECTED') {
+  function authResponder(classification: 'LOGIN' | 'MFA' | 'REJECTED' | 'UNKNOWN') {
     return async (tabId: number, message: unknown) => {
       const value = message as { type?: string }
       if (value.type === 'CLASSIFY_CARRIER_AUTH_PAGE') {
@@ -522,7 +523,7 @@ describe('automatic carrier login recovery', () => {
     )
   })
 
-  it('leases after the Auth0 content script reports that its exact login page is ready', async () => {
+  it('reloads an already-open Auth0 page once, then leases when the content script is ready', async () => {
     await bootBackground()
     storage.sync = {
       runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
@@ -544,6 +545,12 @@ describe('automatic carrier login recovery', () => {
     emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
     await flush()
 
+    expect(tabs.reload).toHaveBeenCalledTimes(1)
+    expect(tabs.reload).toHaveBeenCalledWith(7)
+    expect(storage.sync).toMatchObject({
+      status: 'AUTH_REQUIRED',
+      credentialPageReloadedAt: expect.any(String),
+    })
     expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
       request.pathname.endsWith('/credential-leases'))).toHaveLength(0)
 
@@ -562,6 +569,29 @@ describe('automatic carrier login recovery', () => {
       type: 'SUBMIT_CARRIER_CREDENTIAL',
     }))
     expect(readyResponse).toHaveBeenCalledWith({ ok: true })
+  })
+
+  it('never reloads the same unsupported Auth0 episode twice', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+      credentialPageReloadedAt: '2026-09-01T21:00:00.000Z',
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('UNKNOWN'))
+
+    await bootBackground()
+    emit('tabs.onUpdated', 7, { status: 'complete' }, { id: 7, active: true, url: authUrl })
+    await flush()
+
+    expect(tabs.reload).not.toHaveBeenCalled()
+    expect(storage.sync).toMatchObject({
+      status: 'AUTH_REQUIRED',
+      credentialPageReloadedAt: '2026-09-01T21:00:00.000Z',
+      errorCode: 'CREDENTIAL_PAGE_UNSUPPORTED',
+    })
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(0)
   })
 
   it('recovers a stale pre-lease marker after service-worker eviction', async () => {
@@ -2965,9 +2995,10 @@ describe('background plan executor', () => {
     tabs.query.mockResolvedValue([{ id: 12, active: true, url: `${NLG_AUTH0}/login?state=pending` }])
     await bootBackground()
 
-    // Recovery and watchdog passes are passive during user-paced login. The tab
-    // was already activated when Auth0 first appeared; repeatedly activating it
-    // here would steal focus once a minute.
+    // A build loaded after this page opened needs one reload to inject the
+    // current login handler. It must still neither open another tab nor steal
+    // focus through tabs.update.
+    expect(tabs.reload).toHaveBeenCalledTimes(1)
     expect(tabs.update).not.toHaveBeenCalled()
     expect(tabs.create).not.toHaveBeenCalled()
     expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED', stageIndex: 0 })
@@ -2986,6 +3017,7 @@ describe('background plan executor', () => {
     }
 
     expect(signedJsonRequest).not.toHaveBeenCalled()
+    expect(tabs.reload).toHaveBeenCalledTimes(1)
     expect(tabs.update).not.toHaveBeenCalled()
     expect(readSync()).toMatchObject({ status: 'AUTH_REQUIRED', runId: 'run-1' })
   })
