@@ -59,6 +59,8 @@ export type PromotionAttributionRow = {
   leaderAgentId: string | null;
   promotionCredit: {
     id: string;
+    carrier?: string;
+    policyNumber?: string | null;
     producerAgentId: string;
     creditedPc: { toString(): string } | number | string;
     status: PromotionCreditStatus;
@@ -265,6 +267,11 @@ export function rollupPromotionCredits(
   const agencyProducerScope = agencyProducerAgentIds
     ? new Set(agencyProducerAgentIds)
     : null;
+  const eligibleRows: Array<{
+    row: PromotionAttributionRow;
+    isPersonal: boolean;
+    isTeam: boolean;
+  }> = [];
 
   for (const row of rows) {
     const credit = row.promotionCredit;
@@ -276,6 +283,66 @@ export function rollupPromotionCredits(
       (agencyProducerScope === null || agencyProducerScope.has(credit.producerAgentId)) &&
       credit.producerAgentId !== agentId;
     if (!isPersonal && !isTeam) continue;
+
+    eligibleRows.push({ row, isPersonal, isTeam });
+  }
+
+  function policyKey(
+    credit: PromotionAttributionRow["promotionCredit"],
+  ): string | null {
+    const carrier = credit.carrier?.trim();
+    const policyNumber = credit.policyNumber?.trim();
+    if (!carrier || !policyNumber) return null;
+    return `${carrier.toUpperCase()}\u001f${policyNumber.toUpperCase().replace(/\s+/g, "")}`;
+  }
+
+  const recognizedPolicyKeys = new Set(
+    eligibleRows.flatMap(({ row }) => {
+      const credit = row.promotionCredit;
+      const key = policyKey(credit);
+      return key && isRecognizedPromotionCreditStatus(credit.status)
+        ? [key]
+        : [];
+    }),
+  );
+  const latestLowerQualityCredit = new Map<
+    string,
+    PromotionAttributionRow["promotionCredit"]
+  >();
+
+  for (const { row } of eligibleRows) {
+    const credit = row.promotionCredit;
+    if (credit.status !== "ESTIMATED" && credit.status !== "PENDING_CARRIER") {
+      continue;
+    }
+
+    const key = policyKey(credit);
+    if (!key || recognizedPolicyKeys.has(key)) continue;
+
+    const observationKey = `${key}\u001f${bucketFor(credit.status)}`;
+    const latest = latestLowerQualityCredit.get(observationKey);
+    if (
+      !latest ||
+      credit.createdAt > latest.createdAt ||
+      (credit.createdAt.getTime() === latest.createdAt.getTime() &&
+        credit.id.localeCompare(latest.id) > 0)
+    ) {
+      latestLowerQualityCredit.set(observationKey, credit);
+    }
+  }
+
+  for (const { row, isPersonal, isTeam } of eligibleRows) {
+    const credit = row.promotionCredit;
+    if (credit.status === "ESTIMATED" || credit.status === "PENDING_CARRIER") {
+      const key = policyKey(credit);
+      if (key) {
+        if (recognizedPolicyKeys.has(key)) continue;
+        const observationKey = `${key}\u001f${bucketFor(credit.status)}`;
+        if (latestLowerQualityCredit.get(observationKey)?.id !== credit.id) {
+          continue;
+        }
+      }
+    }
 
     const bucket = bucketFor(credit.status);
     const value = decimalToNumber(credit.creditedPc);
@@ -422,6 +489,8 @@ export const getAgentPromotionSnapshot = cache(
             promotionCredit: {
               select: {
                 id: true,
+                carrier: true,
+                policyNumber: true,
                 producerAgentId: true,
                 creditedPc: true,
                 status: true,

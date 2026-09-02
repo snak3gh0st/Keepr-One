@@ -12,7 +12,12 @@ import {
 import { getPromotionJourney } from '../promotion-journey'
 import type { CaseSnapshot } from './case-snapshot-service'
 import type { InforcePolicySnapshot } from './inforce-policy-service'
+import { COMMISSION_EARNING_GRID_KEYS } from './commission-grid-keys'
 import type { NationalLifeGridKey } from './portal-grid-client'
+import {
+  toNationalLifePromotionPaymentEvidence,
+  type NationalLifePromotionPaymentEvidence,
+} from './promotion-payment-evidence'
 import {
   NATIONAL_LIFE_PROMOTION_RECONCILIATION_SOURCE,
   PromotionReconciliationValidationError,
@@ -24,6 +29,7 @@ import {
 
 const NATIONAL_LIFE_CARRIER = 'NATIONAL_LIFE'
 const POLICY_TARGET_PREMIUM_SOURCE = 'POLICY_TARGET_PREMIUM'
+const POLICY_TARGET_PREMIUM_PENDING_SOURCE = 'POLICY_TARGET_PREMIUM_PENDING'
 const TARGET_PREMIUM_QUALIFICATION_WEIGHT = new Decimal(1)
 const WRITE_CHUNK_SIZE = 250
 
@@ -44,6 +50,7 @@ const PAID_DATE_FIELDS = [
   'PaidDate',
   'PolicyPaidDate',
   'DatePaid',
+  'PaymentDate',
   'ProductionCreditDate',
   'FirstYearPaidDate',
 ] as const
@@ -80,12 +87,25 @@ export type NationalLifePromotionCandidate = {
   attributions: FrozenPromotionAttribution[]
 }
 
+export type NationalLifePendingPromotionCandidate = Omit<
+  NationalLifePromotionCandidate,
+  'source' | 'status'
+> & {
+  source: typeof POLICY_TARGET_PREMIUM_PENDING_SOURCE
+  status: 'PENDING_CARRIER'
+}
+
 type PromotionWriteCandidate =
   | NationalLifePromotionCandidate
+  | NationalLifePendingPromotionCandidate
   | NationalLifePromotionReconciliationCandidate
 
 export type PrepareNationalLifePromotionResult =
   | { candidate: NationalLifePromotionCandidate; skipped: null }
+  | { candidate: null; skipped: NationalLifePromotionSkipReason }
+
+export type PrepareNationalLifePendingPromotionResult =
+  | { candidate: NationalLifePendingPromotionCandidate; skipped: null }
   | { candidate: null; skipped: NationalLifePromotionSkipReason }
 
 export type PromotionCreditSyncResult = {
@@ -97,7 +117,11 @@ export type PromotionCreditSyncResult = {
 }
 
 type PromotionSource = {
-  surface: 'CASE_SNAPSHOT' | 'INFORCE_POLICY'
+  surface:
+    | 'CASE_SNAPSHOT'
+    | 'INFORCE_POLICY'
+    | 'COMMISSION_EARNING'
+    | 'POLICY_DETAIL'
   policyNumber: string
   producerAgentId: string
   carrierStatus: string | null
@@ -111,7 +135,21 @@ type PreparedReversal =
   | { candidate: NationalLifePromotionReconciliationCandidate; skipped: null }
   | { candidate: null; skipped: NationalLifePromotionSkipReason | null }
 
-export type PromotionDatabase = Pick<PrismaClient, '$transaction' | 'agent'>
+export type PromotionDatabase = Pick<PrismaClient, '$transaction' | 'agent'> &
+  Partial<
+    Pick<
+      PrismaClient,
+      | 'nationalLifePolicyDetailSnapshot'
+      | 'nationalLifeReportRow'
+    >
+  >
+
+type PolicyDetailFacts = {
+  policyNumber: string
+  ctp: { toString(): string } | null
+  anticipatedAnnualPremium: { toString(): string } | null
+  observedAt: Date
+}
 
 function stableId(prefix: string, ...parts: string[]) {
   const digest = createHash('sha256').update(parts.join('\u001f')).digest('hex')
@@ -120,6 +158,68 @@ function stableId(prefix: string, ...parts: string[]) {
 
 function canonicalPolicyNumber(value: string) {
   return value.trim().toUpperCase().replace(/\s+/g, '')
+}
+
+function detailMoney(value: { toString(): string } | null) {
+  return value?.toString() ?? null
+}
+
+async function enrichSourcesWithPolicyDetail(
+  sources: readonly PromotionSource[],
+  input: { agentId: string; deploymentScope: string },
+  database: PromotionDatabase,
+): Promise<PromotionSource[]> {
+  const repository = database.nationalLifePolicyDetailSnapshot
+  if (!repository || sources.length === 0) return [...sources]
+
+  const policyNumbers = [
+    ...new Set(sources.map((source) => canonicalPolicyNumber(source.policyNumber))),
+  ]
+  const details = (await repository.findMany({
+    where: {
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      policyNumber: { in: policyNumbers },
+    },
+    select: {
+      policyNumber: true,
+      ctp: true,
+      anticipatedAnnualPremium: true,
+      observedAt: true,
+    },
+  })) as PolicyDetailFacts[]
+  const detailByPolicy = new Map(
+    details.map((detail) => [canonicalPolicyNumber(detail.policyNumber), detail]),
+  )
+
+  return sources.map((source) => {
+    const detail = detailByPolicy.get(canonicalPolicyNumber(source.policyNumber))
+    if (!detail) return source
+
+    const targetPremium = source.targetPremium ?? detailMoney(detail.ctp)
+    const anticipatedAnnualPremium =
+      source.anticipatedAnnualPremium ?? detailMoney(detail.anticipatedAnnualPremium)
+    return {
+      ...source,
+      targetPremium,
+      anticipatedAnnualPremium,
+      raw: {
+        ...source.raw,
+        promotionFacts: {
+          targetPremiumSource:
+            source.targetPremium === null && detail.ctp !== null
+              ? 'POLICY_DETAIL_CTP'
+              : 'SOURCE_SURFACE',
+          anticipatedAnnualPremiumSource:
+            source.anticipatedAnnualPremium === null &&
+            detail.anticipatedAnnualPremium !== null
+              ? 'POLICY_DETAIL_AAP'
+              : 'SOURCE_SURFACE',
+          policyDetailObservedAt: detail.observedAt.toISOString(),
+        },
+      },
+    }
+  })
 }
 
 function scalarText(value: unknown): string | null {
@@ -168,6 +268,7 @@ function carrierPaidEvidence(source: PromotionSource): string | null {
   // policy reached the creditable event. PolicyIssueDate is deliberately absent:
   // issue/active alone is not proof that National Life marked the policy paid.
   for (const field of PAID_DATE_FIELDS) {
+    if (field === 'PaymentDate' && source.surface !== 'COMMISSION_EARNING') continue
     if (scalarText(source.raw[field])) return `${field} present`
   }
 
@@ -230,6 +331,7 @@ function recognitionDate(source: PromotionSource): {
   invalid: boolean
 } {
   for (const field of PAID_DATE_FIELDS) {
+    if (field === 'PaymentDate' && source.surface !== 'COMMISSION_EARNING') continue
     const rawValue = source.raw[field]
     if (rawValue === null || rawValue === undefined || scalarText(rawValue) === null) continue
     const date = parseCarrierDate(rawValue)
@@ -296,6 +398,75 @@ export function prepareConfirmedNationalLifePromotionCredit(
         fetchedAt: source.fetchedAt.toISOString(),
         carrierPaidEvidence: paidEvidence,
         recognitionDateSource: recognition.field,
+        carrierSnapshot: source.raw,
+      }),
+      attributions: validateFrozenPromotionAttributions(attributions),
+    },
+    skipped: null,
+  }
+}
+
+export function preparePendingNationalLifePromotionCredit(
+  source: PromotionSource,
+  attributions: readonly FrozenPromotionAttribution[],
+  pendingReason: 'NOT_CARRIER_PAID' | 'MISSING_RECOGNITION_DATE',
+): PrepareNationalLifePendingPromotionResult {
+  if (!source.targetPremium) return { candidate: null, skipped: 'MISSING_TARGET_PREMIUM' }
+  const targetPremium = carrierMoney(source.targetPremium)
+  if (!targetPremium) return { candidate: null, skipped: 'INVALID_TARGET_PREMIUM' }
+
+  if (!source.anticipatedAnnualPremium) return { candidate: null, skipped: 'MISSING_AAP' }
+  const anticipatedAnnualPremium = carrierMoney(source.anticipatedAnnualPremium)
+  if (!anticipatedAnnualPremium) return { candidate: null, skipped: 'INVALID_AAP' }
+
+  const creditedPc = calculateLifeTargetPc({
+    targetPremium,
+    anticipatedAnnualPremium,
+    qualificationWeight: TARGET_PREMIUM_QUALIFICATION_WEIGHT,
+  })
+  if (creditedPc.isZero()) return { candidate: null, skipped: 'ZERO_PC' }
+
+  const policyNumber = canonicalPolicyNumber(source.policyNumber)
+  const factsFingerprint = createHash('sha256')
+    .update(
+      [
+        targetPremium.toString(),
+        anticipatedAnnualPremium.toString(),
+        TARGET_PREMIUM_QUALIFICATION_WEIGHT.toString(),
+      ].join('\u001f'),
+    )
+    .digest('hex')
+    .slice(0, 16)
+  const externalId = `${policyNumber}:PENDING:${factsFingerprint}`
+  const id = stableId(
+    'pcnlpending',
+    NATIONAL_LIFE_CARRIER,
+    POLICY_TARGET_PREMIUM_PENDING_SOURCE,
+    externalId,
+  )
+
+  return {
+    candidate: {
+      id,
+      carrier: NATIONAL_LIFE_CARRIER,
+      source: POLICY_TARGET_PREMIUM_PENDING_SOURCE,
+      externalId,
+      policyNumber,
+      producerAgentId: source.producerAgentId,
+      targetPremium,
+      anticipatedAnnualPremium,
+      qualificationWeight: TARGET_PREMIUM_QUALIFICATION_WEIGHT,
+      creditedPc,
+      status: 'PENDING_CARRIER',
+      // Pending observations are intentionally excluded from promotion
+      // qualification. `recognizedAt` is the schema's timeline field; while the
+      // carrier payment date is still unknown it records when KeeprOne observed
+      // the complete CTP/AAP pair.
+      recognizedAt: source.fetchedAt,
+      rawPayload: jsonPayload({
+        sourceSurface: source.surface,
+        fetchedAt: source.fetchedAt.toISOString(),
+        pendingReason,
         carrierSnapshot: source.raw,
       }),
       attributions: validateFrozenPromotionAttributions(attributions),
@@ -434,6 +605,8 @@ async function recordMonotonicAchievements(
         promotionCredit: {
           select: {
             id: true,
+            carrier: true,
+            policyNumber: true,
             producerAgentId: true,
             creditedPc: true,
             status: true,
@@ -775,11 +948,29 @@ async function syncSources(
       })),
     ]
     const prepared = prepareConfirmedNationalLifePromotionCredit(source, attributions)
-    if (!prepared.candidate) {
-      skipped[prepared.skipped] = (skipped[prepared.skipped] ?? 0) + 1
+    if (prepared.candidate) {
+      candidates.set(promotionCreditKey(prepared.candidate), prepared.candidate)
       continue
     }
-    candidates.set(promotionCreditKey(prepared.candidate), prepared.candidate)
+
+    if (
+      prepared.skipped === 'NOT_CARRIER_PAID' ||
+      prepared.skipped === 'MISSING_RECOGNITION_DATE'
+    ) {
+      const pending = preparePendingNationalLifePromotionCredit(
+        source,
+        attributions,
+        prepared.skipped,
+      )
+      if (pending.candidate) {
+        candidates.set(promotionCreditKey(pending.candidate), pending.candidate)
+        continue
+      }
+      skipped[pending.skipped] = (skipped[pending.skipped] ?? 0) + 1
+      continue
+    }
+
+    skipped[prepared.skipped] = (skipped[prepared.skipped] ?? 0) + 1
   }
 
   const preparedCandidates = [...candidates.values()]
@@ -850,7 +1041,7 @@ export async function syncConfirmedCasePromotionCredits(
           canonicalCarrierAgentNumber(snapshot.writingAgentNumber) === producerNpn,
       )
     : []
-  const result = await syncSources(
+  const sources = await enrichSourcesWithPolicyDetail(
     ownedSnapshots.map((snapshot): PromotionSource => ({
       surface: 'CASE_SNAPSHOT',
       policyNumber: snapshot.policyNo,
@@ -868,6 +1059,11 @@ export async function syncConfirmedCasePromotionCredits(
         gridKey: input.gridKey,
       },
     })),
+    input,
+    database,
+  )
+  const result = await syncSources(
+    sources,
     database,
   )
   return withOwnershipSkips(
@@ -893,7 +1089,7 @@ export async function syncConfirmedInforcePromotionCredits(
           canonicalCarrierAgentNumber(snapshot.agentNumber) === producerNpn,
       )
     : []
-  const result = await syncSources(
+  const sources = await enrichSourcesWithPolicyDetail(
     ownedSnapshots.map((snapshot): PromotionSource => ({
       surface: 'INFORCE_POLICY',
       policyNumber: snapshot.policyNumber,
@@ -908,12 +1104,193 @@ export async function syncConfirmedInforcePromotionCredits(
         deploymentScope: input.deploymentScope,
       },
     })),
+    input,
+    database,
+  )
+  const result = await syncSources(
+    sources,
     database,
   )
   return withOwnershipSkips(
     result,
     input.snapshots.length,
     input.snapshots.length - ownedSnapshots.length,
+  )
+}
+
+function earliestPaymentByPolicy(
+  evidence: readonly NationalLifePromotionPaymentEvidence[],
+) {
+  const byPolicy = new Map<string, NationalLifePromotionPaymentEvidence>()
+  for (const item of evidence) {
+    const current = byPolicy.get(item.policyNumber)
+    if (!current || item.paymentDate < current.paymentDate) {
+      byPolicy.set(item.policyNumber, item)
+    }
+  }
+  return [...byPolicy.values()]
+}
+
+async function syncPaymentEvidence(
+  input: {
+    agentId: string
+    deploymentScope: string
+    evidence: readonly NationalLifePromotionPaymentEvidence[]
+    fetchedAt: Date
+  },
+  database: PromotionDatabase,
+) {
+  const producerNpn = await getActiveProducerNpn(input.agentId, database)
+  const ownedEvidence = producerNpn
+    ? input.evidence.filter(
+        (item) => canonicalCarrierAgentNumber(item.writingAgentNumber) === producerNpn,
+      )
+    : []
+  const uniqueEvidence = earliestPaymentByPolicy(ownedEvidence)
+  const sources = await enrichSourcesWithPolicyDetail(
+    uniqueEvidence.map((item): PromotionSource => ({
+      surface: 'COMMISSION_EARNING',
+      policyNumber: item.policyNumber,
+      producerAgentId: input.agentId,
+      carrierStatus: 'Paid',
+      targetPremium: null,
+      anticipatedAnnualPremium: null,
+      fetchedAt: input.fetchedAt,
+      // Only the narrow, typed payment proof reaches the promotion ledger.
+      // Names, commission dollars and other report-row PII stay in their
+      // original NationalLifeReportRow record.
+      raw: {
+        PaymentDate: item.paymentDateRaw,
+        CompensationType: item.compensationType,
+        TransactionType: item.transactionType,
+        WritingAgtNumber: item.writingAgentNumber,
+        IncomeClass: item.incomeClass,
+        ProductType: item.productType,
+        lifeEvidenceField: item.lifeEvidenceField,
+        deploymentScope: input.deploymentScope,
+        gridKey: 'COMMISSIONS_EARNING_REPORT',
+      },
+    })),
+    input,
+    database,
+  )
+  const result = await syncSources(sources, database)
+  return withOwnershipSkips(
+    result,
+    input.evidence.length,
+    input.evidence.length - ownedEvidence.length,
+  )
+}
+
+/**
+ * Composes the carrier's per-policy payment evidence with CTP/AAP captured on
+ * Policy Detail. Commission and premium dollars are never calculation inputs.
+ */
+export async function syncNationalLifeCommissionPromotionCredits(
+  input: {
+    agentId: string
+    deploymentScope: string
+    rows: readonly unknown[]
+    fetchedAt: Date
+  },
+  database: PromotionDatabase = prisma,
+) {
+  const evidence = input.rows.flatMap((row) => {
+    const parsed = toNationalLifePromotionPaymentEvidence(row)
+    return parsed ? [parsed] : []
+  })
+  return syncPaymentEvidence({ ...input, evidence }, database)
+}
+
+async function syncPolicyDetailPromotionCredits(
+  input: {
+    agentId: string
+    deploymentScope: string
+    policyNumber: string
+    fetchedAt: Date
+  },
+  database: PromotionDatabase,
+): Promise<PromotionCreditSyncResult> {
+  const detailRepository = database.nationalLifePolicyDetailSnapshot
+  if (!detailRepository) throw new Error('Policy detail promotion source unavailable')
+
+  const policyNumber = canonicalPolicyNumber(input.policyNumber)
+  const detail = (await detailRepository.findFirst({
+    where: {
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      policyNumber,
+    },
+    select: {
+      policyNumber: true,
+      ctp: true,
+      anticipatedAnnualPremium: true,
+      observedAt: true,
+    },
+  })) as PolicyDetailFacts | null
+  if (!detail) {
+    return {
+      status: 'SYNCED',
+      examined: 0,
+      eligible: 0,
+      inserted: 0,
+      skipped: {},
+    }
+  }
+
+  const reportRepository = database.nationalLifeReportRow
+  const reportRows = reportRepository
+    ? await reportRepository.findMany({
+        where: {
+          agentId: input.agentId,
+          deploymentScope: input.deploymentScope,
+          gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
+          label: policyNumber,
+        },
+        select: { raw: true },
+      })
+    : []
+  const evidence = reportRows.flatMap((row) => {
+    const parsed = toNationalLifePromotionPaymentEvidence(row)
+    return parsed && parsed.policyNumber === policyNumber ? [parsed] : []
+  })
+
+  if (evidence.length > 0) {
+    return syncPaymentEvidence({ ...input, evidence }, database)
+  }
+
+  const producerNpn = await getActiveProducerNpn(input.agentId, database)
+  if (!producerNpn) {
+    return {
+      status: 'SYNCED',
+      examined: 1,
+      eligible: 0,
+      inserted: 0,
+      skipped: { PRODUCER_IDENTITY_MISMATCH: 1 },
+    }
+  }
+
+  // Complete carrier values without a matching paid first-year transaction are
+  // useful to the agent as a projection, but never advance a rank.
+  return syncSources(
+    [
+      {
+        surface: 'POLICY_DETAIL',
+        policyNumber,
+        producerAgentId: input.agentId,
+        carrierStatus: null,
+        targetPremium: detailMoney(detail.ctp),
+        anticipatedAnnualPremium: detailMoney(detail.anticipatedAnnualPremium),
+        fetchedAt: detail.observedAt,
+        raw: {
+          deploymentScope: input.deploymentScope,
+          policyDetailObservedAt: detail.observedAt.toISOString(),
+          targetPremiumSource: 'POLICY_DETAIL_CTP',
+          anticipatedAnnualPremiumSource: 'POLICY_DETAIL_AAP',
+        },
+      },
+    ],
+    database,
   )
 }
 
@@ -952,5 +1329,164 @@ export async function syncConfirmedInforcePromotionCreditsSafely(
     return await syncConfirmedInforcePromotionCredits(input, database)
   } catch {
     return failedPromotionSyncResult(input.snapshots.length)
+  }
+}
+
+export async function syncNationalLifeCommissionPromotionCreditsSafely(
+  input: Parameters<typeof syncNationalLifeCommissionPromotionCredits>[0],
+  database?: PromotionDatabase,
+): Promise<PromotionCreditSyncResult> {
+  try {
+    return await syncNationalLifeCommissionPromotionCredits(input, database)
+  } catch {
+    return failedPromotionSyncResult(input.rows.length)
+  }
+}
+
+export async function syncPolicyDetailPromotionCreditsSafely(
+  input: Parameters<typeof syncPolicyDetailPromotionCredits>[0],
+  database: PromotionDatabase = prisma,
+): Promise<PromotionCreditSyncResult> {
+  try {
+    return await syncPolicyDetailPromotionCredits(input, database)
+  } catch {
+    return failedPromotionSyncResult(1)
+  }
+}
+
+function mergePromotionSyncResults(
+  examined: number,
+  results: readonly PromotionCreditSyncResult[],
+): PromotionCreditSyncResult {
+  const skipped: PromotionCreditSyncResult['skipped'] = {}
+  for (const result of results) {
+    for (const [reason, count] of Object.entries(result.skipped)) {
+      if (!count) continue
+      const key = reason as NationalLifePromotionSkipReason
+      skipped[key] = (skipped[key] ?? 0) + count
+    }
+  }
+  return {
+    status: results.some((result) => result.status === 'NEEDS_REVIEW')
+      ? 'NEEDS_REVIEW'
+      : 'SYNCED',
+    examined,
+    eligible: results.reduce((total, result) => total + result.eligible, 0),
+    inserted: results.reduce((total, result) => total + result.inserted, 0),
+    skipped,
+  }
+}
+
+async function syncStoredNationalLifePromotionCreditsForAgent(
+  input: { agentId: string; deploymentScope: string; fetchedAt?: Date },
+  database: PromotionDatabase,
+): Promise<PromotionCreditSyncResult> {
+  const detailRepository = database.nationalLifePolicyDetailSnapshot
+  if (!detailRepository) throw new Error('Policy detail promotion source unavailable')
+
+  const details = (await detailRepository.findMany({
+    where: {
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+    },
+    select: {
+      policyNumber: true,
+      ctp: true,
+      anticipatedAnnualPremium: true,
+      observedAt: true,
+    },
+  })) as PolicyDetailFacts[]
+  if (details.length === 0) {
+    return { status: 'SYNCED', examined: 0, eligible: 0, inserted: 0, skipped: {} }
+  }
+
+  const reportRows = database.nationalLifeReportRow
+    ? await database.nationalLifeReportRow.findMany({
+        where: {
+          agentId: input.agentId,
+          deploymentScope: input.deploymentScope,
+          gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
+        },
+        select: { raw: true },
+      })
+    : []
+  const detailPolicies = new Set(
+    details.map((detail) => canonicalPolicyNumber(detail.policyNumber)),
+  )
+  const evidence = reportRows.flatMap((row) => {
+    const parsed = toNationalLifePromotionPaymentEvidence(row)
+    return parsed && detailPolicies.has(parsed.policyNumber) ? [parsed] : []
+  })
+  const producerNpn = await getActiveProducerNpn(input.agentId, database)
+  const ownedEvidence = producerNpn
+    ? evidence.filter(
+        (item) => canonicalCarrierAgentNumber(item.writingAgentNumber) === producerNpn,
+      )
+    : []
+  const paidPolicies = new Set(ownedEvidence.map((item) => item.policyNumber))
+  const fetchedAt = input.fetchedAt ?? new Date()
+  const results: PromotionCreditSyncResult[] = []
+
+  if (evidence.length > 0) {
+    results.push(
+      await syncPaymentEvidence(
+        {
+          agentId: input.agentId,
+          deploymentScope: input.deploymentScope,
+          evidence,
+          fetchedAt,
+        },
+        database,
+      ),
+    )
+  }
+
+  const pendingSources: PromotionSource[] = details.flatMap((detail) => {
+    const policyNumber = canonicalPolicyNumber(detail.policyNumber)
+    if (paidPolicies.has(policyNumber)) return []
+    return [
+      {
+        surface: 'POLICY_DETAIL',
+        policyNumber,
+        producerAgentId: input.agentId,
+        carrierStatus: null,
+        targetPremium: detailMoney(detail.ctp),
+        anticipatedAnnualPremium: detailMoney(detail.anticipatedAnnualPremium),
+        fetchedAt: detail.observedAt,
+        raw: {
+          deploymentScope: input.deploymentScope,
+          policyDetailObservedAt: detail.observedAt.toISOString(),
+          targetPremiumSource: 'POLICY_DETAIL_CTP',
+          anticipatedAnnualPremiumSource: 'POLICY_DETAIL_AAP',
+        },
+      },
+    ]
+  })
+  if (pendingSources.length > 0) {
+    results.push(
+      producerNpn
+        ? await syncSources(pendingSources, database)
+        : {
+            status: 'SYNCED',
+            examined: pendingSources.length,
+            eligible: 0,
+            inserted: 0,
+            skipped: { PRODUCER_IDENTITY_MISMATCH: pendingSources.length },
+          },
+    )
+  }
+
+  return mergePromotionSyncResults(details.length, results)
+}
+
+/** Replays already-extracted carrier facts after a complete sync or migration. */
+export async function syncStoredNationalLifePromotionCreditsForAgentSafely(
+  input: Parameters<typeof syncStoredNationalLifePromotionCreditsForAgent>[0],
+  database: PromotionDatabase = prisma,
+): Promise<PromotionCreditSyncResult> {
+  try {
+    return await syncStoredNationalLifePromotionCreditsForAgent(input, database)
+  } catch {
+    return failedPromotionSyncResult(1)
   }
 }

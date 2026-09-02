@@ -337,6 +337,7 @@ describe('local connector command dispatch', () => {
       findOwnedPolicy: vi.fn(async () => ({ id: 'policy_1', policyNumber: 'LS1473219' })),
       persist: vi.fn(async () => undefined),
     } satisfies PolicyDetailRepository
+    const syncPolicyDetailPromotionCreditsSafely = vi.fn(async () => undefined)
     const event = {
       protocolVersion: 1,
       eventId: 'event_detail_1',
@@ -354,6 +355,7 @@ describe('local connector command dispatch', () => {
           fields: [
             { section: 'COVERAGE', label: 'Total Face Amount', value: '$100,000.00' },
             { section: 'PAYMENTS', label: 'Anticipated Annual Premium', value: '$5,100.00' },
+            { section: 'PAYMENTS', label: 'CTP', value: '$4,900.00' },
           ],
         },
       },
@@ -363,6 +365,7 @@ describe('local connector command dispatch', () => {
     await recordDeviceConnectorCommandEvent(repo, {
       agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', event, now,
       policyDetailRepository,
+      syncPolicyDetailPromotionCreditsSafely,
       deploymentScope: 'national-life-local-connector',
     })
 
@@ -373,8 +376,18 @@ describe('local connector command dispatch', () => {
         policyNumber: 'LS1473219',
         totalFaceAmount: '100000.00',
         anticipatedAnnualPremium: '5100.00',
+        ctp: '4900.00',
       }),
     }))
+    expect(syncPolicyDetailPromotionCreditsSafely).toHaveBeenCalledWith({
+      agentId: 'agent_1',
+      deploymentScope: 'national-life-local-connector',
+      policyNumber: 'LS1473219',
+      fetchedAt: now,
+    })
+    expect(policyDetailRepository.persist.mock.invocationCallOrder[0]).toBeLessThan(
+      syncPolicyDetailPromotionCreditsSafely.mock.invocationCallOrder[0] as number,
+    )
     expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
       sequence: 2, type: 'DATA_BATCH',
     }))

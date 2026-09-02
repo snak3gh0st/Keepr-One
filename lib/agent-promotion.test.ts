@@ -16,6 +16,9 @@ function row(
     id: string;
     status: PromotionAttributionRow["promotionCredit"]["status"];
     creditedPc: number;
+    carrier?: string;
+    policyNumber?: string | null;
+    createdAt?: Date;
   },
 ): PromotionAttributionRow {
   return {
@@ -24,12 +27,14 @@ function row(
     leaderAgentId: input.leaderAgentId ?? null,
     promotionCredit: {
       id: input.id,
+      carrier: input.carrier ?? input.promotionCredit?.carrier,
+      policyNumber: input.policyNumber ?? input.promotionCredit?.policyNumber,
       producerAgentId:
         input.promotionCredit?.producerAgentId ?? input.agentId ?? "agent-1",
       creditedPc: input.creditedPc,
       status: input.status,
       recognizedAt: input.promotionCredit?.recognizedAt ?? NOW,
-      createdAt: input.promotionCredit?.createdAt ?? NOW,
+      createdAt: input.createdAt ?? input.promotionCredit?.createdAt ?? NOW,
     },
   };
 }
@@ -367,5 +372,133 @@ describe("rollupPromotionCredits", () => {
     expect(result.estimatedCreditCount).toBe(1);
     expect(result.pendingCreditCount).toBe(1);
     expect(result.hasPromotionData).toBe(true);
+  });
+
+  it("suppresses provisional PC once the same carrier policy has a recognized event", () => {
+    const result = rollupPromotionCredits(
+      [
+        row({
+          id: "confirmed",
+          carrier: "NATIONAL_LIFE",
+          policyNumber: "NL-100",
+          status: "CONFIRMED",
+          creditedPc: 1_200,
+        }),
+        row({
+          id: "estimate",
+          carrier: "NATIONAL_LIFE",
+          policyNumber: "NL-100",
+          status: "ESTIMATED",
+          creditedPc: 900,
+        }),
+        row({
+          id: "pending",
+          carrier: "NATIONAL_LIFE",
+          policyNumber: "NL-100",
+          status: "PENDING_CARRIER",
+          creditedPc: 1_100,
+        }),
+      ],
+      "agent-1",
+    );
+
+    expect(result.personalPc).toBe(1_200);
+    expect(result.estimatedPersonalPc).toBe(0);
+    expect(result.pendingPersonalPc).toBe(0);
+    expect(result.confirmedCreditCount).toBe(1);
+    expect(result.estimatedCreditCount).toBe(0);
+    expect(result.pendingCreditCount).toBe(0);
+  });
+
+  it("keeps only the latest provisional observation per carrier policy and bucket", () => {
+    const result = rollupPromotionCredits(
+      [
+        row({
+          id: "estimate-new",
+          carrier: "NATIONAL_LIFE",
+          policyNumber: "NL-200",
+          status: "ESTIMATED",
+          creditedPc: 1_400,
+          createdAt: new Date("2026-08-10T11:00:00.000Z"),
+        }),
+        row({
+          id: "estimate-old",
+          carrier: "NATIONAL_LIFE",
+          policyNumber: "NL-200",
+          status: "ESTIMATED",
+          creditedPc: 1_000,
+          createdAt: new Date("2026-08-10T09:00:00.000Z"),
+        }),
+        row({
+          id: "pending-old",
+          carrier: "NATIONAL_LIFE",
+          policyNumber: "NL-200",
+          status: "PENDING_CARRIER",
+          creditedPc: 1_500,
+          createdAt: new Date("2026-08-10T08:00:00.000Z"),
+        }),
+        row({
+          id: "pending-new",
+          carrier: "NATIONAL_LIFE",
+          policyNumber: "NL-200",
+          status: "PENDING_CARRIER",
+          creditedPc: 1_700,
+          createdAt: new Date("2026-08-10T10:00:00.000Z"),
+        }),
+      ],
+      "agent-1",
+    );
+
+    expect(result.estimatedPersonalPc).toBe(1_400);
+    expect(result.pendingPersonalPc).toBe(1_700);
+    expect(result.estimatedCreditCount).toBe(1);
+    expect(result.pendingCreditCount).toBe(1);
+  });
+
+  it("does not correlate credits without a policy number or from another carrier", () => {
+    const result = rollupPromotionCredits(
+      [
+        row({
+          id: "recognized-without-policy",
+          carrier: "NATIONAL_LIFE",
+          status: "CONFIRMED",
+          creditedPc: 100,
+        }),
+        row({
+          id: "estimate-without-policy-1",
+          carrier: "NATIONAL_LIFE",
+          status: "ESTIMATED",
+          creditedPc: 200,
+        }),
+        row({
+          id: "estimate-without-policy-2",
+          carrier: "NATIONAL_LIFE",
+          status: "ESTIMATED",
+          creditedPc: 300,
+        }),
+        row({
+          id: "recognized-other-carrier",
+          carrier: "OTHER_CARRIER",
+          policyNumber: "NL-300",
+          status: "CONFIRMED",
+          creditedPc: 400,
+        }),
+        row({
+          id: "pending-national-life",
+          carrier: "NATIONAL_LIFE",
+          policyNumber: "NL-300",
+          status: "PENDING_CARRIER",
+          creditedPc: 500,
+        }),
+      ],
+      "agent-1",
+    );
+
+    expect(result.personalPc).toBe(500);
+    expect(result.estimatedPersonalPc).toBe(500);
+    expect(result.pendingPersonalPc).toBe(500);
+    expect(result.confirmedCreditCount).toBe(2);
+    expect(result.estimatedCreditCount).toBe(2);
+    expect(result.pendingCreditCount).toBe(1);
   });
 });

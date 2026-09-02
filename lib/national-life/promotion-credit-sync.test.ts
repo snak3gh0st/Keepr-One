@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   prepareConfirmedNationalLifePromotionCredit,
+  preparePendingNationalLifePromotionCredit,
   syncConfirmedCasePromotionCredits,
   syncConfirmedCasePromotionCreditsSafely,
   syncConfirmedInforcePromotionCredits,
+  syncNationalLifeCommissionPromotionCredits,
+  syncPolicyDetailPromotionCreditsSafely,
+  syncStoredNationalLifePromotionCreditsForAgentSafely,
 } from './promotion-credit-sync'
 import type { CaseSnapshot } from './case-snapshot-service'
 
@@ -28,6 +32,87 @@ const ATTRIBUTIONS = [
   { kind: 'AGENCY' as const, agentId: 'leaf', leaderAgentId: 'mid' },
   { kind: 'AGENCY' as const, agentId: 'leaf', leaderAgentId: 'top' },
 ]
+
+function createPromotionDatabase(input?: { reportRows?: Record<string, unknown>[] }) {
+  const credits: Array<Record<string, unknown>> = []
+  const attributions: Array<Record<string, unknown>> = []
+  const detail = {
+    policyNumber: 'NL123',
+    ctp: { toString: () => '2386.02' },
+    anticipatedAnnualPremium: { toString: () => '2400' },
+    observedAt: FETCHED_AT,
+  }
+  const tx = {
+    agent: {
+      findUnique: vi.fn(async () => ({ promotionAccessScope: 'PERSONAL' })),
+    },
+    promotionCredit: {
+      findMany: vi.fn(async (args: { select: Record<string, unknown> }) => {
+        if ('attributions' in args.select) {
+          return credits.map((credit) => ({
+            producerAgentId: credit.producerAgentId,
+            attributions: attributions
+              .filter((row) => row.promotionCreditId === credit.id)
+              .map((row) => ({
+                agentId: row.agentId,
+                leaderAgentId: row.leaderAgentId,
+              })),
+          }))
+        }
+        return credits
+      }),
+      createMany: vi.fn(async ({ data }: { data: Array<Record<string, unknown>> }) => {
+        credits.push({ ...data[0], createdAt: FETCHED_AT })
+        return { count: 1 }
+      }),
+    },
+    promotionCreditAttribution: {
+      createMany: vi.fn(async ({ data }: { data: Array<Record<string, unknown>> }) => {
+        attributions.push(...data)
+        return { count: data.length }
+      }),
+      findMany: vi.fn(async () =>
+        attributions.map((row) => {
+          const credit = credits.find((item) => item.id === row.promotionCreditId)
+          if (!credit) throw new Error('Missing test credit')
+          return {
+            kind: row.kind,
+            agentId: row.agentId,
+            leaderAgentId: row.leaderAgentId,
+            promotionCredit: {
+              id: credit.id,
+              carrier: credit.carrier,
+              policyNumber: credit.policyNumber,
+              producerAgentId: credit.producerAgentId,
+              creditedPc: credit.creditedPc,
+              status: credit.status,
+              recognizedAt: credit.recognizedAt,
+              createdAt: credit.createdAt,
+            },
+          }
+        }),
+      ),
+    },
+    promotionAchievement: {
+      createMany: vi.fn(async () => ({ count: 0 })),
+    },
+  }
+  const database = {
+    agent: {
+      findUnique: vi.fn(async () => ({ npn: 'NPN-LEAF', status: 'ACTIVE' })),
+      findMany: vi.fn(async () => [{ id: 'leaf', parentAgentId: null }]),
+    },
+    nationalLifePolicyDetailSnapshot: {
+      findMany: vi.fn(async () => [detail]),
+      findFirst: vi.fn(async () => detail),
+    },
+    nationalLifeReportRow: {
+      findMany: vi.fn(async () => input?.reportRows ?? []),
+    },
+    $transaction: async (run: (client: typeof tx) => Promise<unknown>) => run(tx),
+  }
+  return { database, credits, attributions }
+}
 
 describe('confirmed National Life promotion candidate', () => {
   it('uses min(CTP, AAP) at the official first-year target weight', () => {
@@ -136,9 +221,114 @@ describe('confirmed National Life promotion candidate', () => {
     expect(fromCase.candidate?.id).toBe(fromInforce.candidate?.id)
     expect(fromCase.candidate?.externalId).toBe('NL123')
   })
+
+  it('keeps a complete CTP/AAP observation pending until the carrier payment arrives', () => {
+    const result = preparePendingNationalLifePromotionCredit(
+      source({ carrierStatus: 'Issued, Not Paid', raw: {} }),
+      ATTRIBUTIONS,
+      'NOT_CARRIER_PAID',
+    )
+
+    expect(result.skipped).toBeNull()
+    expect(result.candidate).toMatchObject({
+      source: 'POLICY_TARGET_PREMIUM_PENDING',
+      status: 'PENDING_CARRIER',
+      policyNumber: 'NL123',
+      recognizedAt: FETCHED_AT,
+    })
+    expect(result.candidate?.creditedPc.toString()).toBe('6000')
+  })
 })
 
 describe('promotion ledger sync', () => {
+  it('joins Policy Detail CTP/AAP to a paid first-year Life transaction', async () => {
+    const { database, credits } = createPromotionDatabase()
+
+    const result = await syncNationalLifeCommissionPromotionCredits(
+      {
+        agentId: 'leaf',
+        deploymentScope: 'test',
+        rows: [
+          {
+            PolicyNumber: 'NL123',
+            CompensationType: 'First year Compensation',
+            TransactionType: 'Standard',
+            PaymentDate: '08/25/2026',
+            WritingAgtNumber: 'NPN-LEAF',
+            IncomeClass: 'Life',
+            PremiumAmt: '999999',
+            GrossCommEarned: '999999',
+          },
+        ],
+        fetchedAt: FETCHED_AT,
+      },
+      database as never,
+    )
+
+    expect(result).toMatchObject({ status: 'SYNCED', examined: 1, eligible: 1, inserted: 1 })
+    expect(credits).toHaveLength(1)
+    expect(credits[0]).toMatchObject({
+      source: 'POLICY_TARGET_PREMIUM',
+      policyNumber: 'NL123',
+      status: 'CONFIRMED',
+      recognizedAt: new Date('2026-08-25T00:00:00.000Z'),
+    })
+    expect(String(credits[0].creditedPc)).toBe('2386.02')
+    expect(String(credits[0].targetPremium)).toBe('2386.02')
+    expect(String(credits[0].anticipatedAnnualPremium)).toBe('2400')
+  })
+
+  it('writes only a pending projection when Policy Detail has no paid transaction', async () => {
+    const { database, credits } = createPromotionDatabase({ reportRows: [] })
+
+    const result = await syncPolicyDetailPromotionCreditsSafely(
+      {
+        agentId: 'leaf',
+        deploymentScope: 'test',
+        policyNumber: 'NL123',
+        fetchedAt: FETCHED_AT,
+      },
+      database as never,
+    )
+
+    expect(result).toMatchObject({ status: 'SYNCED', examined: 1, eligible: 1, inserted: 1 })
+    expect(credits).toHaveLength(1)
+    expect(credits[0]).toMatchObject({
+      source: 'POLICY_TARGET_PREMIUM_PENDING',
+      policyNumber: 'NL123',
+      status: 'PENDING_CARRIER',
+      recognizedAt: FETCHED_AT,
+    })
+    expect(String(credits[0].creditedPc)).toBe('2386.02')
+  })
+
+  it('backfills already-extracted detail and payment rows after a complete sync', async () => {
+    const payment = {
+      PolicyNumber: 'NL123',
+      CompensationType: 'First year Compensation',
+      TransactionType: 'Standard',
+      PaymentDate: '08/25/2026',
+      WritingAgtNumber: 'NPN-LEAF',
+      ProductType: 'Life',
+    }
+    const { database, credits } = createPromotionDatabase({
+      reportRows: [{ raw: payment }],
+    })
+
+    const result = await syncStoredNationalLifePromotionCreditsForAgentSafely(
+      { agentId: 'leaf', deploymentScope: 'test', fetchedAt: FETCHED_AT },
+      database as never,
+    )
+
+    expect(result).toMatchObject({ status: 'SYNCED', examined: 1, eligible: 1, inserted: 1 })
+    expect(credits).toHaveLength(1)
+    expect(credits[0]).toMatchObject({
+      source: 'POLICY_TARGET_PREMIUM',
+      status: 'CONFIRMED',
+      recognizedAt: new Date('2026-08-25T00:00:00.000Z'),
+    })
+  })
+
   it('fails closed before the ledger when the carrier producer NPN is not the signed agent', async () => {
     const findMany = vi.fn()
     const database = {

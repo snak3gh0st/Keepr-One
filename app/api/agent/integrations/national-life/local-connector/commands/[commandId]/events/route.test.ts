@@ -36,6 +36,9 @@ vi.mock('@/lib/prisma', () => ({
 vi.mock('@/lib/national-life/policy-detail-prisma', () => ({
   createPrismaPolicyDetailRepository: () => ({ kind: 'policy-detail-repository' }),
 }))
+vi.mock('@/lib/national-life/promotion-credit-sync', () => ({
+  syncPolicyDetailPromotionCreditsSafely: vi.fn(),
+}))
 
 import { ConnectorCommandError } from '@/lib/national-life/connector-command-service'
 import { POST } from './route'
@@ -82,6 +85,7 @@ describe('local connector command event route', () => {
       event,
       now: expect.any(Date),
       policyDetailRepository: { kind: 'policy-detail-repository' },
+      syncPolicyDetailPromotionCreditsSafely: expect.any(Function),
       foresightArtifactRepository: expect.objectContaining({
         findOwnedArtifact: expect.any(Function),
         persistTermResult: expect.any(Function),

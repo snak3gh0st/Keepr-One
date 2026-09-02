@@ -25,6 +25,9 @@ import {
 } from '@/lib/national-life/local-connector/request'
 import { prisma } from '@/lib/prisma'
 import { createPrismaPolicyDetailRepository } from '@/lib/national-life/policy-detail-prisma'
+import {
+  syncPolicyDetailPromotionCreditsSafely,
+} from '@/lib/national-life/promotion-credit-sync'
 import { createFlexLifeQuoteResultRepository } from '@/lib/national-life/flexlife-quote-result'
 import { extractForesightTermPremiums } from '@/lib/national-life/foresight-term-pdf'
 import type { IgoApplicationDraftReceipt } from '@/lib/application-addon/igo-receipt'
@@ -273,6 +276,8 @@ export async function POST(
         event,
         now: new Date(),
         policyDetailRepository,
+        syncPolicyDetailPromotionCreditsSafely: (input) =>
+          syncPolicyDetailPromotionCreditsSafely(input, prisma),
         foresightArtifactRepository,
         extractTermPremiums: extractForesightTermPremiums,
         flexLifeQuoteRepository,

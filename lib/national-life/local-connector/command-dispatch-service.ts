@@ -346,6 +346,12 @@ export async function recordDeviceConnectorCommandEvent(
     event: unknown
     now?: Date
     policyDetailRepository?: PolicyDetailRepository
+    syncPolicyDetailPromotionCreditsSafely?: (input: {
+      agentId: string
+      deploymentScope: string
+      policyNumber: string
+      fetchedAt: Date
+    }) => Promise<unknown>
     foresightArtifactRepository?: ForesightArtifactRepository
     flexLifeQuoteRepository?: FlexLifeQuoteResultRepository
     applicationDraftReceiptRepository?: ApplicationDraftReceiptRepository
@@ -389,6 +395,12 @@ export async function recordDeviceConnectorCommandEvent(
       deploymentScope: input.deploymentScope,
       policyId: publicCommand.target.id,
       detail,
+    })
+    await input.syncPolicyDetailPromotionCreditsSafely?.({
+      agentId: input.agentId,
+      deploymentScope: input.deploymentScope,
+      policyNumber: detail.policyNumber,
+      fetchedAt: detail.observedAt,
     })
   }
   if (event.type === 'DATA_BATCH' && command.capability === 'GENERATE_ILLUSTRATION') {
