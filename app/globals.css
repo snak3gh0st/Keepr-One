@@ -165,6 +165,7 @@
 .kbot-activity-panel::before,
 .kbot-announcement::before {
   position: absolute;
+  z-index: 0;
   top: 0;
   right: 0;
   left: 0;
@@ -172,6 +173,28 @@
   background: linear-gradient(90deg, var(--color-teal), var(--color-mint), transparent 82%);
   content: '';
   opacity: 0.78;
+}
+
+.kbot-activity-panel {
+  isolation: isolate;
+  background-image:
+    linear-gradient(rgba(13, 95, 53, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(13, 95, 53, 0.025) 1px, transparent 1px),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(246, 250, 245, 0.98));
+  background-position: center;
+  background-size: 22px 22px, 22px 22px, auto;
+}
+
+.kbot-corner-presence[data-state='waiting'] .kbot-activity-panel::before {
+  background: linear-gradient(90deg, var(--color-gold), rgba(222, 169, 53, 0.12));
+}
+
+.kbot-corner-presence[data-state='success'] .kbot-activity-panel::before {
+  background: linear-gradient(90deg, var(--color-success), rgba(35, 145, 81, 0.12));
+}
+
+.kbot-corner-presence[data-state='error'] .kbot-activity-panel::before {
+  background: linear-gradient(90deg, var(--color-danger), rgba(190, 58, 58, 0.12));
 }
 
 .kbot-ambient-announcement {
@@ -337,7 +360,6 @@
 .kbot-celebration-pixel-b { top: 47px; left: 41px; --kbot-celebrate-x: 10px; --kbot-celebrate-y: -13px; animation-delay: 35ms; }
 .kbot-celebration-pixel-c { top: 55px; left: 30px; --kbot-celebrate-x: -15px; --kbot-celebrate-y: 7px; animation-delay: 70ms; }
 .kbot-celebration-pixel-d { top: 53px; left: 46px; --kbot-celebrate-x: 14px; --kbot-celebrate-y: 6px; animation-delay: 105ms; }
-
 .kbot-character[data-state="idle"] {
   animation: kbot-character-idle 3.8s steps(3, end) infinite;
 }

@@ -162,7 +162,8 @@ describe("SettingsForms", () => {
     );
 
     expect(screen.queryByLabelText(/Nome da agência/)).toBeNull();
-    expect(screen.getByText("Operação individual")).toBeVisible();
+    expect(screen.getAllByText("Operação individual")).toHaveLength(2);
+    expect(screen.getAllByText("Operação individual")[0]).toBeVisible();
     expect(screen.getByRole("link", { name: "Ver meu plano" })).toHaveAttribute(
       "href",
       "/agent/agency",

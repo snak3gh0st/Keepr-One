@@ -584,41 +584,63 @@ export function KBotCornerPresence({
             id={panelId}
             tabIndex={-1}
             aria-label={copy('Painel de atividades do K-Bot', 'K-Bot activity panel')}
-            className="kbot-activity-panel pointer-events-auto absolute bottom-[112px] right-0 w-[min(21rem,calc(100vw-1.5rem))] rounded-xl border border-border-steel bg-paper px-4 py-4 shadow-[0_8px_24px_rgba(16,41,29,0.14)]"
+            className="kbot-activity-panel pointer-events-auto absolute bottom-[112px] right-0 w-[min(23rem,calc(100vw-1.5rem))] overflow-hidden rounded-[20px] border border-border-steel bg-paper p-4 text-ink shadow-[0_18px_48px_-24px_rgba(16,41,29,0.38)] sm:p-5"
           >
-            <span className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <KBotAvatar state={state} size="sm" />
+                <div className="min-w-0">
+                  <span className="block font-mono text-[10px] font-semibold uppercase tracking-[0.13em] text-teal-deep">
+                    K-Bot · {copy('central operacional', 'operations desk')}
+                  </span>
+                  <span className="mt-1 block truncate text-sm font-semibold text-ink">
+                    {copy('O que estou fazendo', 'What I am doing')}
+                  </span>
+                </div>
+              </div>
               <span
-                aria-hidden="true"
-                className={`h-2 w-2 rounded-full ${
+                className={`kbot-state-pill shrink-0 rounded-full px-2.5 py-1 font-mono text-[9px] font-semibold uppercase tracking-[0.1em] ${
                   state === 'working'
-                    ? 'animate-pulse bg-teal'
+                    ? 'bg-teal-pale text-teal-deep'
                     : state === 'waiting'
-                      ? 'bg-gold'
+                      ? 'bg-gold-pale text-gold-ink'
                       : state === 'success'
-                        ? 'bg-success'
+                        ? 'bg-success-pale text-success'
                         : state === 'error'
-                          ? 'bg-danger'
-                          : 'bg-ink-muted/45'
+                          ? 'bg-danger/10 text-danger'
+                          : 'bg-panel text-ink-muted'
                 }`}
-              />
-              {copy('O que estou fazendo', 'What I am doing')}
-            </span>
-            <span className="block text-sm font-semibold leading-5 text-ink">{title}</span>
-            {detail ? (
-              <span className="mt-1.5 block text-sm leading-5 text-ink-muted">{detail}</span>
-            ) : null}
+              >
+                {state === 'working'
+                  ? copy('Ativo', 'Active')
+                  : state === 'waiting'
+                    ? copy('Aguardando', 'Waiting')
+                    : state === 'success'
+                      ? copy('Concluído', 'Complete')
+                      : state === 'error'
+                        ? copy('Atenção', 'Attention')
+                        : copy('Pronto', 'Ready')}
+              </span>
+            </div>
+
+            <div className="mt-5 rounded-[14px] border border-border-steel bg-panel/55 px-4 py-3.5">
+              <span className="block text-sm font-semibold leading-5 text-ink">{title}</span>
+              {detail ? (
+                <span className="mt-1.5 block text-sm leading-5 text-ink-muted">{detail}</span>
+              ) : null}
+            </div>
             {tasks.length > 0 ? (
-              <ul className="mt-4 space-y-2 border-t border-border-steel pt-3" aria-label={copy('Atividades do K-Bot', 'K-Bot activities')}>
+              <ul className="mt-5 border-t border-border-steel pt-2" aria-label={copy('Atividades do K-Bot', 'K-Bot activities')}>
                 {tasks.map((task) => {
                   const safeTaskProgress = task.progress == null
                     ? null
                     : Math.min(1, Math.max(0, task.progress))
                   return (
-                    <li key={task.id} className="rounded-lg border border-border-steel bg-panel px-3 py-3">
+                    <li key={task.id} className="border-b border-border-steel/80 px-1 py-3 last:border-b-0">
                       <span className="flex items-start gap-2">
                         <span
                           aria-hidden="true"
-                          className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                          className={`mt-1.5 h-2 w-2 shrink-0 rounded-full shadow-[0_0_0_3px_rgba(13,95,53,0.08)] ${
                             task.state === 'working'
                               ? 'animate-pulse bg-teal'
                               : task.state === 'waiting'
@@ -629,10 +651,10 @@ export function KBotCornerPresence({
                           }`}
                         />
                         <span className="min-w-0">
-                          <span className="block text-sm font-semibold leading-5 text-ink">{task.label}</span>
-                          <span className="mt-0.5 block text-sm leading-5 text-ink-muted">{task.detail}</span>
+                          <span className="block text-xs font-semibold leading-5 text-ink">{task.label}</span>
+                          <span className="mt-0.5 block text-xs leading-5 text-ink-muted">{task.detail}</span>
                           {task.estimate ? (
-                            <span className="mt-1.5 block font-mono text-xs font-semibold uppercase tracking-[0.06em] text-teal-deep">
+                            <span className="mt-1.5 block font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-teal-deep">
                               {task.estimate}
                             </span>
                           ) : null}
@@ -652,8 +674,8 @@ export function KBotCornerPresence({
               </ul>
             ) : null}
             {showQuickActions ? (
-              <nav className="mt-4 border-t border-border-steel pt-3" aria-label={copy('Ações do K-Bot', 'K-Bot actions')}>
-                <span className="block text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">
+              <nav className="mt-5 border-t border-border-steel pt-4" aria-label={copy('Ações do K-Bot', 'K-Bot actions')}>
+                <span className="block font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
                   {copy('Iniciar uma tarefa', 'Start a task')}
                 </span>
                 <div className="mt-2 grid gap-2">
@@ -661,17 +683,17 @@ export function KBotCornerPresence({
                     <Link
                       key={action.href}
                       href={action.href}
-                      className="group flex min-h-14 items-center gap-3 rounded-lg border border-border-steel bg-paper px-3 py-2.5 transition-colors duration-150 hover:border-teal hover:bg-teal-pale focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
+                      className="group flex min-h-14 items-center gap-3 rounded-[14px] border border-border-steel bg-paper px-3 py-2.5 transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px hover:border-teal hover:bg-teal-pale focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
                     >
                       <span
                         aria-hidden="true"
-                        className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-border-steel bg-panel font-mono text-[11px] font-semibold text-teal-deep group-hover:border-teal/35 group-hover:bg-paper"
+                        className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-border-steel bg-panel font-mono text-[11px] font-semibold text-teal-deep group-hover:border-teal/35 group-hover:bg-paper"
                       >
                         {action.badge}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold leading-5 text-ink">{action.label}</span>
-                        <span className="block text-sm leading-5 text-ink-muted">{action.detail}</span>
+                        <span className="block text-xs font-semibold leading-5 text-ink">{action.label}</span>
+                        <span className="block text-xs leading-5 text-ink-muted">{action.detail}</span>
                       </span>
                       <span aria-hidden="true" className="text-sm text-ink-muted transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-teal-deep">→</span>
                     </Link>
@@ -682,7 +704,7 @@ export function KBotCornerPresence({
             {actionHref && !showQuickActions ? (
               <Link
                 href={actionHref}
-                className="mt-3 inline-flex min-h-11 items-center rounded-md border border-border-steel bg-paper px-3 py-2 text-sm font-semibold text-teal-deep transition-colors duration-150 hover:border-teal hover:bg-teal-pale focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
+                className="mt-4 inline-flex min-h-11 items-center rounded-full border border-border-steel bg-paper px-4 py-2 text-sm font-semibold text-teal-deep transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px hover:border-teal hover:bg-teal-pale focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
               >
                 {resolvedActionLabel}
               </Link>
