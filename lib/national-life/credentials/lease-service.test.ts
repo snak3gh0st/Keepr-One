@@ -44,7 +44,7 @@ function context(override: Partial<CredentialLeaseContext> = {}): CredentialLeas
     },
     operation: {
       kind: 'SYNC_RUN', id: 'run_1', agentId: 'agent_1', deviceId: 'device_1',
-      state: 'RUNNING', authState: 'AUTH_REQUIRED', authEpoch: 1,
+      state: 'RUNNING', authState: 'REQUIRED', authEpoch: 1,
       authRequiredAt: new Date(now.getTime() - 10_000), expiresAt: null,
       latestEventType: null,
     },
@@ -169,6 +169,7 @@ describe('credential lease service', () => {
       kind: 'CONNECTOR_COMMAND' as const,
       id: 'command_1',
       state: 'AUTH_REQUIRED',
+      authState: 'AUTH_REQUIRED',
       expiresAt: new Date(now.getTime() + 60_000),
       latestEventType: 'AUTH_REQUIRED',
     }
@@ -197,6 +198,19 @@ describe('credential lease service', () => {
       code: 'CREDENTIAL_OPERATION_NOT_AUTH_REQUIRED',
     })
     expect(mfa.decrypt).not.toHaveBeenCalled()
+  })
+
+  it('uses the distinct durable auth states for sync runs and commands', async () => {
+    const invalidSync = harness({
+      context: context({ operation: { ...context().operation!, authState: 'AUTH_REQUIRED' } }),
+    })
+    await expect(issue(invalidSync.service)).rejects.toMatchObject({
+      code: 'CREDENTIAL_OPERATION_NOT_AUTH_REQUIRED',
+    })
+    expect(invalidSync.decrypt).not.toHaveBeenCalled()
+
+    const validSync = harness()
+    await expect(issue(validSync.service)).resolves.toEqual(sealed)
   })
 
   it('durably reserves once before decrypting and returns only the sealed contract', async () => {
@@ -296,5 +310,33 @@ describe('credential lease service', () => {
       notifications: notificationUpsert.mock.calls,
       audits: auditCreate.mock.calls,
     })).not.toMatch(/username|password|cookie|token/i)
+  })
+
+  it('reserves a sync lease only while its durable auth state is REQUIRED', async () => {
+    const syncFindFirst = vi.fn().mockResolvedValue({ id: 'run_1' })
+    const tx = {
+      nationalLifeConnectorDevice: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'device_1' }),
+      },
+      nationalLifeSyncRun: { findFirst: syncFindFirst },
+      nationalLifeConnectorCommand: { findFirst: vi.fn() },
+      nationalLifeCredentialLease: { create: vi.fn().mockResolvedValue({ id: 'lease_1' }) },
+      agentIntegrationCredential: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    }
+    const persistence = createPrismaCredentialLeasePersistence({
+      $transaction: (work: (client: typeof tx) => unknown) => work(tx),
+    } as never)
+
+    await expect(persistence.reserveLease({
+      leaseId: 'lease_1', agentId: 'agent_1', credentialId: 'credential_1',
+      deviceId: 'device_1', operationKind: 'SYNC_RUN', operationId: 'run_1',
+      authEpoch: 1, deviceKeyThumbprint: 'thumbprint', issuedAt: now,
+      expiresAt: new Date(now.getTime() + 60_000), lastLeasedAt: now,
+    })).resolves.toBe(true)
+
+    expect(syncFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ state: 'RUNNING', authState: 'REQUIRED' }),
+    }))
+    expect(tx.nationalLifeConnectorCommand.findFirst).not.toHaveBeenCalled()
   })
 })

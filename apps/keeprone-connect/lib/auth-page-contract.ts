@@ -216,10 +216,6 @@ export function submitNationalLifeCredential(
     input.dispatchEvent(new view.Event('input', { bubbles: true }))
     input.dispatchEvent(new view.Event('change', { bubbles: true }))
   }
-  structure.login.addEventListener('submit', (event) => event.preventDefault(), {
-    capture: true,
-    once: true,
-  })
   structure.loginButton.click()
   return { ok: true, code: 'SUBMITTED' }
 }

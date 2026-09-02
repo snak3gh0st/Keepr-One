@@ -523,6 +523,41 @@ describe('automatic carrier login recovery', () => {
     )
   })
 
+  it('retries the existing Auth0 tab and submits the stored credential immediately', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 1,
+      status: 'ERROR', errorCode: 'CREDENTIAL_BROKER_UNAVAILABLE',
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/runs')) {
+        return {
+          runId: 'run-1', schemaVersion: 3, stages: TWO_STAGE_PLAN,
+          duplicate: true, completedStages: 1, nextStageIndex: 1,
+        } as never
+      }
+      if (request.pathname.endsWith('/auth-state')) return { authEpoch: 3 } as never
+      if (request.pathname.endsWith('/credential-leases')) return sealed as never
+      return {} as never
+    })
+    await bootBackground()
+
+    const sendResponse = vi.fn()
+    emit('runtime.onMessage', { type: 'RETRY_SYNC' }, {}, sendResponse)
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled())
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(1)
+    expect(tabs.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+    }))
+    expect(readSync()).toMatchObject({
+      runId: 'run-1', stageIndex: 1, status: 'AUTH_REQUIRED',
+      credentialAttempt: { authEpoch: 3, leaseId: 'lease_1' },
+    })
+  })
+
   it('reloads an already-open Auth0 page once, then leases when the content script is ready', async () => {
     await bootBackground()
     storage.sync = {
