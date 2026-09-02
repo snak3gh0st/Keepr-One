@@ -61,7 +61,7 @@ const TIME_ZONE_OPTIONS = [
 ] as const;
 
 const SECTION_CLASS =
-  "scroll-mt-24 border-b border-border-steel py-8 first:pt-0 last:border-b-0 last:pb-0";
+  "scroll-mt-28 rounded-3xl border border-border-steel bg-paper p-5 shadow-[0_18px_50px_-38px_rgba(15,29,19,0.35)] sm:p-7";
 
 function describedBy(id: string, error?: string, hasHint = false) {
   return [hasHint ? `${id}-hint` : null, error ? `${id}-error` : null]
@@ -192,6 +192,86 @@ function SectionHeading({
         {title}
       </h2>
       <p className="mt-2 text-sm leading-6 text-ink-muted">{description}</p>
+    </div>
+  );
+}
+
+function SettingsOverview({
+  personal,
+  professional,
+  security,
+  agency,
+  kbot,
+}: SettingsFormsProps) {
+  const { copy } = useI18n();
+  const cards = [
+    {
+      href: "#perfil",
+      index: "01",
+      label: copy("Perfil", "Profile"),
+      value: personal.name || copy("Seu perfil", "Your profile"),
+      detail: professional.npn ? `NPN ${professional.npn}` : copy("Dados pessoais e profissionais", "Personal and professional details"),
+    },
+    {
+      href: "#seguranca",
+      index: "02",
+      label: copy("Acesso", "Access"),
+      value: security.email,
+      detail: security.emailVerified ? copy("E-mail verificado", "Email verified") : copy("Verificação pendente", "Verification pending"),
+    },
+    {
+      href: "#kbot",
+      index: "03",
+      label: "K-Bot",
+      value: kbot.enabled ? copy("Conectado ao ambiente", "Connected to the environment") : copy("Indisponível neste ambiente", "Unavailable in this environment"),
+      detail: kbot.credentialBrokerEnabled && kbot.credentialSummary.configured
+        ? copy("Credencial protegida", "Protected credential")
+        : kbot.credentialBrokerEnabled
+          ? copy("Pronto para configurar login automático", "Ready to configure automatic login")
+          : copy("Login manual protegido", "Manual sign-in protected"),
+    },
+    {
+      href: "#agencia",
+      index: "04",
+      label: copy("Agência", "Agency"),
+      value: agency.name ?? copy("Operação individual", "Individual operation"),
+      detail: agency.subscriptionStatus ? subscriptionLabel(agency.subscriptionStatus, copy) : copy("Sem vínculo de agência", "No agency relationship"),
+    },
+  ] as const;
+
+  return (
+    <div className="mt-6 rounded-3xl border border-border-steel bg-rail-strong p-5 text-paper shadow-[0_24px_60px_-38px_rgba(15,29,19,0.65)] sm:p-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal-pale/75">
+            {copy("Mapa rápido", "Quick map")}
+          </p>
+          <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em]">
+            {copy("Encontre o que precisa ajustar.", "Find what you need to adjust.")}
+          </h2>
+        </div>
+        <p className="text-xs text-paper/60">
+          {copy("Quatro áreas da sua operação", "Four areas of your operation")}
+        </p>
+      </div>
+
+      <div className="mt-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {cards.map((card) => (
+          <a
+            key={card.href}
+            href={card.href}
+            className="group min-w-0 rounded-2xl border border-paper/10 bg-paper/[0.07] p-4 transition-colors hover:border-teal-pale/45 hover:bg-paper/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-pale"
+          >
+            <span className="flex items-center justify-between font-mono text-[10px] font-semibold tracking-[0.14em] text-teal-pale/75">
+              {card.index}
+              <span aria-hidden="true" className="text-paper/50 transition-transform group-hover:translate-x-0.5">↗</span>
+            </span>
+            <span className="mt-4 block truncate text-xs font-semibold text-paper/70">{card.label}</span>
+            <strong className="mt-1 block truncate text-sm font-semibold">{card.value}</strong>
+            <span className="mt-1 block truncate text-[11px] text-paper/55">{card.detail}</span>
+          </a>
+        ))}
+      </div>
     </div>
   );
 }
@@ -447,7 +527,7 @@ function EmailChangeForm({
   );
 }
 
-function PasswordChangeForm() {
+function PasswordChangeForm({ className = "mt-8 border-t border-border-steel pt-8" }: { className?: string }) {
   const { copy, language } = useI18n();
   const [state, action] = useActionState(
     changePasswordAction,
@@ -459,7 +539,7 @@ function PasswordChangeForm() {
   const confirmPasswordError = fieldError(state, "confirmPassword", language);
 
   return (
-    <div className="mt-8 border-t border-border-steel pt-8">
+    <div className={className}>
       <h3 className="text-base font-semibold text-ink">{copy("Senha", "Password")}</h3>
       <p className="mt-1 max-w-2xl text-sm leading-6 text-ink-muted">
         {copy("Confirme sua senha atual e crie uma nova com pelo menos 8 caracteres.", "Confirm your current password and create a new one with at least 8 characters.")}
@@ -573,9 +653,13 @@ function SecuritySettings({
         description={copy("Mantenha seu acesso atualizado. Alterações de e-mail e senha sempre exigem sua senha atual.", "Keep your access up to date. Email and password changes always require your current password.")}
       />
 
-      <div className="mt-6">
-        <EmailChangeForm security={security} />
-        <PasswordChangeForm />
+      <div className="mt-6 grid gap-4 xl:grid-cols-2">
+        <div className="rounded-2xl border border-border-steel bg-panel/35 p-5 sm:p-6">
+          <EmailChangeForm security={security} />
+        </div>
+        <div className="rounded-2xl border border-border-steel bg-panel/35 p-5 sm:p-6">
+          <PasswordChangeForm className="" />
+        </div>
       </div>
     </section>
   );
@@ -597,12 +681,37 @@ function KBotSettings({
           "Control K-Bot's connection on this computer and review how carrier authentication works.",
         )}
       />
-      <div className="mt-6">
+      <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1fr)_230px] xl:items-start">
         <KBotCredentialSettings
           connectorEnabled={kbot.enabled}
           credentialBrokerEnabled={kbot.credentialBrokerEnabled}
           summary={kbot.credentialSummary}
         />
+        <aside className="rounded-2xl border border-teal/20 bg-teal-pale/45 p-5">
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-teal-deep">
+            {copy("Como funciona", "How it works")}
+          </p>
+          <ol className="mt-4 grid gap-4">
+            <li className="flex gap-3">
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-teal text-[10px] font-bold text-paper">01</span>
+              <p className="text-xs leading-5 text-ink-muted">
+                {copy("O K-Bot trabalha na aba em segundo plano.", "K-Bot works in the background tab.")}
+              </p>
+            </li>
+            <li className="flex gap-3">
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-teal text-[10px] font-bold text-paper">02</span>
+              <p className="text-xs leading-5 text-ink-muted">
+                {copy("Se a sessão expirar, tenta o login protegido uma vez.", "If the session expires, it tries the protected login once.")}
+              </p>
+            </li>
+            <li className="flex gap-3">
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-gold text-[10px] font-bold text-paper">03</span>
+              <p className="text-xs leading-5 text-ink-muted">
+                {copy("Somente MFA traz a National Life para sua atenção.", "Only MFA brings National Life to your attention.")}
+              </p>
+            </li>
+          </ol>
+        </aside>
       </div>
     </section>
   );
@@ -724,43 +833,82 @@ export function SettingsForms({
   kbot,
 }: SettingsFormsProps) {
   const { copy } = useI18n();
-  const sections = [
-    { href: "#perfil", label: copy("Perfil", "Profile") },
-    { href: "#profissional", label: copy("Dados profissionais", "Professional details") },
-    { href: "#seguranca", label: copy("Segurança", "Security") },
-    { href: "#kbot", label: copy("K-Bot e National Life", "K-Bot and National Life") },
-    { href: "#agencia", label: copy("Agência", "Agency") },
+  const sectionGroups = [
+    {
+      label: copy("Conta", "Account"),
+      items: [
+        { href: "#perfil", label: copy("Perfil", "Profile"), detail: copy("Dados pessoais", "Personal details") },
+        { href: "#profissional", label: copy("Dados profissionais", "Professional details"), detail: copy("NPN e situação", "NPN and status") },
+      ],
+    },
+    {
+      label: copy("Acesso", "Access"),
+      items: [
+        { href: "#seguranca", label: copy("Segurança", "Security"), detail: copy("E-mail e senha", "Email and password") },
+        { href: "#kbot", label: "K-Bot", detail: copy("National Life", "National Life") },
+      ],
+    },
+    {
+      label: copy("Operação", "Operation"),
+      items: [
+        { href: "#agencia", label: copy("Agência", "Agency"), detail: copy("Plano e vínculo", "Plan and relationship") },
+      ],
+    },
   ] as const;
-  return (
-    <div className="mt-6 grid min-w-0 gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-      <nav
-        aria-label={copy("Seções das configurações", "Settings sections")}
-        className="self-start rounded-2xl border border-border-steel bg-paper/90 p-2 lg:sticky lg:top-24"
-      >
-        <p className="px-3 pb-2 pt-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-          {copy("Nesta página", "On this page")}
-        </p>
-        <ul className="grid grid-cols-2 gap-1 lg:grid-cols-1">
-          {sections.map((section) => (
-            <li key={section.href}>
-              <a
-                href={section.href}
-                className="flex min-h-11 items-center rounded-xl px-3 text-sm font-semibold text-ink-muted transition-colors hover:bg-panel hover:text-ink focus-visible:bg-panel"
-              >
-                {section.label}
-              </a>
-            </li>
-          ))}
-        </ul>
-      </nav>
 
-      <div className="module-main-surface">
+  return (
+    <>
+      <SettingsOverview
+        personal={personal}
+        professional={professional}
+        security={security}
+        agency={agency}
+        kbot={kbot}
+      />
+
+      <div className="mt-6 grid min-w-0 gap-4 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
+        <nav
+          aria-label={copy("Seções das configurações", "Settings sections")}
+          className="self-start rounded-3xl border border-border-steel bg-paper/90 p-3 shadow-[0_16px_44px_-36px_rgba(15,29,19,0.35)] lg:sticky lg:top-24"
+        >
+          <p className="px-3 pb-2 pt-1 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-muted">
+            {copy("Navegar por área", "Browse by area")}
+          </p>
+          <div className="grid gap-4">
+            {sectionGroups.map((group) => (
+              <div key={group.label}>
+                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted/70">
+                  {group.label}
+                </p>
+                <ul className="grid gap-1">
+                  {group.items.map((section) => (
+                    <li key={section.href}>
+                      <a
+                        href={section.href}
+                        className="group flex min-h-12 items-center justify-between gap-2 rounded-2xl px-3 py-2 transition-colors hover:bg-panel focus-visible:bg-panel focus-visible:outline-none"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-ink">{section.label}</span>
+                          <span className="mt-0.5 block truncate text-[11px] text-ink-muted">{section.detail}</span>
+                        </span>
+                        <span aria-hidden="true" className="text-ink-muted/50 transition-transform group-hover:translate-x-0.5">↗</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </nav>
+
+        <main className="grid min-w-0 gap-4">
         <PersonalProfileForm personal={personal} />
         <ProfessionalProfile professional={professional} />
         <SecuritySettings security={security} />
         <KBotSettings kbot={kbot} />
         <AgencySettings agency={agency} />
+        </main>
       </div>
-    </div>
+    </>
   );
 }

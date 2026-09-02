@@ -237,6 +237,8 @@ export async function startLocalConnectorRun(
     currentGridKey: true,
     authState: true,
     authRequiredAt: true,
+    completedAt: true,
+    updatedAt: true,
     stageCompletions: { select: { gridKey: true } },
     stageFailures: { where: { resolvedAt: null }, select: { gridKey: true } },
   } as const
@@ -313,10 +315,23 @@ export async function startLocalConnectorRun(
   // A completed run is a statement about the exact source scope it opened. A
   // broader run is not reusable for a narrower priority request: doing so would
   // keep the old denominator, reopen no portal pages, and make the performance
-  // improvement look like it did nothing. RUNNING/FAILED remain authoritative
-  // below because their durable cursor must not be rewritten under a device.
+  // improvement look like it did nothing. RUNNING remains authoritative below
+  // because its durable cursor must not be rewritten under a device. Among
+  // terminal candidates, the newest exact-plan result is the latest truth.
   const reusableCompleted = completedPlanMatchesExactly(completed) ? completed : null
-  const active = running ?? (options?.forceRefresh ? null : failed) ?? reusableCompleted
+  // A stale failed attempt must not win over a newer completed attempt. This
+  // happens after a transient failure is followed by a successful retry: the
+  // old FAILED/PARTIAL row remains inside the 24-hour resume window, but its
+  // cursor is no longer the latest truth. An in-flight run still wins because
+  // it owns the carrier tab and its durable checkpoint.
+  const terminalRunTimestamp = (run: { completedAt: Date | null; updatedAt: Date } | null) =>
+    run ? Math.max(run.completedAt?.getTime() ?? 0, run.updatedAt.getTime()) : 0
+  const latestTerminal = failed && reusableCompleted
+    ? terminalRunTimestamp(failed) > terminalRunTimestamp(reusableCompleted)
+      ? failed
+      : reusableCompleted
+    : failed ?? reusableCompleted
+  const active = running ?? (options?.forceRefresh ? null : latestTerminal)
   if (active) {
     const storedPlan = plannedGridKeys(active)
     const retainedPlan = storedPlan.filter((gridKey) => !DEPRECATED_LOCAL_CONNECTOR_GRID_KEYS.has(gridKey))

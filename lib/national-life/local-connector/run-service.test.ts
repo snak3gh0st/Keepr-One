@@ -695,6 +695,44 @@ describe('local connector runs', () => {
     }))
   })
 
+  it('prefers a newer completed run over an older failed retry cursor', async () => {
+    const failedAt = new Date(now.getTime() - 2 * 60 * 60_000)
+    const completedAt = new Date(now.getTime() - 60 * 60_000)
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'run-old-failed',
+        state: 'FAILED',
+        plannedGridKeys: [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS],
+        completedStages: 0,
+        currentGridKey: 'NEW_BUSINESS',
+        completedAt: failedAt,
+        updatedAt: failedAt,
+      })
+      .mockResolvedValueOnce({
+        id: 'run-new-complete',
+        state: 'COMPLETED',
+        plannedGridKeys: [...LOCAL_CONNECTOR_DEFAULT_GRID_KEYS],
+        completedStages: LOCAL_CONNECTOR_DEFAULT_GRID_KEYS.length,
+        currentGridKey: null,
+        completedAt,
+        updatedAt: completedAt,
+      })
+    const create = vi.fn()
+    const db = {
+      nationalLifeSyncRun: { create, updateMany: vi.fn(), findFirst },
+    } as never
+
+    await expect(
+      startLocalConnectorRun(db, { agentId: 'agent-1', deviceId: 'device-1', now }),
+    ).resolves.toMatchObject({
+      runId: 'run-new-complete',
+      duplicate: true,
+      completedStages: LOCAL_CONNECTOR_DEFAULT_GRID_KEYS.length,
+    })
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it('does not reuse a completed broader run for the selected priority scope', async () => {
     const findFirst = vi.fn()
       .mockResolvedValueOnce(null)
