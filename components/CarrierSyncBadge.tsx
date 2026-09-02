@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { type CarrierSyncState } from '@/lib/national-life/carrier-sync-state'
@@ -8,6 +8,7 @@ import {
   KBotCornerPresence,
   type KBotAction,
   type KBotActivityMode,
+  type KBotAmbientMessage,
   type KBotState,
   type KBotTask,
 } from '@/components/kbot/KBotAvatar'
@@ -65,7 +66,7 @@ type Notice = {
 /// first load.
 export function CarrierSyncBadge({ separated = false }: { separated?: boolean }) {
   const { copy } = useI18n()
-  const quickActions: KBotAction[] = [
+  const quickActions = useMemo<KBotAction[]>(() => [
     {
       href: '/agent/integrations/national-life',
       badge: 'NL',
@@ -84,7 +85,27 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
       label: copy('Criar aplicação no iGO', 'Create Application in iGO'),
       detail: copy('Escolha a ilustração oficial que iniciará a aplicação', 'Choose the official illustration that will start the Application'),
     },
-  ]
+  ], [copy])
+  const ambientMessages = useMemo<KBotAmbientMessage[]>(() => [
+    {
+      id: 'sync-national-life',
+      message: copy('Posso sincronizar seus dados da National Life para você.', 'I can sync your National Life data for you.'),
+      href: quickActions[0].href,
+      actionLabel: quickActions[0].label,
+    },
+    {
+      id: 'official-illustration',
+      message: copy('Quer que eu prepare uma ilustração oficial de Term ou IUL?', 'Would you like me to prepare an official Term or IUL illustration?'),
+      href: quickActions[1].href,
+      actionLabel: quickActions[1].label,
+    },
+    {
+      id: 'igo-application',
+      message: copy('Posso começar uma aplicação no iGO a partir de uma ilustração aprovada.', 'I can start an iGO application from an approved illustration.'),
+      href: quickActions[2].href,
+      actionLabel: quickActions[2].label,
+    },
+  ], [copy, quickActions])
   const [state, setState] = useState<CarrierSyncState | null>(null)
   const [sync, setSync] = useState<CompactSyncStatus | null>(null)
   const [illustration, setIllustration] = useState<IllustrationActivity | null>(null)
@@ -503,6 +524,7 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
         tasks={tasks}
         quickActions={quickActions}
         announcement={notice?.message}
+        ambientMessages={ambientMessages}
       />
     )
   })()

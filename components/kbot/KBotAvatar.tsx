@@ -21,6 +21,12 @@ export type KBotAction = {
   detail: string
   badge: string
 }
+export type KBotAmbientMessage = {
+  id: string
+  message: string
+  href: string
+  actionLabel: string
+}
 
 const sizeClass = {
   xs: 'h-6 w-6 rounded-[5px] p-1',
@@ -38,11 +44,17 @@ const stateClass: Record<KBotState, string> = {
 }
 
 const subscribeToBrowserMount = () => () => {}
+const KBotAmbientTiming = {
+  initialDelay: 28_000,
+  visibleDuration: 8_000,
+  interval: 75_000,
+} as const
 
 /**
  * K-Bot is an operational indicator, not a chat persona. The 16 × 16 drawing
  * intentionally resembles a compact terminal/scanner and stays crisp at every
- * supported size. All meaning is repeated in adjacent text.
+ * supported size. All meaning is repeated in adjacent text, including the
+ * occasional useful suggestion shown while the bot is idle.
  */
 export function KBotAvatar({
   state = 'idle',
@@ -343,7 +355,8 @@ function resetKBotLook(event: ReactPointerEvent<HTMLButtonElement>) {
 
 /**
  * Persistent operational presence for pages where K-Bot can work. Clicking the
- * character reveals its current activity; this is a status panel, not a chat.
+ * character reveals its current activity; occasional suggestions point to
+ * real, safe task entry points without turning the status panel into a chat.
  */
 export function KBotCornerPresence({
   state,
@@ -357,6 +370,7 @@ export function KBotCornerPresence({
   tasks = [],
   quickActions = [],
   announcement,
+  ambientMessages = [],
 }: {
   state: KBotState
   title: string
@@ -369,12 +383,15 @@ export function KBotCornerPresence({
   tasks?: KBotTask[]
   quickActions?: KBotAction[]
   announcement?: string | null
+  ambientMessages?: KBotAmbientMessage[]
 }) {
   const { copy } = useI18n()
   const resolvedActionLabel = actionLabel ?? copy('Abrir K-Bot', 'Open K-Bot')
   const [open, setOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const ambientIndexRef = useRef(0)
+  const [ambientAnnouncement, setAmbientAnnouncement] = useState<KBotAmbientMessage | null>(null)
   const browserMounted = useSyncExternalStore(
     subscribeToBrowserMount,
     () => true,
@@ -388,6 +405,59 @@ export function KBotCornerPresence({
     : trimmedTitle
   const showQuickActions = quickActions.length > 0 && tasks.length === 0 &&
     (state === 'idle' || state === 'success')
+
+  useEffect(() => {
+    if (!browserMounted || state !== 'idle' || announcement || ambientMessages.length === 0) {
+      const resetTimer = window.setTimeout(() => setAmbientAnnouncement(null), 0)
+      return () => window.clearTimeout(resetTimer)
+    }
+
+    let cancelled = false
+    let hideTimer: number | undefined
+    let nextTimer: number | undefined
+    ambientIndexRef.current = 0
+
+    const showNextMessage = () => {
+      if (cancelled) return
+
+      if (ambientMessages.length === 0) return
+
+      const message = ambientMessages[ambientIndexRef.current % ambientMessages.length]
+      ambientIndexRef.current = (ambientIndexRef.current + 1) % ambientMessages.length
+      setAmbientAnnouncement(message)
+
+      hideTimer = window.setTimeout(() => {
+        if (!cancelled) setAmbientAnnouncement(null)
+      }, KBotAmbientTiming.visibleDuration)
+      nextTimer = window.setTimeout(showNextMessage, KBotAmbientTiming.interval)
+    }
+
+    nextTimer = window.setTimeout(showNextMessage, KBotAmbientTiming.initialDelay)
+
+    return () => {
+      cancelled = true
+      if (hideTimer !== undefined) window.clearTimeout(hideTimer)
+      if (nextTimer !== undefined) window.clearTimeout(nextTimer)
+    }
+  }, [ambientMessages, announcement, browserMounted, state])
+
+  const renderedAnnouncement = announcement
+    ? {
+        message: announcement,
+        href: actionHref,
+        actionLabel: resolvedActionLabel,
+        label: copy('Atualização do K-Bot', 'K-Bot update'),
+        kind: 'update' as const,
+      }
+    : state === 'idle' && ambientAnnouncement
+      ? {
+          message: ambientAnnouncement.message,
+          href: ambientAnnouncement.href,
+          actionLabel: ambientAnnouncement.actionLabel,
+          label: copy('Uma ideia do K-Bot', 'A K-Bot idea'),
+          kind: 'suggestion' as const,
+        }
+      : null
 
   useEffect(() => {
     if (!open) return
@@ -427,19 +497,24 @@ export function KBotCornerPresence({
     >
       <span className="sr-only">{spokenCopy}</span>
       <div className="relative ml-auto h-[102px] w-[78px]">
-        {announcement ? (
+        {renderedAnnouncement ? (
           <div
             role="status"
-            aria-label={copy('Atualização do K-Bot', 'K-Bot update')}
-            className="kbot-announcement pointer-events-auto absolute bottom-[112px] right-0 w-[min(21rem,calc(100vw-1.5rem))] rounded-xl border border-border-steel bg-paper px-4 py-3.5 text-sm leading-5 text-ink shadow-[0_8px_24px_rgba(16,41,29,0.14)]"
+            aria-label={renderedAnnouncement.label}
+            data-kind={renderedAnnouncement.kind}
+            className={`kbot-announcement pointer-events-auto absolute bottom-[112px] right-0 w-[min(21rem,calc(100vw-1.5rem))] rounded-xl border border-border-steel bg-paper px-4 py-3.5 text-sm leading-5 text-ink shadow-[0_8px_24px_rgba(16,41,29,0.14)] ${renderedAnnouncement.kind === 'suggestion' ? 'kbot-ambient-announcement' : ''}`}
           >
-            <span className="block font-semibold">{announcement}</span>
-            {actionHref ? (
+            <span className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-teal-deep">
+              <span aria-hidden="true" className="kbot-ambient-beacon h-1.5 w-1.5 rounded-full bg-teal" />
+              {renderedAnnouncement.label}
+            </span>
+            <span className="block font-semibold">{renderedAnnouncement.message}</span>
+            {renderedAnnouncement.href ? (
               <Link
-                href={actionHref}
+                href={renderedAnnouncement.href}
                 className="mt-2 inline-flex min-h-11 items-center rounded-md border border-border-steel bg-paper px-3 py-2 text-sm font-semibold text-teal-deep transition-colors duration-150 hover:border-teal hover:bg-teal-pale focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
               >
-                {resolvedActionLabel}
+                {renderedAnnouncement.actionLabel}
               </Link>
             ) : null}
             <span aria-hidden="true" className="absolute -bottom-[7px] right-8 h-3.5 w-3.5 rotate-45 border-b border-r border-border-steel bg-paper" />
