@@ -5,10 +5,12 @@ describe('parseCommandState', () => {
   it('keeps valid durable coordination metadata across extension restarts', () => {
     expect(parseCommandState({
       status: 'RUNNING', commandId: 'command_1', runId: 'run_1', carrierTabId: 12,
-      nextEventSequence: 3, phase: 'VERIFYING_VALUES', updatedAt: '2026-08-31T20:00:00.000Z',
+      nextEventSequence: 3, phase: 'VERIFYING_VALUES', termInputHash: 'a'.repeat(64),
+      updatedAt: '2026-08-31T20:00:00.000Z',
     })).toEqual({
       status: 'RUNNING', commandId: 'command_1', runId: 'run_1', carrierTabId: 12,
-      nextEventSequence: 3, phase: 'VERIFYING_VALUES', updatedAt: '2026-08-31T20:00:00.000Z',
+      nextEventSequence: 3, phase: 'VERIFYING_VALUES', termInputHash: 'a'.repeat(64),
+      updatedAt: '2026-08-31T20:00:00.000Z',
     })
   })
 
@@ -20,7 +22,8 @@ describe('parseCommandState', () => {
   it('drops malformed optional fields without discarding a valid status', () => {
     expect(parseCommandState({
       status: 'AUTH_REQUIRED', commandId: '', runId: 'run_1', carrierTabId: -1,
-      nextEventSequence: -2, phase: 'UNKNOWN_PHASE', errorCode: '<html>', updatedAt: 'yesterday',
+      nextEventSequence: -2, phase: 'UNKNOWN_PHASE', termInputHash: 'not-a-hash',
+      errorCode: '<html>', updatedAt: 'yesterday',
     })).toEqual({ status: 'AUTH_REQUIRED', runId: 'run_1' })
   })
 

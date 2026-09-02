@@ -111,6 +111,9 @@ export type CommandState = {
   /// Fine-grained, non-sensitive progress for the active official illustration.
   /// It is presentation state only; command events remain the audit authority.
   phase?: CommandProgressPhase
+  /// Hash only, never the illustration input. Lets a new command resume the
+  /// exact same interrupted Term case without re-opening or repopulating it.
+  termInputHash?: string
   credentialAttempt?: CredentialAttempt
 }
 
@@ -202,6 +205,9 @@ export function parseCommandState(value: unknown): CommandState {
   }
   const phase = parseCommandProgressPhase(value.phase)
   if (phase) state.phase = phase
+  if (typeof value.termInputHash === 'string' && /^[a-f0-9]{64}$/.test(value.termInputHash)) {
+    state.termInputHash = value.termInputHash
+  }
   const credentialAttempt = parseCredentialAttempt(value.credentialAttempt)
   if (credentialAttempt) state.credentialAttempt = credentialAttempt
   return state

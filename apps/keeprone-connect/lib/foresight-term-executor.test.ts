@@ -72,11 +72,33 @@ describe('Foresight Term client target', () => {
       source.indexOf('const applyTermClient'),
       source.indexOf('const applyTermFunding'),
     )
+    const retry = source.slice(
+      source.indexOf('const retryTermClientPostback'),
+      source.indexOf('const applyTermClient'),
+    )
 
     expect(source).toContain('minimumSettleMs = 0')
-    expect(workflow).toContain("await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT', 700)")
-    expect(workflow).toContain("await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT', 500)")
-    expect(workflow.match(/await waitForCarrierIdle\('FORESIGHT_TERM_CLIENT_TIMEOUT', 600\)/g)).toHaveLength(2)
+    expect(retry).toContain("await waitForCarrierIdle('FORESIGHT_TERM_CLIENT_TIMEOUT', minimumSettleMs)")
+    expect(workflow).toContain("retryTermClientPostback(700, 'FORESIGHT_TERM_CLIENT_JURISDICTION_WRITE_MISMATCH'")
+    expect(workflow).toContain("retryTermClientPostback(500, 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH'")
+    expect(workflow.match(/retryTermClientPostback\(600,/g)).toHaveLength(2)
+  })
+
+  it('retries only the failed Term client postback and verifies it before moving on', () => {
+    const source = readFileSync(
+      new URL('../entrypoints/foresight-main.content.ts', import.meta.url),
+      'utf8',
+    )
+    const workflow = source.slice(
+      source.indexOf('const applyTermClient'),
+      source.indexOf('const applyTermFunding'),
+    )
+
+    expect(source).toContain('const retryTermClientPostback')
+    expect(source).toContain('for (let attempt = 0; attempt < 2; attempt += 1)')
+    expect(workflow.match(/retryTermClientPostback\(/g)).toHaveLength(5)
+    expect(workflow).toContain("'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH'")
+    expect(workflow).toContain("'FORESIGHT_TERM_CLIENT_INFORMATION_WRITE_MISMATCH'")
   })
 
   it('uses a valid duration returned by the carrier as an explicit fallback', () => {

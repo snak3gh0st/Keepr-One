@@ -156,6 +156,11 @@ describe('illustrationPdfMessage', () => {
     ).toBe(
       'O Foresight não confirmou os dados do segurado. Revise nascimento, estado e perfil de risco antes de tentar novamente; nenhum PDF foi emitido.',
     )
+    expect(
+      illustrationPdfMessage({ state: 'FAILED', safeErrorCode: 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH' }),
+    ).toBe(
+      'O Foresight não confirmou uma etapa do cadastro Term após uma repetição segura. Nenhum PDF foi emitido e o K-Bot não continuará tentando sozinho.',
+    )
   })
 
   it('does not print an empty parenthesis when there is no code', () => {
