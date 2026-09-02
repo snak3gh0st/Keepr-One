@@ -128,6 +128,7 @@ describe('local connector runs', () => {
     ).resolves.toMatchObject({
       runId: 'run-failed',
       duplicate: true,
+      reopened: true,
       completedStages: 2,
       stages: planReadGridStages(['NEW_BUSINESS', 'INFORCE_CLIENTS', 'PAID_COMMISSIONS']),
     })
@@ -135,6 +136,8 @@ describe('local connector runs', () => {
       where: expect.objectContaining({ id: 'run-failed', state: 'FAILED' }),
       data: expect.objectContaining({
         state: 'RUNNING',
+        authState: 'READY',
+        authRequiredAt: null,
         safeErrorCode: null,
         completedAt: null,
         currentGridKey: 'PAID_COMMISSIONS',

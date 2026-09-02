@@ -745,6 +745,149 @@ describe('automatic carrier login recovery', () => {
     expect(settled).not.toHaveProperty('errorCode')
   })
 
+  it('settles a command credential lease after Auth0 lands directly in authenticated Foresight', async () => {
+    storage.command = {
+      commandId: 'cmd-1', runId: 'command-run-1', carrierTabId: 17,
+      nextEventSequence: 4, status: 'RUNNING', phase: 'OPENING_FORESIGHT',
+      errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
+      credentialAttempt: {
+        operationKind: 'CONNECTOR_COMMAND', operationId: 'cmd-1', authEpoch: 3,
+        leaseId: 'lease_1', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    await bootBackground()
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return undefined as never
+      return {} as never
+    })
+
+    emit('tabs.onUpdated', 17, { status: 'complete' }, {
+      id: 17,
+      active: true,
+      url: `${NLG}/NWI/Main/Layout.aspx?SessionTokenId=${'a'.repeat(32)}`,
+    })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease_1/result',
+      body: { schemaVersion: 1, outcome: 'AUTHENTICATED' },
+    }))
+    expect(storage.command).not.toHaveProperty('credentialAttempt')
+    expect(storage.command).not.toHaveProperty('errorCode')
+  })
+
+  it('does not treat a tokenless Foresight shell as authenticated login proof', async () => {
+    storage.command = {
+      commandId: 'cmd-1', runId: 'command-run-1', carrierTabId: 17,
+      nextEventSequence: 4, status: 'RUNNING', phase: 'OPENING_FORESIGHT',
+      credentialAttempt: {
+        operationKind: 'CONNECTOR_COMMAND', operationId: 'cmd-1', authEpoch: 3,
+        leaseId: 'lease_1', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    await bootBackground()
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return undefined as never
+      return {} as never
+    })
+
+    emit('tabs.onUpdated', 17, { status: 'complete' }, {
+      id: 17, active: true, url: `${NLG}/NWI/Main/Layout.aspx`,
+    })
+    await flush()
+
+    expect(signedJsonRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease_1/result',
+    }))
+  })
+
+  it('settles login when a command worker wakes already inside authenticated Foresight', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd-foresight-wake',
+      runId: 'run-foresight-wake',
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'ill-wake' },
+      params: { illustrationId: 'ill-wake', inputHash: 'a'.repeat(64) },
+      idempotencyKey: 'illustration:ill-wake',
+      issuedAt: '2026-09-01T21:00:00.000Z',
+      expiresAt: '2026-09-01T22:00:00.000Z',
+      requiresConfirmation: true,
+    }
+    storage.command = {
+      commandId: command.commandId, runId: command.runId, carrierTabId: 17,
+      nextEventSequence: 3, status: 'AUTH_REQUIRED', phase: 'OPENING_FORESIGHT',
+      credentialAttempt: {
+        operationKind: 'CONNECTOR_COMMAND', operationId: command.commandId, authEpoch: 2,
+        leaseId: 'lease-wake', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    tabs.query.mockResolvedValue([{
+      id: 17,
+      active: false,
+      url: `${NLG}/NWI/Main/Layout.aspx?SessionTokenId=${'b'.repeat(32)}`,
+    }])
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'AUTH_REQUIRED', nextEventSequence: 3, lastEventType: 'AUTH_REQUIRED',
+      } as never
+      if (request.pathname.endsWith('/input')) return {} as never
+      return {} as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease-wake/result',
+      body: { schemaVersion: 1, outcome: 'AUTHENTICATED' },
+    }))
+  })
+
+  it('settles login when an iGO worker wakes on the authenticated National Life tools page', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd-igo-wake',
+      runId: 'run-igo-wake',
+      capability: 'PREPARE_APPLICATION_DRAFT',
+      target: { kind: 'APPLICATION', id: 'app-wake' },
+      params: { applicationId: 'app-wake', payloadHash: 'c'.repeat(64) },
+      idempotencyKey: 'igo:app-wake',
+      issuedAt: '2026-09-01T21:00:00.000Z',
+      expiresAt: '2026-09-01T22:00:00.000Z',
+      requiresConfirmation: true,
+    }
+    storage.command = {
+      commandId: command.commandId, runId: command.runId, carrierTabId: 17,
+      nextEventSequence: 3, status: 'AUTH_REQUIRED', phase: 'OPENING_IGO',
+      credentialAttempt: {
+        operationKind: 'CONNECTOR_COMMAND', operationId: command.commandId, authEpoch: 2,
+        leaseId: 'lease-igo-wake', attemptedAt: '2026-09-01T21:00:00.000Z',
+      },
+    }
+    tabs.query.mockResolvedValue([{
+      id: 17,
+      active: false,
+      url: `${NLG}/agent/tools/business-tools/national-life-tools`,
+    }])
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'AUTH_REQUIRED', nextEventSequence: 3, lastEventType: 'AUTH_REQUIRED',
+      } as never
+      return {} as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/credential-leases/lease-igo-wake/result',
+      body: { schemaVersion: 1, outcome: 'AUTHENTICATED' },
+    }))
+  })
+
   it.each([
     ['MFA', 'MFA_REQUIRED'],
     ['REJECTED', 'CREDENTIAL_REJECTED'],
@@ -1717,6 +1860,51 @@ describe('background plan executor', () => {
       pathname: '/api/agent/integrations/national-life/local-connector/runs',
     }))
     expect(tabs.create).not.toHaveBeenCalled()
+  })
+
+  it('reclaims a timed-out auth wait and keeps the server checkpoint', async () => {
+    storage.sync = {
+      runId: 'run-resume',
+      plan: THREE_STAGE_PLAN,
+      stageIndex: 1,
+      carrierTabId: 7,
+      status: 'AUTH_REQUIRED',
+      authRenewalPending: true,
+      authRequiredAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-resume', authEpoch: 1,
+        leaseId: 'lease-old', attemptedAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+      },
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG_AUTH0}/login?state=stale` }])
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/runs')) return {
+        runId: 'run-resume',
+        stages: THREE_STAGE_PLAN,
+        completedStages: 1,
+        nextStageIndex: 1,
+        reopened: true,
+      } as never
+      if (request.pathname.endsWith('/auth-state')) return { authEpoch: 2 } as never
+      return {} as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-scheduled-sync' })
+    await flush()
+
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs',
+    }))
+    expect(readSync()).toMatchObject({
+      runId: 'run-resume', stageIndex: 1, status: 'AUTH_REQUIRED',
+      authRenewalPending: true,
+    })
+    expect(readSync().credentialAttempt).toBeUndefined()
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs/run-resume/auth-state',
+      body: { state: 'REQUIRED' },
+    }))
   })
 
   it('forwards an explicit full refresh to the run endpoint', async () => {

@@ -376,6 +376,12 @@ export async function startLocalConnectorRun(
           ...(reopening
             ? {
                 state: 'RUNNING' as const,
+                // A timed-out run owns a finished authentication episode. The
+                // reopened run keeps its durable data cursor, but the next
+                // login must be a fresh epoch so a new one-shot lease can be
+                // issued safely.
+                authState: 'READY',
+                authRequiredAt: null,
                 safeErrorCode: null,
                 completedAt: null,
                 failedStages: 0,
@@ -476,6 +482,7 @@ export async function startLocalConnectorRun(
         exportEnabled: options?.exportEnabled && !inForceExportExhausted,
       }),
       duplicate: true as const,
+      ...(reopening ? { reopened: true as const } : {}),
       completedStages,
       nextStageIndex,
       ...(resume ? { resume } : {}),
