@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KBotActivity, KBotAvatar, KBotCornerPresence, KBotTaskTrail } from './KBotAvatar'
@@ -14,7 +14,10 @@ vi.mock('@/components/i18n/LanguageProvider', () => ({
   }),
 }))
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 describe('KBotAvatar', () => {
   it('keeps the drawing decorative because adjacent text carries the state', () => {
@@ -211,5 +214,79 @@ describe('KBotAvatar', () => {
 
     expect(trigger.style.getPropertyValue('--kbot-head-x')).toBe('')
     expect(trigger.style.getPropertyValue('--kbot-eye-x')).toBe('')
+  })
+
+  it('offers useful actions occasionally while K-Bot is idle', () => {
+    vi.useFakeTimers()
+    render(
+      <KBotCornerPresence
+        state="idle"
+        title="K-Bot is ready"
+        ambientMessages={[
+          {
+            id: 'sync',
+            message: 'I can sync your National Life data for you.',
+            href: '/agent/integrations/national-life',
+            actionLabel: 'Sync National Life',
+          },
+          {
+            id: 'illustration',
+            message: 'Would you like an official illustration?',
+            href: '/agent/illustrations/new',
+            actionLabel: 'Create Illustration',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.queryByRole('status', { name: 'A K-Bot idea' })).not.toBeInTheDocument()
+
+    act(() => {
+      vi.advanceTimersByTime(28_000)
+    })
+
+    expect(screen.getByRole('status', { name: 'A K-Bot idea' })).toHaveTextContent(
+      'I can sync your National Life data for you.',
+    )
+    expect(screen.getByRole('link', { name: 'Sync National Life' })).toHaveAttribute(
+      'href',
+      '/agent/integrations/national-life',
+    )
+
+    act(() => {
+      vi.advanceTimersByTime(8_000)
+    })
+    expect(screen.queryByRole('status', { name: 'A K-Bot idea' })).not.toBeInTheDocument()
+
+    act(() => {
+      vi.advanceTimersByTime(67_000)
+    })
+    expect(screen.getByRole('status', { name: 'A K-Bot idea' })).toHaveTextContent(
+      'Would you like an official illustration?',
+    )
+  })
+
+  it('stays quiet with ambient messages while K-Bot is working', () => {
+    vi.useFakeTimers()
+    render(
+      <KBotCornerPresence
+        state="working"
+        title="K-Bot is working"
+        ambientMessages={[
+          {
+            id: 'sync',
+            message: 'I can sync your National Life data for you.',
+            href: '/agent/integrations/national-life',
+            actionLabel: 'Sync National Life',
+          },
+        ]}
+      />,
+    )
+
+    act(() => {
+      vi.advanceTimersByTime(28_000)
+    })
+
+    expect(screen.queryByRole('status', { name: 'A K-Bot idea' })).not.toBeInTheDocument()
   })
 })

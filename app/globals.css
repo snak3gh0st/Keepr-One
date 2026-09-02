@@ -75,6 +75,11 @@
   50% { transform: translateY(-2px); }
 }
 
+@keyframes kbot-ambient-beacon {
+  0%, 100% { opacity: 0.45; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
 .kbot-avatar {
   image-rendering: pixelated;
 }
@@ -99,6 +104,17 @@
 .kbot-activity-panel,
 .kbot-announcement {
   animation: kbot-panel-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.kbot-ambient-announcement {
+  background:
+    linear-gradient(135deg, rgba(236, 248, 239, 0.96), rgba(255, 255, 255, 0.98) 58%),
+    var(--color-paper);
+  border-color: rgba(13, 95, 53, 0.2);
+}
+
+.kbot-ambient-beacon {
+  animation: kbot-ambient-beacon 1.8s steps(2, end) infinite;
 }
 
 .kbot-corner-presence[data-state="working"] .kbot-avatar {
@@ -224,6 +240,10 @@
 
   .kbot-activity-panel,
   .kbot-announcement {
+    animation: none !important;
+  }
+
+  .kbot-ambient-beacon {
     animation: none !important;
   }
 
