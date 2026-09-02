@@ -103,6 +103,22 @@ describe('local connector authentication notification', () => {
     expect(run).toMatchObject({ authState: 'REQUIRED', authEpoch: 2 })
   })
 
+  it('renews a consumed authentication epoch immediately on explicit retry', async () => {
+    const previousRequiredAt = new Date(now.getTime() - 60_000)
+    const { db, run } = database({
+      authState: 'REQUIRED', authEpoch: 6, authRequiredAt: previousRequiredAt,
+    })
+
+    await expect(recordLocalConnectorAuthState(db, {
+      agentId: 'agent-1', deviceId: 'device-1', runId: 'run-1',
+      state: 'RETRY_REQUIRED', now,
+    })).resolves.toEqual({ runId: 'run-1', authState: 'REQUIRED', authEpoch: 7 })
+
+    expect(run).toMatchObject({
+      authState: 'REQUIRED', authEpoch: 7, authRequiredAt: now,
+    })
+  })
+
   it('marks the matching warning read after the carrier session is restored', async () => {
     const { db, updateMany } = database()
 

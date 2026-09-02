@@ -18,7 +18,7 @@ const paramsSchema = z.strictObject({
   runId: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
 })
 const bodySchema = z.strictObject({
-  state: z.enum(['REQUIRED', 'MFA_REQUIRED', 'RESTORED']),
+  state: z.enum(['REQUIRED', 'RETRY_REQUIRED', 'MFA_REQUIRED', 'RESTORED']),
 })
 
 export async function POST(

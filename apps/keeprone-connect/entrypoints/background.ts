@@ -1604,7 +1604,9 @@ async function reportRunFailure(code: string) {
   }
 }
 
-async function reportRunAuthState(state: 'REQUIRED' | 'MFA_REQUIRED' | 'RESTORED') {
+async function reportRunAuthState(
+  state: 'REQUIRED' | 'RETRY_REQUIRED' | 'MFA_REQUIRED' | 'RESTORED',
+) {
   const device = await readDeviceState()
   const sync = await readSyncState()
   if (
@@ -3373,11 +3375,16 @@ async function retryPendingSync() {
     // whose five-minute window expired while the user kept the login tab open.
     // Keep the run, plan and stage cursor; clear only the previous delivery
     // attempt so requireCarrierAuthentication reports REQUIRED with a new epoch.
+    const renewed = await reportRunAuthState('RETRY_REQUIRED')
+    if (typeof renewed?.authEpoch !== 'number' || renewed.authEpoch < 1) {
+      await writeSyncState({ ...state, errorCode: 'CREDENTIAL_BROKER_UNAVAILABLE' })
+      return { ok: false as const, error: 'CREDENTIAL_BROKER_UNAVAILABLE' }
+    }
     await writeSyncState({
       ...state,
       status: 'NAVIGATING',
       authRenewalPending: false,
-      authRequiredAt: undefined,
+      authRequiredAt: new Date().toISOString(),
       credentialPageReloadedAt: undefined,
       credentialAttempt: undefined,
       errorCode: undefined,
