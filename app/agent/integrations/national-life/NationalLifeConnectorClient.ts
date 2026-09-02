@@ -12,6 +12,7 @@ export type ConnectorResponse = {
     runId?: string
     status?: string
     errorCode?: string
+    authRequiredAt?: string
     uploads?: number
     stageIndex?: number
     stageKey?: string
