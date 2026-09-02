@@ -154,6 +154,13 @@ const AUTH_RETRY_CODES = new Set([
   'CREDENTIAL_LEASE_ALREADY_ISSUED',
   'DEVICE_ENCRYPTION_KEY_REQUIRED',
 ])
+const AUTH_WAIT_EXPIRED_MS = 5 * 60_000
+
+function authWaitExpired(authRequiredAt: string | undefined): boolean {
+  if (!authRequiredAt) return false
+  const requiredAt = Date.parse(authRequiredAt)
+  return Number.isFinite(requiredAt) && Date.now() - requiredAt > AUTH_WAIT_EXPIRED_MS
+}
 
 /// O que prova que o run andou desde a última consulta. `uploads` é o único
 /// campo que se move dentro de uma única grade grande.
@@ -594,8 +601,11 @@ export function NationalLifeLocalConnectorCard({
           }
         }
         if (status.sync?.status === 'AUTH_REQUIRED') {
-          if (status.sync.errorCode && AUTH_RETRY_CODES.has(status.sync.errorCode)) {
-            fail(status.sync.errorCode)
+          if (
+            (status.sync.errorCode && AUTH_RETRY_CODES.has(status.sync.errorCode)) ||
+            authWaitExpired(status.sync.authRequiredAt)
+          ) {
+            fail(status.sync.errorCode ?? 'CREDENTIAL_AUTH_STATE_EXPIRED')
           } else {
             setState('login-required')
           }

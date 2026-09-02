@@ -693,6 +693,38 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
   })
 
+  it('uses the auth timestamp when the expired worker has no error code', async () => {
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-1' },
+          sync: {
+            runId: 'run-auth-expired-without-code',
+            status: 'AUTH_REQUIRED',
+            stageIndex: 9,
+            authRequiredAt: new Date(Date.now() - 6 * 60_000).toISOString(),
+          },
+        })
+        return
+      }
+      callback({ ok: false, error: 'AUTH_REQUIRED' })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+      />,
+    )
+
+    const status = await screen.findByRole('status')
+    await waitFor(() => expect(status).toHaveTextContent('sync stopped before it finished'))
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+  })
+
   it('keeps a server-confirmed partial sync recoverable when the extension retains an error', async () => {
     installChromeMock((message, callback) => {
       if (message.type === 'GET_CONNECTOR_STATUS') {
