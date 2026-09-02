@@ -187,6 +187,19 @@ describe('KBotAvatar', () => {
     )
   })
 
+  it('shows a compact visual status glyph for attention states', () => {
+    const { rerender } = render(
+      <KBotCornerPresence state="waiting" title="K-Bot is waiting" detail="Complete MFA to continue." />,
+    )
+
+    expect(screen.getByLabelText('K-Bot status').querySelector('[data-kbot-status-glyph="waiting"]')).toBeInTheDocument()
+
+    rerender(<KBotCornerPresence state="success" title="K-Bot finished" />)
+
+    expect(screen.getByLabelText('K-Bot status').querySelector('[data-kbot-status-glyph="success"]')).toBeInTheDocument()
+    expect(screen.getByLabelText('K-Bot status').querySelector('[data-kbot-celebration="true"]')).toBeInTheDocument()
+  })
+
   it('lets the pixel eyes and head follow the mouse in discrete steps', () => {
     render(<KBotCornerPresence state="idle" title="K-Bot is ready" />)
 
