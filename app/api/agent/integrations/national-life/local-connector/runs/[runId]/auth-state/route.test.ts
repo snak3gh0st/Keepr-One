@@ -72,4 +72,15 @@ describe('local connector auth-state route', () => {
       state: 'MFA_REQUIRED',
     }))
   })
+
+  it('accepts an explicit retry marker without credentials', async () => {
+    const response = await POST(request({ state: 'RETRY_REQUIRED' }), {
+      params: Promise.resolve({ runId: 'run-1' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(mocks.record).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      state: 'RETRY_REQUIRED',
+    }))
+  })
 })

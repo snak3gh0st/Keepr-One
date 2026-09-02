@@ -565,10 +565,13 @@ describe('automatic carrier login recovery', () => {
       authRenewalPending: true,
       credentialAttempt: { authEpoch: 3, leaseId: 'lease_1' },
     })
-    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
-      pathname: '/api/agent/integrations/national-life/local-connector/runs/run-1/auth-state',
-      body: { state: 'REQUIRED' },
-    }))
+    const authStateCalls = vi.mocked(signedJsonRequest).mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.pathname.endsWith('/auth-state'))
+    expect(authStateCalls.map((request) => request.body)).toEqual([
+      { state: 'RETRY_REQUIRED' },
+      { state: 'REQUIRED' },
+    ])
   })
 
   it('reloads an already-open Auth0 page once, then leases when the content script is ready', async () => {

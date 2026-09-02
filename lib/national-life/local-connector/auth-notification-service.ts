@@ -8,7 +8,11 @@ type AuthNotificationDb = Pick<
   'nationalLifeSyncRun' | 'notification' | '$transaction'
 >
 
-export type LocalConnectorAuthState = 'REQUIRED' | 'MFA_REQUIRED' | 'RESTORED'
+export type LocalConnectorAuthState =
+  | 'REQUIRED'
+  | 'RETRY_REQUIRED'
+  | 'MFA_REQUIRED'
+  | 'RESTORED'
 
 const NOTIFICATION_TYPE = 'NATIONAL_LIFE_LOGIN_REQUIRED'
 const MFA_NOTIFICATION_TYPE = 'NATIONAL_LIFE_MFA_REQUIRED'
@@ -58,10 +62,13 @@ export async function recordLocalConnectorAuthState(
     })
     if (!run) throw new LocalConnectorRunError('RUN_NOT_ACTIVE')
 
-    const startsNewEpisode = input.state === 'REQUIRED' && run.authState === 'READY'
+    const retryRequired = input.state === 'RETRY_REQUIRED'
+    const startsNewEpisode = retryRequired ||
+      (input.state === 'REQUIRED' && run.authState === 'READY')
     const authEpoch = startsNewEpisode ? run.authEpoch + 1 : run.authEpoch
     const authRequiredAt = startsNewEpisode ? now : run.authRequiredAt
-    const authState = input.state === 'RESTORED' ? 'READY' : input.state
+    const reportedAuthState = retryRequired ? 'REQUIRED' : input.state
+    const authState = reportedAuthState === 'RESTORED' ? 'READY' : reportedAuthState
     await tx.nationalLifeSyncRun.updateMany({
       where: {
         id: run.id,
@@ -72,15 +79,15 @@ export async function recordLocalConnectorAuthState(
       data: {
         authState,
         authEpoch,
-        authRequiredAt: input.state === 'RESTORED' ? null : authRequiredAt ?? now,
+        authRequiredAt: reportedAuthState === 'RESTORED' ? null : authRequiredAt ?? now,
       },
     })
 
     const dedupeKey = input.state === 'MFA_REQUIRED'
       ? mfaNotificationKey(run.id, authEpoch)
       : notificationKey(run.id)
-    if (input.state === 'REQUIRED' || input.state === 'MFA_REQUIRED') {
-      const mfa = input.state === 'MFA_REQUIRED'
+    if (reportedAuthState === 'REQUIRED' || reportedAuthState === 'MFA_REQUIRED') {
+      const mfa = reportedAuthState === 'MFA_REQUIRED'
       await tx.notification.upsert({
         where: { dedupeKey },
         create: {
@@ -113,6 +120,6 @@ export async function recordLocalConnectorAuthState(
       })
     }
 
-    return { runId: run.id, authState: input.state, authEpoch }
+    return { runId: run.id, authState: reportedAuthState, authEpoch }
   })
 }
