@@ -564,6 +564,57 @@ describe('automatic carrier login recovery', () => {
     expect(readyResponse).toHaveBeenCalledWith({ ok: true })
   })
 
+  it('recovers a stale pre-lease marker after service-worker eviction', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+      errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 0,
+        attemptedAt: '2026-09-01T20:00:00.000Z',
+      },
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    brokerResponder()
+
+    await bootBackground()
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(1)
+    expect(tabs.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+    }))
+    expect(storage.sync).toMatchObject({
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 3, leaseId: 'lease_1',
+      },
+    })
+  })
+
+  it('does not duplicate a fresh pre-lease request that may still be in flight', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+      errorCode: 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS',
+      credentialAttempt: {
+        operationKind: 'SYNC_RUN', operationId: 'run-1', authEpoch: 0,
+        attemptedAt: new Date().toISOString(),
+      },
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: authUrl }])
+    tabs.sendMessage.mockImplementation(authResponder('LOGIN'))
+    brokerResponder()
+
+    await bootBackground()
+
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/credential-leases'))).toHaveLength(0)
+    expect(tabs.sendMessage).not.toHaveBeenCalledWith(7, expect.objectContaining({
+      type: 'SUBMIT_CARRIER_CREDENTIAL',
+    }))
+  })
+
   it('retries a command login once when Auth0 reports readiness, even if it signals twice', async () => {
     storage.command = {
       commandId: 'cmd-1', runId: 'command-run-1', carrierTabId: 7,
