@@ -215,6 +215,10 @@ async function updateTab(tabId: number, updateProperties: chrome.tabs.UpdateProp
   return retryTabEdit(() => chrome.tabs.update(tabId, updateProperties))
 }
 
+async function reloadTab(tabId: number) {
+  return retryTabEdit(() => chrome.tabs.reload(tabId))
+}
+
 async function sendBeginGridWithRetry(tabId: number, message: BeginGridMessage): Promise<void> {
   let lastError: unknown
   for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
@@ -734,6 +738,9 @@ async function executePolicyDetailCommand(
     ...(sameCommand && previous.credentialAttempt
       ? { credentialAttempt: previous.credentialAttempt }
       : {}),
+    ...(sameCommand && previous.credentialPageReloadedAt
+      ? { credentialPageReloadedAt: previous.credentialPageReloadedAt }
+      : {}),
     updatedAt: new Date().toISOString(),
   })
 
@@ -915,6 +922,9 @@ async function executeIgoApplicationDraftCommand(
     phase: 'OPENING_IGO',
     ...(sameCommand && previous.credentialAttempt
       ? { credentialAttempt: previous.credentialAttempt }
+      : {}),
+    ...(sameCommand && previous.credentialPageReloadedAt
+      ? { credentialPageReloadedAt: previous.credentialPageReloadedAt }
       : {}),
     updatedAt: new Date().toISOString(),
   })
@@ -1114,6 +1124,9 @@ async function executeFlexLifeQuoteCommand(
     status: 'NAVIGATING',
     ...(sameCommand && previous.credentialAttempt
       ? { credentialAttempt: previous.credentialAttempt }
+      : {}),
+    ...(sameCommand && previous.credentialPageReloadedAt
+      ? { credentialPageReloadedAt: previous.credentialPageReloadedAt }
       : {}),
     updatedAt: new Date().toISOString(),
   })
@@ -1340,6 +1353,9 @@ async function executeForesightCommand(
     phase: 'OPENING_FORESIGHT',
     ...(sameCommand && previous.credentialAttempt
       ? { credentialAttempt: previous.credentialAttempt }
+      : {}),
+    ...(sameCommand && previous.credentialPageReloadedAt
+      ? { credentialPageReloadedAt: previous.credentialPageReloadedAt }
       : {}),
     ...(resumableTermInputHash === undefined ? {} : { termInputHash: resumableTermInputHash }),
     updatedAt: new Date().toISOString(),
@@ -1618,6 +1634,7 @@ type CredentialAuthOperation = Readonly<{
   kind: 'SYNC_RUN' | 'CONNECTOR_COMMAND'
   id: string
   tabId: number
+  pageReloadedAt?: string
   attempt?: CredentialAttempt
   errorCode?: string
 }>
@@ -1646,6 +1663,7 @@ async function credentialOperationForTab(tabId: number): Promise<CredentialAuthO
   ) {
     return {
       kind: 'CONNECTOR_COMMAND', id: command.commandId, tabId,
+      pageReloadedAt: command.credentialPageReloadedAt,
       attempt: command.credentialAttempt,
       errorCode: command.errorCode,
     }
@@ -1654,6 +1672,7 @@ async function credentialOperationForTab(tabId: number): Promise<CredentialAuthO
   if (sync.carrierTabId === tabId && sync.runId && sync.status === 'AUTH_REQUIRED') {
     return {
       kind: 'SYNC_RUN', id: sync.runId, tabId,
+      pageReloadedAt: sync.credentialPageReloadedAt,
       attempt: sync.credentialAttempt, errorCode: sync.errorCode,
     }
   }
@@ -1662,7 +1681,11 @@ async function credentialOperationForTab(tabId: number): Promise<CredentialAuthO
 
 async function updateCredentialOperation(
   operation: CredentialAuthOperation,
-  patch: { credentialAttempt?: CredentialAttempt; errorCode?: string },
+  patch: {
+    credentialPageReloadedAt?: string
+    credentialAttempt?: CredentialAttempt
+    errorCode?: string
+  },
 ) {
   if (operation.kind === 'SYNC_RUN') {
     const state = await readSyncState()
@@ -1806,6 +1829,17 @@ async function attemptAutomaticCarrierLogin(
 ) {
   const classification = await classifyCarrierAuthPage(operation.tabId)
   if (classification !== 'LOGIN') {
+    if (classification === 'UNKNOWN' && !operation.pageReloadedAt) {
+      // Chrome does not inject a newly loaded extension's content scripts into
+      // pages that were already open. Persist the one allowed recovery before
+      // reloading so worker eviction or a watchdog tick cannot create a loop.
+      await updateCredentialOperation(operation, {
+        credentialPageReloadedAt: new Date().toISOString(),
+        errorCode: undefined,
+      })
+      await reloadTab(operation.tabId)
+      return
+    }
     await markObservedAuthPage(operation, classification)
     return
   }
@@ -1946,6 +1980,7 @@ async function resolveCommandCredentialIfAuthenticated(tabId: number, rawUrl?: s
   ) return
   await writeCommandState({
     ...latest,
+    credentialPageReloadedAt: undefined,
     credentialAttempt: undefined,
     errorCode: undefined,
     updatedAt: new Date().toISOString(),
@@ -1964,6 +1999,7 @@ async function requireCarrierAuthentication(
     errorCode: firstNotice ? undefined : state.errorCode,
     authRenewalPending: true,
     authRequiredAt: state.authRequiredAt ?? new Date().toISOString(),
+    credentialPageReloadedAt: firstNotice ? undefined : state.credentialPageReloadedAt,
   })
   if (updateProperties) await updateTab(tabId, updateProperties)
   if (firstNotice) await reportRunAuthState('REQUIRED')
@@ -1978,6 +2014,7 @@ async function resolveCarrierAuthenticationIfNeeded() {
     ...(await readSyncState()),
     authRenewalPending: false,
     authRequiredAt: undefined,
+    credentialPageReloadedAt: undefined,
     credentialAttempt: undefined,
     errorCode: undefined,
   })
@@ -2172,6 +2209,7 @@ async function createRun(forceRefresh = false) {
         ? {
             authRenewalPending: undefined,
             authRequiredAt: undefined,
+            credentialPageReloadedAt: undefined,
             credentialAttempt: undefined,
           }
         : previous.status === 'AUTH_REQUIRED' && !previous.authRequiredAt

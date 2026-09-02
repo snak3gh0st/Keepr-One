@@ -74,6 +74,10 @@ export type SyncState = {
   /// user data; it only lets the scheduler distinguish a person actively
   /// signing in from a server-expired run that must be reconciled.
   authRequiredAt?: string
+  /// One bounded reload of an already-open carrier login page after an
+  /// extension update. The timestamp is coordination-only and survives service
+  /// worker eviction so recovery cannot become a reload loop.
+  credentialPageReloadedAt?: string
   credentialAttempt?: CredentialAttempt
   status: SyncStatus
   errorCode?: string
@@ -118,6 +122,7 @@ export type CommandState = {
   /// Hash only, never the illustration input. Lets a new command resume the
   /// exact same interrupted Term case without re-opening or repopulating it.
   termInputHash?: string
+  credentialPageReloadedAt?: string
   credentialAttempt?: CredentialAttempt
 }
 
@@ -212,6 +217,12 @@ export function parseCommandState(value: unknown): CommandState {
   if (typeof value.termInputHash === 'string' && /^[a-f0-9]{64}$/.test(value.termInputHash)) {
     state.termInputHash = value.termInputHash
   }
+  if (
+    typeof value.credentialPageReloadedAt === 'string' &&
+    Number.isFinite(Date.parse(value.credentialPageReloadedAt))
+  ) {
+    state.credentialPageReloadedAt = value.credentialPageReloadedAt
+  }
   const credentialAttempt = parseCredentialAttempt(value.credentialAttempt)
   if (credentialAttempt) state.credentialAttempt = credentialAttempt
   return state
@@ -230,6 +241,13 @@ export function parseSyncState(value: unknown): SyncState {
     !(SYNC_STATUSES as readonly string[]).includes(value.status) ||
     containsForbiddenStorageKey(value)) return { status: 'IDLE' }
   const state = { ...value } as SyncState
+  delete state.credentialPageReloadedAt
+  if (
+    typeof value.credentialPageReloadedAt === 'string' &&
+    Number.isFinite(Date.parse(value.credentialPageReloadedAt))
+  ) {
+    state.credentialPageReloadedAt = value.credentialPageReloadedAt
+  }
   delete state.credentialAttempt
   const credentialAttempt = parseCredentialAttempt(value.credentialAttempt)
   if (credentialAttempt) state.credentialAttempt = credentialAttempt
