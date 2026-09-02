@@ -3577,7 +3577,7 @@ async function handOffInstalledConnector() {
 export default defineBackground(() => {
   chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason !== 'install') return
-    void handOffInstalledConnector()
+    void handOffInstalledConnector().catch(() => {})
   })
 
   chrome.runtime.onMessageExternal.addListener((value, sender, sendResponse) => {
@@ -3772,7 +3772,12 @@ export default defineBackground(() => {
             }
           }
         }
-      })()
+      })().catch(() => {
+        // A navigation can race content-script teardown. Poll once more through
+        // the command executor so the existing command-level failure/retry
+        // handling owns the outcome instead of leaking an unhandled Promise.
+        void pollAndExecuteCommand(tab).catch(() => {})
+      })
       void handleTabReady(tabId, tab.url).catch((error) =>
         failSync(errorCode(error, 'TAB_EDIT_FAILED')),
       )
@@ -3809,7 +3814,7 @@ export default defineBackground(() => {
       return
     }
     if (alarm.name === COMMAND_POLL_ALARM) {
-      void pollAndExecuteCommand()
+      void pollAndExecuteCommand().catch(() => {})
     }
   })
 
@@ -3844,5 +3849,5 @@ export default defineBackground(() => {
     if (device.status === 'READY' && device.baseUrl) {
       await ensureFreshRemoteConfig(device.baseUrl)
     }
-  })()
+  })().catch(() => {})
 })
