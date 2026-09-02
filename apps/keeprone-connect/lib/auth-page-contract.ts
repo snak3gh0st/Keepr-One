@@ -27,6 +27,7 @@ export type SubmitCarrierCredentialAck = Readonly<
 const AUTH0_ORIGIN = 'https://nlg-prod.auth0.com'
 const AUTH0_LOGIN_PATH = '/login'
 const submittedForms = new WeakSet<HTMLFormElement>()
+export const NATIONAL_LIFE_AUTH_SUBMIT_CHANNEL = 'KEEPRONE_NATIONAL_LIFE_AUTH_SUBMIT_V1'
 
 function exactKeys(value: object, keys: readonly string[]) {
   const actual = Object.keys(value).sort()
@@ -216,6 +217,25 @@ export function submitNationalLifeCredential(
     input.dispatchEvent(new view.Event('input', { bubbles: true }))
     input.dispatchEvent(new view.Event('change', { bubbles: true }))
   }
-  structure.loginButton.click()
+  // Content scripts run in Chrome's isolated world. National Life installs its
+  // webAuth.login click listener in the page's MAIN world, so clicking here can
+  // leave the visibly populated form untouched. Cross only a fixed,
+  // credential-free signal; the MAIN-world executor revalidates the exact page
+  // before activating the carrier's own handler.
+  view.postMessage({
+    channel: NATIONAL_LIFE_AUTH_SUBMIT_CHANNEL,
+    type: 'SUBMIT_LOGIN',
+  }, AUTH0_ORIGIN)
   return { ok: true, code: 'SUBMITTED' }
+}
+
+export function activateNationalLifeLoginInMainWorld(
+  document: Document,
+  rawUrl: string,
+): boolean {
+  if (classifyNationalLifeAuthPage(document, rawUrl) !== 'LOGIN') return false
+  const structure = exactLoginStructure(document, new URL(rawUrl))
+  if (!structure || !structure.email.value.trim() || !structure.password.value.trim()) return false
+  structure.loginButton.click()
+  return true
 }

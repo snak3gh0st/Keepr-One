@@ -333,16 +333,28 @@ export default defineContentScript({
         riskClass: 'ctl00_mobilityPH_panelInsured_ucRisk_cboRiskClass',
         ownerType: 'ctl00_mobilityPH_panelOwner_ucOwner_cboOwnerType',
       }
+      const writeName = (doc: Document, win: CarrierWindow) => {
+        setInput(doc, fields.firstName, String(values.firstName))
+        setInput(doc, fields.lastName, String(values.lastName))
+        invoke(win, 'ctl00_mobilityPH_panelInsured_ucInsured', 'updateName')
+      }
+      const namesMatch = (doc: Document) =>
+        element<HTMLInputElement>(doc, fields.firstName).value === String(values.firstName) &&
+        element<HTMLInputElement>(doc, fields.lastName).value === String(values.lastName)
+      const matchesCompleteTermClient = (doc: Document) => namesMatch(doc) &&
+        element<HTMLSelectElement>(doc, fields.jurisdiction).value === String(values.jurisdiction) &&
+        element<HTMLSelectElement>(doc, fields.gender).value === String(values.gender) &&
+        element<HTMLInputElement>(doc, fields.birthDate).value === String(values.birthDate) &&
+        element<HTMLSelectElement>(doc, fields.riskClass).value === String(values.riskClass) &&
+        element<HTMLSelectElement>(doc, fields.ownerType).value ===
+          optionByText(doc, fields.ownerType, 'Same as Insured')
       await retryTermClientPostback(700, 'FORESIGHT_TERM_CLIENT_JURISDICTION_WRITE_MISMATCH', (doc) => {
         setSelect(doc, fields.jurisdiction, String(values.jurisdiction))
         element<HTMLSelectElement>(doc, fields.jurisdiction).dispatchEvent(new Event('change', { bubbles: true }))
       }, (doc) => element<HTMLSelectElement>(doc, fields.jurisdiction).value === String(values.jurisdiction))
-      await retryTermClientPostback(500, 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH', (doc, win) => {
-        setInput(doc, fields.firstName, String(values.firstName))
-        setInput(doc, fields.lastName, String(values.lastName))
-        invoke(win, 'ctl00_mobilityPH_panelInsured_ucInsured', 'updateName')
-      }, (doc) => element<HTMLInputElement>(doc, fields.firstName).value === String(values.firstName) &&
-        element<HTMLInputElement>(doc, fields.lastName).value === String(values.lastName))
+      await retryTermClientPostback(
+        500, 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH', writeName, namesMatch,
+      )
       await retryTermClientPostback(800, 'FORESIGHT_TERM_CLIENT_INFORMATION_WRITE_MISMATCH', (doc, win) => {
         setSelect(doc, fields.gender, String(values.gender))
         setInput(doc, fields.birthDate, String(values.birthDate))
@@ -358,6 +370,17 @@ export default defineContentScript({
         invoke(win, 'ctl00_mobilityPH_panelOwner_ucOwner', 'updateOwnerType')
       }, (doc) => element<HTMLSelectElement>(doc, fields.ownerType).value ===
         optionByText(doc, fields.ownerType, 'Same as Insured'))
+      // Foresight's owner postback can restore the insured name from its case
+      // defaults while leaving birth date, state and risk intact. Repair only
+      // that observed loss, then require a cumulative readback before funding.
+      if (!namesMatch(carrier().doc)) {
+        await retryTermClientPostback(
+          500, 'FORESIGHT_TERM_CLIENT_NAME_WRITE_MISMATCH', writeName, namesMatch,
+        )
+      }
+      if (!matchesCompleteTermClient(carrier().doc)) {
+        throw new Error('FORESIGHT_TERM_CLIENT_CUMULATIVE_WRITE_MISMATCH')
+      }
     }
     const applyTermFunding = async (values: MainRequest['values']) => {
       let { doc, win } = carrier()
