@@ -3366,6 +3366,23 @@ function enqueueBridgeMessage(tabId: number, message: BridgeMessage): Promise<vo
 }
 
 async function retryPendingSync() {
+  const state = await readSyncState()
+  if (state.status === 'AUTH_REQUIRED' && state.runId && currentStage(state)) {
+    // An explicit retry starts one fresh, server-authorized authentication
+    // episode. This is the recovery path for a broker outage or an auth lease
+    // whose five-minute window expired while the user kept the login tab open.
+    // Keep the run, plan and stage cursor; clear only the previous delivery
+    // attempt so requireCarrierAuthentication reports REQUIRED with a new epoch.
+    await writeSyncState({
+      ...state,
+      status: 'NAVIGATING',
+      authRenewalPending: false,
+      authRequiredAt: undefined,
+      credentialPageReloadedAt: undefined,
+      credentialAttempt: undefined,
+      errorCode: undefined,
+    })
+  }
   return startNewSync()
 }
 
