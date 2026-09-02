@@ -5,6 +5,7 @@ import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Button } from "@/components/Button";
 import { Field, Input, Select } from "@/components/Field";
+import { KBotAvatar } from "@/components/kbot/KBotAvatar";
 import { useI18n } from "@/components/i18n/LanguageProvider";
 import type { UserLanguage } from "@/lib/i18n/config";
 import {
@@ -204,7 +205,7 @@ function SettingsOverview({
   kbot,
 }: SettingsFormsProps) {
   const { copy } = useI18n();
-  const cards = [
+  const sections = [
     {
       href: "#perfil",
       index: "01",
@@ -215,13 +216,20 @@ function SettingsOverview({
     {
       href: "#seguranca",
       index: "02",
-      label: copy("Acesso", "Access"),
+      label: copy("Segurança", "Security"),
       value: security.email,
       detail: security.emailVerified ? copy("E-mail verificado", "Email verified") : copy("Verificação pendente", "Verification pending"),
     },
     {
-      href: "#kbot",
+      href: "#profissional",
       index: "03",
+      label: copy("Dados profissionais", "Professional details"),
+      value: professional.npn ? `NPN ${professional.npn}` : copy("Ainda não informado", "Not provided yet"),
+      detail: humanizeStatus(professional.status, copy),
+    },
+    {
+      href: "#kbot",
+      index: "04",
       label: "K-Bot",
       value: kbot.enabled ? copy("Conectado ao ambiente", "Connected to the environment") : copy("Indisponível neste ambiente", "Unavailable in this environment"),
       detail: kbot.credentialBrokerEnabled && kbot.credentialSummary.configured
@@ -232,7 +240,7 @@ function SettingsOverview({
     },
     {
       href: "#agencia",
-      index: "04",
+      index: "05",
       label: copy("Agência", "Agency"),
       value: agency.name ?? copy("Operação individual", "Individual operation"),
       detail: agency.subscriptionStatus ? subscriptionLabel(agency.subscriptionStatus, copy) : copy("Sem vínculo de agência", "No agency relationship"),
@@ -240,37 +248,74 @@ function SettingsOverview({
   ] as const;
 
   return (
-    <div className="mt-6 rounded-3xl border border-border-steel bg-rail-strong p-5 text-paper shadow-[0_24px_60px_-38px_rgba(15,29,19,0.65)] sm:p-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal-pale/75">
-            {copy("Mapa rápido", "Quick map")}
-          </p>
-          <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em]">
-            {copy("Encontre o que precisa ajustar.", "Find what you need to adjust.")}
-          </h2>
-        </div>
-        <p className="text-xs text-paper/60">
-          {copy("Quatro áreas da sua operação", "Four areas of your operation")}
-        </p>
-      </div>
+    <div className="mt-6 overflow-hidden rounded-[28px] border border-border-steel bg-paper shadow-[0_22px_64px_-44px_rgba(15,29,19,0.5)]">
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_260px]">
+        <div className="p-5 sm:p-7">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-teal-deep">
+                {copy("Espaço da conta", "Account workspace")}
+              </p>
+              <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-ink">
+                {copy("Ajuste sua operação por área.", "Tune your operation by area.")}
+              </h2>
+            </div>
+            <p className="text-xs text-ink-muted">
+              {copy("5 áreas · alterações independentes", "5 areas · independent changes")}
+            </p>
+          </div>
 
-      <div className="mt-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map((card) => (
-          <a
-            key={card.href}
-            href={card.href}
-            className="group min-w-0 rounded-2xl border border-paper/10 bg-paper/[0.07] p-4 transition-colors hover:border-teal-pale/45 hover:bg-paper/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-pale"
+          <nav
+            aria-label={copy("Seções das configurações", "Settings sections")}
+            className="mt-6 grid gap-2 sm:grid-cols-2 xl:grid-cols-5"
           >
-            <span className="flex items-center justify-between font-mono text-[10px] font-semibold tracking-[0.14em] text-teal-pale/75">
-              {card.index}
-              <span aria-hidden="true" className="text-paper/50 transition-transform group-hover:translate-x-0.5">↗</span>
-            </span>
-            <span className="mt-4 block truncate text-xs font-semibold text-paper/70">{card.label}</span>
-            <strong className="mt-1 block truncate text-sm font-semibold">{card.value}</strong>
-            <span className="mt-1 block truncate text-[11px] text-paper/55">{card.detail}</span>
-          </a>
-        ))}
+            {sections.map((section) => (
+              <a
+                key={section.href}
+                href={section.href}
+                className="group min-w-0 rounded-2xl border border-border-steel bg-panel/45 p-3.5 transition-[border-color,background-color,transform] hover:-translate-y-0.5 hover:border-teal/35 hover:bg-teal-pale/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2"
+              >
+                <span className="flex items-center justify-between font-mono text-[10px] font-semibold tracking-[0.14em] text-teal-deep/75">
+                  {section.index}
+                  <span aria-hidden="true" className="text-ink-muted/50 transition-transform group-hover:translate-x-0.5">↗</span>
+                </span>
+                <span className="mt-4 block truncate text-xs font-semibold text-ink-muted">{section.label}</span>
+                <strong className="mt-1 block truncate text-sm font-semibold text-ink">{section.value}</strong>
+                <span className="mt-1 block truncate text-[11px] text-ink-muted">{section.detail}</span>
+              </a>
+            ))}
+          </nav>
+        </div>
+
+        <aside className="relative overflow-hidden border-t border-border-steel bg-rail-strong p-5 text-paper sm:p-7 lg:border-l lg:border-t-0">
+          <span aria-hidden="true" className="absolute -right-12 -top-14 size-36 rounded-full border border-mint/15" />
+          <span aria-hidden="true" className="absolute -right-5 -top-7 size-24 rounded-full border border-mint/10" />
+          <div className="relative">
+            <div className="flex items-center gap-3">
+              <KBotAvatar
+                state={kbot.credentialBrokerEnabled && !kbot.credentialSummary.configured ? "waiting" : "idle"}
+                size="sm"
+              />
+              <div className="min-w-0">
+                <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-teal-pale/75">K-Bot</p>
+                <p className="mt-1 text-sm font-semibold">{copy("Presença operacional", "Operational presence")}</p>
+              </div>
+            </div>
+            <p className="mt-6 text-sm leading-6 text-paper/65">
+              {copy("O bot trabalha em segundo plano e só pede sua atenção quando a National Life exigir MFA.", "The bot works in the background and only asks for your attention when National Life requires MFA.")}
+            </p>
+            <div className="mt-6 border-t border-paper/10 pt-4">
+              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-paper/45">{copy("Acesso", "Access")}</p>
+              <p className="mt-2 text-sm font-semibold text-paper">
+                {kbot.credentialBrokerEnabled && kbot.credentialSummary.configured
+                  ? copy("Credencial protegida", "Protected credential")
+                  : kbot.credentialBrokerEnabled
+                    ? copy("Pronto para configurar", "Ready to configure")
+                    : copy("Login manual", "Manual sign-in")}
+              </p>
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   );
@@ -832,30 +877,6 @@ export function SettingsForms({
   agency,
   kbot,
 }: SettingsFormsProps) {
-  const { copy } = useI18n();
-  const sectionGroups = [
-    {
-      label: copy("Conta", "Account"),
-      items: [
-        { href: "#perfil", label: copy("Perfil", "Profile"), detail: copy("Dados pessoais", "Personal details") },
-        { href: "#profissional", label: copy("Dados profissionais", "Professional details"), detail: copy("NPN e situação", "NPN and status") },
-      ],
-    },
-    {
-      label: copy("Acesso", "Access"),
-      items: [
-        { href: "#seguranca", label: copy("Segurança", "Security"), detail: copy("E-mail e senha", "Email and password") },
-        { href: "#kbot", label: "K-Bot", detail: copy("National Life", "National Life") },
-      ],
-    },
-    {
-      label: copy("Operação", "Operation"),
-      items: [
-        { href: "#agencia", label: copy("Agência", "Agency"), detail: copy("Plano e vínculo", "Plan and relationship") },
-      ],
-    },
-  ] as const;
-
   return (
     <>
       <SettingsOverview
@@ -866,49 +887,13 @@ export function SettingsForms({
         kbot={kbot}
       />
 
-      <div className="mt-6 grid min-w-0 gap-4 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
-        <nav
-          aria-label={copy("Seções das configurações", "Settings sections")}
-          className="self-start rounded-3xl border border-border-steel bg-paper/90 p-3 shadow-[0_16px_44px_-36px_rgba(15,29,19,0.35)] lg:sticky lg:top-24"
-        >
-          <p className="px-3 pb-2 pt-1 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-muted">
-            {copy("Navegar por área", "Browse by area")}
-          </p>
-          <div className="grid gap-4">
-            {sectionGroups.map((group) => (
-              <div key={group.label}>
-                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted/70">
-                  {group.label}
-                </p>
-                <ul className="grid gap-1">
-                  {group.items.map((section) => (
-                    <li key={section.href}>
-                      <a
-                        href={section.href}
-                        className="group flex min-h-12 items-center justify-between gap-2 rounded-2xl px-3 py-2 transition-colors hover:bg-panel focus-visible:bg-panel focus-visible:outline-none"
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-semibold text-ink">{section.label}</span>
-                          <span className="mt-0.5 block truncate text-[11px] text-ink-muted">{section.detail}</span>
-                        </span>
-                        <span aria-hidden="true" className="text-ink-muted/50 transition-transform group-hover:translate-x-0.5">↗</span>
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </nav>
-
-        <main className="grid min-w-0 gap-4">
+      <main className="mt-6 grid min-w-0 gap-4">
         <PersonalProfileForm personal={personal} />
         <ProfessionalProfile professional={professional} />
         <SecuritySettings security={security} />
         <KBotSettings kbot={kbot} />
         <AgencySettings agency={agency} />
-        </main>
-      </div>
+      </main>
     </>
   );
 }

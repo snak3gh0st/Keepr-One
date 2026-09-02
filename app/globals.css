@@ -106,6 +106,39 @@
   animation: kbot-panel-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.kbot-activity-panel {
+  isolation: isolate;
+  background-image:
+    linear-gradient(rgba(13, 95, 53, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(13, 95, 53, 0.025) 1px, transparent 1px),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(246, 250, 245, 0.98));
+  background-position: center;
+  background-size: 22px 22px, 22px 22px, auto;
+}
+
+.kbot-activity-panel::before {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-teal), rgba(101, 228, 151, 0.12));
+  content: '';
+}
+
+.kbot-corner-presence[data-state='waiting'] .kbot-activity-panel::before {
+  background: linear-gradient(90deg, var(--color-gold), rgba(222, 169, 53, 0.12));
+}
+
+.kbot-corner-presence[data-state='success'] .kbot-activity-panel::before {
+  background: linear-gradient(90deg, var(--color-success), rgba(35, 145, 81, 0.12));
+}
+
+.kbot-corner-presence[data-state='error'] .kbot-activity-panel::before {
+  background: linear-gradient(90deg, var(--color-danger), rgba(190, 58, 58, 0.12));
+}
+
 .kbot-ambient-announcement {
   background:
     linear-gradient(135deg, rgba(236, 248, 239, 0.96), rgba(255, 255, 255, 0.98) 58%),
@@ -173,6 +206,40 @@
 .kbot-character-stage:focus-visible .kbot-character::before {
   opacity: 0.28;
   transform: translateY(0);
+}
+
+.kbot-character-stage {
+  isolation: isolate;
+  border: 1px solid rgba(13, 95, 53, 0.08);
+  background:
+    radial-gradient(circle at 50% 35%, rgba(101, 228, 151, 0.16), transparent 54%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.76), rgba(235, 242, 233, 0.5));
+  box-shadow:
+    0 12px 22px rgba(16, 41, 29, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 150ms ease;
+}
+
+.kbot-character-stage::before {
+  position: absolute;
+  z-index: 0;
+  inset: 9px 8px 10px;
+  border: 1px solid rgba(13, 95, 53, 0.08);
+  background-image:
+    linear-gradient(to right, rgba(13, 95, 53, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(13, 95, 53, 0.05) 1px, transparent 1px);
+  background-size: 10px 10px;
+  content: '';
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.kbot-character-stage:hover,
+.kbot-character-stage:focus-visible {
+  border-color: rgba(13, 95, 53, 0.22);
+  box-shadow:
+    0 15px 28px rgba(16, 41, 29, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .kbot-character[data-state="idle"] {
