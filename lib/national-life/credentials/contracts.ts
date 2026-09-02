@@ -1,6 +1,9 @@
 import { Buffer } from 'node:buffer'
 import { z } from 'zod'
 
+export const CREDENTIAL_AUTH_STATE_MAX_AGE_MS = 5 * 60_000
+export const CREDENTIAL_LEASE_LIFETIME_MS = 60_000
+
 const identifier = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/)
 const nonBlankUsername = z.string().min(1).max(128).refine(
   (value) => value.trim().length > 0,

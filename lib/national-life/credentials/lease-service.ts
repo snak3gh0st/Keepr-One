@@ -3,6 +3,8 @@ import 'server-only'
 import { randomUUID } from 'node:crypto'
 import { Prisma, type PrismaClient } from '@prisma/client'
 import {
+  CREDENTIAL_AUTH_STATE_MAX_AGE_MS,
+  CREDENTIAL_LEASE_LIFETIME_MS,
   parseCredentialLeaseRequest,
   parseCredentialLeaseResult,
   type CredentialLeaseOutcome,
@@ -16,9 +18,6 @@ import {
   consumeCredentialLeaseLimit,
   type CredentialLeaseLimitResult,
 } from './rate-limit'
-
-const AUTH_STATE_MAX_AGE_MS = 5 * 60_000
-const LEASE_LIFETIME_MS = 60_000
 
 type DeviceContext = Readonly<{
   id: string
@@ -219,7 +218,7 @@ function validateOperation(
   if (
     !operation.authRequiredAt ||
     operation.authRequiredAt > input.now ||
-    input.now.getTime() - operation.authRequiredAt.getTime() > AUTH_STATE_MAX_AGE_MS
+    input.now.getTime() - operation.authRequiredAt.getTime() > CREDENTIAL_AUTH_STATE_MAX_AGE_MS
   ) throw new CredentialLeaseError('CREDENTIAL_AUTH_STATE_EXPIRED')
   return operation
 }
@@ -270,7 +269,7 @@ export function createCredentialLeaseService(deps: LeaseServiceDependencies) {
       }))
 
       const leaseId = (deps.createLeaseId ?? (() => `lease_${randomUUID()}`))()
-      const expiresAt = new Date(now.getTime() + LEASE_LIFETIME_MS)
+      const expiresAt = new Date(now.getTime() + CREDENTIAL_LEASE_LIFETIME_MS)
       const reserved = await deps.persistence.reserveLease({
         leaseId,
         agentId: input.agentId,

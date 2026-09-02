@@ -147,6 +147,13 @@ const pilotStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
 /// margem aqui é o que evita chamar de demorado um sync saudável.
 const STALL_LIMIT = 45
 const ACTIVE_SYNC_STATUSES = new Set(['STARTING', 'NAVIGATING', 'EXTRACTING', 'UPLOADING'])
+const AUTH_RETRY_CODES = new Set([
+  'CREDENTIAL_AUTH_STATE_EXPIRED',
+  'CREDENTIAL_BROKER_UNAVAILABLE',
+  'CREDENTIAL_RATE_LIMITED',
+  'CREDENTIAL_LEASE_ALREADY_ISSUED',
+  'DEVICE_ENCRYPTION_KEY_REQUIRED',
+])
 
 /// O que prova que o run andou desde a última consulta. `uploads` é o único
 /// campo que se move dentro de uma única grade grande.
@@ -586,7 +593,13 @@ export function NationalLifeLocalConnectorCard({
             return
           }
         }
-        if (status.sync?.status === 'AUTH_REQUIRED') setState('login-required')
+        if (status.sync?.status === 'AUTH_REQUIRED') {
+          if (status.sync.errorCode && AUTH_RETRY_CODES.has(status.sync.errorCode)) {
+            fail(status.sync.errorCode)
+          } else {
+            setState('login-required')
+          }
+        }
         // Um ERROR gravado tem de sobreviver ao F5. Antes, recarregar a página
         // devolvia o cartão ao repouso como se nada tivesse acontecido.
         if (status.sync?.status === 'ERROR') fail(status.sync.errorCode ?? null)
