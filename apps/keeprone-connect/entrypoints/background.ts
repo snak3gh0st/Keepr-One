@@ -168,6 +168,11 @@ const COMMAND_POLL_ALARM = 'keeprone-national-life-command-poll'
 const COMMAND_POLL_PERIOD_MINUTES = 1
 const SCHEDULED_SYNC_PERIOD_MINUTES = 15
 const SCHEDULED_SYNC_FRESH_MS = 24 * 60 * 60_000
+// A service worker can be evicted after persisting the local pre-lease marker
+// and before the signed request reaches Keepr One. A real lease has a leaseId
+// and must never be replayed; only this marker without a lease may be recovered
+// after the watchdog has proved that the original call is no longer in flight.
+const CREDENTIAL_PRELEASE_STALE_MS = 15_000
 // The server expires a silent local run after 30 minutes. Wait one extra minute
 // before the scheduler re-enters the start endpoint so an agent actively doing
 // MFA is never raced by background recovery.
@@ -1804,7 +1809,16 @@ async function attemptAutomaticCarrierLogin(
     await markObservedAuthPage(operation, classification)
     return
   }
-  if (operation.attempt) return
+  if (operation.attempt) {
+    if (operation.attempt.leaseId) return
+    const attemptedAt = Date.parse(operation.attempt.attemptedAt)
+    const recoverablePrelease =
+      operation.attempt.authEpoch === 0 &&
+      operation.errorCode === 'CREDENTIAL_AUTO_LOGIN_IN_PROGRESS' &&
+      Number.isFinite(attemptedAt) &&
+      Date.now() - attemptedAt >= CREDENTIAL_PRELEASE_STALE_MS
+    if (!recoverablePrelease) return
+  }
 
   let issuedAttempt: CredentialAttempt | undefined
   try {
