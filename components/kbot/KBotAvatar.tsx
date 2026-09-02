@@ -130,6 +130,64 @@ export function KBotActivity({
   )
 }
 
+function KBotStatusGlyph({ state }: { state: KBotState }) {
+  if (state === 'idle') return null
+
+  return (
+    <span
+      aria-hidden="true"
+      data-kbot-status-glyph={state}
+      className={`kbot-status-glyph kbot-status-glyph-${state}`}
+    >
+      <svg viewBox="0 0 16 16" className="h-full w-full" shapeRendering="crispEdges" focusable="false">
+        {state === 'working' ? (
+          <>
+            <rect fill="currentColor" x="2" y="3" width="12" height="1" />
+            <rect fill="currentColor" x="2" y="7" width="8" height="1" />
+            <rect fill="currentColor" x="2" y="11" width="12" height="1" />
+            <rect fill="currentColor" x="11" y="6" width="3" height="3" />
+          </>
+        ) : state === 'waiting' ? (
+          <>
+            <rect fill="currentColor" x="6" y="1" width="4" height="1" />
+            <rect fill="currentColor" x="4" y="2" width="8" height="1" />
+            <rect fill="currentColor" x="3" y="3" width="10" height="5" />
+            <rect fill="currentColor" x="4" y="8" width="8" height="2" />
+            <rect fill="currentColor" x="5" y="10" width="6" height="1" />
+            <rect fill="currentColor" x="6" y="11" width="4" height="1" />
+            <rect fill="var(--color-gold-pale)" x="7" y="4" width="2" height="4" />
+            <rect fill="var(--color-gold-pale)" x="5" y="6" width="6" height="2" />
+          </>
+        ) : state === 'success' ? (
+          <>
+            <rect fill="currentColor" x="2" y="7" width="3" height="2" />
+            <rect fill="currentColor" x="4" y="9" width="3" height="2" />
+            <rect fill="currentColor" x="6" y="8" width="3" height="2" />
+            <rect fill="currentColor" x="8" y="6" width="3" height="2" />
+            <rect fill="currentColor" x="10" y="4" width="3" height="2" />
+          </>
+        ) : (
+          <>
+            <rect fill="currentColor" x="7" y="2" width="2" height="8" />
+            <rect fill="currentColor" x="7" y="12" width="2" height="2" />
+          </>
+        )}
+      </svg>
+    </span>
+  )
+}
+
+function KBotCelebration() {
+  return (
+    <span aria-hidden="true" data-kbot-celebration="true" className="kbot-celebration">
+      <span className="kbot-celebration-pixel kbot-celebration-pixel-a" />
+      <span className="kbot-celebration-pixel kbot-celebration-pixel-b" />
+      <span className="kbot-celebration-pixel kbot-celebration-pixel-c" />
+      <span className="kbot-celebration-pixel kbot-celebration-pixel-d" />
+    </span>
+  )
+}
+
 function KBotCharacter({
   state,
   activity = 'idle',
@@ -651,6 +709,8 @@ export function KBotCornerPresence({
             aria-hidden="true"
             className="absolute bottom-0 h-2.5 w-14 rounded-[50%] bg-rail-strong/20 blur-[1px]"
           />
+          <KBotStatusGlyph state={state} />
+          {state === 'success' ? <KBotCelebration /> : null}
           <KBotProgressRings progress={progress} secondaryState={secondaryState} />
           <KBotCharacter state={state} activity={activity} />
         </button>
