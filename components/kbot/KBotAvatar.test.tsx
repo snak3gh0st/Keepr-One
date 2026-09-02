@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KBotActivity, KBotAvatar, KBotCornerPresence, KBotTaskTrail } from './KBotAvatar'
@@ -182,5 +182,34 @@ describe('KBotAvatar', () => {
       'data-expression',
       'sad',
     )
+  })
+
+  it('lets the pixel eyes and head follow the mouse in discrete steps', () => {
+    render(<KBotCornerPresence state="idle" title="K-Bot is ready" />)
+
+    const trigger = screen.getByRole('button', { name: 'View K-Bot activity' })
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
+      bottom: 102,
+      height: 102,
+      left: 0,
+      right: 78,
+      top: 0,
+      width: 78,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.pointerMove(trigger, { clientX: 76, clientY: 2, pointerType: 'mouse' })
+
+    expect(trigger.style.getPropertyValue('--kbot-head-x')).toBe('1px')
+    expect(trigger.style.getPropertyValue('--kbot-head-y')).toBe('-1px')
+    expect(trigger.style.getPropertyValue('--kbot-eye-x')).toBe('1px')
+    expect(trigger.style.getPropertyValue('--kbot-eye-y')).toBe('-1px')
+
+    fireEvent.pointerLeave(trigger, { pointerType: 'mouse' })
+
+    expect(trigger.style.getPropertyValue('--kbot-head-x')).toBe('')
+    expect(trigger.style.getPropertyValue('--kbot-eye-x')).toBe('')
   })
 })

@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { useI18n } from '@/components/i18n/LanguageProvider'
 
@@ -142,68 +142,91 @@ function KBotCharacter({
         shapeRendering="crispEdges"
         focusable="false"
       >
-        <g className="kbot-character-antenna">
-          <rect className="fill-mint" x="15" y="1" width="2" height="5" />
-          <rect className="fill-current" x="14" y="0" width="4" height="3" />
-        </g>
+        <g className="kbot-character-head-motion">
+          <g className="kbot-character-antenna">
+            <rect className="fill-mint/35" x="14" y="2" width="4" height="5" />
+            <rect className="fill-current" x="15" y="1" width="2" height="5" />
+            <rect className="fill-paper/70" x="15" y="1" width="2" height="1" />
+          </g>
 
-        <rect className="fill-mint/55" x="4" y="7" width="24" height="15" />
-        <rect className="fill-mint" x="6" y="5" width="20" height="17" />
-        <rect className="fill-rail-strong" x="8" y="8" width="16" height="10" />
-        <rect className="fill-mint/70" x="2" y="10" width="4" height="8" />
-        <rect className="fill-mint/70" x="26" y="10" width="4" height="8" />
+          <g className="kbot-character-head">
+            <rect className="fill-mint/35" x="4" y="8" width="24" height="14" />
+            <rect className="fill-mint/70" x="6" y="5" width="20" height="17" />
+            <rect className="fill-mint" x="7" y="6" width="18" height="16" />
+            <rect className="fill-rail-strong" x="8" y="9" width="16" height="9" />
+            <rect className="fill-paper/24" x="9" y="7" width="8" height="1" />
+            <rect className="fill-rail-strong" x="6" y="5" width="2" height="2" />
+            <rect className="fill-rail-strong" x="24" y="5" width="2" height="2" />
+            <rect className="fill-mint/70" x="2" y="10" width="4" height="8" />
+            <rect className="fill-mint/70" x="26" y="10" width="4" height="8" />
+            <rect className="fill-paper/20" x="3" y="11" width="1" height="5" />
+            <rect className="fill-paper/20" x="28" y="11" width="1" height="5" />
+          </g>
 
-        <g className="kbot-character-eyes">
+          <g className="kbot-character-eyes">
+            {state === 'error' ? (
+              <>
+                <rect className="fill-paper" x="10" y="12" width="4" height="3" />
+                <rect className="fill-paper" x="18" y="12" width="4" height="3" />
+                <g className="kbot-eye-pupils">
+                  <rect className="fill-mint" x="11" y="13" width="2" height="2" />
+                  <rect className="fill-mint" x="19" y="13" width="2" height="2" />
+                </g>
+                <rect className="fill-mint/65" x="10" y="10" width="3" height="1" />
+                <rect className="fill-mint/65" x="13" y="11" width="1" height="1" />
+                <rect className="fill-mint/65" x="19" y="11" width="1" height="1" />
+                <rect className="fill-mint/65" x="20" y="10" width="3" height="1" />
+              </>
+            ) : (
+              <>
+                <rect className="fill-paper" x="10" y="11" width="4" height="4" />
+                <rect className="fill-paper" x="18" y="11" width="4" height="4" />
+                <g className="kbot-eye-pupils">
+                  <rect className="fill-mint" x="11" y="12" width="2" height="2" />
+                  <rect className="fill-mint" x="19" y="12" width="2" height="2" />
+                </g>
+              </>
+            )}
+          </g>
           {state === 'error' ? (
-            <>
-              <rect className="fill-paper" x="10" y="12" width="4" height="3" />
-              <rect className="fill-paper" x="18" y="12" width="4" height="3" />
-              <rect className="fill-mint" x="11" y="13" width="2" height="2" />
-              <rect className="fill-mint" x="19" y="13" width="2" height="2" />
-              <rect className="fill-mint/65" x="10" y="10" width="3" height="1" />
-              <rect className="fill-mint/65" x="13" y="11" width="1" height="1" />
-              <rect className="fill-mint/65" x="19" y="11" width="1" height="1" />
-              <rect className="fill-mint/65" x="20" y="10" width="3" height="1" />
-            </>
+            <g className="kbot-character-sad-face">
+              <rect className="fill-mint/65" x="12" y="17" width="2" height="1" />
+              <rect className="fill-mint/65" x="14" y="16" width="4" height="1" />
+              <rect className="fill-mint/65" x="18" y="17" width="2" height="1" />
+              <rect className="fill-sky-300" x="23" y="14" width="1" height="2" />
+              <rect className="fill-sky-300" x="24" y="16" width="1" height="2" />
+            </g>
+          ) : state === 'success' ? (
+            <g className="kbot-character-happy-face">
+              <rect className="fill-mint/65" x="12" y="16" width="2" height="1" />
+              <rect className="fill-mint/65" x="14" y="17" width="4" height="1" />
+              <rect className="fill-mint/65" x="18" y="16" width="2" height="1" />
+            </g>
           ) : (
-            <>
-              <rect className="fill-paper" x="10" y="11" width="4" height="4" />
-              <rect className="fill-paper" x="18" y="11" width="4" height="4" />
-              <rect className="fill-mint" x="11" y="12" width="2" height="2" />
-              <rect className="fill-mint" x="19" y="12" width="2" height="2" />
-            </>
+            <rect className="fill-mint/65" x="13" y="17" width="6" height="1" />
           )}
+          <rect className="kbot-character-scan fill-paper/70" x="8" y="8" width="16" height="1" />
         </g>
-        {state === 'error' ? (
-          <g className="kbot-character-sad-face">
-            <rect className="fill-mint/65" x="12" y="17" width="2" height="1" />
-            <rect className="fill-mint/65" x="14" y="16" width="4" height="1" />
-            <rect className="fill-mint/65" x="18" y="17" width="2" height="1" />
-            <rect className="fill-sky-300" x="23" y="14" width="1" height="2" />
-            <rect className="fill-sky-300" x="24" y="16" width="1" height="2" />
-          </g>
-        ) : state === 'success' ? (
-          <g className="kbot-character-happy-face">
-            <rect className="fill-mint/65" x="12" y="16" width="2" height="1" />
-            <rect className="fill-mint/65" x="14" y="17" width="4" height="1" />
-            <rect className="fill-mint/65" x="18" y="16" width="2" height="1" />
-          </g>
-        ) : (
-          <rect className="fill-mint/65" x="13" y="17" width="6" height="1" />
-        )}
-        <rect className="kbot-character-scan fill-paper/70" x="8" y="8" width="16" height="1" />
 
-        <rect className="fill-mint/75" x="13" y="22" width="6" height="3" />
-        <rect className="fill-mint" x="8" y="25" width="16" height="10" />
-        <rect className="fill-rail-strong" x="12" y="28" width="8" height="4" />
-        <rect className="fill-current" x="14" y="29" width="4" height="2" />
+        <g className="kbot-character-body">
+          <rect className="fill-mint/35" x="8" y="24" width="16" height="12" />
+          <rect className="fill-mint/75" x="13" y="22" width="6" height="4" />
+          <rect className="fill-mint" x="8" y="25" width="16" height="10" />
+          <rect className="fill-paper/20" x="10" y="26" width="12" height="1" />
+          <rect className="fill-rail-strong" x="11" y="28" width="10" height="5" />
+          <rect className="fill-current" x="14" y="29" width="4" height="2" />
+          <rect className="fill-paper/24" x="13" y="32" width="2" height="1" />
+          <rect className="fill-paper/24" x="17" y="32" width="2" height="1" />
+        </g>
 
         <g className="kbot-character-arm kbot-character-arm-left">
           <rect className="fill-mint/80" x="4" y="26" width="4" height="8" />
+          <rect className="fill-paper/20" x="5" y="27" width="1" height="5" />
           <rect className="fill-mint" x="3" y="32" width="5" height="3" />
         </g>
         <g className="kbot-character-arm kbot-character-arm-right">
           <rect className="fill-mint/80" x="24" y="26" width="4" height="8" />
+          <rect className="fill-paper/20" x="26" y="27" width="1" height="5" />
           <rect className="fill-mint" x="24" y="32" width="5" height="3" />
         </g>
         {carriesPaper ? (
@@ -217,10 +240,12 @@ function KBotCharacter({
         <g className="kbot-character-leg kbot-character-leg-left">
           <rect className="fill-mint/80" x="10" y="35" width="5" height="4" />
           <rect className="fill-mint" x="8" y="38" width="7" height="2" />
+          <rect className="fill-paper/20" x="9" y="38" width="3" height="1" />
         </g>
         <g className="kbot-character-leg kbot-character-leg-right">
           <rect className="fill-mint/80" x="18" y="35" width="5" height="4" />
           <rect className="fill-mint" x="18" y="38" width="7" height="2" />
+          <rect className="fill-paper/20" x="20" y="38" width="3" height="1" />
         </g>
       </svg>
     </span>
@@ -288,6 +313,32 @@ function KBotProgressRings({
       ) : null}
     </span>
   )
+}
+
+function snapKBotLook(value: number) {
+  if (value < -0.28) return -1
+  if (value > 0.28) return 1
+  return 0
+}
+
+function updateKBotLook(event: ReactPointerEvent<HTMLButtonElement>) {
+  if (event.pointerType !== 'mouse') return
+
+  const bounds = event.currentTarget.getBoundingClientRect()
+  const lookX = snapKBotLook((event.clientX - (bounds.left + bounds.width / 2)) / (bounds.width / 2))
+  const lookY = snapKBotLook((event.clientY - (bounds.top + bounds.height / 2)) / (bounds.height / 2))
+
+  event.currentTarget.style.setProperty('--kbot-head-x', `${lookX}px`)
+  event.currentTarget.style.setProperty('--kbot-head-y', `${lookY}px`)
+  event.currentTarget.style.setProperty('--kbot-eye-x', `${lookX}px`)
+  event.currentTarget.style.setProperty('--kbot-eye-y', `${lookY}px`)
+}
+
+function resetKBotLook(event: ReactPointerEvent<HTMLButtonElement>) {
+  event.currentTarget.style.removeProperty('--kbot-head-x')
+  event.currentTarget.style.removeProperty('--kbot-head-y')
+  event.currentTarget.style.removeProperty('--kbot-eye-x')
+  event.currentTarget.style.removeProperty('--kbot-eye-y')
 }
 
 /**
@@ -517,6 +568,8 @@ export function KBotCornerPresence({
           aria-controls={panelId}
           aria-label={open ? copy('Ocultar atividade do K-Bot', 'Hide K-Bot activity') : copy('Ver atividade do K-Bot', 'View K-Bot activity')}
           onClick={() => setOpen((current) => !current)}
+          onPointerMove={updateKBotLook}
+          onPointerLeave={resetKBotLook}
           className="kbot-character-stage pointer-events-auto relative grid h-[102px] w-[78px] place-items-end justify-items-center rounded-xl outline-none transition-transform duration-150 hover:-translate-y-px active:translate-y-0 focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
         >
           <span
