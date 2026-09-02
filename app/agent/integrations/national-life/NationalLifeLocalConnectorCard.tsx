@@ -553,12 +553,13 @@ export function NationalLifeLocalConnectorCard({
           void watchSyncProgressRef.current()
           return
         }
-        // The database is authoritative once a run reaches a terminal state.
-        // A service worker can retain the last transient portal error after the
-        // server has already accepted and completed every stage; surfacing that
-        // stale error beside an up-to-date 13/13 panel makes a healthy sync look
-        // broken after a reload.
-        if (status.sync?.status === 'ERROR' && status.sync.runId) {
+        // The database wins over any transient extension state. In particular,
+        // a server-timed-out run must not leave the card permanently claiming
+        // that a login is still being processed.
+        if (
+          status.sync?.runId &&
+          (status.sync.status === 'AUTH_REQUIRED' || status.sync.status === 'ERROR')
+        ) {
           if (status.sync.runId === latestRun?.runId && latestRun.state === 'COMPLETED') {
             setErrorCode(null)
             setState('idle')

@@ -168,6 +168,10 @@ const COMMAND_POLL_ALARM = 'keeprone-national-life-command-poll'
 const COMMAND_POLL_PERIOD_MINUTES = 1
 const SCHEDULED_SYNC_PERIOD_MINUTES = 15
 const SCHEDULED_SYNC_FRESH_MS = 24 * 60 * 60_000
+// The server expires a silent local run after 30 minutes. Wait one extra minute
+// before the scheduler re-enters the start endpoint so an agent actively doing
+// MFA is never raced by background recovery.
+const STALE_AUTH_RECOVERY_MS = 31 * 60_000
 // One navigation can legitimately start from the previous grid. A second
 // redirect can be the carrier's canonical route. If that canonical route still
 // does not match, a third trip would be a loop, so isolate the source instead.
@@ -544,6 +548,10 @@ function scheduledSyncIsDue(
   now = Date.now(),
 ): boolean {
   if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) return false
+  if (sync.status === 'AUTH_REQUIRED') {
+    const requiredAt = sync.authRequiredAt ? Date.parse(sync.authRequiredAt) : Number.NaN
+    return !Number.isFinite(requiredAt) || now - requiredAt >= STALE_AUTH_RECOVERY_MS
+  }
   if (!['IDLE', 'COMPLETED', 'PARTIAL'].includes(sync.status)) return false
   if (!sync.completedAt) return true
   const completedAt = Date.parse(sync.completedAt)
@@ -718,6 +726,9 @@ async function executePolicyDetailCommand(
     carrierTabId,
     nextEventSequence: sequence,
     status: 'NAVIGATING',
+    ...(sameCommand && previous.credentialAttempt
+      ? { credentialAttempt: previous.credentialAttempt }
+      : {}),
     updatedAt: new Date().toISOString(),
   })
 
@@ -897,6 +908,9 @@ async function executeIgoApplicationDraftCommand(
     nextEventSequence: sequence,
     status: 'NAVIGATING',
     phase: 'OPENING_IGO',
+    ...(sameCommand && previous.credentialAttempt
+      ? { credentialAttempt: previous.credentialAttempt }
+      : {}),
     updatedAt: new Date().toISOString(),
   })
 
@@ -945,6 +959,9 @@ async function executeIgoApplicationDraftCommand(
   if ((IGO_HANDOFF_ORIGINS as readonly string[]).includes(currentUrl.origin) ||
     (currentUrl.origin === NLG_ORIGIN && currentUrl.pathname === IGO_SSO_PATH)) return
   if (currentUrl.origin === NLG_ORIGIN && currentUrl.pathname === NLG_TOOLS_PATH) {
+    // The worker may wake after the Auth0 redirect already completed. Settle
+    // the one-shot credential lease before handing the same tab to iGO.
+    await resolveCommandCredentialIfAuthenticated(tab.id, tab.url)
     if (previous.phase === 'WAITING_IGO_HANDOFF') return
     await openIgoFromNationalLifeTools(tab.id)
     await writeCommandState({
@@ -1090,6 +1107,9 @@ async function executeFlexLifeQuoteCommand(
     carrierTabId,
     nextEventSequence: sequence,
     status: 'NAVIGATING',
+    ...(sameCommand && previous.credentialAttempt
+      ? { credentialAttempt: previous.credentialAttempt }
+      : {}),
     updatedAt: new Date().toISOString(),
   })
 
@@ -1313,6 +1333,9 @@ async function executeForesightCommand(
     nextEventSequence: sequence,
     status: 'NAVIGATING',
     phase: 'OPENING_FORESIGHT',
+    ...(sameCommand && previous.credentialAttempt
+      ? { credentialAttempt: previous.credentialAttempt }
+      : {}),
     ...(resumableTermInputHash === undefined ? {} : { termInputHash: resumableTermInputHash }),
     updatedAt: new Date().toISOString(),
   })
@@ -1370,6 +1393,11 @@ async function executeForesightCommand(
     if (currentUrl.href !== targetUrl) await updateTab(tab.id, { url: targetUrl })
     return
   }
+
+  // tabs.onUpdated is not guaranteed to survive service-worker eviction. The
+  // exact authenticated Foresight surface is a second deterministic proof that
+  // the National Life credential was accepted.
+  await resolveCommandCredentialIfAuthenticated(tab.id, tab.url)
 
   const rawInput = await signedJsonRequest<unknown>({
     baseUrl: device.baseUrl,
@@ -1676,21 +1704,28 @@ function parseLeaseMetadata(
 async function reportCredentialLeaseOutcome(
   attempt: CredentialAttempt | undefined,
   outcome: 'AUTHENTICATED' | 'MFA_REQUIRED' | 'REJECTED' | 'UNKNOWN_PAGE',
-) {
-  if (!attempt?.leaseId) return
+): Promise<boolean> {
+  if (!attempt?.leaseId) return true
   const device = await readDeviceState()
-  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) return
+  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) return false
+  const { baseUrl, deviceId } = device
+  const { leaseId } = attempt
   try {
-    await signedJsonRequest({
-      baseUrl: device.baseUrl,
-      deviceId: device.deviceId,
-      method: 'POST',
-      pathname: `/api/agent/integrations/national-life/local-connector/credential-leases/${encodeURIComponent(attempt.leaseId)}/result`,
-      body: { schemaVersion: 1, outcome },
+    await retryIdempotentSignedRequest({
+      request: () => signedJsonRequest({
+        baseUrl,
+        deviceId,
+        method: 'POST',
+        pathname: `/api/agent/integrations/national-life/local-connector/credential-leases/${encodeURIComponent(leaseId)}/result`,
+        body: { schemaVersion: 1, outcome },
+      }),
     })
+    return true
   } catch {
-    // Result reporting is intentionally one-shot and never blocks the existing
-    // browser-auth recovery path. A duplicate terminal result is harmless.
+    // Keep the bounded attempt in local state. A later authenticated page event
+    // can report the same idempotent outcome without requesting or exposing the
+    // credential again.
+    return false
   }
 }
 
@@ -1873,9 +1908,16 @@ async function resolveCommandCredentialIfAuthenticated(tabId: number, rawUrl?: s
   } catch {
     return
   }
-  if (url.origin !== NLG_ORIGIN || !url.pathname.startsWith('/agent/')) return
-  if (!(await hasAuthenticatedPortalSession(tabId))) return
-  await reportCredentialLeaseOutcome(command.credentialAttempt, 'AUTHENTICATED')
+  const authenticatedPortal = url.origin === NLG_ORIGIN && url.pathname.startsWith('/agent/')
+  const foresightSessionToken = url.searchParams.get('SessionTokenId')
+  const authenticatedForesight =
+    url.origin === NLG_ORIGIN &&
+    url.pathname === '/NWI/Main/Layout.aspx' &&
+    typeof foresightSessionToken === 'string' &&
+    /^[A-Za-z0-9_-]{16,128}$/.test(foresightSessionToken)
+  if (!authenticatedPortal && !authenticatedForesight) return
+  if (authenticatedPortal && !(await hasAuthenticatedPortalSession(tabId))) return
+  if (!(await reportCredentialLeaseOutcome(command.credentialAttempt, 'AUTHENTICATED'))) return
   // Auth0 can redirect into the agent portal while command dispatch already
   // advanced this state to NAVIGATING or RUNNING. The lease remains bound to
   // this exact tab and attempt, so clear only that attempt and preserve the
@@ -1906,6 +1948,7 @@ async function requireCarrierAuthentication(
     status: 'AUTH_REQUIRED',
     errorCode: firstNotice ? undefined : state.errorCode,
     authRenewalPending: true,
+    authRequiredAt: state.authRequiredAt ?? new Date().toISOString(),
   })
   if (updateProperties) await updateTab(tabId, updateProperties)
   if (firstNotice) await reportRunAuthState('REQUIRED')
@@ -1914,11 +1957,12 @@ async function requireCarrierAuthentication(
 async function resolveCarrierAuthenticationIfNeeded() {
   const state = await readSyncState()
   if (!state.authRenewalPending) return
-  await reportCredentialLeaseOutcome(state.credentialAttempt, 'AUTHENTICATED')
+  if (!(await reportCredentialLeaseOutcome(state.credentialAttempt, 'AUTHENTICATED'))) return
   await reportRunAuthState('RESTORED')
   await writeSyncState({
     ...(await readSyncState()),
     authRenewalPending: false,
+    authRequiredAt: undefined,
     credentialAttempt: undefined,
     errorCode: undefined,
   })
@@ -2035,6 +2079,7 @@ async function createRun(forceRefresh = false) {
     stages?: unknown
     completedStages?: unknown
     nextStageIndex?: unknown
+    reopened?: unknown
     resume?: { sequence?: unknown; offset?: unknown; recordCount?: unknown }
   }>({
     baseUrl: device.baseUrl,
@@ -2062,6 +2107,7 @@ async function createRun(forceRefresh = false) {
     response.nextStageIndex <= plan.length
     ? response.nextStageIndex
     : completedStages
+  const reopened = response.reopened === true
   const resumeSequence = typeof response.resume?.sequence === 'number' &&
     Number.isInteger(response.resume.sequence) && response.resume.sequence >= 0 && response.resume.sequence <= 10_000
     ? response.resume.sequence
@@ -2107,6 +2153,15 @@ async function createRun(forceRefresh = false) {
       navigationAttempts: undefined,
       status: 'NAVIGATING',
       errorCode: undefined,
+      ...(reopened
+        ? {
+            authRenewalPending: undefined,
+            authRequiredAt: undefined,
+            credentialAttempt: undefined,
+          }
+        : previous.status === 'AUTH_REQUIRED' && !previous.authRequiredAt
+          ? { authRequiredAt: new Date().toISOString() }
+          : {}),
     })
   } else {
     await writeSyncState({

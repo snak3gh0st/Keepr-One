@@ -70,6 +70,10 @@ export type SyncState = {
   /// True only while the carrier asks the agent to renew the browser session.
   /// No credential, cookie or MFA material is ever stored here.
   authRenewalPending?: boolean
+  /// Local age of the visible authentication wait. It contains no carrier or
+  /// user data; it only lets the scheduler distinguish a person actively
+  /// signing in from a server-expired run that must be reconciled.
+  authRequiredAt?: string
   credentialAttempt?: CredentialAttempt
   status: SyncStatus
   errorCode?: string
