@@ -319,8 +319,8 @@ describe('AgentDashboard module access', () => {
 
     expect(within(hero!).getByText('Clientes ativos conciliados').parentElement).toHaveTextContent('2')
     expect(within(hero!).getByText('Apólices ativas').parentElement).toHaveTextContent('2')
-    expect(within(hero!).getByText('AAP ativa').parentElement).toHaveTextContent(/3\.000/)
-    expect(within(hero!).getByText('AAP média por cliente').parentElement).toHaveTextContent(/1\.500/)
+    expect(within(hero!).getByText('Prêmio anual previsto · ativos').parentElement).toHaveTextContent(/3\.000/)
+    expect(within(hero!).getByText('Prêmio anual médio por cliente').parentElement).toHaveTextContent(/1\.500/)
     expect(within(hero!).getByText('A entrar em vigor').closest('a')).toHaveAttribute('href', '/agent/policies?queue=ENTER_INFORCE')
     expect(within(hero!).getByText('A entrar em vigor').closest('a')).toHaveTextContent('45')
     expect(within(hero!).getByText('Aguardando agente').closest('a')).toHaveAttribute('href', '/agent/policies?queue=WAITING_AGENT')
@@ -332,7 +332,7 @@ describe('AgentDashboard module access', () => {
     expect(within(queue!).getByText('Lapsed').closest('a')).toHaveTextContent('1')
     expect(within(queue!).getByText('Canceled').closest('a')).toHaveAttribute('href', '/agent/policies?status=CANCELLED')
     expect(within(queue!).getByText('Canceled').closest('a')).toHaveTextContent('1')
-    expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent(/1\.800/)
+    expect(within(hero!).getByText('Prêmio anual em risco').parentElement).toHaveTextContent(/1\.800/)
   })
 
   it('does not present a partial AAP subtotal as the whole portfolio', async () => {
@@ -365,10 +365,10 @@ describe('AgentDashboard module access', () => {
 
     const hero = screen.getByRole('heading', { name: 'Sua carteira, sob controle.' }).closest('article')
     expect(hero).not.toBeNull()
-    expect(within(hero!).getByText('AAP ativa').parentElement).toHaveTextContent('—')
-    expect(within(hero!).getByText('AAP média por cliente').parentElement).toHaveTextContent('—')
-    expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent('—')
-    expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent('0/1 apólices com AAP')
+    expect(within(hero!).getByText('Prêmio anual previsto · ativos').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText('Prêmio anual médio por cliente').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText('Prêmio anual em risco').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText('Prêmio anual em risco').parentElement).toHaveTextContent('0/1 apólices com prêmio anual')
     expect(within(hero!).getByText('Target Premium capturado').parentElement).toHaveTextContent('Total da carteira em apuração')
     expect(within(hero!).getByText(/Ausência de dados não significa Target Premium zero/)).toBeVisible()
   })

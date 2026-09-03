@@ -460,8 +460,8 @@ export default async function AgentDashboard({
       ? [
           { label: copy('Clientes ativos conciliados', 'Reconciled active clients'), value: hasPortfolioData ? countValue(portfolioMetrics.activeClients) : '—' },
           { label: copy('Apólices ativas', 'Active policies'), value: hasPortfolioData ? countValue(portfolioMetrics.activePolicies) : '—' },
-          { label: copy('AAP ativa', 'Active AAP'), value: activeAapValue },
-          { label: copy('AAP em risco', 'AAP at risk'), value: atRiskAapValue },
+          { label: copy('Prêmio anual previsto · ativos', 'Expected annual premium · active'), value: activeAapValue },
+          { label: copy('Prêmio anual em risco', 'Annual premium at risk'), value: atRiskAapValue },
           { label: copy('Revisões', 'Reviews'), value: countValue(dueReviews) },
         ]
       : []),
@@ -622,7 +622,7 @@ export default async function AgentDashboard({
                       </div>
                       {portfolioVerified && (
                         <p className="mt-4 text-xs leading-5 text-paper/48">
-                          {copy('AAP e status: última exportação completa da National, sem repetir apólices.', 'AAP and status: latest complete National Life export, counting each policy once.')}
+                          {copy('Prêmio anual previsto e status: última exportação completa da National, sem repetir apólices.', 'Expected annual premium and status: latest complete National Life export, counting each policy once.')}
                           {historicalPolicies > 0 && copy(
                             ` ${historicalPolicies} registros históricos fora desta exportação foram preservados e não entram nos totais atuais.`,
                             ` ${historicalPolicies} historical records absent from this export were retained and are excluded from current totals.`,
@@ -654,25 +654,25 @@ export default async function AgentDashboard({
                               : copy('Nenhum Pending Lapse', 'No Pending Lapse'),
                           },
                           {
-                            label: copy('AAP ativa', 'Active AAP'),
+                            label: copy('Prêmio anual previsto · ativos', 'Expected annual premium · active'),
                             display: activeAapValue,
                             tone: 'text-mint',
                             detail: copy(
-                              `${portfolioMetrics.premiumKnownPolicies}/${portfolioMetrics.activePolicies} apólices com AAP confirmada`,
-                              `${portfolioMetrics.premiumKnownPolicies}/${portfolioMetrics.activePolicies} policies with confirmed AAP`,
+                              `${portfolioMetrics.premiumKnownPolicies}/${portfolioMetrics.activePolicies} apólices com prêmio anual informado`,
+                              `${portfolioMetrics.premiumKnownPolicies}/${portfolioMetrics.activePolicies} policies with annual premium data`,
                             ),
                           },
                           {
-                            label: copy('AAP média por cliente', 'Average AAP per client'),
+                            label: copy('Prêmio anual médio por cliente', 'Average annual premium per client'),
                             display: averageAapValue,
                             tone: 'text-[oklch(0.82_0.12_85)]',
                             detail: !portfolioMetrics.clientCoverageComplete
                               ? copy('Conciliação de clientes em andamento', 'Client reconciliation in progress')
                               : portfolioMetrics.premiumCoverageComplete
-                              ? copy('premium anual por cliente ativo', 'annual premium per active client')
+                              ? copy('prêmio anual previsto por cliente ativo', 'expected annual premium per active client')
                               : copy(
-                                  `Faltam dados de AAP em ${portfolioMetrics.premiumMissingPolicies} apólices`,
-                                  `AAP data is missing for ${portfolioMetrics.premiumMissingPolicies} policies`,
+                                  `Falta o prêmio anual em ${portfolioMetrics.premiumMissingPolicies} apólices`,
+                                  `Annual premium data is missing for ${portfolioMetrics.premiumMissingPolicies} policies`,
                                 ),
                           },
                         ].map((metric) => (
@@ -749,15 +749,15 @@ export default async function AgentDashboard({
                           </div>
                         </div>
                         <div className="min-w-[180px] rounded-2xl border border-[oklch(0.82_0.12_85)]/20 bg-[oklch(0.82_0.12_85)]/[0.08] p-4">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/42">{copy('AAP em risco', 'AAP at risk')}</p>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/42">{copy('Prêmio anual em risco', 'Annual premium at risk')}</p>
                           <p className="mt-2 font-mono text-2xl font-medium tabular-nums text-[oklch(0.82_0.12_85)]">{atRiskAapValue}</p>
                           <p className="mt-1 text-[10px] leading-4 text-paper/40">
                             {portfolioMetrics.atRiskPremiumCoverageComplete
                               ? copy('em apólices Pending Lapse', 'in Pending Lapse policies')
                               : portfolioMetrics.pendingLapsePolicies > 0
                                 ? copy(
-                                    `${portfolioMetrics.atRiskPremiumKnownPolicies}/${portfolioMetrics.pendingLapsePolicies} apólices com AAP; total aguardando dados`,
-                                    `${portfolioMetrics.atRiskPremiumKnownPolicies}/${portfolioMetrics.pendingLapsePolicies} policies with AAP; total awaiting data`,
+                                    `${portfolioMetrics.atRiskPremiumKnownPolicies}/${portfolioMetrics.pendingLapsePolicies} apólices com prêmio anual; total aguardando dados`,
+                                    `${portfolioMetrics.atRiskPremiumKnownPolicies}/${portfolioMetrics.pendingLapsePolicies} policies with annual premium; total awaiting data`,
                                   )
                                 : copy('nenhuma apólice Pending Lapse', 'no Pending Lapse policies')}
                           </p>
@@ -772,8 +772,8 @@ export default async function AgentDashboard({
                       <p className="mt-2 max-w-2xl text-sm leading-6 text-paper/50">
                         {localConnectorEnabled
                           ? copy(
-                              'Faça a primeira sincronização para transformar a carteira em clientes, AAP e ações de retenção.',
-                              'Run the first sync to turn the book into clients, AAP, and retention actions.',
+                              'Faça a primeira sincronização para transformar a carteira em clientes, prêmio anual previsto e ações de retenção.',
+                              'Run the first sync to turn the book into clients, expected annual premium, and retention actions.',
                             )
                           : copy(
                               'A integração precisa ser configurada antes da primeira sincronização.',
