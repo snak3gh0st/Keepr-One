@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   getPromotionPreview: vi.fn(),
   findUser: vi.fn(),
   policyCount: vi.fn(),
+  policyFindMany: vi.fn(),
   policyGroupBy: vi.fn(),
+  inforceFindMany: vi.fn(),
   commissionAggregate: vi.fn(),
   commissionGroupBy: vi.fn(),
   caseCount: vi.fn(),
@@ -44,7 +46,7 @@ vi.mock('@/lib/promotion-journey', () => ({
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     user: { findUnique: mocks.findUser },
-    policy: { count: mocks.policyCount, groupBy: mocks.policyGroupBy },
+    policy: { count: mocks.policyCount, findMany: mocks.policyFindMany, groupBy: mocks.policyGroupBy },
     commissionRecord: {
       aggregate: mocks.commissionAggregate,
       groupBy: mocks.commissionGroupBy,
@@ -54,6 +56,7 @@ vi.mock('@/lib/prisma', () => ({
     commissionTransaction: { groupBy: mocks.transactionGroupBy },
     policyReview: { count: mocks.reviewCount },
     nationalLifeReportRow: { findMany: mocks.carrierRowsFindMany },
+    nationalLifeInforcePolicy: { findMany: mocks.inforceFindMany },
   },
 }))
 vi.mock('@/lib/crm', () => ({
@@ -131,6 +134,7 @@ const promotionSnapshot = {
   pendingPersonalPc: 0,
   pendingAgencyPc: 0,
   hasPromotionData: false,
+  ledgerReady: true,
   highestAchievement: null,
   mode: 'individual',
   loadError: false,
@@ -152,7 +156,9 @@ beforeEach(() => {
   mocks.getPromotionSnapshot.mockResolvedValue(promotionSnapshot)
   mocks.getPromotionPreview.mockReturnValue(null)
   mocks.policyCount.mockResolvedValue(0)
+  mocks.policyFindMany.mockResolvedValue([])
   mocks.policyGroupBy.mockResolvedValue([])
+  mocks.inforceFindMany.mockResolvedValue([])
   mocks.commissionAggregate.mockResolvedValue({ _sum: { amount: null } })
   mocks.commissionGroupBy.mockResolvedValue([])
   mocks.caseCount.mockResolvedValue(0)
@@ -235,5 +241,48 @@ describe('AgentDashboard module access', () => {
     expect(screen.getByTestId('upcoming-meetings')).toBeInTheDocument()
     expect(screen.getByTestId('journey-preview')).toBeInTheDocument()
     expect(screen.getByTestId('operation-signals')).toBeInTheDocument()
+  })
+
+  it('renders carrier-backed subtotals while an in-force snapshot is reconciling', async () => {
+    mocks.getCurrentAgentAccess.mockResolvedValue({
+      scopeAgentIds: ['agent-1'],
+      enabledModules: ['TODAY', 'COMMISSIONS', 'POLICIES'],
+      canViewTeamData: false,
+      canViewAgencyNationalLife: false,
+      canManageTeam: false,
+    })
+    mocks.policyCount.mockResolvedValue(2)
+    mocks.policyFindMany.mockResolvedValue([
+      {
+        clientId: 'client-1',
+        policyNumber: 'POLICY-1',
+        faceAmount: 100_000,
+        faceAmountSource: 'NATIONAL_LIFE_POLICY_DETAIL',
+        premium: 1_200,
+        sourceUpdatedAt: new Date('2026-09-03T16:00:00.000Z'),
+      },
+      {
+        clientId: 'client-2',
+        policyNumber: 'POLICY-2',
+        faceAmount: null,
+        faceAmountSource: null,
+        premium: 1_800,
+        sourceUpdatedAt: new Date('2026-09-03T16:00:00.000Z'),
+      },
+    ])
+    mocks.inforceFindMany.mockResolvedValue([
+      { policyNumber: 'POLICY-1', policyStatus: 'Active', fetchedAt: new Date('2026-09-03T16:00:00.000Z') },
+    ])
+
+    render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
+
+    expect(screen.getByLabelText('Produção reconhecida de 0 PC')).toBeVisible()
+    const activeClientsMetric = screen.getAllByText('Clientes ativos National')
+      .find((element) => element.tagName === 'P')
+    expect(activeClientsMetric?.parentElement).toHaveTextContent('2')
+    expect(screen.getAllByText(/100\.000/).some((element) => element.tagName === 'P')).toBe(true)
+    expect(screen.getAllByText(/3\.000/).some((element) => element.tagName === 'P')).toBe(true)
+    expect(screen.getByText(/Subtotal confirmado · 1\/2 apólices/)).toBeVisible()
+    expect(screen.getByText(/Subtotal confirmado · 2\/2 apólices/)).toBeVisible()
   })
 })

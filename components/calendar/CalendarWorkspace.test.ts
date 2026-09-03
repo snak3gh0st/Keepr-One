@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CalendarEventView } from "./types";
 import {
+  calendarEventContentData,
   dateKeyInTimeZone,
   eventOccursOnLocalDay,
   fullCalendarAllDayDateKey,
@@ -11,6 +12,12 @@ import {
 } from "./CalendarWorkspace";
 
 describe("CalendarWorkspace timezone contract", () => {
+  it("accepts FullCalendar selection mirrors without a domain event", () => {
+    expect(calendarEventContentData(undefined)).toEqual({
+      color: "currentColor",
+      caseName: null,
+    });
+  });
   it("passes the user's IANA timezone to FullCalendar", () => {
     expect(fullCalendarOptionsForTimeZone("America/Los_Angeles")).toEqual({
       timeZone: "America/Los_Angeles",
