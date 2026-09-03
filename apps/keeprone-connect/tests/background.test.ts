@@ -317,6 +317,9 @@ const chromeStub = {
     clear: vi.fn(async (name: string) => alarms.delete(name)),
     onAlarm: register('alarms.onAlarm'),
   },
+  scripting: {
+    executeScript: vi.fn(async () => []),
+  },
   tabs,
 }
 
@@ -2032,6 +2035,65 @@ describe('background plan executor', () => {
       policyDetail: expect.objectContaining({ visiblePolicyNumber: 'LS1473219' }),
     }))
     expect(storage.command).toMatchObject({ status: 'COMPLETED', nextEventSequence: 4 })
+  })
+
+  it('restores the National Life bridge when Chrome misses it after policy navigation', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd_policy_bridge_restore',
+      runId: 'run_policy_bridge_restore',
+      capability: 'READ_POLICY_DETAIL',
+      target: { kind: 'POLICY', id: 'policy_1', carrierExternalId: 'LS1473219' },
+      params: { policyNumber: 'LS1473219', navigatePath: POLICY_DETAIL_PATH },
+      idempotencyKey: 'policy_1:detail:bridge-restore',
+      issuedAt: '2026-08-26T17:00:00.000Z',
+      expiresAt: '2026-08-26T17:30:00.000Z',
+      requiresConfirmation: false,
+    }
+    vi.mocked(signedJsonRequest).mockImplementation(async (input) => {
+      if (input.pathname.endsWith('/commands/next')) {
+        return {
+          command,
+          state: 'QUEUED',
+          nextEventSequence: 1,
+          lastEventType: 'COMMAND_ACCEPTED',
+        } as never
+      }
+      return undefined as never
+    })
+    storage.command = {
+      commandId: command.commandId,
+      runId: command.runId,
+      carrierTabId: 4,
+      policyDetailPath: CURRENT_POLICY_DETAIL_PATH,
+      nextEventSequence: 1,
+      status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{
+      id: 4,
+      active: false,
+      url: `${NLG}${CURRENT_POLICY_DETAIL_PATH}`,
+    }])
+    let captureAttempts = 0
+    tabs.sendMessage.mockImplementation(async (tabId, message) => {
+      const value = message as { type?: string }
+      if (value.type === 'CAPTURE_POLICY_DETAIL' && captureAttempts++ === 0) {
+        throw new Error('Could not establish connection. Receiving end does not exist.')
+      }
+      return defaultTabMessageResponse(tabId, message)
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    expect(chromeStub.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 4 },
+      files: ['content-scripts/nlg-bridge.js'],
+    })
+    await vi.waitFor(() => expect(storage.command).toMatchObject({
+      status: 'COMPLETED', nextEventSequence: 4,
+    }))
   })
 
   it('pauses for National Life login and resumes the same command after authentication', async () => {

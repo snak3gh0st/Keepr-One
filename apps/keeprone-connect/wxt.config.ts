@@ -35,11 +35,11 @@ export default defineConfig({
   manifest: {
     name: 'K-Bot by KeeprOne',
     description: 'K-Bot sincroniza a National Life e cria ilustrações oficiais no seu navegador, com segurança.',
-    version: '0.1.79',
+    version: '0.1.80',
     // Chrome Web Store rejects the development-only key field. Keep it for
     // unpacked local builds so the smoke-test extension retains its stable ID.
     ...(!isChromeWebStoreBuild && manifestKey ? { key: manifestKey } : {}),
-    permissions: ['storage', 'tabs', 'alarms'],
+    permissions: ['storage', 'tabs', 'alarms', 'scripting'],
     host_permissions: [
       'https://www.nationallife.com/*',
       'https://nlg-prod.auth0.com/*',
