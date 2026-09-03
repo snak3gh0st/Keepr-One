@@ -150,15 +150,25 @@ function toFullCalendarEvent(event: CalendarEventView): EventInput {
   };
 }
 
+export function calendarEventContentData(item: CalendarEventView | undefined) {
+  return {
+    color: item?.calendarColor ?? "currentColor",
+    caseName: item?.case?.name ?? null,
+  };
+}
+
 function EventContent({ event, timeText }: EventContentArg) {
-  const item = event.extendedProps.event as CalendarEventView;
+  // FullCalendar also calls eventContent for the temporary selection mirror.
+  // That synthetic event has no KeeprOne domain event in extendedProps.
+  const item = event.extendedProps.event as CalendarEventView | undefined;
+  const content = calendarEventContentData(item);
   return (
     <span className="calendar-grid-event">
-      <i style={{ background: item.calendarColor }} />
+      <i style={{ background: content.color }} />
       <span>
         {timeText ? <small>{timeText}</small> : null}
         <strong>{event.title}</strong>
-        {item.case ? <em>{item.case.name}</em> : null}
+        {content.caseName ? <em>{content.caseName}</em> : null}
       </span>
     </span>
   );

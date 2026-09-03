@@ -193,6 +193,7 @@ export default async function AgentDashboard({
         pendingPersonalPc: 0,
         pendingAgencyPc: 0,
         hasPromotionData: true,
+        ledgerReady: true,
         highestAchievementRankId: 'executive-vice-president',
         mode: localPromotionPreview.mode,
         loadError: false,
@@ -205,6 +206,7 @@ export default async function AgentDashboard({
         pendingPersonalPc: promotion.pendingPersonalPc,
         pendingAgencyPc: promotion.pendingAgencyPc,
         hasPromotionData: promotion.hasPromotionData,
+        ledgerReady: promotion.ledgerReady,
         highestAchievementRankId: promotion.highestAchievement?.rankId ?? null,
         mode: promotion.mode,
         loadError: promotion.loadError,
@@ -279,6 +281,7 @@ export default async function AgentDashboard({
   let commissionTotalAmount = 0
   let commissionByPeriod: { period: string; total: number }[] = []
   let commissionAuditBlocked = false
+  let commissionAcceptedRows = 0
   let commissionRejectedRows = 0
   let commissionFetchedAt: Date | null = null
   let byStatus: { status: string; _count: { _all: number } }[] = []
@@ -524,6 +527,7 @@ export default async function AgentDashboard({
       // look like production. Rows without complete statement evidence block
       // the National commission figure instead of being treated as zero.
       commissionAuditBlocked = commissionAudit.rejectedCount > 0
+      commissionAcceptedRows = carrierRecords.length
       commissionRejectedRows = commissionAudit.rejectedCount
       commissionFetchedAt = carrierCommissionRows.reduce<Date | null>(
         (latest, row) => !latest || row.fetchedAt > latest ? row.fetchedAt : latest,
@@ -599,7 +603,7 @@ export default async function AgentDashboard({
       && !loadError
       && displayedPromotion
       && !displayedPromotion.loadError
-      && displayedPromotion.hasPromotionData,
+      && displayedPromotion.ledgerReady,
   )
   const productionNumberValue = productionAuditReady
     ? formatNumber(recognizedProduction, language, { maximumFractionDigits: 0 })
@@ -617,8 +621,11 @@ export default async function AgentDashboard({
       value: commissionTrendMap.get(period) ?? 0,
     }
   })
-  const completeCarrierMoneyValue = (value: number, known: number, expected: number) =>
-    loadError || !carrierPortfolioAuditReady || known !== expected ? '—' : formatCurrency(value, language)
+  // Render only the amount backed by carrier evidence. When coverage is not
+  // complete, the accompanying copy explicitly calls it a confirmed subtotal
+  // instead of presenting it as the final portfolio total.
+  const carrierMoneyValue = (value: number, known: number) =>
+    loadError || known === 0 ? '—' : formatCurrency(value, language)
   const auditedCommissionValue = (value: number) =>
     loadError || commissionAuditBlocked ? '—' : formatCurrency(value, language)
   const commissionAsOfLabel = commissionFetchedAt
@@ -642,8 +649,8 @@ export default async function AgentDashboard({
       ? [
           { label: copy('Produção reconhecida', 'Recognized production'), value: productionAuditReady ? `${productionNumberValue} PC` : '—' },
           { label: copy('Clientes ativos National', 'Active National Life clients'), value: carrierPortfolioAuditReady ? countValue(activeClientCount) : '—' },
-          { label: copy('Proteção confirmada National', 'National Life confirmed protection'), value: completeCarrierMoneyValue(totalProtection, protectionKnownCount, activePolicyCount) },
-          { label: copy('AAP registrado National', 'Recorded National Life AAP'), value: completeCarrierMoneyValue(totalRegisteredPremium, premiumKnownCount, activePolicyCount) },
+          { label: copy('Proteção confirmada National', 'National Life confirmed protection'), value: carrierMoneyValue(totalProtection, protectionKnownCount) },
+          { label: copy('AAP registrado National', 'Recorded National Life AAP'), value: carrierMoneyValue(totalRegisteredPremium, premiumKnownCount) },
           { label: copy('Comissão esperada', 'Expected commission'), value: auditedCommissionValue(txnExpected) },
         ]
       : []),
@@ -823,17 +830,29 @@ export default async function AgentDashboard({
                   </p>
                 </div>
                 <p className="mt-3 max-w-2xl text-xs leading-5 text-paper/48">
-                  {copy(
-                    'Valor confirmado no ledger de Target Premium da National Life; comissão permanece separada no extrato.',
-                    'Value confirmed in the National Life Target Premium ledger; commission remains separate in the statement.',
-                  )}
+                  {displayedPromotion?.hasPromotionData
+                    ? copy(
+                        'Valor confirmado no ledger de Target Premium da National Life; comissão permanece separada no extrato.',
+                        'Value confirmed in the National Life Target Premium ledger; commission remains separate in the statement.',
+                      )
+                    : productionAuditReady
+                      ? copy(
+                          'Nenhum Target Premium foi reconhecido no período atual. O ledger está disponível e o valor confirmado é zero.',
+                          'No Target Premium was recognized in the current period. The ledger is available and the confirmed value is zero.',
+                        )
+                      : copy(
+                          'O ledger de Target Premium ainda não está disponível para uma leitura auditável.',
+                          'The Target Premium ledger is not yet available for an auditable reading.',
+                        )}
                 </p>
               </div>
 
               <div data-hero-reveal className="mt-7 rounded-[20px] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
                 <div className="mb-4 flex items-center justify-between">
                   <p className="text-xs font-medium text-paper/52">
-                    {localConnectorEnabled
+                    {localConnectorEnabled && commissionAuditBlocked
+                      ? copy('Comissões com evidência completa · 6 meses', 'Commissions with complete evidence · 6 months')
+                      : localConnectorEnabled
                       ? copy('Comissões pagas National Life · 6 meses', 'National Life paid commissions · 6 months')
                       : copy('Comissões registradas · 6 meses', 'Recorded commissions · 6 months')}
                   </p>
@@ -843,7 +862,7 @@ export default async function AgentDashboard({
                       : copy(`Período ${currentPeriodLabel}`, `Period ${currentPeriodLabel}`)}
                   </p>
                 </div>
-                {commissionAuditBlocked ? (
+                {commissionAuditBlocked && commissionAcceptedRows === 0 ? (
                   <p className="rounded-xl border border-[oklch(0.78_0.12_68)]/40 bg-[oklch(0.78_0.12_68)]/10 px-4 py-5 text-xs leading-5 text-paper/72">
                     {copy(
                       `${commissionRejectedRows} registro(s) de comissão não têm evidência completa da National Life. O total foi bloqueado para evitar um número parcial ou duplicado.`,
@@ -851,14 +870,24 @@ export default async function AgentDashboard({
                     )}
                   </p>
                 ) : (
-                  <TrendChart
-                    data={commissionTrend}
-                    format="currency"
-                    tone="onDark"
-                    interactive
-                    chartHeight={124}
-                    ariaLabel={copy('Comissões registradas nos últimos seis meses', 'Commissions recorded in the last six months')}
-                  />
+                  <>
+                    <TrendChart
+                      data={commissionTrend}
+                      format="currency"
+                      tone="onDark"
+                      interactive
+                      chartHeight={124}
+                      ariaLabel={copy('Comissões registradas nos últimos seis meses', 'Commissions recorded in the last six months')}
+                    />
+                    {commissionAuditBlocked ? (
+                      <p className="mt-3 rounded-xl border border-[oklch(0.78_0.12_68)]/40 bg-[oklch(0.78_0.12_68)]/10 px-4 py-3 text-[11px] leading-5 text-paper/72">
+                        {copy(
+                          `O gráfico mostra somente ${commissionAcceptedRows} registro(s) com evidência completa. ${commissionRejectedRows} registro(s) incompletos foram excluídos do valor exibido.`,
+                          `The chart shows only ${commissionAcceptedRows} record(s) with complete evidence. ${commissionRejectedRows} incomplete record(s) were excluded from the displayed amount.`,
+                        )}
+                      </p>
+                    ) : null}
+                  </>
                 )}
               </div>
 
@@ -866,29 +895,42 @@ export default async function AgentDashboard({
                 {[
                   {
                     label: copy('Clientes ativos National', 'Active National clients'),
-                    display: carrierPortfolioAuditReady ? countValue(activeClientCount) : '—',
+                    display: activeClientCount > 0 ? countValue(activeClientCount) : '—',
                     tone: 'text-paper',
                     detail: carrierPortfolioAuditReady
                       ? copy(`${activePolicyCount} apólices em vigor`, `${activePolicyCount} in-force policies`)
-                      : copy('Snapshot normalizado ainda não reconciliado', 'Normalized snapshot has not reconciled yet'),
+                      : copy(
+                          `${activePolicyCount} apólices em vigor no registro atual · snapshot em reconciliação`,
+                          `${activePolicyCount} in-force policies in the current record · snapshot reconciling`,
+                        ),
                   },
                   {
                     label: copy('Proteção confirmada', 'Confirmed protection'),
-                    display: completeCarrierMoneyValue(totalProtection, protectionKnownCount, activePolicyCount),
+                    display: carrierMoneyValue(totalProtection, protectionKnownCount),
                     tone: 'text-mint',
-                    detail: copy(
-                      `${protectionKnownCount}/${activePolicyCount} apólices com capital lido no detalhe National`,
-                      `${protectionKnownCount}/${activePolicyCount} policies with face amount read from National Life detail`,
-                    ),
+                    detail: protectionKnownCount === activePolicyCount && carrierPortfolioAuditReady
+                      ? copy(
+                          `Total confirmado em ${protectionKnownCount} apólices`,
+                          `Confirmed total across ${protectionKnownCount} policies`,
+                        )
+                      : copy(
+                          `Subtotal confirmado · ${protectionKnownCount}/${activePolicyCount} apólices com capital lido na National`,
+                          `Confirmed subtotal · ${protectionKnownCount}/${activePolicyCount} policies with face amount read from National Life`,
+                        ),
                   },
                   {
                     label: copy('AAP registrado', 'Recorded AAP'),
-                    display: completeCarrierMoneyValue(totalRegisteredPremium, premiumKnownCount, activePolicyCount),
+                    display: carrierMoneyValue(totalRegisteredPremium, premiumKnownCount),
                     tone: 'text-[oklch(0.78_0.12_68)]',
-                    detail: copy(
-                      `${premiumKnownCount}/${activePolicyCount} apólices com prêmio anual da National`,
-                      `${premiumKnownCount}/${activePolicyCount} policies with National Life annual premium`,
-                    ),
+                    detail: premiumKnownCount === activePolicyCount && carrierPortfolioAuditReady
+                      ? copy(
+                          `Total confirmado em ${premiumKnownCount} apólices`,
+                          `Confirmed total across ${premiumKnownCount} policies`,
+                        )
+                      : copy(
+                          `Subtotal confirmado · ${premiumKnownCount}/${activePolicyCount} apólices com prêmio anual da National`,
+                          `Confirmed subtotal · ${premiumKnownCount}/${activePolicyCount} policies with National Life annual premium`,
+                        ),
                   },
                 ].map((metric) => (
                   <div key={metric.label} className="bg-rail-strong/80 px-4 py-3.5">
