@@ -26,10 +26,14 @@ const mocks = vi.hoisted(() => ({
   getCalendarConnection: vi.fn(),
   getTodayCalendarSummary: vi.fn(),
   getUpcomingCalendarEvents: vi.fn(),
+  loadNationalPolicyQueues: vi.fn(),
 }))
 
 vi.mock('@/lib/agent-context', () => ({
   getCurrentAgent: mocks.getCurrentAgent,
+}))
+vi.mock('@/lib/national-life/policy-queues-prisma', () => ({
+  loadNationalPolicyQueues: mocks.loadNationalPolicyQueues,
 }))
 vi.mock('@/lib/national-life/current-portfolio-prisma', () => ({
   loadCurrentNationalLifePortfolio: async () => {
@@ -168,6 +172,9 @@ beforeEach(() => {
   mocks.policyFindMany.mockResolvedValue([])
   mocks.policyGroupBy.mockResolvedValue([])
   mocks.targetPremiumAggregate.mockResolvedValue({ _count: { ctp: 0 }, _sum: { ctp: null } })
+  mocks.loadNationalPolicyQueues.mockResolvedValue({ verified: true, counts: {
+    ENTER_INFORCE: 45, WAITING_AGENT: 42, WAITING_CLIENT: 35,
+  } })
   mocks.inforceFindMany.mockResolvedValue([])
   mocks.commissionAggregate.mockResolvedValue({ _sum: { amount: null } })
   mocks.commissionGroupBy.mockResolvedValue([])
@@ -314,6 +321,10 @@ describe('AgentDashboard module access', () => {
     expect(within(hero!).getByText('Apólices ativas').parentElement).toHaveTextContent('2')
     expect(within(hero!).getByText('AAP ativa').parentElement).toHaveTextContent(/3\.000/)
     expect(within(hero!).getByText('AAP média por cliente').parentElement).toHaveTextContent(/1\.500/)
+    expect(within(hero!).getByText('A entrar em vigor').closest('a')).toHaveAttribute('href', '/agent/policies?queue=ENTER_INFORCE')
+    expect(within(hero!).getByText('A entrar em vigor').closest('a')).toHaveTextContent('45')
+    expect(within(hero!).getByText('Aguardando agente').closest('a')).toHaveAttribute('href', '/agent/policies?queue=WAITING_AGENT')
+    expect(within(hero!).getByText('Aguardando cliente').closest('a')).toHaveAttribute('href', '/agent/policies?queue=WAITING_CLIENT')
 
     expect(within(queue!).getByText('Pending Lapse').closest('a')).toHaveAttribute('href', '/agent/policies?status=PENDING_LAPSE')
     expect(within(queue!).getByText('Pending Lapse').closest('a')).toHaveTextContent('1')

@@ -6,6 +6,7 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getCurrentAgentAccess } from '@/lib/agent-access'
 import { decimalToNumber } from '@/lib/decimal'
 import { loadCurrentNationalLifePortfolio } from '@/lib/national-life/current-portfolio-prisma'
+import { loadNationalPolicyQueues } from '@/lib/national-life/policy-queues-prisma'
 import {
   getNationalLifeLocalConnectorConfig,
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
@@ -243,6 +244,7 @@ export default async function AgentDashboard({
   let portfolioMetrics: NationalLifePortfolioMetrics = buildNationalLifePortfolioMetrics([])
   let historicalPolicies = 0
   let portfolioVerified = false
+  let nationalQueueCounts: { ENTER_INFORCE: number; WAITING_AGENT: number; WAITING_CLIENT: number } | null = null
   let capturedTargetPremium = 0
   let targetPremiumKnownCount = 0
   let byStatus: { status: string; _count: { _all: number } }[] = []
@@ -347,19 +349,28 @@ export default async function AgentDashboard({
     portfolioMetrics = buildNationalLifePortfolioMetrics(nationalPolicyRows.rows)
     historicalPolicies = nationalPolicyRows.historicalPolicies
     portfolioVerified = nationalPolicyRows.verified
+    atRiskPolicies = portfolioMetrics.attentionPolicies
+    byStatus = statusBuckets
+    byCarrier = carrierBuckets
+    byProduct = productBuckets
     if (portfolioVerified && policyCount === nationalPolicyRows.storedPolicies) {
       policyCount = nationalPolicyRows.rows.length
       byStatus = nationalPolicyRows.statusCounts.map((row) => ({ status: row.status, _count: { _all: row.count } }))
       byCarrier = [{ carrier: 'National Life Group', _count: { _all: nationalPolicyRows.rows.length } }]
       byProduct = nationalPolicyRows.productCounts.map((row) => ({ product: row.product, _count: { _all: row.count } }))
     }
-    atRiskPolicies = portfolioMetrics.attentionPolicies
-    byStatus = statusBuckets
-    byCarrier = carrierBuckets
-    byProduct = productBuckets
   } catch (error) {
     console.error('AgentDashboard query error', error)
     loadError = true
+  }
+
+  if (canUsePolicies) {
+    try {
+      const queueResult = await loadNationalPolicyQueues(prisma, scope)
+      if (queueResult.verified) nationalQueueCounts = queueResult.counts
+    } catch (error) {
+      console.error('National policy queue query error', error)
+    }
   }
 
   if (canUseCalendar) {
@@ -663,6 +674,27 @@ export default async function AgentDashboard({
                             <p className={`mt-2 font-mono text-xl font-medium tabular-nums ${metric.tone}`}>{metric.display}</p>
                             <p className="mt-1 text-[10px] leading-4 text-paper/38">{metric.detail}</p>
                           </div>
+                        ))}
+                      </div>
+                      <div data-hero-reveal className="mt-4 grid gap-2 sm:grid-cols-3">
+                        {[
+                          { key: 'ENTER_INFORCE', label: copy('A entrar em vigor', 'Entering in force'), tone: 'text-mint' },
+                          { key: 'WAITING_AGENT', label: copy('Aguardando agente', 'Waiting on agent'), tone: 'text-amber-300' },
+                          { key: 'WAITING_CLIENT', label: copy('Aguardando cliente', 'Waiting on client'), tone: 'text-paper' },
+                        ].map((queue) => (
+                          <Link
+                            key={queue.key}
+                            href={`/agent/policies?queue=${queue.key}`}
+                            className="group rounded-xl border border-white/10 bg-white/[0.035] p-4 transition-colors hover:border-mint/45 hover:bg-white/[0.065]"
+                          >
+                            <p className={`font-mono text-2xl font-medium tabular-nums ${queue.tone}`}>
+                              {nationalQueueCounts ? countValue(nationalQueueCounts[queue.key as keyof typeof nationalQueueCounts]) : '—'}
+                            </p>
+                            <p className="mt-1 text-xs font-semibold text-paper/72">{queue.label}</p>
+                            <p className="mt-2 text-[10px] uppercase tracking-[0.12em] text-paper/38">
+                              {copy('Ver apólices filtradas →', 'View filtered policies →')}
+                            </p>
+                          </Link>
                         ))}
                       </div>
 
