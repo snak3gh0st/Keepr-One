@@ -70,8 +70,16 @@ describe('National Life policy detail extraction', () => {
 
   it('verifies the expected visible policy number without returning nearby content', () => {
     expect(policyNumberIsVisible(coverageFixture, 'ls 1473219')).toBe(true)
+    expect(policyNumberIsVisible(
+      'Policy # LS1473219 Last Updated:9/2/2026 4:55:02 AM',
+      'LS1473219',
+    )).toBe(true)
     expect(policyNumberIsVisible(coverageFixture, 'LS0000000')).toBe(false)
     expect(policyNumberIsVisible('Policy Number\nLS14732190', 'LS1473219')).toBe(false)
+    expect(policyNumberIsVisible(
+      'Policy # LS14732190 Last Updated:9/2/2026 4:55:02 AM',
+      'LS1473219',
+    )).toBe(false)
   })
 
   it('bounds and normalizes extracted values', () => {

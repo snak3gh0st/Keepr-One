@@ -79,9 +79,15 @@ export function policyNumberIsVisible(text: string, expectedPolicyNumber: string
   const expected = normalizedPolicyNumber(expectedPolicyNumber)
   if (!expected) return false
   return lines(text).some((line) => {
-    const normalized = normalizedPolicyNumber(line)
+    // Preserve the carrier's whitespace while checking token boundaries. The
+    // live header is rendered as `Policy # <number> Last Updated...` on one
+    // line; removing whitespace first incorrectly joins the number to `Last`.
+    const normalized = line.toUpperCase()
     if (normalized === expected) return true
-    if (normalized === `POLICYNUMBER:${expected}` || normalized === `POLICYNUMBER${expected}`) {
+    if (
+      normalized === `POLICY NUMBER: ${expected}` ||
+      normalized === `POLICY NUMBER ${expected}`
+    ) {
       return true
     }
     const index = normalized.indexOf(expected)
