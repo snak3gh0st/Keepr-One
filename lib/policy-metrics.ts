@@ -28,12 +28,15 @@ export function annualizedPolicyPremium(premium: unknown, premiumMode: string | 
  * Quarterly.
  */
 export function auditedNationalLifeAap(premium: unknown): number | null {
-  const amount = decimalToNumber(premium)
-  return Number.isFinite(amount) && amount > 0 ? amount : null
+  if (premium == null || typeof premium === 'boolean') return null
+  const text = String(premium).trim()
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return null
+  const amount = Number(text)
+  return Number.isFinite(amount) && amount >= 0 ? amount : null
 }
 
 export type NationalLifePortfolioMetricRow = {
-  clientId: string
+  clientId: string | null
   status: string
   sourceStatus: string | null
   premium: unknown
@@ -43,6 +46,7 @@ export type NationalLifePortfolioMetricRow = {
 export type NationalLifePortfolioMetrics = {
   hasData: boolean
   activeClients: number
+  clientCoverageComplete: boolean
   activePolicies: number
   activeAap: number
   averageAapPerClient: number | null
@@ -75,12 +79,13 @@ export function buildNationalLifePortfolioMetrics(
   const activeAaps = activeRows.map((row) => auditedNationalLifeAap(row.premium))
   const pendingLapseAaps = pendingLapseRows.map((row) => auditedNationalLifeAap(row.premium))
   const activeAap = activeAaps.reduce<number>(
-    (total, premium) => total + (premium ?? 0),
+    (total, premium) => total + Math.round((premium ?? 0) * 100),
     0,
-  )
+  ) / 100
   const premiumKnownPolicies = activeAaps.filter((premium) => premium !== null).length
   const atRiskPremiumKnownPolicies = pendingLapseAaps.filter((premium) => premium !== null).length
-  const activeClients = new Set(activeRows.map((row) => row.clientId)).size
+  const activeClients = new Set(activeRows.map((row) => row.clientId).filter(Boolean)).size
+  const clientCoverageComplete = activeRows.every((row) => row.clientId !== null)
   const premiumCoverageComplete = activeRows.length > 0 && premiumKnownPolicies === activeRows.length
   const lastUpdatedAt = rows.reduce<Date | null>(
     (latest, row) => row.sourceUpdatedAt && (!latest || row.sourceUpdatedAt > latest)
@@ -92,10 +97,11 @@ export function buildNationalLifePortfolioMetrics(
   return {
     hasData: rows.length > 0,
     activeClients,
+    clientCoverageComplete,
     activePolicies: activeRows.length,
     activeAap,
     averageAapPerClient:
-      premiumCoverageComplete && activeClients > 0 ? activeAap / activeClients : null,
+      premiumCoverageComplete && clientCoverageComplete && activeClients > 0 ? activeAap / activeClients : null,
     premiumKnownPolicies,
     premiumMissingPolicies: activeRows.length - premiumKnownPolicies,
     premiumCoverageComplete,
@@ -104,17 +110,17 @@ export function buildNationalLifePortfolioMetrics(
     cancelledPolicies: cancelledRows.length,
     attentionPolicies: pendingLapseRows.length + lapsedRows.length + cancelledRows.length,
     atRiskAap: pendingLapseAaps.reduce<number>(
-      (total, premium) => total + (premium ?? 0),
+      (total, premium) => total + Math.round((premium ?? 0) * 100),
       0,
-    ),
+    ) / 100,
     atRiskPremiumKnownPolicies,
     atRiskPremiumMissingPolicies: pendingLapseRows.length - atRiskPremiumKnownPolicies,
     atRiskPremiumCoverageComplete:
       pendingLapseRows.length > 0 && atRiskPremiumKnownPolicies === pendingLapseRows.length,
     lostAap: [...lapsedRows, ...cancelledRows].reduce(
-      (total, row) => total + (auditedNationalLifeAap(row.premium) ?? 0),
+      (total, row) => total + Math.round((auditedNationalLifeAap(row.premium) ?? 0) * 100),
       0,
-    ),
+    ) / 100,
     lastUpdatedAt,
   }
 }

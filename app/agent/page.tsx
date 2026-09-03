@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getCurrentAgentAccess } from '@/lib/agent-access'
 import { decimalToNumber } from '@/lib/decimal'
+import { loadCurrentNationalLifePortfolio } from '@/lib/national-life/current-portfolio-prisma'
 import {
   getNationalLifeLocalConnectorConfig,
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
@@ -108,7 +109,7 @@ function PriorityRow({
 }
 
 function formatCurrency(value: number, language: UserLanguage): string {
-  return formatLocalizedCurrency(value, language, 'USD', { maximumFractionDigits: 0 })
+  return formatLocalizedCurrency(value, language, 'USD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function safeGroupCount(groupCount: unknown): number {
@@ -240,6 +241,8 @@ export default async function AgentDashboard({
 
   let policyCount = 0
   let portfolioMetrics: NationalLifePortfolioMetrics = buildNationalLifePortfolioMetrics([])
+  let historicalPolicies = 0
+  let portfolioVerified = false
   let capturedTargetPremium = 0
   let targetPremiumKnownCount = 0
   let byStatus: { status: string; _count: { _all: number } }[] = []
@@ -265,17 +268,8 @@ export default async function AgentDashboard({
         ? prisma.policy.count({ where: { agentId: { in: scope } } })
         : 0,
       canUsePolicies
-        ? (prisma.policy.findMany?.({
-            where: { agentId: { in: scope }, sourceProvider: 'NATIONAL_LIFE' },
-            select: {
-              clientId: true,
-              status: true,
-              sourceStatus: true,
-              premium: true,
-              sourceUpdatedAt: true,
-            },
-          }) ?? [])
-        : [],
+        ? loadCurrentNationalLifePortfolio(prisma, scope)
+        : { rows: [], historicalPolicies: 0, verified: false },
       canUsePolicies
         ? prisma.nationalLifePolicyDetailSnapshot.aggregate({
             where: {
@@ -350,7 +344,9 @@ export default async function AgentDashboard({
     policyCount = policyTotal
     targetPremiumKnownCount = targetPremiumSnapshot._count.ctp
     capturedTargetPremium = decimalToNumber(targetPremiumSnapshot._sum.ctp)
-    portfolioMetrics = buildNationalLifePortfolioMetrics(nationalPolicyRows)
+    portfolioMetrics = buildNationalLifePortfolioMetrics(nationalPolicyRows.rows)
+    historicalPolicies = nationalPolicyRows.historicalPolicies
+    portfolioVerified = nationalPolicyRows.verified
     atRiskPolicies = portfolioMetrics.attentionPolicies
     byStatus = statusBuckets
     byCarrier = carrierBuckets
@@ -438,7 +434,7 @@ export default async function AgentDashboard({
       : []),
     ...(canUsePolicies
       ? [
-          { label: copy('Clientes ativos National', 'Active National clients'), value: hasPortfolioData ? countValue(portfolioMetrics.activeClients) : '—' },
+          { label: copy('Clientes ativos National', 'Active National clients'), value: hasPortfolioData && portfolioMetrics.clientCoverageComplete ? countValue(portfolioMetrics.activeClients) : '—' },
           { label: copy('Apólices ativas', 'Active policies'), value: hasPortfolioData ? countValue(portfolioMetrics.activePolicies) : '—' },
           { label: copy('AAP ativa', 'Active AAP'), value: activeAapValue },
           { label: copy('AAP em risco', 'AAP at risk'), value: atRiskAapValue },
@@ -579,14 +575,14 @@ export default async function AgentDashboard({
                         <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/42">
                           {copy('Target Premium capturado', 'Captured Target Premium')}
                         </p>
-                        <p className="mt-2 font-mono text-3xl font-medium tabular-nums text-mint">
-                          {capturedTargetPremiumValue}
+                        <p className="mt-2 text-lg font-medium text-mint">
+                          {copy('Total da carteira em apuração', 'Book total pending reconciliation')}
                         </p>
                         <p className="mt-2 text-xs leading-5 text-paper/48">
                           {targetPremiumKnownCount > 0
                             ? copy(
-                                `Subtotal de CTP do detalhe de ${targetPremiumKnownCount}/${portfolioMetrics.activePolicies} apólices. Ainda não representa o Target Premium total da carteira.`,
-                                `CTP subtotal from ${targetPremiumKnownCount}/${portfolioMetrics.activePolicies} policy details. It does not yet represent the book's total Target Premium.`,
+                                `${capturedTargetPremiumValue} é apenas o subtotal de ${targetPremiumKnownCount} detalhes capturados, não o total das ${portfolioMetrics.activePolicies} apólices ativas.`,
+                                `${capturedTargetPremiumValue} is only the subtotal of ${targetPremiumKnownCount} captured details, not the total of ${portfolioMetrics.activePolicies} active policies.`,
                               )
                             : copy(
                                 'CTP ainda não capturado nos detalhes da National. Ausência de dados não significa Target Premium zero.',
@@ -600,11 +596,20 @@ export default async function AgentDashboard({
                           )}
                         </p>
                       </div>
+                      {portfolioVerified && (
+                        <p className="mt-4 text-xs leading-5 text-paper/48">
+                          {copy('AAP e status: última exportação completa da National, sem repetir apólices.', 'AAP and status: latest complete National Life export, counting each policy once.')}
+                          {historicalPolicies > 0 && copy(
+                            ` ${historicalPolicies} registros históricos fora desta exportação foram preservados e não entram nos totais atuais.`,
+                            ` ${historicalPolicies} historical records absent from this export were retained and are excluded from current totals.`,
+                          )}
+                        </p>
+                      )}
                       <div data-hero-reveal className="mt-6 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2 xl:grid-cols-4">
                         {[
                           {
                             label: copy('Clientes ativos', 'Active clients'),
-                            display: countValue(portfolioMetrics.activeClients),
+                            display: portfolioMetrics.clientCoverageComplete ? countValue(portfolioMetrics.activeClients) : '—',
                             tone: 'text-paper',
                             detail: copy(
                               `${portfolioMetrics.activePolicies} apólices em vigor`,
@@ -635,7 +640,9 @@ export default async function AgentDashboard({
                             label: copy('AAP média por cliente', 'Average AAP per client'),
                             display: averageAapValue,
                             tone: 'text-[oklch(0.82_0.12_85)]',
-                            detail: portfolioMetrics.premiumCoverageComplete
+                            detail: !portfolioMetrics.clientCoverageComplete
+                              ? copy('Conciliação de clientes em andamento', 'Client reconciliation in progress')
+                              : portfolioMetrics.premiumCoverageComplete
                               ? copy('premium anual por cliente ativo', 'annual premium per active client')
                               : copy(
                                   `Faltam dados de AAP em ${portfolioMetrics.premiumMissingPolicies} apólices`,

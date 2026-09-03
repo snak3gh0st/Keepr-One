@@ -1,0 +1,60 @@
+import type { NationalLifePortfolioMetricRow } from '../policy-metrics'
+import { reconcileInforceRows, type InforceRow } from './portfolio-reconcile'
+
+export type StoredPortfolioRow = NationalLifePortfolioMetricRow & {
+  agentId: string
+  policyNumber: string
+}
+
+/** Membership and money come from ONE completed carrier export, never the
+ * accumulated CRM history. History is retained, not silently marked canceled. */
+export function currentPortfolioFromSnapshot(input: {
+  rows: InforceRow[]
+  stored: StoredPortfolioRow[]
+  observedAt: Date
+}) {
+  const { policies } = reconcileInforceRows(input.rows)
+  const stored = new Map(input.stored.map((row) => [row.policyNumber, row]))
+  const membership = new Set(policies.map((row) => row.policyNumber))
+  // A repeated policy may represent multiple agents in the export. Count its
+  // AAP once, but do not silently choose between conflicting financial rows.
+  const values = new Map<string, string>()
+  for (const row of input.rows) {
+    const parsed = reconcileInforceRows([row]).policies[0]
+    if (!parsed) continue
+    const value = JSON.stringify([parsed.status, parsed.sourceStatus, parsed.premium])
+    const previous = values.get(parsed.policyNumber)
+    if (previous !== undefined && previous !== value) {
+      throw new Error('NATIONAL_PORTFOLIO_SNAPSHOT_CONFLICT')
+    }
+    values.set(parsed.policyNumber, value)
+  }
+  return {
+    rows: policies.map((row): NationalLifePortfolioMetricRow => ({
+      clientId: stored.get(row.policyNumber)?.clientId ?? null,
+      status: row.status,
+      sourceStatus: row.sourceStatus,
+      premium: row.premium,
+      sourceUpdatedAt: input.observedAt,
+    })),
+    historicalPolicies: input.stored.filter((row) => !membership.has(row.policyNumber)).length,
+  }
+}
+
+export function verifyPortfolioPages(input: {
+  expectedRecordCount: number
+  receivedRecordCount: number
+  finalSequence: number
+  truncated: boolean
+  pages: { sequence: number; recordCount: number; records: unknown; observedAt: Date }[]
+}) {
+  const pages = [...input.pages].sort((a, b) => a.sequence - b.sequence)
+  if (input.truncated || input.expectedRecordCount !== input.receivedRecordCount
+    || pages.length !== input.finalSequence + 1
+    || pages.some((page, index) => page.sequence !== index || !Array.isArray(page.records)
+      || page.records.length !== page.recordCount)
+    || pages.reduce((sum, page) => sum + page.recordCount, 0) !== input.receivedRecordCount) {
+    throw new Error('NATIONAL_PORTFOLIO_SNAPSHOT_INCOMPLETE')
+  }
+  return pages
+}

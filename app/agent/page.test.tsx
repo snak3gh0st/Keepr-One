@@ -31,6 +31,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/agent-context', () => ({
   getCurrentAgent: mocks.getCurrentAgent,
 }))
+vi.mock('@/lib/national-life/current-portfolio-prisma', () => ({
+  loadCurrentNationalLifePortfolio: async () => ({ rows: await mocks.policyFindMany(), historicalPolicies: 0, verified: true }),
+}))
 vi.mock('@/lib/agent-access', () => ({
   getCurrentAgentAccess: mocks.getCurrentAgentAccess,
 }))
@@ -351,7 +354,7 @@ describe('AgentDashboard module access', () => {
     expect(within(hero!).getByText('AAP média por cliente').parentElement).toHaveTextContent('—')
     expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent('—')
     expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent('0/1 apólices com AAP')
-    expect(within(hero!).getByText('Target Premium capturado').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText('Target Premium capturado').parentElement).toHaveTextContent('Total da carteira em apuração')
     expect(within(hero!).getByText(/Ausência de dados não significa Target Premium zero/)).toBeVisible()
   })
 
@@ -373,7 +376,8 @@ describe('AgentDashboard module access', () => {
 
     const target = screen.getByText('Target Premium capturado').parentElement
     expect(target).toHaveTextContent('US$ 325,80')
-    expect(target).toHaveTextContent('Subtotal de CTP do detalhe de 1/1 apólices')
+    expect(target).toHaveTextContent('Total da carteira em apuração')
+    expect(target).toHaveTextContent('apenas o subtotal de 1 detalhes capturados')
     expect(target).toHaveTextContent('NPN é opcional')
     expect(target).not.toHaveTextContent('0 PC')
   })
