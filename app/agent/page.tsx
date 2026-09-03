@@ -129,6 +129,13 @@ function formatCurrency(value: number, language: UserLanguage): string {
   return formatLocalizedCurrency(value, language, 'USD', { maximumFractionDigits: 0 })
 }
 
+function formatTargetPremiumCurrency(value: number, language: UserLanguage): string {
+  return formatLocalizedCurrency(value, language, 'USD', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
+
 function formatMonthShort(period: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, {
     month: 'short',
@@ -192,6 +199,7 @@ export default async function AgentDashboard({
         estimatedAgencyPc: 0,
         pendingPersonalPc: 0,
         pendingAgencyPc: 0,
+        confirmedCreditCount: 1,
         hasPromotionData: true,
         ledgerReady: true,
         highestAchievementRankId: 'executive-vice-president',
@@ -205,6 +213,7 @@ export default async function AgentDashboard({
         estimatedAgencyPc: promotion.estimatedAgencyPc,
         pendingPersonalPc: promotion.pendingPersonalPc,
         pendingAgencyPc: promotion.pendingAgencyPc,
+        confirmedCreditCount: promotion.confirmedCreditCount,
         hasPromotionData: promotion.hasPromotionData,
         ledgerReady: promotion.ledgerReady,
         highestAchievementRankId: promotion.highestAchievement?.rankId ?? null,
@@ -277,6 +286,8 @@ export default async function AgentDashboard({
   let activePolicyCount = 0
   let protectionKnownCount = 0
   let premiumKnownCount = 0
+  let capturedTargetPremium = 0
+  let targetPremiumKnownCount = 0
   let carrierPortfolioAuditReady = false
   let commissionTotalAmount = 0
   let commissionByPeriod: { period: string; total: number }[] = []
@@ -299,6 +310,7 @@ export default async function AgentDashboard({
       policyTotal,
       inforcePolicyRows,
       canonicalInforceSnapshotRows,
+      targetPremiumSnapshot,
       commissionAgg,
       commissionPeriodBuckets,
       statusBuckets,
@@ -334,6 +346,21 @@ export default async function AgentDashboard({
             select: { policyNumber: true, policyStatus: true, fetchedAt: true },
           }) ?? [])
         : [],
+      canUseCommissions
+        ? prisma.nationalLifePolicyDetailSnapshot.aggregate({
+            where: {
+              agentId: { in: scope },
+              deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+              ctp: { gt: 0 },
+              policy: {
+                status: 'INFORCE',
+                sourceProvider: 'NATIONAL_LIFE',
+              },
+            },
+            _count: { ctp: true },
+            _sum: { ctp: true },
+          })
+        : { _count: { ctp: 0 }, _sum: { ctp: null } },
       canUseCommissions
         ? prisma.commissionRecord.aggregate({ where: commissionScopeWhere, _sum: { amount: true } })
         : { _sum: { amount: null } },
@@ -427,6 +454,8 @@ export default async function AgentDashboard({
     policyCount = policyTotal
     activePolicyCount = inforcePolicyRows.length
     activeClientCount = new Set(inforcePolicyRows.map((policy) => policy.clientId)).size
+    targetPremiumKnownCount = targetPremiumSnapshot._count.ctp
+    capturedTargetPremium = decimalToNumber(targetPremiumSnapshot._sum.ctp)
     const canonicalActiveRows = canonicalInforceSnapshotRows.filter((row) => {
       const status = row.policyStatus?.trim().toLowerCase()
       return status === 'active' || status === 'pending lapse'
@@ -603,11 +632,15 @@ export default async function AgentDashboard({
       && !loadError
       && displayedPromotion
       && !displayedPromotion.loadError
-      && displayedPromotion.ledgerReady,
+      && displayedPromotion.ledgerReady
+      && displayedPromotion.confirmedCreditCount > 0,
   )
+  const hasCapturedTargetPremium = !loadError && targetPremiumKnownCount > 0
   const productionNumberValue = productionAuditReady
     ? formatNumber(recognizedProduction, language, { maximumFractionDigits: 0 })
-    : '—'
+    : hasCapturedTargetPremium
+      ? formatTargetPremiumCurrency(capturedTargetPremium, language)
+      : '—'
   const commissionTrendMap = new Map(commissionByPeriod.map((bucket) => [bucket.period, bucket.total]))
   const commissionTrend = Array.from({ length: 6 }, (_, index) => {
     const period = shiftPeriod(currentP, index - 5)
@@ -780,7 +813,11 @@ export default async function AgentDashboard({
                     className="mt-4 max-w-4xl text-[clamp(2.35rem,4.1vw,4.35rem)] font-medium leading-[0.98] tracking-[-0.06em]"
                   >
                     {canUseCommissions
-                      ? copy('Sua produção reconhecida.', 'Your recognized production.')
+                      ? productionAuditReady
+                        ? copy('Sua produção reconhecida.', 'Your recognized production.')
+                        : hasCapturedTargetPremium
+                          ? copy('Seu Target Premium capturado.', 'Your captured Target Premium.')
+                          : copy('Sua produção está em reconciliação.', 'Your production is being reconciled.')
                       : copy('Seu dia começa com clareza.', 'Start your day with clarity.')}
                   </h1>
                 </div>
@@ -807,16 +844,25 @@ export default async function AgentDashboard({
                 <>
               <div data-hero-reveal className="mt-7">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-paper/42">
-                  {copy('Target Premium confirmado', 'Confirmed Target Premium')} <span aria-hidden>·</span> PC
+                  {productionAuditReady
+                    ? <>{copy('Target Premium confirmado', 'Confirmed Target Premium')} <span aria-hidden>·</span> PC</>
+                    : hasCapturedTargetPremium
+                      ? copy('Target Premium capturado na National', 'Target Premium captured from National Life')
+                      : copy('Target Premium em reconciliação', 'Target Premium under reconciliation')}
                 </p>
                 <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3">
                   <p
-                    aria-label={!productionAuditReady
-                      ? copy('Produção reconhecida indisponível', 'Recognized production unavailable')
-                      : copy(
+                    aria-label={productionAuditReady
+                      ? copy(
                           `Produção reconhecida de ${productionNumberValue} PC`,
                           `Recognized production of ${productionNumberValue} PC`,
-                        )}
+                        )
+                      : hasCapturedTargetPremium
+                        ? copy(
+                            `Target Premium capturado de ${productionNumberValue}`,
+                            `Captured Target Premium of ${productionNumberValue}`,
+                          )
+                        : copy('Target Premium indisponível', 'Target Premium unavailable')}
                     className="flex items-start gap-2"
                   >
                     <span aria-hidden className="font-mono text-[clamp(3.5rem,6vw,6.25rem)] font-medium leading-[0.84] tracking-[-0.072em] tabular-nums">
@@ -830,19 +876,19 @@ export default async function AgentDashboard({
                   </p>
                 </div>
                 <p className="mt-3 max-w-2xl text-xs leading-5 text-paper/48">
-                  {displayedPromotion?.hasPromotionData
+                  {productionAuditReady
                     ? copy(
                         'Valor confirmado no ledger de Target Premium da National Life; comissão permanece separada no extrato.',
                         'Value confirmed in the National Life Target Premium ledger; commission remains separate in the statement.',
                       )
-                    : productionAuditReady
+                    : hasCapturedTargetPremium
                       ? copy(
-                          'Nenhum Target Premium foi reconhecido no período atual. O ledger está disponível e o valor confirmado é zero.',
-                          'No Target Premium was recognized in the current period. The ledger is available and the confirmed value is zero.',
+                          `Subtotal exato de CTP capturado no detalhe de ${targetPremiumKnownCount} de ${activePolicyCount} apólice(s). NPN não é obrigatório; o valor só passa a PC confirmado com a evidência de pagamento da National.`,
+                          `Exact CTP subtotal captured from ${targetPremiumKnownCount} of ${activePolicyCount} policy detail(s). NPN is optional; the value becomes confirmed PC only with National Life payment evidence.`,
                         )
                       : copy(
-                          'O ledger de Target Premium ainda não está disponível para uma leitura auditável.',
-                          'The Target Premium ledger is not yet available for an auditable reading.',
+                          'A National ainda não forneceu Target Premium suficiente para uma leitura auditável. Nenhum zero será presumido.',
+                          'National Life has not provided enough Target Premium data for an auditable reading. Zero will not be assumed.',
                         )}
                 </p>
               </div>

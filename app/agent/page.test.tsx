@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   policyFindMany: vi.fn(),
   policyGroupBy: vi.fn(),
   inforceFindMany: vi.fn(),
+  targetPremiumAggregate: vi.fn(),
   commissionAggregate: vi.fn(),
   commissionGroupBy: vi.fn(),
   caseCount: vi.fn(),
@@ -57,6 +58,7 @@ vi.mock('@/lib/prisma', () => ({
     policyReview: { count: mocks.reviewCount },
     nationalLifeReportRow: { findMany: mocks.carrierRowsFindMany },
     nationalLifeInforcePolicy: { findMany: mocks.inforceFindMany },
+    nationalLifePolicyDetailSnapshot: { aggregate: mocks.targetPremiumAggregate },
   },
 }))
 vi.mock('@/lib/crm', () => ({
@@ -133,6 +135,7 @@ const promotionSnapshot = {
   estimatedAgencyPc: 0,
   pendingPersonalPc: 0,
   pendingAgencyPc: 0,
+  confirmedCreditCount: 0,
   hasPromotionData: false,
   ledgerReady: true,
   highestAchievement: null,
@@ -159,6 +162,7 @@ beforeEach(() => {
   mocks.policyFindMany.mockResolvedValue([])
   mocks.policyGroupBy.mockResolvedValue([])
   mocks.inforceFindMany.mockResolvedValue([])
+  mocks.targetPremiumAggregate.mockResolvedValue({ _count: { ctp: 0 }, _sum: { ctp: null } })
   mocks.commissionAggregate.mockResolvedValue({ _sum: { amount: null } })
   mocks.commissionGroupBy.mockResolvedValue([])
   mocks.caseCount.mockResolvedValue(0)
@@ -276,7 +280,7 @@ describe('AgentDashboard module access', () => {
 
     render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
 
-    expect(screen.getByLabelText('Produção reconhecida de 0 PC')).toBeVisible()
+    expect(screen.getByLabelText('Target Premium indisponível')).toBeVisible()
     const activeClientsMetric = screen.getAllByText('Clientes ativos National')
       .find((element) => element.tagName === 'P')
     expect(activeClientsMetric?.parentElement).toHaveTextContent('2')
@@ -284,5 +288,41 @@ describe('AgentDashboard module access', () => {
     expect(screen.getAllByText(/3\.000/).some((element) => element.tagName === 'P')).toBe(true)
     expect(screen.getByText(/Subtotal confirmado · 1\/2 apólices/)).toBeVisible()
     expect(screen.getByText(/Subtotal confirmado · 2\/2 apólices/)).toBeVisible()
+  })
+
+  it('renders captured carrier CTP instead of claiming an empty ledger is zero', async () => {
+    mocks.getPromotionSnapshot.mockResolvedValue({
+      ...promotionSnapshot,
+      pendingPersonalPc: 325.8,
+      pendingCreditCount: 1,
+      hasPromotionData: true,
+    })
+    mocks.getCurrentAgentAccess.mockResolvedValue({
+      scopeAgentIds: ['agent-1'],
+      enabledModules: ['TODAY', 'COMMISSIONS', 'POLICIES'],
+      canViewTeamData: false,
+      canViewAgencyNationalLife: false,
+      canManageTeam: false,
+    })
+    mocks.policyFindMany.mockResolvedValue([
+      {
+        clientId: 'client-1',
+        policyNumber: 'POLICY-1',
+        faceAmount: null,
+        faceAmountSource: null,
+        premium: 960,
+        sourceUpdatedAt: new Date('2026-09-03T16:00:00.000Z'),
+      },
+    ])
+    mocks.targetPremiumAggregate.mockResolvedValue({
+      _count: { ctp: 1 },
+      _sum: { ctp: 325.8 },
+    })
+
+    render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
+
+    expect(screen.getByLabelText(/Target Premium capturado de/)).toHaveTextContent('US$ 325,80')
+    expect(screen.queryByText(/valor confirmado é zero/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/Subtotal exato de CTP capturado no detalhe de 1 de 1 apólice/)).toBeVisible()
   })
 })

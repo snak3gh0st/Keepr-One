@@ -998,13 +998,16 @@ function canonicalCarrierAgentNumber(value: string | null | undefined) {
 async function getActiveProducerNpn(
   agentId: string,
   database: PromotionDatabase,
-) {
+): Promise<string | undefined | null> {
   const agent = await database.agent.findUnique({
     where: { id: agentId },
     select: { npn: true, status: true },
   })
   if (!agent || agent.status !== 'ACTIVE') return null
-  return canonicalCarrierAgentNumber(agent.npn)
+  // The signed connector/device is the ownership boundary. NPN is optional:
+  // when present it adds a row-level identity check, but its absence must not
+  // discard carrier data captured through that agent's authenticated account.
+  return canonicalCarrierAgentNumber(agent.npn) ?? undefined
 }
 
 function withOwnershipSkips(
@@ -1035,7 +1038,9 @@ export async function syncConfirmedCasePromotionCredits(
   database: PromotionDatabase = prisma,
 ) {
   const producerNpn = await getActiveProducerNpn(input.agentId, database)
-  const ownedSnapshots = producerNpn
+  const ownedSnapshots = producerNpn === undefined
+    ? input.snapshots
+    : producerNpn
     ? input.snapshots.filter(
         (snapshot) =>
           canonicalCarrierAgentNumber(snapshot.writingAgentNumber) === producerNpn,
@@ -1045,9 +1050,8 @@ export async function syncConfirmedCasePromotionCredits(
     ownedSnapshots.map((snapshot): PromotionSource => ({
       surface: 'CASE_SNAPSHOT',
       policyNumber: snapshot.policyNo,
-      // Product contract: every invited producer connects their own carrier
-      // account. Agency production is a frozen roll-up of those producer-owned
-      // syncs; an agency login is never used to guess ownership from a row name.
+      // The signed connector account establishes ownership. When the optional
+      // NPN exists, the filter above additionally verifies the carrier row.
       producerAgentId: input.agentId,
       carrierStatus: snapshot.carrierStatus,
       targetPremium: snapshot.targetPremium,
@@ -1083,7 +1087,9 @@ export async function syncConfirmedInforcePromotionCredits(
   database: PromotionDatabase = prisma,
 ) {
   const producerNpn = await getActiveProducerNpn(input.agentId, database)
-  const ownedSnapshots = producerNpn
+  const ownedSnapshots = producerNpn === undefined
+    ? input.snapshots
+    : producerNpn
     ? input.snapshots.filter(
         (snapshot) =>
           canonicalCarrierAgentNumber(snapshot.agentNumber) === producerNpn,
@@ -1141,7 +1147,9 @@ async function syncPaymentEvidence(
   database: PromotionDatabase,
 ) {
   const producerNpn = await getActiveProducerNpn(input.agentId, database)
-  const ownedEvidence = producerNpn
+  const ownedEvidence = producerNpn === undefined
+    ? input.evidence
+    : producerNpn
     ? input.evidence.filter(
         (item) => canonicalCarrierAgentNumber(item.writingAgentNumber) === producerNpn,
       )
@@ -1260,7 +1268,7 @@ async function syncPolicyDetailPromotionCredits(
   }
 
   const producerNpn = await getActiveProducerNpn(input.agentId, database)
-  if (!producerNpn) {
+  if (producerNpn === null) {
     return {
       status: 'SYNCED',
       examined: 1,
@@ -1418,7 +1426,9 @@ async function syncStoredNationalLifePromotionCreditsForAgent(
     return parsed && detailPolicies.has(parsed.policyNumber) ? [parsed] : []
   })
   const producerNpn = await getActiveProducerNpn(input.agentId, database)
-  const ownedEvidence = producerNpn
+  const ownedEvidence = producerNpn === undefined
+    ? evidence
+    : producerNpn
     ? evidence.filter(
         (item) => canonicalCarrierAgentNumber(item.writingAgentNumber) === producerNpn,
       )
@@ -1464,15 +1474,15 @@ async function syncStoredNationalLifePromotionCreditsForAgent(
   })
   if (pendingSources.length > 0) {
     results.push(
-      producerNpn
-        ? await syncSources(pendingSources, database)
-        : {
+      producerNpn === null
+        ? {
             status: 'SYNCED',
             examined: pendingSources.length,
             eligible: 0,
             inserted: 0,
             skipped: { PRODUCER_IDENTITY_MISMATCH: pendingSources.length },
-          },
+          }
+        : await syncSources(pendingSources, database),
     )
   }
 
