@@ -7,6 +7,7 @@ function row(overrides: Partial<InforceRow>): InforceRow {
     agentNumber: null,
     policyNumber: 'LS1',
     policyStatus: 'Active',
+    lastStatusChangeDate: null,
     policyIssueDate: '06/02/2023',
     productName: 'Indexed Universal Life',
     insuredClientName: 'ENRICO ABDALLA',
@@ -96,6 +97,26 @@ describe('reconcileInforceRows', () => {
       const { policies } = reconcileInforceRows([row({ policyStatus: carrier })])
       expect(policies[0]?.status, carrier).toBe(expected)
     }
+  })
+
+  it('preserves the carrier status-change date for retention follow-up', () => {
+    const { policies } = reconcileInforceRows([
+      row({
+        policyStatus: 'Lapsed',
+        lastStatusChangeDate: '08/15/2026',
+      } as Partial<InforceRow> & { lastStatusChangeDate: string }),
+    ])
+
+    expect((policies[0] as { statusChangedAt?: Date } | undefined)?.statusChangedAt)
+      .toEqual(new Date(Date.UTC(2026, 7, 15)))
+  })
+
+  it('rejects an impossible carrier date instead of moving it into another month', () => {
+    const { policies } = reconcileInforceRows([
+      row({ lastStatusChangeDate: '02/30/2026' }),
+    ])
+
+    expect(policies[0]?.statusChangedAt).toBeNull()
   })
 
   it('never invents a premium or a date of birth that no slice carried', () => {

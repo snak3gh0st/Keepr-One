@@ -8,6 +8,7 @@ function row(overrides: Partial<InforceRow>): InforceRow {
     agentNumber: null,
     policyNumber: 'LS1',
     policyStatus: 'Active',
+    lastStatusChangeDate: null,
     policyIssueDate: '06/02/2023',
     productName: 'Indexed Universal Life',
     insuredClientName: 'Enrico Abdalla',
@@ -41,6 +42,16 @@ describe('planPortfolioIngest', () => {
 
     expect(plan.policies[0]?.faceAmount).toBeNull()
     expect(plan.needsFaceAmount).toEqual(['LS1'])
+  })
+
+  it('plans the carrier status-change date with a lapsed policy', () => {
+    const plan = planPortfolioIngest({
+      rows: [row({ policyStatus: 'Lapsed', lastStatusChangeDate: '08/15/2026' })],
+      existingClients: [],
+    })
+
+    expect((plan.policies[0] as { statusChangedAt?: Date } | undefined)?.statusChangedAt)
+      .toEqual(new Date(Date.UTC(2026, 7, 15)))
   })
 
   it('attaches the policy to an existing client instead of duplicating them', () => {

@@ -41,6 +41,7 @@ const planned: PlannedPolicy & { agentId: string; clientId: string } = {
   product: 'IUL',
   status: 'INFORCE',
   sourceStatus: 'Active',
+  statusChangedAt: new Date('2026-08-15T00:00:00.000Z'),
   faceAmount: null,
   premium: 1200,
   effectiveDate: null,
@@ -94,6 +95,19 @@ describe('prismaIngestDeps', () => {
     await deps.upsertPolicy({ ...planned, sourceStatus: 'Pending Lapse' })
 
     expect(updateMany.mock.calls[0]?.[0].data.sourceStatus).toBe('Pending Lapse')
+  })
+
+  it('persists the carrier status-change date for retention follow-up', async () => {
+    const existing = policyDeps()
+    const fresh = policyDeps({ updateCounts: [0] })
+
+    await existing.deps.upsertPolicy(planned)
+    await fresh.deps.upsertPolicy(planned)
+
+    expect(existing.updateMany.mock.calls[0]?.[0].data.statusChangedAt)
+      .toEqual(new Date('2026-08-15T00:00:00.000Z'))
+    expect(fresh.create.mock.calls[0]?.[0].data.statusChangedAt)
+      .toEqual(new Date('2026-08-15T00:00:00.000Z'))
   })
 
   it('keeps an unknown carrier premium null instead of inventing zero', async () => {

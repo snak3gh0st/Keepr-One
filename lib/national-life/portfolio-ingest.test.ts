@@ -11,6 +11,7 @@ const row = (overrides: Partial<InforceRow>): InforceRow => ({
   agentNumber: '10001',
   policyNumber: 'LS1',
   policyStatus: 'Active',
+  lastStatusChangeDate: null,
   policyIssueDate: '06/02/2023',
   productName: 'IUL',
   insuredClientName: 'Enrico Abdalla',
