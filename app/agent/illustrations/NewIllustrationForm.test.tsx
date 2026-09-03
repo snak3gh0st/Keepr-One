@@ -16,19 +16,19 @@ import { NewIllustrationForm } from './NewIllustrationForm'
 afterEach(cleanup)
 
 describe('NewIllustrationForm', () => {
-  it('collects exactly one source amount for the selected IUL solve basis', async () => {
+  it('collects exactly one source amount for the selected IUL strategy', async () => {
     const user = userEvent.setup()
     render(<NewIllustrationForm />)
 
-    expect(screen.getByRole('radio', { name: 'Resolver pelo capital segurado' })).toBeChecked()
-    expect(screen.getByRole('spinbutton', { name: 'Capital segurado' })).toBeTruthy()
-    expect(screen.queryByRole('spinbutton', { name: 'Prêmio mensal' })).toBeNull()
-
-    await user.click(screen.getByRole('radio', { name: 'Resolver pelo prêmio mensal' }))
-
-    expect(screen.getByRole('spinbutton', { name: 'Prêmio mensal' })).toBeTruthy()
+    expect(screen.getByRole('radio', { name: 'Máximo Cash Value' })).toBeChecked()
+    expect(screen.getByRole('spinbutton', { name: 'Aporte mensal' })).toBeTruthy()
     expect(screen.queryByRole('spinbutton', { name: 'Capital segurado' })).toBeNull()
-    expect(screen.getByDisplayValue('PREMIUM')).toBeTruthy()
+
+    await user.click(screen.getByRole('radio', { name: 'Foco em proteção' }))
+
+    expect(screen.getByRole('spinbutton', { name: 'Capital segurado' })).toBeTruthy()
+    expect(screen.queryByRole('spinbutton', { name: 'Aporte mensal' })).toBeNull()
+    expect(screen.getByDisplayValue('Protection_Focus')).toBeTruthy()
   })
 
   it('switches to the carrier-specific Term fields without asking for an IUL premium', async () => {

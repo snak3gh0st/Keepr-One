@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getIllustrationCommandStatuses } from '@/lib/national-life/illustration-command-status'
 import { illustrationPdfMessage } from '@/lib/national-life/illustration-pdf-status'
+import { flexLifeProductLabel } from '@/lib/national-life/flex-life'
 import { IllustrationPdfButton } from './IllustrationPdfButton'
 import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
 import { Shell } from '@/components/Shell'
@@ -112,6 +113,8 @@ export default async function IllustrationsPage({
       case 'FORESIGHT_SOLVE_READBACK_MISMATCH':
       case 'FORESIGHT_RESPONSE_INVALID':
         return 'Foresight did not return a verifiable result for this scenario. Review the source amount and generate a new illustration; no PDF was issued.'
+      case 'FORESIGHT_QUICK_VIEW_READBACK_MISMATCH':
+        return 'The National Life Quick Review was incomplete or differed from the calculated values. No PDF was issued, and no number was accepted as official.'
       case null:
         return 'The PDF could not be generated.'
       default:
@@ -193,7 +196,7 @@ export default async function IllustrationsPage({
                   >
                     {illustration.insuredName ?? '—'}
                   </Link>
-                  <span className="mt-0.5 block text-xs text-ink-muted">Foresight · FlexLife</span>
+                  <span className="mt-0.5 block text-xs text-ink-muted">Foresight · {flexLifeProductLabel(illustration.productName)}</span>
                 </Td>
                 <Td>
                   {illustration.client ? (
@@ -209,7 +212,9 @@ export default async function IllustrationsPage({
                 </Td>
                 <Td>
                   <span className="block">{illustration.productName ?? '—'}</span>
-                  <span className="mt-0.5 block text-xs text-ink-muted">{copy("S&P 500 · foco em teto", "S&P 500 · cap focus")}</span>
+                  {flexLifeProductLabel(illustration.productName) === 'FlexLife' ? (
+                    <span className="mt-0.5 block text-xs text-ink-muted">{copy("S&P 500 · foco em teto", "S&P 500 · cap focus")}</span>
+                  ) : null}
                 </Td>
                 <TdNum>
                   {illustration.faceAmount ? currency(Number(illustration.faceAmount), locale) : '—'}

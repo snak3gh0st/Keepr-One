@@ -85,6 +85,30 @@ describe('server-owned Foresight illustration snapshot', () => {
     })
   })
 
+  it('seals the selected National Life strategy into the immutable request', () => {
+    expect(buildForesightIllustrationSnapshot({
+      ...input,
+      rawPayload: {
+        foresightDraft: {
+          schemaVersion: 2,
+          firstName: 'KeeprOne',
+          lastName: 'Test',
+          dateOfBirth: '1990-01-01',
+          issueState: 'FL',
+          gender: 'Male',
+          rateClass: 'Standard_NT',
+          solveBasis: 'PREMIUM',
+          solveMethod: 'Minimum_DB_Max_Cash_Value',
+          targetMonthlyPremium: 2_000,
+          deathBenefitOption: 'A_Level',
+          strategy: 'SP500PointToPointCapFocus',
+        },
+      },
+    })).toMatchObject({
+      solve: { basis: 'PREMIUM', method: 'Minimum_DB_Max_Cash_Value', amount: 2_000 },
+    })
+  })
+
   it('builds a versioned immutable FlexLife snapshot without an InsuranceCase', () => {
     expect(buildForesightIllustrationSnapshot(input)).toEqual({
       schemaVersion: 1,
@@ -165,6 +189,45 @@ describe('server-owned Foresight illustration snapshot', () => {
     expect(parseForesightSolvedIllustrationReceipt(receipt)).toEqual(receipt)
     expect(parseForesightSolvedIllustrationReceipt({ ...receipt, monthlyPremium: 0 })).toBeNull()
     expect(parseForesightSolvedIllustrationReceipt({ ...receipt, annualPremium: 0 })).toBeNull()
+  })
+
+  it('accepts only a bounded annual Quick Review table from Foresight', () => {
+    const receipt = {
+      inputHash: 'a'.repeat(64), caseFingerprint: `case_${'b'.repeat(64)}`,
+      carrierCaseName: 'KEEPRONE-20260902-CM123ILLUSTRATION', productCode: '956',
+      solveBasis: 'PREMIUM', faceAmount: 1_300_000, monthlyPremium: 2_000,
+      annualPremium: 24_000, release: '5.3.65.31', reportCode: 'NAIC_ILLUSTRATION',
+      documentSha256: 'c'.repeat(64), documentBytes: 1_500_000, saved: true,
+      quickReview: {
+        evidence: {
+          source: 'FORESIGHT_QUICK_VIEW', observedAt: '2026-09-02T18:00:00.000Z',
+          sourceRows: [['Initial Face Amount', 'Target Premium'], ['1300000', '18501.6']],
+        },
+        summary: {
+          initialFaceAmount: 1_300_000, lapseYear: 0, mecYear: 0, modalPremium: 2_000,
+          minimumPremium: 6_511.92, deathBenefitProtectionPremium: 6_655.44,
+          targetPremium: 18_501.6, mecPremium: 87_021, guidelineLevelPremium: 23_422,
+          guidelineSinglePremium: 375_315,
+        },
+        annualProjection: [{
+          policyYear: 1, age: 31, premiumOutlay: 24_000, weightedAverageInterestRate: 5.89,
+          loan: 0, annualIncome: 0, accumulatedValue: 16_088.19,
+          cashSurrenderValue: 6_088.19, netDeathBenefit: 1_316_188.19,
+        }],
+      },
+    } as const
+    expect(parseForesightSolvedIllustrationReceipt(receipt)).toEqual(receipt)
+    expect(parseForesightSolvedIllustrationReceipt({
+      ...receipt,
+      quickReview: { ...receipt.quickReview, annualProjection: [] },
+    })).toBeNull()
+    expect(parseForesightSolvedIllustrationReceipt({
+      ...receipt,
+      quickReview: {
+        ...receipt.quickReview,
+        summary: { ...receipt.quickReview.summary, modalPremium: null },
+      },
+    })).toBeNull()
   })
 
   it.each([

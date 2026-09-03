@@ -32,6 +32,7 @@ import { createFlexLifeQuoteResultRepository } from '@/lib/national-life/flexlif
 import { extractForesightTermPremiums } from '@/lib/national-life/foresight-term-pdf'
 import type { IgoApplicationDraftReceipt } from '@/lib/application-addon/igo-receipt'
 import { createHash } from 'node:crypto'
+import type { ForesightQuickReview } from '@/lib/national-life/foresight-illustration-contract'
 
 const MAX_BODY_BYTES = 64 * 1024
 const NO_STORE = { 'Cache-Control': 'no-store' }
@@ -56,6 +57,7 @@ const foresightArtifactRepository = {
     faceAmount: number
     monthlyPremium: number
     annualPremium: number
+    quickReview?: ForesightQuickReview
   }) {
     const existing = await prisma.illustration.findFirst({
       where: { id: input.illustrationId, agentId: input.agentId, productName: 'FlexLife' },
@@ -83,12 +85,13 @@ const foresightArtifactRepository = {
             confirmedFaceAmount: input.faceAmount,
             confirmedMonthlyPremium: input.monthlyPremium,
             confirmedAnnualPremium: input.annualPremium,
+            ...(input.quickReview ? { quickReview: input.quickReview } : {}),
           },
         },
-        ...(input.solveBasis === 'DEATH_BENEFIT'
+        ...(input.quickReview
           ? {
-              targetPremium: input.monthlyPremium,
-              targetPremiumSource: 'FORESIGHT_CALCULATED_FROM_DEATH_BENEFIT',
+              targetPremium: input.quickReview.summary.targetPremium,
+              targetPremiumSource: 'FORESIGHT_QUICK_VIEW',
             }
           : {}),
       },
@@ -137,8 +140,6 @@ const foresightArtifactRepository = {
       },
       data: {
         premium: input.monthlyPremium,
-        targetPremium: input.monthlyPremium,
-        targetPremiumSource: 'CARRIER_CALCULATED_FOR_TERM',
         rawPayload: {
           ...rawPayload,
           foresightTermResult: {

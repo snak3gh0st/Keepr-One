@@ -149,6 +149,22 @@ describe('Foresight content messages', () => {
         faceAmount: 250_000,
         monthlyPremium: 350,
         annualPremium: 4_200,
+        quickReview: {
+          evidence: {
+            source: 'FORESIGHT_QUICK_VIEW', observedAt: '2026-09-02T18:00:00.000Z',
+            sourceRows: [['Initial Face Amount', 'Target Premium'], ['$250,000.00', '$4,000.00']],
+          },
+          summary: {
+            initialFaceAmount: 250_000, lapseYear: 0, mecYear: 0, modalPremium: 350,
+            minimumPremium: 100, deathBenefitProtectionPremium: 120, targetPremium: 4_000,
+            mecPremium: 20_000, guidelineLevelPremium: 5_000, guidelineSinglePremium: 80_000,
+          },
+          annualProjection: [{
+            policyYear: 1, age: 31, premiumOutlay: 4_200, weightedAverageInterestRate: 5.5,
+            loan: 0, annualIncome: 0, accumulatedValue: 3_000, cashSurrenderValue: 2_000,
+            netDeathBenefit: 252_000,
+          }],
+        },
         release: '5.3.65.31',
         reportCode: 'NAIC_ILLUSTRATION',
         documentSha256: 'c'.repeat(64),
@@ -162,6 +178,23 @@ describe('Foresight content messages', () => {
     expect(() => parseForesightExecutionResponse({
       ...response,
       receipt: { ...response.receipt, faceAmount: 0 },
+    }, premiumMessage)).toThrow('FORESIGHT_RESPONSE_INVALID')
+    expect(() => parseForesightExecutionResponse({
+      ...response,
+      receipt: {
+        ...response.receipt,
+        quickReview: { ...response.receipt.quickReview, annualProjection: [] },
+      },
+    }, premiumMessage)).toThrow('FORESIGHT_RESPONSE_INVALID')
+    expect(() => parseForesightExecutionResponse({
+      ...response,
+      receipt: {
+        ...response.receipt,
+        quickReview: {
+          ...response.receipt.quickReview,
+          summary: { ...response.receipt.quickReview.summary, modalPremium: null },
+        },
+      },
     }, premiumMessage)).toThrow('FORESIGHT_RESPONSE_INVALID')
   })
 })

@@ -10,9 +10,9 @@ import {
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
 import {
+  auditVisibleCarrierCommissionRows,
   preferCanonicalCarrierCommissionRows,
   toCarrierCommissionRecords,
-  toVisibleCarrierCommissionRecords,
 } from '@/lib/national-life/commission-records'
 import { getAgentScopeIds } from '@/lib/agent-access'
 import { CommissionsList } from './CommissionsList'
@@ -31,6 +31,11 @@ type Record_ = {
   type: string
   level: number
   amount: unknown
+  agentNumber: string | null
+  payeeName: string | null
+  payeeNumber: string | null
+  agencyName: string | null
+  source: 'NATIONAL_LIFE' | 'KEEPRONE'
   policy: { id: string; policyNumber: string; agent: { user: { name: string } } } | null
 }
 
@@ -48,6 +53,11 @@ function toCommissionRecords(
     type: record.type,
     level: record.level,
     amount: record.amount,
+    agentNumber: record.writingAgentNumber || null,
+    payeeName: record.payeeName,
+    payeeNumber: record.payeeNumber,
+    agencyName: record.writingAgentAgency,
+    source: 'NATIONAL_LIFE',
     policy: {
       // Empty when the policy is not in this book. That is the common case —
       // renewals keep paying on policies that have left inforce — and it must
@@ -68,17 +78,35 @@ export default async function CommissionsPage() {
   ])
   let records: Record_[] = []
   let loadError = false
+  let auditRejectedCount = 0
+  let auditDuplicateCount = 0
 
   try {
     const localConnectorEnabled = getNationalLifeLocalConnectorConfig().enabled
-    const stored = await prisma.commissionRecord.findMany({
+    const storedRows = await prisma.commissionRecord.findMany({
       where: {
         agentId: { in: scopeAgentIds },
         policy: { agentId: { in: scopeAgentIds } },
       },
-      include: { policy: { include: { agent: { include: { user: true } } } } },
+      include: {
+        agent: { include: { user: true } },
+        policy: { include: { agent: { include: { user: true } } } },
+      },
       orderBy: [{ period: 'desc' }, { createdAt: 'desc' }],
     })
+    const stored: Record_[] = storedRows.map((record) => ({
+      id: record.id,
+      period: record.period,
+      type: record.type,
+      level: record.level,
+      amount: record.amount,
+      agentNumber: record.policy.agent.npn,
+      payeeName: record.agent.user.name,
+      payeeNumber: record.agent.npn,
+      agencyName: null,
+      source: 'KEEPRONE',
+      policy: record.policy,
+    }))
 
     let carrierRecords: Record_[] = []
     if (localConnectorEnabled) {
@@ -104,10 +132,13 @@ export default async function CommissionsPage() {
           amounts: true,
         },
       })
-      const visibleCarrierRecords = toVisibleCarrierCommissionRecords(
+      const carrierAudit = auditVisibleCarrierCommissionRows(
         preferCanonicalCarrierCommissionRows(carrierRows, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE),
         agent.id,
       )
+      const visibleCarrierRecords = carrierAudit.records
+      auditRejectedCount = carrierAudit.rejectedCount
+      auditDuplicateCount = carrierAudit.duplicateCount
 
       // Resolve the ones that do exist locally so their number becomes a link.
       const numbers = Array.from(
@@ -133,7 +164,10 @@ export default async function CommissionsPage() {
       )
     }
 
-    records = [...stored, ...carrierRecords].sort((left, right) =>
+    // Once National Life is connected it is the financial source of truth.
+    // Mixing an imported CommissionRecord with the carrier statement can count
+    // the same earning twice, so the internal import is only the fallback.
+    records = (localConnectorEnabled ? carrierRecords : stored).sort((left, right) =>
       right.period.localeCompare(left.period),
     )
   } catch (error) {
@@ -153,7 +187,7 @@ export default async function CommissionsPage() {
       <PageHeader
         title={copy("Comissões", "Commissions")}
         eyebrow={copy("Extrato financeiro", "Financial statement")}
-        description={copy("Acompanhe o valor de cada lançamento, identifique a apólice de origem e diferencie sua produção dos repasses da equipe.", "Track every entry, identify its source policy, and distinguish your production from team overrides.")}
+        description={copy("Confira quem produziu, quem recebeu e o que a National classificou como Personal ou Override em cada lançamento.", "Review who produced, who received, and what National Life classified as Personal or Override for every entry.")}
       >
         <Link
           href="/agent/policies"
@@ -172,6 +206,11 @@ export default async function CommissionsPage() {
       )}
       {!loadError && (
         <CommissionsList
+          audit={{
+            partial: auditRejectedCount > 0,
+            rejectedCount: auditRejectedCount,
+            duplicateCount: auditDuplicateCount,
+          }}
           byPeriod={byPeriod.map(({ period, rows }) => ({
             period,
             rows: rows.map((record) => ({
@@ -179,6 +218,11 @@ export default async function CommissionsPage() {
               policyNumber: record.policy?.policyNumber ?? null,
               policyId: record.policy?.id ?? null,
               agentName: record.policy?.agent.user.name ?? copy('Não informado', 'Not provided'),
+              agentNumber: record.agentNumber,
+              payeeName: record.payeeName,
+              payeeNumber: record.payeeNumber,
+              agencyName: record.agencyName,
+              source: record.source,
               type: record.type === 'DIRECT' ? 'DIRECT' : 'OVERRIDE',
               level: record.level,
               amount: decimalToNumber(record.amount).toFixed(2),

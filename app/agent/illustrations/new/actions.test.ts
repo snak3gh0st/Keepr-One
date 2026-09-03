@@ -186,6 +186,7 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
   it('issues a premium-solved IUL command without fabricating a face amount', async () => {
     const premiumSolved = form()
     premiumSolved.set('solveBasis', 'PREMIUM')
+    premiumSolved.set('solveMethod', 'Minimum_DB_Max_Cash_Value')
     premiumSolved.delete('faceAmount')
 
     await expect(requestForesightIllustration(premiumSolved)).resolves.toEqual({
@@ -203,6 +204,7 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
           foresightDraft: expect.objectContaining({
             schemaVersion: 2,
             solveBasis: 'PREMIUM',
+            solveMethod: 'Minimum_DB_Max_Cash_Value',
             targetMonthlyPremium: 350,
           }),
         },
@@ -235,7 +237,7 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
         faceAmount: 250000,
         premium: null,
         targetPremium: null,
-        targetPremiumSource: 'CARRIER_CALCULATED_FOR_TERM',
+        targetPremiumSource: null,
         rawPayload: expect.objectContaining({
           foresightTermDraft: expect.objectContaining({
             schemaVersion: 1,

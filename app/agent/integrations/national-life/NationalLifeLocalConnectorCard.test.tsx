@@ -59,6 +59,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   cleanup()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
@@ -359,7 +360,9 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(screen.getByRole('button', { name: 'Retry remaining areas' })).toBeEnabled()
     expect(screen.getByRole('status')).not.toHaveTextContent('stopped')
 
-    window.dispatchEvent(new Event(NATIONAL_LIFE_RETRY_REMAINING_EVENT))
+    await act(async () => {
+      window.dispatchEvent(new Event(NATIONAL_LIFE_RETRY_REMAINING_EVENT))
+    })
     await waitFor(() => {
       expect(messages.filter((type) => type === 'START_NATIONAL_LIFE_SYNC')).toHaveLength(2)
     })
@@ -977,7 +980,7 @@ describe('NationalLifeLocalConnectorCard', () => {
       />,
     )
     await vi.advanceTimersByTimeAsync(0)
-    screen.getByRole('button', { name: 'Connect National Life' }).click()
+    screen.getByRole('button', { name: 'Sync National Life' }).click()
     await vi.advanceTimersByTimeAsync(60_000)
 
     const recheck = screen.getByRole('button', { name: 'Check again' })
@@ -1055,7 +1058,7 @@ describe('NationalLifeLocalConnectorCard', () => {
       />,
     )
     await vi.advanceTimersByTimeAsync(0)
-    screen.getByRole('button', { name: 'Connect National Life' }).click()
+    screen.getByRole('button', { name: 'Sync National Life' }).click()
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000)
     })

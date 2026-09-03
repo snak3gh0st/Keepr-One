@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  auditCarrierCommissionRows,
   currentCarrierChargebackSnapshot,
   NO_PERIOD,
   parseCarrierAmount,
@@ -70,6 +71,10 @@ describe('toCarrierCommissionRecords', () => {
       amount: 120.5,
       policyNumber: 'X1',
       writingAgentName: 'Ana',
+      writingAgentNumber: '',
+      payeeName: null,
+      payeeNumber: null,
+      writingAgentAgency: null,
     })
   })
 
@@ -129,6 +134,62 @@ describe('toCarrierCommissionRecords', () => {
     ])
 
     expect(records).toHaveLength(2)
+  })
+})
+
+describe('auditCarrierCommissionRows', () => {
+  it('accepts only attributable National Life earning rows and reports every omission', () => {
+    const validRaw = {
+      CommissionStatementId: 'statement-1', PolicyNumber: 'NL1', PaymentDate: '08/25/2026',
+      WritingAgtLevel: 'Personal', WritingAgtName: 'Agent One', WritingAgtNumber: 'A-101',
+      PayeeName: 'Agency One', PayeeId: 'PAY-1', WritingAgentAgency: 'Agency One', TransactionType: 'FYC',
+    }
+    const audit = auditCarrierCommissionRows([
+      { id: 'valid', agentId: 'agent-1', raw: validRaw, amounts: { GrossCommEarned: '$100.25' } },
+      { id: 'duplicate', agentId: 'agent-1', raw: { ...validRaw, CommissionStatementId: 'statement-2' }, amounts: { GrossCommEarned: '$100.25' } },
+      { id: 'no-statement', agentId: 'agent-1', raw: { ...validRaw, CommissionStatementId: '' }, amounts: { GrossCommEarned: '$5' } },
+      { id: 'no-amount', agentId: 'agent-1', raw: { ...validRaw, PolicyNumber: 'NL2' }, amounts: {} },
+      { id: 'no-owner', raw: { ...validRaw, PolicyNumber: 'NL3' }, amounts: { GrossCommEarned: '$7' } },
+      { id: 'no-policy', agentId: 'agent-1', raw: { ...validRaw, PolicyNumber: ' ' }, amounts: { GrossCommEarned: '$8' } },
+      { id: 'no-date', agentId: 'agent-1', raw: { ...validRaw, PolicyNumber: 'NL4', PaymentDate: '' }, amounts: { GrossCommEarned: '$9' } },
+    ])
+
+    expect(audit.records).toHaveLength(1)
+    expect(totalOf(audit.records)).toBe(100.25)
+    expect(audit.records[0]).toMatchObject({
+      writingAgentName: 'Agent One',
+      writingAgentNumber: 'A-101',
+      payeeName: 'Agency One',
+      payeeNumber: 'PAY-1',
+      writingAgentAgency: 'Agency One',
+    })
+    expect(audit).toMatchObject({ receivedCount: 7, acceptedCount: 1, duplicateCount: 1, rejectedCount: 5 })
+    expect(audit.rejectedByReason).toEqual({
+      MISSING_STATEMENT_ID: 1,
+      MISSING_GROSS_COMMISSION: 1,
+      MISSING_SOURCE_OWNER: 1,
+      MISSING_POLICY_NUMBER: 1,
+      MISSING_PAYMENT_DATE: 1,
+    })
+  })
+
+  it('rejects a row that cannot be attributed to a National Life producer number', () => {
+    const audit = auditCarrierCommissionRows([{
+      id: 'missing-writer',
+      agentId: 'agent-1',
+      raw: {
+        CommissionStatementId: 'statement-1',
+        PolicyNumber: 'NL1',
+        PaymentDate: '08/25/2026',
+        WritingAgtLevel: 'Personal',
+        WritingAgtName: 'Agent One',
+        TransactionType: 'FYC',
+      },
+      amounts: { GrossCommEarned: '$100.25' },
+    }])
+
+    expect(audit.records).toEqual([])
+    expect(audit.rejectedByReason).toEqual({ MISSING_WRITING_AGENT_NUMBER: 1 })
   })
 })
 

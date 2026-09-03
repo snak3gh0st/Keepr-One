@@ -471,6 +471,7 @@ model User {
   schedulingPage            SchedulingPage?            @relation("SchedulingPageOwner")
   schedulingBookings        SchedulingBooking[]        @relation("SchedulingBookingOwner")
   agencyInvitationCheckouts AgencyInvitationCheckout[]
+  createdApplications       Application[]               @relation("ApplicationCreator")
 
   @@map("user")
 }
@@ -2263,6 +2264,10 @@ model Application {
   dossierHash      String?
   reviewedAt       DateTime?
   reviewedByUserId String?
+  /// Immutable author of the Application record. This is distinct from the
+  /// case's current assigned agent, which may change after agency handoff.
+  createdByUserId  String?
+  createdBy        User?                      @relation("ApplicationCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
   consentedAt      DateTime?
   carrierReceipt   Json?
   safeErrorCode    String?
@@ -2274,6 +2279,7 @@ model Application {
 
   @@unique([provider, externalId])
   @@index([caseId])
+  @@index([createdByUserId])
   @@index([automationState, updatedAt])
 }
 

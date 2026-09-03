@@ -166,6 +166,42 @@ describe('Foresight Term client target', () => {
     })).toBe('FORESIGHT_TERM_DURATION_READBACK_MISMATCH')
   })
 
+  it('accepts the currency formatting returned by the Term face amount field', () => {
+    const snapshot = parseForesightTermIllustrationSnapshot({
+      schemaVersion: 1,
+      illustrationId: 'ill_term_currency',
+      caseId: null,
+      carrierCaseName: 'KEEPRONE-TERM-CURRENCY',
+      product: { carrierName: 'LSW Term', kind: 'TERM' },
+      insured: {
+        firstName: 'Paulo',
+        lastName: 'Loureiro',
+        dateOfBirth: '1988-06-02',
+        issueState: 'FL',
+      },
+      underwriting: { gender: 'Male', rateClass: 'Standard_NT' },
+      faceAmount: 250_000,
+      premiumMode: 'Monthly',
+      termDuration: '20-G',
+      reports: ['NAIC_ILLUSTRATION'],
+    })!
+    const client = {
+      firstName: 'Paulo',
+      lastName: 'Loureiro',
+      dateOfBirth: '06/02/1988',
+      issueState: 'FL',
+      gender: 'Male',
+      rateClass: 'Standard_NT',
+    }
+
+    expect(foresightTermReadbackError(snapshot, client, {
+      designType: 'Specify Face Amount',
+      faceAmount: '$250,000.00',
+      premiumMode: 'Monthly',
+      termDuration: '20-G',
+    })).toBeNull()
+  })
+
   it('matches the Term duration from the report section around the NAIC checkbox', () => {
     const checkbox = {
       closest: (selector: string) => selector === 'div[id$="_divReports"]'

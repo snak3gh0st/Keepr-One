@@ -14,6 +14,7 @@ import {
 
 type ApplicationView = {
   id: string;
+  createdByName: string | null;
   automationState: string;
   dossier: unknown;
   dossierHash: string | null;
@@ -239,6 +240,9 @@ export function ApplicationDossier({
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-800">K-Bot Application</p>
           <h3 className="mt-1 text-base font-semibold text-ink">{stateCopy[application.automationState] ?? copy("Preparação do caso", "Case preparation")}</h3>
+          <p className="mt-1 text-xs font-medium text-ink-muted">
+            {copy("Application iniciada por", "Application started by")} {application.createdByName ?? copy("não registrado", "not recorded")}
+          </p>
           <p className="mt-1 max-w-2xl text-sm text-ink-muted">{copy("O KeeprOne reúne e revisa os dados primeiro. O K-Bot só entra no iGO depois da sua autorização.", "KeeprOne collects and reviews the information first. K-Bot only enters iGO after your authorization.")}</p>
         </div>
         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${addon.entitled ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>

@@ -27,6 +27,15 @@ const DEATH_BENEFIT_OPTIONS = {
 
 const CAP_FOCUS = 'SP500PointToPointCapFocus'
 const TERM_DURATIONS = ['10-G', '15-G', '20-G', '30-G', 'ART'] as const
+const IUL_STRATEGIES = {
+  MAX_CASH_VALUE: { solveBasis: 'PREMIUM', solveMethod: 'Minimum_DB_Max_Cash_Value' },
+  BALANCED_DB: { solveBasis: 'PREMIUM', solveMethod: 'Balanced_DB' },
+  TARGET_PREMIUM: { solveBasis: 'PREMIUM', solveMethod: 'Based_on_Target_Premium' },
+  PROTECTION_FOCUS: { solveBasis: 'DEATH_BENEFIT', solveMethod: 'Protection_Focus' },
+  RETIREMENT_FOCUS: { solveBasis: 'DEATH_BENEFIT', solveMethod: 'Retirement_Focus' },
+} as const
+
+type IulStrategy = keyof typeof IUL_STRATEGIES
 
 export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
   const { copy } = useI18n()
@@ -36,7 +45,8 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [productFamily, setProductFamily] = useState<'IUL' | 'TERM'>('IUL')
   const [termCarrier, setTermCarrier] = useState<'LSW_TERM' | 'NL_TERM'>('LSW_TERM')
-  const [iulSolveBasis, setIulSolveBasis] = useState<'DEATH_BENEFIT' | 'PREMIUM'>('DEATH_BENEFIT')
+  const [iulStrategy, setIulStrategy] = useState<IulStrategy>('MAX_CASH_VALUE')
+  const selectedIulStrategy = IUL_STRATEGIES[iulStrategy]
 
   async function handleSubmit(formData: FormData) {
     // React state is not synchronous: two clicks in the same frame can both
@@ -211,40 +221,37 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
         {productFamily === 'IUL' && <fieldset className="border-t border-border-steel pt-6">
           <legend className="flex items-center gap-3 text-sm font-semibold text-ink">
             <span className="grid h-7 w-7 place-items-center rounded-full bg-teal text-[10px] font-mono tracking-[0.08em] text-paper">03</span>
-            {copy('Cenário IUL • FlexLife', 'IUL scenario • FlexLife')}
-            <span className="font-normal text-ink-muted">{copy('Escolha o único valor que a National Life deve resolver', 'Choose the single value National Life should solve for')}</span>
+            {copy('Estratégia IUL • FlexLife', 'IUL strategy • FlexLife')}
+            <span className="font-normal text-ink-muted">{copy('Escolha o objetivo do cliente no Foresight', "Choose the client's objective in Foresight")}</span>
           </legend>
-          <input type="hidden" name="solveBasis" value={iulSolveBasis} />
-          <div className="mt-4 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={copy('Base de cálculo do IUL', 'IUL calculation basis')}>
-            <label className={`relative flex cursor-pointer flex-col rounded-2xl border p-4 transition-colors ${iulSolveBasis === 'DEATH_BENEFIT' ? 'border-teal bg-teal-pale/60' : 'border-border-steel bg-paper hover:bg-panel/55'}`}>
-              <input
-                className="sr-only"
-                type="radio"
-                name="iulSolveBasisChoice"
-                aria-label={copy('Resolver pelo capital segurado', 'Solve for face amount')}
-                checked={iulSolveBasis === 'DEATH_BENEFIT'}
-                onChange={() => setIulSolveBasis('DEATH_BENEFIT')}
-              />
-              <strong className="text-sm font-semibold text-ink">{copy('Resolver pelo capital segurado', 'Solve for face amount')}</strong>
-              <span className="mt-1 text-xs leading-5 text-ink-muted">{copy('Você informa a cobertura; o Foresight calcula o prêmio mensal com Protection Focus.', 'You provide the coverage; Foresight calculates the monthly premium with Protection Focus.')}</span>
-            </label>
-            <label className={`relative flex cursor-pointer flex-col rounded-2xl border p-4 transition-colors ${iulSolveBasis === 'PREMIUM' ? 'border-teal bg-teal-pale/60' : 'border-border-steel bg-paper hover:bg-panel/55'}`}>
-              <input
-                className="sr-only"
-                type="radio"
-                name="iulSolveBasisChoice"
-                aria-label={copy('Resolver pelo prêmio mensal', 'Solve for monthly premium')}
-                checked={iulSolveBasis === 'PREMIUM'}
-                onChange={() => setIulSolveBasis('PREMIUM')}
-              />
-              <strong className="text-sm font-semibold text-ink">{copy('Resolver pelo prêmio mensal', 'Solve for monthly premium')}</strong>
-              <span className="mt-1 text-xs leading-5 text-ink-muted">{copy('Você informa o aporte; o Foresight calcula o capital com Based on Target Premium.', 'You provide the contribution; Foresight calculates the face amount with Based on Target Premium.')}</span>
-            </label>
+          <input type="hidden" name="solveBasis" value={selectedIulStrategy.solveBasis} />
+          <input type="hidden" name="solveMethod" value={selectedIulStrategy.solveMethod} />
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" role="radiogroup" aria-label={copy('Objetivo estratégico do IUL', 'IUL strategic objective')}>
+            {([
+              ['MAX_CASH_VALUE', copy('Máximo Cash Value', 'Maximum Cash Value'), copy('Menor benefício compatível com o aporte para priorizar valor acumulado.', 'Minimum compatible benefit for the contribution to prioritize accumulated value.')],
+              ['BALANCED_DB', copy('Benefício balanceado', 'Balanced death benefit'), copy('Equilibra proteção e potencial de acumulação.', 'Balances protection and accumulation potential.')],
+              ['TARGET_PREMIUM', 'Target Premium', copy('Usa o aporte informado como prêmio-alvo da ilustração.', 'Uses the entered contribution as the illustration target premium.')],
+              ['PROTECTION_FOCUS', copy('Foco em proteção', 'Protection focus'), copy('Parte do capital segurado e calcula o prêmio necessário.', 'Starts from the face amount and calculates the required premium.')],
+              ['RETIREMENT_FOCUS', copy('Foco em aposentadoria', 'Retirement focus'), copy('Configuração da National orientada a renda futura.', 'National Life configuration oriented toward future income.')],
+            ] as const).map(([value, title, detail]) => (
+              <label key={value} className={`relative flex cursor-pointer flex-col rounded-2xl border p-4 transition-colors ${iulStrategy === value ? 'border-teal bg-teal-pale/60' : 'border-border-steel bg-paper hover:bg-panel/55'}`}>
+                <input
+                  className="sr-only"
+                  type="radio"
+                  name="iulStrategyChoice"
+                  aria-label={title}
+                  checked={iulStrategy === value}
+                  onChange={() => setIulStrategy(value)}
+                />
+                <strong className="text-sm font-semibold text-ink">{title}</strong>
+                <span className="mt-1 text-xs leading-5 text-ink-muted">{detail}</span>
+              </label>
+            ))}
           </div>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            {iulSolveBasis === 'DEATH_BENEFIT'
+            {selectedIulStrategy.solveBasis === 'DEATH_BENEFIT'
               ? <Field label={copy('Capital segurado', 'Face amount')}><Input name="faceAmount" type="number" min={1} step="0.01" required placeholder="250000" /></Field>
-              : <Field label={copy('Prêmio mensal', 'Monthly premium')}><Input name="monthlyPremium" type="number" min={0.01} step="0.01" required placeholder="350" /></Field>}
+              : <Field label={copy('Aporte mensal', 'Monthly contribution')}><Input name="monthlyPremium" type="number" min={0.01} step="0.01" required placeholder="350" /></Field>}
             <Field label={copy('Opção de benefício por morte', 'Death benefit option')}>
               <Select name="deathBenefitOption" required defaultValue="" className="w-full">
                 <option value="" disabled>{copy('Selecione...', 'Select...')}</option>
@@ -262,7 +269,7 @@ export function NewIllustrationForm({ extensionId }: { extensionId?: string }) {
             <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-teal-deep">{copy('Configuração padrão do Foresight', 'Default Foresight settings')}</p>
             <div className="mt-3 grid gap-2 text-xs leading-5 text-ink-muted sm:grid-cols-2">
               <p><strong className="font-semibold text-ink">{copy('Ilustração:', 'Illustration:')}</strong> Basic Illustration, GPT {copy('e', 'and')} MEC “None”.</p>
-              <p><strong className="font-semibold text-ink">{copy('Base escolhida:', 'Selected basis:')}</strong> {iulSolveBasis === 'DEATH_BENEFIT' ? copy('capital especificado; prêmio resolvido pela National Life.', 'specified face amount; premium solved by National Life.') : copy('prêmio especificado; capital resolvido pela National Life.', 'specified premium; face amount solved by National Life.')}</p>
+              <p><strong className="font-semibold text-ink">{copy('Objetivo escolhido:', 'Selected objective:')}</strong> {copy('o K-Bot usa a estratégia correspondente da própria National Life e confirma a seleção por leitura de volta.', 'K-Bot uses the corresponding National Life strategy and confirms the selection by reading it back.')}</p>
               <p><strong className="font-semibold text-ink">{copy('Validação:', 'Validation:')}</strong> {copy('a Keepr One só aceita o PDF se os dois valores calculados e o método escolhido voltarem do Foresight.', 'Keepr One accepts the PDF only if both calculated values and the selected method return from Foresight.')}</p>
               <p><strong className="font-semibold text-ink">{copy('Exchange e distribuição:', 'Exchange and distribution:')}</strong> {copy('ambos “None”.', 'both “None”.')}</p>
             </div>

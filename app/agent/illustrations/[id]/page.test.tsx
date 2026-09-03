@@ -202,8 +202,8 @@ describe('Illustration detail page', () => {
     expect(screen.getByText(/US\$\s*4\.200,00$/)).toBeTruthy()
     expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Application de illustration-solved-iul' })).toBeTruthy()
-    expect(screen.getByText('Resolvido pelo prêmio mensal')).toBeTruthy()
-    expect(screen.getByText('Based on Target Premium')).toBeTruthy()
+    expect(screen.getByText('Aporte mensal informado')).toBeTruthy()
+    expect(screen.getByText('Target Premium')).toBeTruthy()
     expect(screen.getByText('Pedido do agente')).toBeTruthy()
     expect(screen.getByText('Confirmação da National Life')).toBeTruthy()
     expect(screen.getByText(/US\$\s*350,00 por mês/)).toBeTruthy()
@@ -220,7 +220,7 @@ describe('Illustration detail page', () => {
       faceAmount: 500_000,
       premium: 62.92,
       targetPremium: 62.92,
-      targetPremiumSource: 'CARRIER_CALCULATED_FOR_TERM',
+      targetPremiumSource: null,
       documentFetchedAt: new Date('2026-08-31T20:46:47.317Z'),
       documentMimeType: 'application/pdf',
       caseId: null,

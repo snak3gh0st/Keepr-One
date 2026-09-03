@@ -1,17 +1,17 @@
 export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
+import Decimal from 'decimal.js'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getCurrentAgentAccess } from '@/lib/agent-access'
 import { decimalToNumber } from '@/lib/decimal'
-import { periodFromDate, shiftPeriod, percentChange } from '@/lib/period'
+import { periodFromDate, shiftPeriod } from '@/lib/period'
 import {
-  currentCarrierChargebackSnapshot,
+  auditVisibleCarrierCommissionRows,
   preferCanonicalCarrierCommissionRows,
   projectedPayableSnapshotForPeriod,
   sumByPeriod,
-  toVisibleCarrierCommissionRecords,
   totalForPeriod,
   totalOf,
 } from '@/lib/national-life/commission-records'
@@ -49,11 +49,11 @@ import type { CalendarConnectionView, CalendarEventView, CalendarSourceView } fr
 import { getServerI18n } from '@/lib/i18n/server'
 import { formatCurrency as formatLocalizedCurrency, formatNumber } from '@/lib/i18n/format'
 import type { UserLanguage } from '@/lib/i18n/config'
+import { auditedNationalLifeAap } from '@/lib/policy-metrics'
 
 const NATIONAL_LIFE_DASHBOARD_FINANCIAL_GRID_KEYS = [
   ...COMMISSION_EARNING_GRID_KEYS,
   'PAYABLE_GROSS_COMMISSIONS',
-  'PAID_COMMISSIONS',
 ] as const
 
 function BreakdownList({
@@ -128,59 +128,11 @@ function formatCurrency(value: number, language: UserLanguage): string {
   return formatLocalizedCurrency(value, language, 'USD', { maximumFractionDigits: 0 })
 }
 
-function formatCurrencyNumber(value: number, language: UserLanguage): string {
-  return formatNumber(value, language, {
-    maximumFractionDigits: 0,
-  })
-}
-
-function formatMonthName(period: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    month: 'long',
-    timeZone: 'UTC',
-  }).format(new Date(`${period}-01T00:00:00.000Z`))
-}
-
 function formatMonthShort(period: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, {
     month: 'short',
     timeZone: 'UTC',
   }).format(new Date(`${period}-01T00:00:00.000Z`))
-}
-
-function Delta({
-  value,
-  copy,
-  language,
-}: {
-  value: number | null
-  copy: (portuguese: string, english: string) => string
-  language: UserLanguage
-}) {
-  if (value === null) return null
-  const positive = value > 0
-  const negative = value < 0
-  const formattedValue = formatNumber(Math.abs(value), language, { maximumFractionDigits: 0 })
-  const accessibleLabel = positive
-    ? copy(`Aumento de ${formattedValue} por cento`, `Increase of ${formattedValue} percent`)
-    : negative
-      ? copy(`Queda de ${formattedValue} por cento`, `Decrease of ${formattedValue} percent`)
-      : copy('Sem variação percentual', 'No percentage change')
-  const toneClass = positive
-    ? 'bg-success-pale text-success'
-    : negative
-      ? 'bg-danger-pale text-danger'
-      : 'bg-white/10 text-paper/70'
-
-  return (
-    <span
-      aria-label={accessibleLabel}
-      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-mono text-[11px] font-semibold ${toneClass}`}
-    >
-      <span aria-hidden>{positive ? '↗' : negative ? '↘' : '→'}</span>
-      {formattedValue}%
-    </span>
-  )
 }
 
 function safeGroupCount(groupCount: unknown): number {
@@ -268,7 +220,6 @@ export default async function AgentDashboard({
   const now = new Date()
   const localConnectorEnabled = getNationalLifeLocalConnectorConfig().enabled
   const currentP = periodFromDate(now)
-  const previousP = shiftPeriod(currentP, -1)
   const trendStartP = shiftPeriod(currentP, -5)
   const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
   const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1)
@@ -284,10 +235,6 @@ export default async function AgentDashboard({
   let atRiskPolicies = 0
   let txnExpected = 0
   let txnPaid = 0
-  let txnChargeback = 0
-  let includesCarrierExpected = false
-  let includesCarrierPaid = false
-  let includesCarrierChargeback = false
   let calendarConnection: CalendarConnectionView = {
     status: 'DISCONNECTED', email: null, displayName: null, lastSyncAt: null, errorMessage: null,
   }
@@ -296,10 +243,18 @@ export default async function AgentDashboard({
   let upcomingMeetings: CalendarEventView[] = []
 
   let policyCount = 0
+  let activeClientCount = 0
+  let totalProtection = 0
+  let totalRegisteredPremium = 0
+  let activePolicyCount = 0
+  let protectionKnownCount = 0
+  let premiumKnownCount = 0
+  let carrierPortfolioAuditReady = false
   let commissionTotalAmount = 0
-  let commissionThisMonth = 0
-  let commissionLastMonth = 0
   let commissionByPeriod: { period: string; total: number }[] = []
+  let commissionAuditBlocked = false
+  let commissionRejectedRows = 0
+  let commissionFetchedAt: Date | null = null
   let byStatus: { status: string; _count: { _all: number } }[] = []
   let byCarrier: { carrier: string; _count: { _all: number } }[] = []
   let byProduct: { product: string; _count: { _all: number } }[] = []
@@ -313,9 +268,9 @@ export default async function AgentDashboard({
   try {
     const [
       policyTotal,
+      inforcePolicyRows,
+      canonicalInforceSnapshotRows,
       commissionAgg,
-      commissionThisMonthAgg,
-      commissionLastMonthAgg,
       commissionPeriodBuckets,
       statusBuckets,
       carrierBuckets,
@@ -329,9 +284,18 @@ export default async function AgentDashboard({
       dueReviewCount,
     ] = await Promise.all([
       prisma.policy.count({ where: { agentId: { in: scope } } }),
+      prisma.policy.findMany({
+        where: { agentId: { in: scope }, status: 'INFORCE', sourceProvider: 'NATIONAL_LIFE' },
+        select: {
+          clientId: true, policyNumber: true, faceAmount: true, faceAmountSource: true,
+          premium: true, sourceUpdatedAt: true,
+        },
+      }),
+      prisma.nationalLifeInforcePolicy.findMany({
+        where: { agentId: { in: scope }, deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE },
+        select: { policyNumber: true, policyStatus: true, fetchedAt: true },
+      }),
       prisma.commissionRecord.aggregate({ where: commissionScopeWhere, _sum: { amount: true } }),
-      prisma.commissionRecord.aggregate({ where: { ...commissionScopeWhere, period: currentP }, _sum: { amount: true } }),
-      prisma.commissionRecord.aggregate({ where: { ...commissionScopeWhere, period: previousP }, _sum: { amount: true } }),
       prisma.commissionRecord.groupBy({
         by: ['period'],
         where: { ...commissionScopeWhere, period: { gte: trendStartP, lte: currentP } },
@@ -397,13 +361,53 @@ export default async function AgentDashboard({
       const sum = decimalToNumber(t._sum.amount)
       if (t.type === 'EXPECTED') txnExpected = sum
       else if (t.type === 'PAID') txnPaid = sum
-      else if (t.type === 'CHARGEBACK') txnChargeback = sum
     }
 
     policyCount = policyTotal
+    activePolicyCount = inforcePolicyRows.length
+    activeClientCount = new Set(inforcePolicyRows.map((policy) => policy.clientId)).size
+    const canonicalActiveRows = canonicalInforceSnapshotRows.filter((row) => {
+      const status = row.policyStatus?.trim().toLowerCase()
+      return status === 'active' || status === 'pending lapse'
+    })
+    const canonicalActivePolicyNumbers = new Set(
+      canonicalActiveRows.map((row) => row.policyNumber.trim().toUpperCase().replace(/\s+/g, '')),
+    )
+    const normalizedActivePolicyNumbers = new Set(
+      inforcePolicyRows.map((row) => row.policyNumber.trim().toUpperCase().replace(/\s+/g, '')),
+    )
+    const latestCanonicalInforceFetchedAt = canonicalActiveRows.reduce<Date | null>(
+      (latest, row) => !latest || row.fetchedAt > latest ? row.fetchedAt : latest,
+      null,
+    )
+    carrierPortfolioAuditReady = Boolean(
+      latestCanonicalInforceFetchedAt &&
+      canonicalActivePolicyNumbers.size === normalizedActivePolicyNumbers.size &&
+      [...canonicalActivePolicyNumbers].every((number) => normalizedActivePolicyNumbers.has(number)) &&
+      inforcePolicyRows.every((policy) =>
+        policy.sourceUpdatedAt && policy.sourceUpdatedAt >= latestCanonicalInforceFetchedAt,
+      ),
+    )
+    const protectionRows = inforcePolicyRows.filter((policy) =>
+      policy.faceAmountSource === 'NATIONAL_LIFE_POLICY_DETAIL' &&
+      decimalToNumber(policy.faceAmount) > 0,
+    )
+    protectionKnownCount = protectionRows.length
+    totalProtection = protectionRows.reduce(
+      (total, policy) => total + Math.max(0, decimalToNumber(policy.faceAmount)),
+      0,
+    )
+    const premiumRows = inforcePolicyRows.flatMap((policy) => {
+      if (policy.sourceUpdatedAt === null) return []
+      const annualPremium = auditedNationalLifeAap(policy.premium)
+      return annualPremium === null ? [] : [annualPremium]
+    })
+    premiumKnownCount = premiumRows.length
+    totalRegisteredPremium = premiumRows.reduce(
+      (total, annualPremium) => total.plus(annualPremium),
+      new Decimal(0),
+    ).toNumber()
     commissionTotalAmount = decimalToNumber(commissionAgg._sum.amount)
-    commissionThisMonth = decimalToNumber(commissionThisMonthAgg._sum.amount)
-    commissionLastMonth = decimalToNumber(commissionLastMonthAgg._sum.amount)
     commissionByPeriod = commissionPeriodBuckets.map((bucket) => ({
       period: bucket.period,
       total: decimalToNumber(bucket._sum.amount),
@@ -448,33 +452,30 @@ export default async function AgentDashboard({
         LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
       )
       const payableRows = carrierRows.filter((row) => row.gridKey === 'PAYABLE_GROSS_COMMISSIONS')
-      const paidStatementRows = carrierRows.filter((row) => row.gridKey === 'PAID_COMMISSIONS')
       // The homepage headline is the authenticated agent's total commission,
       // not only direct production. Keep member direct production available to
       // entitled agency owners, but include overrides only from this agent's
       // own National Life session—the same tenant-safe rule as the statement.
-      const carrierRecords = toVisibleCarrierCommissionRecords(carrierCommissionRows, agent.id)
+      const commissionAudit = auditVisibleCarrierCommissionRows(carrierCommissionRows, agent.id)
+      const carrierRecords = commissionAudit.records
       const carrierPaidThisMonth = totalForPeriod(carrierRecords, currentP)
       const projectedPayable = projectedPayableSnapshotForPeriod(payableRows, currentP)
-      const chargebackBalance = currentCarrierChargebackSnapshot(paidStatementRows)
 
-      commissionTotalAmount += totalOf(carrierRecords)
-      commissionThisMonth += carrierPaidThisMonth
-      commissionLastMonth += totalForPeriod(carrierRecords, previousP)
-      txnExpected += projectedPayable.total
-      txnPaid += carrierPaidThisMonth
-      txnChargeback += chargebackBalance.total
-      includesCarrierExpected = projectedPayable.rowCount > 0
-      includesCarrierPaid = carrierRecords.some((record) => record.period === currentP)
-      includesCarrierChargeback = chargebackBalance.rowCount > 0
+      // Once the National connector is authoritative, never add its ledger to
+      // an internal/imported ledger. That would make an unexplained duplicate
+      // look like production. Rows without complete statement evidence block
+      // the National commission figure instead of being treated as zero.
+      commissionAuditBlocked = commissionAudit.rejectedCount > 0
+      commissionRejectedRows = commissionAudit.rejectedCount
+      commissionFetchedAt = carrierCommissionRows.reduce<Date | null>(
+        (latest, row) => !latest || row.fetchedAt > latest ? row.fetchedAt : latest,
+        null,
+      )
+      commissionTotalAmount = totalOf(carrierRecords)
+      txnExpected = projectedPayable.total
+      txnPaid = carrierPaidThisMonth
 
-      const merged = new Map(commissionByPeriod.map((bucket) => [bucket.period, bucket.total]))
-      for (const bucket of sumByPeriod(carrierRecords, { from: trendStartP, to: currentP })) {
-        merged.set(bucket.period, (merged.get(bucket.period) ?? 0) + bucket.total)
-      }
-      commissionByPeriod = [...merged.entries()]
-        .map(([period, total]) => ({ period, total }))
-        .sort((left, right) => left.period.localeCompare(right.period))
+      commissionByPeriod = sumByPeriod(carrierRecords, { from: trendStartP, to: currentP })
     }
     byStatus = statusBuckets
     byCarrier = carrierBuckets
@@ -525,13 +526,16 @@ export default async function AgentDashboard({
   }
 
   const firstName = ((user?.name ?? '').trim() || copy('Agente', 'Agent')).split(/\s+/)[0]
-  const commissionDelta = loadError ? null : percentChange(commissionThisMonth, commissionLastMonth)
-  const currentMonthName = formatMonthName(currentP, locale)
-  const previousMonthName = formatMonthName(previousP, locale)
   const currentPeriodLabel = `${formatMonthShort(currentP, locale)} ${currentP.slice(0, 4)}`
-  const commissionNumberValue = loadError ? '—' : formatCurrencyNumber(commissionThisMonth, language)
-  const hasCommissionComparison = commissionDelta !== null && commissionLastMonth !== 0
-  const hasNoPreviousCommissionValue = !loadError && commissionThisMonth > 0 && commissionLastMonth === 0
+  // Agency PC already includes personal production, so adding personalPc here
+  // would double count the signed-in agent.
+  const recognizedProduction = access.canViewAgencyNationalLife
+    ? displayedPromotion.agencyPc
+    : displayedPromotion.personalPc
+  const productionAuditReady = !loadError && !displayedPromotion.loadError && displayedPromotion.hasPromotionData
+  const productionNumberValue = productionAuditReady
+    ? formatNumber(recognizedProduction, language, { maximumFractionDigits: 0 })
+    : '—'
   const commissionTrendMap = new Map(commissionByPeriod.map((bucket) => [bucket.period, bucket.total]))
   const commissionTrend = Array.from({ length: 6 }, (_, index) => {
     const period = shiftPeriod(currentP, index - 5)
@@ -546,6 +550,13 @@ export default async function AgentDashboard({
     }
   })
   const moneyValue = (value: number) => loadError ? '—' : formatCurrency(value, language)
+  const completeCarrierMoneyValue = (value: number, known: number, expected: number) =>
+    loadError || !carrierPortfolioAuditReady || known !== expected ? '—' : formatCurrency(value, language)
+  const auditedCommissionValue = (value: number) =>
+    loadError || commissionAuditBlocked ? '—' : formatCurrency(value, language)
+  const commissionAsOfLabel = commissionFetchedAt
+    ? new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' }).format(commissionFetchedAt)
+    : null
   const countValue = (value: number) => loadError ? '—' : formatNumber(value, language, { maximumFractionDigits: 0 })
   const followUpsOverdue = dueFollowUpItems.filter((item) => item.overdue)
   const followUpsToday = dueFollowUpItems.filter((item) => !item.overdue)
@@ -558,6 +569,10 @@ export default async function AgentDashboard({
   }
   const pulseMetrics = [
     { label: copy('Oportunidades ativas', 'Active opportunities'), value: countValue(openCases) },
+    { label: copy('Produção reconhecida', 'Recognized production'), value: productionAuditReady ? `${productionNumberValue} PC` : '—' },
+    { label: copy('Clientes ativos National', 'Active National Life clients'), value: carrierPortfolioAuditReady ? countValue(activeClientCount) : '—' },
+    { label: copy('Proteção confirmada National', 'National Life confirmed protection'), value: completeCarrierMoneyValue(totalProtection, protectionKnownCount, activePolicyCount) },
+    { label: copy('AAP registrado National', 'Recorded National Life AAP'), value: completeCarrierMoneyValue(totalRegisteredPremium, premiumKnownCount, activePolicyCount) },
     { label: copy('Comissão esperada', 'Expected commission'), value: moneyValue(txnExpected) },
     { label: copy('Apólices', 'Policies'), value: countValue(policyCount) },
     ...(access.canManageTeam
@@ -607,10 +622,17 @@ export default async function AgentDashboard({
       tone: 'amber',
     },
     {
-      title: txnExpected > txnPaid
+      title: commissionAuditBlocked
+        ? copy('O extrato National precisa de revisão antes da comparação.', 'The National Life statement needs review before comparison.')
+        : txnExpected > txnPaid
         ? copy('Existe receita esperada pronta para acompanhamento.', 'Expected revenue is ready for follow-up.')
         : copy('Sua produção está alinhada com os pagamentos registrados.', 'Your production is aligned with recorded payments.'),
-      description: txnExpected > txnPaid
+      description: commissionAuditBlocked
+        ? copy(
+            `${commissionRejectedRows} registro(s) não possuem evidência financeira completa; nenhum subtotal foi tratado como comissão paga.`,
+            `${commissionRejectedRows} record(s) do not have complete financial evidence; no subtotal was treated as paid commission.`,
+          )
+        : txnExpected > txnPaid
         ? copy(
             `A diferença atual entre o esperado e o pago é de ${formatCurrency(Math.max(0, txnExpected - txnPaid), language)}.`,
             `The current difference between expected and paid is ${formatCurrency(Math.max(0, txnExpected - txnPaid), language)}.`,
@@ -668,105 +690,114 @@ export default async function AgentDashboard({
                     data-hero-reveal
                     className="mt-4 max-w-4xl text-[clamp(2.35rem,4.1vw,4.35rem)] font-medium leading-[0.98] tracking-[-0.06em]"
                   >
-                    {copy(`Suas comissões de ${currentMonthName}.`, `Your ${currentMonthName} commissions.`)}
+                    {copy('Sua produção reconhecida.', 'Your recognized production.')}
                   </h1>
                 </div>
                 <Link
                   data-hero-reveal
-                  href="/agent/commissions"
+                  href={journeyHref}
                   className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-white/15 px-4 py-2.5 text-xs font-semibold text-paper/78 transition-colors hover:bg-white hover:text-rail-strong"
                 >
-                  {copy('Ver extrato', 'View statement')} <span aria-hidden>↗</span>
+                  {copy('Ver jornada', 'View journey')} <span aria-hidden>↗</span>
                 </Link>
               </div>
 
               <div data-hero-reveal className="mt-7">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-paper/42">
-                  {copy('Total registrado', 'Recorded total')} <span aria-hidden>·</span> USD
+                  {copy('Target Premium confirmado', 'Confirmed Target Premium')} <span aria-hidden>·</span> PC
                 </p>
                 <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3">
                   <p
-                    aria-label={loadError
-                      ? copy('Total de comissões indisponível', 'Commission total unavailable')
+                    aria-label={!productionAuditReady
+                      ? copy('Produção reconhecida indisponível', 'Recognized production unavailable')
                       : copy(
-                          `Total de ${formatCurrency(commissionThisMonth, language)} em comissões`,
-                          `Total commissions of ${formatCurrency(commissionThisMonth, language)}`,
+                          `Produção reconhecida de ${productionNumberValue} PC`,
+                          `Recognized production of ${productionNumberValue} PC`,
                         )}
                     className="flex items-start gap-2"
                   >
-                    {!loadError && (
-                      <span aria-hidden className="mt-[0.48em] text-[clamp(0.9rem,1.4vw,1.2rem)] font-semibold tracking-[0.14em] text-mint">
-                        US$
+                    <span aria-hidden className="font-mono text-[clamp(3.5rem,6vw,6.25rem)] font-medium leading-[0.84] tracking-[-0.072em] tabular-nums">
+                      {productionNumberValue}
+                    </span>
+                    {productionAuditReady && (
+                      <span aria-hidden className="mb-[0.35em] text-[clamp(0.9rem,1.4vw,1.2rem)] font-semibold tracking-[0.14em] text-mint">
+                        PC
                       </span>
                     )}
-                    <span aria-hidden className="font-mono text-[clamp(3.5rem,6vw,6.25rem)] font-medium leading-[0.84] tracking-[-0.072em] tabular-nums">
-                      {commissionNumberValue}
-                    </span>
                   </p>
-
-                  {hasCommissionComparison && (
-                    <div className="pb-1 sm:pb-2">
-                      <Delta value={commissionDelta} copy={copy} language={language} />
-                      <p className="mt-2 text-xs text-paper/48">
-                        {copy(`em relação a ${previousMonthName}`, `compared with ${previousMonthName}`)}
-                      </p>
-                    </div>
-                  )}
-
-                  {hasNoPreviousCommissionValue && (
-                    <p className="pb-1 text-xs text-paper/48 sm:pb-2">
-                      {copy(
-                        `Sem valor registrado em ${previousMonthName}`,
-                        `No value recorded in ${previousMonthName}`,
-                      )}
-                    </p>
-                  )}
                 </div>
+                <p className="mt-3 max-w-2xl text-xs leading-5 text-paper/48">
+                  {copy(
+                    'Valor confirmado no ledger de Target Premium da National Life; comissão permanece separada no extrato.',
+                    'Value confirmed in the National Life Target Premium ledger; commission remains separate in the statement.',
+                  )}
+                </p>
               </div>
 
               <div data-hero-reveal className="mt-7 rounded-[20px] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
                 <div className="mb-4 flex items-center justify-between">
                   <p className="text-xs font-medium text-paper/52">
-                    {copy('Comissões registradas · 6 meses', 'Recorded commissions · 6 months')}
+                    {localConnectorEnabled
+                      ? copy('Comissões pagas National Life · 6 meses', 'National Life paid commissions · 6 months')
+                      : copy('Comissões registradas · 6 meses', 'Recorded commissions · 6 months')}
                   </p>
                   <p className="font-mono text-xs text-paper/46">
-                    {copy(`Período ${currentPeriodLabel}`, `Period ${currentPeriodLabel}`)}
+                    {commissionAsOfLabel
+                      ? copy(`National atualizada em ${commissionAsOfLabel}`, `National Life updated ${commissionAsOfLabel}`)
+                      : copy(`Período ${currentPeriodLabel}`, `Period ${currentPeriodLabel}`)}
                   </p>
                 </div>
-                <TrendChart
-                  data={commissionTrend}
-                  format="currency"
-                  tone="onDark"
-                  interactive
-                  chartHeight={124}
-                  ariaLabel={copy('Comissões registradas nos últimos seis meses', 'Commissions recorded in the last six months')}
-                />
+                {commissionAuditBlocked ? (
+                  <p className="rounded-xl border border-[oklch(0.78_0.12_68)]/40 bg-[oklch(0.78_0.12_68)]/10 px-4 py-5 text-xs leading-5 text-paper/72">
+                    {copy(
+                      `${commissionRejectedRows} registro(s) de comissão não têm evidência completa da National Life. O total foi bloqueado para evitar um número parcial ou duplicado.`,
+                      `${commissionRejectedRows} commission record(s) do not have complete National Life evidence. The total was blocked to avoid a partial or duplicated number.`,
+                    )}
+                  </p>
+                ) : (
+                  <TrendChart
+                    data={commissionTrend}
+                    format="currency"
+                    tone="onDark"
+                    interactive
+                    chartHeight={124}
+                    ariaLabel={copy('Comissões registradas nos últimos seis meses', 'Commissions recorded in the last six months')}
+                  />
+                )}
               </div>
 
               <div data-hero-reveal className="mt-5 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-3">
                 {[
                   {
-                    label: copy('Esperada', 'Expected'),
-                    value: txnExpected,
+                    label: copy('Clientes ativos National', 'Active National clients'),
+                    display: carrierPortfolioAuditReady ? countValue(activeClientCount) : '—',
                     tone: 'text-paper',
-                    detail: includesCarrierExpected ? copy('Projetada pela National Life', 'Projected by National Life') : null,
+                    detail: carrierPortfolioAuditReady
+                      ? copy(`${activePolicyCount} apólices em vigor`, `${activePolicyCount} in-force policies`)
+                      : copy('Snapshot normalizado ainda não reconciliado', 'Normalized snapshot has not reconciled yet'),
                   },
                   {
-                    label: copy('Paga', 'Paid'),
-                    value: txnPaid,
+                    label: copy('Proteção confirmada', 'Confirmed protection'),
+                    display: completeCarrierMoneyValue(totalProtection, protectionKnownCount, activePolicyCount),
                     tone: 'text-mint',
-                    detail: includesCarrierPaid ? copy('Líquida confirmada pela National Life', 'Net amount confirmed by National Life') : null,
+                    detail: copy(
+                      `${protectionKnownCount}/${activePolicyCount} apólices com capital lido no detalhe National`,
+                      `${protectionKnownCount}/${activePolicyCount} policies with face amount read from National Life detail`,
+                    ),
                   },
                   {
-                    label: copy('Estornos', 'Chargebacks'),
-                    value: txnChargeback,
+                    label: copy('AAP registrado', 'Recorded AAP'),
+                    display: completeCarrierMoneyValue(totalRegisteredPremium, premiumKnownCount, activePolicyCount),
                     tone: 'text-[oklch(0.78_0.12_68)]',
-                    detail: includesCarrierChargeback ? copy('Saldo mais recente da National Life', 'Latest balance from National Life') : null,
+                    detail: copy(
+                      `${premiumKnownCount}/${activePolicyCount} apólices com prêmio anual da National`,
+                      `${premiumKnownCount}/${activePolicyCount} policies with National Life annual premium`,
+                    ),
                   },
                 ].map((metric) => (
                   <div key={metric.label} className="bg-rail-strong/80 px-4 py-3.5">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/38">{metric.label}</p>
-                    <p className={`mt-1.5 font-mono text-lg font-medium tabular-nums ${metric.tone}`}>{moneyValue(metric.value)}</p>
+                    <p className={`mt-1.5 font-mono text-lg font-medium tabular-nums ${metric.tone}`}>{metric.display}</p>
                     {metric.detail && <p className="mt-1 text-[10px] text-paper/38">{metric.detail}</p>}
                   </div>
                 ))}
@@ -960,8 +991,8 @@ export default async function AgentDashboard({
                 <div className="mt-8 flex items-center justify-between border-t border-border-steel/70 pt-4 text-xs">
                   <span className="text-ink-muted">
                     {copy(
-                      `${moneyValue(commissionTotalAmount)} em comissões`,
-                      `${moneyValue(commissionTotalAmount)} in commissions`,
+                      `${auditedCommissionValue(commissionTotalAmount)} em comissões`,
+                      `${auditedCommissionValue(commissionTotalAmount)} in commissions`,
                     )}
                   </span>
                   <span aria-hidden className="text-ink">↗</span>

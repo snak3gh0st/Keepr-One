@@ -54,6 +54,7 @@ const CalendarEventModal = dynamic(
 type Requirement = { id: string; title: string; status: string };
 type Application = {
   id: string;
+  createdByName: string | null;
   status: string;
   automationState: string;
   dossier: unknown;

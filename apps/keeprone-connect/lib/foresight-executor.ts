@@ -22,6 +22,7 @@ import type {
   AnyForesightExecutionReceipt,
   ForesightExecutionDocument,
   ForesightExecutionReceipt,
+  ForesightQuickReview,
   ForesightSolvedExecutionReceipt,
 } from './foresight-messages'
 import type { ForesightProgressPhase } from './foresight-progress'
@@ -507,17 +508,114 @@ function expectedDeathBenefitOption(snapshot: ForesightSolvedIllustrationSnapsho
 }
 
 export function quickViewInitialFaceAmount(rows: ReadonlyArray<ReadonlyArray<string>>): number | null {
-  const headerIndex = rows.findIndex((row) => row.some((cell) => cell.trim() === 'Initial Face Amount'))
+  const headerIndex = rows.findIndex((row) => row.some((cell) => quickViewLabel(cell) === 'Initial Face Amount'))
   if (headerIndex < 0) return null
-  const faceColumn = rows[headerIndex]!.findIndex((cell) => cell.trim() === 'Initial Face Amount')
+  const faceColumn = rows[headerIndex]!.findIndex((cell) => quickViewLabel(cell) === 'Initial Face Amount')
   return carrierAmount(rows[headerIndex + 1]?.[faceColumn] ?? '')
 }
 
-function readQuickViewInitialFaceAmount(doc: Document): number | null {
+function quickViewLabel(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function quickViewNumber(value: string, allowZero = true): number | null {
+  const normalized = value.replace(/[^0-9.-]/g, '')
+  if (!/\d/.test(normalized)) return null
+  const amount = Number(normalized)
+  return Number.isFinite(amount) && (allowZero ? amount >= 0 : amount > 0) ? amount : null
+}
+
+export function parseForesightQuickReview(
+  rows: ReadonlyArray<ReadonlyArray<string>>,
+): ForesightQuickReview | null {
+  const summaryHeaderIndex = rows.findIndex((row) =>
+    row.some((cell) => quickViewLabel(cell) === 'Initial Face Amount') &&
+    row.some((cell) => quickViewLabel(cell) === 'Target Premium'))
+  const summaryHeaders = rows[summaryHeaderIndex] ?? []
+  const summaryValues = rows[summaryHeaderIndex + 1] ?? []
+  const summaryValue = (label: string, allowZero = true) => {
+    const index = summaryHeaders.findIndex((cell) => quickViewLabel(cell) === label)
+    return index < 0 ? null : quickViewNumber(summaryValues[index] ?? '', allowZero)
+  }
+  const initialFaceAmount = summaryValue('Initial Face Amount', false)
+  const modalPremium = summaryValue('Modal Premium', false)
+  const targetPremium = summaryValue('Target Premium', false)
+  if (initialFaceAmount === null || modalPremium === null || targetPremium === null) return null
+
+  const annualHeaderIndex = rows.findIndex((row) =>
+    row.some((cell) => quickViewLabel(cell) === 'Policy Year') &&
+    row.some((cell) => quickViewLabel(cell) === 'Cash Surrender Value') &&
+    row.some((cell) => quickViewLabel(cell) === 'Net Death Benefit'))
+  const annualHeaders = rows[annualHeaderIndex] ?? []
+  const annualIndex = (label: string) => annualHeaders.findIndex((cell) => quickViewLabel(cell) === label)
+  const indexes = {
+    policyYear: annualIndex('Policy Year'),
+    age: annualIndex('Age'),
+    premiumOutlay: annualIndex('Premium Outlay'),
+    weightedAverageInterestRate: annualIndex('Weighted Average Interest Rate'),
+    loan: annualIndex('Loan'),
+    annualIncome: annualIndex('Annual Income'),
+    accumulatedValue: annualIndex('Accumulated Value'),
+    cashSurrenderValue: annualIndex('Cash Surrender Value'),
+    netDeathBenefit: annualIndex('Net Death Benefit'),
+  }
+  if (Object.values(indexes).some((index) => index < 0)) return null
+  const annualProjection = rows.slice(annualHeaderIndex + 1, annualHeaderIndex + 122).flatMap((row) => {
+    const policyYear = quickViewNumber(row[indexes.policyYear] ?? '')
+    const age = quickViewNumber(row[indexes.age] ?? '')
+    if (policyYear === null || age === null || !Number.isInteger(policyYear) || !Number.isInteger(age)) return []
+    return [{
+      policyYear,
+      age,
+      premiumOutlay: quickViewNumber(row[indexes.premiumOutlay] ?? ''),
+      weightedAverageInterestRate: quickViewNumber(row[indexes.weightedAverageInterestRate] ?? ''),
+      loan: quickViewNumber(row[indexes.loan] ?? ''),
+      annualIncome: quickViewNumber(row[indexes.annualIncome] ?? ''),
+      accumulatedValue: quickViewNumber(row[indexes.accumulatedValue] ?? ''),
+      cashSurrenderValue: quickViewNumber(row[indexes.cashSurrenderValue] ?? ''),
+      netDeathBenefit: quickViewNumber(row[indexes.netDeathBenefit] ?? ''),
+    }]
+  })
+  if (annualProjection.length < 1) return null
+  return {
+    summary: {
+      initialFaceAmount,
+      lapseYear: summaryValue('Lapse Year'),
+      mecYear: summaryValue('MEC Year'),
+      modalPremium,
+      minimumPremium: summaryValue('Minimum Premium (MMP)'),
+      deathBenefitProtectionPremium: summaryValue('Death Benefit Protection Premium (MGP)'),
+      targetPremium,
+      mecPremium: summaryValue('MEC Premium'),
+      guidelineLevelPremium: summaryValue('Guideline Level Premium'),
+      guidelineSinglePremium: summaryValue('Guideline Single Premium'),
+    },
+    annualProjection,
+  }
+}
+
+function readQuickView(doc: Document): ForesightQuickReview | null {
   if (doc.location.pathname !== '/NWI/IUL2025/quickview.aspx') return null
   const rows = [...doc.querySelectorAll('tr')].map((row) =>
     [...row.querySelectorAll('th, td')].map((cell) => cell.textContent?.trim() ?? ''))
-  return quickViewInitialFaceAmount(rows)
+  const review = parseForesightQuickReview(rows)
+  return review ? {
+    ...review,
+    evidence: {
+      source: 'FORESIGHT_QUICK_VIEW',
+      observedAt: new Date().toISOString(),
+      sourceRows: rows.slice(0, 150).map((row) => row.slice(0, 20).map((cell) => cell.slice(0, 256))),
+    },
+  } : null
+}
+
+export function quickReviewMatchesLedger(
+  review: ForesightQuickReview,
+  ledger: Pick<ForesightSolvedLedgerReadback, 'faceAmount' | 'monthlyPremium'>,
+): boolean {
+  if (ledger.faceAmount === null) return false
+  return carrierAmountEquals(review.summary.initialFaceAmount, ledger.faceAmount) &&
+    carrierAmountEquals(review.summary.modalPremium, ledger.monthlyPremium)
 }
 
 export function solvedLedgerMatches(
@@ -529,9 +627,18 @@ export function solvedLedgerMatches(
   }
   if (Math.abs(observed.annualPremium - (observed.monthlyPremium * 12)) > 0.06) return false
   if (snapshot.solve.basis === 'PREMIUM') {
-    return observed.faceSolve === 'Based on Target Premium' && observed.premiumSolve === 'None'
+    const expected = ({
+      Minimum_DB_Max_Cash_Value: 'Minimum DB/Max Cash Value',
+      Balanced_DB: 'Balanced DB',
+      Based_on_Target_Premium: 'Based on Target Premium',
+    } as Record<string, string>)[snapshot.solve.method]
+    return expected !== undefined && observed.faceSolve === expected && observed.premiumSolve === 'None'
   }
-  return observed.faceSolve === 'None' && observed.premiumSolve === 'Protection Focus'
+  const expected = ({
+    Protection_Focus: 'Protection Focus',
+    Retirement_Focus: 'Retirement Focus',
+  } as Record<string, string>)[snapshot.solve.method]
+  return expected !== undefined && observed.faceSolve === 'None' && observed.premiumSolve === expected
 }
 
 async function fillSolvedLedger(
@@ -541,6 +648,7 @@ async function fillSolvedLedger(
   validateSurface(doc, '/NWI/IUL2025/ledger.aspx')
   const values: Record<string, string | number> = {
     solveBasis: snapshot.solve.basis,
+    solveMethod: snapshot.solve.method,
     deathBenefitOption: optionValue(
       doc,
       FORESIGHT_FLEXLIFE_FIELDS.ledger.deathBenefitOption,
@@ -561,7 +669,7 @@ async function fillSolvedLedger(
     if (observed.faceAmount !== null) return { ...observed, faceAmount: observed.faceAmount }
     if (snapshot.solve.basis !== 'PREMIUM') fail('FORESIGHT_SOLVE_READBACK_MISMATCH')
     const quickView = await navigate('/NWI/IUL2025/quickview.aspx', MENU_IDS.quickView)
-    const faceAmount = readQuickViewInitialFaceAmount(quickView)
+    const faceAmount = readQuickView(quickView)?.summary.initialFaceAmount ?? null
     if (faceAmount === null) fail('FORESIGHT_SOLVE_READBACK_MISMATCH')
     return { ...observed, faceAmount }
   } catch (error) {
@@ -720,6 +828,13 @@ async function executeForesightSolvedIllustration(input: {
   if (!ledger || hasCarrierCalculationError(ledgerDoc) || !solvedLedgerMatches(input.snapshot, ledger)) {
     fail(hasCarrierCalculationError(ledgerDoc) ? 'FORESIGHT_CALCULATION_UNAVAILABLE' : 'FORESIGHT_SOLVE_READBACK_MISMATCH')
   }
+  input.onProgress?.('READING_QUICK_REVIEW')
+  const quickReview = readQuickView(
+    await navigate('/NWI/IUL2025/quickview.aspx', MENU_IDS.quickView),
+  )
+  if (!quickReview || !quickReviewMatchesLedger(quickReview, ledger)) {
+    fail('FORESIGHT_QUICK_VIEW_READBACK_MISMATCH')
+  }
   const ridersDoc = await navigate('/NWI/IUL2025/product.aspx', MENU_IDS.riders)
   const riders = verifyRiders(ridersDoc)
   const allocations = primedAllocations ?? readAllocation(
@@ -749,6 +864,7 @@ async function executeForesightSolvedIllustration(input: {
     faceAmount: ledger.faceAmount,
     monthlyPremium: ledger.monthlyPremium,
     annualPremium: ledger.annualPremium,
+    quickReview,
     release,
     reportCode: 'NAIC_ILLUSTRATION',
     documentSha256: await sha256Hex(pdf),

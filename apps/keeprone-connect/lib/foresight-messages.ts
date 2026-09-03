@@ -52,11 +52,43 @@ export type ForesightSolvedExecutionReceipt = {
   faceAmount: number
   monthlyPremium: number
   annualPremium: number
+  quickReview?: ForesightQuickReview
   release: string
   reportCode: 'NAIC_ILLUSTRATION'
   documentSha256: string
   documentBytes: number
   saved: true
+}
+
+export type ForesightQuickReview = {
+  evidence?: {
+    source: 'FORESIGHT_QUICK_VIEW'
+    observedAt: string
+    sourceRows: string[][]
+  }
+  summary: {
+    initialFaceAmount: number
+    lapseYear: number | null
+    mecYear: number | null
+    modalPremium: number
+    minimumPremium: number | null
+    deathBenefitProtectionPremium: number | null
+    targetPremium: number
+    mecPremium: number | null
+    guidelineLevelPremium: number | null
+    guidelineSinglePremium: number | null
+  }
+  annualProjection: Array<{
+    policyYear: number
+    age: number
+    premiumOutlay: number | null
+    weightedAverageInterestRate: number | null
+    loan: number | null
+    annualIncome: number | null
+    accumulatedValue: number | null
+    cashSurrenderValue: number | null
+    netDeathBenefit: number | null
+  }>
 }
 
 export type AnyForesightExecutionReceipt =
@@ -140,12 +172,15 @@ function validReceipt(
   if (!commonReceiptFields(receipt, expected.inputHash)) return false
   if ('code' in expected.snapshot.product) {
     if (expected.snapshot.schemaVersion === 2) {
-      return exactKeys(receipt, [
+      const keys = [
         'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'solveBasis', 'faceAmount',
         'monthlyPremium', 'annualPremium', 'release', 'reportCode', 'documentSha256', 'documentBytes', 'saved',
-      ]) && receipt.productCode === '956' && receipt.solveBasis === expected.snapshot.solve.basis &&
+      ]
+      const allowedShape = exactKeys(receipt, keys) || exactKeys(receipt, [...keys, 'quickReview'])
+      return allowedShape && receipt.productCode === '956' && receipt.solveBasis === expected.snapshot.solve.basis &&
         positiveCarrierAmount(receipt.faceAmount) && positiveCarrierAmount(receipt.monthlyPremium) &&
-        positiveCarrierAmount(receipt.annualPremium)
+        positiveCarrierAmount(receipt.annualPremium) &&
+        (!Object.hasOwn(receipt, 'quickReview') || isForesightQuickReview(receipt.quickReview))
     }
     return exactKeys(receipt, [
       'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'release', 'reportCode',
@@ -160,6 +195,50 @@ function validReceipt(
   ]) && receipt.carrierProduct === expected.snapshot.product.carrierName &&
     receipt.requestedTermDuration === expected.snapshot.termDuration &&
     (termDurations as readonly unknown[]).includes(receipt.confirmedTermDuration)
+}
+
+function nullableNonNegativeAmount(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000)
+}
+
+export function isForesightQuickReview(value: unknown): value is ForesightQuickReview {
+  if (!isObject(value) ||
+    (!exactKeys(value, ['summary', 'annualProjection']) &&
+      !exactKeys(value, ['summary', 'annualProjection', 'evidence'])) ||
+    !isObject(value.summary) || !Array.isArray(value.annualProjection) ||
+    value.annualProjection.length < 1 || value.annualProjection.length > 121) return false
+  if (Object.hasOwn(value, 'evidence')) {
+    if (!isObject(value.evidence) || !exactKeys(value.evidence, ['source', 'observedAt', 'sourceRows']) ||
+      value.evidence.source !== 'FORESIGHT_QUICK_VIEW' ||
+      typeof value.evidence.observedAt !== 'string' ||
+      Number.isNaN(Date.parse(value.evidence.observedAt)) ||
+      !Array.isArray(value.evidence.sourceRows) || value.evidence.sourceRows.length < 2 ||
+      value.evidence.sourceRows.length > 150 ||
+      !value.evidence.sourceRows.every((row) => Array.isArray(row) && row.length <= 20 &&
+        row.every((cell) => typeof cell === 'string' && cell.length <= 256))) return false
+  }
+  const summary = value.summary
+  if (!exactKeys(summary, [
+    'initialFaceAmount', 'lapseYear', 'mecYear', 'modalPremium', 'minimumPremium',
+    'deathBenefitProtectionPremium', 'targetPremium', 'mecPremium',
+    'guidelineLevelPremium', 'guidelineSinglePremium',
+  ]) || !positiveCarrierAmount(summary.initialFaceAmount) ||
+    !positiveCarrierAmount(summary.modalPremium) ||
+    !positiveCarrierAmount(summary.targetPremium) ||
+    !['lapseYear', 'mecYear', 'minimumPremium', 'deathBenefitProtectionPremium',
+      'mecPremium', 'guidelineLevelPremium', 'guidelineSinglePremium']
+      .every((key) => nullableNonNegativeAmount(summary[key]))) return false
+  return value.annualProjection.every((row) => {
+    if (!isObject(row) || !exactKeys(row, [
+      'policyYear', 'age', 'premiumOutlay', 'weightedAverageInterestRate', 'loan',
+      'annualIncome', 'accumulatedValue', 'cashSurrenderValue', 'netDeathBenefit',
+    ]) || !Number.isInteger(row.policyYear) || (row.policyYear as number) < 1 ||
+      (row.policyYear as number) > 121 || !Number.isInteger(row.age) ||
+      (row.age as number) < 0 || (row.age as number) > 130) return false
+    return ['premiumOutlay', 'weightedAverageInterestRate', 'loan', 'annualIncome',
+      'accumulatedValue', 'cashSurrenderValue', 'netDeathBenefit']
+      .every((key) => nullableNonNegativeAmount(row[key]))
+  })
 }
 
 export function parseForesightExecutionResponse(

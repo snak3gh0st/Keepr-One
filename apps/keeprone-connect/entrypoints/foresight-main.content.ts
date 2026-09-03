@@ -212,12 +212,22 @@ export default defineContentScript({
     }
     const applySolvedLedger = async (values: MainRequest['values']) => {
       const basis = String(values.solveBasis)
+      const method = String(values.solveMethod)
       if (basis !== 'DEATH_BENEFIT' && basis !== 'PREMIUM') {
         throw new Error('FORESIGHT_SCHEMA_MISMATCH')
       }
+      const solveLabels: Record<string, { basis: 'DEATH_BENEFIT' | 'PREMIUM'; label: string }> = {
+        Minimum_DB_Max_Cash_Value: { basis: 'PREMIUM', label: 'Minimum DB/Max Cash Value' },
+        Balanced_DB: { basis: 'PREMIUM', label: 'Balanced DB' },
+        Based_on_Target_Premium: { basis: 'PREMIUM', label: 'Based on Target Premium' },
+        Protection_Focus: { basis: 'DEATH_BENEFIT', label: 'Protection Focus' },
+        Retirement_Focus: { basis: 'DEATH_BENEFIT', label: 'Retirement Focus' },
+      }
+      const strategy = solveLabels[method]
+      if (!strategy || strategy.basis !== basis) throw new Error('FORESIGHT_SCHEMA_MISMATCH')
       let { doc, win } = carrier()
       if (basis === 'PREMIUM') {
-        solveRadio(doc, 'rdoDeathBenefitSolves', 'Based on Target Premium')
+        solveRadio(doc, 'rdoDeathBenefitSolves', strategy.label)
         await delay(900)
         ;({ doc, win } = carrier())
         solveRadio(doc, 'rdoPremiumSolves', 'None')
@@ -256,7 +266,7 @@ export default defineContentScript({
         invoke(win, 'ctl00_mobilityPH_panelPremium_ucPremium', 'updatePremiumMode')
         await delay(900)
         ;({ doc, win } = carrier())
-        solveRadio(doc, 'rdoPremiumSolves', 'Protection Focus')
+        solveRadio(doc, 'rdoPremiumSolves', strategy.label)
         await delay(1_100)
       }
       ;({ doc, win } = carrier())
