@@ -215,6 +215,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         plannedPeriodicPayment: policy.nationalLifeDetail.plannedPeriodicPayment?.toString() ?? null,
         paymentFrequency: policy.nationalLifeDetail.paymentFrequency,
         anticipatedAnnualPremium: policy.nationalLifeDetail.anticipatedAnnualPremium?.toString() ?? null,
+        targetPremium: policy.nationalLifeDetail.ctp?.toString() ?? null,
         observedAt: policy.nationalLifeDetail.observedAt.toISOString(),
       }
     : null

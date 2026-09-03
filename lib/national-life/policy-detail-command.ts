@@ -9,11 +9,11 @@ export type PolicyDetailCommandRepository = {
     policyNumber: string
     carrier: string
   } | null>
-  findCarrierRow(input: {
+  findCarrierRows(input: {
     agentId: string
     deploymentScope: string
     policyNumber: string
-  }): Promise<{ raw: Prisma.JsonValue } | null>
+  }): Promise<Array<{ raw: Prisma.JsonValue }>>
   issue(input: IssueConnectorCommandInput & { now: Date }): Promise<{ commandId: string }>
 }
 
@@ -65,12 +65,14 @@ export async function requestNationalLifePolicyDetailRefresh(
     !policy.policyNumber
   ) throw new Error('POLICY_DETAIL_NOT_FOUND')
 
-  const carrierRow = await repository.findCarrierRow({
+  const carrierRows = await repository.findCarrierRows({
     agentId: policy.agentId,
     deploymentScope: input.deploymentScope,
     policyNumber: policy.policyNumber,
   })
-  const navigatePath = findNationalLifePolicyDetailPath(carrierRow?.raw)
+  const navigatePath = carrierRows
+    .map((row) => findNationalLifePolicyDetailPath(row.raw))
+    .find((path): path is string => path !== null) ?? null
   if (!navigatePath) throw new Error('POLICY_DETAIL_ROUTE_UNAVAILABLE')
 
   const now = input.now ?? new Date()

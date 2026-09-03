@@ -169,16 +169,44 @@ export async function refreshNationalLifePolicyDetail(
 
     const result = await requestNationalLifePolicyDetailRefresh({
       findOwnedPolicy: async () => policy,
-      findCarrierRow: (input) => prisma.nationalLifeInforcePolicy.findUnique({
-        where: {
-          agentId_deploymentScope_policyNumber: {
-            agentId: input.agentId,
-            deploymentScope: input.deploymentScope,
-            policyNumber: input.policyNumber,
-          },
-        },
-        select: { raw: true },
-      }),
+      findCarrierRows: async (input) => {
+        const scopes = [input.deploymentScope, 'keepr-one-production-v1']
+        const [inforceRows, reportRows, caseRows] = await Promise.all([
+          prisma.nationalLifeInforcePolicy.findMany({
+            where: {
+              agentId: input.agentId,
+              policyNumber: input.policyNumber,
+              deploymentScope: { in: scopes },
+            },
+            select: { raw: true },
+            orderBy: { fetchedAt: 'desc' },
+          }),
+          prisma.nationalLifeReportRow.findMany({
+            where: {
+              agentId: input.agentId,
+              deploymentScope: { in: scopes },
+              gridKey: 'CLIENT_INTELLIGENCE',
+              label: input.policyNumber,
+            },
+            select: { raw: true },
+            orderBy: { fetchedAt: 'desc' },
+          }),
+          prisma.nationalLifeCaseSnapshot.findMany({
+            where: {
+              agentId: input.agentId,
+              deploymentScope: { in: scopes },
+              policyNo: input.policyNumber,
+            },
+            select: { raw: true },
+            orderBy: { fetchedAt: 'desc' },
+          }),
+        ])
+        return [
+          ...inforceRows,
+          ...reportRows,
+          ...caseRows,
+        ]
+      },
       issue: async (input) => {
         const issued = await issueConnectorCommand(prismaConnectorCommandRepository, input)
         return { commandId: issued.command.commandId }
