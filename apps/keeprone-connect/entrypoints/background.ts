@@ -190,6 +190,46 @@ const IGO_HANDOFF_ORIGINS = [
   'https://federate.ipipeline.com',
 ] as const
 const IGO_SSO_PATH = NLG_IGO_EAPP_PATH
+const NLG_BRIDGE_SCRIPT = 'content-scripts/nlg-bridge.js'
+
+function isMissingMessageReceiver(error: unknown): boolean {
+  return error instanceof Error && (
+    error.message.includes('Receiving end does not exist') ||
+    error.message.includes('Could not establish connection')
+  )
+}
+
+async function restoreMissingNationalLifeBridge(tabId: number, error: unknown): Promise<boolean> {
+  if (!isMissingMessageReceiver(error)) return false
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: [NLG_BRIDGE_SCRIPT],
+  })
+  return true
+}
+
+function policyDetailFailureCode(
+  value: unknown,
+  message: CapturePolicyDetailMessage,
+): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const response = value as Record<string, unknown>
+  if (
+    Object.keys(response).sort().join(',') !== 'code,correlationId,ok,token,type' ||
+    response.ok !== false ||
+    response.type !== 'POLICY_DETAIL_CAPTURE_FAILED' ||
+    response.token !== message.token ||
+    response.correlationId !== message.correlationId ||
+    typeof response.code !== 'string' ||
+    ![
+      'POLICY_DETAIL_PATH_MISMATCH',
+      'POLICY_DETAIL_TARGET_MISMATCH',
+      'POLICY_DETAIL_SECTION_UNAVAILABLE',
+      'POLICY_DETAIL_CAPTURE_FAILED',
+    ].includes(response.code)
+  ) return null
+  return response.code
+}
 
 function errorCode(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
@@ -299,9 +339,13 @@ async function capturePolicyDetailWithRetry(
   message: CapturePolicyDetailMessage,
 ) {
   let lastError: unknown
+  let restoredBridge = false
   for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
-      const response = parseCapturePolicyDetailAck(await chrome.tabs.sendMessage(tabId, message))
+      const rawResponse = await chrome.tabs.sendMessage(tabId, message)
+      const failureCode = policyDetailFailureCode(rawResponse, message)
+      if (failureCode) throw new Error(failureCode)
+      const response = parseCapturePolicyDetailAck(rawResponse)
       if (
         !response ||
         response.token !== message.token ||
@@ -312,6 +356,14 @@ async function capturePolicyDetailWithRetry(
       return response.detail
     } catch (error) {
       lastError = error
+      if (!restoredBridge && isMissingMessageReceiver(error)) {
+        try {
+          restoredBridge = await restoreMissingNationalLifeBridge(tabId, error)
+          if (restoredBridge) continue
+        } catch {
+          // Keep the original missing-receiver failure as the safe audit code.
+        }
+      }
       const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
       if (delay === undefined) break
       await new Promise((resolve) => setTimeout(resolve, delay))
