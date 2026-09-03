@@ -269,7 +269,7 @@ export default async function AgentDashboard({
         : 0,
       canUsePolicies
         ? loadCurrentNationalLifePortfolio(prisma, scope)
-        : { rows: [], historicalPolicies: 0, verified: false },
+        : { rows: [], storedPolicies: 0, historicalPolicies: 0, verified: false, statusCounts: [], productCounts: [] },
       canUsePolicies
         ? prisma.nationalLifePolicyDetailSnapshot.aggregate({
             where: {
@@ -347,6 +347,12 @@ export default async function AgentDashboard({
     portfolioMetrics = buildNationalLifePortfolioMetrics(nationalPolicyRows.rows)
     historicalPolicies = nationalPolicyRows.historicalPolicies
     portfolioVerified = nationalPolicyRows.verified
+    if (portfolioVerified && policyCount === nationalPolicyRows.storedPolicies) {
+      policyCount = nationalPolicyRows.rows.length
+      byStatus = nationalPolicyRows.statusCounts.map((row) => ({ status: row.status, _count: { _all: row.count } }))
+      byCarrier = [{ carrier: 'National Life Group', _count: { _all: nationalPolicyRows.rows.length } }]
+      byProduct = nationalPolicyRows.productCounts.map((row) => ({ product: row.product, _count: { _all: row.count } }))
+    }
     atRiskPolicies = portfolioMetrics.attentionPolicies
     byStatus = statusBuckets
     byCarrier = carrierBuckets

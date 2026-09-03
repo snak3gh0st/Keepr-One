@@ -22,6 +22,7 @@ describe('loadCurrentNationalLifePortfolio', () => {
     const { prisma, findFirst } = db()
     const result = await loadCurrentNationalLifePortfolio(prisma as never, ['a1'])
     expect(result.verified).toBe(true)
+    expect(result.storedPolicies).toBe(1)
     expect(result.rows).toHaveLength(2)
     expect(result.rows[0]).toMatchObject({ clientId: 'c1', premium: 1200 })
     expect(result.rows[1]).toMatchObject({ clientId: null, premium: 800 })
