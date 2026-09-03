@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   requireAgencyCapability: vi.fn(),
+  requireAgentModule: vi.fn(),
   revalidatePath: vi.fn(),
   transaction: vi.fn(),
   agentFindUnique: vi.fn(),
@@ -26,6 +27,9 @@ const transactionClient = {
 
 vi.mock("@/lib/agent-access", () => ({
   requireAgencyCapability: mocks.requireAgencyCapability,
+}));
+vi.mock("@/lib/require-agent-module", () => ({
+  requireAgentModule: mocks.requireAgentModule,
 }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("@/lib/email/send", () => ({
@@ -99,6 +103,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(now);
   vi.clearAllMocks();
+  mocks.requireAgentModule.mockResolvedValue({ user: { role: "AGENT" } });
   mocks.requireAgencyCapability.mockResolvedValue({
     agentId: "agent-owner",
     kind: "AGENCY_OWNER",
@@ -125,6 +130,19 @@ afterEach(() => {
 });
 
 describe("createAgencyInvitationAction", () => {
+  it("checks the AGENCY module before resolving invitation capabilities", async () => {
+    mocks.requireAgentModule.mockRejectedValue(new Error("module disabled"));
+
+    const result = await createAgencyInvitationAction(
+      INITIAL_AGENCY_ACTION_STATE,
+      invitationForm("agent@example.com"),
+    );
+
+    expect(result.status).toBe("error");
+    expect(mocks.requireAgentModule).toHaveBeenCalledWith("AGENCY");
+    expect(mocks.requireAgencyCapability).not.toHaveBeenCalled();
+  });
+
   it("persists a normalized, server-priced invitation at the server-defined initial stage", async () => {
     const result = await createAgencyInvitationAction(
       INITIAL_AGENCY_ACTION_STATE,

@@ -26,11 +26,11 @@ export default async function NationalLifeAdminPage() {
   return (
     <Shell role="ADMIN" userName={session.user.name}>
       <PageHeader
-        title={copy('Saúde da integração National Life', 'National Life integration health')}
-        eyebrow={copy('Integrações', 'Integrations')}
+        title={copy('Integração National Life', 'National Life integration')}
+        eyebrow={copy('Backoffice Keepr One', 'Keepr One back office')}
         description={copy(
-          'Visão operacional das sessões dos agentes. Administradores acompanham o estado, sem acesso ao portal ou à sessão individual.',
-          'Operational view of agent sessions. Administrators can monitor status without access to the portal or individual sessions.',
+          'Monitore as conexões dos agentes e identifique contas que precisam de suporte antes de acessar o painel do usuário.',
+          'Monitor agent connections and identify accounts that need support before opening the user’s panel.',
         )}
       />
 

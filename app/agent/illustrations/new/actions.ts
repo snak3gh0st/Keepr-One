@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
-import { getCurrentAgent } from '@/lib/agent-context'
+import { getCurrentAgent as readCurrentAgent } from '@/lib/agent-context'
 import { prisma } from '@/lib/prisma'
 import {
   approveConnectorCommand,
@@ -23,6 +23,12 @@ import { getForesightIllustrationProduct } from '@/lib/national-life/foresight-p
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
 import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
 import { getServerI18n } from '@/lib/i18n/server'
+import { requireAgentModule } from '@/lib/require-agent-module'
+
+async function getCurrentAgent() {
+  await requireAgentModule('ILLUSTRATIONS')
+  return readCurrentAgent()
+}
 
 function normalizeText(value: string | null | undefined): string {
   return (value ?? '').trim()

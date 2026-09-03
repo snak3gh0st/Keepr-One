@@ -76,7 +76,7 @@ describe('National Life admin health page', () => {
 
     render(await NationalLifeAdminPage())
 
-    expect(screen.getByRole('heading', { name: 'National Life integration health' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'National Life integration' })).toBeVisible()
     expect(screen.getByText('Connected')).toBeVisible()
     expect(screen.getByText('Last connection')).toBeVisible()
     expect(screen.getByText('New sign-in required')).toBeVisible()

@@ -68,67 +68,72 @@ export default async function FounderExpiredPage({
   const billingContactUrl = process.env.NEXT_PUBLIC_BILLING_CONTACT_URL
     ?? 'https://keeprone.com/#planos'
   const stripePlan = getStripeCatalogEntry(presentation.plan)
+  const linkedBilling = access.subscription
+    ? await prisma.platformSubscription.findUnique({
+        where: { id: access.subscription.id },
+        select: { stripeCustomerId: true, stripeSubscriptionId: true },
+      })
+    : null
+  const hasLinkedStripeSubscription = Boolean(
+    linkedBilling?.stripeCustomerId && linkedBilling.stripeSubscriptionId,
+  )
+  const impersonatedBy = (session.session as { impersonatedBy?: unknown }).impersonatedBy
+  const isSupportPreview = typeof impersonatedBy === 'string'
 
   return (
-    <main className="relative isolate min-h-svh overflow-hidden bg-[#050706] px-5 py-6 text-white sm:px-8 sm:py-8">
-      <div
-        aria-hidden
-        className="absolute inset-0 -z-20 bg-[radial-gradient(circle_at_76%_20%,rgba(101,228,151,0.12),transparent_28%),radial-gradient(circle_at_16%_88%,rgba(255,255,255,0.06),transparent_34%)]"
-      />
-      <div
-        aria-hidden
-        className="absolute inset-0 -z-10 opacity-35 [background-image:linear-gradient(rgba(101,228,151,0.07)_1px,transparent_1px),linear-gradient(90deg,rgba(101,228,151,0.07)_1px,transparent_1px)] [background-size:32px_32px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_82%)]"
-      />
+    <main className="relative isolate min-h-svh overflow-hidden bg-canvas px-4 py-5 text-ink sm:px-7 sm:py-7">
+      <div aria-hidden className="absolute inset-x-0 top-0 -z-10 h-[38vh] min-h-[300px] bg-[#08110c]" />
 
-      <div className="mx-auto flex min-h-[calc(100svh-3rem)] w-full max-w-[1320px] flex-col sm:min-h-[calc(100svh-4rem)]">
-        <header className="flex items-center justify-between gap-6 border-b border-white/10 pb-5">
+      <div className="mx-auto flex min-h-[calc(100svh-2.5rem)] w-full max-w-[1120px] flex-col sm:min-h-[calc(100svh-3.5rem)]">
+        <header className="flex items-center justify-between gap-6 border-b border-white/10 pb-5 text-white">
           <Link href="/" aria-label={copy('Keepr One — início', 'Keepr One — home')}>
             <Logo size={32} className="text-white" />
           </Link>
-          <span className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-white/48">
+          <span className="font-mono text-xs uppercase tracking-[0.12em] text-white/55">
             {presentation.programLabel}
           </span>
         </header>
 
-        <section className="my-auto grid items-center gap-12 py-16 lg:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.65fr)] lg:gap-24">
-          <div>
-            <p className="mb-7 flex items-center gap-3 font-mono text-[0.68rem] uppercase tracking-[0.18em] text-mint">
-              <span aria-hidden className="h-px w-10 bg-mint" />
-              {presentation.eyebrow}
-            </p>
-            <h1 className="max-w-4xl font-[var(--font-outfit)] text-[clamp(3.35rem,7.3vw,7.3rem)] font-medium leading-[0.88] tracking-[-0.068em]">
-              {copy('Sua operação continua aqui.', 'Your operations continue here.')}
-            </h1>
-            <p className="mt-7 max-w-2xl text-base leading-8 text-white/58 sm:text-lg">
-              {presentation.description}
-            </p>
-          </div>
-
-          <aside className="border border-white/14 bg-white/[0.045] p-6 shadow-[0_28px_100px_rgba(0,0,0,0.34)] backdrop-blur-xl sm:p-8">
-            <div className="flex items-start justify-between gap-5 border-b border-white/12 pb-6">
+        <div className="flex flex-1 items-center justify-center py-10 sm:py-14">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="payment-required-title"
+            className="w-full max-w-[760px] overflow-hidden rounded-2xl border border-border-steel bg-paper shadow-[0_22px_60px_rgba(8,17,12,0.16)]"
+          >
+            <div className="h-1.5 bg-mint" />
+            <div className="p-5 sm:p-8 lg:p-10">
+              <div className="flex items-start justify-between gap-5 border-b border-border-steel pb-6">
               <div>
-                <span className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-mint">
-                  {copy('Continuidade', 'Continuity')}
-                </span>
-                <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em]">{presentation.planLabel}</h2>
+                  <span className="font-mono text-xs font-semibold uppercase tracking-[0.12em] text-teal">
+                    {presentation.eyebrow}
+                  </span>
+                  <h1 id="payment-required-title" className="mt-2 text-2xl font-semibold tracking-[-0.035em] text-ink sm:text-3xl">
+                    {access.paymentRequiredAt
+                      ? copy('Pagamento necessário para continuar', 'Payment required to continue')
+                      : copy('Seu período de teste terminou', 'Your free trial has ended')}
+                  </h1>
               </div>
-              <span aria-hidden className="grid h-10 w-10 place-items-center border border-mint/35 text-mint">↗</span>
-            </div>
+                <span aria-hidden className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-teal-pale text-lg font-semibold text-teal">$</span>
+              </div>
 
-            <div className="py-7">
-              <p className="text-sm text-white/48">{copy('Mensalidade do plano', 'Monthly plan fee')}</p>
-              <p className="mt-2 font-[var(--font-outfit)] text-5xl font-medium tracking-[-0.06em]">{price}</p>
-              <p className="mt-2 text-xs text-white/42">{copy('por mês · cobrança em USD', 'per month · billed in USD')}</p>
-            </div>
+              <p className="mt-6 max-w-2xl text-sm leading-6 text-ink-muted sm:text-base">
+                {presentation.description}
+              </p>
 
-            <ul className="space-y-3 border-t border-white/12 pt-6 text-sm leading-6 text-white/66">
-              <li className="flex gap-3"><span className="text-mint">✓</span> {copy('Seus registros permanecem preservados.', 'Your records remain preserved.')}</li>
-              <li className="flex gap-3"><span className="text-mint">✓</span> {copy('O acesso volta após a ativação comercial.', 'Access returns after subscription activation.')}</li>
-              <li className="flex gap-3"><span className="text-mint">✓</span> {presentation.profileBenefit}</li>
-            </ul>
+              <dl className="mt-6 grid gap-3 rounded-xl border border-border-steel bg-panel/60 p-4 sm:grid-cols-2">
+                <div>
+                  <dt className="text-xs text-ink-muted">{copy('Plano', 'Plan')}</dt>
+                  <dd className="mt-1 text-sm font-semibold text-ink">{presentation.planLabel}</dd>
+                </div>
+                <div className="sm:text-right">
+                  <dt className="text-xs text-ink-muted">{copy('Mensalidade', 'Monthly price')}</dt>
+                  <dd className="mt-1 font-mono text-sm font-semibold text-ink">{price} / {copy('mês', 'month')}</dd>
+                </div>
+              </dl>
 
             {billingState === 'canceled' && (
-              <p className="mt-6 border border-white/12 bg-white/[0.04] px-4 py-3 text-sm text-white/66">
+                <p className="mt-5 rounded-lg border border-border-steel bg-panel px-4 py-3 text-sm text-ink-muted">
                 {copy(
                   'Ativação cancelada. Nenhuma nova assinatura foi vinculada.',
                   'Activation canceled. No new subscription was linked.',
@@ -136,7 +141,7 @@ export default async function FounderExpiredPage({
               </p>
             )}
             {(billingState === 'pending' || billingState === 'invalid') && (
-              <p className="mt-6 border border-amber-300/25 bg-amber-200/[0.06] px-4 py-3 text-sm text-amber-100/80">
+                <p className="mt-5 rounded-lg border border-gold/25 bg-gold-pale px-4 py-3 text-sm text-gold-ink">
                 {copy(
                   'Ainda não foi possível confirmar a assinatura no Stripe. Você pode tentar novamente; seus dados continuam preservados.',
                   "We couldn't confirm the Stripe subscription yet. You can try again; your data remains preserved.",
@@ -144,40 +149,50 @@ export default async function FounderExpiredPage({
               </p>
             )}
 
-            {stripePlan ? (
-              <form action="/api/billing/checkout" method="post">
+              {!isSupportPreview && stripePlan ? (
+                <form action={hasLinkedStripeSubscription ? '/api/billing/portal' : '/api/billing/checkout'} method="post">
                 <button
                   type="submit"
-                  className="mt-8 flex min-h-14 w-full items-center justify-between bg-white px-5 text-sm font-bold text-black transition-colors hover:bg-mint focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-mint"
+                    className="mt-6 flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-rail-strong px-5 text-sm font-semibold text-paper transition-colors hover:bg-rail focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
                 >
-                  {copy('Ativar assinatura segura', 'Activate secure subscription')}
+                    {hasLinkedStripeSubscription
+                      ? copy('Resolver pagamento no Stripe', 'Resolve payment in Stripe')
+                      : copy(`Ativar plano por ${price}/mês`, `Activate plan for ${price}/month`)}
                   <span aria-hidden>↗</span>
                 </button>
               </form>
-            ) : (
+              ) : !isSupportPreview ? (
               <Link
                 href={billingContactUrl}
-                className="mt-8 flex min-h-14 items-center justify-between bg-white px-5 text-sm font-bold text-black transition-colors hover:bg-mint focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-mint"
+                  className="mt-6 flex min-h-12 items-center justify-center gap-2 rounded-full bg-rail-strong px-5 text-sm font-semibold text-paper transition-colors hover:bg-rail focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
               >
                 {copy('Falar com a Keepr One', 'Contact Keepr One')}
                 <span aria-hidden>↗</span>
               </Link>
-            )}
-            <p className="mt-4 text-xs leading-5 text-white/42">
-              {stripePlan
+              ) : (
+                <p className="mt-6 rounded-lg bg-panel px-4 py-3 text-sm text-ink-muted">
+                  {copy(
+                    'O pagamento fica desabilitado durante a visualização de suporte. Volte ao painel Keepr One para continuar.',
+                    'Payment is disabled during support preview. Return to the Keepr One admin to continue.',
+                  )}
+                </p>
+              )}
+              <p className="mt-4 text-center text-xs leading-5 text-ink-muted">
+              {stripePlan && !isSupportPreview
                 ? copy(
-                    'Pagamento e renovação são processados pelo Stripe. Seus dados da National Life não são enviados para a cobrança.',
-                    'Payment and renewal are processed by Stripe. Your National Life data is not sent to billing.',
+                      'Pagamento seguro processado pelo Stripe. Seus dados operacionais não são enviados para a cobrança.',
+                      'Secure payment processed by Stripe. Your operations data is not sent to billing.',
                   )
                 : copy(
-                    'A ativação deste plano é concluída com a equipe da Keepr One.',
-                    'This plan is activated with the Keepr One team.',
+                      'Seus registros e configurações permanecem preservados.',
+                      'Your records and settings remain preserved.',
                   )}
             </p>
-          </aside>
-        </section>
+            </div>
+          </section>
+        </div>
 
-        <footer className="flex flex-wrap items-center justify-between gap-5 border-t border-white/10 pt-5 text-xs text-white/42">
+        <footer className="flex flex-wrap items-center justify-between gap-5 border-t border-border-steel pt-5 text-xs text-ink-muted">
           <span>© {new Date().getFullYear()} Keepr One</span>
           <FounderSignOutButton />
         </footer>

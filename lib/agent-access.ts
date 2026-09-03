@@ -4,6 +4,10 @@ import { cache } from 'react'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { prisma } from '@/lib/prisma'
 import type { PlatformPlanName } from '@/lib/plans'
+import {
+  normalizePlatformModules,
+  type PlatformModuleName,
+} from '@/lib/platform-modules'
 
 export const ENTITLING_PLATFORM_SUBSCRIPTION_STATUSES = ['TRIALING', 'ACTIVE'] as const
 
@@ -63,6 +67,8 @@ export type AgentAccessContext = {
   canViewTeamSubscriptions: boolean
   canViewAgencyNationalLife: boolean
   scopeAgentIds: string[]
+  /** null preserves unrestricted module visibility for pre-provisioning users. */
+  enabledModules: PlatformModuleName[] | null
 }
 
 const subscriptionSelect = {
@@ -80,6 +86,7 @@ function individualAccess(
   agentId: string,
   subscription: AccessSubscription | null,
   isActive = true,
+  enabledModules: PlatformModuleName[] | null = null,
 ): AgentAccessContext {
   return {
     agentId,
@@ -97,6 +104,7 @@ function individualAccess(
     canViewTeamSubscriptions: false,
     canViewAgencyNationalLife: false,
     scopeAgentIds: [agentId],
+    enabledModules,
   }
 }
 
@@ -108,6 +116,7 @@ function agencyAccess(input: {
   subscription: AccessSubscription | null
   entitled: boolean
   scopeAgentIds: string[]
+  enabledModules: PlatformModuleName[] | null
 }): AgentAccessContext {
   const isEntitledOwner = input.kind === 'AGENCY_OWNER' && input.entitled
   const canInviteAgents = input.entitled
@@ -132,6 +141,7 @@ function agencyAccess(input: {
     // Invited members keep an individual data boundary even though their
     // commercial subscription remains linked to the agency membership.
     scopeAgentIds: isEntitledOwner ? input.scopeAgentIds : [input.agentId],
+    enabledModules: input.enabledModules,
   }
 }
 
@@ -182,7 +192,17 @@ export async function getAgentAccessForAgent(agentId: string): Promise<AgentAcce
   const [subject, membership, individualSubscriptions] = await Promise.all([
     prisma.agent.findUnique({
       where: { id: agentId },
-      select: { status: true },
+      select: {
+        status: true,
+        adminProvisionedAccess: {
+          select: { modules: true },
+        },
+        agencyInvitationsAccepted: {
+          where: { status: 'ACCEPTED', isCurrentCommercial: true },
+          take: 1,
+          select: { id: true },
+        },
+      },
     }),
     prisma.agencyMembership.findFirst({
       where: { agentId, endedAt: null },
@@ -219,14 +239,21 @@ export async function getAgentAccessForAgent(agentId: string): Promise<AgentAcce
     }),
   ])
 
+  const enabledModules = subject?.adminProvisionedAccess
+    && !subject.agencyInvitationsAccepted?.length
+    ? normalizePlatformModules(subject.adminProvisionedAccess.modules)
+    : null
+
   if (!subject || subject.status !== 'ACTIVE') {
-    return individualAccess(agentId, null, false)
+    return individualAccess(agentId, null, false, enabledModules)
   }
 
   if (!membership) {
     return individualAccess(
       agentId,
       selectAccessSubscription(individualSubscriptions),
+      true,
+      enabledModules,
     )
   }
 
@@ -251,6 +278,7 @@ export async function getAgentAccessForAgent(agentId: string): Promise<AgentAcce
       subscription: memberSubscription,
       entitled: isEntitlingSubscription(memberSubscription),
       scopeAgentIds: [agentId],
+      enabledModules,
     })
   }
 
@@ -266,6 +294,7 @@ export async function getAgentAccessForAgent(agentId: string): Promise<AgentAcce
       subscription: agencySubscription,
       entitled: false,
       scopeAgentIds: [agentId],
+      enabledModules,
     })
   }
 
@@ -316,6 +345,7 @@ export async function getAgentAccessForAgent(agentId: string): Promise<AgentAcce
     subscription: agencySubscription,
     entitled: true,
     scopeAgentIds,
+    enabledModules,
   })
 }
 

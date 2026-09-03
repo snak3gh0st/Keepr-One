@@ -1,6 +1,8 @@
 import { betterAuth } from 'better-auth'
 import { prismaAdapter } from 'better-auth/adapters/prisma'
 import { nextCookies } from 'better-auth/next-js'
+import { admin } from 'better-auth/plugins'
+import { defaultAc, userAc } from 'better-auth/plugins/admin/access'
 import { prisma } from '@/lib/prisma'
 import {
   sendChangeEmailConfirmationEmail,
@@ -34,11 +36,25 @@ const trustedOrigins = [
 const secondaryStorage = createRedisSecondaryStorage()
 const localEmailChangePreview = allowLocalEmailChangeWithoutVerification()
 
+// Keep the official administrative auth boundary deliberately narrower than
+// Better Auth's default admin role. Account creation, deletion, role changes
+// and direct password assignment remain unavailable. Impersonation is used
+// only by the audited, read-only Keepr One support preview.
+const platformAdminRole = defaultAc.newRole({
+  // These capabilities are callable only in-process from audited product
+  // actions. The public /api/auth/admin/* transport is explicitly blocked.
+  user: ['ban', 'impersonate'],
+  session: ['revoke'],
+})
+
 export const auth = betterAuth({
   baseURL,
   trustedOrigins,
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
   secondaryStorage,
+  // Redis remains the fast session path while Postgres keeps the authoritative
+  // management inventory used by the admin directory and revocation audit.
+  session: { storeSessionInDatabase: true },
   rateLimit: {
     enabled: true,
     // An absent Redis adapter cannot back a limiter. Keep a per-process
@@ -100,8 +116,6 @@ export const auth = betterAuth({
       },
     },
     additionalFields: {
-      // Never accept authorization roles from a public auth request body.
-      role: { type: 'string', required: true, defaultValue: 'AGENT', input: false },
       language: {
         type: 'string',
         required: true,
@@ -113,5 +127,19 @@ export const auth = betterAuth({
   // Server Actions need this bridge to persist Set-Cookie headers produced by
   // operations such as changePassword({ revokeOtherSessions: true }). Better
   // Auth requires the cookie bridge to be the final plugin.
-  plugins: [nextCookies()],
+  plugins: [
+    admin({
+      defaultRole: 'AGENT',
+      adminRoles: ['ADMIN'],
+      allowImpersonatingAdmins: false,
+      impersonationSessionDuration: 15 * 60,
+      roles: {
+        ADMIN: platformAdminRole,
+        AGENT: userAc,
+        CLIENT: userAc,
+      },
+      bannedUserMessage: 'Esta conta está suspensa. Entre em contato com o suporte do Keepr One.',
+    }),
+    nextCookies(),
+  ],
 })

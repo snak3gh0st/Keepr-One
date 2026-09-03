@@ -6,7 +6,7 @@ import type { PlatformPlanName } from '@/lib/plans'
 type AccessPresentationInput = Pick<
   FounderAccessResolution,
   'source' | 'requiredPlan' | 'accountType' | 'invitingAgencyName'
->
+> & { paymentRequiredAt?: Date | null }
 
 export type AccessRequiredPresentation = {
   plan: PlatformPlanName
@@ -24,7 +24,7 @@ function resolveRequiredPlan(access: AccessPresentationInput): PlatformPlanName 
 
 export function buildAccessRequiredPresentation(
   access: AccessPresentationInput,
-  founderEndLabel: string,
+  accessEndLabel: string,
   language: UserLanguage = 'PT',
 ): AccessRequiredPresentation {
   const copy = (portuguese: string, english: string) => localize(language, portuguese, english)
@@ -34,6 +34,31 @@ export function buildAccessRequiredPresentation(
     : plan === 'AGENT_AGENCY_MEMBER'
       ? copy('Plano Agente Convidado', 'Invited agent plan')
       : copy('Plano Agente', 'Agent plan')
+
+  if (access.source === 'ADMIN_PROVISIONED') {
+    const manuallyRequired = access.paymentRequiredAt !== null
+    return {
+      plan,
+      programLabel: copy('Acesso Keepr One', 'Keepr One access'),
+      eyebrow: manuallyRequired
+        ? copy('Pagamento necessário', 'Payment required')
+        : copy('Período de teste concluído', 'Free trial ended'),
+      description: manuallyRequired
+        ? copy(
+            `Ative o ${planLabel} para continuar. Seus dados permanecem salvos e o acesso aos módulos volta assim que o pagamento for confirmado.`,
+            `Activate the ${planLabel} to continue. Your data remains saved and module access returns as soon as payment is confirmed.`,
+          )
+        : copy(
+            `Seu período de teste terminou em ${accessEndLabel}. Seus dados permanecem salvos; ative o ${planLabel} para voltar a usar seus módulos.`,
+            `Your free trial ended on ${accessEndLabel}. Your data remains saved; activate the ${planLabel} to use your modules again.`,
+          ),
+      planLabel,
+      profileBenefit: copy(
+        'Os módulos liberados pela Keepr One serão restaurados automaticamente.',
+        'Modules enabled by Keepr One will be restored automatically.',
+      ),
+    }
+  }
 
   if (access.source === 'AGENCY_INVITATION') {
     const agencyName = access.invitingAgencyName
@@ -72,8 +97,8 @@ export function buildAccessRequiredPresentation(
     programLabel: copy('Programa Founders', 'Founders Program'),
     eyebrow: copy('30 dias concluídos', '30 days completed'),
     description: copy(
-      `Seu acesso Founder terminou em ${founderEndLabel}. Seus dados continuam preservados; para voltar ao trabalho, ative a assinatura do plano escolhido.`,
-      `Your Founder access ended on ${founderEndLabel}. Your data remains preserved; activate the selected plan subscription to return to work.`,
+      `Seu acesso Founder terminou em ${accessEndLabel}. Seus dados continuam preservados; para voltar ao trabalho, ative a assinatura do plano escolhido.`,
+      `Your Founder access ended on ${accessEndLabel}. Your data remains preserved; activate the selected plan subscription to return to work.`,
     ),
     planLabel,
     profileBenefit: copy(

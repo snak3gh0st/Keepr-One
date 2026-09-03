@@ -9,6 +9,8 @@ vi.mock('./client', () => ({
 
 import {
   EmailDeliveryError,
+  sendAdminEmailChangeAuthorizationEmail,
+  sendAdminEmailChangeVerificationEmail,
   sendAgencyInvitationEmail,
   sendChangeEmailConfirmationEmail,
   sendFounderWelcomeEmail,
@@ -63,6 +65,40 @@ describe('email send functions', () => {
     expect(call.html).toContain('&lt;novo&amp;seguro@example.com&gt;')
     expect(call.html).not.toContain('<novo&seguro@example.com>')
     expect(call.html).toContain('https://app.keeprone.com/api/auth/verify-email?token=approve')
+  })
+
+  it('starts an admin change at the current inbox and requires both approvals', async () => {
+    await sendAdminEmailChangeAuthorizationEmail({
+      to: 'atual@example.com',
+      accountName: '<Maria>',
+      newEmail: '<novo&seguro@example.com>',
+      authorizationUrl: 'https://app.keeprone.com/confirm-email-change?token=current-safe',
+      expiresAt: new Date('2026-09-01T20:00:00.000Z'),
+      idempotencyKey: 'admin-email-change-current-request-1',
+    })
+
+    const [payload, requestOptions] = emailsSend.mock.calls[0]
+    expect(payload.to).toBe('atual@example.com')
+    expect(payload.html).toContain('&lt;novo&amp;seguro@example.com&gt;')
+    expect(payload.html).toContain('primeira de duas confirmações')
+    expect(payload.html).toContain('token=current-safe')
+    expect(requestOptions).toEqual({ idempotencyKey: 'admin-email-change-current-request-1' })
+  })
+
+  it('sends the second approval only to the new inbox', async () => {
+    await sendAdminEmailChangeVerificationEmail({
+      to: 'novo@example.com',
+      accountName: 'Maria',
+      confirmationUrl: 'https://app.keeprone.com/confirm-email-change?token=new-safe',
+      expiresAt: new Date('2026-09-01T21:00:00.000Z'),
+      idempotencyKey: 'admin-email-change-new-request-1-v2',
+    })
+
+    const [payload, requestOptions] = emailsSend.mock.calls[0]
+    expect(payload.to).toBe('novo@example.com')
+    expect(payload.html).toContain('endereço atual da sua conta já autorizou')
+    expect(payload.html).toContain('token=new-safe')
+    expect(requestOptions).toEqual({ idempotencyKey: 'admin-email-change-new-request-1-v2' })
   })
 
   it('fails closed when the provider returns an error without throwing', async () => {

@@ -49,6 +49,7 @@ const AGENCY_OWNER_ACCESS = {
   canInviteAgents: true,
   canViewTeamSubscriptions: true,
   canViewAgencyNationalLife: true,
+  enabledModules: null,
 }
 
 const FOUNDER_TRIAL_ACCESS = {
@@ -123,6 +124,62 @@ describe('Shell plan access', () => {
     expect(screen.getAllByText('Plano Agência')).not.toHaveLength(0)
   })
 
+  it('hides ungranted modules for a managed agent while keeping account settings', () => {
+    render(
+      <AgentAccessProvider
+        access={{
+          ...AGENCY_OWNER_ACCESS,
+          enabledModules: ['TODAY', 'CRM', 'AGENCY'],
+        }}
+      >
+        <Shell role="AGENT" userName="Ana">
+          <p>Conteúdo</p>
+        </Shell>
+      </AgentAccessProvider>,
+    )
+
+    expect(screen.getByRole('link', { name: 'Hoje' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'CRM' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Agência' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Configurações' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Agenda' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Equipe' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Integrações' })).toBeNull()
+  })
+
+  it('requires both the TEAM grant and the existing owner capability', () => {
+    const { rerender } = render(
+      <AgentAccessProvider
+        access={{
+          ...AGENCY_OWNER_ACCESS,
+          canManageTeam: false,
+          enabledModules: ['TODAY', 'AGENCY', 'TEAM'],
+        }}
+      >
+        <Shell role="AGENT" userName="Ana">
+          <p>Conteúdo</p>
+        </Shell>
+      </AgentAccessProvider>,
+    )
+
+    expect(screen.queryByRole('link', { name: 'Equipe' })).toBeNull()
+
+    rerender(
+      <AgentAccessProvider
+        access={{
+          ...AGENCY_OWNER_ACCESS,
+          enabledModules: ['TODAY', 'AGENCY', 'TEAM'],
+        }}
+      >
+        <Shell role="AGENT" userName="Ana">
+          <p>Conteúdo</p>
+        </Shell>
+      </AgentAccessProvider>,
+    )
+
+    expect(screen.getByRole('link', { name: 'Equipe' })).toBeInTheDocument()
+  })
+
   it('keeps agency and team in Gestão, then places integrations in Conta before settings', () => {
     render(
       <AgentAccessProvider access={AGENCY_OWNER_ACCESS}>
@@ -195,6 +252,40 @@ describe('Shell plan access', () => {
     expect(container.querySelector('.shell-topbar-title')).toHaveTextContent('Link de agendamento')
   })
 
+  it('exposes user management and names dynamic user details in the admin shell', () => {
+    mocks.pathname = '/admin/users/user-123'
+
+    const { container } = render(
+      <Shell role="ADMIN" userName="Admin">
+        <p>Conteúdo</p>
+      </Shell>,
+    )
+
+    expect(screen.getAllByRole('link', { name: 'Usuários' })).not.toHaveLength(0)
+    expect(screen.getAllByRole('link', { name: 'Usuários' })[0]).toHaveAttribute('href', '/admin/users')
+    expect(container.querySelector('.shell-topbar-title')).toHaveTextContent('Detalhe do usuário')
+  })
+
+  it('keeps only overview and users in the administrative navigation', () => {
+    mocks.pathname = '/admin'
+
+    render(
+      <Shell role="ADMIN" userName="Admin">
+        <p>Conteúdo</p>
+      </Shell>,
+    )
+
+    const navigation = screen.getByRole('navigation', { name: 'Navegação principal' })
+    const navigationLabels = Array.from(
+      navigation.querySelectorAll('ul a[aria-label]'),
+    ).map((element) => element.getAttribute('aria-label'))
+
+    expect(navigationLabels).toEqual(['Visão geral', 'Usuários'])
+    expect(screen.queryByRole('link', { name: 'Integrações' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Auditoria' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Importar dados' })).toBeNull()
+  })
+
   it('keeps account settings available in navigation and the account controls', () => {
     mocks.pathname = '/agent/settings'
 
@@ -260,6 +351,18 @@ describe('Shell sign-out ordering', () => {
       await waitFor(() => expect(order).toEqual(['cancel-event', 'sign-out']))
     },
   )
+
+  it('returns administrators to the dedicated admin login', async () => {
+    render(
+      <Shell role="ADMIN" userName="Gestora">
+        <p>Conteúdo</p>
+      </Shell>,
+    )
+
+    await userEvent.click(screen.getAllByRole('button', { name: /Sair/ })[0])
+
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/admin/login'))
+  })
 })
 
 describe('Shell achievement band', () => {
@@ -392,7 +495,7 @@ describe('Shell achievement band', () => {
     )
 
     expect(screen.queryByLabelText('Conquista atual: Blue Jacket')).toBeNull()
-    expect(screen.getByText('Painel administrativo')).toBeInTheDocument()
+    expect(screen.getByText('Visão geral da plataforma')).toBeInTheDocument()
     expect(screen.queryByText('Up to date')).toBeNull()
     expect(fetch).not.toHaveBeenCalled()
   })

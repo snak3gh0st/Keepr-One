@@ -153,6 +153,7 @@ function existingOwner() {
       status: 'ACTIVE',
       parentAgentId: null,
       founderEnrollment: null,
+      adminProvisionedAccess: null as { id: string } | null,
       agencyMemberships: [{
         id: 'existing-owner-membership',
         role: 'OWNER',
@@ -182,6 +183,7 @@ function existingDirectMember(options: {
       parentAgentId: 'parent-agent',
       onboarding: { status: options.onboardingStatus ?? 'IN_PROGRESS' },
       founderEnrollment: null,
+      adminProvisionedAccess: null as { id: string } | null,
       agencyMemberships: [{
         id: 'old-member-membership',
         role: 'MEMBER',
@@ -701,8 +703,13 @@ describe('acceptAgencyInvitationAction', () => {
         acceptedMembershipId: 'owner-membership',
         intendedType: 'AGENCY',
         recruitmentStage: 'ONBOARDING',
+        isCurrentCommercial: true,
       }),
     }))
+    expect(mocks.invitationUpdateMany).toHaveBeenCalledWith({
+      where: { acceptedAgentId: 'member-agent', isCurrentCommercial: true },
+      data: { isCurrentCommercial: false },
+    })
     expect(mocks.invitationUpdateMany).toHaveBeenCalledWith({
       where: {
         id: 'old-agent-invitation',
@@ -964,6 +971,54 @@ describe('acceptAgencyInvitationAction', () => {
       message: 'Nesta primeira versão, uma conta Founder deve escolher o plano Agência para mudar de estrutura.',
     })
     expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it('blocks an admin-provisioned account before opening Stripe Checkout', async () => {
+    const owner = existingOwner()
+    owner.agent.adminProvisionedAccess = { id: 'admin-access-1' }
+    mocks.userFindFirst.mockResolvedValue(owner)
+    mocks.getSession.mockResolvedValue({ user: { id: owner.id, email: owner.email } })
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://app.keeprone.com')
+
+    const result = await acceptAgencyInvitationAction(
+      INITIAL_AGENCY_INVITATION_ACCEPTANCE_STATE,
+      form('AGENCY'),
+    )
+
+    expect(result).toEqual({
+      status: 'error',
+      message: 'Esta conta é gerenciada pela Keepr One. A mudança para um plano por convite precisa ser concluída pelo suporte.',
+    })
+    expect(mocks.providerSubscriptionFindFirst).not.toHaveBeenCalled()
+    expect(mocks.createInvitationCheckout).not.toHaveBeenCalled()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it('rechecks admin-provisioned access inside local atomic acceptance', async () => {
+    const ownerBeforeTransaction = existingOwner()
+    const ownerInsideTransaction = existingOwner()
+    ownerInsideTransaction.agent.adminProvisionedAccess = { id: 'admin-access-1' }
+    mocks.userFindFirst
+      .mockResolvedValueOnce(ownerBeforeTransaction)
+      .mockResolvedValueOnce(ownerInsideTransaction)
+    mocks.getSession.mockResolvedValue({
+      user: { id: ownerBeforeTransaction.id, email: ownerBeforeTransaction.email },
+    })
+
+    const result = await acceptAgencyInvitationAction(
+      INITIAL_AGENCY_INVITATION_ACCEPTANCE_STATE,
+      form('AGENCY'),
+    )
+
+    expect(result).toEqual({
+      status: 'error',
+      message: 'Esta conta é gerenciada pela Keepr One. A mudança para um plano por convite precisa ser concluída pelo suporte.',
+    })
+    expect(mocks.transaction).toHaveBeenCalledTimes(1)
+    expect(mocks.agentFindMany).not.toHaveBeenCalled()
+    expect(mocks.membershipCreate).not.toHaveBeenCalled()
+    expect(mocks.subscriptionCreate).not.toHaveBeenCalled()
   })
 
   it('opens Stripe Checkout in production without creating access before provider confirmation', async () => {

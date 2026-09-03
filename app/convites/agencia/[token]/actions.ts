@@ -76,6 +76,7 @@ const userForAcceptanceSelect = {
       parentAgentId: true,
       onboarding: { select: { status: true } },
       founderEnrollment: { select: { id: true, accountType: true } },
+      adminProvisionedAccess: { select: { id: true } },
       agencyMemberships: {
         where: { endedAt: null },
         orderBy: [{ joinedAt: 'desc' }, { id: 'desc' }],
@@ -296,6 +297,11 @@ export async function acceptAgencyInvitationAction(
         'Nesta primeira versão, uma conta Founder deve escolher o plano Agência para mudar de estrutura.',
       )
     }
+    if (existingUser.agent.adminProvisionedAccess) {
+      return actionError(
+        'Esta conta é gerenciada pela Keepr One. A mudança para um plano por convite precisa ser concluída pelo suporte.',
+      )
+    }
     if (existingUser.agent.id === invitation.invitedBy.id) {
       return actionError('Você não pode aceitar um convite enviado pela própria conta.')
     }
@@ -513,6 +519,7 @@ export async function acceptAgencyInvitationAction(
             parentAgentId: true,
             onboarding: { select: { status: true } },
             founderEnrollment: { select: { id: true, accountType: true } },
+            adminProvisionedAccess: { select: { id: true } },
             agencyMemberships: {
               where: { endedAt: null },
               select: {
@@ -539,6 +546,11 @@ export async function acceptAgencyInvitationAction(
       const agent = user.agent
       if (!agent) {
         throw new InvitationAcceptanceError('A conta convidada não possui um perfil de agente.')
+      }
+      if (agent.adminProvisionedAccess) {
+        throw new InvitationAcceptanceError(
+          'Esta conta é gerenciada pela Keepr One. A mudança para um plano por convite precisa ser concluída pelo suporte.',
+        )
       }
       if (agent.id === currentInvitation.invitedBy.id) {
         throw new InvitationAcceptanceError(
@@ -861,6 +873,13 @@ export async function acceptAgencyInvitationAction(
         : 'ACTIVE'
       const acceptedIntendedType: AgencyInvitationIntendedType =
         currentInvitation.intendedType ?? (plan === 'AGENCY' ? 'AGENCY' : 'AGENT')
+      await transaction.agencyInvitation.updateMany({
+        where: {
+          acceptedAgentId: agent.id,
+          isCurrentCommercial: true,
+        },
+        data: { isCurrentCommercial: false },
+      })
       const claimed = await transaction.agencyInvitation.updateMany({
         where: {
           id: currentInvitation.id,
@@ -875,6 +894,7 @@ export async function acceptAgencyInvitationAction(
           acceptedAgentId: agent.id,
           acceptedPlan: plan,
           acceptedMembershipId,
+          isCurrentCommercial: true,
           intendedType: acceptedIntendedType,
           monthlyPriceCents: transactionUnitAmountCents,
           recruitmentStage,

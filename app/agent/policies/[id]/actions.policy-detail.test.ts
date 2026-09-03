@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   requireRole: vi.fn(),
+  requireAgentModule: vi.fn(),
   currentAgent: vi.fn(),
   agentScope: vi.fn(),
   policyFind: vi.fn(),
@@ -14,6 +15,9 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/require-role', () => ({ requireRole: mocks.requireRole }))
+vi.mock('@/lib/require-agent-module', () => ({
+  requireAgentModule: mocks.requireAgentModule,
+}))
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.currentAgent }))
 vi.mock('@/lib/agent-access', () => ({ getAgentScopeIds: mocks.agentScope }))
 vi.mock('@/lib/prisma', () => ({
@@ -46,6 +50,7 @@ describe('refreshNationalLifePolicyDetail action', () => {
     vi.clearAllMocks()
     mocks.language.current = 'PT'
     mocks.requireRole.mockResolvedValue({ user: { role: 'AGENT' } })
+    mocks.requireAgentModule.mockResolvedValue({ user: { id: 'user-1', role: 'AGENT' } })
     mocks.currentAgent.mockResolvedValue({ id: 'agent_1' })
     mocks.policyFind.mockResolvedValue({
       id: 'policy_1', agentId: 'agent_1', policyNumber: 'LS1473219', carrier: 'National Life',
@@ -92,6 +97,7 @@ describe('refreshNationalLifePolicyDetail action', () => {
     await expect(refreshNationalLifePolicyDetail('policy_1')).resolves.toEqual({
       ok: true, commandId: 'cmd_1',
     })
+    expect(mocks.requireAgentModule).toHaveBeenCalledWith('POLICIES')
     expect(mocks.requestRefresh).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       agentScopeIds: ['agent_1'], policyId: 'policy_1',
     }))

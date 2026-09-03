@@ -8,7 +8,11 @@ export const FOUNDER_TRIAL_DURATION_MS = FOUNDER_TRIAL_DURATION_SECONDS * 1_000
 
 export type FounderAccessState = 'LEGACY' | 'TRIAL' | 'PAID' | 'EXPIRED'
 export type FounderAccountTypeName = 'AGENT' | 'AGENCY'
-export type FounderAccessSource = 'LEGACY' | 'FOUNDER' | 'AGENCY_INVITATION'
+export type FounderAccessSource =
+  | 'LEGACY'
+  | 'FOUNDER'
+  | 'AGENCY_INVITATION'
+  | 'ADMIN_PROVISIONED'
 
 export type FounderAccessSubscription = {
   id: string
@@ -28,6 +32,9 @@ export type FounderAccessResolution = {
   requiredPlan: PlatformPlanName | null
   founderEnrollmentId: string | null
   agencyInvitationId: string | null
+  adminProvisionedAccessId: string | null
+  paymentRequiredAt: Date | null
+  paymentReason: string | null
   invitingAgencyName: string | null
   accountType: FounderAccountTypeName | null
   cohort: string | null
@@ -60,6 +67,26 @@ type AcceptedAgencyInvitationRecord = {
     endedAt: Date | null
     agency: { parentAgencyId: string | null }
   } | null
+}
+
+type AdminProvisionedAccessRecord = {
+  id: string
+  agentId: string
+  paymentRequiredAt: Date | null
+  paymentReason: string | null
+  platformSubscription: FounderAccessSubscription & {
+    agentId: string | null
+    agencyId: string | null
+    agencyMembershipId: string | null
+    agency: {
+      memberships: Array<{ agentId: string }>
+    } | null
+    agencyMembership: {
+      agentId: string
+      role: 'OWNER' | 'MEMBER'
+      endedAt: Date | null
+    } | null
+  }
 }
 
 const founderEnrollmentSelect = {
@@ -160,6 +187,9 @@ function legacyAccess(): FounderAccessResolution {
     requiredPlan: null,
     founderEnrollmentId: null,
     agencyInvitationId: null,
+    adminProvisionedAccessId: null,
+    paymentRequiredAt: null,
+    paymentReason: null,
     invitingAgencyName: null,
     accountType: null,
     cohort: null,
@@ -182,6 +212,9 @@ function founderAccess(
     requiredPlan,
     founderEnrollmentId: founder.id,
     agencyInvitationId: null,
+    adminProvisionedAccessId: null,
+    paymentRequiredAt: null,
+    paymentReason: null,
     invitingAgencyName: null,
     accountType: founder.accountType,
     cohort: founder.cohort,
@@ -208,6 +241,9 @@ function invitationAccess(
     requiredPlan,
     founderEnrollmentId: null,
     agencyInvitationId: invitation.id,
+    adminProvisionedAccessId: null,
+    paymentRequiredAt: null,
+    paymentReason: null,
     invitingAgencyName: invitation.agency.name,
     accountType: requiredPlan === 'AGENCY'
       ? 'AGENCY'
@@ -289,18 +325,102 @@ async function resolveAgencyInvitationAccess(
   return invitationAccess(invitation, 'EXPIRED', subscriptions[0] ?? null)
 }
 
+function isAdminProvisionedSubscriptionSubject(
+  access: AdminProvisionedAccessRecord,
+  agentId: string,
+): boolean {
+  const subscription = access.platformSubscription
+  if (access.agentId !== agentId) return false
+
+  if (subscription.plan === 'AGENT_INDIVIDUAL') {
+    return subscription.agentId === agentId
+  }
+  if (subscription.plan === 'AGENCY') {
+    return subscription.agencyId !== null
+      && subscription.agency?.memberships.some(
+        (membership) => membership.agentId === agentId,
+      ) === true
+  }
+  return subscription.agencyMembershipId !== null
+    && subscription.agencyMembership?.agentId === agentId
+    && subscription.agencyMembership.role === 'MEMBER'
+    && subscription.agencyMembership.endedAt === null
+}
+
+function adminProvisionedAccess(
+  access: AdminProvisionedAccessRecord,
+  state: Exclude<FounderAccessState, 'LEGACY'>,
+): FounderAccessResolution {
+  const subscription = access.platformSubscription
+  return {
+    state,
+    hasAccess: state === 'TRIAL' || state === 'PAID',
+    source: 'ADMIN_PROVISIONED',
+    requiredPlan: subscription.plan,
+    founderEnrollmentId: null,
+    agencyInvitationId: null,
+    adminProvisionedAccessId: access.id,
+    paymentRequiredAt: access.paymentRequiredAt,
+    paymentReason: access.paymentReason,
+    invitingAgencyName: null,
+    accountType: subscription.plan === 'AGENCY' ? 'AGENCY' : 'AGENT',
+    cohort: null,
+    trialStartedAt: subscription.status === 'TRIALING'
+      ? subscription.currentPeriodStart
+      : null,
+    trialEndsAt: subscription.status === 'TRIALING'
+      ? subscription.currentPeriodEnd
+      : null,
+    subscription: {
+      id: subscription.id,
+      plan: subscription.plan,
+      status: subscription.status,
+      unitAmountCents: subscription.unitAmountCents,
+      currency: subscription.currency,
+      currentPeriodStart: subscription.currentPeriodStart,
+      currentPeriodEnd: subscription.currentPeriodEnd,
+      cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+    },
+  }
+}
+
+function resolveAdminProvisionedAccess(
+  access: AdminProvisionedAccessRecord,
+  agentId: string,
+  nowTimestamp: number,
+): FounderAccessResolution {
+  const subscription = access.platformSubscription
+  const validSubject = isAdminProvisionedSubscriptionSubject(access, agentId)
+  const currentPeriod = isWithinRequiredPeriod(subscription, nowTimestamp)
+
+  // A current ACTIVE row is provider-confirmed payment and therefore restores
+  // access even if an earlier administrative hold has not yet been cleared by
+  // the webhook reconciliation path.
+  if (validSubject && subscription.status === 'ACTIVE' && currentPeriod) {
+    return adminProvisionedAccess(access, 'PAID')
+  }
+  if (access.paymentRequiredAt !== null) {
+    return adminProvisionedAccess(access, 'EXPIRED')
+  }
+  if (validSubject && subscription.status === 'TRIALING' && currentPeriod) {
+    return adminProvisionedAccess(access, 'TRIAL')
+  }
+  return adminProvisionedAccess(access, 'EXPIRED')
+}
+
 /**
  * Resolves the additive commercial boundary independently from the legacy
  * access resolver. Accounts without a Founder enrollment or accepted agency
- * invitation remain grandfathered. An accepted invitation takes precedence
- * because it identifies the person's current, exact commercial subject.
+ * invitation or administrative provisioning remain grandfathered. An
+ * accepted invitation takes precedence because it identifies the person's
+ * current, exact commercial subject.
  */
 export async function resolveFounderAccessForAgent(
   agentId: string,
   now = new Date(),
 ): Promise<FounderAccessResolution> {
   const nowTimestamp = requireValidDate(now, 'now')
-  const [founder, acceptedInvitation] = await Promise.all([
+  const [founder, acceptedInvitation, provisionedAccess] = await Promise.all([
     prisma.founderEnrollment.findUnique({
       where: { agentId },
       select: founderEnrollmentSelect,
@@ -309,15 +429,57 @@ export async function resolveFounderAccessForAgent(
       where: {
         acceptedAgentId: agentId,
         status: 'ACCEPTED',
+        isCurrentCommercial: true,
       },
       orderBy: [{ acceptedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       select: acceptedAgencyInvitationSelect,
+    }),
+    prisma.adminProvisionedAccess.findUnique({
+      where: { agentId },
+      select: {
+        id: true,
+        agentId: true,
+        paymentRequiredAt: true,
+        paymentReason: true,
+        platformSubscription: {
+          select: {
+            ...subscriptionSelect,
+            agentId: true,
+            agencyId: true,
+            agencyMembershipId: true,
+            agency: {
+              select: {
+                memberships: {
+                  where: { agentId, role: 'OWNER', endedAt: null },
+                  take: 1,
+                  select: { agentId: true },
+                },
+              },
+            },
+            agencyMembership: {
+              select: {
+                agentId: true,
+                role: true,
+                endedAt: true,
+              },
+            },
+          },
+        },
+      },
     }),
   ])
 
   if (acceptedInvitation) {
     return resolveAgencyInvitationAccess(
       acceptedInvitation,
+      agentId,
+      nowTimestamp,
+    )
+  }
+
+  if (provisionedAccess) {
+    return resolveAdminProvisionedAccess(
+      provisionedAccess,
       agentId,
       nowTimestamp,
     )

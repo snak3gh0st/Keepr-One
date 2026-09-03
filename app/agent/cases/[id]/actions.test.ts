@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => {
       return result
     }),
     getCurrentAgent: vi.fn(),
+    requireAgentModule: vi.fn(),
     getAgentScopeIds: vi.fn(),
     canAccessCase: vi.fn(() => true),
     advanceCaseCrmToSystemStage: vi.fn(),
@@ -50,6 +51,9 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
+vi.mock('@/lib/require-agent-module', () => ({
+  requireAgentModule: mocks.requireAgentModule,
+}))
 vi.mock('@/lib/agent-access', () => ({ getAgentScopeIds: mocks.getAgentScopeIds }))
 vi.mock('@/lib/case-access', () => ({ canAccessCase: mocks.canAccessCase }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
@@ -77,6 +81,7 @@ beforeEach(() => {
   mocks.state.activeApplication = false
   mocks.resetTransactionTail()
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1' })
+  mocks.requireAgentModule.mockResolvedValue({ user: { role: 'AGENT' } })
   mocks.getAgentScopeIds.mockResolvedValue(['agent-1'])
 })
 
@@ -110,6 +115,7 @@ describe('startApplicationFromIllustration', () => {
 
     const result = await startApplicationFromIllustration('illustration-1')
 
+    expect(mocks.requireAgentModule).toHaveBeenCalledWith('CRM')
     expect(result).toMatchObject({ ok: true, applicationId: 'application-1' })
     expect(mocks.tx.illustration.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'illustration-1', agentId: 'agent-1', caseId: null },

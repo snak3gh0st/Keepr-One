@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
@@ -8,6 +9,7 @@ import { useRouter } from 'next/navigation'
 import { Logo } from '@/components/Logo'
 import { useI18n } from '@/components/i18n/LanguageProvider'
 import { authClient } from '@/lib/auth-client'
+import { sanitizeUserRedirectPath } from '@/lib/auth-navigation'
 
 gsap.registerPlugin(useGSAP, ScrollTrigger)
 
@@ -93,6 +95,7 @@ export default function LoginPage() {
   const [signalIndex, setSignalIndex] = useState(0)
   const [founderCreated, setFounderCreated] = useState(false)
   const [agencyInvitationLogin, setAgencyInvitationLogin] = useState(false)
+  const [adminAccessDetected, setAdminAccessDetected] = useState(false)
   const [postLoginPath, setPostLoginPath] = useState('/')
   const securitySignals = securitySignalCopy.map((signal) => ({
     title: copy(signal.title[0], signal.title[1]),
@@ -103,10 +106,7 @@ export default function LoginPage() {
   useEffect(() => {
     const search = new URLSearchParams(window.location.search)
     const invitedEmail = search.get('email')?.trim() ?? ''
-    const requestedPath = search.get('next')?.trim() ?? ''
-    const safePath = requestedPath.startsWith('/') && !requestedPath.startsWith('//')
-      ? requestedPath
-      : '/'
+    const safePath = sanitizeUserRedirectPath(search.get('next'))
     const frame = window.requestAnimationFrame(() => {
       if (invitedEmail) setEmail((current) => current || invitedEmail)
       setPostLoginPath(safePath)
@@ -208,14 +208,42 @@ export default function LoginPage() {
 
     setSubmitting(true)
     setError(null)
+    setAdminAccessDetected(false)
 
     try {
-      const { error: signInError } = await authClient.signIn.email({ email, password })
+      const { data, error: signInError } = await authClient.signIn.email({ email, password })
 
       if (signInError) {
         setError(copy(
           'Não foi possível entrar. Confira seu e-mail e sua senha.',
           "We couldn't sign you in. Check your email and password.",
+        ))
+        return
+      }
+
+      const role = (data?.user as { role?: unknown } | undefined)?.role
+      if (role === 'ADMIN') {
+        try {
+          await authClient.signOut()
+        } catch {
+          // The administrative server boundary still prevents this user
+          // portal from becoming an alternative entrance to the backoffice.
+        }
+        setAdminAccessDetected(true)
+        setError(copy(
+          'Contas administrativas entram pela área exclusiva do backoffice.',
+          'Administrative accounts sign in through the dedicated back-office area.',
+        ))
+        return
+      }
+
+      if (role !== 'AGENT' && role !== 'CLIENT') {
+        try {
+          await authClient.signOut()
+        } catch {}
+        setError(copy(
+          'Não foi possível confirmar o perfil desta conta.',
+          'We could not confirm this account profile.',
         ))
         return
       }
@@ -302,6 +330,7 @@ export default function LoginPage() {
                     onChange={(event) => {
                       setEmail(event.target.value)
                       if (error) setError(null)
+                      if (adminAccessDetected) setAdminAccessDetected(false)
                     }}
                     required
                     autoComplete="email"
@@ -326,6 +355,7 @@ export default function LoginPage() {
                       onChange={(event) => {
                         setPassword(event.target.value)
                         if (error) setError(null)
+                        if (adminAccessDetected) setAdminAccessDetected(false)
                       }}
                       required
                       autoComplete="current-password"
@@ -361,13 +391,14 @@ export default function LoginPage() {
                 </div>
 
                 {error && (
-                  <p
-                    id="login-error"
-                    role="alert"
-                    className="border-l-2 border-danger bg-danger/10 px-4 py-3 text-sm leading-6 text-white/78"
-                  >
-                    {error}
-                  </p>
+                  <div id="login-error" role="alert" className="border-l-2 border-danger bg-danger/10 px-4 py-3 text-sm leading-6 text-white/78">
+                    <p>{error}</p>
+                    {adminAccessDetected ? (
+                      <Link href="/admin/login" className="mt-2 inline-flex font-semibold text-mint hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint/40">
+                        {copy('Ir para o login administrativo', 'Go to admin sign in')} <span aria-hidden className="ml-1">→</span>
+                      </Link>
+                    ) : null}
+                  </div>
                 )}
 
                 <button

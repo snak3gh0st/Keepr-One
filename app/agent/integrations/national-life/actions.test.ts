@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getCurrentAgent: vi.fn(),
+  requireAgentModule: vi.fn(),
   headers: vi.fn(),
   start: vi.fn(),
   bootstrap: vi.fn(),
@@ -11,6 +12,9 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
+vi.mock('@/lib/require-agent-module', () => ({
+  requireAgentModule: mocks.requireAgentModule,
+}))
 vi.mock('@/lib/i18n/server', () => ({
   getServerI18n: async () => ({
     language: 'EN',
@@ -41,6 +45,7 @@ beforeEach(() => {
     'x-forwarded-proto': 'https',
   }))
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1' })
+  mocks.requireAgentModule.mockResolvedValue({ user: { role: 'AGENT' } })
 })
 
 describe('National Life interactive connection actions', () => {
@@ -70,6 +75,7 @@ describe('National Life interactive connection actions', () => {
       state: 'OPENING_PORTAL',
       expiresAt: '2026-07-28T12:10:00.000Z',
     })
+    expect(mocks.requireAgentModule).toHaveBeenCalledWith('INTEGRATIONS')
   })
 
   it('requires an owned interactive attempt for viewer bootstrap', async () => {

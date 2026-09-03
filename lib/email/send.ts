@@ -115,6 +115,122 @@ export async function sendVerificationEmail(options: {
   })
 }
 
+export async function sendAdminEmailChangeVerificationEmail(options: {
+  to: string
+  accountName: string
+  confirmationUrl: string
+  expiresAt: Date
+  idempotencyKey: string
+  language?: UserLanguage
+}): Promise<void> {
+  const language = options.language ?? 'PT'
+  const safeName = escapeEmailText(options.accountName)
+  const expiration = new Intl.DateTimeFormat(localeFor(language), {
+    dateStyle: 'long',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  }).format(options.expiresAt)
+  const html = renderEmailLayout({
+    language,
+    preheader: localize(
+      language,
+      'Confirme o novo e-mail de acesso do Keepr One',
+      'Confirm the new Keepr One login email',
+    ),
+    heading: localize(language, 'Confirme seu novo e-mail', 'Confirm your new email'),
+    bodyHtml: `
+      <p style="margin:0 0 16px;">${localize(
+        language,
+        `Olá, ${safeName}. O endereço atual da sua conta já autorizou a troca. Confirme agora que este novo e-mail também pertence a você.`,
+        `Hello, ${safeName}. Your current account address already authorized the change. Now confirm that this new email also belongs to you.`,
+      )}</p>
+      <p style="margin:0 0 16px;">${localize(
+        language,
+        'Seu e-mail atual continuará funcionando até você confirmar. Ao concluir, todas as sessões abertas serão encerradas.',
+        'Your current email will keep working until you confirm. Completing the change signs out every open session.',
+      )}</p>
+      <p style="margin:0;">${localize(
+        language,
+        `Este link é único e expira em ${expiration} (UTC). Se você não reconhece a solicitação, não confirme e fale com o suporte.`,
+        `This one-time link expires on ${expiration} (UTC). If you do not recognize the request, do not confirm it and contact support.`,
+      )}</p>
+    `,
+    ctaLabel: localize(language, 'Confirmar novo e-mail', 'Confirm new email'),
+    ctaUrl: options.confirmationUrl,
+  })
+
+  await deliverEmail({
+    from: EMAIL_FROM,
+    to: options.to,
+    subject: localize(
+      language,
+      'Confirme seu novo e-mail de acesso — Keepr One',
+      'Confirm your new login email — Keepr One',
+    ),
+    html,
+    tags: [{ name: 'category', value: 'admin-email-change' }],
+  }, { idempotencyKey: options.idempotencyKey })
+}
+
+export async function sendAdminEmailChangeAuthorizationEmail(options: {
+  to: string
+  accountName: string
+  newEmail: string
+  authorizationUrl: string
+  expiresAt: Date
+  idempotencyKey: string
+  language?: UserLanguage
+}): Promise<void> {
+  const language = options.language ?? 'PT'
+  const safeName = escapeEmailText(options.accountName)
+  const safeNewEmail = escapeEmailText(options.newEmail)
+  const expiration = new Intl.DateTimeFormat(localeFor(language), {
+    dateStyle: 'long',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  }).format(options.expiresAt)
+  const html = renderEmailLayout({
+    language,
+    preheader: localize(
+      language,
+      'Autorize a troca do seu e-mail de acesso',
+      'Authorize your login email change',
+    ),
+    heading: localize(language, 'Autorize a troca de e-mail', 'Authorize the email change'),
+    bodyHtml: `
+      <p style="margin:0 0 16px;">${localize(
+        language,
+        `Olá, ${safeName}. Um administrador solicitou que o e-mail de acesso da sua conta seja alterado para <strong style="color:#ffffff;">${safeNewEmail}</strong>.`,
+        `Hello, ${safeName}. An administrator requested changing your account login email to <strong style="color:#ffffff;">${safeNewEmail}</strong>.`,
+      )}</p>
+      <p style="margin:0 0 16px;">${localize(
+        language,
+        'Esta é a primeira de duas confirmações. Depois de autorizar aqui, enviaremos outro link ao novo endereço. Nada muda antes das duas aprovações.',
+        'This is the first of two confirmations. After you authorize here, we will send another link to the new address. Nothing changes before both approvals.',
+      )}</p>
+      <p style="margin:0;">${localize(
+        language,
+        `Este link é único e expira em ${expiration} (UTC). Se você não reconhece a solicitação, não autorize e fale com o suporte.`,
+        `This one-time link expires on ${expiration} (UTC). If you do not recognize the request, do not authorize it and contact support.`,
+      )}</p>
+    `,
+    ctaLabel: localize(language, 'Autorizar troca', 'Authorize change'),
+    ctaUrl: options.authorizationUrl,
+  })
+
+  await deliverEmail({
+    from: EMAIL_FROM,
+    to: options.to,
+    subject: localize(
+      language,
+      'Autorize a troca do seu e-mail — Keepr One',
+      'Authorize your email change — Keepr One',
+    ),
+    html,
+    tags: [{ name: 'category', value: 'admin-email-change-authorization' }],
+  }, { idempotencyKey: options.idempotencyKey })
+}
+
 export async function sendWelcomeEmail(options: { to: string; agentName: string; language?: UserLanguage }): Promise<void> {
   const language = options.language ?? 'PT'
   const html = renderEmailLayout({

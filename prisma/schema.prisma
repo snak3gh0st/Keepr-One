@@ -28,6 +28,14 @@ enum AgentStatus {
   INACTIVE
 }
 
+/// Professional progression retained while an administratively provisioned
+/// agent temporarily occupies the structural AGENCY_OWNER role.
+enum AgentProfessionalRank {
+  AGENT
+  MANAGER
+  DIRECTOR
+}
+
 enum MessagingChannelProvider {
   EVOLUTION
   META_CLOUD
@@ -304,6 +312,23 @@ enum PlatformAddon {
   K_BOT_APPLICATION
 }
 
+/// Product surfaces that Keepr One staff can explicitly release for an
+/// administratively provisioned account. Account, onboarding, billing, and
+/// sign-out remain operational boundaries and are intentionally not modules.
+enum PlatformModule {
+  TODAY
+  CALENDAR
+  CRM
+  MESSAGES
+  POLICIES
+  ILLUSTRATIONS
+  COMMISSIONS
+  JOURNEY
+  AGENCY
+  TEAM
+  INTEGRATIONS
+}
+
 /// Identifies which commercial workspace a founder selected when entering the
 /// early-access cohort. This remains separate from User.role because both
 /// account types authenticate through an AGENT user.
@@ -443,15 +468,18 @@ enum NationalLifeForesightReadMode {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  role      Role
-  language  UserLanguage @default(PT)
-  createdAt DateTime @default(now())
+  id         String       @id @default(cuid())
+  email      String       @unique
+  name       String
+  role       Role
+  banned     Boolean      @default(false)
+  banReason  String?
+  banExpires DateTime?
+  language   UserLanguage @default(PT)
+  createdAt  DateTime     @default(now())
   /// IANA zone used by Agenda, reminders and local wall-clock input. Existing
   /// users retain the product's historical New York behavior after migration.
-  timeZone  String   @default("America/New_York")
+  timeZone   String       @default("America/New_York")
 
   agent                     Agent?
   client                    Client?
@@ -472,7 +500,12 @@ model User {
   schedulingBookings        SchedulingBooking[]        @relation("SchedulingBookingOwner")
   agencyInvitationCheckouts AgencyInvitationCheckout[]
   createdApplications       Application[]               @relation("ApplicationCreator")
+  pendingEmailChange        AdminEmailChangeRequest?    @relation("AdminEmailChangeTarget")
+  requestedEmailChanges     AdminEmailChangeRequest[]   @relation("AdminEmailChangeRequester")
+  adminAccessesProvisioned  AdminProvisionedAccess[]    @relation("AdminProvisionedAccessCreator")
+  adminAccessesUpdated      AdminProvisionedAccess[]    @relation("AdminProvisionedAccessUpdater")
 
+  @@index([banned])
   @@map("user")
 }
 
@@ -489,6 +522,7 @@ model Agent {
   status               AgentStatus          @default(ACTIVE)
   promotionAccessScope PromotionAccessScope @default(PERSONAL)
   createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
 
   clients                               Client[]
   policies                              Policy[]
@@ -533,6 +567,7 @@ model Agent {
   agencyMembershipInvitationsSent       AgencyMembership[]                     @relation("AgencyMembershipInviter")
   agencyInvitationsSent                 AgencyInvitation[]                     @relation("AgencyInvitationInviter")
   agencyInvitationsAccepted             AgencyInvitation[]                     @relation("AgencyInvitationAcceptedAgent")
+  adminProvisionedAccess                AdminProvisionedAccess?
 
   @@index([parentAgentId])
 }
@@ -599,6 +634,7 @@ model AgencyInvitation {
   acceptedAgentId      String?
   acceptedPlan         PlatformPlan?
   acceptedMembershipId String?                       @unique
+  isCurrentCommercial  Boolean                       @default(false)
   revokedAt            DateTime?
   createdAt            DateTime                      @default(now())
   updatedAt            DateTime                      @updatedAt
@@ -613,6 +649,7 @@ model AgencyInvitation {
   @@index([agencyId, recruitmentStage, status])
   @@index([invitedByAgentId])
   @@index([acceptedAgentId])
+  @@index([acceptedAgentId, isCurrentCommercial])
 }
 
 /// Holds a billing handoff without creating an account, membership, or access.
@@ -676,16 +713,43 @@ model PlatformSubscription {
   createdAt            DateTime                   @default(now())
   updatedAt            DateTime                   @updatedAt
 
-  agent              Agent?                    @relation("AgentPlatformSubscriptions", fields: [agentId], references: [id], onDelete: Restrict)
-  agency             Agency?                   @relation(fields: [agencyId], references: [id], onDelete: Restrict)
-  agencyMembership   AgencyMembership?         @relation(fields: [agencyMembershipId], references: [id], onDelete: Restrict)
-  invitationCheckout AgencyInvitationCheckout?
+  agent                  Agent?                    @relation("AgentPlatformSubscriptions", fields: [agentId], references: [id], onDelete: Restrict)
+  agency                 Agency?                   @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+  agencyMembership       AgencyMembership?         @relation(fields: [agencyMembershipId], references: [id], onDelete: Restrict)
+  invitationCheckout     AgencyInvitationCheckout?
+  adminProvisionedAccess AdminProvisionedAccess?
 
   @@index([agentId, status])
   @@index([agencyId, status])
   @@index([agencyMembershipId, status])
   @@index([stripeCustomerId])
   @@index([stripePriceId])
+}
+
+/// Marks an account whose commercial access is managed directly by Keepr One.
+/// Plan and trial dates stay authoritative on PlatformSubscription; this row
+/// binds that exact commercial subject to the agent and adds per-user modules.
+model AdminProvisionedAccess {
+  id                     String                @id @default(cuid())
+  agentId                String                @unique
+  platformSubscriptionId String                @unique
+  individualRank         AgentProfessionalRank @default(AGENT)
+  modules                PlatformModule[]      @default([])
+  paymentRequiredAt      DateTime?
+  paymentReason          String?
+  provisionedById        String
+  updatedById            String?
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  agent                Agent                @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  platformSubscription PlatformSubscription @relation(fields: [platformSubscriptionId], references: [id], onDelete: Restrict)
+  provisionedBy        User                 @relation("AdminProvisionedAccessCreator", fields: [provisionedById], references: [id], onDelete: Restrict)
+  updatedBy            User?                @relation("AdminProvisionedAccessUpdater", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([paymentRequiredAt])
+  @@index([provisionedById, createdAt])
+  @@index([updatedById])
 }
 
 /// A separately billed capability belonging to one agent. It is deliberately
@@ -1081,6 +1145,7 @@ model Client {
   assignedAgentId String
   assignedAgent   Agent     @relation(fields: [assignedAgentId], references: [id])
   createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   policies       Policy[]
   insuranceCases InsuranceCase[]
@@ -2617,18 +2682,49 @@ model AuditLog {
   before    Json?
   after     Json?
   createdAt DateTime @default(now())
+
+  @@index([entity, entityId, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// A login email never changes directly from the admin panel. This short-lived
+/// record reserves the new address and stores only the SHA-256 token digest.
+/// Completion deletes the record; AuditLog keeps the durable, token-free trace.
+model AdminEmailChangeRequest {
+  id                    String    @id @default(cuid())
+  userId                String    @unique
+  requestedById         String
+  originalEmail         String
+  originalEmailVerified Boolean
+  newEmail              String    @unique
+  currentTokenHash      String    @unique
+  newTokenHash          String?   @unique
+  expectedUserUpdatedAt DateTime
+  expiresAt             DateTime
+  currentApprovedAt     DateTime?
+  newTokenExpiresAt     DateTime?
+  version               Int       @default(1)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user        User @relation("AdminEmailChangeTarget", fields: [userId], references: [id], onDelete: Cascade)
+  requestedBy User @relation("AdminEmailChangeRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+
+  @@index([expiresAt])
+  @@index([requestedById, createdAt])
 }
 
 model Session {
-  id        String   @id
-  expiresAt DateTime
-  token     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  ipAddress String?
-  userAgent String?
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String   @id
+  expiresAt      DateTime
+  token          String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  ipAddress      String?
+  userAgent      String?
+  userId         String
+  impersonatedBy String?
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([token])
   @@index([userId])

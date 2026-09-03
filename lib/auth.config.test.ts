@@ -30,14 +30,13 @@ vi.mock('@/lib/redis/secondary-storage', () => ({
 import './auth'
 
 describe('auth security configuration', () => {
-  it('disables generic signup, protects role and installs the cookie bridge last', () => {
+  it('disables generic signup, restricts admin capabilities and installs the cookie bridge last', () => {
     const options = mocks.betterAuth.mock.calls[0]?.[0]
 
     expect(options).toEqual(expect.objectContaining({
       emailAndPassword: expect.objectContaining({ disableSignUp: true }),
       user: expect.objectContaining({
         additionalFields: expect.objectContaining({
-          role: expect.objectContaining({ input: false }),
           language: expect.objectContaining({
             type: 'string',
             required: true,
@@ -47,7 +46,25 @@ describe('auth security configuration', () => {
       }),
       rateLimit: expect.objectContaining({ storage: 'memory' }),
     }))
-    expect(options.plugins).toEqual([{ id: 'next-cookies' }])
+    const adminPlugin = options.plugins?.find((plugin) => plugin.id === 'admin')
+    expect(adminPlugin).toEqual(expect.objectContaining({
+      options: expect.objectContaining({
+        defaultRole: 'AGENT',
+        adminRoles: ['ADMIN'],
+        allowImpersonatingAdmins: false,
+        impersonationSessionDuration: 15 * 60,
+      }),
+    }))
+    expect((adminPlugin as { options?: { roles?: { ADMIN?: { statements?: Record<string, string[]> } } } })
+      .options?.roles?.ADMIN?.statements).toEqual({
+        user: ['ban', 'impersonate'],
+        session: ['revoke'],
+      })
+    const adminStatements = (adminPlugin as { options?: { roles?: { ADMIN?: { statements?: Record<string, string[]> } } } })
+      .options?.roles?.ADMIN?.statements
+    expect(adminStatements?.user).not.toContain('impersonate-admins')
+    expect(options.session).toEqual({ storeSessionInDatabase: true })
+    expect(options.plugins?.at(-1)).toEqual({ id: 'next-cookies' })
     expect(mocks.nextCookies).toHaveBeenCalledTimes(1)
   })
 

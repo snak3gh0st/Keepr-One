@@ -35,6 +35,7 @@ const userSelect = {
       parentAgentId: true,
       onboarding: { select: { status: true } },
       founderEnrollment: { select: { id: true, accountType: true } },
+      adminProvisionedAccess: { select: { id: true } },
       agencyMemberships: {
         where: { endedAt: null },
         orderBy: [{ joinedAt: 'desc' as const }, { id: 'desc' as const }],
@@ -264,6 +265,7 @@ export async function finalizeAgencyInvitationAccess(
           parentAgentId: true,
           onboarding: { select: { status: true } },
           founderEnrollment: { select: { id: true, accountType: true } },
+          adminProvisionedAccess: { select: { id: true } },
           agencyMemberships: {
             where: { endedAt: null },
             select: {
@@ -287,6 +289,11 @@ export async function finalizeAgencyInvitationAccess(
     const agent = user.agent
     if (!agent) {
       throw new AgencyInvitationFinalizationError('A conta convidada não possui um perfil de agente.')
+    }
+    if (agent.adminProvisionedAccess) {
+      throw new AgencyInvitationFinalizationError(
+        'Esta conta é gerenciada pela Keepr One. A mudança para um plano por convite precisa ser concluída pelo suporte.',
+      )
     }
     if (agent.id === invitation.invitedBy.id) {
       throw new AgencyInvitationFinalizationError('Você não pode aceitar seu próprio convite.')
@@ -571,6 +578,13 @@ export async function finalizeAgencyInvitationAccess(
       : 'ACTIVE'
     const acceptedIntendedType = invitation.intendedType
       ?? (plan === 'AGENCY' ? 'AGENCY' : 'AGENT')
+    await transaction.agencyInvitation.updateMany({
+      where: {
+        acceptedAgentId: agent.id,
+        isCurrentCommercial: true,
+      },
+      data: { isCurrentCommercial: false },
+    })
     const claimed = await transaction.agencyInvitation.updateMany({
       where: {
         id: invitation.id,
@@ -585,6 +599,7 @@ export async function finalizeAgencyInvitationAccess(
         acceptedAgentId: agent.id,
         acceptedPlan: plan,
         acceptedMembershipId,
+        isCurrentCommercial: true,
         intendedType: acceptedIntendedType,
         monthlyPriceCents: unitAmountCents,
         recruitmentStage,

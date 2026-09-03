@@ -3,7 +3,7 @@ import type { PlatformPlanName } from '@/lib/plans'
 
 export type TrialCountdownSource = Extract<
   FounderAccessResolution['source'],
-  'FOUNDER' | 'AGENCY_INVITATION'
+  'FOUNDER' | 'AGENCY_INVITATION' | 'ADMIN_PROVISIONED'
 >
 
 export type TrialCountdownView = {
@@ -35,7 +35,11 @@ export function buildTrialCountdownView(
 
   if (
     access.state !== 'TRIAL'
-    || (access.source !== 'FOUNDER' && access.source !== 'AGENCY_INVITATION')
+    || (
+      access.source !== 'FOUNDER'
+      && access.source !== 'AGENCY_INVITATION'
+      && access.source !== 'ADMIN_PROVISIONED'
+    )
     || !access.requiredPlan
   ) {
     return null

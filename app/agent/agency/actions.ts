@@ -15,6 +15,7 @@ import {
   INVITATION_VALIDITY_DAYS,
   type AgencyActionState,
 } from "./plan";
+import { requireAgentModule } from "@/lib/require-agent-module";
 
 const AGENCY_INVITATION_INTENDED_TYPES = ["AGENT", "AGENCY"] as const;
 const AGENCY_RECRUITMENT_STAGES = [
@@ -105,6 +106,7 @@ export async function createAgencyInvitationAction(
 ): Promise<AgencyActionState> {
   let access: Awaited<ReturnType<typeof requireAgencyCapability>>;
   try {
+    await requireAgentModule("AGENCY");
     access = await requireAgencyCapability("INVITE_AGENTS");
   } catch {
     return actionError("Uma assinatura ativa vinculada à agência é necessária para criar convites.");
@@ -345,6 +347,7 @@ export async function updateAgencyRecruitmentStageAction(
 ): Promise<AgencyActionState> {
   let access: Awaited<ReturnType<typeof requireAgencyCapability>>;
   try {
+    await requireAgentModule("AGENCY");
     access = await requireAgencyCapability("INVITE_AGENTS");
   } catch {
     return actionError("Uma assinatura ativa vinculada à agência é necessária para atualizar etapas.");
@@ -489,6 +492,7 @@ export async function revokeAgencyInvitationAction(
 ): Promise<AgencyActionState> {
   let access: Awaited<ReturnType<typeof requireAgencyCapability>>;
   try {
+    await requireAgentModule("AGENCY");
     access = await requireAgencyCapability("INVITE_AGENTS");
   } catch {
     return actionError("Uma assinatura ativa vinculada à agência é necessária para revogar convites.");

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getAgent: vi.fn(),
+  requireAgentModule: vi.fn(),
   enabled: vi.fn(() => true),
   illustrationFindFirst: vi.fn(),
   illustrationUpdateMany: vi.fn(),
@@ -23,6 +24,9 @@ vi.mock('@/lib/i18n/server', () => ({
   }),
 }))
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getAgent }))
+vi.mock('@/lib/require-agent-module', () => ({
+  requireAgentModule: mocks.requireAgentModule,
+}))
 vi.mock('@/lib/national-life/local-connector/config', () => ({
   isNationalLifeLocalConnectorEnabled: mocks.enabled,
 }))
@@ -97,6 +101,7 @@ describe('request official Foresight illustration', () => {
     mocks.enabled.mockReturnValue(true)
     mocks.language.current = 'PT'
     mocks.getAgent.mockResolvedValue({ id: 'agent_1', userId: 'user_1' })
+    mocks.requireAgentModule.mockResolvedValue({ user: { role: 'AGENT' } })
     mocks.illustrationFindFirst.mockResolvedValue(illustration)
     mocks.commandFindFirst.mockReset()
     mocks.commandFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({

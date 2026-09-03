@@ -22,6 +22,22 @@ export default async function AuditPage() {
   const actionLabels: Record<string, string> = {
     UPDATE_AGENT_HIERARCHY: copy('Hierarquia atualizada', 'Hierarchy updated'),
     UPSERT_COMMISSION_PLAN: copy('Plano de comissão salvo', 'Commission plan saved'),
+    ADMIN_USER_PROFILE_UPDATED: copy('Perfil de usuário atualizado', 'User profile updated'),
+    ADMIN_USER_SUSPENDED: copy('Conta de usuário suspensa', 'User account suspended'),
+    ADMIN_USER_RESTORED: copy('Acesso de usuário restaurado', 'User access restored'),
+    ADMIN_PASSWORD_RESET_REQUESTED: copy('Redefinição de senha enviada', 'Password reset sent'),
+    ADMIN_EMAIL_VERIFICATION_SENT: copy('Verificação de e-mail enviada', 'Email verification sent'),
+    ADMIN_USER_EMAIL_CHANGE_REQUESTED: copy('Troca de e-mail solicitada', 'Email change requested'),
+    ADMIN_USER_EMAIL_CHANGE_CURRENT_APPROVED: copy('E-mail atual autorizou a troca', 'Current email authorized the change'),
+    ADMIN_USER_EMAIL_CHANGE_COMPLETED: copy('Troca de e-mail concluída', 'Email change completed'),
+    ADMIN_USER_EMAIL_CHANGE_DELIVERY_FAILED: copy('Falha no envio da troca de e-mail', 'Email change delivery failed'),
+    ADMIN_USER_SESSIONS_REVOKED: copy('Sessões de usuário encerradas', 'User sessions revoked'),
+    ADMIN_USER_PREVIEW_STARTED: copy('Visualização de suporte iniciada', 'Support preview started'),
+    ADMIN_USER_PREVIEW_ENDED: copy('Visualização de suporte encerrada', 'Support preview ended'),
+    ADMIN_USER_PREVIEW_FAILED: copy('Falha ao abrir visualização', 'Support preview failed to start'),
+    ADMIN_USER_PREVIEW_STOP_FAILED: copy('Falha ao encerrar visualização', 'Support preview failed to end'),
+    ADMIN_USER_PLAN_CHANGED: copy('Plano do usuário alterado', 'User plan changed'),
+    ADMIN_USER_PLAN_RECONCILIATION_REQUIRED: copy('Cobrança exige reconciliação', 'Billing reconciliation required'),
   }
   const rows = logs.map((log) => ({
     id: log.id,
@@ -41,8 +57,8 @@ export default async function AuditPage() {
         title={copy('Auditoria', 'Audit')}
         eyebrow={copy('Controle', 'Controls')}
         description={copy(
-          'Últimas 100 alterações de hierarquia e planos de comissão, com o valor antes e depois de cada mudança.',
-          'The latest 100 hierarchy and commission plan changes, including the value before and after each update.',
+          'Últimas 100 ações administrativas em usuários, hierarquia e planos, com responsável e valores antes e depois da mudança.',
+          'The latest 100 administrative actions across users, hierarchy, and plans, with the actor and values before and after each change.',
         )}
       />
       <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">
