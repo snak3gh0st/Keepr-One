@@ -10,6 +10,7 @@ export type InforceRow = {
   agentNumber: string | null
   policyNumber: string
   policyStatus: string | null
+  lastStatusChangeDate: string | null
   policyIssueDate: string | null
   productName: string | null
   insuredClientName: string | null
@@ -27,6 +28,7 @@ export type ReconciledPolicy = {
   policyNumber: string
   status: PolicyStatusName
   sourceStatus: string | null
+  statusChangedAt: Date | null
   productName: string | null
   issueDate: Date | null
   premium: number | null
@@ -41,9 +43,11 @@ export type DiscardedRow = { reason: 'MISSING_POLICY_NUMBER'; policyStatus: stri
 
 export type ReconcileResult = { policies: ReconciledPolicy[]; discarded: DiscardedRow[] }
 
-/// `Pending Lapse` has no home in PolicyStatus, and it is the one status with money
-/// still recoverable behind it. It maps to INFORCE so the policy reads as live, and
-/// `sourceStatus` keeps the carrier's own word so the signal survives.
+/**
+ * `Pending Lapse` has no home in PolicyStatus, and it is the one status with money
+ * still recoverable behind it. It maps to INFORCE so the policy reads as live, and
+ * `sourceStatus` keeps the carrier's own word so the signal survives.
+ */
 const STATUS_BY_CARRIER_LABEL: Record<string, PolicyStatusName> = {
   active: 'INFORCE',
   issued: 'APPROVED',
@@ -56,14 +60,22 @@ function mapStatus(carrier: string | null): PolicyStatusName {
   return STATUS_BY_CARRIER_LABEL[(carrier ?? '').trim().toLowerCase()] ?? 'PENDING'
 }
 
-/// The carrier writes dates as MM/DD/YYYY. Parsed into UTC so a birthday does not
-/// drift a day for an agent in a negative offset.
+/** The carrier writes dates as MM/DD/YYYY. UTC avoids a one-day timezone drift. */
 function parseCarrierDate(value: string | null): Date | null {
   const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((value ?? '').trim())
   if (!match) return null
   const [, month, day, year] = match
-  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
-  return Number.isNaN(date.getTime()) ? null : date
+  const monthNumber = Number(month)
+  const dayNumber = Number(day)
+  const yearNumber = Number(year)
+  const date = new Date(Date.UTC(yearNumber, monthNumber - 1, dayNumber))
+  if (
+    Number.isNaN(date.getTime())
+    || date.getUTCFullYear() !== yearNumber
+    || date.getUTCMonth() !== monthNumber - 1
+    || date.getUTCDate() !== dayNumber
+  ) return null
+  return date
 }
 
 function parseMoney(value: string | null): number | null {
@@ -78,8 +90,7 @@ function text(value: string | null): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-/// `??` rather than `||` throughout: a legitimately empty value must not be
-/// overwritten by a later slice just because it is falsy.
+/** `??` preserves legitimate falsy values when carrier slices are merged. */
 function coalesce<T>(current: T | null, incoming: T | null): T | null {
   return current ?? incoming
 }
@@ -108,6 +119,7 @@ export function reconcileInforceRows(rows: InforceRow[]): ReconcileResult {
       policyNumber,
       status: mapStatus(row.policyStatus),
       sourceStatus: text(row.policyStatus),
+      statusChangedAt: parseCarrierDate(row.lastStatusChangeDate),
       productName: text(row.productName),
       issueDate: parseCarrierDate(row.policyIssueDate),
       premium: parseMoney(row.anticipatedAnnualPremium),
@@ -129,6 +141,9 @@ export function reconcileInforceRows(rows: InforceRow[]): ReconcileResult {
       policyNumber,
       status: isExport ? incoming.status : existing.status,
       sourceStatus: isExport ? incoming.sourceStatus : existing.sourceStatus,
+      statusChangedAt: isExport
+        ? coalesce(incoming.statusChangedAt, existing.statusChangedAt)
+        : coalesce(existing.statusChangedAt, incoming.statusChangedAt),
       productName: isExport
         ? coalesce(incoming.productName, existing.productName)
         : coalesce(existing.productName, incoming.productName),

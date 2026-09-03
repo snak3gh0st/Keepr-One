@@ -11,8 +11,25 @@ import { getServerI18n } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
-export default async function PoliciesPage() {
+const ALLOWED_STATUS_FILTERS = new Set([
+  'INFORCE',
+  'PENDING_LAPSE',
+  'APPROVED',
+  'PENDING',
+  'LAPSED',
+  'CANCELLED',
+])
+
+export default async function PoliciesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string }>
+}) {
   const { copy } = await getServerI18n()
+  const { status: requestedStatus } = await searchParams
+  const initialStatus = requestedStatus && ALLOWED_STATUS_FILTERS.has(requestedStatus)
+    ? requestedStatus
+    : 'all'
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
   const scopeAgentIds = await getAgentScopeIds(agent.id)
@@ -25,6 +42,8 @@ export default async function PoliciesPage() {
     faceAmount: unknown
     premium: unknown
     status: string
+    sourceStatus: string | null
+    statusChangedAt: Date | null
     sourceProvider: string | null
     client: { name: string } | null
   }[] = []
@@ -34,7 +53,10 @@ export default async function PoliciesPage() {
     policies = await prisma.policy.findMany({
       where: { agentId: { in: scopeAgentIds } },
       include: { client: true },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [
+        { statusChangedAt: { sort: 'desc', nulls: 'last' } },
+        { createdAt: 'desc' },
+      ],
     })
   } catch (error) {
     console.error('Policies query error', error)
@@ -78,8 +100,11 @@ export default async function PoliciesPage() {
             faceAmount: p.faceAmount == null ? null : decimalToNumber(p.faceAmount).toFixed(2),
             premium: premiumIsKnown(p) ? decimalToNumber(p.premium).toFixed(2) : null,
             status: p.status,
+            sourceStatus: p.sourceStatus,
+            statusChangedAt: p.statusChangedAt?.toISOString() ?? null,
             clientName: p.client?.name ?? '—',
           }))}
+          initialStatus={initialStatus}
         />
       )}
     </Shell>

@@ -29,6 +29,7 @@ export type PlannedPolicy = {
   product: string
   status: PolicyStatusName
   sourceStatus: string | null
+  statusChangedAt: Date | null
   faceAmount: null
   premium: number | null
   effectiveDate: Date | null
@@ -121,6 +122,7 @@ export function planPortfolioIngest(input: {
       product: policy.productName ?? 'Unknown',
       status: policy.status,
       sourceStatus: policy.sourceStatus,
+      statusChangedAt: policy.statusChangedAt,
       faceAmount: null,
       premium: policy.premium,
       effectiveDate: policy.issueDate,
