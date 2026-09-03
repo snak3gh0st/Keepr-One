@@ -14,28 +14,49 @@ export type PolicyDetailObservation = {
   fields: PolicyDetailField[]
 }
 
-const LABELS: Record<PolicyDetailSection, readonly string[]> = {
+type PolicyDetailFieldDefinition = {
+  label: string
+  aliases: readonly string[]
+}
+
+const FIELD_DEFINITIONS: Record<PolicyDetailSection, readonly PolicyDetailFieldDefinition[]> = {
   COVERAGE: [
-    'Total Face Amount',
-    'Base Face Amount',
-    'Net Death Benefit',
-    'MEC Limit',
-    'Guideline Premium Limit',
+    { label: 'Total Face Amount', aliases: ['Total Face Amount'] },
+    { label: 'Base Face Amount', aliases: ['Base Face Amount'] },
+    { label: 'Net Death Benefit', aliases: ['Net Death Benefit'] },
+    { label: 'MEC Limit', aliases: ['MEC Limit'] },
+    { label: 'Guideline Premium Limit', aliases: ['Guideline Premium Limit'] },
   ],
   PAYMENTS: [
-    'Next Scheduled Payment Date',
-    'Payment Frequency',
-    'Planned Periodic Payment',
-    'Anticipated Annual Premium',
-    'Minimum Monthly Premium',
-    'Minimum Guaranteed Premium',
-    'CTP',
+    {
+      label: 'Next Scheduled Payment Date',
+      aliases: ['Next Scheduled Payment Date', 'Next Premium Due Date'],
+    },
+    {
+      label: 'Payment Frequency',
+      aliases: ['Payment Frequency', 'Premium Payment Frequency'],
+    },
+    {
+      label: 'Planned Periodic Payment',
+      aliases: ['Planned Periodic Payment', 'Premium'],
+    },
+    {
+      label: 'Anticipated Annual Premium',
+      aliases: ['Anticipated Annual Premium', 'Annual'],
+    },
+    { label: 'Minimum Monthly Premium', aliases: ['Minimum Monthly Premium'] },
+    { label: 'Minimum Guaranteed Premium', aliases: ['Minimum Guaranteed Premium'] },
+    { label: 'CTP', aliases: ['CTP'] },
   ],
 }
 
 const MAX_PAGE_TEXT = 256 * 1024
 const MAX_VALUE_LENGTH = 256
-const ALL_LABELS = new Set(Object.values(LABELS).flat())
+const ALL_LABELS = new Set(
+  Object.values(FIELD_DEFINITIONS).flatMap((definitions) =>
+    definitions.flatMap(({ aliases }) => aliases),
+  ),
+)
 const EMPTY_VALUES = new Set(['—', '-', 'N/A', 'n/a', 'Not available'])
 const MONEY_VALUE = /^(?:\(\s*)?\$?\s*\d+(?:,\d{3})*(?:\.\d{1,2})?\s*\)?$/
 const DATE_VALUE = /^\d{2}\/\d{2}\/\d{4}$/
@@ -63,33 +84,46 @@ function isApprovedValue(label: string, value: string | undefined): value is str
 }
 
 function fieldOrder(pageLines: readonly string[], section: PolicyDetailSection): FieldOrder {
+  // Term's carrier labels are rendered in the live value-before-label layout.
+  // Their aliases are intentionally explicit so a nearby valid amount (for
+  // example Loan Interest) can never shift the canonical field mapping.
+  if (FIELD_DEFINITIONS[section].some(({ label, aliases }) =>
+    aliases.some((alias) => alias !== label && pageLines.includes(alias)),
+  )) {
+    return 'VALUE_THEN_LABEL'
+  }
   let before = 0
   let after = 0
   for (let index = 0; index < pageLines.length; index += 1) {
-    const label = pageLines[index]
-    if (!label || !LABELS[section].includes(label)) continue
-    if (isApprovedValue(label, pageLines[index - 1])) before += 1
-    if (isApprovedValue(label, pageLines[index + 1])) after += 1
+    const sourceLabel = pageLines[index]
+    const definition = FIELD_DEFINITIONS[section].find(({ aliases }) =>
+      sourceLabel ? aliases.includes(sourceLabel) : false,
+    )
+    if (!definition) continue
+    if (isApprovedValue(definition.label, pageLines[index - 1])) before += 1
+    if (isApprovedValue(definition.label, pageLines[index + 1])) after += 1
   }
   return before > after ? 'VALUE_THEN_LABEL' : 'LABEL_THEN_VALUE'
 }
 
 function valueForLabel(
   pageLines: readonly string[],
-  label: string,
+  definition: PolicyDetailFieldDefinition,
   order: FieldOrder,
 ): string | null {
   for (let index = 0; index < pageLines.length; index += 1) {
     const line = pageLines[index]
-    if (line === label) {
+    const sourceLabel = definition.aliases.find((alias) => line === alias)
+    if (sourceLabel) {
       const primary = pageLines[index + (order === 'VALUE_THEN_LABEL' ? -1 : 1)]
-      if (isApprovedValue(label, primary)) return primary
+      if (isApprovedValue(definition.label, primary)) return primary
       const fallback = pageLines[index + (order === 'VALUE_THEN_LABEL' ? 1 : -1)]
-      return isApprovedValue(label, fallback) ? fallback : null
+      if (isApprovedValue(definition.label, fallback)) return fallback
     }
-    if (line?.startsWith(`${label}:`)) {
-      const value = compact(line.slice(label.length + 1))
-      return isApprovedValue(label, value) ? value : null
+    const inlineLabel = definition.aliases.find((alias) => line?.startsWith(`${alias}:`))
+    if (line && inlineLabel) {
+      const value = compact(line.slice(inlineLabel.length + 1))
+      if (isApprovedValue(definition.label, value)) return value
     }
   }
   return null
@@ -101,9 +135,9 @@ export function extractApprovedPolicyDetailFields(
 ): PolicyDetailField[] {
   const pageLines = lines(text)
   const order = fieldOrder(pageLines, section)
-  return LABELS[section].flatMap((label) => {
-    const value = valueForLabel(pageLines, label, order)
-    return value === null ? [] : [{ section, label, value }]
+  return FIELD_DEFINITIONS[section].flatMap((definition) => {
+    const value = valueForLabel(pageLines, definition, order)
+    return value === null ? [] : [{ section, label: definition.label, value }]
   })
 }
 

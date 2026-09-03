@@ -62,6 +62,36 @@ const liveCarrierFixture = `
   CTP
 `
 
+const liveTermPaymentsFixture = `
+  09/30/2026
+  Next Premium Due Date
+  —
+  Loan Interest Due Date
+  Monthly
+  Premium Payment Frequency
+  Direct Bill
+  Premium Payment Type
+  $50.00
+  Premium
+  $0.00
+  Loan Interest
+  $0.00
+  Applied Dividend
+  $0.00
+  Financed
+  $50.00
+  Net Due
+  Payment Mode Information
+  $568.18
+  Annual
+  $289.77
+  Semi-Annual
+  $147.73
+  Quarterly
+  $50.00
+  Check-O-Matic
+`
+
 describe('National Life policy detail extraction', () => {
   it('extracts only approved coverage labels from a page fixture', () => {
     const fields = extractApprovedPolicyDetailFields(coverageFixture, 'COVERAGE')
@@ -108,6 +138,15 @@ describe('National Life policy detail extraction', () => {
       { section: 'PAYMENTS', label: 'Minimum Monthly Premium', value: '$35.18' },
       { section: 'PAYMENTS', label: 'Minimum Guaranteed Premium', value: '$61.16' },
       { section: 'PAYMENTS', label: 'CTP', value: '$975.00' },
+    ])
+  })
+
+  it('maps live Term payment labels into the canonical policy detail contract', () => {
+    expect(extractApprovedPolicyDetailFields(liveTermPaymentsFixture, 'PAYMENTS')).toEqual([
+      { section: 'PAYMENTS', label: 'Next Scheduled Payment Date', value: '09/30/2026' },
+      { section: 'PAYMENTS', label: 'Payment Frequency', value: 'Monthly' },
+      { section: 'PAYMENTS', label: 'Planned Periodic Payment', value: '$50.00' },
+      { section: 'PAYMENTS', label: 'Anticipated Annual Premium', value: '$568.18' },
     ])
   })
 
