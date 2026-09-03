@@ -26,7 +26,7 @@ export async function loadCurrentNationalLifePortfolio(prisma: PrismaClient, age
         } } } },
     })
     if (!completion) return { rows: owned, historicalPolicies: 0, verified: false,
-      statusCounts: [], productCounts: [] }
+      statusCounts: [], productCounts: [], premiumEvolutionRows: [], observedAt: null }
     const pages = verifyPortfolioPages({ ...completion, pages: completion.run.rawGridPages })
     const rows = pages.flatMap((page) => (page.records as GridRow[]).flatMap((raw) => {
       const row = toInforcePolicySnapshot(raw)
@@ -41,6 +41,10 @@ export async function loadCurrentNationalLifePortfolio(prisma: PrismaClient, age
     storedPolicies: stored.length,
     historicalPolicies: partitions.reduce((sum, partition) => sum + partition.historicalPolicies, 0),
     verified: partitions.length > 0 && partitions.every((partition) => partition.verified),
+    premiumEvolutionRows: partitions.flatMap((partition) => partition.premiumEvolutionRows),
+    observedAt: partitions.some((partition) => partition.observedAt)
+      ? new Date(Math.max(...partitions.flatMap((partition) => partition.observedAt ? [partition.observedAt.getTime()] : [])))
+      : null,
     statusCounts: [...Map.groupBy(partitions.flatMap((partition) => partition.statusCounts), (row) => row.status)]
       .map(([status, rows]) => ({ status, count: rows.reduce((sum, row) => sum + row.count, 0) }))
       .sort((a, b) => b.count - a.count || a.status.localeCompare(b.status)),
