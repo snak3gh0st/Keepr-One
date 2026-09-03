@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { hashGoogleSecret } from './crypto'
-import { acceptGoogleWebhook } from './watch'
+import { GoogleApiError } from './errors'
+import { acceptGoogleWebhook, isGooglePushNotificationUnsupported } from './watch'
 
 function createDb() {
   const channel = {
@@ -20,6 +21,25 @@ function createDb() {
 }
 
 describe('Google webhook validation', () => {
+  it('recognizes calendars that Google explicitly excludes from push notifications', () => {
+    expect(isGooglePushNotificationUnsupported(new GoogleApiError({
+      message: 'Google API request failed (INVALID_ARGUMENT)',
+      status: 400,
+      code: 'INVALID_ARGUMENT',
+      responseBody: {
+        error: {
+          message: 'Push notifications are not supported by this resource.',
+          errors: [{ reason: 'pushNotSupportedForRequestedResource' }],
+        },
+      },
+    }))).toBe(true)
+    expect(isGooglePushNotificationUnsupported(new GoogleApiError({
+      message: 'Google API request failed (rateLimitExceeded)',
+      status: 429,
+      responseBody: {},
+    }))).toBe(false)
+  })
+
   it('rejects a forged channel token without enqueuing', async () => {
     const { db, upsert } = createDb()
     const result = await acceptGoogleWebhook({

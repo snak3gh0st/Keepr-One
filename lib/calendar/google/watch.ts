@@ -12,6 +12,7 @@ import { hashGoogleSecret, safeSecretHashEquals } from './crypto'
 import type { GoogleCalendarEnv } from './env'
 import type { GoogleFetch } from './http'
 import { newGoogleWatchIdentity } from './idempotency'
+import { GoogleApiError } from './errors'
 
 type WatchDb = Pick<
   PrismaClient,
@@ -25,6 +26,14 @@ export type GoogleWebhookHeaders = {
   messageNumber: string | null
   channelToken: string | null
   channelExpiration: string | null
+}
+
+export function isGooglePushNotificationUnsupported(error: unknown) {
+  if (!(error instanceof GoogleApiError) || error.status !== 400) return false
+  const providerDetail = JSON.stringify(error.responseBody).toLowerCase()
+  return error.code.toLowerCase() === 'pushnotsupportedforrequestedresource'
+    || providerDetail.includes('pushnotsupportedforrequestedresource')
+    || providerDetail.includes('push notifications are not supported by this resource')
 }
 
 export function readGoogleWebhookHeaders(headers: Headers): GoogleWebhookHeaders {
@@ -101,9 +110,17 @@ export async function registerGoogleCalendarWatch(
   const now = options.now ?? new Date()
   const calendar = await db.calendarSource.findUnique({
     where: { id: calendarSourceId },
-    select: { id: true, integrationId: true, providerCalendarId: true },
+    select: {
+      id: true,
+      integrationId: true,
+      providerCalendarId: true,
+      pushNotificationsSupported: true,
+    },
   })
   if (!calendar) throw new Error('Calendar source not found')
+  if (calendar.pushNotificationsSupported === false) {
+    return { channel: null, secretToken: null, supported: false as const }
+  }
   const accessToken = await getGoogleAccessToken(calendar.integrationId, env, {
     now,
     fetch: options.fetch,
@@ -111,13 +128,26 @@ export async function registerGoogleCalendarWatch(
   const identity = newGoogleWatchIdentity()
   const expiresAt = new Date(now.getTime() + GOOGLE_CALENDAR_WATCH_LIFETIME_MS)
   const client = new GoogleCalendarClient({ accessToken, fetch: options.fetch })
-  const watched = await client.watchEvents({
-    calendarId: calendar.providerCalendarId,
-    address: env.webhookUrl,
-    channelId: identity.channelId,
-    token: identity.token,
-    expiresAt,
-  })
+  let watched
+  try {
+    watched = await client.watchEvents({
+      calendarId: calendar.providerCalendarId,
+      address: env.webhookUrl,
+      channelId: identity.channelId,
+      token: identity.token,
+      expiresAt,
+    })
+  } catch (error) {
+    if (!isGooglePushNotificationUnsupported(error)) throw error
+    // Reading and periodic reconciliation remain valid for these calendars.
+    // Persist the provider capability so every scheduler tick does not repeat
+    // an unsupported watch request or report it as an operational failure.
+    await db.calendarSource.update({
+      where: { id: calendar.id },
+      data: { pushNotificationsSupported: false },
+    })
+    return { channel: null, secretToken: null, supported: false as const }
+  }
   const providerExpiry = watched.expiration ? new Date(Number(watched.expiration)) : expiresAt
   if (Number.isNaN(providerExpiry.getTime())) throw new Error('Google returned an invalid watch expiration')
   const channel = await db.calendarWatchChannel.create({
@@ -132,6 +162,10 @@ export async function registerGoogleCalendarWatch(
       status: 'ACTIVE',
     },
   })
+  await db.calendarSource.update({
+    where: { id: calendar.id },
+    data: { pushNotificationsSupported: true },
+  })
   await db.calendarSyncJob.upsert({
     where: { idempotencyKey: `calendar:watch:${channel.id}:initial-sync` },
     create: {
@@ -143,7 +177,7 @@ export async function registerGoogleCalendarWatch(
     },
     update: {},
   })
-  return { channel, secretToken: identity.token }
+  return { channel, secretToken: identity.token, supported: true as const }
 }
 
 export async function stopGoogleCalendarWatch(
@@ -182,7 +216,11 @@ export async function renewExpiringGoogleWatches(
   let renewed = 0
   for (const previous of expiring) {
     // New channel first, then old channel stop: overlapping validity avoids a gap.
-    await registerGoogleCalendarWatch(previous.calendarId, env, { now, fetch: options.fetch, db })
+    const replacement = await registerGoogleCalendarWatch(previous.calendarId, env, { now, fetch: options.fetch, db })
+    if (!replacement.supported) {
+      await stopGoogleCalendarWatch(previous.id, env, { fetch: options.fetch, db })
+      continue
+    }
     await stopGoogleCalendarWatch(previous.id, env, { fetch: options.fetch, db })
     renewed += 1
   }

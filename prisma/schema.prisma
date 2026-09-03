@@ -1446,6 +1446,9 @@ model CalendarSource {
   crmDefault            Boolean             @default(false)
   accessRole            String?
   timeZone              String?
+  /// Some read-only/system Google calendars reject events.watch even though
+  /// their events remain readable and fully eligible for polling sync.
+  pushNotificationsSupported Boolean?
   syncToken             String?
   syncStatus            CalendarSyncStatus  @default(PENDING)
   lastIncrementalSyncAt DateTime?           @db.Timestamptz(3)
