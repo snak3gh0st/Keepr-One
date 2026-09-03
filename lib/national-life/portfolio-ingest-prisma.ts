@@ -24,6 +24,7 @@ export function prismaIngestDeps(prisma: PrismaClient): IngestDeps {
           agentNumber: true,
           policyNumber: true,
           policyStatus: true,
+          lastStatusChangeDate: true,
           policyIssueDate: true,
           productName: true,
           insuredClientName: true,
@@ -56,6 +57,7 @@ export function prismaIngestDeps(prisma: PrismaClient): IngestDeps {
         product: input.product,
         status: input.status,
         sourceStatus: input.sourceStatus,
+        statusChangedAt: input.statusChangedAt,
         // Missing carrier money remains unknown. Zero is a business value and
         // must never be manufactured to satisfy storage constraints.
         premium: input.premium,

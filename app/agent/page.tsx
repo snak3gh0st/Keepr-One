@@ -1,27 +1,16 @@
 export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
-import Decimal from 'decimal.js'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getCurrentAgentAccess } from '@/lib/agent-access'
 import { decimalToNumber } from '@/lib/decimal'
-import { periodFromDate, shiftPeriod } from '@/lib/period'
-import {
-  auditVisibleCarrierCommissionRows,
-  preferCanonicalCarrierCommissionRows,
-  projectedPayableSnapshotForPeriod,
-  sumByPeriod,
-  totalForPeriod,
-  totalOf,
-} from '@/lib/national-life/commission-records'
 import {
   getNationalLifeLocalConnectorConfig,
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
 import { Shell } from '@/components/Shell'
 import { ErrorBanner } from '@/components/ErrorBanner'
-import { TrendChart } from '@/components/TrendChart'
 import {
   KeeprDashboardMotion,
 } from '@/components/KeeprDashboardMotion'
@@ -30,11 +19,6 @@ import { getAgentPromotionSnapshot } from '@/lib/agent-promotion'
 import { getLocalPromotionPreview } from '@/lib/promotion-preview'
 import { getPromotionIdentity, getPromotionJourney } from '@/lib/promotion-journey'
 import { JourneyDashboardPreview } from './JourneyDashboardPreview'
-import {
-  COMMISSION_EARNING_GRID_KEYS,
-  LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
-  LEGACY_COMMISSION_EARNING_GRID_KEY,
-} from '@/lib/national-life/commission-grid-keys'
 import { FollowUpActionCard } from '@/components/crm/FollowUpActionCard'
 import { getDueFollowUpsForScope, nyDayBounds, type DueFollowUpView } from '@/lib/crm'
 import {
@@ -49,13 +33,11 @@ import type { CalendarConnectionView, CalendarEventView, CalendarSourceView } fr
 import { getServerI18n } from '@/lib/i18n/server'
 import { formatCurrency as formatLocalizedCurrency, formatNumber } from '@/lib/i18n/format'
 import type { UserLanguage } from '@/lib/i18n/config'
-import { auditedNationalLifeAap } from '@/lib/policy-metrics'
+import {
+  buildNationalLifePortfolioMetrics,
+  type NationalLifePortfolioMetrics,
+} from '@/lib/policy-metrics'
 import type { PlatformModuleName } from '@/lib/platform-modules'
-
-const NATIONAL_LIFE_DASHBOARD_FINANCIAL_GRID_KEYS = [
-  ...COMMISSION_EARNING_GRID_KEYS,
-  'PAYABLE_GROSS_COMMISSIONS',
-] as const
 
 function BreakdownList({
   title,
@@ -129,20 +111,6 @@ function formatCurrency(value: number, language: UserLanguage): string {
   return formatLocalizedCurrency(value, language, 'USD', { maximumFractionDigits: 0 })
 }
 
-function formatTargetPremiumCurrency(value: number, language: UserLanguage): string {
-  return formatLocalizedCurrency(value, language, 'USD', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
-}
-
-function formatMonthShort(period: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    month: 'short',
-    timeZone: 'UTC',
-  }).format(new Date(`${period}-01T00:00:00.000Z`))
-}
-
 function safeGroupCount(groupCount: unknown): number {
   if (groupCount && typeof groupCount === 'object' && '_all' in groupCount) {
     const countObj = groupCount as { _all?: number }
@@ -177,11 +145,10 @@ export default async function AgentDashboard({
   const canUseCrm = hasModule('CRM')
   const canUsePolicies = hasModule('POLICIES')
   const canUseIllustrations = hasModule('ILLUSTRATIONS')
-  const canUseCommissions = hasModule('COMMISSIONS')
   const canUseJourney = hasModule('JOURNEY')
   const canUseTeam = hasModule('TEAM') && access.canManageTeam
   const hasPriorityQueue = canUseCrm || canUsePolicies
-  const promotion = canUseJourney || canUseCommissions
+  const promotion = canUseJourney
     ? await getAgentPromotionSnapshot(agent.id)
     : null
   const localPromotionPreview = canUseJourney
@@ -199,7 +166,6 @@ export default async function AgentDashboard({
         estimatedAgencyPc: 0,
         pendingPersonalPc: 0,
         pendingAgencyPc: 0,
-        confirmedCreditCount: 1,
         hasPromotionData: true,
         ledgerReady: true,
         highestAchievementRankId: 'executive-vice-president',
@@ -213,7 +179,6 @@ export default async function AgentDashboard({
         estimatedAgencyPc: promotion.estimatedAgencyPc,
         pendingPersonalPc: promotion.pendingPersonalPc,
         pendingAgencyPc: promotion.pendingAgencyPc,
-        confirmedCreditCount: promotion.confirmedCreditCount,
         hasPromotionData: promotion.hasPromotionData,
         ledgerReady: promotion.ledgerReady,
         highestAchievementRankId: promotion.highestAchievement?.rankId ?? null,
@@ -256,10 +221,6 @@ export default async function AgentDashboard({
 
   const now = new Date()
   const localConnectorEnabled = getNationalLifeLocalConnectorConfig().enabled
-  const currentP = periodFromDate(now)
-  const trendStartP = shiftPeriod(currentP, -5)
-  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1)
 
   // Work-queue counters are restricted by the subscription access resolved on
   // the server. Individual subscribers receive only their own records.
@@ -270,8 +231,6 @@ export default async function AgentDashboard({
   let dueFollowUpItems: DueFollowUpView[] = []
   let dueReviews = 0
   let atRiskPolicies = 0
-  let txnExpected = 0
-  let txnPaid = 0
   let calendarConnection: CalendarConnectionView = {
     status: 'DISCONNECTED', email: null, displayName: null, lastSyncAt: null, errorMessage: null,
   }
@@ -280,98 +239,55 @@ export default async function AgentDashboard({
   let upcomingMeetings: CalendarEventView[] = []
 
   let policyCount = 0
-  let activeClientCount = 0
-  let totalProtection = 0
-  let totalRegisteredPremium = 0
-  let activePolicyCount = 0
-  let protectionKnownCount = 0
-  let premiumKnownCount = 0
+  let portfolioMetrics: NationalLifePortfolioMetrics = buildNationalLifePortfolioMetrics([])
   let capturedTargetPremium = 0
   let targetPremiumKnownCount = 0
-  let carrierPortfolioAuditReady = false
-  let commissionTotalAmount = 0
-  let commissionByPeriod: { period: string; total: number }[] = []
-  let commissionAuditBlocked = false
-  let commissionAcceptedRows = 0
-  let commissionRejectedRows = 0
-  let commissionFetchedAt: Date | null = null
   let byStatus: { status: string; _count: { _all: number } }[] = []
   let byCarrier: { carrier: string; _count: { _all: number } }[] = []
   let byProduct: { product: string; _count: { _all: number } }[] = []
   let loadError = false
-  const commissionScopeWhere = {
-    agentId: { in: scope },
-    policy: { agentId: { in: scope } },
-    ...(!access.canViewTeamData ? { type: 'DIRECT' as const } : {}),
-  }
 
   try {
     const [
       policyTotal,
-      inforcePolicyRows,
-      canonicalInforceSnapshotRows,
+      nationalPolicyRows,
       targetPremiumSnapshot,
-      commissionAgg,
-      commissionPeriodBuckets,
       statusBuckets,
       carrierBuckets,
       productBuckets,
       openCasesCount,
       awaitingIllustrationCount,
       openRequirementsCount,
-      atRiskCount,
-      txnByType,
       dueFollowUpsResult,
       dueReviewCount,
     ] = await Promise.all([
       canUsePolicies
         ? prisma.policy.count({ where: { agentId: { in: scope } } })
         : 0,
-      canUseCommissions
+      canUsePolicies
         ? (prisma.policy.findMany?.({
-            where: { agentId: { in: scope }, status: 'INFORCE', sourceProvider: 'NATIONAL_LIFE' },
+            where: { agentId: { in: scope }, sourceProvider: 'NATIONAL_LIFE' },
             select: {
               clientId: true,
-              policyNumber: true,
-              faceAmount: true,
-              faceAmountSource: true,
+              status: true,
+              sourceStatus: true,
               premium: true,
               sourceUpdatedAt: true,
             },
           }) ?? [])
         : [],
-      canUseCommissions
-        ? (prisma.nationalLifeInforcePolicy?.findMany?.({
-            where: { agentId: { in: scope }, deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE },
-            select: { policyNumber: true, policyStatus: true, fetchedAt: true },
-          }) ?? [])
-        : [],
-      canUseCommissions
+      canUsePolicies
         ? prisma.nationalLifePolicyDetailSnapshot.aggregate({
             where: {
               agentId: { in: scope },
               deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
               ctp: { gt: 0 },
-              policy: {
-                status: 'INFORCE',
-                sourceProvider: 'NATIONAL_LIFE',
-              },
+              policy: { status: 'INFORCE', sourceProvider: 'NATIONAL_LIFE' },
             },
             _count: { ctp: true },
             _sum: { ctp: true },
           })
         : { _count: { ctp: 0 }, _sum: { ctp: null } },
-      canUseCommissions
-        ? prisma.commissionRecord.aggregate({ where: commissionScopeWhere, _sum: { amount: true } })
-        : { _sum: { amount: null } },
-      canUseCommissions
-        ? prisma.commissionRecord.groupBy({
-            by: ['period'],
-            where: { ...commissionScopeWhere, period: { gte: trendStartP, lte: currentP } },
-            _sum: { amount: true },
-            orderBy: { period: 'asc' },
-          })
-        : [],
       canUsePolicies
         ? prisma.policy.groupBy({
             by: ['status'],
@@ -412,20 +328,6 @@ export default async function AgentDashboard({
             where: { status: 'OPEN', application: { insuranceCase: { assignedAgentId: { in: scope } } } },
           })
         : 0,
-      canUsePolicies
-        ? prisma.policy.count({ where: { agentId: { in: scope }, status: 'LAPSED' } })
-        : 0,
-      canUseCommissions
-        ? prisma.commissionTransaction.groupBy({
-            by: ['type'],
-            where: {
-              agentId: { in: scope },
-              policy: { agentId: { in: scope } },
-              occurredAt: { gte: currentMonthStart, lt: nextMonthStart },
-            },
-            _sum: { amount: true },
-          })
-        : [],
       canUseCrm ? getDueFollowUpsForScope(scope, now) : [],
       canUsePolicies
         ? prisma.policyReview.count({
@@ -441,133 +343,15 @@ export default async function AgentDashboard({
     openCases = openCasesCount
     awaitingIllustration = awaitingIllustrationCount
     openRequirements = openRequirementsCount
-    atRiskPolicies = atRiskCount
     dueFollowUpItems = dueFollowUpsResult
     dueFollowUps = dueFollowUpsResult.length
     dueReviews = dueReviewCount
-    for (const t of txnByType) {
-      const sum = decimalToNumber(t._sum.amount)
-      if (t.type === 'EXPECTED') txnExpected = sum
-      else if (t.type === 'PAID') txnPaid = sum
-    }
 
     policyCount = policyTotal
-    activePolicyCount = inforcePolicyRows.length
-    activeClientCount = new Set(inforcePolicyRows.map((policy) => policy.clientId)).size
     targetPremiumKnownCount = targetPremiumSnapshot._count.ctp
     capturedTargetPremium = decimalToNumber(targetPremiumSnapshot._sum.ctp)
-    const canonicalActiveRows = canonicalInforceSnapshotRows.filter((row) => {
-      const status = row.policyStatus?.trim().toLowerCase()
-      return status === 'active' || status === 'pending lapse'
-    })
-    const canonicalActivePolicyNumbers = new Set(
-      canonicalActiveRows.map((row) => row.policyNumber.trim().toUpperCase().replace(/\s+/g, '')),
-    )
-    const normalizedActivePolicyNumbers = new Set(
-      inforcePolicyRows.map((row) => row.policyNumber.trim().toUpperCase().replace(/\s+/g, '')),
-    )
-    const latestCanonicalInforceFetchedAt = canonicalActiveRows.reduce<Date | null>(
-      (latest, row) => !latest || row.fetchedAt > latest ? row.fetchedAt : latest,
-      null,
-    )
-    carrierPortfolioAuditReady = Boolean(
-      latestCanonicalInforceFetchedAt &&
-      canonicalActivePolicyNumbers.size === normalizedActivePolicyNumbers.size &&
-      [...canonicalActivePolicyNumbers].every((number) => normalizedActivePolicyNumbers.has(number)) &&
-      inforcePolicyRows.every((policy) =>
-        policy.sourceUpdatedAt && policy.sourceUpdatedAt >= latestCanonicalInforceFetchedAt,
-      ),
-    )
-    const protectionRows = inforcePolicyRows.filter((policy) =>
-      policy.faceAmountSource === 'NATIONAL_LIFE_POLICY_DETAIL' &&
-      decimalToNumber(policy.faceAmount) > 0,
-    )
-    protectionKnownCount = protectionRows.length
-    totalProtection = protectionRows.reduce(
-      (total, policy) => total + Math.max(0, decimalToNumber(policy.faceAmount)),
-      0,
-    )
-    const premiumRows = inforcePolicyRows.flatMap((policy) => {
-      if (policy.sourceUpdatedAt === null) return []
-      const annualPremium = auditedNationalLifeAap(policy.premium)
-      return annualPremium === null ? [] : [annualPremium]
-    })
-    premiumKnownCount = premiumRows.length
-    totalRegisteredPremium = premiumRows.reduce(
-      (total, annualPremium) => total.plus(annualPremium),
-      new Decimal(0),
-    ).toNumber()
-    commissionTotalAmount = decimalToNumber(commissionAgg._sum.amount)
-    commissionByPeriod = commissionPeriodBuckets.map((bucket) => ({
-      period: bucket.period,
-      total: decimalToNumber(bucket._sum.amount),
-    }))
-
-    // The carrier's commission lives in the integration's own table, not in
-    // CommissionRecord: that model requires a policyId and fewer than half the
-    // transactions match a policy still in the book. The commissions page has
-    // always read it directly; this dashboard summed only CommissionRecord,
-    // which is empty, so the same agent saw real commission on one page and
-    // zero here. Both read the same source now.
-    if (canUseCommissions && localConnectorEnabled) {
-      const carrierRows = await prisma.nationalLifeReportRow.findMany({
-        where: {
-          agentId: { in: scope },
-          OR: [
-            {
-              deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-              gridKey: { in: [...NATIONAL_LIFE_DASHBOARD_FINANCIAL_GRID_KEYS] },
-            },
-            {
-              deploymentScope: LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
-              gridKey: LEGACY_COMMISSION_EARNING_GRID_KEY,
-            },
-          ],
-        },
-        select: {
-          id: true,
-          agentId: true,
-          gridKey: true,
-          raw: true,
-          amounts: true,
-          primaryDate: true,
-          fetchedAt: true,
-          deploymentScope: true,
-        },
-      })
-      const carrierCommissionRows = preferCanonicalCarrierCommissionRows(
-        carrierRows.filter((row) =>
-          COMMISSION_EARNING_GRID_KEYS.some((gridKey) => gridKey === row.gridKey),
-        ),
-        LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-      )
-      const payableRows = carrierRows.filter((row) => row.gridKey === 'PAYABLE_GROSS_COMMISSIONS')
-      // The homepage headline is the authenticated agent's total commission,
-      // not only direct production. Keep member direct production available to
-      // entitled agency owners, but include overrides only from this agent's
-      // own National Life session—the same tenant-safe rule as the statement.
-      const commissionAudit = auditVisibleCarrierCommissionRows(carrierCommissionRows, agent.id)
-      const carrierRecords = commissionAudit.records
-      const carrierPaidThisMonth = totalForPeriod(carrierRecords, currentP)
-      const projectedPayable = projectedPayableSnapshotForPeriod(payableRows, currentP)
-
-      // Once the National connector is authoritative, never add its ledger to
-      // an internal/imported ledger. That would make an unexplained duplicate
-      // look like production. Rows without complete statement evidence block
-      // the National commission figure instead of being treated as zero.
-      commissionAuditBlocked = commissionAudit.rejectedCount > 0
-      commissionAcceptedRows = carrierRecords.length
-      commissionRejectedRows = commissionAudit.rejectedCount
-      commissionFetchedAt = carrierCommissionRows.reduce<Date | null>(
-        (latest, row) => !latest || row.fetchedAt > latest ? row.fetchedAt : latest,
-        null,
-      )
-      commissionTotalAmount = totalOf(carrierRecords)
-      txnExpected = projectedPayable.total
-      txnPaid = carrierPaidThisMonth
-
-      commissionByPeriod = sumByPeriod(carrierRecords, { from: trendStartP, to: currentP })
-    }
+    portfolioMetrics = buildNationalLifePortfolioMetrics(nationalPolicyRows)
+    atRiskPolicies = portfolioMetrics.attentionPolicies
     byStatus = statusBuckets
     byCarrier = carrierBuckets
     byProduct = productBuckets
@@ -619,52 +403,26 @@ export default async function AgentDashboard({
   }
 
   const firstName = ((user?.name ?? '').trim() || copy('Agente', 'Agent')).split(/\s+/)[0]
-  const currentPeriodLabel = `${formatMonthShort(currentP, locale)} ${currentP.slice(0, 4)}`
-  // Agency PC already includes personal production, so adding personalPc here
-  // would double count the signed-in agent.
-  const recognizedProduction = displayedPromotion
-    ? access.canViewAgencyNationalLife
-      ? displayedPromotion.agencyPc
-      : displayedPromotion.personalPc
-    : 0
-  const productionAuditReady = Boolean(
-    canUseCommissions
-      && !loadError
-      && displayedPromotion
-      && !displayedPromotion.loadError
-      && displayedPromotion.ledgerReady
-      && displayedPromotion.confirmedCreditCount > 0,
-  )
-  const hasCapturedTargetPremium = !loadError && targetPremiumKnownCount > 0
-  const productionNumberValue = productionAuditReady
-    ? formatNumber(recognizedProduction, language, { maximumFractionDigits: 0 })
-    : hasCapturedTargetPremium
-      ? formatTargetPremiumCurrency(capturedTargetPremium, language)
-      : '—'
-  const commissionTrendMap = new Map(commissionByPeriod.map((bucket) => [bucket.period, bucket.total]))
-  const commissionTrend = Array.from({ length: 6 }, (_, index) => {
-    const period = shiftPeriod(currentP, index - 5)
-    return {
-      label: formatMonthShort(period, locale),
-      tooltipLabel: new Intl.DateTimeFormat(locale, {
-        month: 'long',
-        year: 'numeric',
-        timeZone: 'UTC',
-      }).format(new Date(`${period}-01T00:00:00.000Z`)),
-      value: commissionTrendMap.get(period) ?? 0,
-    }
-  })
-  // Render only the amount backed by carrier evidence. When coverage is not
-  // complete, the accompanying copy explicitly calls it a confirmed subtotal
-  // instead of presenting it as the final portfolio total.
-  const carrierMoneyValue = (value: number, known: number) =>
-    loadError || known === 0 ? '—' : formatCurrency(value, language)
-  const auditedCommissionValue = (value: number) =>
-    loadError || commissionAuditBlocked ? '—' : formatCurrency(value, language)
-  const commissionAsOfLabel = commissionFetchedAt
-    ? new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' }).format(commissionFetchedAt)
-    : null
   const countValue = (value: number) => loadError ? '—' : formatNumber(value, language, { maximumFractionDigits: 0 })
+  const hasPortfolioData = canUsePolicies && portfolioMetrics.hasData && !loadError
+  const capturedTargetPremiumValue = hasPortfolioData && targetPremiumKnownCount > 0
+    ? formatLocalizedCurrency(capturedTargetPremium, language, 'USD', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    : '—'
+  const activeAapValue = hasPortfolioData && portfolioMetrics.premiumCoverageComplete
+    ? formatCurrency(portfolioMetrics.activeAap, language)
+    : '—'
+  const averageAapValue = hasPortfolioData && portfolioMetrics.averageAapPerClient !== null
+    ? formatCurrency(portfolioMetrics.averageAapPerClient, language)
+    : '—'
+  const atRiskAapValue = hasPortfolioData && portfolioMetrics.atRiskPremiumCoverageComplete
+    ? formatCurrency(portfolioMetrics.atRiskAap, language)
+    : '—'
+  const portfolioUpdatedLabel = portfolioMetrics.lastUpdatedAt
+    ? new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' }).format(portfolioMetrics.lastUpdatedAt)
+    : null
   const followUpsOverdue = dueFollowUpItems.filter((item) => item.overdue)
   const followUpsToday = dueFollowUpItems.filter((item) => !item.overdue)
   const localizedPolicyStatusLabel: Record<string, string> = {
@@ -678,18 +436,12 @@ export default async function AgentDashboard({
     ...(canUseCrm
       ? [{ label: copy('Oportunidades ativas', 'Active opportunities'), value: countValue(openCases) }]
       : []),
-    ...(canUseCommissions
-      ? [
-          { label: copy('Produção reconhecida', 'Recognized production'), value: productionAuditReady ? `${productionNumberValue} PC` : '—' },
-          { label: copy('Clientes ativos National', 'Active National Life clients'), value: carrierPortfolioAuditReady ? countValue(activeClientCount) : '—' },
-          { label: copy('Proteção confirmada National', 'National Life confirmed protection'), value: carrierMoneyValue(totalProtection, protectionKnownCount) },
-          { label: copy('AAP registrado National', 'Recorded National Life AAP'), value: carrierMoneyValue(totalRegisteredPremium, premiumKnownCount) },
-          { label: copy('Comissão esperada', 'Expected commission'), value: auditedCommissionValue(txnExpected) },
-        ]
-      : []),
     ...(canUsePolicies
       ? [
-          { label: copy('Apólices', 'Policies'), value: countValue(policyCount) },
+          { label: copy('Clientes ativos National', 'Active National clients'), value: hasPortfolioData ? countValue(portfolioMetrics.activeClients) : '—' },
+          { label: copy('Apólices ativas', 'Active policies'), value: hasPortfolioData ? countValue(portfolioMetrics.activePolicies) : '—' },
+          { label: copy('AAP ativa', 'Active AAP'), value: activeAapValue },
+          { label: copy('AAP em risco', 'AAP at risk'), value: atRiskAapValue },
           { label: copy('Revisões', 'Reviews'), value: countValue(dueReviews) },
         ]
       : []),
@@ -722,16 +474,16 @@ export default async function AgentDashboard({
   }
   if (!loadError && canUsePolicies) {
     signals.push({
-      title: atRiskPolicies > 0
+      title: portfolioMetrics.attentionPolicies > 0
         ? copy(
-            `${formatNumber(atRiskPolicies, language)} apólices merecem atenção antes da próxima revisão.`,
-            `${formatNumber(atRiskPolicies, language)} policies need attention before the next review.`,
+            `${formatNumber(portfolioMetrics.attentionPolicies, language)} apólices pedem uma ação de retenção.`,
+            `${formatNumber(portfolioMetrics.attentionPolicies, language)} policies need a retention action.`,
           )
         : copy('Sua carteira não apresenta alertas críticos.', 'Your book has no critical alerts.'),
-      description: atRiskPolicies > 0
+      description: portfolioMetrics.attentionPolicies > 0
         ? copy(
-            'Revise os sinais de risco e planeje um contato proativo antes que a relação com o cliente esfrie.',
-            'Review the risk signals and plan proactive outreach before the client relationship cools.',
+            `${portfolioMetrics.pendingLapsePolicies} Pending Lapse, ${portfolioMetrics.lapsedPolicies} Lapsed e ${portfolioMetrics.cancelledPolicies} Canceled foram organizadas pelo K-Bot.`,
+            `${portfolioMetrics.pendingLapsePolicies} Pending Lapse, ${portfolioMetrics.lapsedPolicies} Lapsed, and ${portfolioMetrics.cancelledPolicies} Canceled were organized by K-Bot.`,
           )
         : copy(
             'Mantenha o ritmo de acompanhamento para preservar retenção e confiança.',
@@ -740,37 +492,6 @@ export default async function AgentDashboard({
       action: copy('Abrir carteira', 'Open book'),
       href: '/agent/policies',
       tone: 'amber',
-    })
-  }
-  if (!loadError && canUseCommissions) {
-    signals.push({
-      title: commissionAuditBlocked
-        ? copy('O extrato National precisa de revisão antes da comparação.', 'The National Life statement needs review before comparison.')
-        : txnExpected > txnPaid
-        ? copy('Existe receita esperada pronta para acompanhamento.', 'Expected revenue is ready for follow-up.')
-        : copy('Sua produção está alinhada com os pagamentos registrados.', 'Your production is aligned with recorded payments.'),
-      description: commissionAuditBlocked
-        ? copy(
-            `${commissionRejectedRows} registro(s) não possuem evidência financeira completa; nenhum subtotal foi tratado como comissão paga.`,
-            `${commissionRejectedRows} record(s) do not have complete financial evidence; no subtotal was treated as paid commission.`,
-          )
-        : txnExpected > txnPaid
-        ? copy(
-            `A diferença atual entre o esperado e o pago é de ${formatCurrency(Math.max(0, txnExpected - txnPaid), language)}.`,
-            `The current difference between expected and paid is ${formatCurrency(Math.max(0, txnExpected - txnPaid), language)}.`,
-          )
-        : access.canManageTeam
-          ? copy(
-              'Use o extrato para acompanhar detalhes, repasses e movimentos da sua equipe.',
-              'Use the statement to track your team details, splits, and movements.',
-            )
-          : copy(
-              'Use o extrato para acompanhar os detalhes e movimentos da sua produção.',
-              'Use the statement to track the details and movements of your production.',
-            ),
-      action: copy('Ver comissões', 'View commissions'),
-      href: '/agent/commissions',
-      tone: 'violet',
     })
   }
 
@@ -812,16 +533,20 @@ export default async function AgentDashboard({
                     data-hero-reveal
                     className="mt-4 max-w-4xl text-[clamp(2.35rem,4.1vw,4.35rem)] font-medium leading-[0.98] tracking-[-0.06em]"
                   >
-                    {canUseCommissions
-                      ? productionAuditReady
-                        ? copy('Sua produção reconhecida.', 'Your recognized production.')
-                        : hasCapturedTargetPremium
-                          ? copy('Seu Target Premium capturado.', 'Your captured Target Premium.')
-                          : copy('Sua produção está em reconciliação.', 'Your production is being reconciled.')
+                    {canUsePolicies
+                      ? copy('Sua carteira, sob controle.', 'Your book, under control.')
                       : copy('Seu dia começa com clareza.', 'Start your day with clarity.')}
                   </h1>
                 </div>
-                {canUseJourney ? (
+                {canUsePolicies ? (
+                  <Link
+                    data-hero-reveal
+                    href="/agent/integrations/national-life"
+                    className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-white/15 px-4 py-2.5 text-xs font-semibold text-paper/78 transition-colors hover:bg-white hover:text-rail-strong"
+                  >
+                    {copy('Gerenciar K-Bot', 'Manage K-Bot')} <span aria-hidden>↗</span>
+                  </Link>
+                ) : canUseJourney ? (
                   <Link
                     data-hero-reveal
                     href={journeyHref}
@@ -829,164 +554,184 @@ export default async function AgentDashboard({
                   >
                     {copy('Ver jornada', 'View journey')} <span aria-hidden>↗</span>
                   </Link>
-                ) : canUseCommissions ? (
-                  <Link
-                    data-hero-reveal
-                    href="/agent/commissions"
-                    className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-white/15 px-4 py-2.5 text-xs font-semibold text-paper/78 transition-colors hover:bg-white hover:text-rail-strong"
-                  >
-                    {copy('Ver extrato', 'View statement')} <span aria-hidden>↗</span>
-                  </Link>
                 ) : null}
               </div>
 
-              {canUseCommissions ? (
-                <>
-              <div data-hero-reveal className="mt-7">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-paper/42">
-                  {productionAuditReady
-                    ? <>{copy('Target Premium confirmado', 'Confirmed Target Premium')} <span aria-hidden>·</span> PC</>
-                    : hasCapturedTargetPremium
-                      ? copy('Target Premium capturado na National', 'Target Premium captured from National Life')
-                      : copy('Target Premium em reconciliação', 'Target Premium under reconciliation')}
-                </p>
-                <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3">
-                  <p
-                    aria-label={productionAuditReady
-                      ? copy(
-                          `Produção reconhecida de ${productionNumberValue} PC`,
-                          `Recognized production of ${productionNumberValue} PC`,
-                        )
-                      : hasCapturedTargetPremium
-                        ? copy(
-                            `Target Premium capturado de ${productionNumberValue}`,
-                            `Captured Target Premium of ${productionNumberValue}`,
-                          )
-                        : copy('Target Premium indisponível', 'Target Premium unavailable')}
-                    className="flex items-start gap-2"
-                  >
-                    <span aria-hidden className="font-mono text-[clamp(3.5rem,6vw,6.25rem)] font-medium leading-[0.84] tracking-[-0.072em] tabular-nums">
-                      {productionNumberValue}
-                    </span>
-                    {productionAuditReady && (
-                      <span aria-hidden className="mb-[0.35em] text-[clamp(0.9rem,1.4vw,1.2rem)] font-semibold tracking-[0.14em] text-mint">
-                        PC
-                      </span>
-                    )}
-                  </p>
-                </div>
-                <p className="mt-3 max-w-2xl text-xs leading-5 text-paper/48">
-                  {productionAuditReady
-                    ? copy(
-                        'Valor confirmado no ledger de Target Premium da National Life; comissão permanece separada no extrato.',
-                        'Value confirmed in the National Life Target Premium ledger; commission remains separate in the statement.',
-                      )
-                    : hasCapturedTargetPremium
-                      ? copy(
-                          `Subtotal exato de CTP capturado no detalhe de ${targetPremiumKnownCount} de ${activePolicyCount} apólice(s). NPN não é obrigatório; o valor só passa a PC confirmado com a evidência de pagamento da National.`,
-                          `Exact CTP subtotal captured from ${targetPremiumKnownCount} of ${activePolicyCount} policy detail(s). NPN is optional; the value becomes confirmed PC only with National Life payment evidence.`,
-                        )
-                      : copy(
-                          'A National ainda não forneceu Target Premium suficiente para uma leitura auditável. Nenhum zero será presumido.',
-                          'National Life has not provided enough Target Premium data for an auditable reading. Zero will not be assumed.',
-                        )}
-                </p>
-              </div>
-
-              <div data-hero-reveal className="mt-7 rounded-[20px] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
-                <div className="mb-4 flex items-center justify-between">
-                  <p className="text-xs font-medium text-paper/52">
-                    {localConnectorEnabled && commissionAuditBlocked
-                      ? copy('Comissões com evidência completa · 6 meses', 'Commissions with complete evidence · 6 months')
-                      : localConnectorEnabled
-                      ? copy('Comissões pagas National Life · 6 meses', 'National Life paid commissions · 6 months')
-                      : copy('Comissões registradas · 6 meses', 'Recorded commissions · 6 months')}
-                  </p>
-                  <p className="font-mono text-xs text-paper/46">
-                    {commissionAsOfLabel
-                      ? copy(`National atualizada em ${commissionAsOfLabel}`, `National Life updated ${commissionAsOfLabel}`)
-                      : copy(`Período ${currentPeriodLabel}`, `Period ${currentPeriodLabel}`)}
-                  </p>
-                </div>
-                {commissionAuditBlocked && commissionAcceptedRows === 0 ? (
-                  <p className="rounded-xl border border-[oklch(0.78_0.12_68)]/40 bg-[oklch(0.78_0.12_68)]/10 px-4 py-5 text-xs leading-5 text-paper/72">
-                    {copy(
-                      `${commissionRejectedRows} registro(s) de comissão não têm evidência completa da National Life. O total foi bloqueado para evitar um número parcial ou duplicado.`,
-                      `${commissionRejectedRows} commission record(s) do not have complete National Life evidence. The total was blocked to avoid a partial or duplicated number.`,
-                    )}
-                  </p>
-                ) : (
-                  <>
-                    <TrendChart
-                      data={commissionTrend}
-                      format="currency"
-                      tone="onDark"
-                      interactive
-                      chartHeight={124}
-                      ariaLabel={copy('Comissões registradas nos últimos seis meses', 'Commissions recorded in the last six months')}
-                    />
-                    {commissionAuditBlocked ? (
-                      <p className="mt-3 rounded-xl border border-[oklch(0.78_0.12_68)]/40 bg-[oklch(0.78_0.12_68)]/10 px-4 py-3 text-[11px] leading-5 text-paper/72">
-                        {copy(
-                          `O gráfico mostra somente ${commissionAcceptedRows} registro(s) com evidência completa. ${commissionRejectedRows} registro(s) incompletos foram excluídos do valor exibido.`,
-                          `The chart shows only ${commissionAcceptedRows} record(s) with complete evidence. ${commissionRejectedRows} incomplete record(s) were excluded from the displayed amount.`,
-                        )}
-                      </p>
-                    ) : null}
-                  </>
-                )}
-              </div>
-
-              <div data-hero-reveal className="mt-5 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-3">
-                {[
-                  {
-                    label: copy('Clientes ativos National', 'Active National clients'),
-                    display: activeClientCount > 0 ? countValue(activeClientCount) : '—',
-                    tone: 'text-paper',
-                    detail: carrierPortfolioAuditReady
-                      ? copy(`${activePolicyCount} apólices em vigor`, `${activePolicyCount} in-force policies`)
-                      : copy(
-                          `${activePolicyCount} apólices em vigor no registro atual · snapshot em reconciliação`,
-                          `${activePolicyCount} in-force policies in the current record · snapshot reconciling`,
-                        ),
-                  },
-                  {
-                    label: copy('Proteção confirmada', 'Confirmed protection'),
-                    display: carrierMoneyValue(totalProtection, protectionKnownCount),
-                    tone: 'text-mint',
-                    detail: protectionKnownCount === activePolicyCount && carrierPortfolioAuditReady
-                      ? copy(
-                          `Total confirmado em ${protectionKnownCount} apólices`,
-                          `Confirmed total across ${protectionKnownCount} policies`,
-                        )
-                      : copy(
-                          `Subtotal confirmado · ${protectionKnownCount}/${activePolicyCount} apólices com capital lido na National`,
-                          `Confirmed subtotal · ${protectionKnownCount}/${activePolicyCount} policies with face amount read from National Life`,
-                        ),
-                  },
-                  {
-                    label: copy('AAP registrado', 'Recorded AAP'),
-                    display: carrierMoneyValue(totalRegisteredPremium, premiumKnownCount),
-                    tone: 'text-[oklch(0.78_0.12_68)]',
-                    detail: premiumKnownCount === activePolicyCount && carrierPortfolioAuditReady
-                      ? copy(
-                          `Total confirmado em ${premiumKnownCount} apólices`,
-                          `Confirmed total across ${premiumKnownCount} policies`,
-                        )
-                      : copy(
-                          `Subtotal confirmado · ${premiumKnownCount}/${activePolicyCount} apólices com prêmio anual da National`,
-                          `Confirmed subtotal · ${premiumKnownCount}/${activePolicyCount} policies with National Life annual premium`,
-                        ),
-                  },
-                ].map((metric) => (
-                  <div key={metric.label} className="bg-rail-strong/80 px-4 py-3.5">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/38">{metric.label}</p>
-                    <p className={`mt-1.5 font-mono text-lg font-medium tabular-nums ${metric.tone}`}>{metric.display}</p>
-                    {metric.detail && <p className="mt-1 text-[10px] text-paper/38">{metric.detail}</p>}
+              {canUsePolicies ? (
+                <div className="mt-7 flex flex-1 flex-col">
+                  <div data-hero-reveal className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <p className="max-w-2xl text-sm leading-6 text-paper/62">
+                      {copy(
+                        'O K-Bot lê a National Life, organiza sua carteira e mostra o que precisa da sua atenção.',
+                        'K-Bot reads National Life, organizes your book, and shows what needs your attention.',
+                      )}
+                    </p>
+                    <p className="shrink-0 font-mono text-[11px] text-paper/42">
+                      {portfolioUpdatedLabel
+                        ? copy(`National atualizada em ${portfolioUpdatedLabel}`, `National Life updated ${portfolioUpdatedLabel}`)
+                        : copy('Aguardando a primeira leitura da National', 'Waiting for the first National Life read')}
+                    </p>
                   </div>
-                ))}
-              </div>
-                </>
+
+                  {hasPortfolioData ? (
+                    <>
+                      <div data-hero-reveal className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-4 sm:p-5">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/42">
+                          {copy('Target Premium capturado', 'Captured Target Premium')}
+                        </p>
+                        <p className="mt-2 font-mono text-3xl font-medium tabular-nums text-mint">
+                          {capturedTargetPremiumValue}
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-paper/48">
+                          {targetPremiumKnownCount > 0
+                            ? copy(
+                                `Subtotal de CTP do detalhe de ${targetPremiumKnownCount}/${portfolioMetrics.activePolicies} apólices. Ainda não representa o Target Premium total da carteira.`,
+                                `CTP subtotal from ${targetPremiumKnownCount}/${portfolioMetrics.activePolicies} policy details. It does not yet represent the book's total Target Premium.`,
+                              )
+                            : copy(
+                                'CTP ainda não capturado nos detalhes da National. Ausência de dados não significa Target Premium zero.',
+                                'CTP has not yet been captured from National Life policy details. Missing data does not mean zero Target Premium.',
+                              )}
+                        </p>
+                        <p className="mt-1 text-[10px] leading-4 text-paper/38">
+                          {copy(
+                            'NPN é opcional. PC confirmado permanece separado e depende da evidência de pagamento da National.',
+                            'NPN is optional. Confirmed PC remains separate and requires National Life payment evidence.',
+                          )}
+                        </p>
+                      </div>
+                      <div data-hero-reveal className="mt-6 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2 xl:grid-cols-4">
+                        {[
+                          {
+                            label: copy('Clientes ativos', 'Active clients'),
+                            display: countValue(portfolioMetrics.activeClients),
+                            tone: 'text-paper',
+                            detail: copy(
+                              `${portfolioMetrics.activePolicies} apólices em vigor`,
+                              `${portfolioMetrics.activePolicies} in-force policies`,
+                            ),
+                          },
+                          {
+                            label: copy('Apólices ativas', 'Active policies'),
+                            display: countValue(portfolioMetrics.activePolicies),
+                            tone: 'text-mint',
+                            detail: portfolioMetrics.pendingLapsePolicies > 0
+                              ? copy(
+                                  `${portfolioMetrics.pendingLapsePolicies} aguardando retenção`,
+                                  `${portfolioMetrics.pendingLapsePolicies} awaiting retention`,
+                                )
+                              : copy('Nenhum Pending Lapse', 'No Pending Lapse'),
+                          },
+                          {
+                            label: copy('AAP ativa', 'Active AAP'),
+                            display: activeAapValue,
+                            tone: 'text-mint',
+                            detail: copy(
+                              `${portfolioMetrics.premiumKnownPolicies}/${portfolioMetrics.activePolicies} apólices com AAP confirmada`,
+                              `${portfolioMetrics.premiumKnownPolicies}/${portfolioMetrics.activePolicies} policies with confirmed AAP`,
+                            ),
+                          },
+                          {
+                            label: copy('AAP média por cliente', 'Average AAP per client'),
+                            display: averageAapValue,
+                            tone: 'text-[oklch(0.82_0.12_85)]',
+                            detail: portfolioMetrics.premiumCoverageComplete
+                              ? copy('premium anual por cliente ativo', 'annual premium per active client')
+                              : copy(
+                                  `Faltam dados de AAP em ${portfolioMetrics.premiumMissingPolicies} apólices`,
+                                  `AAP data is missing for ${portfolioMetrics.premiumMissingPolicies} policies`,
+                                ),
+                          },
+                        ].map((metric) => (
+                          <div key={metric.label} className="bg-rail-strong/80 px-4 py-4">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/38">{metric.label}</p>
+                            <p className={`mt-2 font-mono text-xl font-medium tabular-nums ${metric.tone}`}>{metric.display}</p>
+                            <p className="mt-1 text-[10px] leading-4 text-paper/38">{metric.detail}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div data-hero-reveal className="mt-5 grid gap-4 rounded-[20px] border border-white/10 bg-white/[0.035] p-4 sm:p-5 xl:grid-cols-[1fr_auto]">
+                        <div>
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <p className="text-xs font-medium text-paper/62">{copy('Situação da carteira', 'Book status')}</p>
+                              <p className="mt-1 text-[11px] text-paper/36">
+                                {copy('Da estabilidade à recuperação, sem procurar relatório por relatório.', 'From stability to recovery, without searching report by report.')}
+                              </p>
+                            </div>
+                            <Link href="/agent/policies" className="shrink-0 text-xs font-semibold text-mint hover:text-paper">
+                              {copy('Ver clientes', 'View clients')} <span aria-hidden>↗</span>
+                            </Link>
+                          </div>
+                          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            {[
+                              {
+                                label: copy('Em dia', 'Healthy'),
+                                value: Math.max(0, portfolioMetrics.activePolicies - portfolioMetrics.pendingLapsePolicies),
+                                className: 'border-mint/20 bg-mint/10 text-mint',
+                              },
+                              {
+                                label: 'Pending Lapse',
+                                value: portfolioMetrics.pendingLapsePolicies,
+                                className: 'border-[oklch(0.82_0.12_85)]/25 bg-[oklch(0.82_0.12_85)]/10 text-[oklch(0.82_0.12_85)]',
+                              },
+                              {
+                                label: 'Lapsed',
+                                value: portfolioMetrics.lapsedPolicies,
+                                className: 'border-danger/25 bg-danger/10 text-[oklch(0.76_0.12_25)]',
+                              },
+                              {
+                                label: 'Canceled',
+                                value: portfolioMetrics.cancelledPolicies,
+                                className: 'border-white/10 bg-white/[0.04] text-paper/60',
+                              },
+                            ].map((status) => (
+                              <div key={status.label} className={`rounded-xl border px-3 py-3 ${status.className}`}>
+                                <p className="font-mono text-lg font-semibold tabular-nums">{status.value}</p>
+                                <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em]">{status.label}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="min-w-[180px] rounded-2xl border border-[oklch(0.82_0.12_85)]/20 bg-[oklch(0.82_0.12_85)]/[0.08] p-4">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/42">{copy('AAP em risco', 'AAP at risk')}</p>
+                          <p className="mt-2 font-mono text-2xl font-medium tabular-nums text-[oklch(0.82_0.12_85)]">{atRiskAapValue}</p>
+                          <p className="mt-1 text-[10px] leading-4 text-paper/40">
+                            {portfolioMetrics.atRiskPremiumCoverageComplete
+                              ? copy('em apólices Pending Lapse', 'in Pending Lapse policies')
+                              : portfolioMetrics.pendingLapsePolicies > 0
+                                ? copy(
+                                    `${portfolioMetrics.atRiskPremiumKnownPolicies}/${portfolioMetrics.pendingLapsePolicies} apólices com AAP; total aguardando dados`,
+                                    `${portfolioMetrics.atRiskPremiumKnownPolicies}/${portfolioMetrics.pendingLapsePolicies} policies with AAP; total awaiting data`,
+                                  )
+                                : copy('nenhuma apólice Pending Lapse', 'no Pending Lapse policies')}
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div data-hero-reveal className="mt-8 rounded-[20px] border border-dashed border-white/15 bg-white/[0.035] px-5 py-7">
+                      <p className="text-lg font-medium text-paper">
+                        {copy('O K-Bot ainda não trouxe dados da National.', 'K-Bot has not brought National Life data yet.')}
+                      </p>
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-paper/50">
+                        {localConnectorEnabled
+                          ? copy(
+                              'Faça a primeira sincronização para transformar a carteira em clientes, AAP e ações de retenção.',
+                              'Run the first sync to turn the book into clients, AAP, and retention actions.',
+                            )
+                          : copy(
+                              'A integração precisa ser configurada antes da primeira sincronização.',
+                              'The integration must be configured before the first sync.',
+                            )}
+                      </p>
+                      <Link href="/agent/integrations/national-life" className="mt-5 inline-flex min-h-10 items-center rounded-full bg-mint px-4 text-xs font-semibold text-rail-strong transition-transform hover:-translate-y-0.5">
+                        {copy('Conectar National Life', 'Connect National Life')}
+                      </Link>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div data-hero-reveal className="mt-auto max-w-2xl pt-14">
                   <p className="text-base leading-7 text-paper/62 sm:text-lg">
@@ -1014,18 +759,24 @@ export default async function AgentDashboard({
               <span className="flex h-10 w-10 items-center justify-center rounded-full bg-rail-strong text-sm font-semibold text-paper">
                 {loadError
                   ? '—'
-                  : (canUseCrm ? dueFollowUps + openRequirements : 0)
-                    + (canUsePolicies ? atRiskPolicies + dueReviews : 0)}
+                  : canUsePolicies
+                    ? portfolioMetrics.attentionPolicies
+                    : dueFollowUps + openRequirements}
               </span>
             </div>
             <p className="mt-4 max-w-xs text-sm leading-6 text-ink-muted">
-              {copy(
-                'Comece pelo que pode destravar resultado ou proteger sua carteira hoje.',
-                'Start with what can unlock results or protect your book today.',
-              )}
+              {canUsePolicies
+                ? copy(
+                    'O K-Bot separou os clientes que precisam de contato para proteger sua carteira.',
+                    'K-Bot separated the clients who need contact to protect your book.',
+                  )
+                : copy(
+                    'Comece pelo que pode destravar resultado hoje.',
+                    'Start with what can unlock results today.',
+                  )}
             </p>
             <div className="mt-6 flex flex-col gap-1">
-              {canUseCrm && (
+              {!canUsePolicies && canUseCrm && (
                 <>
                   <PriorityRow href="/agent/activities" label={copy('Retornos pendentes', 'Pending follow-ups')} value={loadError ? null : dueFollowUps} tone="danger" />
                   <PriorityRow href="/agent/activities" label={copy('Pendências abertas', 'Open requirements')} value={loadError ? null : openRequirements} tone="amber" />
@@ -1033,15 +784,16 @@ export default async function AgentDashboard({
               )}
               {canUsePolicies && (
                 <>
-                  <PriorityRow href="/agent/policies" label={copy('Apólices em risco', 'Policies at risk')} value={loadError ? null : atRiskPolicies} tone="danger" />
-                  <PriorityRow href="/agent/policies" label={copy('Revisões anuais', 'Annual reviews')} value={loadError ? null : dueReviews} tone="mint" />
+                  <PriorityRow href="/agent/policies?status=PENDING_LAPSE" label="Pending Lapse" value={loadError ? null : portfolioMetrics.pendingLapsePolicies} tone="amber" />
+                  <PriorityRow href="/agent/policies?status=LAPSED" label="Lapsed" value={loadError ? null : portfolioMetrics.lapsedPolicies} tone="danger" />
+                  <PriorityRow href="/agent/policies?status=CANCELLED" label="Canceled" value={loadError ? null : portfolioMetrics.cancelledPolicies} tone="danger" />
                 </>
               )}
             </div>
-            <Link href={canUseCrm ? '/agent/activities' : '/agent/policies'} className="mt-auto inline-flex min-h-11 w-full items-center justify-center rounded-full bg-rail-strong px-4 py-3 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5">
-              {canUseCrm
-                ? copy('Abrir fila completa', 'Open full queue')
-                : copy('Abrir carteira', 'Open book')}
+            <Link href={canUsePolicies ? '/agent/policies' : '/agent/activities'} className="mt-auto inline-flex min-h-11 w-full items-center justify-center rounded-full bg-rail-strong px-4 py-3 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5">
+              {canUsePolicies
+                ? copy('Abrir carteira completa', 'Open full book')
+                : copy('Abrir fila completa', 'Open full queue')}
             </Link>
           </aside>
           )}
@@ -1214,10 +966,10 @@ export default async function AgentDashboard({
                 </div>
                 <div className="mt-8 flex items-center justify-between border-t border-border-steel/70 pt-4 text-xs">
                   <span className="text-ink-muted">
-                    {canUseCommissions
+                    {canUsePolicies
                       ? copy(
-                          `${auditedCommissionValue(commissionTotalAmount)} em comissões`,
-                          `${auditedCommissionValue(commissionTotalAmount)} in commissions`,
+                          `${countValue(portfolioMetrics.activeClients)} clientes ativos National`,
+                          `${countValue(portfolioMetrics.activeClients)} active National clients`,
                         )
                       : copy('Abrir estrutura da equipe', 'Open team structure')}
                   </span>

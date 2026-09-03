@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -12,8 +12,8 @@ const mocks = vi.hoisted(() => ({
   policyCount: vi.fn(),
   policyFindMany: vi.fn(),
   policyGroupBy: vi.fn(),
-  inforceFindMany: vi.fn(),
   targetPremiumAggregate: vi.fn(),
+  inforceFindMany: vi.fn(),
   commissionAggregate: vi.fn(),
   commissionGroupBy: vi.fn(),
   caseCount: vi.fn(),
@@ -135,7 +135,6 @@ const promotionSnapshot = {
   estimatedAgencyPc: 0,
   pendingPersonalPc: 0,
   pendingAgencyPc: 0,
-  confirmedCreditCount: 0,
   hasPromotionData: false,
   ledgerReady: true,
   highestAchievement: null,
@@ -161,8 +160,8 @@ beforeEach(() => {
   mocks.policyCount.mockResolvedValue(0)
   mocks.policyFindMany.mockResolvedValue([])
   mocks.policyGroupBy.mockResolvedValue([])
-  mocks.inforceFindMany.mockResolvedValue([])
   mocks.targetPremiumAggregate.mockResolvedValue({ _count: { ctp: 0 }, _sum: { ctp: null } })
+  mocks.inforceFindMany.mockResolvedValue([])
   mocks.commissionAggregate.mockResolvedValue({ _sum: { amount: null } })
   mocks.commissionGroupBy.mockResolvedValue([])
   mocks.caseCount.mockResolvedValue(0)
@@ -187,6 +186,7 @@ describe('AgentDashboard module access', () => {
     expect(mocks.getPromotionSnapshot).not.toHaveBeenCalled()
     expect(mocks.getPromotionPreview).not.toHaveBeenCalled()
     expect(mocks.policyCount).not.toHaveBeenCalled()
+    expect(mocks.targetPremiumAggregate).not.toHaveBeenCalled()
     expect(mocks.policyGroupBy).not.toHaveBeenCalled()
     expect(mocks.commissionAggregate).not.toHaveBeenCalled()
     expect(mocks.commissionGroupBy).not.toHaveBeenCalled()
@@ -222,7 +222,7 @@ describe('AgentDashboard module access', () => {
     ]))
   })
 
-  it('preserves the unrestricted legacy dashboard when enabledModules is null', async () => {
+  it('uses the portfolio dashboard while preserving unrestricted module access', async () => {
     mocks.getCurrentAgentAccess.mockResolvedValue({
       scopeAgentIds: ['agent-1'],
       enabledModules: null,
@@ -235,22 +235,92 @@ describe('AgentDashboard module access', () => {
 
     expect(mocks.getPromotionSnapshot).toHaveBeenCalledWith('agent-1')
     expect(mocks.policyCount).toHaveBeenCalled()
-    expect(mocks.commissionAggregate).toHaveBeenCalled()
+    expect(mocks.policyFindMany).toHaveBeenCalled()
+    expect(mocks.commissionAggregate).not.toHaveBeenCalled()
     expect(mocks.caseCount).toHaveBeenCalled()
     expect(mocks.requirementCount).toHaveBeenCalled()
-    expect(mocks.carrierRowsFindMany).toHaveBeenCalled()
+    expect(mocks.carrierRowsFindMany).not.toHaveBeenCalled()
     expect(mocks.getCalendarConnection).toHaveBeenCalledWith('user-1')
-    expect(screen.getByTestId('commission-trend')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Sua carteira, sob controle.' })).toBeVisible()
+    expect(screen.queryByTestId('commission-trend')).not.toBeInTheDocument()
     expect(screen.getByTestId('today-meetings')).toBeInTheDocument()
     expect(screen.getByTestId('upcoming-meetings')).toBeInTheDocument()
     expect(screen.getByTestId('journey-preview')).toBeInTheDocument()
     expect(screen.getByTestId('operation-signals')).toBeInTheDocument()
   })
 
-  it('renders carrier-backed subtotals while an in-force snapshot is reconciling', async () => {
+  it('turns National policy data into an understandable book and retention dashboard', async () => {
     mocks.getCurrentAgentAccess.mockResolvedValue({
       scopeAgentIds: ['agent-1'],
-      enabledModules: ['TODAY', 'COMMISSIONS', 'POLICIES'],
+      enabledModules: ['TODAY', 'POLICIES'],
+      canViewTeamData: false,
+      canViewAgencyNationalLife: false,
+      canManageTeam: false,
+    })
+    mocks.policyCount.mockResolvedValue(4)
+    mocks.policyFindMany.mockResolvedValue([
+      {
+        clientId: 'client-1',
+        policyNumber: 'POLICY-1',
+        status: 'INFORCE',
+        sourceStatus: 'Active',
+        premium: 1_200,
+        sourceUpdatedAt: new Date('2026-09-03T16:00:00.000Z'),
+      },
+      {
+        clientId: 'client-2',
+        policyNumber: 'POLICY-2',
+        status: 'INFORCE',
+        sourceStatus: 'Pending Lapse',
+        premium: 1_800,
+        sourceUpdatedAt: new Date('2026-09-03T16:00:00.000Z'),
+      },
+      {
+        clientId: 'client-3',
+        policyNumber: 'POLICY-3',
+        status: 'LAPSED',
+        sourceStatus: 'Lapsed',
+        premium: 900,
+        sourceUpdatedAt: new Date('2026-09-03T16:00:00.000Z'),
+      },
+      {
+        clientId: 'client-4',
+        policyNumber: 'POLICY-4',
+        status: 'CANCELLED',
+        sourceStatus: 'Not Active',
+        premium: 500,
+        sourceUpdatedAt: new Date('2026-09-03T16:00:00.000Z'),
+      },
+    ])
+
+    render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
+
+    expect(screen.getByRole('heading', { name: 'Sua carteira, sob controle.' })).toBeVisible()
+    expect(screen.queryByTestId('commission-trend')).not.toBeInTheDocument()
+
+    const hero = screen.getByRole('heading', { name: 'Sua carteira, sob controle.' }).closest('article')
+    const queue = screen.getByRole('heading', { name: 'Prioridades de hoje' }).closest('aside')
+    expect(hero).not.toBeNull()
+    expect(queue).not.toBeNull()
+
+    expect(within(hero!).getByText('Clientes ativos').parentElement).toHaveTextContent('2')
+    expect(within(hero!).getByText('Apólices ativas').parentElement).toHaveTextContent('2')
+    expect(within(hero!).getByText('AAP ativa').parentElement).toHaveTextContent(/3\.000/)
+    expect(within(hero!).getByText('AAP média por cliente').parentElement).toHaveTextContent(/1\.500/)
+
+    expect(within(queue!).getByText('Pending Lapse').closest('a')).toHaveAttribute('href', '/agent/policies?status=PENDING_LAPSE')
+    expect(within(queue!).getByText('Pending Lapse').closest('a')).toHaveTextContent('1')
+    expect(within(queue!).getByText('Lapsed').closest('a')).toHaveAttribute('href', '/agent/policies?status=LAPSED')
+    expect(within(queue!).getByText('Lapsed').closest('a')).toHaveTextContent('1')
+    expect(within(queue!).getByText('Canceled').closest('a')).toHaveAttribute('href', '/agent/policies?status=CANCELLED')
+    expect(within(queue!).getByText('Canceled').closest('a')).toHaveTextContent('1')
+    expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent(/1\.800/)
+  })
+
+  it('does not present a partial AAP subtotal as the whole portfolio', async () => {
+    mocks.getCurrentAgentAccess.mockResolvedValue({
+      scopeAgentIds: ['agent-1'],
+      enabledModules: ['TODAY', 'POLICIES'],
       canViewTeamData: false,
       canViewAgencyNationalLife: false,
       canManageTeam: false,
@@ -259,70 +329,52 @@ describe('AgentDashboard module access', () => {
     mocks.policyFindMany.mockResolvedValue([
       {
         clientId: 'client-1',
-        policyNumber: 'POLICY-1',
-        faceAmount: 100_000,
-        faceAmountSource: 'NATIONAL_LIFE_POLICY_DETAIL',
+        status: 'INFORCE',
+        sourceStatus: 'Active',
         premium: 1_200,
         sourceUpdatedAt: new Date('2026-09-03T16:00:00.000Z'),
       },
       {
         clientId: 'client-2',
-        policyNumber: 'POLICY-2',
-        faceAmount: null,
-        faceAmountSource: null,
-        premium: 1_800,
+        status: 'INFORCE',
+        sourceStatus: 'Pending Lapse',
+        premium: null,
         sourceUpdatedAt: new Date('2026-09-03T16:00:00.000Z'),
       },
-    ])
-    mocks.inforceFindMany.mockResolvedValue([
-      { policyNumber: 'POLICY-1', policyStatus: 'Active', fetchedAt: new Date('2026-09-03T16:00:00.000Z') },
     ])
 
     render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
 
-    expect(screen.getByLabelText('Target Premium indisponível')).toBeVisible()
-    const activeClientsMetric = screen.getAllByText('Clientes ativos National')
-      .find((element) => element.tagName === 'P')
-    expect(activeClientsMetric?.parentElement).toHaveTextContent('2')
-    expect(screen.getAllByText(/100\.000/).some((element) => element.tagName === 'P')).toBe(true)
-    expect(screen.getAllByText(/3\.000/).some((element) => element.tagName === 'P')).toBe(true)
-    expect(screen.getByText(/Subtotal confirmado · 1\/2 apólices/)).toBeVisible()
-    expect(screen.getByText(/Subtotal confirmado · 2\/2 apólices/)).toBeVisible()
+    const hero = screen.getByRole('heading', { name: 'Sua carteira, sob controle.' }).closest('article')
+    expect(hero).not.toBeNull()
+    expect(within(hero!).getByText('AAP ativa').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText('AAP média por cliente').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent('0/1 apólices com AAP')
+    expect(within(hero!).getByText('Target Premium capturado').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText(/Ausência de dados não significa Target Premium zero/)).toBeVisible()
   })
 
-  it('renders captured carrier CTP instead of claiming an empty ledger is zero', async () => {
-    mocks.getPromotionSnapshot.mockResolvedValue({
-      ...promotionSnapshot,
-      pendingPersonalPc: 325.8,
-      pendingCreditCount: 1,
-      hasPromotionData: true,
-    })
+  it('renders exact captured CTP without requiring NPN or calling it confirmed PC', async () => {
+    mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1', npn: null })
     mocks.getCurrentAgentAccess.mockResolvedValue({
       scopeAgentIds: ['agent-1'],
-      enabledModules: ['TODAY', 'COMMISSIONS', 'POLICIES'],
+      enabledModules: ['TODAY', 'POLICIES'],
       canViewTeamData: false,
       canViewAgencyNationalLife: false,
       canManageTeam: false,
     })
     mocks.policyFindMany.mockResolvedValue([
-      {
-        clientId: 'client-1',
-        policyNumber: 'POLICY-1',
-        faceAmount: null,
-        faceAmountSource: null,
-        premium: 960,
-        sourceUpdatedAt: new Date('2026-09-03T16:00:00.000Z'),
-      },
+      { clientId: 'client-1', status: 'INFORCE', sourceStatus: 'Active', premium: 960, sourceUpdatedAt: new Date() },
     ])
-    mocks.targetPremiumAggregate.mockResolvedValue({
-      _count: { ctp: 1 },
-      _sum: { ctp: 325.8 },
-    })
+    mocks.targetPremiumAggregate.mockResolvedValue({ _count: { ctp: 1 }, _sum: { ctp: 325.8 } })
 
     render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
 
-    expect(screen.getByLabelText(/Target Premium capturado de/)).toHaveTextContent('US$ 325,80')
-    expect(screen.queryByText(/valor confirmado é zero/i)).not.toBeInTheDocument()
-    expect(screen.getByText(/Subtotal exato de CTP capturado no detalhe de 1 de 1 apólice/)).toBeVisible()
+    const target = screen.getByText('Target Premium capturado').parentElement
+    expect(target).toHaveTextContent('US$ 325,80')
+    expect(target).toHaveTextContent('Subtotal de CTP do detalhe de 1/1 apólices')
+    expect(target).toHaveTextContent('NPN é opcional')
+    expect(target).not.toHaveTextContent('0 PC')
   })
 })

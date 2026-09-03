@@ -23,6 +23,8 @@ type Policy = {
   /// null when the carrier did not supply it, which must not read as zero.
   premium: string | null;
   status: string;
+  sourceStatus: string | null;
+  statusChangedAt: string | null;
   clientName: string;
 };
 
@@ -35,6 +37,7 @@ type SortMode =
 
 const STATUS_ORDER = [
   "INFORCE",
+  "PENDING_LAPSE",
   "APPROVED",
   "PENDING",
   "LAPSED",
@@ -48,6 +51,10 @@ function premiumValue(premium: string | null) {
   if (premium === null) return 0;
   const value = Number(premium);
   return Number.isFinite(value) ? value : 0;
+}
+
+function isPendingLapse(policy: Pick<Policy, "sourceStatus">) {
+  return (policy.sourceStatus ?? "").trim().toLowerCase() === "pending lapse";
 }
 
 function formatPremium(premium: string | null, formatter: Intl.NumberFormat) {
@@ -82,7 +89,13 @@ function paginationItems(page: number, pageCount: number) {
   return items;
 }
 
-export function PoliciesList({ policies }: { policies: Policy[] }) {
+export function PoliciesList({
+  policies,
+  initialStatus = "all",
+}: {
+  policies: Policy[];
+  initialStatus?: string;
+}) {
   const { copy, language, locale } = useI18n();
   const currency = useMemo(() => new Intl.NumberFormat(locale, {
     style: "currency",
@@ -95,10 +108,14 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
     maximumFractionDigits: 0,
   }), [locale]);
   const count = useMemo(() => new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }), [locale]);
+  const statusDate = useMemo(() => new Intl.DateTimeFormat(locale, {
+    dateStyle: "short",
+    timeZone: "UTC",
+  }), [locale]);
   const root = useRef<HTMLDivElement>(null);
   const navigation = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("all");
+  const [status, setStatus] = useState(initialStatus);
   const [premiumFilter, setPremiumFilter] = useState<PremiumFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("default");
   const [page, setPage] = useState(1);
@@ -125,6 +142,9 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
     const counts = new Map<string, number>();
     for (const policy of policies) {
       counts.set(policy.status, (counts.get(policy.status) ?? 0) + 1);
+      if (isPendingLapse(policy)) {
+        counts.set("PENDING_LAPSE", (counts.get("PENDING_LAPSE") ?? 0) + 1);
+      }
     }
 
     const statuses = [
@@ -138,7 +158,7 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
       value,
       label: language === "PT"
         ? policyStatusLabel[value] ?? value
-        : ({ INFORCE: "In force", APPROVED: "Approved", PENDING: "Pending", LAPSED: "Lapsed", CANCELLED: "Cancelled" } as Record<string, string>)[value] ?? value,
+        : ({ INFORCE: "In force", PENDING_LAPSE: "Pending Lapse", APPROVED: "Approved", PENDING: "Pending", LAPSED: "Lapsed", CANCELLED: "Canceled" } as Record<string, string>)[value] ?? value,
       count: counts.get(value) ?? 0,
     }));
   }, [language, policies]);
@@ -146,7 +166,8 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
   const filteredPolicies = useMemo(() => {
     const normalizedQuery = deferredQuery.trim().toLocaleLowerCase(locale);
     const result = policies.filter((policy) => {
-      if (status !== "all" && policy.status !== status) return false;
+      if (status === "PENDING_LAPSE" && !isPendingLapse(policy)) return false;
+      if (status !== "all" && status !== "PENDING_LAPSE" && policy.status !== status) return false;
       if (premiumFilter === "known" && policy.premium === null) return false;
       if (!normalizedQuery) return true;
 
@@ -632,13 +653,24 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                       <strong>{formatPremium(policy.premium, currency)}</strong>
                     </span>
                     <span className="policy-list-action">
-                      {language === "PT" ? (
-                        <PolicyStatusPill status={policy.status} />
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-panel px-2.5 py-[3px] text-xs font-semibold tracking-wide text-ink-muted">
-                          {({ INFORCE: "In force", APPROVED: "Approved", PENDING: "Pending", LAPSED: "Lapsed", CANCELLED: "Cancelled" } as Record<string, string>)[policy.status] ?? policy.status}
-                        </span>
-                      )}
+                      <span className="flex flex-col items-end gap-1">
+                        {language === "PT" ? (
+                          <PolicyStatusPill status={isPendingLapse(policy) ? "PENDING_LAPSE" : policy.status} />
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-panel px-2.5 py-[3px] text-xs font-semibold tracking-wide text-ink-muted">
+                            {isPendingLapse(policy)
+                              ? "Pending Lapse"
+                              : ({ INFORCE: "In force", APPROVED: "Approved", PENDING: "Pending", LAPSED: "Lapsed", CANCELLED: "Canceled" } as Record<string, string>)[policy.status] ?? policy.status}
+                          </span>
+                        )}
+                        {policy.statusChangedAt && (isPendingLapse(policy) || policy.status === "LAPSED" || policy.status === "CANCELLED") && (
+                          <small className="text-[10px] text-ink-muted">
+                            {copy("Mudança em {date}", "Changed on {date}", {
+                              date: statusDate.format(new Date(policy.statusChangedAt)),
+                            })}
+                          </small>
+                        )}
+                      </span>
                       <span className="policy-list-arrow" aria-hidden="true">
                         <svg viewBox="0 0 18 18" fill="none">
                           <path d="M4.5 9h9M10 5.5 13.5 9 10 12.5" />

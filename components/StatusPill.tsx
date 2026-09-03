@@ -15,6 +15,7 @@ const toneClasses: Record<Tone, string> = {
 
 const policyStatusTone: Record<string, Tone> = {
   INFORCE: "success",
+  PENDING_LAPSE: "warning",
   APPROVED: "success",
   PENDING: "warning",
   LAPSED: "danger",
@@ -23,6 +24,7 @@ const policyStatusTone: Record<string, Tone> = {
 
 export const policyStatusLabel: Record<string, string> = {
   INFORCE: "Em vigor",
+  PENDING_LAPSE: "Pending Lapse",
   APPROVED: "Aprovada",
   PENDING: "Pendente",
   LAPSED: "Lapsada",
@@ -31,6 +33,7 @@ export const policyStatusLabel: Record<string, string> = {
 
 const policyStatusLabelEn: Record<string, string> = {
   INFORCE: "In force",
+  PENDING_LAPSE: "Pending Lapse",
   APPROVED: "Approved",
   PENDING: "Pending",
   LAPSED: "Lapsed",
