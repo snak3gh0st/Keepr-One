@@ -107,17 +107,6 @@ function normalizedMode(value) {
   return (text(value) ?? 'ANNUAL').replace(/[^A-Z]/gi, '').toUpperCase()
 }
 
-function annualizedPremium(value, mode) {
-  const amount = decimal(value)
-  if (!amount || !amount.isFinite() || amount.lte(0)) return null
-  const normalized = normalizedMode(mode)
-  if (normalized === 'MONTHLY' || normalized === 'MONTH') return amount.times(12)
-  if (normalized === 'QUARTERLY' || normalized === 'QUARTER') return amount.times(4)
-  if (normalized === 'SEMIANNUAL' || normalized === 'SEMIANNUALLY') return amount.times(2)
-  if (normalized === 'ANNUAL' || normalized === 'ANNUALLY' || normalized === 'YEARLY') return amount
-  return null
-}
-
 function mappedPolicyStatus(value) {
   const normalized = text(value)?.toLowerCase() ?? ''
   if (normalized === 'active') return 'INFORCE'
@@ -190,18 +179,23 @@ async function auditPolicies() {
   }
   const premiumAccepted = []
   const storedPremiumByMode = new Map()
-  const annualizedPremiumByMode = new Map()
+  const auditedAapByStoredMode = new Map()
   const premium = {
     accepted: 0,
     missingSourceTimestamp: 0,
     missingOrNonPositive: 0,
     unknownMode: 0,
     nullModeTreatedAsAnnual: 0,
+    staleNonAnnualMode: 0,
     unknownModes: {},
     byStoredMode: {},
     storedAmountByMode: {},
-    annualizedAmountByMode: {},
+    auditedAapAmountByStoredMode: {},
   }
+  const knownPremiumModes = new Set([
+    'MONTHLY', 'MONTH', 'QUARTERLY', 'QUARTER', 'SEMIANNUAL',
+    'SEMIANNUALLY', 'ANNUAL', 'ANNUALLY', 'YEARLY',
+  ])
 
   for (const policy of inforce) {
     const faceValue = decimal(policy.faceAmount)
@@ -225,27 +219,30 @@ async function auditPolicies() {
       premium.missingOrNonPositive += 1
       continue
     }
-    const annual = annualizedPremium(base, policy.premiumMode)
-    if (!annual) {
+    // Policy.premium is AnticipatedAnnualPremium for National Life imports.
+    // A stale frequency on an older Policy row is diagnostic metadata only;
+    // multiplying this amount would annualize an already annual carrier value.
+    const mode = normalizedMode(policy.premiumMode)
+    if (!knownPremiumModes.has(mode)) {
       premium.unknownMode += 1
       increment(premium.unknownModes, text(policy.premiumMode) ?? 'NULL')
-      continue
     }
     if (policy.premiumMode === null) premium.nullModeTreatedAsAnnual += 1
+    if (!['ANNUAL', 'ANNUALLY', 'YEARLY'].includes(mode)) premium.staleNonAnnualMode += 1
     const modeKey = text(policy.premiumMode) ?? 'NULL'
     increment(premium.byStoredMode, modeKey)
     storedPremiumByMode.set(modeKey,
       (storedPremiumByMode.get(modeKey) ?? new Prisma.Decimal(0)).plus(base))
-    annualizedPremiumByMode.set(modeKey,
-      (annualizedPremiumByMode.get(modeKey) ?? new Prisma.Decimal(0)).plus(annual))
+    auditedAapByStoredMode.set(modeKey,
+      (auditedAapByStoredMode.get(modeKey) ?? new Prisma.Decimal(0)).plus(base))
     premium.accepted += 1
-    premiumAccepted.push(annual)
+    premiumAccepted.push(base)
   }
 
   const policyNumberCount = new Set(policies.map((row) => canonicalPolicyNumber(row.policyNumber))).size
   const sourceExternalCount = new Set(policies.map((row) => canonicalPolicyNumber(row.sourceExternalId))).size
   premium.storedAmountByMode = moneyMapToObject(storedPremiumByMode)
-  premium.annualizedAmountByMode = moneyMapToObject(annualizedPremiumByMode)
+  premium.auditedAapAmountByStoredMode = moneyMapToObject(auditedAapByStoredMode)
 
   return {
     rowCount: policies.length,
