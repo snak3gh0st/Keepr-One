@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from "react";
 import type { TrialCountdownView } from "@/lib/trial-countdown";
+import type { PlatformModuleName } from "@/lib/platform-modules";
 
 export type AgentAccessView = {
   kind: "INDIVIDUAL" | "AGENCY_MEMBER" | "AGENCY_OWNER";
@@ -11,6 +12,7 @@ export type AgentAccessView = {
   canInviteAgents: boolean;
   canViewTeamSubscriptions: boolean;
   canViewAgencyNationalLife: boolean;
+  enabledModules: PlatformModuleName[] | null;
   trial?: TrialCountdownView | null;
 };
 

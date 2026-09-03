@@ -43,7 +43,10 @@ import { POST } from './route'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.requireRole.mockResolvedValue({ user: { id: 'user-1', email: 'agent@example.com' } })
+  mocks.requireRole.mockResolvedValue({
+    user: { id: 'user-1', email: 'agent@example.com' },
+    session: { id: 'session-1', impersonatedBy: null },
+  })
   mocks.findAgent.mockResolvedValue({ id: 'agent-1' })
   mocks.resolveAccess.mockResolvedValue({
     state: 'EXPIRED',
@@ -96,6 +99,22 @@ describe('Stripe platform checkout', () => {
     }))
 
     expect(response.status).toBe(409)
+    expect(mocks.createCheckout).not.toHaveBeenCalled()
+  })
+
+  it('does not initiate billing from a read-only support preview', async () => {
+    mocks.requireRole.mockResolvedValue({
+      user: { id: 'user-1', email: 'agent@example.com' },
+      session: { id: 'preview-session', impersonatedBy: 'admin-1' },
+    })
+
+    const response = await POST(new Request('https://app.keeprone.com/api/billing/checkout', {
+      method: 'POST',
+    }))
+
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual({ error: 'READ_ONLY_USER_PREVIEW' })
+    expect(mocks.findAgent).not.toHaveBeenCalled()
     expect(mocks.createCheckout).not.toHaveBeenCalled()
   })
 })

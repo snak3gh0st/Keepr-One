@@ -94,8 +94,22 @@ describe('agent plan access boundary', () => {
       canManageTeam: false,
       canViewAgencyNationalLife: false,
       scopeAgentIds: ['agent-1'],
+      enabledModules: null,
     })
     expect(mocks.findMemberships).not.toHaveBeenCalled()
+  })
+
+  it('returns the normalized module grants for an administratively provisioned agent', async () => {
+    mocks.findAgent.mockResolvedValue({
+      status: 'ACTIVE',
+      adminProvisionedAccess: {
+        modules: ['CRM', 'CRM', 'MESSAGES'],
+      },
+    })
+
+    const access = await getAgentAccessForAgent('agent-1')
+
+    expect(access.enabledModules).toEqual(['TODAY', 'CRM', 'MESSAGES'])
   })
 
   it('keeps an invited agency member inside a self-only data boundary', async () => {

@@ -1,7 +1,6 @@
 'use server'
 
 import { prisma } from '@/lib/prisma'
-import { requireRole } from '@/lib/require-role'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentScopeIds } from '@/lib/agent-access'
 import { canAccessPolicy } from '@/lib/policy-access'
@@ -15,6 +14,7 @@ import {
 } from '@/lib/national-life/policy-detail-command'
 import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from '@/lib/national-life/local-connector/config'
 import { getServerI18n } from '@/lib/i18n/server'
+import { requireAgentModule } from '@/lib/require-agent-module'
 
 type ActionResult = { ok: true } | { ok: false; message: string }
 export type PolicyDetailRefreshResult =
@@ -24,9 +24,14 @@ export type PolicyDetailRefreshResult =
 // Confirms the caller may act on this policy; returns null when allowed,
 // otherwise a failure result the action can pass straight back to the UI.
 type Copy = Awaited<ReturnType<typeof getServerI18n>>['copy']
+type PolicyActionSession = Awaited<ReturnType<typeof requireAgentModule>>
 
-async function assertPolicyAccess(policyId: string, copy: Copy): Promise<ActionResult | null> {
-  const session = await requireRole('ADMIN', 'AGENT')
+async function assertPolicyAccess(
+  policyId: string,
+  copy: Copy,
+  existingSession?: PolicyActionSession,
+): Promise<ActionResult | null> {
+  const session = existingSession ?? await requireAgentModule('POLICIES')
   if (session.user.role === 'ADMIN') return null
 
   const policy = await prisma.policy.findUnique({ where: { id: policyId }, select: { agentId: true, clientId: true } })
@@ -47,7 +52,7 @@ const DOCUMENT_KIND_ILLUSTRATION = 'ILLUSTRATION'
 
 export async function uploadPolicyDocument(formData: FormData): Promise<ActionResult> {
   const { copy } = await getServerI18n()
-  const session = await requireRole('ADMIN', 'AGENT')
+  const session = await requireAgentModule('POLICIES')
   const policyId = String(formData.get('policyId') ?? '')
   const file = formData.get('file')
   const documentKind = (formData.get('documentKind') as string | null) ?? 'DOCUMENT'
@@ -121,13 +126,14 @@ export async function scheduleAnnualReview(policyId: string): Promise<ActionResu
 
 export async function completeAnnualReview(reviewId: string, notes: string): Promise<ActionResult> {
   const { copy } = await getServerI18n()
+  const session = await requireAgentModule('POLICIES')
   const review = await prisma.policyReview.findUnique({
     where: { id: reviewId },
     select: { id: true, policyId: true, completedAt: true },
   })
   if (!review) return { ok: false, message: copy('Revisão não encontrada.', 'Review not found.') }
 
-  const denied = await assertPolicyAccess(review.policyId, copy)
+  const denied = await assertPolicyAccess(review.policyId, copy, session)
   if (denied) return denied
   if (review.completedAt) return { ok: true } // idempotent
 
@@ -151,7 +157,7 @@ export async function refreshNationalLifePolicyDetail(
 ): Promise<PolicyDetailRefreshResult> {
   const { copy } = await getServerI18n()
   try {
-    const session = await requireRole('ADMIN', 'AGENT')
+    const session = await requireAgentModule('POLICIES')
     const policy = await prisma.policy.findUnique({
       where: { id: policyId },
       select: { id: true, agentId: true, policyNumber: true, carrier: true },

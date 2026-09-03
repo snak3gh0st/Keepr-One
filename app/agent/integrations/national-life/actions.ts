@@ -1,6 +1,6 @@
 'use server'
 
-import { getCurrentAgent } from '@/lib/agent-context'
+import { getCurrentAgent as readCurrentAgent } from '@/lib/agent-context'
 import {
   cancelConnectionAttempt,
   disconnectAgentSession,
@@ -10,6 +10,12 @@ import {
 import { assertSameOriginAction } from '@/lib/security/same-origin-action'
 import { headers } from 'next/headers'
 import { getServerI18n } from '@/lib/i18n/server'
+import { requireAgentModule } from '@/lib/require-agent-module'
+
+async function getCurrentAgent() {
+  await requireAgentModule('INTEGRATIONS')
+  return readCurrentAgent()
+}
 
 export type StartConnectionActionResult =
   | { ok: true; attemptId: string; state: string; expiresAt: string }

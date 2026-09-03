@@ -50,6 +50,7 @@ import { getServerI18n } from '@/lib/i18n/server'
 import { formatCurrency as formatLocalizedCurrency, formatNumber } from '@/lib/i18n/format'
 import type { UserLanguage } from '@/lib/i18n/config'
 import { auditedNationalLifeAap } from '@/lib/policy-metrics'
+import type { PlatformModuleName } from '@/lib/platform-modules'
 
 const NATIONAL_LIFE_DASHBOARD_FINANCIAL_GRID_KEYS = [
   ...COMMISSION_EARNING_GRID_KEYS,
@@ -143,6 +144,13 @@ function safeGroupCount(groupCount: unknown): number {
   return 0
 }
 
+function isPlatformModuleEnabled(
+  enabledModules: readonly PlatformModuleName[] | null,
+  module: PlatformModuleName,
+): boolean {
+  return enabledModules === null || enabledModules.includes(module)
+}
+
 export default async function AgentDashboard({
   searchParams,
 }: {
@@ -151,18 +159,33 @@ export default async function AgentDashboard({
   const { preview } = await searchParams
   const { copy, language } = await getServerI18n()
   const locale = language === 'PT' ? 'pt-BR' : 'en-US'
-  const localPromotionPreview = getLocalPromotionPreview(preview)
   const agent = await getCurrentAgent()
-  const [user, access, promotion] = await Promise.all([
+  const [user, access] = await Promise.all([
     prisma.user.findUnique({ where: { id: agent.userId } }),
     getCurrentAgentAccess(),
-    getAgentPromotionSnapshot(agent.id),
   ])
+  const hasModule = (module: PlatformModuleName) =>
+    isPlatformModuleEnabled(access.enabledModules, module)
+  const canUseCalendar = hasModule('CALENDAR')
+  const canUseCrm = hasModule('CRM')
+  const canUsePolicies = hasModule('POLICIES')
+  const canUseIllustrations = hasModule('ILLUSTRATIONS')
+  const canUseCommissions = hasModule('COMMISSIONS')
+  const canUseJourney = hasModule('JOURNEY')
+  const canUseTeam = hasModule('TEAM') && access.canManageTeam
+  const hasPriorityQueue = canUseCrm || canUsePolicies
+  const promotion = canUseJourney || canUseCommissions
+    ? await getAgentPromotionSnapshot(agent.id)
+    : null
+  const localPromotionPreview = canUseJourney
+    ? getLocalPromotionPreview(preview)
+    : null
   const scope = access.scopeAgentIds
   const teamAgentIds = scope.filter((id) => id !== agent.id)
 
-  const availablePromotion = localPromotionPreview
-    ? {
+  const availablePromotion = promotion
+    ? localPromotionPreview
+      ? {
         personalPc: localPromotionPreview.personalPc,
         agencyPc: localPromotionPreview.agencyPc,
         estimatedPersonalPc: 0,
@@ -173,8 +196,8 @@ export default async function AgentDashboard({
         highestAchievementRankId: 'executive-vice-president',
         mode: localPromotionPreview.mode,
         loadError: false,
-      }
-    : {
+        }
+      : {
         personalPc: promotion.personalPc,
         agencyPc: promotion.agencyPc,
         estimatedPersonalPc: promotion.estimatedPersonalPc,
@@ -186,12 +209,14 @@ export default async function AgentDashboard({
         mode: promotion.mode,
         loadError: promotion.loadError,
       }
+    : null
   // The legacy promotion entitlement is intentionally not an authorization
   // source for the platform plan. An individual subscriber can keep their
   // personal journey without receiving agency production or achievements.
-  const displayedPromotion = access.canViewAgencyNationalLife
-    ? availablePromotion
-    : {
+  const displayedPromotion = availablePromotion
+    ? access.canViewAgencyNationalLife
+      ? availablePromotion
+      : {
         ...availablePromotion,
         agencyPc: 0,
         estimatedAgencyPc: 0,
@@ -204,7 +229,8 @@ export default async function AgentDashboard({
           }).currentRank?.id ?? null,
         mode: 'individual' as const,
       }
-  const previewPromotionIdentity = localPromotionPreview
+    : null
+  const previewPromotionIdentity = localPromotionPreview && displayedPromotion
     ? getPromotionIdentity(
         getPromotionJourney({
           personalPc: displayedPromotion.personalPc,
@@ -213,7 +239,7 @@ export default async function AgentDashboard({
         }),
       )
     : undefined
-  const journeyHref = localPromotionPreview && access.canViewAgencyNationalLife
+  const journeyHref = canUseJourney && localPromotionPreview && access.canViewAgencyNationalLife
     ? `/agent/journey?preview=${encodeURIComponent(preview ?? '')}`
     : '/agent/journey'
 
@@ -283,71 +309,103 @@ export default async function AgentDashboard({
       dueFollowUpsResult,
       dueReviewCount,
     ] = await Promise.all([
-      prisma.policy.count({ where: { agentId: { in: scope } } }),
-      prisma.policy.findMany({
-        where: { agentId: { in: scope }, status: 'INFORCE', sourceProvider: 'NATIONAL_LIFE' },
-        select: {
-          clientId: true, policyNumber: true, faceAmount: true, faceAmountSource: true,
-          premium: true, sourceUpdatedAt: true,
-        },
-      }),
-      prisma.nationalLifeInforcePolicy.findMany({
-        where: { agentId: { in: scope }, deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE },
-        select: { policyNumber: true, policyStatus: true, fetchedAt: true },
-      }),
-      prisma.commissionRecord.aggregate({ where: commissionScopeWhere, _sum: { amount: true } }),
-      prisma.commissionRecord.groupBy({
-        by: ['period'],
-        where: { ...commissionScopeWhere, period: { gte: trendStartP, lte: currentP } },
-        _sum: { amount: true },
-        orderBy: { period: 'asc' },
-      }),
-      prisma.policy.groupBy({
-        by: ['status'],
-        where: { agentId: { in: scope } },
-        _count: { _all: true },
-        orderBy: { status: 'asc' },
-      }),
-      prisma.policy.groupBy({
-        by: ['carrier'],
-        where: { agentId: { in: scope } },
-        _count: { _all: true },
-        orderBy: { carrier: 'asc' },
-      }),
-      prisma.policy.groupBy({
-        by: ['product'],
-        where: { agentId: { in: scope } },
-        _count: { _all: true },
-        orderBy: { product: 'asc' },
-      }),
-      prisma.insuranceCase.count({ where: { assignedAgentId: { in: scope }, status: 'OPEN' } }),
-      prisma.insuranceCase.count({
-        where: {
-          assignedAgentId: { in: scope },
-          crmStage: { systemKey: { in: ['QUALIFIED', 'CREATE_ILLUSTRATION', 'RESCHEDULE_ILLUSTRATION'] } },
-        },
-      }),
-      prisma.applicationRequirement.count({
-        where: { status: 'OPEN', application: { insuranceCase: { assignedAgentId: { in: scope } } } },
-      }),
-      prisma.policy.count({ where: { agentId: { in: scope }, status: 'LAPSED' } }),
-      prisma.commissionTransaction.groupBy({
-        by: ['type'],
-        where: {
-          agentId: { in: scope },
-          policy: { agentId: { in: scope } },
-          occurredAt: { gte: currentMonthStart, lt: nextMonthStart },
-        },
-        _sum: { amount: true },
-      }),
-      getDueFollowUpsForScope(scope, now),
-      prisma.policyReview.count({
-        where: {
-          completedAt: null,
-          dueAt: { lt: nyDayBounds(now).end },
-          policy: { agentId: { in: scope } },
-        },
-      }),
+      canUsePolicies
+        ? prisma.policy.count({ where: { agentId: { in: scope } } })
+        : 0,
+      canUseCommissions
+        ? (prisma.policy.findMany?.({
+            where: { agentId: { in: scope }, status: 'INFORCE', sourceProvider: 'NATIONAL_LIFE' },
+            select: {
+              clientId: true,
+              policyNumber: true,
+              faceAmount: true,
+              faceAmountSource: true,
+              premium: true,
+              sourceUpdatedAt: true,
+            },
+          }) ?? [])
+        : [],
+      canUseCommissions
+        ? (prisma.nationalLifeInforcePolicy?.findMany?.({
+            where: { agentId: { in: scope }, deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE },
+            select: { policyNumber: true, policyStatus: true, fetchedAt: true },
+          }) ?? [])
+        : [],
+      canUseCommissions
+        ? prisma.commissionRecord.aggregate({ where: commissionScopeWhere, _sum: { amount: true } })
+        : { _sum: { amount: null } },
+      canUseCommissions
+        ? prisma.commissionRecord.groupBy({
+            by: ['period'],
+            where: { ...commissionScopeWhere, period: { gte: trendStartP, lte: currentP } },
+            _sum: { amount: true },
+            orderBy: { period: 'asc' },
+          })
+        : [],
+      canUsePolicies
+        ? prisma.policy.groupBy({
+            by: ['status'],
+            where: { agentId: { in: scope } },
+            _count: { _all: true },
+            orderBy: { status: 'asc' },
+          })
+        : [],
+      canUsePolicies
+        ? prisma.policy.groupBy({
+            by: ['carrier'],
+            where: { agentId: { in: scope } },
+            _count: { _all: true },
+            orderBy: { carrier: 'asc' },
+          })
+        : [],
+      canUsePolicies
+        ? prisma.policy.groupBy({
+            by: ['product'],
+            where: { agentId: { in: scope } },
+            _count: { _all: true },
+            orderBy: { product: 'asc' },
+          })
+        : [],
+      canUseCrm
+        ? prisma.insuranceCase.count({ where: { assignedAgentId: { in: scope }, status: 'OPEN' } })
+        : 0,
+      canUseCrm && canUseIllustrations
+        ? prisma.insuranceCase.count({
+            where: {
+              assignedAgentId: { in: scope },
+              crmStage: { systemKey: { in: ['QUALIFIED', 'CREATE_ILLUSTRATION', 'RESCHEDULE_ILLUSTRATION'] } },
+            },
+          })
+        : 0,
+      canUseCrm
+        ? prisma.applicationRequirement.count({
+            where: { status: 'OPEN', application: { insuranceCase: { assignedAgentId: { in: scope } } } },
+          })
+        : 0,
+      canUsePolicies
+        ? prisma.policy.count({ where: { agentId: { in: scope }, status: 'LAPSED' } })
+        : 0,
+      canUseCommissions
+        ? prisma.commissionTransaction.groupBy({
+            by: ['type'],
+            where: {
+              agentId: { in: scope },
+              policy: { agentId: { in: scope } },
+              occurredAt: { gte: currentMonthStart, lt: nextMonthStart },
+            },
+            _sum: { amount: true },
+          })
+        : [],
+      canUseCrm ? getDueFollowUpsForScope(scope, now) : [],
+      canUsePolicies
+        ? prisma.policyReview.count({
+            where: {
+              completedAt: null,
+              dueAt: { lt: nyDayBounds(now).end },
+              policy: { agentId: { in: scope } },
+            },
+          })
+        : 0,
     ])
 
     openCases = openCasesCount
@@ -419,7 +477,7 @@ export default async function AgentDashboard({
     // always read it directly; this dashboard summed only CommissionRecord,
     // which is empty, so the same agent saw real commission on one page and
     // zero here. Both read the same source now.
-    if (localConnectorEnabled) {
+    if (canUseCommissions && localConnectorEnabled) {
       const carrierRows = await prisma.nationalLifeReportRow.findMany({
         where: {
           agentId: { in: scope },
@@ -485,54 +543,64 @@ export default async function AgentDashboard({
     loadError = true
   }
 
-  try {
-    const [calendarConnectionResult, todayCalendarResult, upcomingCalendarResult] = await Promise.all([
-      getCalendarConnectionForUser(agent.userId),
-      getTodayCalendarSummary({ ownerUserId: agent.userId, now, timeZone: user?.timeZone ?? 'America/New_York' }),
-      getUpcomingCalendarEvents({ ownerUserId: agent.userId, now, timeZone: user?.timeZone ?? 'America/New_York' }),
-    ])
-    const mappedCalendar = mapDomainCalendarConnectionToUi(calendarConnectionResult)
-    calendarConnection = mappedCalendar.connection
-    calendarSources = mappedCalendar.calendars
-    const calendarById = new Map(calendarSources.map((calendar) => [calendar.id, calendar]))
-    const calendarEvents = [...todayCalendarResult.upcoming, ...upcomingCalendarResult]
-    const meetingCaseIds = [...new Set(calendarEvents.map((event) => event.caseId).filter((caseId): caseId is string => Boolean(caseId)))]
-    const meetingCases = meetingCaseIds.length ? await prisma.insuranceCase.findMany({
-      where: { id: { in: meetingCaseIds }, assignedAgentId: agent.id },
-      select: {
-        id: true,
-        prospect: { select: { firstName: true, lastName: true, email: true } },
-        crmStage: { select: { name: true } },
-      },
-    }) : []
-    const meetingCaseById = new Map(meetingCases.map((item) => [item.id, {
-      id: item.id,
-      name: `${item.prospect.firstName} ${item.prospect.lastName}`.trim(),
-      email: item.prospect.email,
-      stage: item.crmStage?.name ?? null,
-    }]))
-    todayMeetings = todayCalendarResult.upcoming.map((event) => mapDomainCalendarEventToUi(event, {
-      timeZone: user?.timeZone ?? 'America/New_York',
-      case: event.caseId ? meetingCaseById.get(event.caseId) ?? null : null,
-      canWrite: calendarById.get(event.calendar.id)?.canWrite ?? false,
-    }))
-    upcomingMeetings = upcomingCalendarResult.map((event) => mapDomainCalendarEventToUi(event, {
-      timeZone: user?.timeZone ?? 'America/New_York',
-      case: event.caseId ? meetingCaseById.get(event.caseId) ?? null : null,
-      canWrite: calendarById.get(event.calendar.id)?.canWrite ?? false,
-    }))
-  } catch (error) {
-    console.error('AgentDashboard calendar query error', error)
+  if (canUseCalendar) {
+    try {
+      const [calendarConnectionResult, todayCalendarResult, upcomingCalendarResult] = await Promise.all([
+        getCalendarConnectionForUser(agent.userId),
+        getTodayCalendarSummary({ ownerUserId: agent.userId, now, timeZone: user?.timeZone ?? 'America/New_York' }),
+        getUpcomingCalendarEvents({ ownerUserId: agent.userId, now, timeZone: user?.timeZone ?? 'America/New_York' }),
+      ])
+      const mappedCalendar = mapDomainCalendarConnectionToUi(calendarConnectionResult)
+      calendarConnection = mappedCalendar.connection
+      calendarSources = mappedCalendar.calendars
+      const calendarById = new Map(calendarSources.map((calendar) => [calendar.id, calendar]))
+      const calendarEvents = [...todayCalendarResult.upcoming, ...upcomingCalendarResult]
+      const meetingCaseIds = [...new Set(calendarEvents.map((event) => event.caseId).filter((caseId): caseId is string => Boolean(caseId)))]
+      const meetingCases = canUseCrm && meetingCaseIds.length ? await prisma.insuranceCase.findMany({
+        where: { id: { in: meetingCaseIds }, assignedAgentId: agent.id },
+        select: {
+          id: true,
+          prospect: { select: { firstName: true, lastName: true, email: true } },
+          crmStage: { select: { name: true } },
+        },
+      }) : []
+      const meetingCaseById = new Map(meetingCases.map((item) => [item.id, {
+        id: item.id,
+        name: `${item.prospect.firstName} ${item.prospect.lastName}`.trim(),
+        email: item.prospect.email,
+        stage: item.crmStage?.name ?? null,
+      }]))
+      todayMeetings = todayCalendarResult.upcoming.map((event) => mapDomainCalendarEventToUi(event, {
+        timeZone: user?.timeZone ?? 'America/New_York',
+        case: event.caseId ? meetingCaseById.get(event.caseId) ?? null : null,
+        canWrite: calendarById.get(event.calendar.id)?.canWrite ?? false,
+      }))
+      upcomingMeetings = upcomingCalendarResult.map((event) => mapDomainCalendarEventToUi(event, {
+        timeZone: user?.timeZone ?? 'America/New_York',
+        case: event.caseId ? meetingCaseById.get(event.caseId) ?? null : null,
+        canWrite: calendarById.get(event.calendar.id)?.canWrite ?? false,
+      }))
+    } catch (error) {
+      console.error('AgentDashboard calendar query error', error)
+    }
   }
 
   const firstName = ((user?.name ?? '').trim() || copy('Agente', 'Agent')).split(/\s+/)[0]
   const currentPeriodLabel = `${formatMonthShort(currentP, locale)} ${currentP.slice(0, 4)}`
   // Agency PC already includes personal production, so adding personalPc here
   // would double count the signed-in agent.
-  const recognizedProduction = access.canViewAgencyNationalLife
-    ? displayedPromotion.agencyPc
-    : displayedPromotion.personalPc
-  const productionAuditReady = !loadError && !displayedPromotion.loadError && displayedPromotion.hasPromotionData
+  const recognizedProduction = displayedPromotion
+    ? access.canViewAgencyNationalLife
+      ? displayedPromotion.agencyPc
+      : displayedPromotion.personalPc
+    : 0
+  const productionAuditReady = Boolean(
+    canUseCommissions
+      && !loadError
+      && displayedPromotion
+      && !displayedPromotion.loadError
+      && displayedPromotion.hasPromotionData,
+  )
   const productionNumberValue = productionAuditReady
     ? formatNumber(recognizedProduction, language, { maximumFractionDigits: 0 })
     : '—'
@@ -549,7 +617,6 @@ export default async function AgentDashboard({
       value: commissionTrendMap.get(period) ?? 0,
     }
   })
-  const moneyValue = (value: number) => loadError ? '—' : formatCurrency(value, language)
   const completeCarrierMoneyValue = (value: number, known: number, expected: number) =>
     loadError || !carrierPortfolioAuditReady || known !== expected ? '—' : formatCurrency(value, language)
   const auditedCommissionValue = (value: number) =>
@@ -568,20 +635,31 @@ export default async function AgentDashboard({
     CANCELLED: copy('Cancelada', 'Cancelled'),
   }
   const pulseMetrics = [
-    { label: copy('Oportunidades ativas', 'Active opportunities'), value: countValue(openCases) },
-    { label: copy('Produção reconhecida', 'Recognized production'), value: productionAuditReady ? `${productionNumberValue} PC` : '—' },
-    { label: copy('Clientes ativos National', 'Active National Life clients'), value: carrierPortfolioAuditReady ? countValue(activeClientCount) : '—' },
-    { label: copy('Proteção confirmada National', 'National Life confirmed protection'), value: completeCarrierMoneyValue(totalProtection, protectionKnownCount, activePolicyCount) },
-    { label: copy('AAP registrado National', 'Recorded National Life AAP'), value: completeCarrierMoneyValue(totalRegisteredPremium, premiumKnownCount, activePolicyCount) },
-    { label: copy('Comissão esperada', 'Expected commission'), value: moneyValue(txnExpected) },
-    { label: copy('Apólices', 'Policies'), value: countValue(policyCount) },
-    ...(access.canManageTeam
+    ...(canUseCrm
+      ? [{ label: copy('Oportunidades ativas', 'Active opportunities'), value: countValue(openCases) }]
+      : []),
+    ...(canUseCommissions
+      ? [
+          { label: copy('Produção reconhecida', 'Recognized production'), value: productionAuditReady ? `${productionNumberValue} PC` : '—' },
+          { label: copy('Clientes ativos National', 'Active National Life clients'), value: carrierPortfolioAuditReady ? countValue(activeClientCount) : '—' },
+          { label: copy('Proteção confirmada National', 'National Life confirmed protection'), value: completeCarrierMoneyValue(totalProtection, protectionKnownCount, activePolicyCount) },
+          { label: copy('AAP registrado National', 'Recorded National Life AAP'), value: completeCarrierMoneyValue(totalRegisteredPremium, premiumKnownCount, activePolicyCount) },
+          { label: copy('Comissão esperada', 'Expected commission'), value: auditedCommissionValue(txnExpected) },
+        ]
+      : []),
+    ...(canUsePolicies
+      ? [
+          { label: copy('Apólices', 'Policies'), value: countValue(policyCount) },
+          { label: copy('Revisões', 'Reviews'), value: countValue(dueReviews) },
+        ]
+      : []),
+    ...(canUseTeam
       ? [{ label: copy('Equipe', 'Team'), value: countValue(teamAgentIds.length) }]
       : []),
-    { label: copy('Revisões', 'Reviews'), value: countValue(dueReviews) },
   ]
-  const signals: OperationSignal[] = loadError ? [] : [
-    {
+  const signals: OperationSignal[] = []
+  if (!loadError && canUseCrm) {
+    signals.push({
       title: dueFollowUps > 0
         ? copy(
             `${formatNumber(dueFollowUps, language)} retornos podem destravar seu funil hoje.`,
@@ -600,8 +678,10 @@ export default async function AgentDashboard({
       action: dueFollowUps > 0 ? copy('Revisar retornos', 'Review follow-ups') : copy('Novo atendimento', 'New case'),
       href: dueFollowUps > 0 ? '/agent/activities' : '/agent/cases/new',
       tone: 'mint',
-    },
-    {
+    })
+  }
+  if (!loadError && canUsePolicies) {
+    signals.push({
       title: atRiskPolicies > 0
         ? copy(
             `${formatNumber(atRiskPolicies, language)} apólices merecem atenção antes da próxima revisão.`,
@@ -620,8 +700,10 @@ export default async function AgentDashboard({
       action: copy('Abrir carteira', 'Open book'),
       href: '/agent/policies',
       tone: 'amber',
-    },
-    {
+    })
+  }
+  if (!loadError && canUseCommissions) {
+    signals.push({
       title: commissionAuditBlocked
         ? copy('O extrato National precisa de revisão antes da comparação.', 'The National Life statement needs review before comparison.')
         : txnExpected > txnPaid
@@ -649,8 +731,8 @@ export default async function AgentDashboard({
       action: copy('Ver comissões', 'View commissions'),
       href: '/agent/commissions',
       tone: 'violet',
-    },
-  ]
+    })
+  }
 
   return (
     <Shell
@@ -672,10 +754,10 @@ export default async function AgentDashboard({
         )}
 
         <section
-          aria-labelledby="agent-financial-title"
+          aria-labelledby="agent-today-title"
           className="grid min-h-[520px] grid-flow-dense grid-cols-1 overflow-hidden rounded-[30px] bg-rail-strong text-paper shadow-[var(--shadow-overlay)] lg:grid-cols-12"
         >
-          <article className="keepr-noise relative flex flex-col overflow-hidden p-7 sm:p-9 lg:col-span-8 lg:p-10">
+          <article className={`keepr-noise relative flex flex-col overflow-hidden p-7 sm:p-9 lg:p-10 ${hasPriorityQueue ? 'lg:col-span-8' : 'lg:col-span-12'}`}>
             <div aria-hidden className="absolute -left-28 -top-32 h-96 w-96 rounded-full bg-mint/14 blur-3xl" />
             <div aria-hidden className="absolute -bottom-28 right-0 h-80 w-80 rounded-full bg-white/[0.035] blur-3xl" />
 
@@ -686,22 +768,36 @@ export default async function AgentDashboard({
                     {copy(`Bom dia, ${firstName}!`, `Good morning, ${firstName}!`)}
                   </p>
                   <h1
-                    id="agent-financial-title"
+                    id="agent-today-title"
                     data-hero-reveal
                     className="mt-4 max-w-4xl text-[clamp(2.35rem,4.1vw,4.35rem)] font-medium leading-[0.98] tracking-[-0.06em]"
                   >
-                    {copy('Sua produção reconhecida.', 'Your recognized production.')}
+                    {canUseCommissions
+                      ? copy('Sua produção reconhecida.', 'Your recognized production.')
+                      : copy('Seu dia começa com clareza.', 'Start your day with clarity.')}
                   </h1>
                 </div>
-                <Link
-                  data-hero-reveal
-                  href={journeyHref}
-                  className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-white/15 px-4 py-2.5 text-xs font-semibold text-paper/78 transition-colors hover:bg-white hover:text-rail-strong"
-                >
-                  {copy('Ver jornada', 'View journey')} <span aria-hidden>↗</span>
-                </Link>
+                {canUseJourney ? (
+                  <Link
+                    data-hero-reveal
+                    href={journeyHref}
+                    className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-white/15 px-4 py-2.5 text-xs font-semibold text-paper/78 transition-colors hover:bg-white hover:text-rail-strong"
+                  >
+                    {copy('Ver jornada', 'View journey')} <span aria-hidden>↗</span>
+                  </Link>
+                ) : canUseCommissions ? (
+                  <Link
+                    data-hero-reveal
+                    href="/agent/commissions"
+                    className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-white/15 px-4 py-2.5 text-xs font-semibold text-paper/78 transition-colors hover:bg-white hover:text-rail-strong"
+                  >
+                    {copy('Ver extrato', 'View statement')} <span aria-hidden>↗</span>
+                  </Link>
+                ) : null}
               </div>
 
+              {canUseCommissions ? (
+                <>
               <div data-hero-reveal className="mt-7">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-paper/42">
                   {copy('Target Premium confirmado', 'Confirmed Target Premium')} <span aria-hidden>·</span> PC
@@ -802,10 +898,22 @@ export default async function AgentDashboard({
                   </div>
                 ))}
               </div>
+                </>
+              ) : (
+                <div data-hero-reveal className="mt-auto max-w-2xl pt-14">
+                  <p className="text-base leading-7 text-paper/62 sm:text-lg">
+                    {copy(
+                      'Use este espaço como ponto de partida. Os atalhos e indicadores abaixo acompanham apenas os módulos liberados para sua conta.',
+                      'Use this space as your starting point. The shortcuts and indicators below reflect only the modules enabled for your account.',
+                    )}
+                  </p>
+                </div>
+              )}
             </div>
           </article>
 
-          <aside data-hero-reveal className="relative flex flex-col border-t border-border-steel bg-[#f4f4f1] p-6 text-ink sm:p-7 lg:col-span-4 lg:border-l lg:border-t-0 lg:p-8">
+          {hasPriorityQueue && (
+            <aside data-hero-reveal className="relative flex flex-col border-t border-border-steel bg-[#f4f4f1] p-6 text-ink sm:p-7 lg:col-span-4 lg:border-l lg:border-t-0 lg:p-8">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-muted">
@@ -816,7 +924,10 @@ export default async function AgentDashboard({
                 </h2>
               </div>
               <span className="flex h-10 w-10 items-center justify-center rounded-full bg-rail-strong text-sm font-semibold text-paper">
-                {loadError ? '—' : dueFollowUps + openRequirements + atRiskPolicies + dueReviews}
+                {loadError
+                  ? '—'
+                  : (canUseCrm ? dueFollowUps + openRequirements : 0)
+                    + (canUsePolicies ? atRiskPolicies + dueReviews : 0)}
               </span>
             </div>
             <p className="mt-4 max-w-xs text-sm leading-6 text-ink-muted">
@@ -826,18 +937,29 @@ export default async function AgentDashboard({
               )}
             </p>
             <div className="mt-6 flex flex-col gap-1">
-              <PriorityRow href="/agent/activities" label={copy('Retornos pendentes', 'Pending follow-ups')} value={loadError ? null : dueFollowUps} tone="danger" />
-              <PriorityRow href="/agent/activities" label={copy('Pendências abertas', 'Open requirements')} value={loadError ? null : openRequirements} tone="amber" />
-              <PriorityRow href="/agent/policies" label={copy('Apólices em risco', 'Policies at risk')} value={loadError ? null : atRiskPolicies} tone="danger" />
-              <PriorityRow href="/agent/policies" label={copy('Revisões anuais', 'Annual reviews')} value={loadError ? null : dueReviews} tone="mint" />
+              {canUseCrm && (
+                <>
+                  <PriorityRow href="/agent/activities" label={copy('Retornos pendentes', 'Pending follow-ups')} value={loadError ? null : dueFollowUps} tone="danger" />
+                  <PriorityRow href="/agent/activities" label={copy('Pendências abertas', 'Open requirements')} value={loadError ? null : openRequirements} tone="amber" />
+                </>
+              )}
+              {canUsePolicies && (
+                <>
+                  <PriorityRow href="/agent/policies" label={copy('Apólices em risco', 'Policies at risk')} value={loadError ? null : atRiskPolicies} tone="danger" />
+                  <PriorityRow href="/agent/policies" label={copy('Revisões anuais', 'Annual reviews')} value={loadError ? null : dueReviews} tone="mint" />
+                </>
+              )}
             </div>
-            <Link href="/agent/activities" className="mt-auto inline-flex min-h-11 w-full items-center justify-center rounded-full bg-rail-strong px-4 py-3 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5">
-              {copy('Abrir fila completa', 'Open full queue')}
+            <Link href={canUseCrm ? '/agent/activities' : '/agent/policies'} className="mt-auto inline-flex min-h-11 w-full items-center justify-center rounded-full bg-rail-strong px-4 py-3 text-sm font-semibold text-paper transition-transform duration-300 hover:-translate-y-0.5">
+              {canUseCrm
+                ? copy('Abrir fila completa', 'Open full queue')
+                : copy('Abrir carteira', 'Open book')}
             </Link>
           </aside>
+          )}
         </section>
 
-        {!loadError && (
+        {canUseCalendar && !loadError && (
           <TodayMeetingsSection
             connection={calendarConnection}
             calendars={calendarSources}
@@ -846,7 +968,7 @@ export default async function AgentDashboard({
           />
         )}
 
-        {!loadError && (
+        {canUseCalendar && !loadError && (
           <UpcomingMeetingsSection
             calendars={calendarSources}
             events={upcomingMeetings}
@@ -854,7 +976,7 @@ export default async function AgentDashboard({
           />
         )}
 
-        {!loadError && dueFollowUpItems.length > 0 && (
+        {canUseCrm && !loadError && dueFollowUpItems.length > 0 && (
           <section
             aria-labelledby="today-follow-ups-title"
             className="mt-6 overflow-hidden rounded-[28px] border border-border-steel bg-paper/68 p-5 shadow-[var(--shadow-soft)] sm:p-7"
@@ -910,36 +1032,42 @@ export default async function AgentDashboard({
           </section>
         )}
 
-        <div className="keepr-marquee-mask mt-6 overflow-hidden border-y border-border-steel/70 bg-paper/56 py-3.5">
-          <div className="keepr-marquee-track flex items-center">
-            {[...pulseMetrics, ...pulseMetrics].map((metric, index) => (
-              <div key={`${metric.label}-${index}`} className="flex shrink-0 items-center gap-3 px-7">
-                <span className="h-1.5 w-1.5 rounded-full bg-mint" />
-                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-muted">{metric.label}</span>
-                <span className="font-mono text-xs font-semibold tabular-nums text-ink">{metric.value}</span>
-              </div>
-            ))}
+        {pulseMetrics.length > 0 && (
+          <div className="keepr-marquee-mask mt-6 overflow-hidden border-y border-border-steel/70 bg-paper/56 py-3.5">
+            <div className="keepr-marquee-track flex items-center">
+              {[...pulseMetrics, ...pulseMetrics].map((metric, index) => (
+                <div key={`${metric.label}-${index}`} className="flex shrink-0 items-center gap-3 px-7">
+                  <span className="h-1.5 w-1.5 rounded-full bg-mint" />
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-muted">{metric.label}</span>
+                  <span className="font-mono text-xs font-semibold tabular-nums text-ink">{metric.value}</span>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        <JourneyDashboardPreview
-          personalPc={displayedPromotion.personalPc}
-          agencyPc={displayedPromotion.agencyPc}
-          estimatedPersonalPc={displayedPromotion.estimatedPersonalPc}
-          estimatedAgencyPc={displayedPromotion.estimatedAgencyPc}
-          pendingPersonalPc={displayedPromotion.pendingPersonalPc}
-          pendingAgencyPc={displayedPromotion.pendingAgencyPc}
-          hasPromotionData={displayedPromotion.hasPromotionData}
-          windowStart={promotion.windowStart}
-          windowEnd={promotion.windowEnd}
-          highestAchievementRankId={displayedPromotion.highestAchievementRankId}
-          mode={displayedPromotion.mode}
-          loadError={displayedPromotion.loadError}
-          journeyHref={journeyHref}
-        />
+        {canUseJourney && promotion && displayedPromotion && (
+          <JourneyDashboardPreview
+            personalPc={displayedPromotion.personalPc}
+            agencyPc={displayedPromotion.agencyPc}
+            estimatedPersonalPc={displayedPromotion.estimatedPersonalPc}
+            estimatedAgencyPc={displayedPromotion.estimatedAgencyPc}
+            pendingPersonalPc={displayedPromotion.pendingPersonalPc}
+            pendingAgencyPc={displayedPromotion.pendingAgencyPc}
+            hasPromotionData={displayedPromotion.hasPromotionData}
+            windowStart={promotion.windowStart}
+            windowEnd={promotion.windowEnd}
+            highestAchievementRankId={displayedPromotion.highestAchievementRankId}
+            mode={displayedPromotion.mode}
+            loadError={displayedPromotion.loadError}
+            journeyHref={journeyHref}
+          />
+        )}
 
-        <section aria-label={copy('Resumo da operação', 'Operation summary')} className="mt-12 grid grid-flow-dense grid-cols-1 gap-4 lg:grid-cols-12">
-          <Link href="/agent/cases" className="keepr-card keepr-card-interactive group relative min-h-[250px] overflow-hidden rounded-[28px] p-7 lg:col-span-4" data-stack-card>
+        {(canUseCrm || canUsePolicies || canUseTeam) && (
+          <section aria-label={copy('Resumo da operação', 'Operation summary')} className="mt-12 grid grid-flow-dense grid-cols-1 gap-4 lg:grid-cols-12">
+          {canUseCrm && (
+            <Link href="/agent/cases" className="keepr-card keepr-card-interactive group relative min-h-[250px] overflow-hidden rounded-[28px] p-7 lg:col-span-4" data-stack-card>
             <div aria-hidden className="absolute -bottom-20 -right-12 h-52 w-52 rounded-full bg-teal-pale transition-transform duration-700 ease-out group-hover:scale-105" />
             <div className="relative flex h-full flex-col justify-between">
               <div>
@@ -949,17 +1077,24 @@ export default async function AgentDashboard({
               </div>
               <div className="mt-8 flex items-center justify-between border-t border-border-steel/70 pt-4 text-xs">
                 <span className="text-ink-muted">
-                  {copy(
-                    `${countValue(awaitingIllustration)} aguardando ilustração`,
-                    `${countValue(awaitingIllustration)} awaiting illustration`,
-                  )}
+                  {canUseIllustrations
+                    ? copy(
+                        `${countValue(awaitingIllustration)} aguardando ilustração`,
+                        `${countValue(awaitingIllustration)} awaiting illustration`,
+                      )
+                    : copy(
+                        `${countValue(dueFollowUps)} retornos pendentes`,
+                        `${countValue(dueFollowUps)} pending follow-ups`,
+                      )}
                 </span>
                 <span aria-hidden className="text-ink">↗</span>
               </div>
             </div>
-          </Link>
+            </Link>
+          )}
 
-          <Link href="/agent/policies" className="keepr-card keepr-card-interactive group relative min-h-[250px] overflow-hidden rounded-[28px] p-7 lg:col-span-4" data-stack-card>
+          {canUsePolicies && (
+            <Link href="/agent/policies" className="keepr-card keepr-card-interactive group relative min-h-[250px] overflow-hidden rounded-[28px] p-7 lg:col-span-4" data-stack-card>
             <div aria-hidden className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-gold-pale transition-transform duration-700 ease-out group-hover:scale-105" />
             <div className="relative flex h-full flex-col justify-between">
               <div>
@@ -977,9 +1112,10 @@ export default async function AgentDashboard({
                 <span aria-hidden className="text-ink">↗</span>
               </div>
             </div>
-          </Link>
+            </Link>
+          )}
 
-          {access.canManageTeam ? (
+          {canUseTeam ? (
             <Link href="/agent/hierarchy" className="keepr-card keepr-card-interactive group relative min-h-[250px] overflow-hidden rounded-[28px] p-7 lg:col-span-4" data-stack-card>
               <div aria-hidden className="absolute -bottom-24 left-1/3 h-56 w-56 rounded-full bg-[oklch(0.91_0.045_286)] transition-transform duration-700 ease-out group-hover:scale-105" />
               <div className="relative flex h-full flex-col justify-between">
@@ -990,19 +1126,23 @@ export default async function AgentDashboard({
                 </div>
                 <div className="mt-8 flex items-center justify-between border-t border-border-steel/70 pt-4 text-xs">
                   <span className="text-ink-muted">
-                    {copy(
-                      `${auditedCommissionValue(commissionTotalAmount)} em comissões`,
-                      `${auditedCommissionValue(commissionTotalAmount)} in commissions`,
-                    )}
+                    {canUseCommissions
+                      ? copy(
+                          `${auditedCommissionValue(commissionTotalAmount)} em comissões`,
+                          `${auditedCommissionValue(commissionTotalAmount)} in commissions`,
+                        )
+                      : copy('Abrir estrutura da equipe', 'Open team structure')}
                   </span>
                   <span aria-hidden className="text-ink">↗</span>
                 </div>
               </div>
             </Link>
           ) : null}
-        </section>
+          </section>
+        )}
 
-        <section className="py-24 sm:py-32" aria-labelledby="portfolio-panorama-title">
+        {canUsePolicies && (
+          <section className="py-24 sm:py-32" aria-labelledby="portfolio-panorama-title">
           <div className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.17em] text-teal-deep">
@@ -1036,11 +1176,13 @@ export default async function AgentDashboard({
               emptyLabel={copy('Nenhum produto para exibir.', 'No products to display.')}
             />
           </div>
-        </section>
+          </section>
+        )}
 
-        <OperationSignals signals={signals} />
+        {signals.length > 0 && <OperationSignals signals={signals} />}
 
-        <section className="py-24 sm:py-32">
+        {canUseCrm && (
+          <section className="py-24 sm:py-32">
           <div className="relative overflow-hidden rounded-[32px] bg-mint p-8 text-rail-strong sm:p-12 lg:flex lg:items-end lg:justify-between lg:gap-12">
             <div aria-hidden className="absolute -right-12 -top-20 h-64 w-64 rounded-full border-[42px] border-rail-strong/8" />
             <div className="relative max-w-4xl">
@@ -1055,7 +1197,8 @@ export default async function AgentDashboard({
               {copy('Novo atendimento', 'New case')}
             </Link>
           </div>
-        </section>
+          </section>
+        )}
       </KeeprDashboardMotion>
     </Shell>
   )

@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { getCurrentAgent } from '@/lib/agent-context'
+import { getCurrentAgent as readCurrentAgent } from '@/lib/agent-context'
 import { prisma } from '@/lib/prisma'
 import {
   approveConnectorCommand,
@@ -21,6 +21,7 @@ import {
 import { extractForesightTermPremiums } from '@/lib/national-life/foresight-term-pdf'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
 import { getServerI18n } from '@/lib/i18n/server'
+import { requireAgentModule } from '@/lib/require-agent-module'
 
 export type RequestIllustrationPdfResult =
   | { ok: true; commandId: string; duplicate: boolean; completed: boolean; retryingLogin?: true }
@@ -29,6 +30,11 @@ export type RequestIllustrationPdfResult =
 export type ReconcileTermIllustrationPdfResult =
   | { ok: true; message: string }
   | { ok: false; message: string }
+
+async function getCurrentAgent() {
+  await requireAgentModule('ILLUSTRATIONS')
+  return readCurrentAgent()
+}
 
 function termPdfReconciliationMessage(
   error: unknown,

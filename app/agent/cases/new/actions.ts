@@ -6,6 +6,7 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { revalidatePath } from 'next/cache'
 import { getOrCreateNewLeadStageId } from '@/lib/crm'
 import { getServerI18n } from '@/lib/i18n/server'
+import { requireAgentModule } from '@/lib/require-agent-module'
 
 const newCaseSchema = (copy: (pt: string, en: string) => string) => z.object({
   firstName: z.string().trim().min(1, copy('Informe o nome.', 'Enter the first name.')),
@@ -26,6 +27,7 @@ export type CreateCaseResult =
   | { ok: false; message: string }
 
 export async function createInsuranceCase(formData: FormData): Promise<CreateCaseResult> {
+  await requireAgentModule('CRM')
   const { copy } = await getServerI18n()
   const agent = await getCurrentAgent()
 

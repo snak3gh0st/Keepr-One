@@ -20,6 +20,10 @@ function appOrigin(request: Request): string {
 export async function POST(request: Request) {
   try {
     const session = await requireRoleWithoutFounderAccess('AGENT')
+    const impersonatedBy = (session.session as { impersonatedBy?: unknown }).impersonatedBy
+    if (typeof impersonatedBy === 'string') {
+      return NextResponse.json({ error: 'READ_ONLY_USER_PREVIEW' }, { status: 403 })
+    }
     const agent = await prisma.agent.findUnique({
       where: { userId: session.user.id },
       select: { id: true },

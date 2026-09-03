@@ -16,10 +16,9 @@ export type Role = 'ADMIN' | 'AGENT' | 'CLIENT'
  * Every server action and server component that needs role-based access
  * control MUST call `requireRole(...)` itself.
  *
- * Note: `session.user.role` is typed as `string` by Better Auth (the
- * `additionalFields` config declares it as `{ type: 'string' }`, since
- * Better Auth's additionalFields system doesn't support a literal string
- * union/enum type). We validate + cast it to our real `Role` union here.
+ * Better Auth's admin plugin stores roles as strings. We validate + cast the
+ * persisted value to our real `Role` union here instead of trusting a route
+ * payload or a client-side role claim.
  */
 async function readRequiredRole(
   roles: Role[],
@@ -27,6 +26,11 @@ async function readRequiredRole(
 ) {
   const session = await getCurrentSession()
   if (!session) throw new Error('Not authenticated')
+
+  const banned = (session.user as typeof session.user & { banned?: unknown }).banned
+  if (banned === true) {
+    throw new Error('Forbidden: account access is suspended')
+  }
 
   const role = session.user.role as unknown as string
   if (!roles.includes(role as Role)) {

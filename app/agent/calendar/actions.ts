@@ -35,6 +35,7 @@ import type {
   CalendarRange,
 } from "@/components/calendar/types";
 import { getServerI18n } from "@/lib/i18n/server";
+import { requireAgentModule } from "@/lib/require-agent-module";
 
 const RANGE_LIMIT_MS = 400 * 86_400_000;
 const WRITABLE_CALENDAR_ROLES = new Set(["owner", "writer"]);
@@ -113,6 +114,7 @@ async function localizeConflictGuard(result: CalendarConflictGuardResult): Promi
 }
 
 async function userContext() {
+  await requireAgentModule("CALENDAR");
   const agent = await getCurrentAgent();
   const user = await prisma.user.findUnique({ where: { id: agent.userId }, select: { timeZone: true } });
   if (!user) throw new Error("Calendar user not found");

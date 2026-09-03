@@ -31,11 +31,13 @@ export default async function AgentLayout({
     throw error;
   }
   const now = new Date();
-  const [promotion, access, platformAccess] = await Promise.all([
-    getAgentPromotionSnapshot(agent.id),
+  const [access, platformAccess] = await Promise.all([
     getAgentAccessForAgent(agent.id),
     resolveFounderAccessForAgent(agent.id, now),
   ]);
+  const promotion = access.enabledModules === null || access.enabledModules.includes("JOURNEY")
+    ? await getAgentPromotionSnapshot(agent.id)
+    : null;
   const trial = buildTrialCountdownView(platformAccess, now);
 
   return (
@@ -48,10 +50,11 @@ export default async function AgentLayout({
         canInviteAgents: access.canInviteAgents,
         canViewTeamSubscriptions: access.canViewTeamSubscriptions,
         canViewAgencyNationalLife: access.canViewAgencyNationalLife,
+        enabledModules: access.enabledModules,
         trial,
       }}
     >
-      <AgentPromotionProvider initialIdentity={promotion.identity}>
+      <AgentPromotionProvider initialIdentity={promotion?.identity ?? null}>
         {children}
       </AgentPromotionProvider>
     </AgentAccessProvider>

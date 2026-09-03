@@ -55,6 +55,38 @@ describe('access-required presentation', () => {
     expect(formatPlatformPlanPrice(presentation.plan, 'en-US')).toBe('$59.90')
   })
 
+  it('explains an administratively required payment without Founder copy', () => {
+    const presentation = buildAccessRequiredPresentation({
+      source: 'ADMIN_PROVISIONED',
+      requiredPlan: 'AGENCY',
+      accountType: 'AGENCY',
+      invitingAgencyName: null,
+      paymentRequiredAt: new Date('2026-09-02T12:00:00.000Z'),
+    }, '2 de setembro de 2026')
+
+    expect(presentation).toMatchObject({
+      plan: 'AGENCY',
+      programLabel: 'Acesso Keepr One',
+      eyebrow: 'Pagamento necessário',
+      planLabel: 'Plano Agência',
+    })
+    expect(presentation.description).toContain('permanecem salvos')
+    expect(presentation.description).not.toMatch(/Founder/i)
+  })
+
+  it('shows the custom end date when an administrative trial expires naturally', () => {
+    const presentation = buildAccessRequiredPresentation({
+      source: 'ADMIN_PROVISIONED',
+      requiredPlan: 'AGENT_INDIVIDUAL',
+      accountType: 'AGENT',
+      invitingAgencyName: null,
+      paymentRequiredAt: null,
+    }, '15 de setembro de 2026')
+
+    expect(presentation.eyebrow).toBe('Período de teste concluído')
+    expect(presentation.description).toContain('15 de setembro de 2026')
+  })
+
   it('localizes invitation and Founder presentations in English', () => {
     const invited = buildAccessRequiredPresentation({
       source: 'AGENCY_INVITATION',

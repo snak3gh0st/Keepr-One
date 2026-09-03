@@ -43,7 +43,7 @@ export default async function Home() {
   let role: string | null = null
   try {
     const session = await requireRoleWithoutFounderAccess('ADMIN', 'AGENT', 'CLIENT')
-    role = session.user.role
+    role = session.user.role ?? null
   } catch {
     // Not signed in — fall through to the guest landing page.
   }

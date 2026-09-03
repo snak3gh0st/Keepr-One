@@ -5,7 +5,7 @@ import { mkdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { prisma } from '@/lib/prisma'
 import { Prisma, type ApplicationStatus } from '@prisma/client'
-import { getCurrentAgent } from '@/lib/agent-context'
+import { getCurrentAgent as readCurrentAgent } from '@/lib/agent-context'
 import { getAgentScopeIds } from '@/lib/agent-access'
 import { canAccessCase } from '@/lib/case-access'
 import { computeNeedsAnalysis, type NeedsAnalysisInput } from '@/lib/needs-analysis'
@@ -38,6 +38,7 @@ import {
   ApplicationFromIllustrationError,
   buildApplicationFromIllustrationSeed,
 } from '@/lib/application-addon/application-from-illustration'
+import { requireAgentModule } from '@/lib/require-agent-module'
 
 type ActionResult = { ok: true } | { ok: false; message: string }
 type FailureResult = { ok: false; message: string }
@@ -49,6 +50,11 @@ export type ApplicationDossierActionResult =
 export type StartApplicationFromIllustrationResult =
   | { ok: true; caseId: string; applicationId: string }
   | { ok: false; message: string }
+
+async function getCurrentAgent() {
+  await requireAgentModule('CRM')
+  return readCurrentAgent()
+}
 
 async function agentScopeIds(): Promise<{ agentId: string; scope: string[] }> {
   const agent = await getCurrentAgent()

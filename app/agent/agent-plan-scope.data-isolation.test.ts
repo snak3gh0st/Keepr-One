@@ -47,7 +47,8 @@ describe('agent plan data isolation', () => {
   it('does not render team or agency promotion metrics for an individual plan', () => {
     const source = readFileSync(new URL('./page.tsx', import.meta.url), 'utf8')
 
-    expect(source).toContain('access.canManageTeam ?')
+    expect(source).toContain("const canUseTeam = hasModule('TEAM') && access.canManageTeam")
+    expect(source).toContain('{canUseTeam ? (')
     expect(source).toContain('access.canViewAgencyNationalLife')
     expect(source).toContain("mode: 'individual' as const")
   })

@@ -1,8 +1,13 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, IBM_Plex_Mono, IBM_Plex_Sans, Inter, Outfit } from "next/font/google";
 import { LanguageProvider } from "@/components/i18n/LanguageProvider";
+import { ImpersonationBanner } from "@/components/admin/ImpersonationBanner";
+import {
+  ImpersonationProvider,
+  type ImpersonationContextValue,
+} from "@/components/admin/ImpersonationContext";
 import { localeFor } from "@/lib/i18n/config";
-import { getServerLanguage } from "@/lib/i18n/server";
+import { getCurrentSession, getServerLanguage } from "@/lib/i18n/server";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -63,7 +68,23 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const language = await getServerLanguage();
+  const [language, session] = await Promise.all([
+    getServerLanguage(),
+    getCurrentSession(),
+  ]);
+  const impersonatedBy = (session?.session as { impersonatedBy?: unknown } | undefined)?.impersonatedBy;
+  const currentRole = session?.user.role as unknown;
+  const impersonation: ImpersonationContextValue =
+    typeof impersonatedBy === "string" && (currentRole === "AGENT" || currentRole === "CLIENT")
+      ? {
+          active: true,
+          targetId: session!.user.id,
+          targetName: session!.user.name,
+          targetEmail: session!.user.email,
+          targetRole: currentRole,
+          expiresAt: new Date(session!.session.expiresAt).toISOString(),
+        }
+      : { active: false };
 
   return (
     <html
@@ -71,7 +92,12 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${inter.variable} ${outfit.variable} ${ibmPlexSans.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-paper text-ink font-sans">
-        <LanguageProvider initialLanguage={language}>{children}</LanguageProvider>
+        <LanguageProvider initialLanguage={language}>
+          <ImpersonationProvider value={impersonation}>
+            <ImpersonationBanner />
+            {children}
+          </ImpersonationProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

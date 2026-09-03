@@ -22,7 +22,9 @@ import { NotificationCenter } from "@/components/notifications/NotificationCente
 import { TrialCountdown } from "@/components/trial";
 import { LanguageSwitcher } from "@/components/i18n/LanguageSwitcher";
 import { useI18n } from "@/components/i18n/LanguageProvider";
+import { useImpersonation } from "@/components/admin/ImpersonationContext";
 import type { MessageKey } from "@/lib/i18n/catalog";
+import type { PlatformModuleName } from "@/lib/platform-modules";
 import type { JacketTone, PromotionIdentity } from "@/lib/promotion-journey";
 
 gsap.registerPlugin(useGSAP);
@@ -50,50 +52,48 @@ type NavItem = {
   icon: NavIconName;
   groupKey?: MessageKey;
   matches?: string[];
+  module?: PlatformModuleName;
 };
 
 const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
   ADMIN: [
-    { href: "/admin", labelKey: "nav.dashboard", icon: "grid" },
-    { href: "/admin/agents", labelKey: "nav.hierarchy", icon: "hierarchy" },
-    { href: "/admin/pipeline", labelKey: "nav.pipeline", icon: "layers" },
-    { href: "/admin/production", labelKey: "nav.production", icon: "chart" },
-    { href: "/admin/commission-plans", labelKey: "nav.commissionPlans", icon: "layers" },
-    { href: "/admin/import", labelKey: "nav.importData", icon: "upload" },
-    { href: "/admin/audit", labelKey: "nav.audit", icon: "audit" },
-    { href: "/admin/integrations/national-life", labelKey: "nav.integrations", icon: "link" },
+    { href: "/admin", labelKey: "nav.dashboard", icon: "grid", groupKey: "nav.group.platform" },
+    { href: "/admin/users", labelKey: "nav.users", icon: "users", groupKey: "nav.group.platform" },
   ],
   AGENT: [
-    { href: "/agent", labelKey: "nav.today", icon: "grid", groupKey: "nav.group.operations" },
-    { href: "/agent/calendar", labelKey: "nav.calendar", icon: "calendar", groupKey: "nav.group.operations" },
+    { href: "/agent", labelKey: "nav.today", icon: "grid", groupKey: "nav.group.operations", module: "TODAY" },
+    { href: "/agent/calendar", labelKey: "nav.calendar", icon: "calendar", groupKey: "nav.group.operations", module: "CALENDAR" },
     {
       href: "/agent/cases",
       labelKey: "nav.crm",
       icon: "layers",
       groupKey: "nav.group.operations",
       matches: ["/agent/cases", "/agent/clients", "/agent/activities"],
+      module: "CRM",
     },
     {
       href: "/agent/mensagens",
       labelKey: "nav.messages",
       icon: "chat",
       groupKey: "nav.group.operations",
+      module: "MESSAGES",
     },
-    { href: "/agent/policies", labelKey: "nav.policies", icon: "document", groupKey: "nav.group.portfolio" },
+    { href: "/agent/policies", labelKey: "nav.policies", icon: "document", groupKey: "nav.group.portfolio", module: "POLICIES" },
     // The quotes were being written to the database and shown nowhere: the
     // screen that asked for one displayed it until the page reloaded, and
     // there was no route that listed them.
-    { href: "/agent/illustrations", labelKey: "nav.illustrations", icon: "document", groupKey: "nav.group.portfolio" },
-    { href: "/agent/commissions", labelKey: "nav.commissions", icon: "money", groupKey: "nav.group.portfolio" },
-    { href: "/agent/journey", labelKey: "nav.journey", icon: "chart", groupKey: "nav.group.portfolio" },
-    { href: "/agent/agency", labelKey: "nav.agency", mobileLabelKey: "nav.agency", icon: "users", groupKey: "nav.group.management" },
-    { href: "/agent/hierarchy", labelKey: "nav.team", icon: "hierarchy", groupKey: "nav.group.management" },
+    { href: "/agent/illustrations", labelKey: "nav.illustrations", icon: "document", groupKey: "nav.group.portfolio", module: "ILLUSTRATIONS" },
+    { href: "/agent/commissions", labelKey: "nav.commissions", icon: "money", groupKey: "nav.group.portfolio", module: "COMMISSIONS" },
+    { href: "/agent/journey", labelKey: "nav.journey", icon: "chart", groupKey: "nav.group.portfolio", module: "JOURNEY" },
+    { href: "/agent/agency", labelKey: "nav.agency", mobileLabelKey: "nav.agency", icon: "users", groupKey: "nav.group.management", module: "AGENCY" },
+    { href: "/agent/hierarchy", labelKey: "nav.team", icon: "hierarchy", groupKey: "nav.group.management", module: "TEAM" },
     {
       href: "/agent/integrations",
       labelKey: "nav.integrations",
       icon: "link",
       groupKey: "nav.group.account",
       matches: ["/agent/integrations"],
+      module: "INTEGRATIONS",
     },
     { href: "/agent/settings", labelKey: "nav.settings", mobileLabelKey: "common.account", icon: "settings", groupKey: "nav.group.account" },
   ],
@@ -102,6 +102,8 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
 
 const PAGE_NAMES: Record<string, MessageKey> = {
   "/admin": "page.admin",
+  "/admin/users": "page.adminUsers",
+  "/admin/users/new": "page.adminUserCreate",
   "/admin/agents": "page.adminAgents",
   "/admin/pipeline": "page.adminPipeline",
   "/admin/production": "page.adminProduction",
@@ -134,6 +136,7 @@ const PAGE_NAMES: Record<string, MessageKey> = {
 
 function resolvePageName(pathname: string, role: "ADMIN" | "AGENT" | "CLIENT", t: (key: MessageKey) => string) {
   if (PAGE_NAMES[pathname]) return t(PAGE_NAMES[pathname]);
+  if (/^\/admin\/users\/[^/]+$/.test(pathname)) return t("page.adminUserDetail");
   if (/^\/agent\/cases\/[^/]+$/.test(pathname)) return t("page.caseDetail");
   if (/^\/agent\/policies\/[^/]+$/.test(pathname)) return t("page.policyDetail");
   return role === "ADMIN" ? t("page.operation") : role === "AGENT" ? t("page.myOperation") : t("page.myAccount");
@@ -156,22 +159,28 @@ export function Shell({
   const pathname = usePathname();
   const router = useRouter();
   const { t, language, isChanging } = useI18n();
+  const impersonation = useImpersonation();
   const isJourney = role === "AGENT" && pathname === "/agent/journey";
   const promotionContext = useAgentPromotionContext();
   const agentAccess = useAgentAccessContext();
+  const enabledModules = agentAccess?.enabledModules ?? null;
+  const hasModule = (module: PlatformModuleName) =>
+    enabledModules === null || enabledModules.includes(module);
   const setGlobalPromotionIdentity = promotionContext?.setIdentity;
   const activePromotionIdentity =
     role === "AGENT"
       ? (promotionIdentity ?? promotionContext?.identity ?? null)
       : null;
-  const items = NAV[role].filter(
-    (item) =>
-      role !== "AGENT" ||
-      item.href !== "/agent/hierarchy" ||
-      agentAccess?.canManageTeam === true,
-  );
+  const items = NAV[role].filter((item) => {
+    if (role !== "AGENT") return true;
+    if (item.module && !hasModule(item.module)) return false;
+    if (item.href === "/agent/hierarchy") {
+      return agentAccess?.canManageTeam === true;
+    }
+    return true;
+  });
   const mobileItemWidth =
-    role === "AGENT" ? "w-1/5 min-w-[68px]" : role === "CLIENT" ? "w-full" : "w-[78px]";
+    role === "AGENT" ? "w-1/5 min-w-[68px]" : role === "CLIENT" ? "w-full" : "w-1/2 min-w-[92px]";
   const currentPage = resolvePageName(pathname, role, t);
   const roleLabel =
     role === "ADMIN"
@@ -193,14 +202,13 @@ export function Shell({
         : agentAccess?.kind === "AGENCY_MEMBER"
           ? t("workspace.linkedAgency", { agency: agentAccess.agencyName ?? t("workspace.anAgency") })
           : t("workspace.individualOperation");
-  const quickAction =
-    role === "AGENT" && pathname === "/agent/calendar"
+  const quickAction = impersonation.active
+    ? null
+    : role === "AGENT" && pathname === "/agent/calendar" && hasModule("CALENDAR")
       ? { href: "/agent/calendar?create=1", label: t("action.newAppointment") }
-      : role === "AGENT" && pathname === "/agent"
+      : role === "AGENT" && pathname === "/agent" && hasModule("CRM")
       ? { href: "/agent/cases/new", label: t("action.newService") }
-      : role === "ADMIN" && pathname === "/admin"
-        ? { href: "/admin/import", label: t("action.importData") }
-        : null;
+      : null;
   const achievementTone =
     activePromotionIdentity?.tone !== "standard"
       ? activePromotionIdentity?.tone
@@ -221,6 +229,7 @@ export function Shell({
     ? `premium-v2:${achievementTone}:${rankTitle}`
     : null;
   const trial = role === "AGENT" ? agentAccess?.trial ?? null : null;
+  const showCarrierSync = role === "AGENT" && hasModule("INTEGRATIONS");
 
   const handleTrialExpire = useCallback(() => {
     // The server remains authoritative. Refreshing the current route makes
@@ -333,7 +342,7 @@ export function Shell({
     window.dispatchEvent(new Event('keepr-one:sign-out'));
     await new Promise((resolve) => window.setTimeout(resolve, 50));
     await authClient.signOut();
-    router.push("/login");
+    router.push(role === "ADMIN" ? "/admin/login" : "/login");
     router.refresh();
   }
 
@@ -361,19 +370,23 @@ export function Shell({
               <NavIcon name="settings" />
             </Link>
           ) : null}
-          <button
-            type="button"
-            onClick={handleSignOut}
-            className="shell-signout min-h-11 rounded-full border border-white/[0.12] px-3 py-1.5 text-xs font-semibold text-white/65 hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75"
-          >
-            {t("common.signOut")}
-          </button>
+          {!impersonation.active ? (
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="shell-signout min-h-11 rounded-full border border-white/[0.12] px-3 py-1.5 text-xs font-semibold text-white/65 hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75"
+            >
+              {t("common.signOut")}
+            </button>
+          ) : null}
         </div>
       </div>
 
       <nav
         aria-label={t("common.mainNavigation")}
-        className="shell-navigation fixed inset-x-0 bottom-0 z-30 flex shrink-0 border-t border-white/[0.08] bg-[#090909] pb-[env(safe-area-inset-bottom)] text-white shadow-[0_-16px_48px_rgba(0,0,0,0.22)] md:sticky md:top-0 md:h-screen md:w-[272px] md:flex-col md:self-start md:border-r md:border-t-0 md:border-white/[0.07] md:pb-0 md:shadow-[16px_0_56px_rgba(0,0,0,0.12)]"
+        className={`shell-navigation fixed inset-x-0 bottom-0 z-30 flex shrink-0 border-t border-white/[0.08] bg-[#090909] pb-[env(safe-area-inset-bottom)] text-white shadow-[0_-16px_48px_rgba(0,0,0,0.22)] md:sticky md:w-[272px] md:flex-col md:self-start md:border-r md:border-t-0 md:border-white/[0.07] md:pb-0 md:shadow-[16px_0_56px_rgba(0,0,0,0.12)] ${
+          impersonation.active ? "md:top-14 md:h-[calc(100vh-3.5rem)]" : "md:top-0 md:h-screen"
+        }`}
       >
         <div aria-hidden className="pointer-events-none absolute inset-0 hidden overflow-hidden md:block">
           <div className="absolute -left-24 -top-20 h-72 w-72 rounded-full bg-white/[0.035] blur-3xl" />
@@ -477,32 +490,41 @@ export function Shell({
               </div>
             )}
 
-            <div className="flex items-center justify-between gap-3 md:mt-3 md:border-t md:border-white/[0.08] md:pt-3">
-              <div className="hidden min-w-0 md:block">
-                <p className="text-xs font-semibold text-white/85">{t("language.label")}</p>
-                <p className="mt-0.5 truncate text-xs text-white/45">
-                  {isChanging
-                    ? t("language.saving")
-                    : t(language === "PT" ? "language.portuguese" : "language.english")}
-                </p>
+            {impersonation.active ? (
+              <div className="mt-3 hidden border-t border-white/[0.08] pt-3 md:block">
+                <p className="text-xs font-semibold text-[#8ef0b5]">{t("preview.readOnly")}</p>
+                <p className="mt-0.5 text-xs text-white/45">{t("preview.useTopBar")}</p>
               </div>
-              <LanguageSwitcher inverse errorPlacement="above" size="navigation" />
-            </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-3 md:mt-3 md:border-t md:border-white/[0.08] md:pt-3">
+                  <div className="hidden min-w-0 md:block">
+                    <p className="text-xs font-semibold text-white/85">{t("language.label")}</p>
+                    <p className="mt-0.5 truncate text-xs text-white/45">
+                      {isChanging
+                        ? t("language.saving")
+                        : t(language === "PT" ? "language.portuguese" : "language.english")}
+                    </p>
+                  </div>
+                  <LanguageSwitcher inverse errorPlacement="above" size="navigation" />
+                </div>
 
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="mt-3 hidden min-h-9 w-full items-center justify-center rounded-xl border border-white/[0.1] text-xs font-semibold text-white/65 transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75 md:flex"
-            >
-              {t("common.signOutAccount")}
-            </button>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="mt-3 hidden min-h-9 w-full items-center justify-center rounded-xl border border-white/[0.1] text-xs font-semibold text-white/65 transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:outline-white/75 md:flex"
+                >
+                  {t("common.signOutAccount")}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </nav>
 
       <main id="main-content" className="shell-main min-w-0 w-full max-w-full flex-1 overflow-x-hidden bg-canvas pb-24 md:pb-0">
         <div
-          className="shell-topbar sticky top-0 z-20 border-b border-border-steel/65 bg-canvas/88 px-4 backdrop-blur-xl sm:px-6 md:px-9 lg:px-12"
+          className={`shell-topbar sticky z-20 border-b border-border-steel/65 bg-canvas/88 px-4 backdrop-blur-xl sm:px-6 md:px-9 lg:px-12 ${impersonation.active ? "top-14" : "top-0"}`}
           data-achievement-tone={hasAchievement ? achievementTone : undefined}
           aria-label={hasAchievement && rankJacket ? t("common.currentAchievement", { achievement: rankJacket }) : undefined}
         >
@@ -554,7 +576,7 @@ export function Shell({
                     <p className="shell-topbar-title truncate text-sm font-semibold tracking-[-0.02em]">
                       {rankTitle}
                     </p>
-                    {role === 'AGENT' && <CarrierSyncBadge separated />}
+                    {showCarrierSync && <CarrierSyncBadge separated />}
                   </div>
                 </div>
               </div>
@@ -568,7 +590,7 @@ export function Shell({
                     {currentPage}
                   </p>
                   <span className="shell-topbar-separator hidden h-1 w-1 rounded-full bg-border-steel sm:block" />
-                  {role === 'AGENT' && <CarrierSyncBadge />}
+                  {showCarrierSync && <CarrierSyncBadge />}
                 </div>
               </div>
             )}
@@ -597,7 +619,7 @@ export function Shell({
                   </span>
                 </div>
               )}
-              {hasAchievement && !isJourney && (
+              {hasAchievement && !isJourney && hasModule("JOURNEY") && (
                 <Link
                   href={journeyHref}
                   className="shell-journey-link hidden min-h-9 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold md:inline-flex"
@@ -637,7 +659,7 @@ export function Shell({
                 <TrialCountdown
                   endsAt={trial.endsAt}
                   initialRemainingSeconds={trial.initialRemainingSeconds}
-                  actionHref="/agent/agency"
+                  actionHref={hasModule("AGENCY") ? "/agent/agency" : "/agent/settings"}
                   actionLabel={t("common.viewPlan")}
                   onExpire={handleTrialExpire}
                 />

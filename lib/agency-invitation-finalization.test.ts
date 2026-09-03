@@ -181,6 +181,14 @@ describe('provider-confirmed agency invitation finalization', () => {
         stripePriceId: 'price_1UAiJ0GJWjOaP9iwDnO3AaXc',
       },
     })
+    expect(mocks.invitationUpdateMany).toHaveBeenCalledWith({
+      where: { acceptedAgentId: 'new-agent', isCurrentCommercial: true },
+      data: { isCurrentCommercial: false },
+    })
+    expect(mocks.invitationUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'invitation-1', status: 'PENDING' }),
+      data: expect.objectContaining({ isCurrentCommercial: true }),
+    }))
     expect(mocks.checkoutUpdateMany).toHaveBeenCalledWith({
       where: {
         id: 'invite-checkout-1',
@@ -234,6 +242,49 @@ describe('provider-confirmed agency invitation finalization', () => {
     expect(mocks.userCreate).not.toHaveBeenCalled()
     expect(mocks.membershipCreate).not.toHaveBeenCalled()
     expect(mocks.subscriptionCreate).not.toHaveBeenCalled()
+  })
+
+  it('refuses to overlap a paid invitation with admin-provisioned access', async () => {
+    mocks.checkoutFindUnique.mockResolvedValue({
+      id: 'invite-checkout-1',
+      invitationId: 'invitation-1',
+      email: 'invitee@example.com',
+      userId: 'existing-user',
+      plan: 'AGENT_AGENCY_MEMBER',
+      inviterRole: 'OWNER',
+      status: 'PENDING',
+      unitAmountCents: 4_990,
+      acceptedTermsAt: new Date('2026-08-31T23:30:00.000Z'),
+      stripeSubscriptionId: null,
+      platformSubscriptionId: null,
+    })
+    mocks.userFindFirst.mockResolvedValue({
+      id: 'existing-user',
+      email: 'invitee@example.com',
+      role: 'AGENT',
+      agent: {
+        id: 'existing-agent',
+        status: 'ACTIVE',
+        parentAgentId: null,
+        onboarding: { status: 'COMPLETED' },
+        founderEnrollment: null,
+        adminProvisionedAccess: { id: 'admin-access-1' },
+        agencyMemberships: [],
+      },
+    })
+
+    await expect(finalizeAgencyInvitationAccess({
+      ...input(),
+      expectedUserId: 'existing-user',
+      passwordHash: null,
+    })).rejects.toThrow(
+      'Esta conta é gerenciada pela Keepr One. A mudança para um plano por convite precisa ser concluída pelo suporte.',
+    )
+    expect(mocks.agentFindMany).not.toHaveBeenCalled()
+    expect(mocks.membershipCreate).not.toHaveBeenCalled()
+    expect(mocks.subscriptionUpdateMany).not.toHaveBeenCalled()
+    expect(mocks.subscriptionCreate).not.toHaveBeenCalled()
+    expect(mocks.checkoutUpdateMany).not.toHaveBeenCalled()
   })
 
   it('honors a checkout reserved while the invite and issuer authority were valid', async () => {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getAgent: vi.fn(),
+  requireAgentModule: vi.fn(),
   enabled: vi.fn(() => true),
   createIllustration: vi.fn(),
   issue: vi.fn(),
@@ -13,6 +14,9 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getAgent }))
+vi.mock('@/lib/require-agent-module', () => ({
+  requireAgentModule: mocks.requireAgentModule,
+}))
 vi.mock('@/lib/i18n/server', () => ({
   getServerI18n: async () => ({
     language: mocks.language.current,
@@ -68,6 +72,7 @@ describe('request official FlexLife illustration through KeeproneConnect', () =>
     mocks.enabled.mockReturnValue(true)
     mocks.language.current = 'PT'
     mocks.getAgent.mockResolvedValue({ id: 'agent_1', userId: 'user_1' })
+    mocks.requireAgentModule.mockResolvedValue({ user: { role: 'AGENT' } })
     mocks.createIllustration.mockResolvedValue({
       id: 'ill_foresight_1',
       createdAt: new Date('2026-08-26T22:30:00.000Z'),

@@ -15,6 +15,9 @@ function access(
     requiredPlan: 'AGENT_INDIVIDUAL',
     founderEnrollmentId: 'founder-1',
     agencyInvitationId: null,
+    adminProvisionedAccessId: null,
+    paymentRequiredAt: null,
+    paymentReason: null,
     invitingAgencyName: null,
     accountType: 'AGENT',
     cohort: 'FOUNDERS_2026',
@@ -78,6 +81,27 @@ describe('buildTrialCountdownView', () => {
       plan: 'AGENT_AGENCY_MEMBER',
       endsAt: founderEnd.toISOString(),
       initialRemainingSeconds: 30 * 24 * 60 * 60,
+    })
+  })
+
+  it('shows the custom period for an administratively provisioned trial', () => {
+    const customEnd = new Date('2026-09-09T12:00:00.000Z')
+
+    expect(buildTrialCountdownView(access({
+      source: 'ADMIN_PROVISIONED',
+      founderEnrollmentId: null,
+      adminProvisionedAccessId: 'managed-access-1',
+      cohort: null,
+      trialEndsAt: customEnd,
+      subscription: {
+        ...access().subscription!,
+        currentPeriodEnd: customEnd,
+      },
+    }), now)).toEqual({
+      source: 'ADMIN_PROVISIONED',
+      plan: 'AGENT_INDIVIDUAL',
+      endsAt: customEnd.toISOString(),
+      initialRemainingSeconds: 14 * 24 * 60 * 60,
     })
   })
 

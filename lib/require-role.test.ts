@@ -83,4 +83,15 @@ describe('requireRole Founder boundary', () => {
     await expect(requireRole('AGENT')).rejects.toThrow('Forbidden: insufficient role')
     expect(mocks.requireFounderAccessForUser).not.toHaveBeenCalled()
   })
+
+  it('rejects suspended users before applying product access gates', async () => {
+    mocks.getSession.mockResolvedValueOnce({
+      user: { id: 'user-1', role: 'AGENT', banned: true },
+      session: { id: 'session-1' },
+    })
+
+    await expect(requireRole('AGENT')).rejects.toThrow('Forbidden: account access is suspended')
+    expect(mocks.requireFounderAccessForUser).not.toHaveBeenCalled()
+    expect(mocks.requireAgentOnboardingCompleteForUser).not.toHaveBeenCalled()
+  })
 })

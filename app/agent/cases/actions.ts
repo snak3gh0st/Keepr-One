@@ -14,10 +14,12 @@ import {
   parseCrmLocalDateTime,
 } from "@/lib/crm";
 import { getServerI18n } from "@/lib/i18n/server";
+import { requireAgentModule } from "@/lib/require-agent-module";
 
 export type CrmActionResult = { ok: true } | { ok: false; message: string };
 
 async function actionContext() {
+  await requireAgentModule("CRM");
   const agent = await getCurrentAgent();
   return {
     agent,

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   findAgent: vi.fn(),
   findFounderEnrollment: vi.fn(),
   findAcceptedAgencyInvitation: vi.fn(),
+  findAdminProvisionedAccess: vi.fn(),
   findPlatformSubscriptions: vi.fn(),
 }))
 
@@ -17,6 +18,9 @@ vi.mock('@/lib/prisma', () => ({
     },
     agencyInvitation: {
       findFirst: mocks.findAcceptedAgencyInvitation,
+    },
+    adminProvisionedAccess: {
+      findUnique: mocks.findAdminProvisionedAccess,
     },
     platformSubscription: {
       findMany: mocks.findPlatformSubscriptions,
@@ -115,6 +119,49 @@ function acceptedInvitation(
   }
 }
 
+function adminProvisionedAccess(
+  overrides: Partial<{
+    id: string
+    agentId: string
+    paymentRequiredAt: Date | null
+    paymentReason: string | null
+    platformSubscription: ReturnType<typeof adminSubscription>
+  }> = {},
+) {
+  return {
+    id: 'admin-access-1',
+    agentId: 'agent-1',
+    paymentRequiredAt: null,
+    paymentReason: null,
+    platformSubscription: adminSubscription(),
+    ...overrides,
+  }
+}
+
+function adminSubscription(
+  overrides: Partial<FounderAccessSubscription & {
+    agentId: string | null
+    agencyId: string | null
+    agencyMembershipId: string | null
+    agency: { memberships: Array<{ agentId: string }> } | null
+    agencyMembership: {
+      agentId: string
+      role: 'OWNER' | 'MEMBER'
+      endedAt: Date | null
+    } | null
+  }> = {},
+) {
+  return {
+    ...subscription(),
+    agentId: 'agent-1',
+    agencyId: null,
+    agencyMembershipId: null,
+    agency: null,
+    agencyMembership: null,
+    ...overrides,
+  }
+}
+
 describe('founder trial duration', () => {
   it('is exactly 2,592,000 seconds and does not mutate the start date', () => {
     const start = new Date('2026-03-07T17:30:00.000Z')
@@ -143,6 +190,7 @@ describe('founder access resolution', () => {
     vi.clearAllMocks()
     mocks.findFounderEnrollment.mockResolvedValue(founder())
     mocks.findAcceptedAgencyInvitation.mockResolvedValue(null)
+    mocks.findAdminProvisionedAccess.mockResolvedValue(null)
     mocks.findPlatformSubscriptions.mockResolvedValue([subscription()])
     mocks.findAgent.mockResolvedValue({ id: 'agent-1' })
   })
@@ -161,6 +209,9 @@ describe('founder access resolution', () => {
       requiredPlan: null,
       founderEnrollmentId: null,
       agencyInvitationId: null,
+      adminProvisionedAccessId: null,
+      paymentRequiredAt: null,
+      paymentReason: null,
       invitingAgencyName: null,
       accountType: null,
       cohort: null,
@@ -243,6 +294,7 @@ describe('founder access resolution', () => {
 
   it('makes an accepted invitation authoritative over a Founder enrollment', async () => {
     mocks.findAcceptedAgencyInvitation.mockResolvedValue(acceptedInvitation())
+    mocks.findAdminProvisionedAccess.mockResolvedValue(adminProvisionedAccess())
     mocks.findPlatformSubscriptions.mockResolvedValue([])
 
     await expect(resolveFounderAccessForAgent('agent-1')).resolves.toMatchObject({
@@ -256,6 +308,136 @@ describe('founder access resolution', () => {
         where: expect.objectContaining({ agencyMembershipId: 'membership-1' }),
       }),
     )
+  })
+
+  it('allows an administratively provisioned custom-duration trial', async () => {
+    const customStart = new Date('2026-08-14T12:00:00.000Z')
+    const customEnd = new Date('2026-08-18T12:00:00.000Z')
+    mocks.findFounderEnrollment.mockResolvedValue(null)
+    mocks.findAdminProvisionedAccess.mockResolvedValue(adminProvisionedAccess({
+      platformSubscription: adminSubscription({
+        currentPeriodStart: customStart,
+        currentPeriodEnd: customEnd,
+      }),
+    }))
+
+    await expect(resolveFounderAccessForAgent('agent-1')).resolves.toMatchObject({
+      state: 'TRIAL',
+      hasAccess: true,
+      source: 'ADMIN_PROVISIONED',
+      requiredPlan: 'AGENT_INDIVIDUAL',
+      founderEnrollmentId: null,
+      agencyInvitationId: null,
+      adminProvisionedAccessId: 'admin-access-1',
+      accountType: 'AGENT',
+      trialStartedAt: customStart,
+      trialEndsAt: customEnd,
+      subscription: { id: 'subscription-1', status: 'TRIALING' },
+    })
+    expect(mocks.findPlatformSubscriptions).not.toHaveBeenCalled()
+  })
+
+  it('makes administrative provisioning authoritative over a Founder enrollment', async () => {
+    mocks.findAdminProvisionedAccess.mockResolvedValue(adminProvisionedAccess({
+      paymentRequiredAt: new Date('2026-08-15T10:00:00.000Z'),
+      paymentReason: 'Período promocional encerrado.',
+    }))
+
+    await expect(resolveFounderAccessForAgent('agent-1')).resolves.toMatchObject({
+      state: 'EXPIRED',
+      hasAccess: false,
+      source: 'ADMIN_PROVISIONED',
+      founderEnrollmentId: null,
+      adminProvisionedAccessId: 'admin-access-1',
+      paymentReason: 'Período promocional encerrado.',
+    })
+    expect(mocks.findPlatformSubscriptions).not.toHaveBeenCalled()
+  })
+
+  it('enforces an administrative payment requirement during a current trial', async () => {
+    mocks.findFounderEnrollment.mockResolvedValue(null)
+    mocks.findAdminProvisionedAccess.mockResolvedValue(adminProvisionedAccess({
+      paymentRequiredAt: new Date('2026-08-15T10:00:00.000Z'),
+      paymentReason: 'Ativação comercial necessária.',
+    }))
+
+    await expect(resolveFounderAccessForAgent('agent-1')).resolves.toMatchObject({
+      state: 'EXPIRED',
+      hasAccess: false,
+      source: 'ADMIN_PROVISIONED',
+      paymentReason: 'Ativação comercial necessária.',
+      subscription: { status: 'TRIALING' },
+    })
+  })
+
+  it('lets a current provider-confirmed payment restore an earlier administrative hold', async () => {
+    mocks.findFounderEnrollment.mockResolvedValue(null)
+    mocks.findAdminProvisionedAccess.mockResolvedValue(adminProvisionedAccess({
+      paymentRequiredAt: new Date('2026-08-15T10:00:00.000Z'),
+      paymentReason: 'Hold antigo.',
+      platformSubscription: adminSubscription({ status: 'ACTIVE' }),
+    }))
+
+    await expect(resolveFounderAccessForAgent('agent-1')).resolves.toMatchObject({
+      state: 'PAID',
+      hasAccess: true,
+      source: 'ADMIN_PROVISIONED',
+      subscription: { status: 'ACTIVE' },
+    })
+  })
+
+  it.each([
+    { label: 'starts in the future', start: new Date(middleOfTrial.getTime() + 1), end: trialEndsAt },
+    { label: 'ends now', start: trialStartedAt, end: middleOfTrial },
+    { label: 'has no start', start: null, end: trialEndsAt },
+    { label: 'has no end', start: trialStartedAt, end: null },
+  ])('fails closed when an admin-provisioned trial $label', async ({ start, end }) => {
+    mocks.findFounderEnrollment.mockResolvedValue(null)
+    mocks.findAdminProvisionedAccess.mockResolvedValue(adminProvisionedAccess({
+      platformSubscription: adminSubscription({
+        currentPeriodStart: start,
+        currentPeriodEnd: end,
+      }),
+    }))
+
+    await expect(resolveFounderAccessForAgent('agent-1')).resolves.toMatchObject({
+      state: 'EXPIRED',
+      hasAccess: false,
+      source: 'ADMIN_PROVISIONED',
+    })
+  })
+
+  it('fails closed when the managed subscription belongs to a different agent', async () => {
+    mocks.findFounderEnrollment.mockResolvedValue(null)
+    mocks.findAdminProvisionedAccess.mockResolvedValue(adminProvisionedAccess({
+      platformSubscription: adminSubscription({ agentId: 'another-agent' }),
+    }))
+
+    await expect(resolveFounderAccessForAgent('agent-1')).resolves.toMatchObject({
+      state: 'EXPIRED',
+      hasAccess: false,
+      source: 'ADMIN_PROVISIONED',
+    })
+  })
+
+  it('validates an admin-provisioned agency plan against its active owner', async () => {
+    mocks.findFounderEnrollment.mockResolvedValue(null)
+    mocks.findAdminProvisionedAccess.mockResolvedValue(adminProvisionedAccess({
+      platformSubscription: adminSubscription({
+        plan: 'AGENCY',
+        agentId: null,
+        agencyId: 'agency-1',
+        agency: { memberships: [{ agentId: 'agent-1' }] },
+      }),
+    }))
+
+    await expect(resolveFounderAccessForAgent('agent-1')).resolves.toMatchObject({
+      state: 'TRIAL',
+      hasAccess: true,
+      source: 'ADMIN_PROVISIONED',
+      requiredPlan: 'AGENCY',
+      accountType: 'AGENCY',
+    })
   })
 
   it.each([
