@@ -1,4 +1,4 @@
-import { parseStagePlan, type StagePlan } from './capabilities'
+import { isSafePolicyDetailPath, parseStagePlan, type StagePlan } from './capabilities'
 import { parseForesightProgressPhase, type ForesightProgressPhase } from './foresight-progress'
 
 export type ConnectorStatus = 'UNPAIRED' | 'PAIRING' | 'READY' | 'ERROR'
@@ -122,6 +122,10 @@ export type CommandState = {
   /// Hash only, never the illustration input. Lets a new command resume the
   /// exact same interrupted Term case without re-opening or repopulating it.
   termInputHash?: string
+  /// Fresh opaque route resolved from the authenticated All Clients grid for
+  /// this command. National Life rotates these ids, so the server's historical
+  /// locator is only a hint and is never persisted here as current truth.
+  policyDetailPath?: string
   credentialPageReloadedAt?: string
   credentialAttempt?: CredentialAttempt
 }
@@ -216,6 +220,9 @@ export function parseCommandState(value: unknown): CommandState {
   if (phase) state.phase = phase
   if (typeof value.termInputHash === 'string' && /^[a-f0-9]{64}$/.test(value.termInputHash)) {
     state.termInputHash = value.termInputHash
+  }
+  if (typeof value.policyDetailPath === 'string' && isSafePolicyDetailPath(value.policyDetailPath)) {
+    state.policyDetailPath = value.policyDetailPath
   }
   if (
     typeof value.credentialPageReloadedAt === 'string' &&

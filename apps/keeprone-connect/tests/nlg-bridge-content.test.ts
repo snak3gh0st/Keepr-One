@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ capture: vi.fn() }))
+const mocks = vi.hoisted(() => ({ capture: vi.fn(), locate: vi.fn() }))
 vi.mock('../lib/policy-detail', async () => {
   const actual = await vi.importActual<typeof import('../lib/policy-detail')>('../lib/policy-detail')
   return { ...actual, captureNationalLifePolicyDetail: mocks.capture }
 })
+vi.mock('../lib/policy-detail-locator', () => ({
+  locateCurrentPolicyDetailPath: mocks.locate,
+}))
 
 type MessageListener = (
   value: unknown,
@@ -22,6 +25,7 @@ beforeEach(() => {
   windowMessageListener = undefined
   postMessage.mockReset()
   mocks.capture.mockReset()
+  mocks.locate.mockReset()
   vi.stubGlobal('defineContentScript', (config: unknown) => config)
   vi.stubGlobal('location', {
     pathname: '/agent/book-of-business/inforce-book/all-clients/policy-details',
@@ -44,6 +48,40 @@ beforeEach(() => {
 })
 
 describe('National Life isolated-world bridge', () => {
+  it('returns the current exact policy route from the authenticated grid', async () => {
+    const navigatePath =
+      `/agent/book-of-business/inforce-book/all-clients/policy-details?id=${'b'.repeat(32)}`
+    mocks.locate.mockResolvedValue(navigatePath)
+    vi.stubGlobal('location', {
+      pathname: '/agent/book-of-business/inforce-book/all-clients/all-clients-agent',
+      href: 'https://www.nationallife.com/agent/book-of-business/inforce-book/all-clients/all-clients-agent',
+      origin: 'https://www.nationallife.com',
+    })
+    const content = (await import('../entrypoints/nlg-bridge.content')).default as unknown as {
+      main: () => void
+    }
+    content.main()
+
+    const response = await new Promise<unknown>((resolve) => {
+      expect(listener?.({
+        type: 'LOCATE_POLICY_DETAIL',
+        expectedPolicyNumber: 'LS1473219',
+        token: 't'.repeat(32),
+        correlationId: 'c'.repeat(16),
+      }, {}, resolve)).toBe(true)
+    })
+
+    expect(mocks.locate).toHaveBeenCalledWith(document, 'LS1473219')
+    expect(response).toEqual({
+      ok: true,
+      type: 'POLICY_DETAIL_LOCATED',
+      expectedPolicyNumber: 'LS1473219',
+      navigatePath,
+      token: 't'.repeat(32),
+      correlationId: 'c'.repeat(16),
+    })
+  })
+
   it('clicks the exact iGO e-App link from National Life Tools', async () => {
     const click = vi.fn()
     const anchors = [

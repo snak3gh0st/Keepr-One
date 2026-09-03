@@ -1,5 +1,6 @@
 import {
   parseConnectorCommandDispatch,
+  isSafePolicyDetailPath,
   parseStagePlan,
   type ConnectorCommandDispatch,
   type StagePlan,
@@ -33,6 +34,7 @@ import { openSealedCredentialLease } from '../lib/credential-envelope'
 import {
   parseBridgeMessage,
   parseCapturePolicyDetailAck,
+  parseLocatePolicyDetailAck,
   parsePageCaptureAck,
   parseProbeAuthAck,
   parseExternalMessage,
@@ -42,6 +44,7 @@ import {
   type BridgeMessage,
   type CapturePageMessage,
   type CapturePolicyDetailMessage,
+  type LocatePolicyDetailMessage,
   type BeginExportMessage,
   type BeginDocumentMessage,
   type DocumentControlAck,
@@ -307,6 +310,32 @@ async function capturePolicyDetailWithRetry(
         response.detail.expectedPolicyNumber !== message.expectedPolicyNumber
       ) throw new Error('BRIDGE_UNAVAILABLE')
       return response.detail
+    } catch (error) {
+      lastError = error
+      const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError ?? new Error('BRIDGE_UNAVAILABLE')
+}
+
+async function locatePolicyDetailWithRetry(
+  tabId: number,
+  message: LocatePolicyDetailMessage,
+) {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = parseLocatePolicyDetailAck(await chrome.tabs.sendMessage(tabId, message))
+      if (
+        !response ||
+        response.token !== message.token ||
+        response.correlationId !== message.correlationId ||
+        response.expectedPolicyNumber !== message.expectedPolicyNumber ||
+        !isSafePolicyDetailPath(response.navigatePath)
+      ) throw new Error('BRIDGE_UNAVAILABLE')
+      return response.navigatePath
     } catch (error) {
       lastError = error
       const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
@@ -747,11 +776,13 @@ async function executePolicyDetailCommand(
   const previous = await readCommandState()
   const sameCommand = previous.commandId === dispatch.command.commandId
   let carrierTabId = sameCommand ? previous.carrierTabId : undefined
+  let policyDetailPath = sameCommand ? previous.policyDetailPath : undefined
   let sequence = dispatch.nextEventSequence
   await writeCommandState({
     commandId: dispatch.command.commandId,
     runId: dispatch.command.runId,
     carrierTabId,
+    ...(policyDetailPath ? { policyDetailPath } : {}),
     nextEventSequence: sequence,
     status: 'NAVIGATING',
     ...(sameCommand && previous.credentialAttempt
@@ -764,7 +795,8 @@ async function executePolicyDetailCommand(
     updatedAt: new Date().toISOString(),
   })
 
-  const targetUrl = `${NLG_ORIGIN}${params.navigatePath}`
+  const policyLookupPath = '/agent/book-of-business/inforce-book/all-clients/all-clients-agent'
+  const targetUrl = `${NLG_ORIGIN}${policyDetailPath ?? policyLookupPath}`
   const tab = await findBoundCommandTab(carrierTabId, hint)
   if (!tab?.id) {
     const created = await chrome.tabs.create({ active: false, url: targetUrl })
@@ -802,7 +834,8 @@ async function executePolicyDetailCommand(
     await focusCarrierTabForAuthRequirement(tab.id, requirement, tab.active)
     return
   }
-  if (`${currentUrl.pathname}${currentUrl.search}` !== params.navigatePath) {
+  const currentPath = `${currentUrl.pathname}${currentUrl.search}`
+  if (!policyDetailPath && currentPath !== policyLookupPath) {
     await updateTab(tab.id, { url: targetUrl })
     return
   }
@@ -821,6 +854,28 @@ async function executePolicyDetailCommand(
     return
   }
 
+  if (!policyDetailPath) {
+    policyDetailPath = await locatePolicyDetailWithRetry(tab.id, {
+      type: 'LOCATE_POLICY_DETAIL',
+      expectedPolicyNumber: params.policyNumber,
+      token: randomToken(),
+      correlationId: crypto.randomUUID(),
+    })
+    await writeCommandState({
+      ...(await readCommandState()),
+      carrierTabId: tab.id,
+      policyDetailPath,
+      status: 'NAVIGATING',
+      updatedAt: new Date().toISOString(),
+    })
+    await updateTab(tab.id, { url: `${NLG_ORIGIN}${policyDetailPath}` })
+    return
+  }
+  if (currentPath !== policyDetailPath) {
+    await updateTab(tab.id, { url: `${NLG_ORIGIN}${policyDetailPath}` })
+    return
+  }
+
   await writeCommandState({
     ...(await readCommandState()), carrierTabId: tab.id, status: 'RUNNING',
     updatedAt: new Date().toISOString(),
@@ -834,7 +889,7 @@ async function executePolicyDetailCommand(
     const detail = await capturePolicyDetailWithRetry(tab.id, {
       type: 'CAPTURE_POLICY_DETAIL',
       expectedPolicyNumber: params.policyNumber,
-      navigatePath: params.navigatePath,
+      navigatePath: policyDetailPath,
       token,
       correlationId,
     })

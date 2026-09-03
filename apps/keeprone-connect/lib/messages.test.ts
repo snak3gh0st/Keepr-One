@@ -10,6 +10,8 @@ import {
   parseBeginDocumentMessage,
   parseCapturePolicyDetailAck,
   parseCapturePolicyDetailMessage,
+  parseLocatePolicyDetailAck,
+  parseLocatePolicyDetailMessage,
   parseExecuteFlexLifeQuoteMessage,
   parseFlexLifeQuoteMainResult,
 } from './messages'
@@ -282,6 +284,33 @@ describe('policy detail messages', () => {
       ...message, navigatePath: `${navigatePath}&next=/agent/x`,
     })).toBeNull()
     expect(parseCapturePolicyDetailMessage({ ...message, password: 'no' })).toBeNull()
+  })
+
+  it('accepts only a bounded exact policy lookup and a safe correlated result', () => {
+    const message = {
+      type: 'LOCATE_POLICY_DETAIL',
+      expectedPolicyNumber: 'LS1473219',
+      ...identity,
+    }
+    expect(parseLocatePolicyDetailMessage(message)).toEqual(message)
+    expect(parseLocatePolicyDetailMessage({ ...message, password: 'no' })).toBeNull()
+
+    const response = {
+      ok: true,
+      type: 'POLICY_DETAIL_LOCATED',
+      expectedPolicyNumber: 'LS1473219',
+      navigatePath,
+      ...identity,
+    }
+    expect(parseLocatePolicyDetailAck(response)).toEqual(response)
+    expect(parseLocatePolicyDetailAck({
+      ...response,
+      navigatePath: `${navigatePath}&next=/agent/x`,
+    })).toBeNull()
+    expect(parseLocatePolicyDetailAck({
+      ...response,
+      expectedPolicyNumber: 'OTHER',
+    })).not.toBeNull()
   })
 
   it('accepts only approved fields in a bounded correlated response', () => {
