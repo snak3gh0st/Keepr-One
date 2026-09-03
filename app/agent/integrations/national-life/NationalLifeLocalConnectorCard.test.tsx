@@ -979,7 +979,9 @@ describe('NationalLifeLocalConnectorCard', () => {
         baseUrl={baseUrl}
       />,
     )
-    await vi.advanceTimersByTimeAsync(0)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
     screen.getByRole('button', { name: 'Sync National Life' }).click()
     await vi.advanceTimersByTimeAsync(60_000)
 
@@ -1057,7 +1059,9 @@ describe('NationalLifeLocalConnectorCard', () => {
         baseUrl={baseUrl}
       />,
     )
-    await vi.advanceTimersByTimeAsync(0)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
     screen.getByRole('button', { name: 'Sync National Life' }).click()
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000)

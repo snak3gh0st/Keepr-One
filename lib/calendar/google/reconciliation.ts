@@ -80,16 +80,22 @@ export async function reconcileGoogleCalendarWatches(
     where: {
       visible: true,
       integration: { status: 'CONNECTED' },
+      OR: [
+        { pushNotificationsSupported: null },
+        { pushNotificationsSupported: true },
+      ],
       watchChannels: { none: { status: 'ACTIVE', expiresAt: { gt: now } } },
     },
     select: { id: true },
   })
   let registered = 0
+  let unsupported = 0
   for (const source of sources) {
-    await registerGoogleCalendarWatch(source.id, env, { now, db })
-    registered += 1
+    const result = await registerGoogleCalendarWatch(source.id, env, { now, db })
+    if (result.supported) registered += 1
+    else unsupported += 1
   }
-  return { renewed, registered }
+  return { renewed, registered, unsupported }
 }
 
 export type CalendarInternalAuthResult = 'OK' | 'NOT_CONFIGURED' | 'DENIED'

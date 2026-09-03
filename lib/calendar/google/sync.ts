@@ -574,6 +574,13 @@ export async function applyGoogleEvent(
       })
     }
     return { changed: true, cancelled: mapped.status === 'CANCELLED' }
+  }, {
+    // The default interactive-transaction timeout is only five seconds. A
+    // single inbound event can legitimately update its projection, attendees,
+    // CRM timeline and notifications; production connection latency must not
+    // expire that atomic unit midway through the write.
+    maxWait: 10_000,
+    timeout: 30_000,
   })
 }
 

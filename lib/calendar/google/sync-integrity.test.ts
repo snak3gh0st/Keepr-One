@@ -44,7 +44,8 @@ describe('Google inbound/local outbox race', () => {
       caseTimelineEvent: { findMany: vi.fn(), create: timelineCreate },
       notification: { upsert: vi.fn() },
     }
-    const db = { $transaction: async (run: (value: typeof tx) => unknown) => run(tx) }
+    const transaction = vi.fn(async (run: (value: typeof tx) => unknown) => run(tx))
+    const db = { $transaction: transaction }
 
     const result = await applyGoogleEvent(db as never, {
       ownerUserId: 'user-1',
@@ -65,6 +66,10 @@ describe('Google inbound/local outbox race', () => {
     expect(update).not.toHaveBeenCalled()
     expect(attendeeDelete).not.toHaveBeenCalled()
     expect(timelineCreate).not.toHaveBeenCalled()
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 10_000,
+      timeout: 30_000,
+    })
   })
 
   it.each(['PROCESSING', 'ERROR'] as const)(
