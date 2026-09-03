@@ -164,34 +164,49 @@ describe('onboarding server actions', () => {
         name: 'Maria Agent',
         phone: '+1 305 555 0100',
         timeZone: 'America/New_York',
-        npn: '',
+        npn: 'invalid',
       }),
     )
 
     expect(result).toMatchObject({
       status: 'error',
       message: 'Review the highlighted fields.',
-      fieldErrors: { npn: 'Enter your NPN.' },
+      fieldErrors: { npn: 'Use 4 to 20 digits for the NPN.' },
     })
   })
 
-  it('requires a 4–20 digit NPN before doing authenticated or database work', async () => {
+  it('validates the optional NPN when supplied before authenticated or database work', async () => {
     const result = await saveOnboardingProfileAction(
       INITIAL_ONBOARDING_ACTION_STATE,
       form({
         name: 'Maria Agent',
         phone: '+1 305 555 0100',
         timeZone: 'America/New_York',
-        npn: '',
+        npn: '12',
       }),
     )
 
     expect(result).toMatchObject({
       status: 'error',
-      fieldErrors: { npn: 'Informe seu NPN.' },
+      fieldErrors: { npn: 'Use de 4 a 20 números no NPN.' },
     })
     expect(mocks.requireRoleWithoutOnboarding).not.toHaveBeenCalled()
     expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it('saves the profile and advances without an NPN', async () => {
+    current = onboarding({ currentStep: 'PROFILE', welcomeCompletedAt: now })
+
+    const result = await saveOnboardingProfileAction(
+      INITIAL_ONBOARDING_ACTION_STATE,
+      form({ name: 'Maria Agent', phone: '+13055550100', timeZone: 'America/New_York', npn: '' }),
+    )
+
+    expect(result).toMatchObject({ status: 'success', onboarding: { currentStep: 'NATIONAL_LIFE' } })
+    expect(mocks.agentUpdate).toHaveBeenCalledWith({
+      where: { id: 'agent-1' },
+      data: { phone: '+13055550100', npn: null },
+    })
   })
 
   it('saves profile fields in the authenticated agent tenant and audits the change', async () => {

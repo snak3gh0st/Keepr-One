@@ -466,7 +466,7 @@ function ProfileCard({
         <StepState state={phase} />
       </header>
       <h2 id="onboarding-profile-title">{copy("Confirme como sua operação identifica você.", "Confirm how your operation identifies you.")}</h2>
-      <p>{copy("Nome, telefone, fuso e NPN conectam agenda, produção e carteira ao perfil correto.", "Your name, phone, time zone, and NPN connect your calendar, production, and book to the right profile.")}</p>
+      <p>{copy("Nome, telefone e fuso conectam sua operação ao perfil correto. O NPN é opcional.", "Your name, phone, and time zone connect your work to the right profile. NPN is optional.")}</p>
 
       <form action={action} aria-describedby={state.message ? "onboarding-profile-feedback" : undefined}>
         <Field label={copy("Nome completo", "Full name")} htmlFor="onboarding-name" error={nameError} required>
@@ -481,8 +481,8 @@ function ProfileCard({
             {TIME_ZONE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option[language]}</option>)}
           </Select>
         </Field>
-        <Field label="NPN" htmlFor="onboarding-npn" hint={copy("Informe de 4 a 20 números do identificador associado à sua produção.", "Enter the 4 to 20 digit identifier associated with your production.")} error={npnError} required>
-          <Input id="onboarding-npn" name="npn" inputMode="numeric" autoComplete="off" minLength={4} maxLength={20} pattern="[0-9]{4,20}" defaultValue={profile.npn} required disabled={!enabled || pending} aria-invalid={Boolean(npnError)} aria-describedby={describedBy("onboarding-npn", npnError, true)} />
+        <Field label="NPN" htmlFor="onboarding-npn" hint={copy("Opcional. Se informar, use de 4 a 20 números.", "Optional. If provided, use 4 to 20 digits.")} error={npnError}>
+          <Input id="onboarding-npn" name="npn" inputMode="numeric" autoComplete="off" minLength={4} maxLength={20} pattern="[0-9]{4,20}" defaultValue={profile.npn} disabled={!enabled || pending} aria-invalid={Boolean(npnError)} aria-describedby={describedBy("onboarding-npn", npnError, true)} />
         </Field>
 
         <ActionFeedback state={state} id="onboarding-profile-feedback" />

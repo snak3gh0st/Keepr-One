@@ -140,7 +140,7 @@ describe("OnboardingExperience", () => {
     expect(screen.getByText(/Your progress is saved/)).toBeVisible();
   });
 
-  it("renders the resumable flow, exact bento geometry and required NPN", () => {
+  it("renders the resumable flow, exact bento geometry and optional NPN", () => {
     const { container } = render(<OnboardingExperience {...BASE_PROPS} />);
 
     expect(container.querySelector("main")).toHaveClass(
@@ -171,7 +171,7 @@ describe("OnboardingExperience", () => {
     );
 
     const npn = screen.getByLabelText(/NPN/);
-    expect(npn).toBeRequired();
+    expect(npn).not.toBeRequired();
     expect(npn).toHaveAttribute("minlength", "4");
     expect(npn).toHaveAttribute("maxlength", "20");
     expect(screen.getByLabelText(/Nome completo/)).toBeEnabled();
