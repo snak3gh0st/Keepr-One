@@ -47,6 +47,7 @@ export type NationalLifePortfolioMetrics = {
   hasData: boolean
   activeClients: number
   clientCoverageComplete: boolean
+  clientMissingPolicies: number
   activePolicies: number
   activeAap: number
   averageAapPerClient: number | null
@@ -86,6 +87,7 @@ export function buildNationalLifePortfolioMetrics(
   const atRiskPremiumKnownPolicies = pendingLapseAaps.filter((premium) => premium !== null).length
   const activeClients = new Set(activeRows.map((row) => row.clientId).filter(Boolean)).size
   const clientCoverageComplete = activeRows.every((row) => row.clientId !== null)
+  const clientMissingPolicies = activeRows.filter((row) => row.clientId === null).length
   const premiumCoverageComplete = activeRows.length > 0 && premiumKnownPolicies === activeRows.length
   const lastUpdatedAt = rows.reduce<Date | null>(
     (latest, row) => row.sourceUpdatedAt && (!latest || row.sourceUpdatedAt > latest)
@@ -98,6 +100,7 @@ export function buildNationalLifePortfolioMetrics(
     hasData: rows.length > 0,
     activeClients,
     clientCoverageComplete,
+    clientMissingPolicies,
     activePolicies: activeRows.length,
     activeAap,
     averageAapPerClient:

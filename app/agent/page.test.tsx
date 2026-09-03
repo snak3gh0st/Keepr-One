@@ -306,7 +306,7 @@ describe('AgentDashboard module access', () => {
     expect(hero).not.toBeNull()
     expect(queue).not.toBeNull()
 
-    expect(within(hero!).getByText('Clientes ativos').parentElement).toHaveTextContent('2')
+    expect(within(hero!).getByText('Clientes ativos conciliados').parentElement).toHaveTextContent('2')
     expect(within(hero!).getByText('Apólices ativas').parentElement).toHaveTextContent('2')
     expect(within(hero!).getByText('AAP ativa').parentElement).toHaveTextContent(/3\.000/)
     expect(within(hero!).getByText('AAP média por cliente').parentElement).toHaveTextContent(/1\.500/)

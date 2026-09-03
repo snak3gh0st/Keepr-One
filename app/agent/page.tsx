@@ -434,7 +434,7 @@ export default async function AgentDashboard({
       : []),
     ...(canUsePolicies
       ? [
-          { label: copy('Clientes ativos National', 'Active National clients'), value: hasPortfolioData && portfolioMetrics.clientCoverageComplete ? countValue(portfolioMetrics.activeClients) : '—' },
+          { label: copy('Clientes ativos conciliados', 'Reconciled active clients'), value: hasPortfolioData ? countValue(portfolioMetrics.activeClients) : '—' },
           { label: copy('Apólices ativas', 'Active policies'), value: hasPortfolioData ? countValue(portfolioMetrics.activePolicies) : '—' },
           { label: copy('AAP ativa', 'Active AAP'), value: activeAapValue },
           { label: copy('AAP em risco', 'AAP at risk'), value: atRiskAapValue },
@@ -608,13 +608,15 @@ export default async function AgentDashboard({
                       <div data-hero-reveal className="mt-6 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2 xl:grid-cols-4">
                         {[
                           {
-                            label: copy('Clientes ativos', 'Active clients'),
-                            display: portfolioMetrics.clientCoverageComplete ? countValue(portfolioMetrics.activeClients) : '—',
+                            label: copy('Clientes ativos conciliados', 'Reconciled active clients'),
+                            display: countValue(portfolioMetrics.activeClients),
                             tone: 'text-paper',
-                            detail: copy(
-                              `${portfolioMetrics.activePolicies} apólices em vigor`,
-                              `${portfolioMetrics.activePolicies} in-force policies`,
-                            ),
+                            detail: portfolioMetrics.clientCoverageComplete
+                              ? copy(`${portfolioMetrics.activePolicies} apólices em vigor`, `${portfolioMetrics.activePolicies} in-force policies`)
+                              : copy(
+                                  `${portfolioMetrics.clientMissingPolicies} apólices aguardam vínculo de cliente`,
+                                  `${portfolioMetrics.clientMissingPolicies} policies await client reconciliation`,
+                                ),
                           },
                           {
                             label: copy('Apólices ativas', 'Active policies'),

@@ -33,7 +33,7 @@ describe('current completed National portfolio', () => {
     const result = currentPortfolioFromSnapshot({ rows: [row('new', '1200')], stored: [], observedAt })
     expect(buildNationalLifePortfolioMetrics(result.rows)).toMatchObject({
       activeAap: 1200, premiumCoverageComplete: true, clientCoverageComplete: false,
-      averageAapPerClient: null, activeClients: 0,
+      clientMissingPolicies: 1, averageAapPerClient: null, activeClients: 0,
     })
   })
   it('rejects conflicting duplicates instead of choosing a convenient amount', () => {
