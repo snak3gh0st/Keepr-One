@@ -9,15 +9,14 @@ export function prismaIngestDeps(prisma: PrismaClient): IngestDeps {
         where: { id: agentId },
         select: { npn: true, status: true },
       })
-      if (!agent?.npn || agent.status !== 'ACTIVE') return []
+      if (!agent || agent.status !== 'ACTIVE') return []
 
       return (await prisma.nationalLifeInforcePolicy.findMany({
         where: {
           agentId,
-          // `agentId` is the connector/uploader. The carrier's agent number is
-          // the producer identity; an unowned row must never be promoted into
-          // this agent's CRM portfolio.
-          agentNumber: agent.npn,
+          // The authenticated connector owns this partition. NPN is optional;
+          // when supplied it adds a producer filter, never a global lookup.
+          ...(agent.npn ? { agentNumber: agent.npn } : {}),
         },
         select: {
           deploymentScope: true,
