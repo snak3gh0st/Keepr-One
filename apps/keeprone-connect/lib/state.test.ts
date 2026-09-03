@@ -3,13 +3,16 @@ import { parseCommandState, parseCredentialAttempt, parseSyncState } from './sta
 
 describe('parseCommandState', () => {
   it('keeps valid durable coordination metadata across extension restarts', () => {
+    const policyDetailPath = `/agent/book-of-business/inforce-book/all-clients/policy-details?id=${'a'.repeat(32)}`
     expect(parseCommandState({
       status: 'RUNNING', commandId: 'command_1', runId: 'run_1', carrierTabId: 12,
       nextEventSequence: 3, phase: 'VERIFYING_VALUES', termInputHash: 'a'.repeat(64),
+      policyDetailPath,
       updatedAt: '2026-08-31T20:00:00.000Z',
     })).toEqual({
       status: 'RUNNING', commandId: 'command_1', runId: 'run_1', carrierTabId: 12,
       nextEventSequence: 3, phase: 'VERIFYING_VALUES', termInputHash: 'a'.repeat(64),
+      policyDetailPath,
       updatedAt: '2026-08-31T20:00:00.000Z',
     })
   })
@@ -23,6 +26,7 @@ describe('parseCommandState', () => {
     expect(parseCommandState({
       status: 'AUTH_REQUIRED', commandId: '', runId: 'run_1', carrierTabId: -1,
       nextEventSequence: -2, phase: 'UNKNOWN_PHASE', termInputHash: 'not-a-hash',
+      policyDetailPath: '/agent/book-of-business/inforce-book/all-clients/policy-details?id=../../admin',
       errorCode: '<html>', updatedAt: 'yesterday',
     })).toEqual({ status: 'AUTH_REQUIRED', runId: 'run_1' })
   })

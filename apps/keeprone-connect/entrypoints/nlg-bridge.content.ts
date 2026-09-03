@@ -4,6 +4,7 @@ import {
   parseBridgeMessage,
   parseCapturePageMessage,
   parseCapturePolicyDetailMessage,
+  parseLocatePolicyDetailMessage,
   parseBeginDocumentMessage,
   parseBeginExportMessage,
   parseProbeAuthMessage,
@@ -16,6 +17,7 @@ import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
 import { isAuthenticatedAgentResponse } from '../lib/auth-probe'
 import { capturePageSnapshot } from '../lib/page-snapshot'
 import { captureNationalLifePolicyDetail } from '../lib/policy-detail'
+import { locateCurrentPolicyDetailPath } from '../lib/policy-detail-locator'
 import { exactIgoEAppHref, parseOpenIgoEAppMessage } from '../lib/nlg-tool-launcher'
 
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
@@ -101,6 +103,31 @@ export default defineContentScript({
           records: capturePageSnapshot(document, new URL(location.href)),
         })
         return false
+      }
+      const policyLookup = parseLocatePolicyDetailMessage(value)
+      if (policyLookup) {
+        void locateCurrentPolicyDetailPath(document, policyLookup.expectedPolicyNumber).then(
+          (navigatePath) => sendResponse({
+            ok: true,
+            type: 'POLICY_DETAIL_LOCATED',
+            expectedPolicyNumber: policyLookup.expectedPolicyNumber,
+            navigatePath,
+            token: policyLookup.token,
+            correlationId: policyLookup.correlationId,
+          }),
+          (error: unknown) => sendResponse({
+            ok: false,
+            type: 'POLICY_DETAIL_LOOKUP_FAILED',
+            token: policyLookup.token,
+            correlationId: policyLookup.correlationId,
+            code: error instanceof Error && [
+              'POLICY_DETAIL_LOOKUP_UNAVAILABLE', 'POLICY_DETAIL_NOT_FOUND',
+            ].includes(error.message)
+              ? error.message
+              : 'POLICY_DETAIL_LOOKUP_FAILED',
+          }),
+        )
+        return true
       }
       const quote = parseExecuteFlexLifeQuoteMessage(value)
       if (quote) {

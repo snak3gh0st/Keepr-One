@@ -55,6 +55,8 @@ const PAYABLE_PERSONAL_PATH =
   '/agent/compensation/commissions/projected-commissions/payable-gross-commissions/personal'
 const POLICY_DETAIL_PATH =
   `/agent/book-of-business/inforce-book/all-clients/policy-details?id=${'a'.repeat(32)}`
+const CURRENT_POLICY_DETAIL_PATH =
+  `/agent/book-of-business/inforce-book/all-clients/policy-details?id=${'b'.repeat(32)}`
 const FORESIGHT_PDF = new TextEncoder().encode('%PDF-1.7\n')
 const FORESIGHT_PDF_HASH = createHash('sha256').update(FORESIGHT_PDF).digest('hex')
 const FORESIGHT_PDF_BASE64 = Buffer.from(FORESIGHT_PDF).toString('base64')
@@ -122,6 +124,8 @@ async function defaultTabMessageResponse(tabId: number, message: unknown): Promi
     sourceKey?: string
     token?: string
     correlationId?: string
+    expectedPolicyNumber?: string
+    navigatePath?: string
     inputHash?: string
     payloadHash?: string
     snapshot?: { carrierCaseName?: string }
@@ -160,15 +164,25 @@ async function defaultTabMessageResponse(tabId: number, message: unknown): Promi
       token: value.token,
       correlationId: value.correlationId,
       detail: {
-        navigatePath: POLICY_DETAIL_PATH,
-        expectedPolicyNumber: 'LS1473219',
-        visiblePolicyNumber: 'LS1473219',
+        navigatePath: value.navigatePath,
+        expectedPolicyNumber: value.expectedPolicyNumber,
+        visiblePolicyNumber: value.expectedPolicyNumber,
         observedAt: '2026-08-26T17:00:00.000Z',
         fields: [
           { section: 'COVERAGE', label: 'Total Face Amount', value: '$100,000.00' },
           { section: 'PAYMENTS', label: 'Anticipated Annual Premium', value: '$5,100.00' },
         ],
       },
+    }
+  }
+  if (value.type === 'LOCATE_POLICY_DETAIL') {
+    return {
+      ok: true,
+      type: 'POLICY_DETAIL_LOCATED',
+      token: value.token,
+      correlationId: value.correlationId,
+      expectedPolicyNumber: value.expectedPolicyNumber,
+      navigatePath: CURRENT_POLICY_DETAIL_PATH,
     }
   }
   if (value.type === 'EXECUTE_FORESIGHT_ILLUSTRATION') {
@@ -1544,7 +1558,7 @@ describe('background plan executor', () => {
     releaseBackgroundPoll(undefined)
 
     await vi.waitFor(() => expect(pollCalls).toBe(2))
-    expect(tabs.create).toHaveBeenCalledWith({ active: false, url: `${NLG}${POLICY_DETAIL_PATH}` })
+    expect(tabs.create).toHaveBeenCalledWith({ active: false, url: `${NLG}${INFORCE_PATH}` })
   })
 
   it('executes a sealed FlexLife quote in the agent portal instead of Steel', async () => {
@@ -1982,18 +1996,30 @@ describe('background plan executor', () => {
     emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
     await flush()
 
-    expect(tabs.create).toHaveBeenCalledWith({ active: false, url: `${NLG}${POLICY_DETAIL_PATH}` })
+    expect(tabs.create).toHaveBeenCalledWith({ active: false, url: `${NLG}${INFORCE_PATH}` })
     expect(storage.command).toMatchObject({
       commandId: 'cmd_policy_1', carrierTabId: 4, status: 'NAVIGATING',
     })
 
     emit('tabs.onUpdated', 4, { status: 'complete' }, {
-      id: 4, active: false, url: `${NLG}${POLICY_DETAIL_PATH}`,
+      id: 4, active: false, url: `${NLG}${INFORCE_PATH}`,
+    })
+    await flush()
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(4, expect.objectContaining({
+      type: 'LOCATE_POLICY_DETAIL', expectedPolicyNumber: 'LS1473219',
+    }))
+    expect(tabs.update).toHaveBeenCalledWith(4, { url: `${NLG}${CURRENT_POLICY_DETAIL_PATH}` })
+    expect(storage.command).toMatchObject({ policyDetailPath: CURRENT_POLICY_DETAIL_PATH })
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: false, url: `${NLG}${CURRENT_POLICY_DETAIL_PATH}`,
     })
     await flush()
 
     expect(tabs.sendMessage).toHaveBeenCalledWith(4, expect.objectContaining({
       type: 'CAPTURE_POLICY_DETAIL', expectedPolicyNumber: 'LS1473219',
+      navigatePath: CURRENT_POLICY_DETAIL_PATH,
     }))
     const events = vi.mocked(signedJsonRequest).mock.calls
       .map(([input]) => input)
@@ -2051,7 +2077,19 @@ describe('background plan executor', () => {
     expect(tabs.update).not.toHaveBeenCalledWith(4, { active: true })
 
     emit('tabs.onUpdated', 4, { status: 'complete' }, {
-      id: 4, active: true, url: `${NLG}${POLICY_DETAIL_PATH}`,
+      id: 4, active: true, url: `${NLG}/agent/`,
+    })
+    await flush()
+    expect(tabs.update).toHaveBeenCalledWith(4, { url: `${NLG}${INFORCE_PATH}` })
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: false, url: `${NLG}${INFORCE_PATH}`,
+    })
+    await flush()
+    expect(storage.command).toMatchObject({ policyDetailPath: CURRENT_POLICY_DETAIL_PATH })
+
+    emit('tabs.onUpdated', 4, { status: 'complete' }, {
+      id: 4, active: false, url: `${NLG}${CURRENT_POLICY_DETAIL_PATH}`,
     })
     await flush()
     expect(storage.command).toMatchObject({

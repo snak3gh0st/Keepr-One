@@ -136,6 +136,22 @@ export type CapturePolicyDetailAck = {
   detail: PolicyDetailObservation
 }
 
+export type LocatePolicyDetailMessage = {
+  type: 'LOCATE_POLICY_DETAIL'
+  expectedPolicyNumber: string
+  token: string
+  correlationId: string
+}
+
+export type LocatePolicyDetailAck = {
+  ok: true
+  type: 'POLICY_DETAIL_LOCATED'
+  expectedPolicyNumber: string
+  navigatePath: string
+  token: string
+  correlationId: string
+}
+
 export type PageCaptureAck = {
   ok: true
   type: 'PAGE_CAPTURED'
@@ -583,6 +599,35 @@ export function parseCapturePolicyDetailAck(value: unknown): CapturePolicyDetail
     !isPolicyDetailObservation(value.detail)
   ) return null
   return value as CapturePolicyDetailAck
+}
+
+export function parseLocatePolicyDetailMessage(value: unknown): LocatePolicyDetailMessage | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ['type', 'expectedPolicyNumber', 'token', 'correlationId']) ||
+    value.type !== 'LOCATE_POLICY_DETAIL' ||
+    !isPolicyNumber(value.expectedPolicyNumber) ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16)
+  ) return null
+  return value as LocatePolicyDetailMessage
+}
+
+export function parseLocatePolicyDetailAck(value: unknown): LocatePolicyDetailAck | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, [
+      'ok', 'type', 'expectedPolicyNumber', 'navigatePath', 'token', 'correlationId',
+    ]) ||
+    value.ok !== true ||
+    value.type !== 'POLICY_DETAIL_LOCATED' ||
+    !isPolicyNumber(value.expectedPolicyNumber) ||
+    typeof value.navigatePath !== 'string' ||
+    !POLICY_DETAIL_PATH.test(value.navigatePath) ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16)
+  ) return null
+  return value as LocatePolicyDetailAck
 }
 
 export function parseBridgeMessage(value: unknown): BridgeMessage | null {
