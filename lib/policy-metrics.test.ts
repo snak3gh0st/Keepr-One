@@ -90,6 +90,7 @@ describe('buildNationalLifePortfolioMetrics', () => {
       hasData: true,
       activeClients: 2,
       clientCoverageComplete: true,
+      clientMissingPolicies: 0,
       activePolicies: 3,
       activeAap: 3_000,
       averageAapPerClient: 1_500,
