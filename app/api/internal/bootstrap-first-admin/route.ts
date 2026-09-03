@@ -10,8 +10,8 @@ export const dynamic = 'force-dynamic'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
 const PRODUCTION_ORIGIN = 'https://app.keeprone.com'
-const BOOTSTRAP_LOCK = 'keepr:first-admin-bootstrap:v1'
-const BOOTSTRAP_ACTION = 'FIRST_ADMIN_BOOTSTRAPPED'
+const BOOTSTRAP_LOCK = 'keepr:production-admin-bootstrap:v1'
+const BOOTSTRAP_ACTION = 'PRODUCTION_ADMIN_BOOTSTRAPPED'
 
 // These are SHA-256 digests, never the bootstrap credential or email itself.
 // The endpoint is removed immediately after the one-time production bootstrap.
@@ -20,7 +20,6 @@ const ALLOWED_EMAIL_SHA256 = '5f5d1e1c311675d2e1656b79f4be596f4d90c011478a3c7748
 
 type BootstrapOutcome =
   | { state: 'PASSWORD_SETUP_REQUIRED'; userId: string; email: string; newlyCreated: boolean }
-  | { state: 'ALREADY_CREATED'; userId: string }
   | { state: 'UNAVAILABLE' }
 
 function digest(value: string): Buffer {
@@ -84,54 +83,20 @@ export async function handleFirstAdminBootstrap(
         SELECT pg_advisory_xact_lock(hashtextextended(${BOOTSTRAP_LOCK}, 0))
       `
 
-      const [target, administrators] = await Promise.all([
-        transaction.user.findFirst({
-          where: { email: { equals: email, mode: 'insensitive' } },
-          select: { id: true, role: true, banned: true },
-        }),
-        transaction.user.findMany({
-          where: { role: 'ADMIN' },
-          select: { id: true },
-          take: 2,
-        }),
-      ])
+      const target = await transaction.user.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        select: { id: true, email: true, role: true, banned: true },
+      })
 
       if (target) {
-        const bootstrapAudit = target.role === 'ADMIN'
-          ? await transaction.auditLog.findFirst({
-              where: {
-                userId: target.id,
-                entity: 'User',
-                entityId: target.id,
-                action: BOOTSTRAP_ACTION,
-              },
-              select: { id: true },
-            })
-          : null
-
-        if (
-          !target.banned
-          && administrators.length === 1
-          && administrators[0]?.id === target.id
-          && bootstrapAudit
-        ) {
-          const credential = await transaction.account.findFirst({
-            where: { userId: target.id, providerId: 'credential', password: { not: null } },
-            select: { id: true },
-          })
-          return credential
-            ? { state: 'ALREADY_CREATED' as const, userId: target.id }
-            : {
-                state: 'PASSWORD_SETUP_REQUIRED' as const,
-                userId: target.id,
-                email,
-                newlyCreated: false,
-              }
+        if (target.role !== 'ADMIN' || target.banned) return { state: 'UNAVAILABLE' as const }
+        return {
+          state: 'PASSWORD_SETUP_REQUIRED' as const,
+          userId: target.id,
+          email: target.email,
+          newlyCreated: false,
         }
-        return { state: 'UNAVAILABLE' as const }
       }
-
-      if (administrators.length > 0) return { state: 'UNAVAILABLE' as const }
 
       const user = await transaction.user.create({
         data: {
@@ -174,12 +139,6 @@ export async function handleFirstAdminBootstrap(
   if (outcome.state === 'UNAVAILABLE') {
     return Response.json({ error: 'BOOTSTRAP_UNAVAILABLE' }, { status: 409, headers: NO_STORE })
   }
-  if (outcome.state === 'ALREADY_CREATED') {
-    return Response.json(
-      { ok: true, state: 'ALREADY_CREATED' },
-      { headers: NO_STORE },
-    )
-  }
 
   let verificationIdentifier: string | null = null
   try {
@@ -212,7 +171,7 @@ export async function handleFirstAdminBootstrap(
       },
       data: { emailVerified: true },
     })
-    if (verified.count !== 1) throw new Error('FIRST_ADMIN_VERIFICATION_STATE_CHANGED')
+    if (verified.count !== 1) throw new Error('PRODUCTION_ADMIN_VERIFICATION_STATE_CHANGED')
 
     try {
       await prisma.auditLog.create({
@@ -221,7 +180,7 @@ export async function handleFirstAdminBootstrap(
           action: 'ADMIN_PASSWORD_RESET_REQUESTED',
           entity: 'User',
           entityId: outcome.userId,
-          after: { delivery: 'EMAIL', source: 'FIRST_ADMIN_BOOTSTRAP' },
+          after: { delivery: 'EMAIL', source: 'PRODUCTION_ADMIN_BOOTSTRAP' },
         },
       })
     } catch (auditError) {
@@ -239,13 +198,13 @@ export async function handleFirstAdminBootstrap(
   } catch {
     // Redis errors may carry command arguments, including the live reset
     // token. Never forward the adapter/provider error object to telemetry.
-    Sentry.captureException(new Error('First admin password setup delivery failed'))
+    Sentry.captureException(new Error('Production admin password setup delivery failed'))
     if (verificationIdentifier) {
       try {
         const context = await auth.$context
         await context.internalAdapter.deleteVerificationByIdentifier(verificationIdentifier)
       } catch {
-        Sentry.captureException(new Error('First admin reset verification cleanup failed'))
+        Sentry.captureException(new Error('Production admin reset verification cleanup failed'))
       }
     }
     return Response.json(

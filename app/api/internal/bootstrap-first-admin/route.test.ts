@@ -6,12 +6,9 @@ const mocks = vi.hoisted(() => {
     $executeRaw: vi.fn(),
     user: {
       findFirst: vi.fn(),
-      findMany: vi.fn(),
       create: vi.fn(),
     },
-    account: { findFirst: vi.fn() },
     auditLog: {
-      findFirst: vi.fn(),
       create: vi.fn(),
     },
   }
@@ -78,11 +75,8 @@ function request(email = TEST_EMAIL, authorization = AUTHORIZATION) {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.transaction.user.findFirst.mockResolvedValue(null)
-  mocks.transaction.user.findMany.mockResolvedValue([])
   mocks.transaction.user.create.mockResolvedValue({ id: 'admin-1' })
-  mocks.transaction.account.findFirst.mockResolvedValue(null)
   mocks.transaction.auditLog.create.mockResolvedValue({ id: 'audit-1' })
-  mocks.transaction.auditLog.findFirst.mockResolvedValue(null)
   mocks.updateUser.mockResolvedValue({ count: 1 })
   mocks.createVerificationValue.mockResolvedValue({ id: 'verification-1' })
   mocks.deleteVerificationByIdentifier.mockResolvedValue(undefined)
@@ -117,7 +111,7 @@ describe('one-time first admin bootstrap', () => {
     )
     expect(mocks.transaction.user.findFirst).toHaveBeenCalledWith({
       where: { email: { equals: TEST_EMAIL, mode: 'insensitive' } },
-      select: { id: true, role: true, banned: true },
+      select: { id: true, email: true, role: true, banned: true },
     })
     expect(mocks.transaction.user.create).toHaveBeenCalledWith({
       data: {
@@ -160,46 +154,17 @@ describe('one-time first admin bootstrap', () => {
     expect(resetUrl.searchParams.get('callbackURL')).toBe('/reset-password?lang=PT&portal=admin')
   })
 
-  it('refuses to create an account when an administrator already exists', async () => {
-    mocks.transaction.user.findMany.mockResolvedValue([{ id: 'another-admin' }])
-
-    const response = await bootstrap(request())
-
-    expect(response.status).toBe(409)
-    await expect(response.json()).resolves.toEqual({ error: 'BOOTSTRAP_UNAVAILABLE' })
-    expect(mocks.transaction.user.create).not.toHaveBeenCalled()
-    expect(mocks.sendResetPasswordEmail).not.toHaveBeenCalled()
-  })
-
   it.each([
     {
       label: 'the email belongs to a non-admin',
-      target: { id: 'agent-1', role: 'AGENT', banned: false },
-      administrators: [],
-      bootstrapAudit: null,
+      target: { id: 'agent-1', email: TEST_EMAIL, role: 'AGENT', banned: false },
     },
     {
       label: 'the bootstrap admin is banned',
-      target: { id: 'admin-1', role: 'ADMIN', banned: true },
-      administrators: [{ id: 'admin-1' }],
-      bootstrapAudit: { id: 'bootstrap-audit' },
+      target: { id: 'admin-1', email: TEST_EMAIL, role: 'ADMIN', banned: true },
     },
-    {
-      label: 'an existing admin lacks the bootstrap audit',
-      target: { id: 'admin-1', role: 'ADMIN', banned: false },
-      administrators: [{ id: 'admin-1' }],
-      bootstrapAudit: null,
-    },
-    {
-      label: 'more than one administrator exists',
-      target: { id: 'admin-1', role: 'ADMIN', banned: false },
-      administrators: [{ id: 'admin-1' }, { id: 'admin-2' }],
-      bootstrapAudit: { id: 'bootstrap-audit' },
-    },
-  ])('stays unavailable when $label', async ({ target, administrators, bootstrapAudit }) => {
+  ])('stays unavailable when $label', async ({ target }) => {
     mocks.transaction.user.findFirst.mockResolvedValue(target)
-    mocks.transaction.user.findMany.mockResolvedValue(administrators)
-    mocks.transaction.auditLog.findFirst.mockResolvedValue(bootstrapAudit)
 
     const response = await bootstrap(request())
 
@@ -208,20 +173,27 @@ describe('one-time first admin bootstrap', () => {
     expect(mocks.sendResetPasswordEmail).not.toHaveBeenCalled()
   })
 
-  it('is idempotent only for the account created by this bootstrap', async () => {
-    mocks.transaction.user.findFirst.mockResolvedValue({ id: 'admin-1', role: 'ADMIN', banned: false })
-    mocks.transaction.user.findMany.mockResolvedValue([{ id: 'admin-1' }])
-    mocks.transaction.auditLog.findFirst.mockResolvedValue({ id: 'bootstrap-audit' })
-    mocks.transaction.account.findFirst.mockResolvedValue({ id: 'credential-1' })
+  it('reissues password setup for an existing active administrator', async () => {
+    mocks.transaction.user.findFirst.mockResolvedValue({
+      id: 'admin-1',
+      email: 'Admin@Example.com',
+      role: 'ADMIN',
+      banned: false,
+    })
 
     const response = await bootstrap(request())
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      state: 'ALREADY_CREATED',
+      state: 'PASSWORD_SETUP_REISSUED',
+      emailSent: true,
     })
-    expect(mocks.sendResetPasswordEmail).not.toHaveBeenCalled()
+    expect(mocks.transaction.user.create).not.toHaveBeenCalled()
+    expect(mocks.sendResetPasswordEmail).toHaveBeenCalledOnce()
+    expect(mocks.sendResetPasswordEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'Admin@Example.com' }),
+    )
   })
 
   it('keeps the account passwordless when email delivery fails', async () => {
@@ -244,10 +216,12 @@ describe('one-time first admin bootstrap', () => {
   })
 
   it('can reissue password setup after a delivery failure or interrupted request', async () => {
-    mocks.transaction.user.findFirst.mockResolvedValue({ id: 'admin-1', role: 'ADMIN', banned: false })
-    mocks.transaction.user.findMany.mockResolvedValue([{ id: 'admin-1' }])
-    mocks.transaction.auditLog.findFirst.mockResolvedValue({ id: 'bootstrap-audit' })
-    mocks.transaction.account.findFirst.mockResolvedValue(null)
+    mocks.transaction.user.findFirst.mockResolvedValue({
+      id: 'admin-1',
+      email: TEST_EMAIL,
+      role: 'ADMIN',
+      banned: false,
+    })
 
     const response = await bootstrap(request())
 
