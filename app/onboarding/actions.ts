@@ -72,12 +72,12 @@ function createProfileSchema(copy: OnboardingCopy) {
     npn: z
       .string()
       .trim()
-      .min(1, copy('Informe seu NPN.', 'Enter your NPN.'))
       .max(20, copy('O NPN deve ter no máximo 20 dígitos.', 'NPN must be at most 20 digits.'))
       .refine(
-        (value) => /^\d{4,20}$/.test(value),
+        (value) => value === '' || /^\d{4,20}$/.test(value),
         copy('Use de 4 a 20 números no NPN.', 'Use 4 to 20 digits for the NPN.'),
-      ),
+      )
+      .transform((value) => value || null),
   })
 }
 
@@ -347,7 +347,7 @@ export async function saveOnboardingProfileAction(
               ? { phoneLast4: lastFourDigits(parsed.data.phone) }
               : {}),
             ...(changedFields.includes('npn')
-              ? { npnLast4: lastFourDigits(parsed.data.npn) }
+              ? { npnLast4: parsed.data.npn ? lastFourDigits(parsed.data.npn) : null }
               : {}),
             currentStep,
           },
