@@ -6,6 +6,8 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getCurrentAgentAccess } from '@/lib/agent-access'
 import { decimalToNumber } from '@/lib/decimal'
 import { loadCurrentNationalLifePortfolio } from '@/lib/national-life/current-portfolio-prisma'
+import { buildPremiumEvolution } from '@/lib/national-life/premium-evolution'
+import { NationalPremiumEvolution } from '@/components/NationalPremiumEvolution'
 import { loadNationalPolicyQueues } from '@/lib/national-life/policy-queues-prisma'
 import {
   getNationalLifeLocalConnectorConfig,
@@ -131,9 +133,10 @@ function isPlatformModuleEnabled(
 export default async function AgentDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ preview?: string }>
+  searchParams: Promise<{ preview?: string; premiumRange?: string; premiumProduct?: string; premiumView?: string }>
 }) {
-  const { preview } = await searchParams
+  const params = await searchParams
+  const { preview } = params
   const { copy, language } = await getServerI18n()
   const locale = language === 'PT' ? 'pt-BR' : 'en-US'
   const agent = await getCurrentAgent()
@@ -244,6 +247,7 @@ export default async function AgentDashboard({
   let portfolioMetrics: NationalLifePortfolioMetrics = buildNationalLifePortfolioMetrics([])
   let historicalPolicies = 0
   let portfolioVerified = false
+  let premiumEvolution = buildPremiumEvolution({ rows: [], observedAt: null, verified: false })
   let nationalQueueCounts: { ENTER_INFORCE: number; WAITING_AGENT: number; WAITING_CLIENT: number } | null = null
   let capturedTargetPremium = 0
   let targetPremiumKnownCount = 0
@@ -271,7 +275,7 @@ export default async function AgentDashboard({
         : 0,
       canUsePolicies
         ? loadCurrentNationalLifePortfolio(prisma, scope)
-        : { rows: [], storedPolicies: 0, historicalPolicies: 0, verified: false, statusCounts: [], productCounts: [] },
+        : { rows: [], storedPolicies: 0, historicalPolicies: 0, verified: false, statusCounts: [], productCounts: [], premiumEvolutionRows: [], observedAt: null },
       canUsePolicies
         ? prisma.nationalLifePolicyDetailSnapshot.aggregate({
             where: {
@@ -349,6 +353,9 @@ export default async function AgentDashboard({
     portfolioMetrics = buildNationalLifePortfolioMetrics(nationalPolicyRows.rows)
     historicalPolicies = nationalPolicyRows.historicalPolicies
     portfolioVerified = nationalPolicyRows.verified
+    premiumEvolution = buildPremiumEvolution({ rows: nationalPolicyRows.premiumEvolutionRows ?? [],
+      observedAt: nationalPolicyRows.observedAt ?? null, verified: portfolioVerified,
+      range: params.premiumRange, product: params.premiumProduct, view: params.premiumView })
     atRiskPolicies = portfolioMetrics.attentionPolicies
     byStatus = statusBuckets
     byCarrier = carrierBuckets
@@ -845,6 +852,11 @@ export default async function AgentDashboard({
           </aside>
           )}
         </section>
+
+        {canUsePolicies && !loadError && (
+          <NationalPremiumEvolution model={premiumEvolution} language={language}
+            preservedParams={Object.fromEntries(Object.entries(params).filter((entry): entry is [string, string] => !entry[0].startsWith('premium') && typeof entry[1] === 'string'))} />
+        )}
 
         {canUseCalendar && !loadError && (
           <TodayMeetingsSection

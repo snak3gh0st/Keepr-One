@@ -1,5 +1,6 @@
 import type { NationalLifePortfolioMetricRow } from '../policy-metrics'
 import { reconcileInforceRows, type InforceRow } from './portfolio-reconcile'
+import type { PremiumEvolutionRow } from './premium-evolution'
 
 export type StoredPortfolioRow = NationalLifePortfolioMetricRow & {
   agentId: string
@@ -19,9 +20,13 @@ export function currentPortfolioFromSnapshot(input: {
   // A repeated policy may represent multiple agents in the export. Count its
   // AAP once, but do not silently choose between conflicting financial rows.
   const values = new Map<string, string>()
+  const premiumEvolutionRows: PremiumEvolutionRow[] = []
   for (const row of input.rows) {
     const parsed = reconcileInforceRows([row]).policies[0]
     if (!parsed) continue
+    premiumEvolutionRows.push({ policyNumber: parsed.policyNumber,
+      issueDate: parsed.issueDate?.toISOString() ?? null, premium: parsed.premium,
+      product: parsed.productName ?? 'Unknown' })
     const value = JSON.stringify([parsed.status, parsed.sourceStatus, parsed.premium])
     const previous = values.get(parsed.policyNumber)
     if (previous !== undefined && previous !== value) {
@@ -37,6 +42,8 @@ export function currentPortfolioFromSnapshot(input: {
       premium: row.premium,
       sourceUpdatedAt: input.observedAt,
     })),
+    premiumEvolutionRows,
+    observedAt: input.observedAt,
     historicalPolicies: input.stored.filter((row) => !membership.has(row.policyNumber)).length,
     statusCounts: [...Map.groupBy(policies, (row) => row.status)].map(([status, rows]) => ({ status, count: rows.length }))
       .sort((a, b) => b.count - a.count || a.status.localeCompare(b.status)),
