@@ -4,7 +4,11 @@ import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getCurrentAgentAccess } from '@/lib/agent-access'
-import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
+import { decimalToNumber } from '@/lib/decimal'
+import {
+  getNationalLifeLocalConnectorConfig,
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+} from '@/lib/national-life/local-connector/config'
 import { Shell } from '@/components/Shell'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import {
@@ -236,6 +240,8 @@ export default async function AgentDashboard({
 
   let policyCount = 0
   let portfolioMetrics: NationalLifePortfolioMetrics = buildNationalLifePortfolioMetrics([])
+  let capturedTargetPremium = 0
+  let targetPremiumKnownCount = 0
   let byStatus: { status: string; _count: { _all: number } }[] = []
   let byCarrier: { carrier: string; _count: { _all: number } }[] = []
   let byProduct: { product: string; _count: { _all: number } }[] = []
@@ -245,6 +251,7 @@ export default async function AgentDashboard({
     const [
       policyTotal,
       nationalPolicyRows,
+      targetPremiumSnapshot,
       statusBuckets,
       carrierBuckets,
       productBuckets,
@@ -269,6 +276,18 @@ export default async function AgentDashboard({
             },
           }) ?? [])
         : [],
+      canUsePolicies
+        ? prisma.nationalLifePolicyDetailSnapshot.aggregate({
+            where: {
+              agentId: { in: scope },
+              deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+              ctp: { gt: 0 },
+              policy: { status: 'INFORCE', sourceProvider: 'NATIONAL_LIFE' },
+            },
+            _count: { ctp: true },
+            _sum: { ctp: true },
+          })
+        : { _count: { ctp: 0 }, _sum: { ctp: null } },
       canUsePolicies
         ? prisma.policy.groupBy({
             by: ['status'],
@@ -329,6 +348,8 @@ export default async function AgentDashboard({
     dueReviews = dueReviewCount
 
     policyCount = policyTotal
+    targetPremiumKnownCount = targetPremiumSnapshot._count.ctp
+    capturedTargetPremium = decimalToNumber(targetPremiumSnapshot._sum.ctp)
     portfolioMetrics = buildNationalLifePortfolioMetrics(nationalPolicyRows)
     atRiskPolicies = portfolioMetrics.attentionPolicies
     byStatus = statusBuckets
@@ -384,6 +405,12 @@ export default async function AgentDashboard({
   const firstName = ((user?.name ?? '').trim() || copy('Agente', 'Agent')).split(/\s+/)[0]
   const countValue = (value: number) => loadError ? '—' : formatNumber(value, language, { maximumFractionDigits: 0 })
   const hasPortfolioData = canUsePolicies && portfolioMetrics.hasData && !loadError
+  const capturedTargetPremiumValue = hasPortfolioData && targetPremiumKnownCount > 0
+    ? formatLocalizedCurrency(capturedTargetPremium, language, 'USD', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    : '—'
   const activeAapValue = hasPortfolioData && portfolioMetrics.premiumCoverageComplete
     ? formatCurrency(portfolioMetrics.activeAap, language)
     : '—'
@@ -548,6 +575,31 @@ export default async function AgentDashboard({
 
                   {hasPortfolioData ? (
                     <>
+                      <div data-hero-reveal className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-4 sm:p-5">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/42">
+                          {copy('Target Premium capturado', 'Captured Target Premium')}
+                        </p>
+                        <p className="mt-2 font-mono text-3xl font-medium tabular-nums text-mint">
+                          {capturedTargetPremiumValue}
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-paper/48">
+                          {targetPremiumKnownCount > 0
+                            ? copy(
+                                `Subtotal de CTP do detalhe de ${targetPremiumKnownCount}/${portfolioMetrics.activePolicies} apólices. Ainda não representa o Target Premium total da carteira.`,
+                                `CTP subtotal from ${targetPremiumKnownCount}/${portfolioMetrics.activePolicies} policy details. It does not yet represent the book's total Target Premium.`,
+                              )
+                            : copy(
+                                'CTP ainda não capturado nos detalhes da National. Ausência de dados não significa Target Premium zero.',
+                                'CTP has not yet been captured from National Life policy details. Missing data does not mean zero Target Premium.',
+                              )}
+                        </p>
+                        <p className="mt-1 text-[10px] leading-4 text-paper/38">
+                          {copy(
+                            'NPN é opcional. PC confirmado permanece separado e depende da evidência de pagamento da National.',
+                            'NPN is optional. Confirmed PC remains separate and requires National Life payment evidence.',
+                          )}
+                        </p>
+                      </div>
                       <div data-hero-reveal className="mt-6 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2 xl:grid-cols-4">
                         {[
                           {

@@ -33,7 +33,10 @@ const ATTRIBUTIONS = [
   { kind: 'AGENCY' as const, agentId: 'leaf', leaderAgentId: 'top' },
 ]
 
-function createPromotionDatabase(input?: { reportRows?: Record<string, unknown>[] }) {
+function createPromotionDatabase(input?: {
+  reportRows?: Record<string, unknown>[]
+  agentNpn?: string | null
+}) {
   const credits: Array<Record<string, unknown>> = []
   const attributions: Array<Record<string, unknown>> = []
   const detail = {
@@ -99,7 +102,10 @@ function createPromotionDatabase(input?: { reportRows?: Record<string, unknown>[
   }
   const database = {
     agent: {
-      findUnique: vi.fn(async () => ({ npn: 'NPN-LEAF', status: 'ACTIVE' })),
+      findUnique: vi.fn(async () => ({
+        npn: input && 'agentNpn' in input ? input.agentNpn : 'NPN-LEAF',
+        status: 'ACTIVE',
+      })),
       findMany: vi.fn(async () => [{ id: 'leaf', parentAgentId: null }]),
     },
     nationalLifePolicyDetailSnapshot: {
@@ -300,6 +306,57 @@ describe('promotion ledger sync', () => {
       recognizedAt: FETCHED_AT,
     })
     expect(String(credits[0].creditedPc)).toBe('2386.02')
+  })
+
+  it('uses the authenticated connector owner when the optional NPN is absent', async () => {
+    const { database, credits } = createPromotionDatabase({
+      reportRows: [],
+      agentNpn: null,
+    })
+
+    const result = await syncPolicyDetailPromotionCreditsSafely(
+      {
+        agentId: 'leaf',
+        deploymentScope: 'test',
+        policyNumber: 'NL123',
+        fetchedAt: FETCHED_AT,
+      },
+      database as never,
+    )
+
+    expect(result).toMatchObject({ status: 'SYNCED', examined: 1, eligible: 1, inserted: 1 })
+    expect(credits[0]).toMatchObject({
+      producerAgentId: 'leaf',
+      source: 'POLICY_TARGET_PREMIUM_PENDING',
+      status: 'PENDING_CARRIER',
+    })
+  })
+
+  it('accepts matching-policy payment evidence without requiring an NPN', async () => {
+    const payment = {
+      PolicyNumber: 'NL123',
+      CompensationType: 'First year Compensation',
+      TransactionType: 'Standard',
+      PaymentDate: '08/25/2026',
+      WritingAgtNumber: 'OPTIONAL-CARRIER-ID',
+      ProductType: 'Life',
+    }
+    const { database, credits } = createPromotionDatabase({
+      reportRows: [{ raw: payment }],
+      agentNpn: null,
+    })
+
+    const result = await syncStoredNationalLifePromotionCreditsForAgentSafely(
+      { agentId: 'leaf', deploymentScope: 'test', fetchedAt: FETCHED_AT },
+      database as never,
+    )
+
+    expect(result).toMatchObject({ status: 'SYNCED', examined: 1, eligible: 1, inserted: 1 })
+    expect(credits[0]).toMatchObject({
+      producerAgentId: 'leaf',
+      source: 'POLICY_TARGET_PREMIUM',
+      status: 'CONFIRMED',
+    })
   })
 
   it('backfills already-extracted detail and payment rows after a complete sync', async () => {

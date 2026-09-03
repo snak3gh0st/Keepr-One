@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   policyCount: vi.fn(),
   policyFindMany: vi.fn(),
   policyGroupBy: vi.fn(),
+  targetPremiumAggregate: vi.fn(),
   inforceFindMany: vi.fn(),
   commissionAggregate: vi.fn(),
   commissionGroupBy: vi.fn(),
@@ -57,6 +58,7 @@ vi.mock('@/lib/prisma', () => ({
     policyReview: { count: mocks.reviewCount },
     nationalLifeReportRow: { findMany: mocks.carrierRowsFindMany },
     nationalLifeInforcePolicy: { findMany: mocks.inforceFindMany },
+    nationalLifePolicyDetailSnapshot: { aggregate: mocks.targetPremiumAggregate },
   },
 }))
 vi.mock('@/lib/crm', () => ({
@@ -158,6 +160,7 @@ beforeEach(() => {
   mocks.policyCount.mockResolvedValue(0)
   mocks.policyFindMany.mockResolvedValue([])
   mocks.policyGroupBy.mockResolvedValue([])
+  mocks.targetPremiumAggregate.mockResolvedValue({ _count: { ctp: 0 }, _sum: { ctp: null } })
   mocks.inforceFindMany.mockResolvedValue([])
   mocks.commissionAggregate.mockResolvedValue({ _sum: { amount: null } })
   mocks.commissionGroupBy.mockResolvedValue([])
@@ -183,6 +186,7 @@ describe('AgentDashboard module access', () => {
     expect(mocks.getPromotionSnapshot).not.toHaveBeenCalled()
     expect(mocks.getPromotionPreview).not.toHaveBeenCalled()
     expect(mocks.policyCount).not.toHaveBeenCalled()
+    expect(mocks.targetPremiumAggregate).not.toHaveBeenCalled()
     expect(mocks.policyGroupBy).not.toHaveBeenCalled()
     expect(mocks.commissionAggregate).not.toHaveBeenCalled()
     expect(mocks.commissionGroupBy).not.toHaveBeenCalled()
@@ -347,5 +351,30 @@ describe('AgentDashboard module access', () => {
     expect(within(hero!).getByText('AAP média por cliente').parentElement).toHaveTextContent('—')
     expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent('—')
     expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent('0/1 apólices com AAP')
+    expect(within(hero!).getByText('Target Premium capturado').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText(/Ausência de dados não significa Target Premium zero/)).toBeVisible()
+  })
+
+  it('renders exact captured CTP without requiring NPN or calling it confirmed PC', async () => {
+    mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1', npn: null })
+    mocks.getCurrentAgentAccess.mockResolvedValue({
+      scopeAgentIds: ['agent-1'],
+      enabledModules: ['TODAY', 'POLICIES'],
+      canViewTeamData: false,
+      canViewAgencyNationalLife: false,
+      canManageTeam: false,
+    })
+    mocks.policyFindMany.mockResolvedValue([
+      { clientId: 'client-1', status: 'INFORCE', sourceStatus: 'Active', premium: 960, sourceUpdatedAt: new Date() },
+    ])
+    mocks.targetPremiumAggregate.mockResolvedValue({ _count: { ctp: 1 }, _sum: { ctp: 325.8 } })
+
+    render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
+
+    const target = screen.getByText('Target Premium capturado').parentElement
+    expect(target).toHaveTextContent('US$ 325,80')
+    expect(target).toHaveTextContent('Subtotal de CTP do detalhe de 1/1 apólices')
+    expect(target).toHaveTextContent('NPN é opcional')
+    expect(target).not.toHaveTextContent('0 PC')
   })
 })
