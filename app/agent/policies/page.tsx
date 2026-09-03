@@ -8,6 +8,9 @@ import { PageHeader } from '@/components/PageHeader'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { PoliciesList } from './PoliciesList'
 import { getServerI18n } from '@/lib/i18n/server'
+import { isNationalPolicyQueueKey } from '@/lib/national-life/policy-queues'
+import { loadNationalPolicyQueues } from '@/lib/national-life/policy-queues-prisma'
+import { NationalPolicyQueueTable, nationalPolicyQueueTitle } from './NationalPolicyQueueTable'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,16 +26,41 @@ const ALLOWED_STATUS_FILTERS = new Set([
 export default async function PoliciesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>
+  searchParams: Promise<{ status?: string; queue?: string }>
 }) {
-  const { copy } = await getServerI18n()
-  const { status: requestedStatus } = await searchParams
+  const { copy, language } = await getServerI18n()
+  const { status: requestedStatus, queue: requestedQueue } = await searchParams
   const initialStatus = requestedStatus && ALLOWED_STATUS_FILTERS.has(requestedStatus)
     ? requestedStatus
     : 'all'
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
   const scopeAgentIds = await getAgentScopeIds(agent.id)
+
+  if (isNationalPolicyQueueKey(requestedQueue)) {
+    let rows: Awaited<ReturnType<typeof loadNationalPolicyQueues>>['queues'][typeof requestedQueue] = []
+    let queueLoadError = false
+    try {
+      const result = await loadNationalPolicyQueues(prisma, scopeAgentIds)
+      if (!result.verified) throw new Error('NATIONAL_NEW_BUSINESS_SNAPSHOT_UNVERIFIED')
+      rows = result.queues[requestedQueue]
+    } catch (error) {
+      console.error('National policy queue page error', error)
+      queueLoadError = true
+    }
+    return (
+      <Shell role="AGENT" userName={user?.name ?? ''}>
+        <PageHeader
+          title={nationalPolicyQueueTitle(requestedQueue, language)}
+          eyebrow={copy('Fila de apólices', 'Policy queue')}
+          description={copy('Recorte da última grade New Business completa da National Life.', 'Filtered from the latest complete National Life New Business grid.')}
+        />
+        {queueLoadError
+          ? <ErrorBanner>{copy('Não foi possível validar esta fila agora.', 'This queue could not be verified right now.')}</ErrorBanner>
+          : <NationalPolicyQueueTable rows={rows} queue={requestedQueue} language={language} />}
+      </Shell>
+    )
+  }
 
   let policies: {
     id: string
