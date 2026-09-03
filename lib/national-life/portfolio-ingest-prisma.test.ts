@@ -107,6 +107,17 @@ describe('prismaIngestDeps', () => {
     expect(fresh.create.mock.calls[0]?.[0].data).toHaveProperty('premium', null)
   })
 
+  it('clears a stale modal frequency because the imported premium is already AAP', async () => {
+    const existing = policyDeps()
+    const fresh = policyDeps({ updateCounts: [0] })
+
+    await existing.deps.upsertPolicy(planned)
+    await fresh.deps.upsertPolicy(planned)
+
+    expect(existing.updateMany.mock.calls[0]?.[0].data).toHaveProperty('premiumMode', null)
+    expect(fresh.create.mock.calls[0]?.[0].data).toHaveProperty('premiumMode', null)
+  })
+
   it('refuses to mutate a carrier policy that belongs to another agent', async () => {
     const { deps, updateMany } = policyDeps({
       updateCounts: [0, 0],

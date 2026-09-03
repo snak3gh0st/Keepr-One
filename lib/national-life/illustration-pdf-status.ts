@@ -135,6 +135,8 @@ export function illustrationPdfMessage(status: IllustrationPdfStatus): string {
     case 'FORESIGHT_SOLVE_READBACK_MISMATCH':
     case 'FORESIGHT_RESPONSE_INVALID':
       return 'O Foresight não devolveu um resultado verificável para este cenário. Revise o valor de origem e gere uma nova ilustração; nenhum PDF foi emitido.'
+    case 'FORESIGHT_QUICK_VIEW_READBACK_MISMATCH':
+      return 'O Quick Review da National Life estava incompleto ou divergiu dos valores calculados. Nenhum PDF foi emitido e nenhum número foi aceito como oficial.'
     case null:
       return 'Não foi possível gerar.'
     default:

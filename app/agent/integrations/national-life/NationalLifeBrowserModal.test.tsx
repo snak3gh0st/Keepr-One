@@ -129,6 +129,7 @@ describe('NationalLifeBrowserModal', () => {
     )
 
     const stage = await screen.findByTestId('national-life-viewer-stage')
+    await waitFor(() => expect(resizeObserverCallback).toBeDefined())
     act(() => reportViewerAreaSize(1200, 400))
 
     await waitFor(() => {
@@ -160,6 +161,7 @@ describe('NationalLifeBrowserModal', () => {
     )
 
     const stage = await screen.findByTestId('national-life-viewer-stage')
+    await waitFor(() => expect(resizeObserverCallback).toBeDefined())
     act(() => reportViewerAreaSize(2_000, 2_000))
 
     await waitFor(() => {

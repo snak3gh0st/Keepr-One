@@ -22,6 +22,7 @@ export default async function PoliciesPage() {
     policyNumber: string
     carrier: string
     product: string
+    faceAmount: unknown
     premium: unknown
     status: string
     sourceProvider: string | null
@@ -74,6 +75,7 @@ export default async function PoliciesPage() {
             policyNumber: p.policyNumber,
             carrier: p.carrier,
             product: p.product,
+            faceAmount: p.faceAmount == null ? null : decimalToNumber(p.faceAmount).toFixed(2),
             premium: premiumIsKnown(p) ? decimalToNumber(p.premium).toFixed(2) : null,
             status: p.status,
             clientName: p.client?.name ?? '—',

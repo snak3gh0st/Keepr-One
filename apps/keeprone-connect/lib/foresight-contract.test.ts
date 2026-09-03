@@ -76,6 +76,17 @@ describe('Foresight illustration execution snapshot', () => {
     })).toBeNull()
   })
 
+  it('accepts the strategic solve methods only with their matching source amount', () => {
+    expect(parseForesightIllustrationSnapshot({
+      ...premiumSolvedSnapshot,
+      solve: { ...premiumSolvedSnapshot.solve, method: 'Minimum_DB_Max_Cash_Value' },
+    })).toMatchObject({ solve: { method: 'Minimum_DB_Max_Cash_Value' } })
+    expect(parseForesightIllustrationSnapshot({
+      ...premiumSolvedSnapshot,
+      solve: { ...premiumSolvedSnapshot.solve, method: 'Retirement_Focus' },
+    })).toBeNull()
+  })
+
   it.each([
     { ...snapshot, schemaVersion: 2 },
     { ...snapshot, carrierCaseName: '../wrong' },

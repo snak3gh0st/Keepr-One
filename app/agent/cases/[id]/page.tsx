@@ -29,6 +29,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
       illustrations: { orderBy: { createdAt: 'desc' } },
       applications: {
         include: {
+          createdBy: { select: { name: true } },
           requirements: { orderBy: { createdAt: 'asc' } },
           documents: { orderBy: { createdAt: 'asc' } },
         },
@@ -114,6 +115,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           })),
           applications: c.applications.map((app) => ({
             id: app.id,
+            createdByName: app.createdBy?.name ?? null,
             status: app.status,
             automationState: app.automationState,
             dossier: app.dossier,

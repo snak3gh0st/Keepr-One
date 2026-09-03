@@ -7,7 +7,7 @@ import {
   type ForesightTermIllustrationSnapshotV1,
 } from './foresight-term-contract'
 import { ForesightExecutionError } from './foresight-executor'
-import { foresightClientBirthDate } from './foresight-target'
+import { carrierAmountEquals, foresightClientBirthDate } from './foresight-target'
 import type {
   ForesightExecutionDocument,
   ForesightTermExecutionReceipt,
@@ -332,7 +332,7 @@ export function foresightTermReadbackError(
   if (funding.designType !== 'Specify Face Amount' || funding.premiumMode !== 'Monthly') {
     return 'FORESIGHT_TERM_FUNDING_READBACK_MISMATCH'
   }
-  if (funding.faceAmount.replace(/[$,]/g, '') !== String(snapshot.faceAmount)) {
+  if (!carrierAmountEquals(funding.faceAmount, snapshot.faceAmount)) {
     return 'FORESIGHT_TERM_FACE_AMOUNT_READBACK_MISMATCH'
   }
   if (!isTermDuration(funding.termDuration)) {
@@ -352,7 +352,10 @@ async function fillFunding(doc: Document, snapshot: ForesightTermIllustrationSna
     const current = frameDocument(MAIN_FRAME_ID)
     return current?.getElementById(TERM_FIELDS.funding.designType) ? current : null
   }, 'FORESIGHT_TERM_FUNDING_NAVIGATION_TIMEOUT')
-  await waitFor(() => input(doc, TERM_FIELDS.funding.faceAmount).value.replace(/[$,]/g, '') === String(snapshot.faceAmount) ? true : null, 'FORESIGHT_TERM_FACE_AMOUNT_WRITE_MISMATCH')
+  await waitFor(() => carrierAmountEquals(
+    input(doc, TERM_FIELDS.funding.faceAmount).value,
+    snapshot.faceAmount,
+  ) ? true : null, 'FORESIGHT_TERM_FACE_AMOUNT_WRITE_MISMATCH')
   return readFunding(doc)
 }
 

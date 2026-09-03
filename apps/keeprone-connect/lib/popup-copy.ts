@@ -30,6 +30,7 @@ const FORESIGHT_PHASE_TEXT: Record<string, string> = {
   FILLING_CLIENT: 'K-Bot is entering the insured details…',
   CONFIGURING_PRODUCT: 'K-Bot is entering the product and requested values…',
   CALCULATING: 'K-Bot is waiting for National Life to calculate…',
+  READING_QUICK_REVIEW: 'K-Bot is reading and checking the National Life Quick Review…',
   VERIFYING_VALUES: 'K-Bot is checking the values returned by National Life…',
   SAVING_CASE: 'K-Bot is saving the case in National Life…',
   GENERATING_PDF: 'K-Bot is creating the official PDF…',

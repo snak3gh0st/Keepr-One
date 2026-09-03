@@ -46,6 +46,13 @@ const DEATH_BENEFIT_OPTIONS = new Set(['A_Level', 'B_Increasing'])
 const CAP_FOCUS = 'SP500PointToPointCapFocus'
 const TERM_DURATIONS = new Set(['10-G', '15-G', '20-G', '30-G', 'ART'])
 const IUL_SOLVE_BASES = new Set(['DEATH_BENEFIT', 'PREMIUM'])
+const IUL_SOLVE_METHOD_BASIS: Record<string, 'DEATH_BENEFIT' | 'PREMIUM'> = {
+  Minimum_DB_Max_Cash_Value: 'PREMIUM',
+  Balanced_DB: 'PREMIUM',
+  Based_on_Target_Premium: 'PREMIUM',
+  Protection_Focus: 'DEATH_BENEFIT',
+  Retirement_Focus: 'DEATH_BENEFIT',
+}
 const ACTIVE_ILLUSTRATION_COMMAND_STATES = [
   'QUEUED',
   'RUNNING',
@@ -81,6 +88,7 @@ export async function requestForesightIllustration(
   const gender = normalizeText(formData.get('gender') as string | null)
   const rateClass = normalizeText(formData.get('rateClass') as string | null)
   const solveBasis = normalizeText(formData.get('solveBasis') as string | null)
+  const requestedSolveMethod = normalizeText(formData.get('solveMethod') as string | null)
   const deathBenefitOption = normalizeText(formData.get('deathBenefitOption') as string | null)
   const strategy = normalizeText(formData.get('strategy') as string | null)
   const termDuration = normalizeText(formData.get('termDuration') as string | null)
@@ -101,12 +109,18 @@ export async function requestForesightIllustration(
   if (!RATE_CLASSES.has(rateClass)) return { ok: false, message: copy('Informe a classe de risco.', 'Enter the rate class.') }
   const isPremiumSolve = product?.kind === 'IUL' && solveBasis === 'PREMIUM'
   const isExplicitIulSolve = product?.kind === 'IUL' && solveBasis.length > 0
+  const solveMethod = requestedSolveMethod || (solveBasis === 'PREMIUM'
+    ? 'Based_on_Target_Premium'
+    : 'Protection_Focus')
   if (!isPremiumSolve && (!Number.isFinite(faceAmount) || faceAmount <= 0 || faceAmount > 1_000_000_000)) {
     return { ok: false, message: copy('Informe um capital segurado maior que zero.', 'Enter a face amount greater than zero.') }
   }
   if (product.kind === 'IUL') {
     if (isExplicitIulSolve && !IUL_SOLVE_BASES.has(solveBasis)) {
-      return { ok: false, message: copy('Escolha se a ilustração será resolvida por capital ou prêmio.', 'Choose whether the illustration will be solved by face amount or premium.') }
+      return { ok: false, message: copy('Escolha uma estratégia válida para o IUL.', 'Choose a valid IUL strategy.') }
+    }
+    if (isExplicitIulSolve && IUL_SOLVE_METHOD_BASIS[solveMethod] !== solveBasis) {
+      return { ok: false, message: copy('A estratégia escolhida não corresponde ao cenário informado.', 'The selected strategy does not match the entered scenario.') }
     }
     if (!DEATH_BENEFIT_OPTIONS.has(deathBenefitOption)) {
       return { ok: false, message: copy('Informe a opção de benefício por morte.', 'Enter the death benefit option.') }
@@ -137,6 +151,7 @@ export async function requestForesightIllustration(
             gender,
             rateClass,
             solveBasis,
+            solveMethod,
             ...(solveBasis === 'PREMIUM'
               ? { targetMonthlyPremium: monthlyPremium }
               : { targetFaceAmount: faceAmount }),
@@ -230,7 +245,7 @@ export async function requestForesightIllustration(
             ? isPremiumSolve || !isExplicitIulSolve
               ? 'AGENT_INPUT_FOR_FORESIGHT'
               : 'FORESIGHT_CALCULATES_PREMIUM_FROM_DEATH_BENEFIT'
-            : 'CARRIER_CALCULATED_FOR_TERM',
+            : null,
           insuredName: `${firstName} ${lastName}`,
           insuredDateOfBirth: dateOfBirth,
           rawPayload,

@@ -18,6 +18,8 @@ type Policy = {
   policyNumber: string;
   carrier: string;
   product: string;
+  /// null when the carrier detail page has not supplied coverage yet.
+  faceAmount: string | null;
   /// null when the carrier did not supply it, which must not read as zero.
   premium: string | null;
   status: string;
@@ -53,6 +55,12 @@ function formatPremium(premium: string | null, formatter: Intl.NumberFormat) {
   // number the carrier never gave us.
   if (premium === null) return "—";
   const value = Number(premium);
+  return Number.isFinite(value) ? formatter.format(value) : "—";
+}
+
+function formatFaceAmount(faceAmount: string | null, formatter: Intl.NumberFormat) {
+  if (faceAmount === null) return "—";
+  const value = Number(faceAmount);
   return Number.isFinite(value) ? formatter.format(value) : "—";
 }
 
@@ -598,7 +606,7 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
           <div id="policy-list" className="policy-list-frame">
             <div className="policy-list-header" aria-hidden="true">
               <span>{copy("Cliente e apólice", "Client and policy")}</span>
-              <span>{copy("Seguradora e produto", "Carrier and product")}</span>
+              <span>{copy("Capital segurado e produto", "Face amount and product")}</span>
               <span>{copy("Prêmio", "Premium")}</span>
               <span>{copy("Status", "Status")}</span>
             </div>
@@ -616,7 +624,7 @@ export function PoliciesList({ policies }: { policies: Policy[] }) {
                       <small>{policy.policyNumber}</small>
                     </span>
                     <span className="policy-list-market">
-                      <strong>{policy.carrier}</strong>
+                      <strong>{formatFaceAmount(policy.faceAmount, currency)}</strong>
                       <small>{policy.product}</small>
                     </span>
                     <span className="policy-list-premium">

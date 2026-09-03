@@ -48,6 +48,29 @@ export type CarrierCommissionRecord = {
   amount: number
   policyNumber: string
   writingAgentName: string
+  writingAgentNumber: string
+  payeeName: string | null
+  payeeNumber: string | null
+  writingAgentAgency: string | null
+}
+
+export type CarrierCommissionAuditReason =
+  | 'MISSING_GROSS_COMMISSION'
+  | 'UNKNOWN_WRITING_AGENT_LEVEL'
+  | 'MISSING_STATEMENT_ID'
+  | 'MISSING_POLICY_NUMBER'
+  | 'MISSING_PAYMENT_DATE'
+  | 'MISSING_WRITING_AGENT_NUMBER'
+  | 'MISSING_TRANSACTION_IDENTITY'
+  | 'MISSING_SOURCE_OWNER'
+
+export type CarrierCommissionAudit = {
+  receivedCount: number
+  acceptedCount: number
+  duplicateCount: number
+  rejectedCount: number
+  rejectedByReason: Partial<Record<CarrierCommissionAuditReason, number>>
+  records: CarrierCommissionRecord[]
 }
 
 export const NO_PERIOD = 'sem-periodo'
@@ -151,10 +174,122 @@ export function toCarrierCommissionRecords(
       amount,
       policyNumber: asString(raw.PolicyNumber) ?? '—',
       writingAgentName: asString(raw.WritingAgtName) ?? '',
+      writingAgentNumber: asString(raw.WritingAgtNumber) ?? '',
+      payeeName: asString(raw.PayeeName),
+      payeeNumber: asString(raw.PayeeId),
+      writingAgentAgency: asString(raw.WritingAgentAgency)
+        ?? asString(raw.AgencyName)
+        ?? asString(raw.Agency),
     })
   }
 
   return records
+}
+
+/**
+ * Strict financial read for totals presented as National Life evidence.
+ *
+ * The permissive mapper above remains useful for old, unscoped history. An
+ * audited total is intentionally stricter: every included earning must retain
+ * the carrier statement id, business identity and authenticated source owner.
+ * A malformed row is reported, never silently turned into zero.
+ */
+export function auditCarrierCommissionRows(
+  rows: readonly CarrierCommissionRow[],
+): CarrierCommissionAudit {
+  const records: CarrierCommissionRecord[] = []
+  const seen = new Set<string>()
+  const rejectedByReason: CarrierCommissionAudit['rejectedByReason'] = {}
+  let duplicateCount = 0
+
+  const reject = (reason: CarrierCommissionAuditReason) => {
+    rejectedByReason[reason] = (rejectedByReason[reason] ?? 0) + 1
+  }
+
+  for (const row of rows) {
+    const raw = asRecord(row.raw)
+    const amounts = asRecord(row.amounts)
+    const amount = parseCarrierAmount(amounts.GrossCommEarned ?? raw.GrossCommEarned)
+    if (amount === null) {
+      reject('MISSING_GROSS_COMMISSION')
+      continue
+    }
+    const type = classifyCarrierCommissionLevel(raw.WritingAgtLevel)
+    if (type === null) {
+      reject('UNKNOWN_WRITING_AGENT_LEVEL')
+      continue
+    }
+    if (!asString(raw.CommissionStatementId)) {
+      reject('MISSING_STATEMENT_ID')
+      continue
+    }
+    if (!asString(raw.PolicyNumber)) {
+      reject('MISSING_POLICY_NUMBER')
+      continue
+    }
+    if (toPeriod(raw.PaymentDate) === NO_PERIOD) {
+      reject('MISSING_PAYMENT_DATE')
+      continue
+    }
+    if (!asString(raw.WritingAgtNumber)) {
+      reject('MISSING_WRITING_AGENT_NUMBER')
+      continue
+    }
+    const identity = commissionEarningIdentity(raw, amounts)
+    if (!identity) {
+      reject('MISSING_TRANSACTION_IDENTITY')
+      continue
+    }
+    if (!asString(row.agentId)) {
+      reject('MISSING_SOURCE_OWNER')
+      continue
+    }
+    const dedupeKey = `${row.agentId}\u0000${identity}`
+    if (seen.has(dedupeKey)) {
+      duplicateCount += 1
+      continue
+    }
+    seen.add(dedupeKey)
+    records.push({
+      id: row.id,
+      period: toPeriod(raw.PaymentDate),
+      type,
+      level: type === 'OVERRIDE' ? 1 : 0,
+      amount,
+      policyNumber: asString(raw.PolicyNumber)!,
+      writingAgentName: asString(raw.WritingAgtName) ?? '',
+      writingAgentNumber: asString(raw.WritingAgtNumber)!,
+      payeeName: asString(raw.PayeeName),
+      payeeNumber: asString(raw.PayeeId),
+      writingAgentAgency: asString(raw.WritingAgentAgency)
+        ?? asString(raw.AgencyName)
+        ?? asString(raw.Agency),
+    })
+  }
+
+  const rejectedCount = Object.values(rejectedByReason).reduce((sum, count) => sum + (count ?? 0), 0)
+  return {
+    receivedCount: rows.length,
+    acceptedCount: records.length,
+    duplicateCount,
+    rejectedCount,
+    rejectedByReason,
+    records,
+  }
+}
+
+export function auditVisibleCarrierCommissionRows(
+  rows: readonly ScopedCarrierCommissionRow[],
+  currentAgentId: string,
+): CarrierCommissionAudit {
+  const audit = auditCarrierCommissionRows(rows)
+  const ownerByRecordId = new Map(rows.map((row) => [row.id, row.agentId]))
+  return {
+    ...audit,
+    records: audit.records.filter((record) =>
+      record.type === 'DIRECT' || ownerByRecordId.get(record.id) === currentAgentId,
+    ),
+  }
 }
 
 /**

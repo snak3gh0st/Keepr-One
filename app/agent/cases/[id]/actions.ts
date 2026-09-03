@@ -303,6 +303,7 @@ export async function startApplicationFromIllustration(
       const application = await tx.application.create({
         data: {
           caseId,
+          createdByUserId: agent.userId,
           status: 'STARTED',
           intakeVersion: 2,
           dossier: seed.dossier as Prisma.InputJsonValue,

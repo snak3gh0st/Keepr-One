@@ -24,6 +24,7 @@ import {
   parseForesightIllustrationReceipt,
   parseForesightSolvedIllustrationReceipt,
   type ForesightIllustrationSnapshot,
+  type ForesightQuickReview,
   type ForesightSolvedIllustrationReceipt,
 } from '../foresight-illustration-contract'
 import {
@@ -129,6 +130,7 @@ export type ForesightArtifactRepository = {
     faceAmount: number
     monthlyPremium: number
     annualPremium: number
+    quickReview?: ForesightQuickReview
   }) => Promise<void>
   persistTermResult?: (input: {
     agentId: string
@@ -438,6 +440,7 @@ export async function recordDeviceConnectorCommandEvent(
         faceAmount: receipt.faceAmount,
         monthlyPremium: receipt.monthlyPremium,
         annualPremium: receipt.annualPremium,
+        ...(receipt.quickReview ? { quickReview: receipt.quickReview } : {}),
       })
     } else if (isForesightTermIllustrationReceipt(receipt)) {
       if (!input.extractTermPremiums || !input.foresightArtifactRepository.persistTermResult) {

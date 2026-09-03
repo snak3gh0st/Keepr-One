@@ -59,6 +59,10 @@ export function prismaIngestDeps(prisma: PrismaClient): IngestDeps {
         // Missing carrier money remains unknown. Zero is a business value and
         // must never be manufactured to satisfy storage constraints.
         premium: input.premium,
+        // `input.premium` is AnticipatedAnnualPremium from the in-force book,
+        // not a modal payment. Clear any frequency retained by an older/manual
+        // Policy row so no reader can multiply the carrier's AAP again.
+        premiumMode: null,
         effectiveDate: input.effectiveDate,
         sourceUpdatedAt: new Date(),
       }

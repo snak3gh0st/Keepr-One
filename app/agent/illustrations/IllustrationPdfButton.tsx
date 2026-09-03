@@ -15,6 +15,7 @@ const PHASE_COPY: Record<string, { pt: string; en: string }> = {
   FILLING_CLIENT: { pt: 'K-Bot está preenchendo os dados do cliente…', en: 'K-Bot is entering the client data…' },
   CONFIGURING_PRODUCT: { pt: 'K-Bot está preenchendo o produto e os valores…', en: 'K-Bot is entering the product and amounts…' },
   CALCULATING: { pt: 'K-Bot está esperando o cálculo da National Life…', en: 'K-Bot is waiting for National Life’s calculation…' },
+  READING_QUICK_REVIEW: { pt: 'K-Bot está lendo e conferindo o Quick Review…', en: 'K-Bot is reading and checking the Quick Review…' },
   VERIFYING_VALUES: { pt: 'K-Bot está conferindo os valores da National Life…', en: 'K-Bot is checking the National Life values…' },
   SAVING_CASE: { pt: 'K-Bot está salvando a ilustração…', en: 'K-Bot is saving the illustration…' },
   GENERATING_PDF: { pt: 'K-Bot está criando o PDF oficial…', en: 'K-Bot is creating the official PDF…' },
@@ -25,7 +26,7 @@ const PHASE_COPY: Record<string, { pt: string; en: string }> = {
 function illustrationTrailIndex(phase: string | null): number {
   if (phase === 'OPENING_FORESIGHT' || phase === 'OPENING_CASE') return 0
   if (phase === 'FILLING_CLIENT' || phase === 'CONFIGURING_PRODUCT') return 1
-  if (phase === 'CALCULATING' || phase === 'VERIFYING_VALUES') return 2
+  if (phase === 'CALCULATING' || phase === 'READING_QUICK_REVIEW' || phase === 'VERIFYING_VALUES') return 2
   if (phase === 'SAVING_CASE' || phase === 'GENERATING_PDF') return 3
   if (phase === 'UPLOADING_PDF') return 4
   if (phase === 'COMPLETED') return 5

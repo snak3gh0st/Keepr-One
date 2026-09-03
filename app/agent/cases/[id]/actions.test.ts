@@ -116,6 +116,7 @@ describe('startApplicationFromIllustration', () => {
     }))
     expect(mocks.tx.application.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
+        createdByUserId: 'user-1',
         intakeVersion: 2,
         dossier: expect.objectContaining({
           coverage: expect.objectContaining({

@@ -222,7 +222,6 @@ describe('reconcile stored Term PDF', () => {
       where: expect.objectContaining({ id: 'ill_term_1', agentId: 'agent_1' }),
       data: expect.objectContaining({
         premium: 62.92,
-        targetPremiumSource: 'CARRIER_CALCULATED_FOR_TERM',
         rawPayload: expect.objectContaining({
           foresightTermResult: expect.objectContaining({
             confirmedMonthlyPremium: 62.92,
@@ -232,6 +231,8 @@ describe('reconcile stored Term PDF', () => {
         }),
       }),
     }))
+    expect(mocks.illustrationUpdateMany.mock.calls[0]?.[0]?.data).not.toHaveProperty('targetPremium')
+    expect(mocks.illustrationUpdateMany.mock.calls[0]?.[0]?.data).not.toHaveProperty('targetPremiumSource')
     expect(mocks.issue).not.toHaveBeenCalled()
   })
 

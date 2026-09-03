@@ -42,7 +42,8 @@ export type ForesightSolvedIllustrationSnapshotV2 = {
   product: { name: 'FlexLife'; code: '956' }
   solve: {
     basis: 'DEATH_BENEFIT' | 'PREMIUM'
-    method: 'Protection_Focus' | 'Based_on_Target_Premium'
+    method: 'Protection_Focus' | 'Retirement_Focus' | 'Minimum_DB_Max_Cash_Value' |
+      'Balanced_DB' | 'Based_on_Target_Premium'
     amount: number
   }
   faceAmount: number | null
@@ -104,6 +105,7 @@ export type ForesightIllustrationDraftV2 = {
   gender: 'Male' | 'Female'
   rateClass: 'Standard_NT' | 'Standard_Tobacco'
   solveBasis: 'DEATH_BENEFIT' | 'PREMIUM'
+  solveMethod?: ForesightSolvedIllustrationSnapshotV2['solve']['method']
   targetFaceAmount?: number
   targetMonthlyPremium?: number
   deathBenefitOption: 'A_Level' | 'B_Increasing'
@@ -201,7 +203,17 @@ function parseForesightIllustrationDraftV2(value: unknown): ForesightIllustratio
     ]
     const amountKey = draft.solveBasis === 'DEATH_BENEFIT' ? 'targetFaceAmount'
       : draft.solveBasis === 'PREMIUM' ? 'targetMonthlyPremium' : null
-    if (!amountKey || Object.keys(draft).sort().join(',') !== [...common, amountKey].sort().join(',') ||
+    const allowedKeys = draft.solveMethod === undefined
+      ? [...common, amountKey]
+      : [...common, amountKey, 'solveMethod']
+    const methodBasis: Record<string, 'DEATH_BENEFIT' | 'PREMIUM'> = {
+      Minimum_DB_Max_Cash_Value: 'PREMIUM',
+      Balanced_DB: 'PREMIUM',
+      Based_on_Target_Premium: 'PREMIUM',
+      Protection_Focus: 'DEATH_BENEFIT',
+      Retirement_Focus: 'DEATH_BENEFIT',
+    }
+    if (!amountKey || Object.keys(draft).sort().join(',') !== allowedKeys.sort().join(',') ||
       draft.schemaVersion !== 2 || !text(draft.firstName, 80) || !text(draft.lastName, 80) ||
       !/^\d{4}-\d{2}-\d{2}$/.test(String(draft.dateOfBirth)) ||
       !isoDateFromCarrier(`${String(draft.dateOfBirth).slice(5, 7)}/${String(draft.dateOfBirth).slice(8, 10)}/${String(draft.dateOfBirth).slice(0, 4)}`) ||
@@ -209,6 +221,7 @@ function parseForesightIllustrationDraftV2(value: unknown): ForesightIllustratio
       !['Male', 'Female'].includes(String(draft.gender)) ||
       !['Standard_NT', 'Standard_Tobacco'].includes(String(draft.rateClass)) ||
       !['DEATH_BENEFIT', 'PREMIUM'].includes(String(draft.solveBasis)) ||
+      (draft.solveMethod !== undefined && methodBasis[String(draft.solveMethod)] !== draft.solveBasis) ||
       !['A_Level', 'B_Increasing'].includes(String(draft.deathBenefitOption)) ||
       draft.strategy !== 'SP500PointToPointCapFocus' ||
       !positiveNumber(draft[amountKey])) return null
@@ -251,6 +264,7 @@ function snapshotFromForesightDraftV2(
 ): ForesightSolvedIllustrationSnapshotV2 {
   const isFaceSolve = draft.solveBasis === 'DEATH_BENEFIT'
   const amount = isFaceSolve ? positiveNumber(draft.targetFaceAmount) : positiveNumber(draft.targetMonthlyPremium)
+  const solveMethod = draft.solveMethod ?? (isFaceSolve ? 'Protection_Focus' : 'Based_on_Target_Premium')
   return {
     schemaVersion: 2,
     illustrationId: source.id,
@@ -263,9 +277,7 @@ function snapshotFromForesightDraftV2(
       issueState: draft.issueState,
     },
     product: { name: 'FlexLife', code: '956' },
-    solve: isFaceSolve
-      ? { basis: 'DEATH_BENEFIT', method: 'Protection_Focus', amount }
-      : { basis: 'PREMIUM', method: 'Based_on_Target_Premium', amount },
+    solve: { basis: draft.solveBasis, method: solveMethod, amount },
     faceAmount: isFaceSolve ? amount : null,
     premium: { mode: 'Monthly', amount: isFaceSolve ? null : amount },
     underwriting: { gender: draft.gender, rateClass: draft.rateClass },
@@ -362,11 +374,94 @@ export type ForesightSolvedIllustrationReceipt = {
   faceAmount: number
   monthlyPremium: number
   annualPremium: number
+  quickReview?: ForesightQuickReview
   release: string
   reportCode: 'NAIC_ILLUSTRATION'
   documentSha256: string
   documentBytes: number
   saved: true
+}
+
+export type ForesightQuickReview = {
+  evidence?: {
+    source: 'FORESIGHT_QUICK_VIEW'
+    observedAt: string
+    sourceRows: string[][]
+  }
+  summary: {
+    initialFaceAmount: number
+    lapseYear: number | null
+    mecYear: number | null
+    modalPremium: number
+    minimumPremium: number | null
+    deathBenefitProtectionPremium: number | null
+    targetPremium: number
+    mecPremium: number | null
+    guidelineLevelPremium: number | null
+    guidelineSinglePremium: number | null
+  }
+  annualProjection: Array<{
+    policyYear: number
+    age: number
+    premiumOutlay: number | null
+    weightedAverageInterestRate: number | null
+    loan: number | null
+    annualIncome: number | null
+    accumulatedValue: number | null
+    cashSurrenderValue: number | null
+    netDeathBenefit: number | null
+  }>
+}
+
+function nullableNonNegativeAmount(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000)
+}
+
+export function isForesightQuickReview(value: unknown): value is ForesightQuickReview {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const review = value as Record<string, unknown>
+  const reviewKeys = Object.keys(review).sort().join(',')
+  if (!['annualProjection,summary', 'annualProjection,evidence,summary'].includes(reviewKeys) ||
+    !review.summary || typeof review.summary !== 'object' || Array.isArray(review.summary) ||
+    !Array.isArray(review.annualProjection) || review.annualProjection.length < 1 ||
+    review.annualProjection.length > 121) return false
+  if (Object.hasOwn(review, 'evidence')) {
+    if (!review.evidence || typeof review.evidence !== 'object' || Array.isArray(review.evidence)) return false
+    const evidence = review.evidence as Record<string, unknown>
+    if (Object.keys(evidence).sort().join(',') !== 'observedAt,source,sourceRows' ||
+      evidence.source !== 'FORESIGHT_QUICK_VIEW' || typeof evidence.observedAt !== 'string' ||
+      Number.isNaN(Date.parse(evidence.observedAt)) || !Array.isArray(evidence.sourceRows) ||
+      evidence.sourceRows.length < 2 || evidence.sourceRows.length > 150 ||
+      !evidence.sourceRows.every((row) => Array.isArray(row) && row.length <= 20 &&
+        row.every((cell) => typeof cell === 'string' && cell.length <= 256))) return false
+  }
+  const summary = review.summary as Record<string, unknown>
+  const summaryKeys = [
+    'initialFaceAmount', 'lapseYear', 'mecYear', 'modalPremium', 'minimumPremium',
+    'deathBenefitProtectionPremium', 'targetPremium', 'mecPremium',
+    'guidelineLevelPremium', 'guidelineSinglePremium',
+  ].sort()
+  if (Object.keys(summary).sort().join(',') !== summaryKeys.join(',') ||
+    typeof summary.initialFaceAmount !== 'number' || !Number.isFinite(summary.initialFaceAmount) ||
+    summary.initialFaceAmount <= 0 || typeof summary.modalPremium !== 'number' ||
+    !Number.isFinite(summary.modalPremium) || summary.modalPremium <= 0 ||
+    typeof summary.targetPremium !== 'number' ||
+    !Number.isFinite(summary.targetPremium) || summary.targetPremium <= 0 ||
+    !summaryKeys.filter((key) => !['initialFaceAmount', 'modalPremium', 'targetPremium'].includes(key))
+      .every((key) => nullableNonNegativeAmount(summary[key]))) return false
+  const rowKeys = [
+    'policyYear', 'age', 'premiumOutlay', 'weightedAverageInterestRate', 'loan',
+    'annualIncome', 'accumulatedValue', 'cashSurrenderValue', 'netDeathBenefit',
+  ].sort()
+  return review.annualProjection.every((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const row = value as Record<string, unknown>
+    return Object.keys(row).sort().join(',') === rowKeys.join(',') &&
+      Number.isInteger(row.policyYear) && Number(row.policyYear) >= 1 && Number(row.policyYear) <= 121 &&
+      Number.isInteger(row.age) && Number(row.age) >= 0 && Number(row.age) <= 130 &&
+      rowKeys.filter((key) => !['policyYear', 'age'].includes(key))
+        .every((key) => nullableNonNegativeAmount(row[key]))
+  })
 }
 
 export function parseForesightIllustrationReceipt(value: unknown): ForesightIllustrationReceipt | null {
@@ -397,7 +492,10 @@ export function parseForesightSolvedIllustrationReceipt(value: unknown): Foresig
     'monthlyPremium', 'annualPremium', 'release', 'reportCode', 'documentSha256', 'documentBytes', 'saved',
   ].sort()
   const keys = Object.keys(receipt).sort()
-  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index]) ||
+  const expectedWithQuickReview = [...expected, 'quickReview'].sort()
+  const hasExpectedKeys = (candidate: string[]) => keys.length === candidate.length &&
+    keys.every((key, index) => key === candidate[index])
+  if ((!hasExpectedKeys(expected) && !hasExpectedKeys(expectedWithQuickReview)) ||
     typeof receipt.inputHash !== 'string' || !/^[a-f0-9]{64}$/.test(receipt.inputHash) ||
     typeof receipt.caseFingerprint !== 'string' || !/^case_[a-f0-9]{64}$/.test(receipt.caseFingerprint) ||
     typeof receipt.carrierCaseName !== 'string' || !/^[A-Z0-9][A-Z0-9_-]{5,79}$/.test(receipt.carrierCaseName) ||
@@ -411,6 +509,7 @@ export function parseForesightSolvedIllustrationReceipt(value: unknown): Foresig
     receipt.reportCode !== 'NAIC_ILLUSTRATION' || typeof receipt.documentSha256 !== 'string' ||
     !/^[a-f0-9]{64}$/.test(receipt.documentSha256) || !Number.isSafeInteger(receipt.documentBytes) ||
     (receipt.documentBytes as number) < 5 || (receipt.documentBytes as number) > 25 * 1024 * 1024 ||
-    receipt.saved !== true) return null
+    receipt.saved !== true || (Object.hasOwn(receipt, 'quickReview') &&
+      !isForesightQuickReview(receipt.quickReview))) return null
   return receipt as ForesightSolvedIllustrationReceipt
 }

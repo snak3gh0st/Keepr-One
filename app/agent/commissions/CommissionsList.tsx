@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { useI18n } from "@/components/i18n/LanguageProvider";
+import { buildCommissionAgentBreakdown } from "@/lib/commission-attribution";
 
 type CommissionType = "DIRECT" | "OVERRIDE";
 
@@ -20,6 +21,11 @@ type Record_ = {
   policyNumber: string | null;
   policyId: string | null;
   agentName: string;
+  agentNumber: string | null;
+  payeeName: string | null;
+  payeeNumber: string | null;
+  agencyName: string | null;
+  source: "NATIONAL_LIFE" | "KEEPRONE";
   type: CommissionType;
   level: number;
   amount: string;
@@ -30,6 +36,11 @@ type OriginFilter = "all" | "direct" | "override";
 type PeriodFilter = "all" | string;
 type SortMode = "period-desc" | "period-asc" | "amount-desc" | "amount-asc";
 type CommissionRecord = Record_ & { period: string; numericAmount: number };
+type CommissionAudit = {
+  partial: boolean;
+  rejectedCount: number;
+  duplicateCount: number;
+};
 
 const ROWS_PER_PAGE = 12;
 function periodLabel(period: string, locale: string, noDateLabel: string) {
@@ -107,7 +118,13 @@ function MoneyValue({
   );
 }
 
-export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
+export function CommissionsList({
+  byPeriod,
+  audit,
+}: {
+  byPeriod: PeriodGroup[];
+  audit: CommissionAudit;
+}) {
   const { copy, locale } = useI18n();
   const count = useMemo(
     () => new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }),
@@ -208,10 +225,14 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
       return [
         record.policyNumber ?? "",
         record.agentName,
+        record.agentNumber ?? "",
+        record.payeeName ?? "",
+        record.payeeNumber ?? "",
+        record.agencyName ?? "",
         formatPeriod(record.period),
         record.type === "DIRECT"
           ? copy("direta", "direct")
-          : copy("repasse equipe override", "team override"),
+          : copy("agência override", "agency override"),
         record.numericAmount.toFixed(2),
       ]
         .join(" ")
@@ -268,6 +289,16 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
 
     return { total, direct, override, byPeriod: byPeriodMap };
   }, [filteredRecords]);
+
+  const agentBreakdown = useMemo(
+    () => buildCommissionAgentBreakdown(filteredRecords.map((record) => ({
+      agentName: record.agentName,
+      agentNumber: record.agentNumber,
+      type: record.type,
+      amount: record.numericAmount,
+    }))),
+    [filteredRecords],
+  );
 
   const pageCount = Math.max(
     1,
@@ -465,7 +496,9 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
   const metricItems = [
     {
       key: "all" as const,
-      label: copy("Saldo do extrato", "Statement balance"),
+      label: audit.partial
+        ? copy("Subtotal auditado", "Audited subtotal")
+        : copy("Total do extrato", "Statement total"),
       detail: copy(
         "{entries} lançamentos em {periods} {periodLabel}",
         "{entries} entries across {periods} {periodLabel}",
@@ -482,8 +515,8 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
       key: "direct" as const,
       label: copy("Produção direta", "Direct production"),
       detail: copy(
-        "{count} lançamentos da sua produção",
-        "{count} entries from your production",
+        "{count} lançamentos Personal da National",
+        "{count} National Life Personal entries",
         { count: count.format(summary.directCount) },
       ),
       value: summary.direct,
@@ -491,10 +524,10 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
     },
     {
       key: "override" as const,
-      label: copy("Repasses da equipe", "Team overrides"),
+      label: copy("Agência · Override", "Agency · Override"),
       detail: copy(
-        "{count} repasses da sua hierarquia",
-        "{count} overrides from your hierarchy",
+        "{count} lançamentos Override da National",
+        "{count} National Life Override entries",
         { count: count.format(summary.overrideCount) },
       ),
       value: summary.override,
@@ -506,6 +539,22 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
     <div ref={root} className="commissions-workspace">
       {records.length > 0 ? (
         <>
+          {audit.partial ? (
+            <aside className="commission-audit-warning" role="status">
+              <strong>{copy("Extrato parcial, sem estimativas", "Partial statement, with no estimates")}</strong>
+              <p>
+                {copy(
+                  "{rejected} lançamento(s) sem evidência completa ficaram fora dos valores. {duplicates} cópia(s) de sincronização também foram removidas. O demonstrativo abaixo contém somente linhas atribuíveis e auditáveis da National Life.",
+                  "{rejected} entry or entries without complete evidence were excluded. {duplicates} sync copies were also removed. The statement below contains only attributable, auditable National Life rows.",
+                  {
+                    rejected: count.format(audit.rejectedCount),
+                    duplicates: count.format(audit.duplicateCount),
+                  },
+                )}
+              </p>
+            </aside>
+          ) : null}
+
           <section className="commission-metrics" aria-label={copy("Resumo do extrato", "Statement summary")}>
             {metricItems.map((item) => (
               <button
@@ -537,14 +586,63 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
             ))}
           </section>
 
+          <section className="commission-agent-statement" aria-labelledby="commission-agent-statement-title">
+            <header>
+              <div>
+                <span>{copy("Rastreabilidade National Life", "National Life traceability")}</span>
+                <h2 id="commission-agent-statement-title">{copy("Demonstrativo por agente", "Statement by agent")}</h2>
+                <p>
+                  {copy(
+                    "Cada linha usa o número do agente produtor informado pela National. Direta corresponde a Personal; agência corresponde a Override recebido sobre a produção daquele agente.",
+                    "Each row uses the writing-agent number reported by National Life. Direct means Personal; agency means an Override received from that agent's production.",
+                  )}
+                </p>
+              </div>
+              <small>
+                {count.format(agentBreakdown.length)} {agentBreakdown.length === 1
+                  ? copy("agente nesta visão", "agent in this view")
+                  : copy("agentes nesta visão", "agents in this view")}
+              </small>
+            </header>
+            <div className="commission-agent-table" role="table" aria-label={copy("Valores diretos e de agência por agente", "Direct and agency values by agent")}>
+              <div className="commission-agent-table-head" role="row">
+                <span role="columnheader">{copy("Agente produtor", "Writing agent")}</span>
+                <span role="columnheader">{copy("Direta · Personal", "Direct · Personal")}</span>
+                <span role="columnheader">{copy("Agência · Override", "Agency · Override")}</span>
+                <span role="columnheader">{copy("Total atribuído", "Attributed total")}</span>
+              </div>
+              <div className="commission-agent-table-body" role="rowgroup">
+                {agentBreakdown.map((row) => (
+                  <div key={row.key} className="commission-agent-table-row" role="row">
+                    <span className="commission-agent-identity" role="cell">
+                      <strong>{row.agentName === "Not provided" ? copy("Nome não informado", "Name not provided") : row.agentName}</strong>
+                      <small>{row.agentNumber ? copy("Agente #{number}", "Agent #{number}", { number: row.agentNumber }) : copy("Número não informado", "Number not provided")}</small>
+                    </span>
+                    <span role="cell">
+                      <strong>US$ {moneyNumber.format(row.directAmount)}</strong>
+                      <small>{count.format(row.directCount)} {copy("lanç.", "entries")}</small>
+                    </span>
+                    <span role="cell">
+                      <strong>US$ {moneyNumber.format(row.overrideAmount)}</strong>
+                      <small>{count.format(row.overrideCount)} {copy("lanç.", "entries")}</small>
+                    </span>
+                    <span className="commission-agent-total" role="cell">
+                      US$ {moneyNumber.format(row.totalAmount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
           <section className="commission-command-deck" data-commission-control>
             <header className="commission-command-heading">
               <div>
                 <h2>{copy("Encontre cada valor sem perder a origem.", "Find every amount without losing its source.")}</h2>
                 <p>
                   {copy(
-                    "Busque por apólice ou agente, selecione o período e compare produção direta com repasses.",
-                    "Search by policy or agent, select a period, and compare direct production with overrides.",
+                    "Busque por apólice, produtor ou recebedor e compare direta Personal com agência Override.",
+                    "Search by policy, writing agent, or payee and compare Personal direct with agency Override.",
                   )}
                 </p>
               </div>
@@ -642,7 +740,7 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                   [
                     ["all", copy("Todos", "All"), records.length, summary.total],
                     ["direct", copy("Direta", "Direct"), summary.directCount, summary.direct],
-                    ["override", copy("Equipe", "Team"), summary.overrideCount, summary.override],
+                    ["override", copy("Agência", "Agency"), summary.overrideCount, summary.override],
                   ] as const
                 ).map(([value, label, entryCount, amount]) => (
                   <button
@@ -714,8 +812,8 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                     {selected.numericAmount < 0
                       ? copy("Valor negativo registrado no extrato", "Negative amount recorded in the statement")
                       : selected.type === "DIRECT"
-                        ? copy("Comissão da sua produção direta", "Commission from your direct production")
-                        : copy("Repasse gerado pela produção da equipe", "Override generated by team production")}
+                        ? copy("Comissão direta classificada como Personal pela National", "Direct commission classified as Personal by National Life")
+                        : copy("Comissão da agência classificada como Override pela National", "Agency commission classified as Override by National Life")}
                   </p>
 
                   <dl>
@@ -728,16 +826,36 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                       <dd>{selected.policyNumber ?? copy("Não informada", "Not provided")}</dd>
                     </div>
                     <div>
-                      <dt>{copy("Agente de origem", "Source agent")}</dt>
-                      <dd>{selected.agentName}</dd>
+                      <dt>{copy("Agente produtor", "Writing agent")}</dt>
+                      <dd>
+                        {selected.agentName}
+                        {selected.agentNumber ? ` · #${selected.agentNumber}` : ""}
+                      </dd>
                     </div>
                     <div>
-                      <dt>{copy("Origem", "Source")}</dt>
+                      <dt>{copy("Classificação National", "National Life classification")}</dt>
                       <dd>
                         {selected.type === "DIRECT"
-                          ? copy("Produção direta", "Direct production")
-                          : copy("Repasse · nível {level}", "Override · level {level}", { level: selected.level })}
+                          ? copy("Direta · Personal", "Direct · Personal")
+                          : copy("Agência · Override", "Agency · Override")}
                       </dd>
+                    </div>
+                    <div>
+                      <dt>{copy("Recebedor", "Payee")}</dt>
+                      <dd>
+                        {selected.payeeName ?? copy("Não informado", "Not provided")}
+                        {selected.payeeNumber ? ` · #${selected.payeeNumber}` : ""}
+                      </dd>
+                    </div>
+                    {selected.agencyName ? (
+                      <div>
+                        <dt>{copy("Agência informada", "Reported agency")}</dt>
+                        <dd>{selected.agencyName}</dd>
+                      </div>
+                    ) : null}
+                    <div>
+                      <dt>{copy("Fonte", "Source")}</dt>
+                      <dd>{selected.source === "NATIONAL_LIFE" ? "National Life" : "KeeprOne"}</dd>
                     </div>
                   </dl>
 
@@ -822,8 +940,9 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                                   <strong>{record.policyNumber ?? copy("Não informada", "Not provided")}</strong>
                                 </span>
                                 <span className="commission-row-agent">
-                                  <small>{copy("Agente de origem", "Source agent")}</small>
+                                  <small>{copy("Agente produtor", "Writing agent")}</small>
                                   <strong>{record.agentName}</strong>
+                                  {record.agentNumber ? <small>#{record.agentNumber}</small> : null}
                                 </span>
                                 <span
                                   className="commission-row-origin"
@@ -834,8 +953,8 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
                                   {record.numericAmount < 0
                                     ? copy("Valor negativo", "Negative amount")
                                     : record.type === "DIRECT"
-                                      ? copy("Direta", "Direct")
-                                      : copy("Repasse · N{level}", "Override · L{level}", { level: record.level })}
+                                      ? copy("Direta · Personal", "Direct · Personal")
+                                      : copy("Agência · Override", "Agency · Override")}
                                 </span>
                                 <MoneyValue value={record.numericAmount} compact />
                                 <span className="commission-row-arrow" aria-hidden="true">
@@ -926,8 +1045,8 @@ export function CommissionsList({ byPeriod }: { byPeriod: PeriodGroup[] }) {
             </svg>
             <p>
               {copy(
-                "Valores em dólares americanos. Lançamentos negativos reduzem o saldo da visão; produção direta e repasses seguem a classificação recebida da operação.",
-                "Amounts are in U.S. dollars. Negative entries reduce the balance in this view; direct production and overrides follow the classification received from operations.",
+                "Valores em dólares americanos. O agente produtor, o recebedor e a classificação Personal/Override vêm do extrato da National Life; o KeeprOne não presume vínculo por semelhança de nome.",
+                "Amounts are in U.S. dollars. The writing agent, payee, and Personal/Override classification come from the National Life statement; KeeprOne does not infer identity from similar names.",
               )}
             </p>
           </aside>

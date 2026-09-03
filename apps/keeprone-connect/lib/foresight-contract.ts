@@ -60,7 +60,8 @@ export type ForesightSolvedIllustrationSnapshotV2 = {
   product: { name: 'FlexLife'; code: '956' }
   solve: {
     basis: 'DEATH_BENEFIT' | 'PREMIUM'
-    method: 'Protection_Focus' | 'Based_on_Target_Premium'
+    method: 'Protection_Focus' | 'Retirement_Focus' | 'Minimum_DB_Max_Cash_Value' |
+      'Balanced_DB' | 'Based_on_Target_Premium'
     amount: number
   }
   faceAmount: number | null
@@ -219,12 +220,18 @@ function parseForesightSolvedIllustrationSnapshot(
   const product = value.product
   if (!isObject(product) || !hasExactKeys(product, ['name', 'code']) || product.name !== 'FlexLife' || product.code !== '956') return null
   const solve = value.solve
+  const methodBasis: Record<string, 'DEATH_BENEFIT' | 'PREMIUM'> = {
+    Minimum_DB_Max_Cash_Value: 'PREMIUM',
+    Balanced_DB: 'PREMIUM',
+    Based_on_Target_Premium: 'PREMIUM',
+    Protection_Focus: 'DEATH_BENEFIT',
+    Retirement_Focus: 'DEATH_BENEFIT',
+  }
   if (!isObject(solve) || !hasExactKeys(solve, ['basis', 'method', 'amount']) ||
     !['DEATH_BENEFIT', 'PREMIUM'].includes(String(solve.basis)) ||
     typeof solve.amount !== 'number' || !Number.isFinite(solve.amount) || solve.amount <= 0 ||
     solve.amount > 1_000_000_000 ||
-    (solve.basis === 'DEATH_BENEFIT' && solve.method !== 'Protection_Focus') ||
-    (solve.basis === 'PREMIUM' && solve.method !== 'Based_on_Target_Premium')) return null
+    methodBasis[String(solve.method)] !== solve.basis) return null
   if (!isObject(value.premium) || !hasExactKeys(value.premium, ['mode', 'amount']) || value.premium.mode !== 'Monthly') return null
   const isFaceSolve = solve.basis === 'DEATH_BENEFIT'
   if ((isFaceSolve && (typeof value.faceAmount !== 'number' || value.faceAmount !== solve.amount || value.premium.amount !== null)) ||

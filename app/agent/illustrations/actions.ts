@@ -117,8 +117,6 @@ export async function reconcileTermIllustrationPdf(
       },
       data: {
         premium: premiums.monthlyPremium,
-        targetPremium: premiums.monthlyPremium,
-        targetPremiumSource: 'CARRIER_CALCULATED_FOR_TERM',
         rawPayload: {
           ...rawPayload,
           foresightTermResult: {

@@ -5,7 +5,11 @@ import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { flexLifeProductLabel } from '@/lib/national-life/flex-life'
-import { buildForesightIllustrationSnapshot } from '@/lib/national-life/foresight-illustration-contract'
+import {
+  buildForesightIllustrationSnapshot,
+  isForesightQuickReview,
+  type ForesightQuickReview,
+} from '@/lib/national-life/foresight-illustration-contract'
 import { resolveForesightTermDurationResult } from '@/lib/national-life/foresight-term-contract'
 import { IllustrationPdfButton } from '../IllustrationPdfButton'
 import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
@@ -71,6 +75,26 @@ function foresightResultFrom(rawPayload: unknown): ForesightResult | null {
   return candidate as ForesightResult
 }
 
+function quickReviewFrom(rawPayload: unknown): ForesightQuickReview | null {
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload) ||
+    !('foresightResult' in rawPayload)) return null
+  const result = rawPayload.foresightResult
+  if (!result || typeof result !== 'object' || Array.isArray(result) ||
+    !('quickReview' in result)) return null
+  return isForesightQuickReview(result.quickReview) ? result.quickReview : null
+}
+
+function strategyLabel(method: string, copy: (pt: string, en: string) => string): string {
+  const labels: Record<string, string> = {
+    Minimum_DB_Max_Cash_Value: copy('Máximo Cash Value', 'Maximum Cash Value'),
+    Balanced_DB: copy('Benefício balanceado', 'Balanced death benefit'),
+    Based_on_Target_Premium: 'Target Premium',
+    Protection_Focus: copy('Foco em proteção', 'Protection focus'),
+    Retirement_Focus: copy('Foco em aposentadoria', 'Retirement focus'),
+  }
+  return labels[method] ?? method.replaceAll('_', ' ')
+}
+
 const day = (value: Date, locale: string) =>
   new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeZone: 'UTC' }).format(value)
 
@@ -132,6 +156,8 @@ function englishIllustrationPdfMessage(
     case 'FORESIGHT_SOLVE_READBACK_MISMATCH':
     case 'FORESIGHT_RESPONSE_INVALID':
       return 'Foresight did not return a verifiable result for this scenario. Review the source amount and generate a new illustration; no PDF was issued.'
+    case 'FORESIGHT_QUICK_VIEW_READBACK_MISMATCH':
+      return 'The National Life Quick Review was incomplete or differed from the calculated values. No PDF was issued, and no number was accepted as official.'
     case null:
       return 'The PDF could not be generated.'
     default:
@@ -178,6 +204,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
   const commandStatus = (await getIllustrationCommandStatuses(agent.id)).get(illustration.id)
   const documentReady = illustration.documentFetchedAt && illustration.documentMimeType === 'application/pdf'
   const foresightResult = documentReady ? foresightResultFrom(illustration.rawPayload) : null
+  const quickReview = quickReviewFrom(illustration.rawPayload)
   const isTermProduct = illustration.productName === 'NL Term' || illustration.productName === 'LSW Term'
   const termDurationResult = isTermProduct ? (() => {
     try {
@@ -363,6 +390,66 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
         )}
       </section>
 
+      {quickReview && (
+        <section className="mt-6 overflow-hidden rounded-[1.35rem] border border-gold/30 bg-paper shadow-[0_18px_48px_rgba(15,29,19,0.045)]">
+          <div className="border-b border-border-steel px-5 py-4 sm:px-6">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-gold-ink">Quick Review · National Life</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-[-0.025em] text-ink">{copy('Números revisados antes da montagem do PDF', 'Numbers reviewed before the PDF is assembled')}</h2>
+            <p className="mt-1 text-xs leading-5 text-ink-muted">{copy('O K-Bot lê esta tabela diretamente do Foresight depois do cálculo e antes de solicitar o documento oficial.', 'K-Bot reads this table directly from Foresight after calculation and before requesting the official document.')}</p>
+            {quickReview.evidence && (
+              <p className="mt-1 font-mono text-[10px] text-ink-muted">
+                {copy('Fonte: Foresight Quick View · capturado em', 'Source: Foresight Quick View · captured at')} {instant(new Date(quickReview.evidence.observedAt), locale)}
+              </p>
+            )}
+          </div>
+          <dl className="grid gap-px bg-border-steel sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              [copy('Capital inicial', 'Initial face amount'), currency(quickReview.summary.initialFaceAmount, locale)],
+              ['Target Premium', premiumCurrency(quickReview.summary.targetPremium, locale)],
+              [copy('Prêmio modal', 'Modal premium'), quickReview.summary.modalPremium === null ? '—' : premiumCurrency(quickReview.summary.modalPremium, locale)],
+              [copy('MEC Premium', 'MEC premium'), quickReview.summary.mecPremium === null ? '—' : premiumCurrency(quickReview.summary.mecPremium, locale)],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-paper px-5 py-4">
+                <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">{label}</dt>
+                <dd className="mt-1 font-mono text-lg font-semibold tabular-nums text-ink">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="overflow-x-auto p-5 sm:p-6">
+            <table className="min-w-[920px] w-full border-collapse text-left text-xs">
+              <thead className="border-b border-border-steel text-[10px] uppercase tracking-[0.08em] text-ink-muted">
+                <tr>
+                  <th className="px-2 py-2">{copy('Ano', 'Year')}</th>
+                  <th className="px-2 py-2">{copy('Idade', 'Age')}</th>
+                  <th className="px-2 py-2">{copy('Aporte', 'Premium outlay')}</th>
+                  <th className="px-2 py-2">{copy('Taxa média', 'Average rate')}</th>
+                  <th className="px-2 py-2">{copy('Empréstimo', 'Loan')}</th>
+                  <th className="px-2 py-2">{copy('Renda', 'Income')}</th>
+                  <th className="px-2 py-2">{copy('Valor acumulado', 'Accumulated value')}</th>
+                  <th className="px-2 py-2">Cash surrender</th>
+                  <th className="px-2 py-2">{copy('Benefício líquido', 'Net death benefit')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border-steel/70">
+                {quickReview.annualProjection.map((row) => (
+                  <tr key={row.policyYear}>
+                    <td className="px-2 py-2 font-mono tabular-nums">{row.policyYear}</td>
+                    <td className="px-2 py-2 font-mono tabular-nums">{row.age}</td>
+                    <td className="px-2 py-2 font-mono tabular-nums">{row.premiumOutlay === null ? '—' : premiumCurrency(row.premiumOutlay, locale)}</td>
+                    <td className="px-2 py-2 font-mono tabular-nums">{row.weightedAverageInterestRate === null ? '—' : `${row.weightedAverageInterestRate.toFixed(2)}%`}</td>
+                    <td className="px-2 py-2 font-mono tabular-nums">{row.loan === null ? '—' : currency(row.loan, locale)}</td>
+                    <td className="px-2 py-2 font-mono tabular-nums">{row.annualIncome === null ? '—' : currency(row.annualIncome, locale)}</td>
+                    <td className="px-2 py-2 font-mono tabular-nums">{row.accumulatedValue === null ? '—' : currency(row.accumulatedValue, locale)}</td>
+                    <td className="px-2 py-2 font-mono tabular-nums">{row.cashSurrenderValue === null ? '—' : currency(row.cashSurrenderValue, locale)}</td>
+                    <td className="px-2 py-2 font-mono tabular-nums">{row.netDeathBenefit === null ? '—' : currency(row.netDeathBenefit, locale)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {foresightResult && (
         <section className="mt-6 overflow-hidden rounded-[1.35rem] border border-teal/25 bg-paper shadow-[0_18px_48px_rgba(15,29,19,0.045)]">
           <div className="border-b border-border-steel px-5 py-4 sm:px-6">
@@ -509,19 +596,19 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                 label={copy('Benefício por morte', 'Death benefit')}
                 value={foresightSnapshot.deathBenefitOption === 'A_Level' ? copy('A — nivelado', 'A — level') : copy('B — crescente', 'B — increasing')}
               />
-              {foresightSnapshot.schemaVersion === 2 ? (
+            {foresightSnapshot.schemaVersion === 2 ? (
                 <>
                   <Fact
-                    label={copy('Base de cálculo', 'Solve basis')}
-                    value={foresightSnapshot.solve.basis === 'PREMIUM'
-                      ? copy('Resolvido pelo prêmio mensal', 'Solved by monthly premium')
-                      : copy('Resolvido pelo capital segurado', 'Solved by face amount')}
+                    label={copy('Estratégia da ilustração', 'Illustration strategy')}
+                    value={strategyLabel(foresightSnapshot.solve.method, copy)}
                   />
-                  <Fact label={copy('Método Foresight', 'Foresight method')} value={foresightSnapshot.solve.method.replaceAll('_', ' ')} />
                   <Fact
-                    label={copy('Valor de origem', 'Source amount')}
-                    value={currency(foresightSnapshot.solve.amount, locale)}
+                    label={foresightSnapshot.solve.basis === 'PREMIUM' ? copy('Aporte mensal informado', 'Entered monthly contribution') : copy('Capital segurado informado', 'Entered face amount')}
+                    value={foresightSnapshot.solve.basis === 'PREMIUM'
+                      ? premiumCurrency(foresightSnapshot.solve.amount, locale)
+                      : currency(foresightSnapshot.solve.amount, locale)}
                   />
+                  {quickReview && <Fact label="Target Premium" value={premiumCurrency(quickReview.summary.targetPremium, locale)} />}
                 </>
               ) : (
                 <>
