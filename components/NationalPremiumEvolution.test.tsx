@@ -19,6 +19,8 @@ describe('NationalPremiumEvolution', () => {
     const table = container.querySelector('table')!
     expect(within(table).getAllByText(/1\.234,56/).length).toBeGreaterThan(0)
     expect(screen.getByRole('img')).toHaveAccessibleName('AAP em dólares por mês de emissão')
+    expect(screen.getByRole('img')).toHaveAttribute('width', '100%')
+    expect(within(table).getByText('ago./26')).toBeTruthy()
   })
   it('does not draw unverified totals as a zero chart', () => {
     const model = buildPremiumEvolution({ rows: [], observedAt: null, verified: false })
