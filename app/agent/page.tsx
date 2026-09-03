@@ -133,10 +133,16 @@ function isPlatformModuleEnabled(
 export default async function AgentDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ preview?: string; premiumRange?: string; premiumProduct?: string; premiumView?: string }>
+  searchParams: Promise<{
+    preview?: string
+    onboarding?: string
+    premiumRange?: string
+    premiumProduct?: string
+    premiumView?: string
+  }>
 }) {
   const params = await searchParams
-  const { preview } = params
+  const { preview, onboarding } = params
   const { copy, language } = await getServerI18n()
   const locale = language === 'PT' ? 'pt-BR' : 'en-US'
   const agent = await getCurrentAgent()
@@ -521,6 +527,7 @@ export default async function AgentDashboard({
       userName={user?.name ?? ''}
       promotionIdentity={previewPromotionIdentity}
       journeyHref={journeyHref}
+      kbotWelcome={onboarding === 'completed'}
     >
       <KeeprDashboardMotion>
         {loadError && (

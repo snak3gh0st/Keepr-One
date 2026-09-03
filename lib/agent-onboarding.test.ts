@@ -22,6 +22,7 @@ import {
   deriveAgentOnboardingStep,
   detectOnboardingIntegrations,
   getRequiredOnboardingModulesForAccess,
+  ONBOARDING_STEPS,
   reconcileAgentOnboardingModules,
   reconcileAgentOnboardingForAgent,
   type AgentOnboardingRecord,
@@ -100,21 +101,16 @@ describe('agent onboarding contract', () => {
     expect(agency).toEqual([...individual.slice(0, -1), 'TEAM', 'INTEGRATIONS'])
   })
 
-  it('derives every step from durable prerequisites instead of trusting currentStep', () => {
-    const welcome = onboarding({ currentStep: 'REVIEW' })
-    expect(deriveAgentOnboardingStep(welcome)).toBe('WELCOME')
-
-    const profile = onboarding({ welcomeCompletedAt: now })
+  it('derives only the four effective steps from durable prerequisites', () => {
+    const profile = onboarding({ currentStep: 'REVIEW' })
     expect(deriveAgentOnboardingStep(profile)).toBe('PROFILE')
 
     const nationalLife = onboarding({
-      welcomeCompletedAt: now,
       profileCompletedAt: now,
     })
     expect(deriveAgentOnboardingStep(nationalLife)).toBe('NATIONAL_LIFE')
 
     const calendar = onboarding({
-      welcomeCompletedAt: now,
       profileCompletedAt: now,
       nationalLifeVerifiedAt: now,
     })
@@ -126,18 +122,30 @@ describe('agent onboarding contract', () => {
     })
     expect(deriveAgentOnboardingStep(whatsapp)).toBe('WHATSAPP')
 
-    const modules = onboarding({
+    const legacyReview = onboarding({
       ...whatsapp,
       whatsappDecision: 'CONNECTED',
+      currentStep: 'REVIEW',
     })
-    expect(deriveAgentOnboardingStep(modules)).toBe('MODULES')
+    expect(deriveAgentOnboardingStep(legacyReview)).toBe('WHATSAPP')
     expect(deriveAgentOnboardingStep({
-      ...modules,
+      ...legacyReview,
       completedModules: ['TODAY', 'INTEGRATIONS'],
-    })).toBe('REVIEW')
+    })).toBe('WHATSAPP')
+    expect(deriveAgentOnboardingStep({
+      ...legacyReview,
+      status: 'COMPLETED',
+    })).toBe('COMPLETED')
+    expect(ONBOARDING_STEPS).toEqual([
+      'PROFILE',
+      'NATIONAL_LIFE',
+      'CALENDAR',
+      'WHATSAPP',
+      'COMPLETED',
+    ])
   })
 
-  it('reconciles capability upgrades and downgrades without trapping the tour', () => {
+  it('reconciles capability changes without reopening the removed module tour', () => {
     const review = onboarding({
       currentStep: 'REVIEW',
       welcomeCompletedAt: now,
@@ -152,7 +160,7 @@ describe('agent onboarding contract', () => {
       ['TODAY', 'TEAM', 'INTEGRATIONS'],
     )
     expect(upgraded).toMatchObject({
-      currentStep: 'MODULES',
+      currentStep: 'WHATSAPP',
       requiredModules: ['TODAY', 'TEAM', 'INTEGRATIONS'],
       completedModules: ['TODAY', 'INTEGRATIONS'],
     })
@@ -162,7 +170,7 @@ describe('agent onboarding contract', () => {
       ['TODAY', 'INTEGRATIONS'],
     )
     expect(downgraded).toMatchObject({
-      currentStep: 'REVIEW',
+      currentStep: 'WHATSAPP',
       requiredModules: ['TODAY', 'INTEGRATIONS'],
       completedModules: ['TODAY', 'INTEGRATIONS'],
     })
@@ -194,12 +202,12 @@ describe('agent onboarding contract', () => {
     const result = await reconcileAgentOnboardingForAgent('agent-1')
 
     expect(result).toMatchObject({
-      currentStep: 'MODULES',
+      currentStep: 'WHATSAPP',
       requiredModules: expect.arrayContaining(['TEAM', 'INTEGRATIONS']),
     })
     expect(mocks.onboardingUpdate).toHaveBeenCalledWith({
       where: { id: 'onboarding-1' },
-      data: expect.objectContaining({ currentStep: 'MODULES' }),
+      data: expect.objectContaining({ currentStep: 'WHATSAPP' }),
       select: expect.any(Object),
     })
   })

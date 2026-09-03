@@ -7,7 +7,13 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
 
-export function OnboardingMotion({ children }: { children: React.ReactNode }) {
+export function OnboardingMotion({
+  children,
+  step,
+}: {
+  children: React.ReactNode;
+  step: string;
+}) {
   const scope = useRef<HTMLDivElement>(null);
 
   useGSAP(
@@ -15,84 +21,60 @@ export function OnboardingMotion({ children }: { children: React.ReactNode }) {
       const media = gsap.matchMedia();
 
       media.add("(prefers-reduced-motion: no-preference)", () => {
-        gsap.from("[data-onboarding-reveal]", {
-          y: 24,
-          opacity: 0,
-          duration: 0.82,
-          stagger: 0.075,
-          ease: "power3.out",
-        });
-
-        const marquee = scope.current?.querySelector<HTMLElement>(
-          "[data-onboarding-marquee]",
-        );
-        if (marquee) {
-          gsap.to(marquee, {
-            xPercent: -50,
-            duration: 34,
-            repeat: -1,
-            ease: "none",
-          });
+        const root = scope.current;
+        const stepCard = root?.querySelector<HTMLElement>("[data-onboarding-step-card]");
+        const assistant = root?.querySelector<HTMLElement>("[data-onboarding-assistant]");
+        const substeps = root
+          ? Array.from(root.querySelectorAll<HTMLElement>(".onboarding-kbot-substeps > li"))
+          : [];
+        const timeline = gsap.timeline({ defaults: { ease: "power3.out" } });
+        if (stepCard) {
+          timeline.fromTo(
+            stepCard,
+            { y: 24, scale: 0.985, opacity: 0 },
+            { y: 0, scale: 1, opacity: 1, duration: 0.46, clearProps: "transform,opacity" },
+          );
+        }
+        if (assistant) {
+          timeline.fromTo(
+            assistant,
+            { y: 14, opacity: 0 },
+            { y: 0, opacity: 1, duration: 0.38, clearProps: "transform,opacity" },
+            0.08,
+          );
+        }
+        if (substeps.length > 0) {
+          timeline.fromTo(
+            substeps,
+            { y: 12, scale: 0.97, opacity: 0 },
+            { y: 0, scale: 1, opacity: 1, duration: 0.32, stagger: 0.055, clearProps: "transform,opacity" },
+            0.12,
+          );
         }
       });
 
       media.add(
         "(min-width: 1024px) and (prefers-reduced-motion: no-preference)",
         () => {
-          const tour = scope.current?.querySelector<HTMLElement>(
-            "[data-onboarding-tour]",
-          );
-          const heading = scope.current?.querySelector<HTMLElement>(
-            "[data-onboarding-tour-heading]",
-          );
+          const workspace = scope.current?.querySelector<HTMLElement>(".onboarding-workspace");
+          const assistant = scope.current?.querySelector<HTMLElement>("[data-onboarding-assistant]");
+          if (!workspace || !assistant || workspace.scrollHeight <= window.innerHeight - 112) return;
 
-          if (tour && heading) {
-            ScrollTrigger.create({
-              trigger: tour,
-              start: "top top+=112",
-              end: "bottom bottom-=120",
-              pin: heading,
-              pinSpacing: false,
-              invalidateOnRefresh: true,
-            });
-          }
-
-          const stackCards = gsap.utils.toArray<HTMLElement>(
-            "[data-onboarding-stack-card]",
-          );
-          stackCards.forEach((card, index) => {
-            gsap.fromTo(
-              card,
-              {
-                y: 76 + index * 18,
-                scale: 0.94,
-                opacity: 0.42,
-              },
-              {
-                y: index * 10,
-                scale: 1 - index * 0.012,
-                opacity: 1,
-                ease: "none",
-                scrollTrigger: {
-                  trigger: card,
-                  start: "top 94%",
-                  end: "top 62%",
-                  scrub: 0.55,
-                },
-              },
-            );
+          ScrollTrigger.create({
+            trigger: workspace,
+            start: "top top+=104",
+            end: "bottom bottom-=32",
+            pin: assistant,
+            pinSpacing: false,
+            invalidateOnRefresh: true,
           });
         },
       );
 
       return () => media.revert();
     },
-    { scope },
+    { scope, dependencies: [step], revertOnUpdate: true },
   );
 
-  return (
-    <div ref={scope} className="onboarding-motion-root w-full max-w-full overflow-x-hidden">
-      {children}
-    </div>
-  );
+  return <div ref={scope} className="onboarding-motion-root">{children}</div>;
 }

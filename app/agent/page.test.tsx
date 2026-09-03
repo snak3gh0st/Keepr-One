@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   getTodayCalendarSummary: vi.fn(),
   getUpcomingCalendarEvents: vi.fn(),
   loadNationalPolicyQueues: vi.fn(),
+  shellProps: vi.fn(),
 }))
 
 vi.mock('@/lib/agent-context', () => ({
@@ -104,7 +105,10 @@ vi.mock('@/lib/national-life/commission-grid-keys', () => ({
   LEGACY_COMMISSION_EARNING_GRID_KEY: 'LEGACY_COMMISSIONS',
 }))
 vi.mock('@/components/Shell', () => ({
-  Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Shell: ({ children, ...props }: { children: React.ReactNode; kbotWelcome?: boolean }) => {
+    mocks.shellProps(props)
+    return <div>{children}</div>
+  },
 }))
 vi.mock('@/components/KeeprDashboardMotion', () => ({
   KeeprDashboardMotion: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -193,6 +197,27 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('AgentDashboard module access', () => {
+  it('asks the Shell for a K-Bot welcome only for the exact completed-onboarding flag', async () => {
+    const completed = render(await AgentDashboard({
+      searchParams: Promise.resolve({ onboarding: 'completed' }),
+    }))
+
+    expect(mocks.shellProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kbotWelcome: true }),
+    )
+
+    completed.unmount()
+    mocks.shellProps.mockClear()
+
+    render(await AgentDashboard({
+      searchParams: Promise.resolve({ onboarding: 'complete' }),
+    }))
+
+    expect(mocks.shellProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kbotWelcome: false }),
+    )
+  })
+
   it('does not query or render disabled modules for a TODAY-only account', async () => {
     render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
 

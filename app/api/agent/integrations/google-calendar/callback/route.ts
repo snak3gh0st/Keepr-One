@@ -22,6 +22,7 @@ export async function GET(request: Request) {
   if (!state || (!code && !oauthError)) {
     return NextResponse.json({ error: 'INVALID_OAUTH_CALLBACK' }, { status: 400 })
   }
+  let returnTo = '/agent/calendar'
   try {
     const user = await requireCalendarUser({ allowOnboarding: true })
     const env = getGoogleCalendarEnv()
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
       { state, userId: user.userId, sessionToken: user.sessionId },
       env,
     )
-    const returnTo = consumed.returnTo ?? '/agent/calendar'
+    returnTo = consumed.returnTo ?? returnTo
     if (oauthError || !code) return callbackRedirect(request, returnTo, 'denied')
 
     const tokens = await exchangeGoogleAuthorizationCode(
@@ -56,6 +57,6 @@ export async function GET(request: Request) {
     return callbackRedirect(request, returnTo, 'connected')
   } catch (error) {
     Sentry.captureException(error)
-    return callbackRedirect(request, '/agent/calendar', 'error')
+    return callbackRedirect(request, returnTo, 'error')
   }
 }
