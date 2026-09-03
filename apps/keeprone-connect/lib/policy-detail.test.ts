@@ -59,6 +59,15 @@ describe('National Life policy detail extraction', () => {
     expect(JSON.stringify(fields)).not.toContain('private@example.com')
   })
 
+  it('extracts Base Face Amount from a Term policy coverage section', () => {
+    expect(extractApprovedPolicyDetailFields(
+      'Policy Number\nLS1473219\nBase Face Amount\n$500,000.00',
+      'COVERAGE',
+    )).toContainEqual({
+      section: 'COVERAGE', label: 'Base Face Amount', value: '$500,000.00',
+    })
+  })
+
   it('verifies the expected visible policy number without returning nearby content', () => {
     expect(policyNumberIsVisible(coverageFixture, 'ls 1473219')).toBe(true)
     expect(policyNumberIsVisible(coverageFixture, 'LS0000000')).toBe(false)

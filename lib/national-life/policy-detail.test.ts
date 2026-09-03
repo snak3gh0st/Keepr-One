@@ -63,6 +63,18 @@ describe('parseNationalLifePolicyDetail', () => {
     expect(result.anticipatedAnnualPremium).toBeNull()
   })
 
+  it('uses the National Life Base Face Amount label for Term policies', () => {
+    const result = parseNationalLifePolicyDetail(observation({
+      fields: [
+        { section: 'COVERAGE', label: 'Base Face Amount', value: '$500,000.00' },
+        { section: 'PAYMENTS', label: 'CTP', value: '$1,125.00' },
+      ],
+    }))
+
+    expect(result.totalFaceAmount).toBe('500000.00')
+    expect(result.ctp).toBe('1125.00')
+  })
+
   it('rejects a path outside the exact policy-detail route', () => {
     expect(() => parseNationalLifePolicyDetail(observation({
       navigatePath: '/agent/book-of-business/inforce-book/all-clients',

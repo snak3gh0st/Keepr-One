@@ -21,7 +21,10 @@ describe('National Life policy detail command', () => {
       findOwnedPolicy: vi.fn(async () => ({
         id: 'policy_1', agentId: 'agent_1', policyNumber: 'LS1473219', carrier: 'National Life',
       })),
-      findCarrierRow: vi.fn(async () => ({ raw: { PolicyNumber: `<a href="${path}">LS1473219</a>` } })),
+      findCarrierRows: vi.fn(async () => [
+        { raw: { 'Policy #': 'LS1473219' } },
+        { raw: { PolicyNumber: `<a href="${path}">LS1473219</a>` } },
+      ]),
       issue: vi.fn(async () => ({ commandId: 'cmd_1' })),
     } satisfies PolicyDetailCommandRepository
     const now = new Date('2026-08-26T17:00:00.000Z')
@@ -43,7 +46,7 @@ describe('National Life policy detail command', () => {
       findOwnedPolicy: vi.fn(async () => ({
         id: 'policy_1', agentId: 'agent_2', policyNumber: 'LS1473219', carrier: 'National Life',
       })),
-      findCarrierRow: vi.fn(async () => null),
+      findCarrierRows: vi.fn(async () => []),
       issue: vi.fn(async () => ({ commandId: 'cmd_1' })),
     } satisfies PolicyDetailCommandRepository
 

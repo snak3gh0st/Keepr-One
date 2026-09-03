@@ -9,6 +9,7 @@ export type NationalLifePolicyDetailCardValue = {
   plannedPeriodicPayment: string | null
   paymentFrequency: string | null
   anticipatedAnnualPremium: string | null
+  targetPremium: string | null
   observedAt: string
 }
 
@@ -61,6 +62,10 @@ export function NationalLifePolicyDetailCard({
         <div className="flex items-baseline justify-between gap-3">
           <dt className="text-ink-muted">{copy('Prêmio anual antecipado', 'Anticipated annual premium')}</dt>
           <dd className="font-mono text-ink">{money(detail.anticipatedAnnualPremium, locale)}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-ink-muted">Target Premium / CTP</dt>
+          <dd className="font-mono text-ink">{money(detail.targetPremium, locale)}</dd>
         </div>
       </dl>
       <p className="mt-3 text-xs text-ink-muted">

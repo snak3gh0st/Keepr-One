@@ -510,6 +510,7 @@ const POLICY_DETAIL_PATH =
   /^\/agent\/book-of-business\/inforce-book\/all-clients\/policy-details\?id=[a-f0-9]{32}$/
 const POLICY_DETAIL_LABELS = new Set([
   'COVERAGE:Total Face Amount',
+  'COVERAGE:Base Face Amount',
   'COVERAGE:Net Death Benefit',
   'COVERAGE:MEC Limit',
   'COVERAGE:Guideline Premium Limit',

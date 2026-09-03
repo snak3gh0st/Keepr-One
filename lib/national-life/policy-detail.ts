@@ -133,7 +133,9 @@ export function parseNationalLifePolicyDetail(
     observedAt,
     coverageCaptured: input.fields.some((field) => field.section === 'COVERAGE'),
     paymentsCaptured: input.fields.some((field) => field.section === 'PAYMENTS'),
-    totalFaceAmount: money(value('COVERAGE', 'Total Face Amount')),
+    totalFaceAmount: money(
+      value('COVERAGE', 'Total Face Amount') ?? value('COVERAGE', 'Base Face Amount'),
+    ),
     netDeathBenefit: money(value('COVERAGE', 'Net Death Benefit')),
     nextScheduledPaymentDate: carrierDate(value('PAYMENTS', 'Next Scheduled Payment Date')),
     paymentFrequency: boundedText(value('PAYMENTS', 'Payment Frequency')),

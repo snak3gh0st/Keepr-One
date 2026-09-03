@@ -291,7 +291,7 @@ describe('policy detail messages', () => {
       visiblePolicyNumber: 'LS1473219',
       observedAt: '2026-08-26T17:00:00.000Z',
       fields: [
-        { section: 'COVERAGE', label: 'Total Face Amount', value: '$100,000.00' },
+        { section: 'COVERAGE', label: 'Base Face Amount', value: '$100,000.00' },
         { section: 'PAYMENTS', label: 'Anticipated Annual Premium', value: '$5,100.00' },
       ],
     }

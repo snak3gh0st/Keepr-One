@@ -17,6 +17,7 @@ export type PolicyDetailObservation = {
 const LABELS: Record<PolicyDetailSection, readonly string[]> = {
   COVERAGE: [
     'Total Face Amount',
+    'Base Face Amount',
     'Net Death Benefit',
     'MEC Limit',
     'Guideline Premium Limit',

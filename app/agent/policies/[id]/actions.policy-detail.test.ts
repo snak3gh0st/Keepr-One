@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({
   currentAgent: vi.fn(),
   agentScope: vi.fn(),
   policyFind: vi.fn(),
+  inforceFindMany: vi.fn(),
+  reportFindMany: vi.fn(),
+  caseFindMany: vi.fn(),
   requestRefresh: vi.fn(),
   revalidate: vi.fn(),
   language: { current: 'PT' as 'PT' | 'EN' },
@@ -16,7 +19,9 @@ vi.mock('@/lib/agent-access', () => ({ getAgentScopeIds: mocks.agentScope }))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     policy: { findUnique: mocks.policyFind },
-    nationalLifeInforcePolicy: { findUnique: vi.fn() },
+    nationalLifeInforcePolicy: { findMany: mocks.inforceFindMany },
+    nationalLifeReportRow: { findMany: mocks.reportFindMany },
+    nationalLifeCaseSnapshot: { findMany: mocks.caseFindMany },
   },
 }))
 vi.mock('@/lib/national-life/policy-detail-command', () => ({
@@ -46,7 +51,41 @@ describe('refreshNationalLifePolicyDetail action', () => {
       id: 'policy_1', agentId: 'agent_1', policyNumber: 'LS1473219', carrier: 'National Life',
     })
     mocks.agentScope.mockResolvedValue(['agent_1'])
+    mocks.inforceFindMany.mockResolvedValue([{ raw: { source: 'inforce' } }])
+    mocks.reportFindMany.mockResolvedValue([{ raw: { source: 'report' } }])
+    mocks.caseFindMany.mockResolvedValue([{ raw: { source: 'case' } }])
     mocks.requestRefresh.mockResolvedValue({ commandId: 'cmd_1' })
+  })
+
+  it('searches every carrier-owned locator source for the policy detail path', async () => {
+    mocks.requestRefresh.mockImplementationOnce(async (repository) => {
+      await expect(repository.findCarrierRows({
+        agentId: 'agent_1',
+        deploymentScope: 'LOCAL_CONNECTOR',
+        policyNumber: 'LS1473219',
+      })).resolves.toEqual([
+        { raw: { source: 'inforce' } },
+        { raw: { source: 'report' } },
+        { raw: { source: 'case' } },
+      ])
+      return { commandId: 'cmd_1' }
+    })
+
+    await refreshNationalLifePolicyDetail('policy_1')
+
+    expect(mocks.reportFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        agentId: 'agent_1',
+        gridKey: 'CLIENT_INTELLIGENCE',
+        label: 'LS1473219',
+      }),
+    }))
+    expect(mocks.caseFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        agentId: 'agent_1',
+        policyNo: 'LS1473219',
+      }),
+    }))
   })
 
   it('issues a scoped command and returns only its safe identity', async () => {
