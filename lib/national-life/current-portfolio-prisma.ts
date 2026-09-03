@@ -25,7 +25,8 @@ export async function loadCurrentNationalLifePortfolio(prisma: PrismaClient, age
           select: { sequence: true, recordCount: true, records: true, observedAt: true },
         } } } },
     })
-    if (!completion) return { rows: owned, historicalPolicies: 0, verified: false }
+    if (!completion) return { rows: owned, historicalPolicies: 0, verified: false,
+      statusCounts: [], productCounts: [] }
     const pages = verifyPortfolioPages({ ...completion, pages: completion.run.rawGridPages })
     const rows = pages.flatMap((page) => (page.records as GridRow[]).flatMap((raw) => {
       const row = toInforcePolicySnapshot(raw)
@@ -37,7 +38,14 @@ export async function loadCurrentNationalLifePortfolio(prisma: PrismaClient, age
   }))
   return {
     rows: partitions.flatMap((partition) => partition.rows),
+    storedPolicies: stored.length,
     historicalPolicies: partitions.reduce((sum, partition) => sum + partition.historicalPolicies, 0),
     verified: partitions.length > 0 && partitions.every((partition) => partition.verified),
+    statusCounts: [...Map.groupBy(partitions.flatMap((partition) => partition.statusCounts), (row) => row.status)]
+      .map(([status, rows]) => ({ status, count: rows.reduce((sum, row) => sum + row.count, 0) }))
+      .sort((a, b) => b.count - a.count || a.status.localeCompare(b.status)),
+    productCounts: [...Map.groupBy(partitions.flatMap((partition) => partition.productCounts), (row) => row.product)]
+      .map(([product, rows]) => ({ product, count: rows.reduce((sum, row) => sum + row.count, 0) }))
+      .sort((a, b) => b.count - a.count || a.product.localeCompare(b.product)),
   }
 }

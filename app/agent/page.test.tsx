@@ -32,7 +32,11 @@ vi.mock('@/lib/agent-context', () => ({
   getCurrentAgent: mocks.getCurrentAgent,
 }))
 vi.mock('@/lib/national-life/current-portfolio-prisma', () => ({
-  loadCurrentNationalLifePortfolio: async () => ({ rows: await mocks.policyFindMany(), historicalPolicies: 0, verified: true }),
+  loadCurrentNationalLifePortfolio: async () => {
+    const rows = await mocks.policyFindMany()
+    return { rows, storedPolicies: rows.length, historicalPolicies: 0, verified: true,
+      statusCounts: [], productCounts: [] }
+  },
 }))
 vi.mock('@/lib/agent-access', () => ({
   getCurrentAgentAccess: mocks.getCurrentAgentAccess,

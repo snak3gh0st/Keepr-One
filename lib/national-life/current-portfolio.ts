@@ -38,6 +38,11 @@ export function currentPortfolioFromSnapshot(input: {
       sourceUpdatedAt: input.observedAt,
     })),
     historicalPolicies: input.stored.filter((row) => !membership.has(row.policyNumber)).length,
+    statusCounts: [...Map.groupBy(policies, (row) => row.status)].map(([status, rows]) => ({ status, count: rows.length }))
+      .sort((a, b) => b.count - a.count || a.status.localeCompare(b.status)),
+    productCounts: [...Map.groupBy(policies, (row) => row.productName ?? 'Unknown')]
+      .map(([product, rows]) => ({ product, count: rows.length }))
+      .sort((a, b) => b.count - a.count || a.product.localeCompare(b.product)),
   }
 }
 

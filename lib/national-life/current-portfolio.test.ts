@@ -23,6 +23,8 @@ describe('current completed National portfolio', () => {
     })
     expect(result.historicalPolicies).toBe(1)
     expect(result.rows).toHaveLength(3)
+    expect(result.statusCounts).toEqual([{ status: 'INFORCE', count: 3 }])
+    expect(result.productCounts).toEqual([{ product: 'Unknown', count: 3 }])
     expect(buildNationalLifePortfolioMetrics(result.rows)).toMatchObject({
       activePolicies: 3, activeClients: 3, activeAap: 2000.13, premiumMissingPolicies: 0,
       premiumCoverageComplete: true, pendingLapsePolicies: 1, atRiskAap: 800.01,
