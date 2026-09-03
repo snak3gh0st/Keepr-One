@@ -37,6 +37,31 @@ const paymentsFixture = `
   09/15/2026
 `
 
+const liveCarrierFixture = `
+  $300,000.00
+  Total Face Amount
+  $300,886.86
+  Net Death Benefit
+  $16,724.00 through 01/10/2027
+  MEC Limit
+  $27,299.96 through 01/10/2027
+  Guideline Premium Limit
+  10/10/2026
+  Next Scheduled Payment Date
+  Monthly
+  Payment Frequency
+  $100.00
+  Planned Periodic Payment
+  $1,200.00
+  Anticipated Annual Premium
+  $35.18
+  Minimum Monthly Premium
+  $61.16
+  Minimum Guaranteed Premium
+  $975.00
+  CTP
+`
+
 describe('National Life policy detail extraction', () => {
   it('extracts only approved coverage labels from a page fixture', () => {
     const fields = extractApprovedPolicyDetailFields(coverageFixture, 'COVERAGE')
@@ -66,6 +91,24 @@ describe('National Life policy detail extraction', () => {
     )).toContainEqual({
       section: 'COVERAGE', label: 'Base Face Amount', value: '$500,000.00',
     })
+  })
+
+  it('extracts the live carrier value-before-label layout without shifting fields', () => {
+    expect(extractApprovedPolicyDetailFields(liveCarrierFixture, 'COVERAGE')).toEqual([
+      { section: 'COVERAGE', label: 'Total Face Amount', value: '$300,000.00' },
+      { section: 'COVERAGE', label: 'Net Death Benefit', value: '$300,886.86' },
+      { section: 'COVERAGE', label: 'MEC Limit', value: '$16,724.00 through 01/10/2027' },
+      { section: 'COVERAGE', label: 'Guideline Premium Limit', value: '$27,299.96 through 01/10/2027' },
+    ])
+    expect(extractApprovedPolicyDetailFields(liveCarrierFixture, 'PAYMENTS')).toEqual([
+      { section: 'PAYMENTS', label: 'Next Scheduled Payment Date', value: '10/10/2026' },
+      { section: 'PAYMENTS', label: 'Payment Frequency', value: 'Monthly' },
+      { section: 'PAYMENTS', label: 'Planned Periodic Payment', value: '$100.00' },
+      { section: 'PAYMENTS', label: 'Anticipated Annual Premium', value: '$1,200.00' },
+      { section: 'PAYMENTS', label: 'Minimum Monthly Premium', value: '$35.18' },
+      { section: 'PAYMENTS', label: 'Minimum Guaranteed Premium', value: '$61.16' },
+      { section: 'PAYMENTS', label: 'CTP', value: '$975.00' },
+    ])
   })
 
   it('verifies the expected visible policy number without returning nearby content', () => {
