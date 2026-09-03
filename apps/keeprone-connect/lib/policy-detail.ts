@@ -36,6 +36,12 @@ const LABELS: Record<PolicyDetailSection, readonly string[]> = {
 const MAX_PAGE_TEXT = 256 * 1024
 const MAX_VALUE_LENGTH = 256
 const ALL_LABELS = new Set(Object.values(LABELS).flat())
+const EMPTY_VALUES = new Set(['—', '-', 'N/A', 'n/a', 'Not available'])
+const MONEY_VALUE = /^(?:\(\s*)?\$?\s*\d+(?:,\d{3})*(?:\.\d{1,2})?\s*\)?$/
+const DATE_VALUE = /^\d{2}\/\d{2}\/\d{4}$/
+const LIMIT_VALUE = /^(?:\(\s*)?\$?\s*\d+(?:,\d{3})*(?:\.\d{1,2})?\s*\)?\s+through\s+\d{2}\/\d{2}\/\d{4}$/i
+
+type FieldOrder = 'VALUE_THEN_LABEL' | 'LABEL_THEN_VALUE'
 
 function compact(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
@@ -45,16 +51,45 @@ function lines(text: string): string[] {
   return text.slice(0, MAX_PAGE_TEXT).split(/\r?\n/).map(compact).filter(Boolean)
 }
 
-function valueAfterLabel(pageLines: readonly string[], label: string): string | null {
+function isApprovedValue(label: string, value: string | undefined): value is string {
+  if (!value || value.length > MAX_VALUE_LENGTH || ALL_LABELS.has(value)) return false
+  if (EMPTY_VALUES.has(value)) return true
+  if (label === 'Next Scheduled Payment Date') return DATE_VALUE.test(value)
+  if (label === 'Payment Frequency') return /^[A-Za-z][A-Za-z /-]{0,63}$/.test(value)
+  if (label === 'MEC Limit' || label === 'Guideline Premium Limit') {
+    return LIMIT_VALUE.test(value)
+  }
+  return MONEY_VALUE.test(value)
+}
+
+function fieldOrder(pageLines: readonly string[], section: PolicyDetailSection): FieldOrder {
+  let before = 0
+  let after = 0
+  for (let index = 0; index < pageLines.length; index += 1) {
+    const label = pageLines[index]
+    if (!label || !LABELS[section].includes(label)) continue
+    if (isApprovedValue(label, pageLines[index - 1])) before += 1
+    if (isApprovedValue(label, pageLines[index + 1])) after += 1
+  }
+  return before > after ? 'VALUE_THEN_LABEL' : 'LABEL_THEN_VALUE'
+}
+
+function valueForLabel(
+  pageLines: readonly string[],
+  label: string,
+  order: FieldOrder,
+): string | null {
   for (let index = 0; index < pageLines.length; index += 1) {
     const line = pageLines[index]
     if (line === label) {
-      const value = pageLines[index + 1]
-      return value && value.length <= MAX_VALUE_LENGTH && !ALL_LABELS.has(value) ? value : null
+      const primary = pageLines[index + (order === 'VALUE_THEN_LABEL' ? -1 : 1)]
+      if (isApprovedValue(label, primary)) return primary
+      const fallback = pageLines[index + (order === 'VALUE_THEN_LABEL' ? 1 : -1)]
+      return isApprovedValue(label, fallback) ? fallback : null
     }
     if (line?.startsWith(`${label}:`)) {
       const value = compact(line.slice(label.length + 1))
-      return value && value.length <= MAX_VALUE_LENGTH ? value : null
+      return isApprovedValue(label, value) ? value : null
     }
   }
   return null
@@ -65,8 +100,9 @@ export function extractApprovedPolicyDetailFields(
   section: PolicyDetailSection,
 ): PolicyDetailField[] {
   const pageLines = lines(text)
+  const order = fieldOrder(pageLines, section)
   return LABELS[section].flatMap((label) => {
-    const value = valueAfterLabel(pageLines, label)
+    const value = valueForLabel(pageLines, label, order)
     return value === null ? [] : [{ section, label, value }]
   })
 }
