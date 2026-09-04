@@ -74,11 +74,15 @@ describe('readCurrentPolicyDirectory', () => {
   })
 
   it('keeps source-only carrier rows in the current projection and filters Pending Lapse by source status', async () => {
+    const whitespacePadded = {
+      ...currentRow(2),
+      sourceStatus: ' Pending Lapse ',
+    }
     const result = await readCurrentPolicyDirectory(
       {} as never,
       ['agent-1'],
       filters({ status: 'PENDING_LAPSE' }),
-      vi.fn().mockResolvedValue({ rows: [currentRow(1), currentRow(2)], verified: true }),
+      vi.fn().mockResolvedValue({ rows: [currentRow(1), whitespacePadded], verified: true }),
     )
 
     expect(result.items).toEqual([expect.objectContaining({
@@ -86,6 +90,31 @@ describe('readCurrentPolicyDirectory', () => {
       linkedPolicyId: null,
       sourceStatus: 'Pending Lapse',
     })])
+    expect(result.statusCounts.PENDING_LAPSE).toBe(1)
+  })
+
+  it('does not count or return whitespace-padded source statuses as Pending Lapse', async () => {
+    const whitespacePadded = {
+      ...currentRow(1),
+      sourceStatus: ' Pending Lapse ',
+    }
+    const loadPortfolio = vi.fn().mockResolvedValue({ rows: [whitespacePadded], verified: true })
+
+    const unfiltered = await readCurrentPolicyDirectory(
+      {} as never,
+      ['agent-1'],
+      filters(),
+      loadPortfolio,
+    )
+    const filtered = await readCurrentPolicyDirectory(
+      {} as never,
+      ['agent-1'],
+      filters({ status: 'PENDING_LAPSE' }),
+      loadPortfolio,
+    )
+
+    expect(unfiltered.statusCounts.PENDING_LAPSE).toBeUndefined()
+    expect(filtered.items).toEqual([])
   })
 
   it('keeps source-only rows stable across page boundaries regardless of loader order', async () => {
@@ -196,5 +225,24 @@ describe('readHistoryPolicyDirectory', () => {
         { sourceStatus: { equals: 'Pending Lapse', mode: 'insensitive' } },
       ]) }),
     }))
+  })
+
+  it('counts canonical Pending Lapse history statuses with the same helper as current policies', async () => {
+    const policy = {
+      count: vi.fn().mockResolvedValue(1),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { premium: null } }),
+      groupBy: vi.fn().mockResolvedValue([
+        { status: 'INFORCE', sourceStatus: 'pending lapse', _count: { _all: 1 } },
+      ]),
+      findMany: vi.fn().mockResolvedValue([]),
+    }
+
+    const result = await readHistoryPolicyDirectory(
+      { policy } as never,
+      ['agent-1'],
+      filters({ view: 'history' }),
+    )
+
+    expect(result.statusCounts.PENDING_LAPSE).toBe(1)
   })
 })

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { readFileSync } from 'node:fs'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PoliciesList } from './PoliciesList'
 
@@ -82,11 +82,29 @@ describe('PoliciesList server directory presentation', () => {
     expect(screen.getByText('Fonte: National Life · sem cadastro local')).toBeVisible()
   })
 
+  it('does not show a Pending Lapse warning for a whitespace-padded source status', () => {
+    renderList({
+      items: [{ ...item, sourceStatus: ' Pending Lapse ', status: 'INFORCE' }],
+      total: 1,
+      page: 1,
+      pageCount: 1,
+      statusCounts: { INFORCE: 1 },
+      filters: { ...filters, status: null, page: 1 },
+    })
+
+    const row = screen.getByRole('link', { name: /NL-RISK.*Cliente em Risco/i })
+    expect(within(row).getByText('Em vigor')).toBeVisible()
+    expect(within(row).queryByText('Pending Lapse')).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Pending Lapse/ })).not.toBeInTheDocument()
+  })
+
   it('does not retain a client-side copy of the policy book for filtering or slicing', () => {
     const source = readFileSync('app/agent/policies/PoliciesList.tsx', 'utf8')
     expect(source).not.toContain('items.filter(')
     expect(source).not.toContain('items.slice(')
     expect(source).toContain('method="get"')
     expect(source).toContain('key={policy.stableKey}')
+    expect(source).toContain('isCanonicalPendingLapse')
+    expect(source).not.toContain('sourceStatus?.trim()')
   })
 })

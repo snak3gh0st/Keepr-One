@@ -4,6 +4,7 @@ import type { PolicyStatus, Prisma, PrismaClient } from '@prisma/client'
 import { decimalToNumber } from '@/lib/decimal'
 import { parseDirectoryPage } from '@/lib/directory-page'
 import { loadCurrentNationalLifePortfolio } from './current-portfolio-prisma'
+import { CANONICAL_PENDING_LAPSE_STATUS, isCanonicalPendingLapse } from './pending-lapse'
 
 export const POLICY_DIRECTORY_PAGE_SIZE = 25
 
@@ -114,10 +115,6 @@ export function parsePolicyDirectoryFilters(params: SearchParams): PolicyDirecto
   }
 }
 
-function isPendingLapse(row: Pick<PolicyDirectoryItem, 'sourceStatus'>): boolean {
-  return row.sourceStatus?.trim().toLocaleLowerCase('en-US') === 'pending lapse'
-}
-
 function numericPremium(value: string | null): number {
   if (value === null) return 0
   const parsed = Number(value)
@@ -150,7 +147,7 @@ function matchesDirectoryQuery(row: PolicyDirectoryItem, query: string): boolean
 
 function matchesStatus(row: PolicyDirectoryItem, status: PolicyDirectoryFilters['status']): boolean {
   if (!status) return true
-  if (status === 'PENDING_LAPSE') return isPendingLapse(row)
+  if (status === 'PENDING_LAPSE') return isCanonicalPendingLapse(row.sourceStatus)
   return row.status === status
 }
 
@@ -192,7 +189,7 @@ function countStatuses(rows: readonly PolicyDirectoryItem[]): Record<string, num
   const result: Record<string, number> = {}
   for (const row of rows) {
     result[row.status] = (result[row.status] ?? 0) + 1
-    if (isPendingLapse(row)) result.PENDING_LAPSE = (result.PENDING_LAPSE ?? 0) + 1
+    if (isCanonicalPendingLapse(row.sourceStatus)) result.PENDING_LAPSE = (result.PENDING_LAPSE ?? 0) + 1
   }
   return result
 }
@@ -253,14 +250,9 @@ function historyPremiumKnownWhere(): Prisma.PolicyWhereInput {
 function statusWhere(status: PolicyDirectoryFilters['status']): Prisma.PolicyWhereInput | null {
   if (!status) return null
   if (status === 'PENDING_LAPSE') {
-    return { sourceStatus: { equals: 'Pending Lapse', mode: 'insensitive' } }
+    return { sourceStatus: { equals: CANONICAL_PENDING_LAPSE_STATUS, mode: 'insensitive' } }
   }
   return { status: status as PolicyStatus }
-}
-
-/** Prisma's case-insensitive equality does not trim stored status values. */
-function isCanonicalPendingLapse(sourceStatus: string | null): boolean {
-  return sourceStatus?.toLocaleLowerCase('en-US') === 'pending lapse'
 }
 
 function historyBaseWhere(

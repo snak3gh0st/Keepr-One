@@ -5,6 +5,7 @@ import { EmptyState } from '@/components/Table'
 import { ContextPanel } from '@/components/ContextPanel'
 import { PolicyStatusPill, policyStatusLabel } from '@/components/StatusPill'
 import { useI18n } from '@/components/i18n/LanguageProvider'
+import { isCanonicalPendingLapse } from '@/lib/national-life/pending-lapse'
 import type {
   PolicyDirectoryFilters,
   PolicyDirectoryItem,
@@ -31,10 +32,6 @@ function formatFaceAmount(value: string | null, formatter: Intl.NumberFormat) {
   if (value === null) return '—'
   const amount = Number(value)
   return Number.isFinite(amount) ? formatter.format(amount) : '—'
-}
-
-function isPendingLapse(policy: Pick<PolicyDirectoryItem, 'sourceStatus'>) {
-  return policy.sourceStatus?.trim().toLocaleLowerCase('en-US') === 'pending lapse'
 }
 
 function policyHref(
@@ -232,9 +229,9 @@ export function PoliciesList({
                       <span className="policy-list-action">
                         <span className="flex flex-col items-end gap-1">
                           {language === 'PT'
-                            ? <PolicyStatusPill status={isPendingLapse(policy) ? 'PENDING_LAPSE' : policy.status} />
-                            : <span className="inline-flex items-center gap-1.5 rounded-full bg-panel px-2.5 py-[3px] text-xs font-semibold tracking-wide text-ink-muted">{isPendingLapse(policy) ? 'Pending Lapse' : policy.status}</span>}
-                          {policy.statusChangedAt && (isPendingLapse(policy) || policy.status === 'LAPSED' || policy.status === 'CANCELLED') && (
+                            ? <PolicyStatusPill status={isCanonicalPendingLapse(policy.sourceStatus) ? 'PENDING_LAPSE' : policy.status} />
+                            : <span className="inline-flex items-center gap-1.5 rounded-full bg-panel px-2.5 py-[3px] text-xs font-semibold tracking-wide text-ink-muted">{isCanonicalPendingLapse(policy.sourceStatus) ? 'Pending Lapse' : policy.status}</span>}
+                          {policy.statusChangedAt && (isCanonicalPendingLapse(policy.sourceStatus) || policy.status === 'LAPSED' || policy.status === 'CANCELLED') && (
                             <small className="text-[10px] text-ink-muted">{copy('Mudança em {date}', 'Changed on {date}', { date: statusDate.format(new Date(policy.statusChangedAt)) })}</small>
                           )}
                         </span>
