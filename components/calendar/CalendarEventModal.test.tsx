@@ -74,6 +74,31 @@ describe("CalendarEventModal", () => {
     expect(screen.getByText("15 minutos antes")).toBeInTheDocument();
     expect(screen.getByText("Repete semanalmente")).toBeInTheDocument();
   });
+
+  it("formats timed detail labels in the account timezone", () => {
+    render(
+      <CalendarEventModal
+        open
+        mode="details"
+        event={{
+          ...allDayEvent,
+          allDay: false,
+          startsAt: "2026-09-04T16:00:00.000Z",
+          endsAt: "2026-09-04T16:30:00.000Z",
+          startDate: null,
+          endDate: null,
+          timeZone: "America/Sao_Paulo",
+        }}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        timeZone="America/New_York"
+        calendars={[calendar]}
+      />,
+    );
+
+    expect(screen.getByText(/12:00/)).toBeInTheDocument();
+    expect(screen.queryByText(/13:00/)).not.toBeInTheDocument();
+  });
   it("only overrides a server-revalidated conflict after explicit confirmation", async () => {
     const user = userEvent.setup();
     const onSubmit = vi

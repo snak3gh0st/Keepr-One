@@ -54,7 +54,7 @@ export function TodayMeetingsSection({
       ) : events.length ? (
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {events.slice(0, 6).map((event) => (
-            <MeetingActionCard key={event.id} event={event} onOpen={setSelected} />
+            <MeetingActionCard key={event.id} event={event} displayTimeZone={timeZone} onOpen={setSelected} />
           ))}
         </div>
       ) : (

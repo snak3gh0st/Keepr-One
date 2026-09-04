@@ -235,7 +235,7 @@ export async function getPublicSchedulingPage(
               status: true,
               grantedScopes: true,
               calendars: {
-                select: { visible: true, crmDefault: true, accessRole: true },
+                select: { visible: true, crmDefault: true, accessRole: true, providerCalendarId: true },
               },
             },
           },

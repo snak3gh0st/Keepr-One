@@ -170,7 +170,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             calendars: mappedCalendar.calendars,
             timeZone: user?.timeZone ?? 'America/New_York',
             events: calendarEventDomains.map((event) => mapDomainCalendarEventToUi(event, {
-              timeZone: event.timeZone ?? 'America/New_York',
+              timeZone: user?.timeZone ?? 'America/New_York',
               case: calendarCase,
               canWrite: ownsCase && (calendarById.get(event.calendar.id)?.canWrite ?? false),
             })),

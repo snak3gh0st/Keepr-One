@@ -102,6 +102,7 @@ export function CaseMeetingsSection({
   connection,
   events,
   now,
+  timeZone,
   systemKey,
   prospectName,
   onSchedule,
@@ -111,6 +112,7 @@ export function CaseMeetingsSection({
   connection: CalendarConnectionView;
   events: CalendarEventView[];
   now: string;
+  timeZone: string;
   systemKey: string | null;
   prospectName: string;
   onSchedule: () => void;
@@ -173,13 +175,13 @@ export function CaseMeetingsSection({
               <Link href="/agent/calendar" className="text-xs font-semibold text-teal-deep hover:text-teal">{translate("Abrir agenda", "Open calendar")} ↗</Link>
             </div>
             {meetings.next ? (
-              <MeetingActionCard event={meetings.next} onOpen={onOpen} />
+              <MeetingActionCard event={meetings.next} displayTimeZone={timeZone} onOpen={onOpen} />
             ) : (
               <div className="rounded-2xl border border-dashed border-border-steel px-4 py-5 text-sm text-ink-muted">{translate("Nenhuma reunião futura. Agende o próximo contato quando fizer sentido.", "No future meetings. Schedule the next contact when it makes sense.")}</div>
             )}
             {meetings.upcoming.length > 0 ? (
               <div className="mt-3 grid gap-2.5">
-                {meetings.upcoming.slice(0, 2).map((event) => <MeetingActionCard key={event.id} event={event} onOpen={onOpen} />)}
+                {meetings.upcoming.slice(0, 2).map((event) => <MeetingActionCard key={event.id} event={event} displayTimeZone={timeZone} onOpen={onOpen} />)}
               </div>
             ) : null}
           </div>
@@ -191,7 +193,7 @@ export function CaseMeetingsSection({
             </div>
             {meetings.history.length ? (
               <div className="grid gap-2.5">
-                {meetings.history.slice(0, 3).map((event) => <MeetingActionCard key={event.id} event={event} onOpen={onOpen} />)}
+                {meetings.history.slice(0, 3).map((event) => <MeetingActionCard key={event.id} event={event} displayTimeZone={timeZone} onOpen={onOpen} />)}
               </div>
             ) : (
               <p className="rounded-2xl border border-dashed border-border-steel px-4 py-5 text-sm text-ink-muted">{translate("As reuniões realizadas ou canceladas aparecerão aqui.", "Completed or canceled meetings will appear here.")}</p>

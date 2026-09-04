@@ -91,7 +91,7 @@ function inputSeed(props: CalendarEventModalProps) {
   };
 }
 
-function friendlyDate(event: CalendarEventView, locale: string, copy: Copy) {
+function friendlyDate(event: CalendarEventView, locale: string, copy: Copy, timeZone: string) {
   if (event.allDay && event.startDate) {
     return new Intl.DateTimeFormat(locale, { dateStyle: "full" }).format(
       new Date(`${event.startDate}T12:00:00`),
@@ -101,7 +101,7 @@ function friendlyDate(event: CalendarEventView, locale: string, copy: Copy) {
   return new Intl.DateTimeFormat(locale, {
     dateStyle: "full",
     timeStyle: "short",
-    timeZone: event.timeZone,
+    timeZone,
   }).format(new Date(event.startsAt));
 }
 
@@ -115,7 +115,7 @@ function durationLabel(event: CalendarEventView) {
   return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
 }
 
-function endLabel(event: CalendarEventView, locale: string, copy: Copy) {
+function endLabel(event: CalendarEventView, locale: string, copy: Copy, timeZone: string) {
   if (event.allDay) {
     if (!event.endDate) return copy("Dia inteiro", "All day");
     const inclusiveEnd = shiftDate(event.endDate, -1);
@@ -125,7 +125,7 @@ function endLabel(event: CalendarEventView, locale: string, copy: Copy) {
   return new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: event.timeZone,
+    timeZone,
   }).format(new Date(event.endsAt));
 }
 
@@ -205,7 +205,7 @@ function CalendarEventDetails(
         <div>
           <span>{copy("Compromisso", "Event")}</span>
           <h2 id="calendar-event-modal-title">{event.title}</h2>
-          <p id="calendar-event-modal-description">{friendlyDate(event, locale, copy)}</p>
+          <p id="calendar-event-modal-description">{friendlyDate(event, locale, copy, props.timeZone)}</p>
         </div>
         <button type="button" onClick={props.onClose} aria-label={copy("Fechar detalhes", "Close details")}>×</button>
       </header>
@@ -217,7 +217,7 @@ function CalendarEventDetails(
       </div>
 
       <dl className="calendar-event-detail-list">
-        <div><dt>{copy("Término", "End")}</dt><dd>{endLabel(event, locale, copy)}{durationLabel(event) ? ` · ${durationLabel(event)}` : ""}</dd></div>
+        <div><dt>{copy("Término", "End")}</dt><dd>{endLabel(event, locale, copy, props.timeZone)}{durationLabel(event) ? ` · ${durationLabel(event)}` : ""}</dd></div>
         {reminderLabel(event.reminderMinutes, copy) ? <div><dt>{copy("Lembrete", "Reminder")}</dt><dd>{reminderLabel(event.reminderMinutes, copy)}</dd></div> : null}
         {recurrenceLabel(event, copy) ? <div><dt>{copy("Recorrência", "Recurrence")}</dt><dd>{recurrenceLabel(event, copy)}</dd></div> : null}
         {event.case ? (

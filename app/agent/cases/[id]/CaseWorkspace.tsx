@@ -582,6 +582,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         connection={c.calendar.connection}
         events={c.calendar.events}
         now={c.now}
+        timeZone={c.calendar.timeZone}
         systemKey={c.crmStage?.systemKey ?? null}
         prospectName={c.prospect.name}
         onSchedule={() => setCalendarModal({ mode: "create" })}

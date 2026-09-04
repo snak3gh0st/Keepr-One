@@ -41,7 +41,7 @@ export function UpcomingMeetingsSection({
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {events.map((event) => (
-          <MeetingActionCard key={event.id} event={event} onOpen={setSelected} />
+          <MeetingActionCard key={event.id} event={event} displayTimeZone={timeZone} onOpen={setSelected} />
         ))}
       </div>
 
