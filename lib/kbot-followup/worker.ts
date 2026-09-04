@@ -47,12 +47,23 @@ export async function reconcileFollowups() {
         continue
       }
       await transport.verifyConversation(job.conversationId, job.phone)
+      if (job.providerMessageId) {
+        const providerStatus = await transport.providerStatus(job.phone, job.providerMessageId)
+        if (providerStatus) {
+          await terminal(job.id, providerStatus, providerStatus === 'FAILED' ? 'PROVIDER_FAILED' : undefined, job.providerMessageId)
+          await prisma.kBotFollowupJob.updateMany({
+            where: { id: job.id, updatedAt: job.updatedAt }, data: { updatedAt: new Date() },
+          })
+          continue
+        }
+      }
       let before: string | undefined
       let found = false
       // Never infer delivery from message text. Match exact gateway id or durable correlation metadata.
       for (let page = 0; page < 10; page++) {
         const messages = await transport.messages(job.conversationId, before)
         const m = messages.find(m => (job.messageId && String(m.id) === job.messageId) ||
+          (job.providerMessageId && String(m.source_id ?? '').replace(/^WAID:/, '') === job.providerMessageId) ||
           (m.content_attributes as Record<string, unknown> | undefined)?.kbot_followup_id === job.id)
         if (m) {
           found = true
@@ -145,10 +156,14 @@ export async function processNextFollowup() {
     })
     if (!dispatch) return true
     dispatched = true
-    const receipt = await ready.send(conversationId, result.content, claimed.id)
-    await prisma.kBotFollowupJob.updateMany({ where: { id: claimed.id, status: { in: unconfirmedStates } }, data: {
-      status: receipt.id ? 'ACCEPTED' : 'UNKNOWN', messageId: receipt.id, providerMessageId: receipt.sourceId,
-    } })
+    const receipt = await ready.send(conversationId, result.content, claimed.id, claimed.phone)
+    if (receipt.status) {
+      await terminal(claimed.id, receipt.status, receipt.status === 'FAILED' ? 'PROVIDER_FAILED' : undefined, receipt.sourceId ?? undefined)
+    } else {
+      await prisma.kBotFollowupJob.updateMany({ where: { id: claimed.id, status: { in: unconfirmedStates } }, data: {
+        status: receipt.id || receipt.sourceId ? 'ACCEPTED' : 'UNKNOWN', messageId: receipt.id, providerMessageId: receipt.sourceId,
+      } })
+    }
   } catch (error) {
     if (error instanceof GenerationFailure) {
       await prisma.$transaction(async tx => {

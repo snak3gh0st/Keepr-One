@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ channel: vi.fn() }))
+const mocks = vi.hoisted(() => ({ channel: vi.fn(), sendText: vi.fn(), messageStatus: vi.fn() }))
 vi.mock('@/lib/prisma', () => ({ prisma: { agentMessagingChannel: { findUnique: mocks.channel } } }))
 vi.mock('@/lib/agent-access', () => ({ getAgentAccessForAgent: async () => ({ isActive: true, enabledModules: null }) }))
 vi.mock('@/lib/messaging/agent-chatwoot-context', () => ({ getAgentChatwootContext: async () => ({ accountId: '17', token: 'test-token',
@@ -7,7 +7,12 @@ vi.mock('@/lib/messaging/agent-chatwoot-context', () => ({ getAgentChatwootConte
 }) }))
 vi.mock('@/lib/messaging/chatwoot-config', () => ({ chatwootConfigFromEnv: () => ({ baseUrl: 'https://mock.invalid' }) }))
 vi.mock('@/lib/messaging/whatsapp-config', () => ({ whatsappConfigFromEnv: () => ({ baseUrl: 'https://mock.invalid', apiKey: 'test' }) }))
-vi.mock('@/lib/messaging/whatsapp-client', () => ({ createWhatsappClient: () => ({ connectionState: async () => 'open', connectionIdentity: async () => ({ normalizedPhoneE164: '+14075550001' }) }) }))
+vi.mock('@/lib/messaging/whatsapp-client', () => ({ createWhatsappClient: () => ({
+  connectionState: async () => 'open',
+  connectionIdentity: async () => ({ normalizedPhoneE164: '+14075550001' }),
+  sendText: mocks.sendText,
+  messageStatus: mocks.messageStatus,
+}) }))
 import { messagingTransport } from './transport'
 beforeEach(() => { mocks.channel.mockResolvedValue({ status: 'CONNECTED', provider: 'EVOLUTION', normalizedPhoneE164: '+14075550001', externalInboxId: '8' }) })
 afterEach(() => { vi.unstubAllGlobals() })
@@ -49,5 +54,27 @@ describe('scoped provider contract', () => {
   it('rejects a conversation whose phone or inbox changed', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ inbox_id: 99, meta: { sender: { phone_number: '+14075550100' } } })))
     await expect((await messagingTransport('agent', false)).verifyConversation('10', '+14075550100')).rejects.toThrow('CONTACT_CHANGED')
+  })
+  it('sends AI follow-up through the verified provider and keeps its exact reference', async () => {
+    mocks.sendText.mockResolvedValue({ providerMessageId: 'WA-123', status: null })
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({})))
+    const transport = await messagingTransport('agent')
+
+    await expect(transport.send('10', 'Olá, Ana!', 'job-1', '+14075550100')).resolves.toEqual({
+      id: null,
+      sourceId: 'WA-123',
+      status: null,
+    })
+    expect(mocks.sendText).toHaveBeenCalledWith({ agentId: 'agent', phone: '+14075550100', text: 'Olá, Ana!' })
+  })
+  it('reads the receipt for the exact provider reference', async () => {
+    mocks.messageStatus.mockResolvedValue('DELIVERED')
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({})))
+    const transport = await messagingTransport('agent')
+
+    await expect(transport.providerStatus('+14075550100', 'WA-123')).resolves.toBe('DELIVERED')
+    expect(mocks.messageStatus).toHaveBeenCalledWith({
+      agentId: 'agent', phone: '+14075550100', providerMessageId: 'WA-123',
+    })
   })
 })

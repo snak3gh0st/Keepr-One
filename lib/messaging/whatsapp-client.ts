@@ -18,11 +18,20 @@ export type WhatsappIdentity = {
   normalizedPhoneE164: string
 }
 
+export type WhatsappDeliveryStatus = 'SENT' | 'DELIVERED' | 'READ' | 'FAILED'
+
+export type WhatsappSendReceipt = {
+  providerMessageId: string
+  status: WhatsappDeliveryStatus | null
+}
+
 export type WhatsappClient = {
   createInstance: (input: { agentId: string }) => Promise<void>
   fetchQrCode: (input: { agentId: string }) => Promise<{ image: string } | null>
   connectionState: (input: { agentId: string }) => Promise<string>
   connectionIdentity: (input: { agentId: string }) => Promise<WhatsappIdentity | null>
+  sendText: (input: { agentId: string; phone: string; text: string }) => Promise<WhatsappSendReceipt>
+  messageStatus: (input: { agentId: string; phone: string; providerMessageId: string }) => Promise<WhatsappDeliveryStatus | null>
   logoutInstance: (input: { agentId: string }) => Promise<void>
   enforcePrivateChatSettings: (input: { agentId: string }) => Promise<void>
   linkToInbox: (input: {
@@ -35,6 +44,21 @@ export type WhatsappClient = {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
+}
+
+function targetFor(phone: string) {
+  const match = /^\+(\d{8,15})$/.exec(phone)
+  if (!match) throw new WhatsappRequestError(400)
+  return { number: match[1], remoteJid: `${match[1]}@s.whatsapp.net` }
+}
+
+function deliveryStatus(values: unknown[]): WhatsappDeliveryStatus | null {
+  const statuses = values.map(value => String(value).toUpperCase())
+  if (statuses.includes('PLAYED') || statuses.includes('READ')) return 'READ'
+  if (statuses.includes('DELIVERY_ACK')) return 'DELIVERED'
+  if (statuses.includes('SERVER_ACK')) return 'SENT'
+  if (statuses.includes('ERROR') || statuses.includes('FAILED')) return 'FAILED'
+  return null
 }
 
 /// Derived from the agent id rather than their name: names repeat, and two agents
@@ -99,6 +123,38 @@ export function createWhatsappClient(config: {
         externalPhoneNumberId: ownerJid,
         normalizedPhoneE164: `+${match[1]}`,
       }
+    },
+
+    sendText: async ({ agentId, phone, text }) => {
+      const target = targetFor(phone)
+      const body = await call(`/message/sendText/${instanceNameFor(agentId)}`, {
+        method: 'POST', body: JSON.stringify({ number: target.number, text }),
+      })
+      const key = asRecord(body.key)
+      if (typeof key.id !== 'string' || key.id.length === 0 || key.fromMe !== true || key.remoteJid !== target.remoteJid) {
+        throw new WhatsappRequestError(502)
+      }
+      return { providerMessageId: key.id, status: deliveryStatus([body.status]) }
+    },
+
+    messageStatus: async ({ agentId, phone, providerMessageId }) => {
+      const target = targetFor(phone)
+      if (!providerMessageId) throw new WhatsappRequestError(400)
+      const body = await call(`/chat/findMessages/${instanceNameFor(agentId)}`, {
+        method: 'POST', body: JSON.stringify({
+          where: { key: { id: providerMessageId, fromMe: true, remoteJid: target.remoteJid } }, limit: 1,
+        }),
+      })
+      const records = Array.isArray(asRecord(body.messages).records) ? asRecord(body.messages).records as unknown[] : []
+      if (records.length === 0) return null
+      if (records.length !== 1) throw new WhatsappRequestError(502)
+      const message = asRecord(records[0])
+      const key = asRecord(message.key)
+      if (key.id !== providerMessageId || key.fromMe !== true || key.remoteJid !== target.remoteJid) {
+        throw new WhatsappRequestError(502)
+      }
+      const updates = Array.isArray(message.MessageUpdate) ? message.MessageUpdate.map(update => asRecord(update).status) : []
+      return deliveryStatus([message.status, ...updates])
     },
 
     logoutInstance: async ({ agentId }) => {

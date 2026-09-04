@@ -4,7 +4,7 @@ import { getAgentAccessForAgent } from '@/lib/agent-access'
 import { getAgentChatwootContext } from '@/lib/messaging/agent-chatwoot-context'
 import { chatwootConfigFromEnv } from '@/lib/messaging/chatwoot-config'
 import { whatsappConfigFromEnv } from '@/lib/messaging/whatsapp-config'
-import { createWhatsappClient } from '@/lib/messaging/whatsapp-client'
+import { createWhatsappClient, type WhatsappClient } from '@/lib/messaging/whatsapp-client'
 import { FollowupError, normalizePhone } from './domain'
 
 type Obj = Record<string, unknown>
@@ -22,12 +22,15 @@ export async function messagingTransport(agentId: string, automated = true) {
   if (automated && (channel.provider !== 'EVOLUTION' || process.env.WHATSAPP_CHANNEL_MODE === 'META_CLOUD')) {
     throw new FollowupError('TEMPLATE_REQUIRED')
   }
-  if (automated) {
+  let whatsappClient: WhatsappClient | null = null
+  if (channel.provider === 'EVOLUTION' && process.env.WHATSAPP_CHANNEL_MODE !== 'META_CLOUD') {
     const wc = whatsappConfigFromEnv(process.env)
-    if (!wc) throw new FollowupError('WHATSAPP_DISCONNECTED')
-    const client = createWhatsappClient({ ...wc, http: (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(10_000) }) })
-    if (await client.connectionState({ agentId }) !== 'open') throw new FollowupError('WHATSAPP_DISCONNECTED')
-    const identity = await client.connectionIdentity({ agentId })
+    if (wc) whatsappClient = createWhatsappClient({ ...wc, http: (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(10_000) }) })
+  }
+  if (automated) {
+    if (!whatsappClient) throw new FollowupError('WHATSAPP_DISCONNECTED')
+    if (await whatsappClient.connectionState({ agentId }) !== 'open') throw new FollowupError('WHATSAPP_DISCONNECTED')
+    const identity = await whatsappClient.connectionIdentity({ agentId })
     if (!identity || identity.normalizedPhoneE164 !== channel.normalizedPhoneE164) throw new FollowupError('SENDER_CHANGED')
   }
   const inboxes = (await context.chatwoot.listInboxes({ accountId: context.accountId, token: context.token })).filter(i => i.kind === 'WHATSAPP')
@@ -78,11 +81,23 @@ export async function messagingTransport(agentId: string, automated = true) {
     identity: `${context.accountId}:${inbox.id}:${channel.normalizedPhoneE164}`,
     conversation, verifyConversation,
     messages: async (id: string, before?: string) => arr((await call(`/conversations/${encodeURIComponent(id)}/messages${before ? `?before=${encodeURIComponent(before)}` : ''}`)).payload),
-    send: async (id: string, content: string, jobId: string) => {
+    send: async (id: string, content: string, jobId: string, phone?: string) => {
+      if (automated && whatsappClient) {
+        if (!phone || !normalizePhone(phone)) throw new FollowupError('PHONE_REQUIRED')
+        const receipt = await whatsappClient.sendText({ agentId, phone, text: content })
+        return { id: null, sourceId: receipt.providerMessageId, status: receipt.status }
+      }
       const message = await call(`/conversations/${encodeURIComponent(id)}/messages`, {
         content, message_type: 'outgoing', private: false, content_type: 'text', content_attributes: { kbot_followup_id: jobId },
       })
-      return { id: numericId(message.id), sourceId: typeof message.source_id === 'string' ? message.source_id : null }
+      return { id: numericId(message.id), sourceId: typeof message.source_id === 'string' ? message.source_id : null, status: null }
+    },
+    providerStatus: async (phone: string, providerMessageId: string) => {
+      if (!whatsappClient) return null
+      if (await whatsappClient.connectionState({ agentId }) !== 'open') throw new FollowupError('WHATSAPP_DISCONNECTED')
+      const identity = await whatsappClient.connectionIdentity({ agentId })
+      if (!identity || identity.normalizedPhoneE164 !== channel.normalizedPhoneE164) throw new FollowupError('SENDER_CHANGED')
+      return whatsappClient.messageStatus({ agentId, phone, providerMessageId })
     },
   }
 }
