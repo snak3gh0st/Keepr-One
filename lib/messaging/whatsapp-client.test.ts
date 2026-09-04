@@ -93,6 +93,51 @@ describe('createWhatsappClient', () => {
     })
   })
 
+  it('returns the exact provider reference when sending a background text', async () => {
+    const { http, calls } = recorder([{
+      key: { id: 'WA-123', fromMe: true, remoteJid: '14075550100@s.whatsapp.net' },
+      status: 'PENDING',
+    }])
+
+    const receipt = await createWhatsappClient(config(http)).sendText({
+      agentId: 'a1',
+      phone: '+14075550100',
+      text: 'Olá, Ana!',
+    })
+
+    expect(calls[0]?.url).toBe('http://evo:8080/message/sendText/agent-a1')
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ number: '14075550100', text: 'Olá, Ana!' })
+    expect(receipt).toEqual({ providerMessageId: 'WA-123', status: null })
+  })
+
+  it('reads delivery progress only for the exact provider message and recipient', async () => {
+    const { http, calls } = recorder([{
+      messages: {
+        total: 1,
+        pages: 1,
+        currentPage: 1,
+        records: [{
+          key: { id: 'WA-123', fromMe: true, remoteJid: '14075550100@s.whatsapp.net' },
+          status: 'PENDING',
+          MessageUpdate: [{ status: 'SERVER_ACK' }, { status: 'DELIVERY_ACK' }],
+        }],
+      },
+    }])
+
+    const status = await createWhatsappClient(config(http)).messageStatus({
+      agentId: 'a1',
+      phone: '+14075550100',
+      providerMessageId: 'WA-123',
+    })
+
+    expect(calls[0]?.url).toBe('http://evo:8080/chat/findMessages/agent-a1')
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      where: { key: { id: 'WA-123', fromMe: true, remoteJid: '14075550100@s.whatsapp.net' } },
+      limit: 1,
+    })
+    expect(status).toBe('DELIVERED')
+  })
+
   it('does not mistake a group owner id for a phone identity', async () => {
     const { http } = recorder([[{ ownerJid: '12345@g.us' }]])
 

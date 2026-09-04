@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-const state = vi.hoisted(() => ({ candidates: [] as Array<Record<string, unknown>>, send: vi.fn(), messages: vi.fn(), generation: vi.fn() }))
+const state = vi.hoisted(() => ({ candidates: [] as Array<Record<string, unknown>>, send: vi.fn(), messages: vi.fn(), providerStatus: vi.fn(), generation: vi.fn() }))
 vi.mock('@/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
   return { prisma: new PrismaClient({ datasourceUrl: process.env.KBOT_TEST_DATABASE_URL ?? 'postgresql://disabled:disabled@127.0.0.1:1/disabled' }) }
@@ -8,7 +8,7 @@ vi.mock('@/lib/prisma', async () => {
 vi.mock('./candidates', () => ({ getFollowupCandidates: async () => state.candidates }))
 vi.mock('./generation', async orig => ({ ...await orig<typeof import('./generation')>(), generateFollowup: state.generation }))
 vi.mock('./transport', async importOriginal => ({ ...await importOriginal<typeof import('./transport')>(),
-  messagingTransport: async () => ({ identity: 'acct:inbox:phone', conversation: async () => '10', verifyConversation: async () => {}, send: state.send, messages: state.messages }),
+  messagingTransport: async () => ({ identity: 'acct:inbox:phone', conversation: async () => '10', verifyConversation: async () => {}, send: state.send, messages: state.messages, providerStatus: state.providerStatus }),
 }))
 import { prisma } from '@/lib/prisma'
 import { startFollowups, cancelBatch } from './service'
@@ -41,7 +41,7 @@ describe.skipIf(!enabled)('follow-up PostgreSQL accounting and dispatch', () => 
     state.candidates = ['one', 'two'].map((id, i) => ({ id, fingerprint: id.padEnd(64, '0'), customerName: `Cliente ${i}`, phone: `+1407555010${i}`,
       subjectKey: `client:${id}`, blockedReason: null, reason: 'LAPSE_WARNING', sourceHref: '/agent/policies/test', sourceAt: new Date().toISOString() }))
     state.generation.mockResolvedValue({ content: 'Olá, Cliente. Podemos conversar?', model: 'test', inputTokens: 123, outputTokens: 11 })
-    state.messages.mockResolvedValue([]); state.send.mockResolvedValue({ id: '99', sourceId: null })
+    state.messages.mockResolvedValue([]); state.providerStatus.mockResolvedValue(null); state.send.mockResolvedValue({ id: '99', sourceId: null, status: null })
   })
   afterAll(async () => {
     await reset(); await prisma.agent.delete({ where: { id: agentId } }); await prisma.user.delete({ where: { id: userId } });
@@ -149,6 +149,32 @@ describe.skipIf(!enabled)('follow-up PostgreSQL accounting and dispatch', () => 
     }
     expect(state.send).toHaveBeenCalledTimes(1)
     expect((await creditBalance(agentId)).spent).toBe(134)
+  })
+  it('reconciles an exact provider receipt when Chatwoot has no source id', async () => {
+    state.send.mockResolvedValue({ id: null, sourceId: 'WA-99', status: null })
+    await startFollowups(agentId, input()); await processNextFollowup()
+    const job = await prisma.kBotFollowupJob.findFirstOrThrow({ where: { agentId } })
+    await prisma.kBotFollowupJob.update({ where: { id: job.id }, data: { updatedAt: new Date(Date.now() - 60_000) } })
+    state.providerStatus.mockResolvedValue('DELIVERED')
+
+    await reconcileFollowups()
+
+    expect(await prisma.kBotFollowupJob.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject({
+      status: 'DELIVERED', providerMessageId: 'WA-99',
+    })
+    expect(state.send).toHaveBeenCalledTimes(1)
+  })
+  it('rotates a stale job when the provider repeats the same receipt', async () => {
+    state.send.mockResolvedValue({ id: null, sourceId: 'WA-99', status: null })
+    await startFollowups(agentId, input()); await processNextFollowup()
+    const job = await prisma.kBotFollowupJob.findFirstOrThrow({ where: { agentId } })
+    const stale = new Date(Date.now() - 60_000)
+    await prisma.kBotFollowupJob.update({ where: { id: job.id }, data: { status: 'SENT', updatedAt: stale } })
+    state.providerStatus.mockResolvedValue('SENT')
+
+    await reconcileFollowups()
+
+    expect((await prisma.kBotFollowupJob.findUniqueOrThrow({ where: { id: job.id } })).updatedAt.getTime()).toBeGreaterThan(stale.getTime())
   })
   it('a stale reconciliation pass cannot erase a confirmed delivery', async () => {
     await startFollowups(agentId, input()); await processNextFollowup()

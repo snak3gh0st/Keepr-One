@@ -23,11 +23,13 @@ Existing Chatwoot/Evolution settings and agent-specific account/channel records 
 
 1. Apply `20260904000000_kbot_followup` before enabling either flag. Generate matching Prisma client.
 2. Confirm assigned agent, explicit-country phone, connected inbox, actual sender identity and a fresh source record.
-3. With an authorized internal recipient, test manual conversation opening without sending, then one AI authorization. Verify message in Chatwoot and WhatsApp, provider reference/status, token allocation settlement and notification.
+3. With an authorized internal recipient, test manual conversation opening without sending, then one AI authorization. Verify message in Chatwoot and WhatsApp, the Evolution message id and ACK for the exact recipient, token allocation settlement and notification.
 4. Simulate a provider timeout after acceptance. Confirm no second send and reconcile the original id/correlation attribute. If the installed provider does not preserve correlation metadata or message source ids, keep AI disabled until an adapter is verified.
 5. Turn on the UI/manual flag, then AI only after the roundtrip gate. Configure a paid catalog only after price/allowance approval and a Stripe test-mode paid/unpaid/renewal/cancellation exercise.
 
 Unknown sends are not permission to resend. Inspect the gateway message id, provider source id and recipient conversation. Automatic reconciliation stops after 24 hours; unresolved entries remain visible. Tokens already used for generation remain spent regardless of later send failure. Stop pending batches to release unused reservations. Turning off AI prevents new processing; maintenance can continue with the feature flag on.
+
+Evolution 2.3.7 does not populate Chatwoot `source_id` when Chatwoot initiates a message unless its direct database import path is enabled. Do not grant Evolution direct access to the Chatwoot database for this purpose. K-Bot automation sends through Evolution's internal API, persists the returned provider id and reads its exact `SERVER_ACK`, `DELIVERY_ACK` or `READ` progression. Evolution remains responsible for mirroring the message into Chatwoot.
 
 ## Local validation
 
@@ -51,3 +53,9 @@ Release gates still open:
 A release with both feature flags false can ship the inactive foundation. Enabling automated sending or paid purchases requires the gates above.
 
 Final local checks after merging current `origin/main` (`1a71ad4`): 86 tests passed across 13 files, including 16 PostgreSQL integration tests and 6 checkout boundary tests; production build (including TypeScript) passed. Targeted ESLint passed before the merge; the merge did not change the follow-up modules. Main integrated without conflicts. No push, production deployment, live charge or real client message was performed.
+
+## Controlled live roundtrip, 2026-09-04
+
+One background message was authorized to the connected agent's own WhatsApp number using a synthetic requirement. Generation consumed 123 input and 11 output tokens. Chatwoot accepted the message, Evolution stored the exact provider id with `SERVER_ACK`, and the recipient confirmed that it appeared on the device. No retry occurred. The initial Chatwoot path did not return its provider id, so the job correctly remained unconfirmed rather than claiming delivery.
+
+The receipt adapter was then changed to send automated messages through Evolution's authenticated internal API and reconcile its exact provider id, phone and ACK. The existing provider id was read successfully through that adapter without another send. The confirmed test job was closed as delivered, the result notification reported one sent message, and its exact token charge remained unchanged. Both global follow-up flags remained disabled. Publish this adapter and perform one final authorized roundtrip through the new send path before enabling automation broadly.
