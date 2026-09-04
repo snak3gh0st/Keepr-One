@@ -60,6 +60,9 @@ export async function generateMetadata(): Promise<Metadata> {
       language === "PT"
         ? "Keepr One — a visão conectada da sua operação financeira."
         : "Keepr One — a connected view of your financial operations.",
+    verification: {
+      google: "ZY49GxoDnNik85xinSiaIuSN90wis9Fj29iuXY6OI2U",
+    },
   };
 }
 
