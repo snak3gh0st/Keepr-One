@@ -157,6 +157,34 @@ describe("CalendarEventModal", () => {
     await waitFor(() => expect(onCancelEvent).toHaveBeenCalledWith(cancellable));
   });
 
+  it("formats timed cancellation confirmation in the account timezone", async () => {
+    const browserTimeZone = process.env.TZ;
+    process.env.TZ = "America/Sao_Paulo";
+    try {
+      const user = userEvent.setup();
+      render(<CalendarEventModal open mode="details" event={{
+        ...allDayEvent,
+        allDay: false,
+        startsAt: "2026-09-04T16:00:00.000Z",
+        endsAt: "2026-09-04T16:30:00.000Z",
+        startDate: null,
+        endDate: null,
+        timeZone: "America/Sao_Paulo",
+        canDelete: false,
+      }} onClose={vi.fn()} onSubmit={vi.fn()} onCancelEvent={vi.fn()}
+      timeZone="America/New_York" calendars={[calendar]} />);
+
+      await user.click(screen.getByRole("button", { name: "Cancelar compromisso" }));
+
+      const confirmation = screen.getByRole("alert");
+      expect(confirmation).toHaveTextContent(/12:00/);
+      expect(confirmation).not.toHaveTextContent(/13:00/);
+    } finally {
+      if (browserTimeZone === undefined) delete process.env.TZ;
+      else process.env.TZ = browserTimeZone;
+    }
+  });
+
   it("offers an idempotent manual retry for failed synchronization", async () => {
     const user = userEvent.setup();
     const onRetrySync = vi.fn(async () => ({ ok: true as const }));

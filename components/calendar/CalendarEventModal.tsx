@@ -250,7 +250,7 @@ function CalendarEventDetails(
       {confirmCancellation ? (
         <section className="calendar-cancel-confirmation" role="alert" aria-live="assertive">
           <strong>{copy("Cancelar “{title}”?", "Cancel “{title}”?", { title: event.title })}</strong>
-          <p>{friendlyDate(event, locale, copy)}. {event.attendees.length ? copy("{count} {guests} pelo Google.", "Google will notify {count} {guests}.", { count: event.attendees.length, guests: event.attendees.length === 1 ? copy("convidado será avisado", "guest") : copy("convidados serão avisados", "guests") }) : copy("Este compromisso será removido da sua agenda.", "This event will be removed from your calendar.")}</p>
+          <p>{friendlyDate(event, locale, copy, props.timeZone)}. {event.attendees.length ? copy("{count} {guests} pelo Google.", "Google will notify {count} {guests}.", { count: event.attendees.length, guests: event.attendees.length === 1 ? copy("convidado será avisado", "guest") : copy("convidados serão avisados", "guests") }) : copy("Este compromisso será removido da sua agenda.", "This event will be removed from your calendar.")}</p>
           <div><button type="button" onClick={() => setConfirmCancellation(false)} disabled={pending}>{copy("Voltar", "Back")}</button><button type="button" className="calendar-danger-confirm" onClick={() => resolve(props.onCancelEvent)} disabled={pending}>{pending ? copy("Cancelando…", "Canceling…") : copy("Cancelar compromisso", "Cancel event")}</button></div>
         </section>
       ) : null}
