@@ -34,9 +34,12 @@ describe('auditedNationalLifeAap', () => {
     expect(auditedNationalLifeAap(1_200)).toBe(1_200)
   })
 
-  it('fails closed for a missing or non-positive AAP', () => {
-    expect(auditedNationalLifeAap(null)).toBeNull()
-    expect(auditedNationalLifeAap(0)).toBeNull()
+  it.each([null, undefined, '', ' ', 'invalid', NaN, Infinity, -1, false, {}])('fails closed for missing or invalid AAP: %s', (value) => {
+    expect(auditedNationalLifeAap(value)).toBeNull()
+  })
+
+  it.each([0, '0', '0.00', { toString: () => '0' }])('preserves an explicit carrier zero: %s', (value) => {
+    expect(auditedNationalLifeAap(value)).toBe(0)
   })
 })
 
@@ -86,6 +89,8 @@ describe('buildNationalLifePortfolioMetrics', () => {
     expect(metrics).toEqual({
       hasData: true,
       activeClients: 2,
+      clientCoverageComplete: true,
+      clientMissingPolicies: 0,
       activePolicies: 3,
       activeAap: 3_000,
       averageAapPerClient: 1_500,

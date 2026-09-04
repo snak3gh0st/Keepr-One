@@ -19,11 +19,11 @@ beforeEach(() => {
       }
       if (init?.method === 'POST') {
         whatsappConnected = true
-        return Response.json({ state: 'open', status: 'CONNECTED', phone: '+14075550123' })
+        return Response.json({ state: 'open', status: 'CONNECTED', phone: '+14075550123', recorded: true })
       }
       return Response.json(whatsappConnected
-        ? { state: 'open', status: 'CONNECTED', phone: '+14075550123' }
-        : { state: 'close', status: 'DISCONNECTED', phone: null })
+        ? { state: 'open', status: 'CONNECTED', phone: '+14075550123', recorded: true }
+        : { state: 'close', status: 'DISCONNECTED', phone: null, recorded: false })
     }
     if (url.endsWith('/read')) return new Response(null, { status: 204 })
     if (url.includes('/messages') && init?.method === 'POST') {

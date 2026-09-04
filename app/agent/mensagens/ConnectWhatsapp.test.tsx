@@ -43,6 +43,31 @@ describe('ConnectWhatsapp', () => {
     expect(screen.queryByRole('button', { name: 'Gerar código para conectar' })).not.toBeInTheDocument()
   })
 
+  it('reports a connection only after the API confirms its durable record', async () => {
+    const onConnectionChange = vi.fn()
+
+    render(<ConnectWhatsapp onConnectionChange={onConnectionChange} />)
+
+    await screen.findByRole('heading', { name: 'WhatsApp conectado' })
+    expect(onConnectionChange).toHaveBeenCalledWith(true)
+  })
+
+  it('does not report a provider-only session as connected', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({
+      state: 'open',
+      status: 'CONNECTED',
+      phone: '+15617260051',
+      recorded: false,
+    }))
+    const onConnectionChange = vi.fn()
+
+    render(<ConnectWhatsapp onConnectionChange={onConnectionChange} />)
+
+    expect(await screen.findByRole('heading', { name: 'Conectar meu WhatsApp' })).toBeInTheDocument()
+    expect(onConnectionChange).toHaveBeenCalledWith(false)
+    expect(onConnectionChange).not.toHaveBeenCalledWith(true)
+  })
+
   it('requires confirmation, logs out, and returns to the reconnect flow', async () => {
     render(<ConnectWhatsapp />)
     await userEvent.click(await screen.findByRole('button', { name: 'Desconectar WhatsApp' }))

@@ -49,6 +49,23 @@ const planned: PlannedPolicy & { agentId: string; clientId: string } = {
 }
 
 describe('prismaIngestDeps', () => {
+  it.each([null, '123456'])('accepts the owned connector partition with optional NPN %s', async (npn) => {
+    const findMany = vi.fn().mockResolvedValue([])
+    const deps = prismaIngestDeps({ agent: { findUnique: vi.fn().mockResolvedValue({ status: 'ACTIVE', npn }) },
+      nationalLifeInforcePolicy: { findMany } } as never)
+    await deps.loadInforceRows('a1')
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: npn ? { agentId: 'a1', agentNumber: npn } : { agentId: 'a1' },
+    }))
+  })
+
+  it.each([null, { status: 'INACTIVE', npn: '123456' }])('rejects missing/inactive agents', async (agent) => {
+    const findMany = vi.fn()
+    const deps = prismaIngestDeps({ agent: { findUnique: vi.fn().mockResolvedValue(agent) },
+      nationalLifeInforcePolicy: { findMany } } as never)
+    expect(await deps.loadInforceRows('a1')).toEqual([])
+    expect(findMany).not.toHaveBeenCalled()
+  })
   it('updates a carrier policy only when the global key and agent owner both match', async () => {
     const { deps, updateMany, create } = policyDeps()
 

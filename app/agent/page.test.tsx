@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   policyCount: vi.fn(),
   policyFindMany: vi.fn(),
   policyGroupBy: vi.fn(),
+  targetPremiumAggregate: vi.fn(),
   inforceFindMany: vi.fn(),
   commissionAggregate: vi.fn(),
   commissionGroupBy: vi.fn(),
@@ -25,10 +26,22 @@ const mocks = vi.hoisted(() => ({
   getCalendarConnection: vi.fn(),
   getTodayCalendarSummary: vi.fn(),
   getUpcomingCalendarEvents: vi.fn(),
+  loadNationalPolicyQueues: vi.fn(),
+  shellProps: vi.fn(),
 }))
 
 vi.mock('@/lib/agent-context', () => ({
   getCurrentAgent: mocks.getCurrentAgent,
+}))
+vi.mock('@/lib/national-life/policy-queues-prisma', () => ({
+  loadNationalPolicyQueues: mocks.loadNationalPolicyQueues,
+}))
+vi.mock('@/lib/national-life/current-portfolio-prisma', () => ({
+  loadCurrentNationalLifePortfolio: async () => {
+    const rows = await mocks.policyFindMany()
+    return { rows, storedPolicies: rows.length, historicalPolicies: 0, verified: true,
+      statusCounts: [], productCounts: [] }
+  },
 }))
 vi.mock('@/lib/agent-access', () => ({
   getCurrentAgentAccess: mocks.getCurrentAgentAccess,
@@ -57,6 +70,7 @@ vi.mock('@/lib/prisma', () => ({
     policyReview: { count: mocks.reviewCount },
     nationalLifeReportRow: { findMany: mocks.carrierRowsFindMany },
     nationalLifeInforcePolicy: { findMany: mocks.inforceFindMany },
+    nationalLifePolicyDetailSnapshot: { aggregate: mocks.targetPremiumAggregate },
   },
 }))
 vi.mock('@/lib/crm', () => ({
@@ -91,7 +105,10 @@ vi.mock('@/lib/national-life/commission-grid-keys', () => ({
   LEGACY_COMMISSION_EARNING_GRID_KEY: 'LEGACY_COMMISSIONS',
 }))
 vi.mock('@/components/Shell', () => ({
-  Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Shell: ({ children, ...props }: { children: React.ReactNode; kbotWelcome?: boolean }) => {
+    mocks.shellProps(props)
+    return <div>{children}</div>
+  },
 }))
 vi.mock('@/components/KeeprDashboardMotion', () => ({
   KeeprDashboardMotion: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -158,6 +175,10 @@ beforeEach(() => {
   mocks.policyCount.mockResolvedValue(0)
   mocks.policyFindMany.mockResolvedValue([])
   mocks.policyGroupBy.mockResolvedValue([])
+  mocks.targetPremiumAggregate.mockResolvedValue({ _count: { ctp: 0 }, _sum: { ctp: null } })
+  mocks.loadNationalPolicyQueues.mockResolvedValue({ verified: true, counts: {
+    ENTER_INFORCE: 45, WAITING_AGENT: 42, WAITING_CLIENT: 35,
+  } })
   mocks.inforceFindMany.mockResolvedValue([])
   mocks.commissionAggregate.mockResolvedValue({ _sum: { amount: null } })
   mocks.commissionGroupBy.mockResolvedValue([])
@@ -176,6 +197,27 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('AgentDashboard module access', () => {
+  it('asks the Shell for a K-Bot welcome only for the exact completed-onboarding flag', async () => {
+    const completed = render(await AgentDashboard({
+      searchParams: Promise.resolve({ onboarding: 'completed' }),
+    }))
+
+    expect(mocks.shellProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kbotWelcome: true }),
+    )
+
+    completed.unmount()
+    mocks.shellProps.mockClear()
+
+    render(await AgentDashboard({
+      searchParams: Promise.resolve({ onboarding: 'complete' }),
+    }))
+
+    expect(mocks.shellProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kbotWelcome: false }),
+    )
+  })
+
   it('does not query or render disabled modules for a TODAY-only account', async () => {
     render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
 
@@ -183,6 +225,7 @@ describe('AgentDashboard module access', () => {
     expect(mocks.getPromotionSnapshot).not.toHaveBeenCalled()
     expect(mocks.getPromotionPreview).not.toHaveBeenCalled()
     expect(mocks.policyCount).not.toHaveBeenCalled()
+    expect(mocks.targetPremiumAggregate).not.toHaveBeenCalled()
     expect(mocks.policyGroupBy).not.toHaveBeenCalled()
     expect(mocks.commissionAggregate).not.toHaveBeenCalled()
     expect(mocks.commissionGroupBy).not.toHaveBeenCalled()
@@ -299,10 +342,14 @@ describe('AgentDashboard module access', () => {
     expect(hero).not.toBeNull()
     expect(queue).not.toBeNull()
 
-    expect(within(hero!).getByText('Clientes ativos').parentElement).toHaveTextContent('2')
+    expect(within(hero!).getByText('Clientes ativos conciliados').parentElement).toHaveTextContent('2')
     expect(within(hero!).getByText('Apólices ativas').parentElement).toHaveTextContent('2')
-    expect(within(hero!).getByText('AAP ativa').parentElement).toHaveTextContent(/3\.000/)
-    expect(within(hero!).getByText('AAP média por cliente').parentElement).toHaveTextContent(/1\.500/)
+    expect(within(hero!).getByText('Prêmio anual previsto · ativos').parentElement).toHaveTextContent(/3\.000/)
+    expect(within(hero!).getByText('Prêmio anual médio por cliente').parentElement).toHaveTextContent(/1\.500/)
+    expect(within(hero!).getByText('A entrar em vigor').closest('a')).toHaveAttribute('href', '/agent/policies?queue=ENTER_INFORCE')
+    expect(within(hero!).getByText('A entrar em vigor').closest('a')).toHaveTextContent('45')
+    expect(within(hero!).getByText('Aguardando agente').closest('a')).toHaveAttribute('href', '/agent/policies?queue=WAITING_AGENT')
+    expect(within(hero!).getByText('Aguardando cliente').closest('a')).toHaveAttribute('href', '/agent/policies?queue=WAITING_CLIENT')
 
     expect(within(queue!).getByText('Pending Lapse').closest('a')).toHaveAttribute('href', '/agent/policies?status=PENDING_LAPSE')
     expect(within(queue!).getByText('Pending Lapse').closest('a')).toHaveTextContent('1')
@@ -310,7 +357,7 @@ describe('AgentDashboard module access', () => {
     expect(within(queue!).getByText('Lapsed').closest('a')).toHaveTextContent('1')
     expect(within(queue!).getByText('Canceled').closest('a')).toHaveAttribute('href', '/agent/policies?status=CANCELLED')
     expect(within(queue!).getByText('Canceled').closest('a')).toHaveTextContent('1')
-    expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent(/1\.800/)
+    expect(within(hero!).getByText('Prêmio anual em risco').parentElement).toHaveTextContent(/1\.800/)
   })
 
   it('does not present a partial AAP subtotal as the whole portfolio', async () => {
@@ -343,9 +390,35 @@ describe('AgentDashboard module access', () => {
 
     const hero = screen.getByRole('heading', { name: 'Sua carteira, sob controle.' }).closest('article')
     expect(hero).not.toBeNull()
-    expect(within(hero!).getByText('AAP ativa').parentElement).toHaveTextContent('—')
-    expect(within(hero!).getByText('AAP média por cliente').parentElement).toHaveTextContent('—')
-    expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent('—')
-    expect(within(hero!).getByText('AAP em risco').parentElement).toHaveTextContent('0/1 apólices com AAP')
+    expect(within(hero!).getByText('Prêmio anual previsto · ativos').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText('Prêmio anual médio por cliente').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText('Prêmio anual em risco').parentElement).toHaveTextContent('—')
+    expect(within(hero!).getByText('Prêmio anual em risco').parentElement).toHaveTextContent('0/1 apólices com prêmio anual')
+    expect(within(hero!).getByText('Target Premium capturado').parentElement).toHaveTextContent('Total da carteira em apuração')
+    expect(within(hero!).getByText(/Ausência de dados não significa Target Premium zero/)).toBeVisible()
+  })
+
+  it('renders exact captured CTP without requiring NPN or calling it confirmed PC', async () => {
+    mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1', npn: null })
+    mocks.getCurrentAgentAccess.mockResolvedValue({
+      scopeAgentIds: ['agent-1'],
+      enabledModules: ['TODAY', 'POLICIES'],
+      canViewTeamData: false,
+      canViewAgencyNationalLife: false,
+      canManageTeam: false,
+    })
+    mocks.policyFindMany.mockResolvedValue([
+      { clientId: 'client-1', status: 'INFORCE', sourceStatus: 'Active', premium: 960, sourceUpdatedAt: new Date() },
+    ])
+    mocks.targetPremiumAggregate.mockResolvedValue({ _count: { ctp: 1 }, _sum: { ctp: 325.8 } })
+
+    render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
+
+    const target = screen.getByText('Target Premium capturado').parentElement
+    expect(target).toHaveTextContent('US$ 325,80')
+    expect(target).toHaveTextContent('Total da carteira em apuração')
+    expect(target).toHaveTextContent('apenas o subtotal de 1 detalhes capturados')
+    expect(target).toHaveTextContent('NPN é opcional')
+    expect(target).not.toHaveTextContent('0 PC')
   })
 })

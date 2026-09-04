@@ -67,6 +67,72 @@ afterEach(() => {
 })
 
 describe('NationalLifeLocalConnectorCard', () => {
+  it('offers a compact guided presentation for onboarding without mounting the corner portal', async () => {
+    installChromeMock((_message, callback) => callback())
+
+    const { container } = render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+        variant="onboarding"
+        showCornerPresence={false}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: "Let's get your data ready together" })).toBeVisible()
+    expect(screen.getByText('Guided setup')).toBeVisible()
+    expect(screen.getByText(/I will help you install K-Bot/)).toBeVisible()
+    expect(screen.queryByText(/protected sign-in attempt/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('K-Bot status')).not.toBeInTheDocument()
+    expect(container.querySelector('[data-connector-variant="onboarding"]')).toBeVisible()
+
+    expect(screen.queryByRole('list', { name: 'Connection progress' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Install K-Bot' })).toBeEnabled()
+  })
+
+  it('reports only a safe presentation state to an onboarding host', async () => {
+    const onStateChange = vi.fn()
+    installChromeMock((message, callback) => {
+      if (message.type === 'GET_CONNECTOR_STATUS') {
+        callback({
+          ok: true,
+          device: { status: 'READY', deviceId: 'device-secret-1' },
+          sync: { runId: 'run-secret-1', status: 'IDLE' },
+        })
+        return
+      }
+      callback({ ok: true })
+    })
+
+    render(
+      <NationalLifeLocalConnectorCard
+        extensionId={extensionId}
+        storeUrl={storeUrl}
+        installMode="store"
+        baseUrl={baseUrl}
+        variant="onboarding"
+        showCornerPresence={false}
+        onStateChange={onStateChange}
+      />,
+    )
+
+    await waitFor(() => expect(onStateChange).toHaveBeenCalledWith({
+      phase: 'idle',
+      presence: 'installed',
+      paired: true,
+      syncActive: false,
+      syncComplete: false,
+      botState: 'idle',
+      progress: null,
+    }))
+
+    const serializedCalls = JSON.stringify(onStateChange.mock.calls)
+    expect(serializedCalls).not.toContain('device-secret-1')
+    expect(serializedCalls).not.toContain('run-secret-1')
+  })
+
   it('opens the official store when the connector is absent', async () => {
     installChromeMock((_message, callback) => callback())
     const clicked = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})

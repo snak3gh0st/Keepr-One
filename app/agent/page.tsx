@@ -4,7 +4,15 @@ import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getCurrentAgentAccess } from '@/lib/agent-access'
-import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
+import { decimalToNumber } from '@/lib/decimal'
+import { loadCurrentNationalLifePortfolio } from '@/lib/national-life/current-portfolio-prisma'
+import { buildPremiumEvolution } from '@/lib/national-life/premium-evolution'
+import { NationalPremiumEvolution } from '@/components/NationalPremiumEvolution'
+import { loadNationalPolicyQueues } from '@/lib/national-life/policy-queues-prisma'
+import {
+  getNationalLifeLocalConnectorConfig,
+  LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+} from '@/lib/national-life/local-connector/config'
 import { Shell } from '@/components/Shell'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import {
@@ -105,7 +113,7 @@ function PriorityRow({
 }
 
 function formatCurrency(value: number, language: UserLanguage): string {
-  return formatLocalizedCurrency(value, language, 'USD', { maximumFractionDigits: 0 })
+  return formatLocalizedCurrency(value, language, 'USD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function safeGroupCount(groupCount: unknown): number {
@@ -126,9 +134,16 @@ function isPlatformModuleEnabled(
 export default async function AgentDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ preview?: string }>
+  searchParams: Promise<{
+    preview?: string
+    onboarding?: string
+    premiumRange?: string
+    premiumProduct?: string
+    premiumView?: string
+  }>
 }) {
-  const { preview } = await searchParams
+  const params = await searchParams
+  const { preview, onboarding } = params
   const { copy, language } = await getServerI18n()
   const locale = language === 'PT' ? 'pt-BR' : 'en-US'
   const agent = await getCurrentAgent()
@@ -237,6 +252,12 @@ export default async function AgentDashboard({
 
   let policyCount = 0
   let portfolioMetrics: NationalLifePortfolioMetrics = buildNationalLifePortfolioMetrics([])
+  let historicalPolicies = 0
+  let portfolioVerified = false
+  let premiumEvolution = buildPremiumEvolution({ rows: [], observedAt: null, verified: false })
+  let nationalQueueCounts: { ENTER_INFORCE: number; WAITING_AGENT: number; WAITING_CLIENT: number } | null = null
+  let capturedTargetPremium = 0
+  let targetPremiumKnownCount = 0
   let byStatus: { status: string; _count: { _all: number } }[] = []
   let byCarrier: { carrier: string; _count: { _all: number } }[] = []
   let byProduct: { product: string; _count: { _all: number } }[] = []
@@ -246,6 +267,7 @@ export default async function AgentDashboard({
     const [
       policyTotal,
       nationalPolicyRows,
+      targetPremiumSnapshot,
       statusBuckets,
       carrierBuckets,
       productBuckets,
@@ -259,17 +281,20 @@ export default async function AgentDashboard({
         ? prisma.policy.count({ where: { agentId: { in: scope } } })
         : 0,
       canUsePolicies
-        ? (prisma.policy.findMany?.({
-            where: { agentId: { in: scope }, sourceProvider: 'NATIONAL_LIFE' },
-            select: {
-              clientId: true,
-              status: true,
-              sourceStatus: true,
-              premium: true,
-              sourceUpdatedAt: true,
+        ? loadCurrentNationalLifePortfolio(prisma, scope)
+        : { rows: [], storedPolicies: 0, historicalPolicies: 0, verified: false, statusCounts: [], productCounts: [], premiumEvolutionRows: [], observedAt: null },
+      canUsePolicies
+        ? prisma.nationalLifePolicyDetailSnapshot.aggregate({
+            where: {
+              agentId: { in: scope },
+              deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+              ctp: { gt: 0 },
+              policy: { status: 'INFORCE', sourceProvider: 'NATIONAL_LIFE' },
             },
-          }) ?? [])
-        : [],
+            _count: { ctp: true },
+            _sum: { ctp: true },
+          })
+        : { _count: { ctp: 0 }, _sum: { ctp: null } },
       canUsePolicies
         ? prisma.policy.groupBy({
             by: ['status'],
@@ -330,14 +355,36 @@ export default async function AgentDashboard({
     dueReviews = dueReviewCount
 
     policyCount = policyTotal
-    portfolioMetrics = buildNationalLifePortfolioMetrics(nationalPolicyRows)
+    targetPremiumKnownCount = targetPremiumSnapshot._count.ctp
+    capturedTargetPremium = decimalToNumber(targetPremiumSnapshot._sum.ctp)
+    portfolioMetrics = buildNationalLifePortfolioMetrics(nationalPolicyRows.rows)
+    historicalPolicies = nationalPolicyRows.historicalPolicies
+    portfolioVerified = nationalPolicyRows.verified
+    premiumEvolution = buildPremiumEvolution({ rows: nationalPolicyRows.premiumEvolutionRows ?? [],
+      observedAt: nationalPolicyRows.observedAt ?? null, verified: portfolioVerified,
+      range: params.premiumRange, product: params.premiumProduct, view: params.premiumView })
     atRiskPolicies = portfolioMetrics.attentionPolicies
     byStatus = statusBuckets
     byCarrier = carrierBuckets
     byProduct = productBuckets
+    if (portfolioVerified && policyCount === nationalPolicyRows.storedPolicies) {
+      policyCount = nationalPolicyRows.rows.length
+      byStatus = nationalPolicyRows.statusCounts.map((row) => ({ status: row.status, _count: { _all: row.count } }))
+      byCarrier = [{ carrier: 'National Life Group', _count: { _all: nationalPolicyRows.rows.length } }]
+      byProduct = nationalPolicyRows.productCounts.map((row) => ({ product: row.product, _count: { _all: row.count } }))
+    }
   } catch (error) {
     console.error('AgentDashboard query error', error)
     loadError = true
+  }
+
+  if (canUsePolicies) {
+    try {
+      const queueResult = await loadNationalPolicyQueues(prisma, scope)
+      if (queueResult.verified) nationalQueueCounts = queueResult.counts
+    } catch (error) {
+      console.error('National policy queue query error', error)
+    }
   }
 
   if (canUseCalendar) {
@@ -385,6 +432,12 @@ export default async function AgentDashboard({
   const firstName = ((user?.name ?? '').trim() || copy('Agente', 'Agent')).split(/\s+/)[0]
   const countValue = (value: number) => loadError ? '—' : formatNumber(value, language, { maximumFractionDigits: 0 })
   const hasPortfolioData = canUsePolicies && portfolioMetrics.hasData && !loadError
+  const capturedTargetPremiumValue = hasPortfolioData && targetPremiumKnownCount > 0
+    ? formatLocalizedCurrency(capturedTargetPremium, language, 'USD', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    : '—'
   const activeAapValue = hasPortfolioData && portfolioMetrics.premiumCoverageComplete
     ? formatCurrency(portfolioMetrics.activeAap, language)
     : '—'
@@ -412,10 +465,10 @@ export default async function AgentDashboard({
       : []),
     ...(canUsePolicies
       ? [
-          { label: copy('Clientes ativos National', 'Active National clients'), value: hasPortfolioData ? countValue(portfolioMetrics.activeClients) : '—' },
+          { label: copy('Clientes ativos conciliados', 'Reconciled active clients'), value: hasPortfolioData ? countValue(portfolioMetrics.activeClients) : '—' },
           { label: copy('Apólices ativas', 'Active policies'), value: hasPortfolioData ? countValue(portfolioMetrics.activePolicies) : '—' },
-          { label: copy('AAP ativa', 'Active AAP'), value: activeAapValue },
-          { label: copy('AAP em risco', 'AAP at risk'), value: atRiskAapValue },
+          { label: copy('Prêmio anual previsto · ativos', 'Expected annual premium · active'), value: activeAapValue },
+          { label: copy('Prêmio anual em risco', 'Annual premium at risk'), value: atRiskAapValue },
           { label: copy('Revisões', 'Reviews'), value: countValue(dueReviews) },
         ]
       : []),
@@ -475,6 +528,7 @@ export default async function AgentDashboard({
       userName={user?.name ?? ''}
       promotionIdentity={previewPromotionIdentity}
       journeyHref={journeyHref}
+      kbotWelcome={onboarding === 'completed'}
     >
       <KeeprDashboardMotion>
         {process.env.KBOT_FOLLOWUP_ENABLED === 'true' && <FollowupWorkspace compact />}
@@ -550,16 +604,52 @@ export default async function AgentDashboard({
 
                   {hasPortfolioData ? (
                     <>
+                      <div data-hero-reveal className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-4 sm:p-5">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/42">
+                          {copy('Target Premium capturado', 'Captured Target Premium')}
+                        </p>
+                        <p className="mt-2 text-lg font-medium text-mint">
+                          {copy('Total da carteira em apuração', 'Book total pending reconciliation')}
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-paper/48">
+                          {targetPremiumKnownCount > 0
+                            ? copy(
+                                `${capturedTargetPremiumValue} é apenas o subtotal de ${targetPremiumKnownCount} detalhes capturados, não o total das ${portfolioMetrics.activePolicies} apólices ativas.`,
+                                `${capturedTargetPremiumValue} is only the subtotal of ${targetPremiumKnownCount} captured details, not the total of ${portfolioMetrics.activePolicies} active policies.`,
+                              )
+                            : copy(
+                                'CTP ainda não capturado nos detalhes da National. Ausência de dados não significa Target Premium zero.',
+                                'CTP has not yet been captured from National Life policy details. Missing data does not mean zero Target Premium.',
+                              )}
+                        </p>
+                        <p className="mt-1 text-[10px] leading-4 text-paper/38">
+                          {copy(
+                            'NPN é opcional. PC confirmado permanece separado e depende da evidência de pagamento da National.',
+                            'NPN is optional. Confirmed PC remains separate and requires National Life payment evidence.',
+                          )}
+                        </p>
+                      </div>
+                      {portfolioVerified && (
+                        <p className="mt-4 text-xs leading-5 text-paper/48">
+                          {copy('Prêmio anual previsto e status: última exportação completa da National, sem repetir apólices.', 'Expected annual premium and status: latest complete National Life export, counting each policy once.')}
+                          {historicalPolicies > 0 && copy(
+                            ` ${historicalPolicies} registros históricos fora desta exportação foram preservados e não entram nos totais atuais.`,
+                            ` ${historicalPolicies} historical records absent from this export were retained and are excluded from current totals.`,
+                          )}
+                        </p>
+                      )}
                       <div data-hero-reveal className="mt-6 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2 xl:grid-cols-4">
                         {[
                           {
-                            label: copy('Clientes ativos', 'Active clients'),
+                            label: copy('Clientes ativos conciliados', 'Reconciled active clients'),
                             display: countValue(portfolioMetrics.activeClients),
                             tone: 'text-paper',
-                            detail: copy(
-                              `${portfolioMetrics.activePolicies} apólices em vigor`,
-                              `${portfolioMetrics.activePolicies} in-force policies`,
-                            ),
+                            detail: portfolioMetrics.clientCoverageComplete
+                              ? copy(`${portfolioMetrics.activePolicies} apólices em vigor`, `${portfolioMetrics.activePolicies} in-force policies`)
+                              : copy(
+                                  `${portfolioMetrics.clientMissingPolicies} apólices aguardam vínculo de cliente`,
+                                  `${portfolioMetrics.clientMissingPolicies} policies await client reconciliation`,
+                                ),
                           },
                           {
                             label: copy('Apólices ativas', 'Active policies'),
@@ -573,23 +663,25 @@ export default async function AgentDashboard({
                               : copy('Nenhum Pending Lapse', 'No Pending Lapse'),
                           },
                           {
-                            label: copy('AAP ativa', 'Active AAP'),
+                            label: copy('Prêmio anual previsto · ativos', 'Expected annual premium · active'),
                             display: activeAapValue,
                             tone: 'text-mint',
                             detail: copy(
-                              `${portfolioMetrics.premiumKnownPolicies}/${portfolioMetrics.activePolicies} apólices com AAP confirmada`,
-                              `${portfolioMetrics.premiumKnownPolicies}/${portfolioMetrics.activePolicies} policies with confirmed AAP`,
+                              `${portfolioMetrics.premiumKnownPolicies}/${portfolioMetrics.activePolicies} apólices com prêmio anual informado`,
+                              `${portfolioMetrics.premiumKnownPolicies}/${portfolioMetrics.activePolicies} policies with annual premium data`,
                             ),
                           },
                           {
-                            label: copy('AAP média por cliente', 'Average AAP per client'),
+                            label: copy('Prêmio anual médio por cliente', 'Average annual premium per client'),
                             display: averageAapValue,
                             tone: 'text-[oklch(0.82_0.12_85)]',
-                            detail: portfolioMetrics.premiumCoverageComplete
-                              ? copy('premium anual por cliente ativo', 'annual premium per active client')
+                            detail: !portfolioMetrics.clientCoverageComplete
+                              ? copy('Conciliação de clientes em andamento', 'Client reconciliation in progress')
+                              : portfolioMetrics.premiumCoverageComplete
+                              ? copy('prêmio anual previsto por cliente ativo', 'expected annual premium per active client')
                               : copy(
-                                  `Faltam dados de AAP em ${portfolioMetrics.premiumMissingPolicies} apólices`,
-                                  `AAP data is missing for ${portfolioMetrics.premiumMissingPolicies} policies`,
+                                  `Falta o prêmio anual em ${portfolioMetrics.premiumMissingPolicies} apólices`,
+                                  `Annual premium data is missing for ${portfolioMetrics.premiumMissingPolicies} policies`,
                                 ),
                           },
                         ].map((metric) => (
@@ -598,6 +690,27 @@ export default async function AgentDashboard({
                             <p className={`mt-2 font-mono text-xl font-medium tabular-nums ${metric.tone}`}>{metric.display}</p>
                             <p className="mt-1 text-[10px] leading-4 text-paper/38">{metric.detail}</p>
                           </div>
+                        ))}
+                      </div>
+                      <div data-hero-reveal className="mt-4 grid gap-2 sm:grid-cols-3">
+                        {[
+                          { key: 'ENTER_INFORCE', label: copy('A entrar em vigor', 'Entering in force'), tone: 'text-mint' },
+                          { key: 'WAITING_AGENT', label: copy('Aguardando agente', 'Waiting on agent'), tone: 'text-amber-300' },
+                          { key: 'WAITING_CLIENT', label: copy('Aguardando cliente', 'Waiting on client'), tone: 'text-paper' },
+                        ].map((queue) => (
+                          <Link
+                            key={queue.key}
+                            href={`/agent/policies?queue=${queue.key}`}
+                            className="group rounded-xl border border-white/10 bg-white/[0.035] p-4 transition-colors hover:border-mint/45 hover:bg-white/[0.065]"
+                          >
+                            <p className={`font-mono text-2xl font-medium tabular-nums ${queue.tone}`}>
+                              {nationalQueueCounts ? countValue(nationalQueueCounts[queue.key as keyof typeof nationalQueueCounts]) : '—'}
+                            </p>
+                            <p className="mt-1 text-xs font-semibold text-paper/72">{queue.label}</p>
+                            <p className="mt-2 text-[10px] uppercase tracking-[0.12em] text-paper/38">
+                              {copy('Ver apólices filtradas →', 'View filtered policies →')}
+                            </p>
+                          </Link>
                         ))}
                       </div>
 
@@ -645,15 +758,15 @@ export default async function AgentDashboard({
                           </div>
                         </div>
                         <div className="min-w-[180px] rounded-2xl border border-[oklch(0.82_0.12_85)]/20 bg-[oklch(0.82_0.12_85)]/[0.08] p-4">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/42">{copy('AAP em risco', 'AAP at risk')}</p>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-paper/42">{copy('Prêmio anual em risco', 'Annual premium at risk')}</p>
                           <p className="mt-2 font-mono text-2xl font-medium tabular-nums text-[oklch(0.82_0.12_85)]">{atRiskAapValue}</p>
                           <p className="mt-1 text-[10px] leading-4 text-paper/40">
                             {portfolioMetrics.atRiskPremiumCoverageComplete
                               ? copy('em apólices Pending Lapse', 'in Pending Lapse policies')
                               : portfolioMetrics.pendingLapsePolicies > 0
                                 ? copy(
-                                    `${portfolioMetrics.atRiskPremiumKnownPolicies}/${portfolioMetrics.pendingLapsePolicies} apólices com AAP; total aguardando dados`,
-                                    `${portfolioMetrics.atRiskPremiumKnownPolicies}/${portfolioMetrics.pendingLapsePolicies} policies with AAP; total awaiting data`,
+                                    `${portfolioMetrics.atRiskPremiumKnownPolicies}/${portfolioMetrics.pendingLapsePolicies} apólices com prêmio anual; total aguardando dados`,
+                                    `${portfolioMetrics.atRiskPremiumKnownPolicies}/${portfolioMetrics.pendingLapsePolicies} policies with annual premium; total awaiting data`,
                                   )
                                 : copy('nenhuma apólice Pending Lapse', 'no Pending Lapse policies')}
                           </p>
@@ -668,8 +781,8 @@ export default async function AgentDashboard({
                       <p className="mt-2 max-w-2xl text-sm leading-6 text-paper/50">
                         {localConnectorEnabled
                           ? copy(
-                              'Faça a primeira sincronização para transformar a carteira em clientes, AAP e ações de retenção.',
-                              'Run the first sync to turn the book into clients, AAP, and retention actions.',
+                              'Faça a primeira sincronização para transformar a carteira em clientes, prêmio anual previsto e ações de retenção.',
+                              'Run the first sync to turn the book into clients, expected annual premium, and retention actions.',
                             )
                           : copy(
                               'A integração precisa ser configurada antes da primeira sincronização.',
@@ -748,6 +861,11 @@ export default async function AgentDashboard({
           </aside>
           )}
         </section>
+
+        {canUsePolicies && !loadError && (
+          <NationalPremiumEvolution model={premiumEvolution} language={language}
+            preservedParams={Object.fromEntries(Object.entries(params).filter((entry): entry is [string, string] => !entry[0].startsWith('premium') && typeof entry[1] === 'string'))} />
+        )}
 
         {canUseCalendar && !loadError && (
           <TodayMeetingsSection

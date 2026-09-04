@@ -6,7 +6,7 @@ import { useI18n } from '@/components/i18n/LanguageProvider'
 
 type State = 'checking' | 'idle' | 'starting' | 'waiting' | 'connected' | 'disconnecting' | 'failed'
 
-type ConnectWhatsappProps = {
+export type ConnectWhatsappProps = {
   onConnectionChange?: (connected: boolean) => void
 }
 
@@ -43,10 +43,15 @@ export function ConnectWhatsapp({ onConnectionChange }: ConnectWhatsappProps = {
         state: string
         status: string
         phone: string | null
+        recorded: boolean
       }
       setPhone(body.phone)
       setErrorCode(null)
-      const connected = body.state === 'open' && body.status === 'CONNECTED'
+      // Provider state alone is not enough for onboarding. The connection only
+      // counts after the API confirms that its verified identity was persisted.
+      const connected = body.state === 'open'
+        && body.status === 'CONNECTED'
+        && body.recorded === true
       onConnectionChangeRef.current?.(connected)
       setState(connected ? 'connected' : 'idle')
     } catch {

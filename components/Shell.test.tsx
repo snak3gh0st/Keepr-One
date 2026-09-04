@@ -147,6 +147,27 @@ describe('Shell plan access', () => {
     expect(screen.queryByRole('link', { name: 'Integrações' })).toBeNull()
   })
 
+  it('shows the K-Bot welcome even when the Integrations module is disabled', async () => {
+    render(
+      <AgentAccessProvider
+        access={{
+          ...AGENCY_OWNER_ACCESS,
+          enabledModules: ['TODAY', 'CRM', 'AGENCY'],
+        }}
+      >
+        <Shell role="AGENT" userName="Ana" kbotWelcome>
+          <p>Conteúdo</p>
+        </Shell>
+      </AgentAccessProvider>,
+    )
+
+    expect(screen.queryByRole('link', { name: 'Integrações' })).toBeNull()
+    expect(await screen.findByLabelText('Status do K-Bot')).toBeVisible()
+    expect(
+      screen.getByRole('status', { name: 'Atualização do K-Bot' }),
+    ).toHaveTextContent('Tudo pronto. Que bom ter você aqui.')
+  })
+
   it('requires both the TEAM grant and the existing owner capability', () => {
     const { rerender } = render(
       <AgentAccessProvider
