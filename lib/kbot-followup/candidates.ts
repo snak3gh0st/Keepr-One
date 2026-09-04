@@ -27,13 +27,16 @@ export async function getFollowupCandidates(agentId: string, now = new Date()): 
     ] }, select: { phone: true } }),
   ])
   const byPolicy = new Map(policies.map(p => [p.policyNumber, p]))
+  const preferenceBySubject = new Map(preferences.map(p => [p.subjectKey, p]))
+  const contactedPhones = new Set(jobs.map(j => j.phone))
   const rows: Candidate[] = []
   function add(input: Omit<Candidate, 'fingerprint' | 'blockedReason'>) {
-    const p = preferences.find(p => p.subjectKey === (input.phone ?? input.subjectKey))
+    // A phone repair must not discard a preference saved before a phone existed.
+    const prefs = [preferenceBySubject.get(input.subjectKey), input.phone ? preferenceBySubject.get(input.phone) : undefined]
     const stale = now.getTime() - new Date(input.sourceAt).getTime() > 72 * 3_600_000
-    const blockedReason = p?.optedOut ? 'OPTED_OUT' : p?.snoozedUntil && p.snoozedUntil > now ? 'SNOOZED'
-      : p?.lastManualAt && now.getTime() - p.lastManualAt.getTime() < COOLDOWN_MS ? 'RECENT_CONTACT'
-      : input.phone && jobs.some(j => j.phone === input.phone) ? 'RECENT_CONTACT'
+    const blockedReason = prefs.some(p => p?.optedOut) ? 'OPTED_OUT' : prefs.some(p => p?.snoozedUntil && p.snoozedUntil > now) ? 'SNOOZED'
+      : prefs.some(p => p?.lastManualAt && now.getTime() - p.lastManualAt.getTime() < COOLDOWN_MS) ? 'RECENT_CONTACT'
+      : input.phone && contactedPhones.has(input.phone) ? 'RECENT_CONTACT'
       : !input.phone ? 'PHONE_REQUIRED' : stale ? 'SYNC_REQUIRED' : null
     rows.push({ ...input, fingerprint: fingerprint(input), blockedReason })
   }
@@ -65,8 +68,15 @@ export async function getFollowupCandidates(agentId: string, now = new Date()): 
   const rank = { LAPSED: 0, LAPSE_WARNING: 1, PAYMENT: 2, REQUIREMENT: 3 }
   rows.sort((a, b) => rank[a.reason] - rank[b.reason] || a.id.localeCompare(b.id))
   const seen = new Set<string>()
+  const subjectsByPhone = new Map<string, Set<string>>()
   for (const row of rows) {
-    if (row.blockedReason !== 'OPTED_OUT' && row.phone && rows.some(other => other.phone === row.phone && other.subjectKey !== row.subjectKey)) row.blockedReason = 'CONTACT_AMBIGUOUS'
+    if (!row.phone) continue
+    const subjects = subjectsByPhone.get(row.phone) ?? new Set<string>()
+    subjects.add(row.subjectKey)
+    subjectsByPhone.set(row.phone, subjects)
+  }
+  for (const row of rows) {
+    if (row.blockedReason !== 'OPTED_OUT' && row.phone && subjectsByPhone.get(row.phone)!.size > 1) row.blockedReason = 'CONTACT_AMBIGUOUS'
   }
   return rows.filter(row => { const key = row.phone ?? row.subjectKey; if (seen.has(key)) return false; seen.add(key); return true })
 }

@@ -7,7 +7,6 @@ import {
   LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
 } from '@/lib/national-life/local-connector/config'
 import { prisma } from '@/lib/prisma'
-import { PageHeader } from '@/components/PageHeader'
 import { Shell } from '@/components/Shell'
 import { EmptyState } from '@/components/Table'
 import { NationalLifeLocalConnectorCard } from './NationalLifeLocalConnectorCard'
@@ -39,22 +38,34 @@ export default async function NationalLifeConnectionPage() {
 
   return (
     <Shell role={role} userName={user?.name ?? ''}>
-      <PageHeader
-        title={copy('Coloque o K-Bot para trabalhar', 'Put K-Bot to work')}
-        eyebrow={copy('Integrações', 'Integrations')}
-        description={copy('O K-Bot executa as etapas da National Life que você aprovar, enquanto a Keepr One valida e salva o resultado.', 'K-Bot operates the National Life steps you approve while Keepr One validates and saves the result.')}
-      >
-        <Link
-          href={backHref}
-          className="inline-flex min-h-10 items-center rounded-md border border-teal px-4 py-2.5 text-sm font-semibold text-teal transition-[background-color,border-color,color,transform] duration-150 hover:border-teal-deep hover:bg-teal-pale focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
-        >
-          ← {copy('Voltar às operações', 'Back to operations')}
-        </Link>
-      </PageHeader>
+      <header className="flex flex-wrap items-end justify-between gap-4 py-5">
+        <div><p className="text-xs font-semibold uppercase tracking-widest text-teal-deep">K-Bot · National Life</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink">{copy('Conexão e atualizações', 'Connection and updates')}</h1>
+          <p className="mt-2 text-sm text-ink-muted">{copy('Confira este computador, inicie uma atualização e acompanhe o resultado.', 'Check this computer, start an update and track the result.')}</p>
+        </div>
+        <Link href={role === 'AGENT' ? '/agent/kbot?view=activities' : backHref} className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-semibold text-teal-deep">{copy('Ver atividades', 'View activities')}</Link>
+      </header>
 
       {localConfig.enabled ? (
-        <div className="mt-8 max-w-6xl space-y-8">
-          <section className="relative overflow-hidden rounded-[28px] border border-border-steel bg-paper shadow-[var(--shadow-card)]">
+        <div className="mt-4 max-w-6xl space-y-5">
+
+
+          {localConfig.enabled && (
+            <NationalLifeLocalConnectorCard
+              extensionId={localConfig.extensionTarget}
+              storeUrl={localConfig.storeUrl}
+              installMode={localConfig.installMode}
+              baseUrl={localConfig.baseUrl}
+              showCornerPresence={false}
+              hideDuringActiveSync
+              latestRun={syncStatus ? { runId: syncStatus.runId, state: syncStatus.state } : null}
+            />
+          )}
+
+          <NationalLifeSyncProgress initialStatus={syncStatus} />
+
+          <details className="relative overflow-hidden rounded-[28px] border border-border-steel bg-paper shadow-[var(--shadow-card)]">
+            <summary className="cursor-pointer px-6 py-4 text-sm font-semibold text-ink">{copy('Como o K-Bot trabalha', 'How K-Bot works')}</summary>
             <div
               aria-hidden="true"
               className="absolute -right-24 -top-28 h-72 w-72 rounded-full bg-teal-pale/75 blur-3xl"
@@ -108,20 +119,7 @@ export default async function NationalLifeConnectionPage() {
                 ))}
               </ol>
             </div>
-          </section>
-
-          {localConfig.enabled && (
-            <NationalLifeLocalConnectorCard
-              extensionId={localConfig.extensionTarget}
-              storeUrl={localConfig.storeUrl}
-              installMode={localConfig.installMode}
-              baseUrl={localConfig.baseUrl}
-              hideDuringActiveSync
-              latestRun={syncStatus ? { runId: syncStatus.runId, state: syncStatus.state } : null}
-            />
-          )}
-
-          <NationalLifeSyncProgress initialStatus={syncStatus} />
+          </details>
 
           <p className="border-t border-border-steel pt-5 text-sm leading-6 text-ink-muted">
             {copy('Os dados da National Life são copiados para a Keepr One como um snapshot somente para leitura.', 'National Life data is copied into Keepr One as a read-only snapshot.')}{' '}
