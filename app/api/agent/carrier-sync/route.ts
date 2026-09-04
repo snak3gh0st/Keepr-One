@@ -12,6 +12,11 @@ import {
 } from '@/lib/national-life/local-connector/config'
 import { getNationalLifeSyncStatus } from '@/lib/national-life/sync-run-service'
 import { sanitizeNationalLifeSyncStatusForAgent } from '@/lib/national-life/plan-access'
+import { hasVerifiedNationalLifeSyncForAgent } from '@/lib/agent-onboarding'
+
+import { featureEnabled } from '@/lib/kbot-followup/domain'
+
+const responseHeaders = { 'Cache-Control': 'private, no-store' }
 
 type IllustrationActivity = {
   id: string
@@ -107,21 +112,42 @@ async function applicationActivity(agentId: string, command: {
   return null
 }
 
-/// A compact, user-owned activity snapshot for the global shell. The client
-/// only polls this route while an operation is active, so idle accounts remain
-/// quiet while a running sync and illustration can be represented together.
+async function nationalLifeSetupRequired(agentId: string): Promise<boolean> {
+  const onboarding = await prisma.agentOnboarding.findUnique({
+    where: { agentId },
+    select: { nationalLifeSkippedAt: true },
+  })
+  if (!onboarding?.nationalLifeSkippedAt) return false
+  return !(await hasVerifiedNationalLifeSyncForAgent(agentId))
+}
+
+/// A compact, user-owned activity snapshot for the global shell and activity
+/// center. Clients refresh only while visible, with faster polling during work.
 export async function GET() {
   const localConnector = getNationalLifeLocalConnectorConfig()
   const connector = localConnector.enabled
     ? { enabled: true, extensionTarget: localConnector.extensionTarget }
     : { enabled: false, extensionTarget: null }
 
-  if (!localConnector.enabled) {
-    // No integration, no badge. Not every agent connects one.
-    return NextResponse.json({ state: null, connector })
-  }
   try {
     const agent = await getCurrentAgent()
+    const followup = featureEnabled() ? await (async () => {
+      const [working, attention] = await Promise.all([
+        prisma.kBotFollowupJob.count({ where: { agentId: agent.id, status: { in: ['PENDING', 'PREPARING', 'DISPATCHING', 'ACCEPTED', 'CANCEL_REQUESTED'] } } }),
+        prisma.kBotFollowupJob.count({ where: { agentId: agent.id, OR: [
+          { status: 'UNKNOWN' }, { status: 'FAILED', updatedAt: { gte: new Date(Date.now() - 86_400_000) } },
+        ] } }),
+      ])
+      return { working, attention }
+    })() : null
+    if (!localConnector.enabled) {
+      const setupRequired = await nationalLifeSetupRequired(agent.id)
+      return NextResponse.json({
+        state: null, connector,
+        ...(followup ? { followup } : {}),
+        ...(setupRequired ? { nationalLifeSetupRequired: true } : {}),
+      }, { headers: responseHeaders })
+    }
     const [working, blocked, rawSync, latestIllustrationCommand, latestApplicationCommand, credential] = await Promise.all([
       prisma.browserAutomationJob.count({
         where: {
@@ -166,16 +192,22 @@ export async function GET() {
     const sync = await sanitizeNationalLifeSyncStatusForAgent(agent.id, rawSync)
     const illustration = await illustrationActivity(agent.id, latestIllustrationCommand)
     const application = await applicationActivity(agent.id, latestApplicationCommand)
+    // Read the durable evidence after the live status. When a run has just
+    // completed, this ordering prevents one stale reminder from becoming the
+    // final payload after client polling stops.
+    const setupRequired = await nationalLifeSetupRequired(agent.id)
     return NextResponse.json({
       state: carrierSyncState({ working, blocked }),
+      ...(followup ? { followup } : {}),
       connector: credential?.autoLoginEnabled ? { ...connector, autoLoginEnabled: true } : connector,
+      ...(setupRequired ? { nationalLifeSetupRequired: true } : {}),
       ...(sync ? { sync } : {}),
       ...(illustration ? { illustration } : {}),
       ...(application ? { application } : {}),
-    })
+    }, { headers: responseHeaders })
   } catch {
     // A badge that does not know what it is saying is worse than no badge —
     // that is how the illustration reachability flag lied for hours.
-    return NextResponse.json({ state: null, connector })
+    return NextResponse.json({ state: null, connector }, { status: 503, headers: responseHeaders })
   }
 }

@@ -50,6 +50,17 @@ afterEach(() => {
 })
 
 describe('MessagingWorkspace', () => {
+  it('does not open a different customer when a follow-up conversation is unavailable', async () => {
+    const originalFetch = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === '/api/agent/messaging/conversations/999') return Response.json({ error: 'UNAVAILABLE' }, { status: 404 })
+      return originalFetch(input, init)
+    }))
+    render(<MessagingWorkspace channelMode="EVOLUTION" initialConversationId="999" />)
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('conversa'))
+    expect(screen.queryByRole('textbox', { name: 'Mensagem' })).not.toBeInTheDocument()
+    expect(fetch).not.toHaveBeenCalledWith('/api/agent/messaging/conversations/128/messages', expect.anything())
+  })
   it('renders the agent-owned conversation without Chatwoot assignment controls', async () => {
     render(<MessagingWorkspace channelMode="EVOLUTION" />)
 

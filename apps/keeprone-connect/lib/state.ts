@@ -11,6 +11,7 @@ export type SyncStatus =
   | 'AUTH_REQUIRED'
   | 'COMPLETED'
   | 'PARTIAL'
+  | 'CANCELLED'
   | 'ERROR'
 
 export type DeviceState = {
@@ -237,7 +238,7 @@ export function parseCommandState(value: unknown): CommandState {
 
 const SYNC_STATUSES = [
   'IDLE', 'STARTING', 'NAVIGATING', 'EXTRACTING', 'UPLOADING', 'AUTH_REQUIRED',
-  'COMPLETED', 'PARTIAL', 'ERROR',
+  'COMPLETED', 'PARTIAL', 'CANCELLED', 'ERROR',
 ] as const satisfies readonly SyncStatus[]
 
 /// Sync state has a large, independently validated stage/checkpoint surface.

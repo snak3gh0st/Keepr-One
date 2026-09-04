@@ -57,15 +57,17 @@ function DeliveryStatus({ status }: { status: MessagingMessage['status'] }) {
 export function MessagingWorkspace({
   channelMode,
   readOnly = false,
+  initialConversationId,
 }: {
   channelMode: 'EVOLUTION' | 'META_CLOUD'
   readOnly?: boolean
+  initialConversationId?: string
 }) {
   const { copy, locale } = useI18n()
   const [inboxes, setInboxes] = useState<MessagingInbox[]>([])
   const [conversations, setConversations] = useState<MessagingConversation[]>([])
   const [messages, setMessages] = useState<MessagingMessage[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(initialConversationId ?? null)
   const [channel, setChannel] = useState<ChannelFilter>('ALL')
   const [query, setQuery] = useState('')
   const [search, setSearch] = useState('')
@@ -99,6 +101,20 @@ export function MessagingWorkspace({
       inboxes: MessagingInbox[]
       conversations: MessagingConversation[]
     }
+    if (initialConversationId && !search && !body.conversations.some(c => c.id === initialConversationId)) {
+      const selectedResponse = await fetch(`/api/agent/messaging/conversations/${encodeURIComponent(initialConversationId)}`, { cache: 'no-store' })
+      if (selectedResponse.ok) {
+        const selectedBody = await selectedResponse.json() as { conversation: MessagingConversation }
+        body.conversations.unshift(selectedBody.conversation)
+      } else {
+        setInboxes(body.inboxes)
+        setConversations(body.conversations)
+        setSelectedId(null)
+        setError(copy('Não foi possível abrir a conversa solicitada. Selecione o cliente para continuar.', 'Could not open the requested conversation. Select the customer to continue.'))
+        setLoading(false)
+        return
+      }
+    }
     setInboxes(body.inboxes)
     setConversations(body.conversations)
     setSelectedId((current) => current && body.conversations.some((item) => item.id === current)
@@ -108,7 +124,7 @@ export function MessagingWorkspace({
         : body.conversations[0]?.id ?? null)
     setError(null)
     setLoading(false)
-  }, [copy, search])
+  }, [copy, search, initialConversationId])
 
   const handleWhatsappConnectionChange = useCallback((connected: boolean) => {
     if (readOnly) return

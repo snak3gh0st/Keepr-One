@@ -42,6 +42,7 @@ function onboarding(
     profileCompletedAt: null,
     nationalLifeVerifiedAt: null,
     nationalLifeVerificationSource: null,
+    nationalLifeSkippedAt: null,
     calendarDecision: null,
     calendarDecidedAt: null,
     whatsappDecision: null,
@@ -115,6 +116,12 @@ describe('agent onboarding contract', () => {
       nationalLifeVerifiedAt: now,
     })
     expect(deriveAgentOnboardingStep(calendar)).toBe('CALENDAR')
+
+    const skippedNationalLife = onboarding({
+      profileCompletedAt: now,
+      nationalLifeSkippedAt: now,
+    })
+    expect(deriveAgentOnboardingStep(skippedNationalLife)).toBe('CALENDAR')
 
     const whatsapp = onboarding({
       ...calendar,

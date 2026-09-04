@@ -21,6 +21,8 @@ import {
 import { auth } from '@/lib/auth'
 import { getServerI18n } from '@/lib/i18n/server'
 import { prisma } from '@/lib/prisma'
+import { resolveLocalConnectorAuthNotifications } from '@/lib/national-life/local-connector/auth-notification-service'
+import { CANONICAL_NATIONAL_LIFE_SYNC } from '@/lib/national-life/sync-engine'
 import { requireRoleWithoutOnboarding } from '@/lib/require-role'
 import type { OnboardingActionState } from './state'
 
@@ -259,10 +261,16 @@ async function completeOnboardingInTransaction(input: {
 }): Promise<AgentOnboardingRecord> {
   const whatsappDecision = input.whatsappDecision ?? input.current.whatsappDecision
   const whatsappDecidedAt = input.whatsappDecidedAt ?? input.current.whatsappDecidedAt
+  const nationalLifeReady = Boolean(
+    input.current.nationalLifeSkippedAt
+    || (
+      input.current.nationalLifeVerifiedAt
+      && input.current.nationalLifeVerificationSource
+    ),
+  )
   if (
     !input.current.profileCompletedAt
-    || !input.current.nationalLifeVerifiedAt
-    || !input.current.nationalLifeVerificationSource
+    || !nationalLifeReady
     || !input.current.calendarDecision
     || !input.current.calendarDecidedAt
     || !whatsappDecision
@@ -282,6 +290,7 @@ async function completeOnboardingInTransaction(input: {
     where: { id: input.current.id },
     data: {
       welcomeCompletedAt,
+      nationalLifeSkippedAt: input.current.nationalLifeSkippedAt,
       whatsappDecision,
       whatsappDecidedAt,
       requiredModules: input.requiredModules,
@@ -330,6 +339,7 @@ async function completeOnboardingInTransaction(input: {
       after: {
         completedAt: input.now.toISOString(),
         requiredModules: input.requiredModules,
+        nationalLifeOutcome: input.current.nationalLifeSkippedAt ? 'SKIPPED' : 'CONNECTED',
         calendarDecision: input.current.calendarDecision,
         whatsappDecision,
         activatedRecruitmentInvitations: activatedRecruitmentInvitations.count,
@@ -542,6 +552,7 @@ export async function verifyNationalLifeOnboardingAction(
         data: {
           nationalLifeVerifiedAt,
           nationalLifeVerificationSource,
+          nationalLifeSkippedAt: null,
           currentStep,
         },
         select: AGENT_ONBOARDING_SELECT,
@@ -570,6 +581,111 @@ export async function verifyNationalLifeOnboardingAction(
     ))
   } catch (error) {
     return actionFailure(error, 'National Life onboarding verification failed', copy)
+  }
+}
+
+export async function skipNationalLifeOnboardingAction(
+  _previousState: OnboardingActionState,
+  _formData: FormData,
+): Promise<OnboardingActionState> {
+  void _previousState
+  void _formData
+  const { copy } = await getServerI18n()
+  try {
+    const actor = await getOnboardingActor(copy)
+    const now = new Date()
+    const updated = await prisma.$transaction(async (transaction) => {
+      const current = await requireInProgressOnboarding(transaction, actor.agentId, copy)
+      requireCurrentStep(current, 'NATIONAL_LIFE', copy)
+      const nationalLifeSkippedAt = current.nationalLifeSkippedAt ?? now
+      const currentStep = nextStep(current, { nationalLifeSkippedAt })
+      const cancelledRuns = await transaction.nationalLifeSyncRun.updateManyAndReturn({
+        where: {
+          agentId: actor.agentId,
+          provider: CANONICAL_NATIONAL_LIFE_SYNC.provider,
+          deploymentScope: CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope,
+          executionSource: CANONICAL_NATIONAL_LIFE_SYNC.executionSource,
+          state: { in: ['QUEUED', 'RUNNING', 'PAUSED'] },
+        },
+        data: {
+          state: 'FAILED',
+          safeErrorCode: 'USER_CANCELLED',
+          currentGridKey: null,
+          authRequiredAt: null,
+          completedAt: now,
+          updatedAt: now,
+        },
+        select: { id: true },
+      })
+      const cancelledUploads = cancelledRuns.length === 0
+        ? { count: 0 }
+        : await transaction.nationalLifeExportUpload.updateMany({
+          where: {
+            agentId: actor.agentId,
+            runId: { in: cancelledRuns.map((run) => run.id) },
+            state: 'UPLOADING',
+          },
+          data: {
+            state: 'FAILED',
+            safeErrorCode: 'USER_CANCELLED',
+            completedAt: now,
+            updatedAt: now,
+          },
+        })
+      const terminalAuthWarningRuns = await transaction.nationalLifeSyncRun.findMany({
+        where: {
+          agentId: actor.agentId,
+          provider: CANONICAL_NATIONAL_LIFE_SYNC.provider,
+          deploymentScope: CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope,
+          executionSource: CANONICAL_NATIONAL_LIFE_SYNC.executionSource,
+          state: { in: ['FAILED', 'PARTIAL'] },
+          authState: { not: 'READY' },
+        },
+        select: { id: true },
+      })
+      const notificationRunIds = [...new Set([
+        ...cancelledRuns.map((run) => run.id),
+        ...terminalAuthWarningRuns.map((run) => run.id),
+      ])]
+      const resolvedAuthNotifications = await resolveLocalConnectorAuthNotifications(transaction, {
+        recipientUserId: actor.userId,
+        runIds: notificationRunIds,
+        now,
+      })
+      const onboarding = await transaction.agentOnboarding.update({
+        where: { id: current.id },
+        data: {
+          nationalLifeSkippedAt,
+          currentStep,
+        },
+        select: AGENT_ONBOARDING_SELECT,
+      })
+      await transaction.auditLog.create({
+        data: {
+          userId: actor.userId,
+          action: 'AGENT_ONBOARDING_NATIONAL_LIFE_SKIPPED',
+          entity: 'AgentOnboarding',
+          entityId: current.id,
+          after: {
+            skippedAt: nationalLifeSkippedAt.toISOString(),
+            currentStep,
+            cancelledRuns: cancelledRuns.length,
+            cancelledUploads: cancelledUploads.count,
+            resolvedAuthNotifications: resolvedAuthNotifications.count,
+          },
+        },
+      })
+      return onboarding
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    })
+    refreshOnboarding()
+    return success(updated, copy(
+      'Sincronização pulada por agora. O K-Bot lembrará você de conectar a National Life pelo painel.',
+      'Sync skipped for now. K-Bot will remind you to connect National Life from your dashboard.',
+    ))
+  } catch (error) {
+    return actionFailure(error, 'National Life onboarding skip failed', copy)
   }
 }
 

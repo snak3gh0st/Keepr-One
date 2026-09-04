@@ -57,6 +57,7 @@ export type AgentOnboardingView = {
   profileCompletedAt: string | null
   nationalLifeVerifiedAt: string | null
   nationalLifeVerificationSource: AgentOnboardingNationalLifeSource | null
+  nationalLifeSkippedAt: string | null
   calendarDecision: AgentOnboardingOptionalDecision | null
   calendarDecidedAt: string | null
   whatsappDecision: AgentOnboardingOptionalDecision | null
@@ -100,6 +101,7 @@ export const AGENT_ONBOARDING_SELECT = {
   profileCompletedAt: true,
   nationalLifeVerifiedAt: true,
   nationalLifeVerificationSource: true,
+  nationalLifeSkippedAt: true,
   calendarDecision: true,
   calendarDecidedAt: true,
   whatsappDecision: true,
@@ -161,6 +163,7 @@ export function deriveAgentOnboardingStep(input: Pick<
   | 'welcomeCompletedAt'
   | 'profileCompletedAt'
   | 'nationalLifeVerifiedAt'
+  | 'nationalLifeSkippedAt'
   | 'calendarDecision'
   | 'whatsappDecision'
   | 'requiredModules'
@@ -168,7 +171,7 @@ export function deriveAgentOnboardingStep(input: Pick<
 >): AgentOnboardingStep {
   if (input.status === 'COMPLETED') return 'COMPLETED'
   if (!input.profileCompletedAt) return 'PROFILE'
-  if (!input.nationalLifeVerifiedAt) return 'NATIONAL_LIFE'
+  if (!input.nationalLifeVerifiedAt && !input.nationalLifeSkippedAt) return 'NATIONAL_LIFE'
   if (!input.calendarDecision) return 'CALENDAR'
   // WHATSAPP is the final interactive screen. Its decision and completion are
   // committed together by the server action, so an in-progress legacy row
@@ -259,6 +262,7 @@ export function toAgentOnboardingView(
     profileCompletedAt: value.profileCompletedAt?.toISOString() ?? null,
     nationalLifeVerifiedAt: value.nationalLifeVerifiedAt?.toISOString() ?? null,
     nationalLifeVerificationSource: value.nationalLifeVerificationSource,
+    nationalLifeSkippedAt: value.nationalLifeSkippedAt?.toISOString() ?? null,
     calendarDecision: value.calendarDecision,
     calendarDecidedAt: value.calendarDecidedAt?.toISOString() ?? null,
     whatsappDecision: value.whatsappDecision,
@@ -319,12 +323,46 @@ function isVerifiedNationalLifeRun(run: {
   return planned.every((gridKey) => completed.has(gridKey))
 }
 
+export async function hasVerifiedNationalLifeSyncForAgent(
+  agentId: string,
+  db: Pick<PrismaClient, 'nationalLifeSyncRun'> = prisma,
+): Promise<boolean> {
+  if (!agentId.trim()) throw new RangeError('agentId is required')
+  const completedRun = await db.nationalLifeSyncRun.findFirst({
+    where: {
+      agentId,
+      provider: CANONICAL_NATIONAL_LIFE_SYNC.provider,
+      deploymentScope: CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope,
+      executionSource: CANONICAL_NATIONAL_LIFE_SYNC.executionSource,
+      state: 'COMPLETED',
+      completedAt: { not: null },
+    },
+    orderBy: [{ completedAt: 'desc' }, { id: 'desc' }],
+    select: {
+      completedAt: true,
+      totalStages: true,
+      completedStages: true,
+      failedStages: true,
+      plannedGridKeys: true,
+      stageCompletions: {
+        select: {
+          gridKey: true,
+          expectedRecordCount: true,
+          receivedRecordCount: true,
+          truncated: true,
+        },
+      },
+    },
+  })
+  return isVerifiedNationalLifeRun(completedRun)
+}
+
 export async function detectOnboardingIntegrations(
   input: { agentId: string; userId: string },
   db: OnboardingIntegrationDb = prisma,
 ): Promise<OnboardingIntegrationSnapshot> {
   const whatsappProvider = whatsappChannelModeFromEnv(process.env)
-  const [device, completedRun, calendar, whatsapp] = await Promise.all([
+  const [device, nationalLifeVerified, calendar, whatsapp] = await Promise.all([
     db.nationalLifeConnectorDevice.findFirst({
       where: {
         agentId: input.agentId,
@@ -334,32 +372,7 @@ export async function detectOnboardingIntegrations(
       },
       select: { id: true },
     }),
-    db.nationalLifeSyncRun.findFirst({
-      where: {
-        agentId: input.agentId,
-        provider: CANONICAL_NATIONAL_LIFE_SYNC.provider,
-        deploymentScope: CANONICAL_NATIONAL_LIFE_SYNC.deploymentScope,
-        executionSource: CANONICAL_NATIONAL_LIFE_SYNC.executionSource,
-        state: 'COMPLETED',
-        completedAt: { not: null },
-      },
-      orderBy: [{ completedAt: 'desc' }, { id: 'desc' }],
-      select: {
-        completedAt: true,
-        totalStages: true,
-        completedStages: true,
-        failedStages: true,
-        plannedGridKeys: true,
-        stageCompletions: {
-          select: {
-            gridKey: true,
-            expectedRecordCount: true,
-            receivedRecordCount: true,
-            truncated: true,
-          },
-        },
-      },
-    }),
+    hasVerifiedNationalLifeSyncForAgent(input.agentId, db),
     db.calendarIntegration.findFirst({
       where: {
         userId: input.userId,
@@ -385,7 +398,7 @@ export async function detectOnboardingIntegrations(
   ])
 
   return {
-    nationalLife: isVerifiedNationalLifeRun(completedRun)
+    nationalLife: nationalLifeVerified
       ? 'VERIFIED_SYNC'
       : device
         ? 'CONNECTOR_PAIRED'

@@ -62,7 +62,7 @@ describe('MensagensPage support preview', () => {
     })
     mocks.findMessagingAccount.mockResolvedValue(null)
 
-    render(await MensagensPage())
+    render(await MensagensPage({ searchParams: Promise.resolve({}) }))
 
     expect(mocks.findMessagingAccount).toHaveBeenCalledWith({
       where: { agentId: 'agent-1' },
@@ -80,19 +80,19 @@ describe('MensagensPage support preview', () => {
     })
     mocks.findMessagingAccount.mockResolvedValue({ externalUserToken: 'stored-agent-token' })
 
-    render(await MensagensPage())
+    render(await MensagensPage({ searchParams: Promise.resolve({}) }))
 
     expect(mocks.provisionAgentInbox).not.toHaveBeenCalled()
-    expect(mocks.workspaceProps).toHaveBeenCalledWith({ channelMode: 'EVOLUTION', readOnly: true })
+    expect(mocks.workspaceProps).toHaveBeenCalledWith({ channelMode: 'EVOLUTION', initialConversationId: undefined, readOnly: true })
   })
 
   it('keeps normal agent visits lazily provisioning the inbox', async () => {
-    render(await MensagensPage())
+    render(await MensagensPage({ searchParams: Promise.resolve({}) }))
 
     expect(mocks.findMessagingAccount).not.toHaveBeenCalled()
     expect(mocks.provisionAgentInbox).toHaveBeenCalledWith({}, {
       agentId: 'agent-1', agentName: 'Ana', agentEmail: 'ana@example.com',
     })
-    expect(mocks.workspaceProps).toHaveBeenCalledWith({ channelMode: 'EVOLUTION', readOnly: false })
+    expect(mocks.workspaceProps).toHaveBeenCalledWith({ channelMode: 'EVOLUTION', initialConversationId: undefined, readOnly: false })
   })
 })

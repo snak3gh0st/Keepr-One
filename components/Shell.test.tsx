@@ -168,6 +168,42 @@ describe('Shell plan access', () => {
     ).toHaveTextContent('Tudo pronto. Que bom ter você aqui.')
   })
 
+  it('keeps the National Life setup reminder visible when the Integrations module is disabled', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          state: null,
+          nationalLifeSetupRequired: true,
+          connector: { enabled: false },
+        }),
+      })),
+    )
+
+    render(
+      <AgentAccessProvider
+        access={{
+          ...AGENCY_OWNER_ACCESS,
+          enabledModules: ['TODAY', 'CRM', 'AGENCY'],
+        }}
+      >
+        <Shell role="AGENT" userName="Ana">
+          <p>Conteúdo</p>
+        </Shell>
+      </AgentAccessProvider>,
+    )
+
+    expect(screen.queryByRole('link', { name: 'Integrações' })).toBeNull()
+    const kbot = await screen.findByLabelText('Status do K-Bot')
+    expect(kbot).toHaveTextContent('Seus dados ainda não estão completos')
+    expect(kbot).toHaveTextContent('Assim que o acesso à National Life for habilitado')
+    expect(screen.getByRole('status', { name: 'Atualização do K-Bot' })).toHaveTextContent(
+      'Quando o acesso à National Life estiver disponível, eu ajudo você a completar seus dados.',
+    )
+    expect(screen.queryByRole('link', { name: 'Completar meus dados' })).toBeNull()
+  })
+
   it('requires both the TEAM grant and the existing owner capability', () => {
     const { rerender } = render(
       <AgentAccessProvider

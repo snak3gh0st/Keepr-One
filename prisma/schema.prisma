@@ -310,6 +310,7 @@ enum PlatformSubscriptionStatus {
 
 enum PlatformAddon {
   K_BOT_APPLICATION
+  K_BOT_FOLLOWUP
 }
 
 /// Product surfaces that Keepr One staff can explicitly release for an
@@ -510,6 +511,9 @@ model User {
 }
 
 model Agent {
+  kbotCreditGrants       KBotCreditGrant[]
+  kbotFollowupJobs       KBotFollowupJob[]
+  kbotContactPreferences KBotContactPreference[]
   id                   String               @id @default(cuid())
   userId               String               @unique
   user                 User                 @relation(fields: [userId], references: [id])
@@ -760,6 +764,8 @@ model AdminProvisionedAccess {
 /// independent from the base plan so cancellation of an add-on cannot change
 /// CRM ownership, hierarchy, or the agent's historical Application records.
 model PlatformAddonSubscription {
+  stripeCheckoutSessionId String?
+  checkoutExpiresAt DateTime?
   id                   String                     @id @default(cuid())
   addon                PlatformAddon
   status               PlatformSubscriptionStatus @default(TRIALING)
@@ -817,6 +823,7 @@ model AgentOnboarding {
   profileCompletedAt             DateTime?
   nationalLifeVerifiedAt         DateTime?
   nationalLifeVerificationSource AgentOnboardingNationalLifeSource?
+  nationalLifeSkippedAt          DateTime?
   calendarDecision               AgentOnboardingOptionalDecision?
   calendarDecidedAt              DateTime?
   whatsappDecision               AgentOnboardingOptionalDecision?
@@ -2829,4 +2836,86 @@ model Verification {
 
   @@index([identifier])
   @@map("verification")
+}
+
+model KBotCreditGrant {
+  allocations KBotCreditAllocation[]
+  id          String                 @id @default(cuid())
+  agentId     String
+  agent       Agent                  @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  sourceKey   String                 @unique
+  allowance   Int
+  reserved    Int                    @default(0)
+  spent       Int                    @default(0)
+  expiresAt   DateTime
+  createdAt   DateTime               @default(now())
+  jobs        KBotFollowupJob[]
+
+  @@index([agentId, expiresAt])
+}
+
+model KBotFollowupJob {
+  billedTokens Int @default(0)
+  allocations         KBotCreditAllocation[]
+  id                  String                 @id @default(cuid())
+  agentId             String
+  agent               Agent                  @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  batchId             String
+  requestKey          String
+  candidateId         String
+  fingerprint         String
+  customerName        String
+  phone               String
+  language            String
+  reason              String
+  sourceHref          String
+  status              String                 @default("PENDING")
+  grantId             String?
+  grant               KBotCreditGrant?       @relation(fields: [grantId], references: [id], onDelete: Restrict)
+  reservedTokens      Int                    @default(192)
+  creditState         String                 @default("RESERVED")
+  conversationId      String?
+  senderIdentity      String?
+  messageId           String?
+  providerMessageId   String?
+  content             String?
+  model               String?
+  inputTokens         Int                    @default(0)
+  outputTokens        Int                    @default(0)
+  generationStartedAt DateTime?
+  leaseExpiresAt      DateTime?
+  errorCode           String?
+  notifiedAt          DateTime?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@unique([agentId, requestKey, candidateId])
+  @@index([status, updatedAt])
+  @@index([agentId, phone, createdAt])
+  @@index([batchId])
+}
+
+model KBotContactPreference {
+  id           String    @id @default(cuid())
+  agentId      String
+  agent        Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  subjectKey   String
+  optedOut     Boolean   @default(false)
+  snoozedUntil DateTime?
+  lastManualAt DateTime?
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([agentId, subjectKey])
+}
+
+model KBotCreditAllocation {
+  id             String          @id @default(cuid())
+  jobId          String
+  job            KBotFollowupJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  grantId        String
+  grant          KBotCreditGrant @relation(fields: [grantId], references: [id], onDelete: Restrict)
+  reservedTokens Int
+  spentTokens    Int             @default(0)
+
+  @@unique([jobId, grantId])
 }

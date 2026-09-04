@@ -1664,6 +1664,71 @@ describe('local connector runs', () => {
     )
   })
 
+  it('rolls back a late ingest instead of reopening a run canceled after its active read', async () => {
+    const canceled = Object.assign(new Error('Record to update not found'), { code: 'P2025' })
+    const runUpdate = vi.fn().mockRejectedValue(canceled)
+    const receiptCreate = vi.fn().mockResolvedValue({
+      id: 'receipt-raced',
+      deviceId: 'device-1',
+      runId: 'run-raced',
+      gridKey: 'NEW_BUSINESS',
+      sequence: 0,
+      contentHash: 'f'.repeat(64),
+      recordCount: 0,
+      writtenCount: 0,
+      createdAt: now,
+    })
+    const tx = {
+      nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        // The transaction observed RUNNING, then onboarding cancellation won
+        // immediately before the conditional run update.
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run-raced',
+          plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
+        }),
+        update: runUpdate,
+      },
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
+      nationalLifeConnectorStageReceipt: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: receiptCreate,
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      nationalLifeCaseSnapshot: { upsert: vi.fn() },
+      nationalLifeInforcePolicy: { upsert: vi.fn() },
+      nationalLifeReportRow: { upsert: vi.fn() },
+      nationalLifeRawGridPage: { upsert: vi.fn(), deleteMany: vi.fn() },
+    }
+    const db = {
+      nationalLifeConnectorStageReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+    } as never
+
+    await expect(ingestLocalConnectorStage(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      gridKey: 'NEW_BUSINESS',
+      idempotencyKey: 'nlc:run-raced:NEW_BUSINESS:0',
+      contentHash: 'f'.repeat(64),
+      now,
+      envelope: {
+        schemaVersion: 2,
+        runId: 'run-raced',
+        gridKey: 'NEW_BUSINESS',
+        sequence: 0,
+        observedAt: now.toISOString(),
+        recordsTotal: 0,
+        truncated: false,
+        records: [],
+      },
+    })).rejects.toMatchObject({ code: 'RUN_NOT_ACTIVE' })
+    expect(receiptCreate).toHaveBeenCalledOnce()
+    expect(runUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'run-raced', state: 'RUNNING' },
+    }))
+  })
+
   it('returns the original receipt only when an idempotency key has the same hash', async () => {
     const stored = {
       id: 'receipt-1',
@@ -1960,6 +2025,70 @@ describe('local connector runs', () => {
       where: { id: 'receipt-1' },
       data: { writtenCount: 56, duplicateCount: 1, rejectedCount: 0 },
     })
+  })
+
+  it('does not complete a run canceled while its final marker is reconciling', async () => {
+    const canceled = Object.assign(new Error('Record to update not found'), { code: 'P2025' })
+    const runUpdate = vi.fn().mockRejectedValue(canceled)
+    const tx = {
+      nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run-raced',
+          state: 'RUNNING',
+          plannedGridKeys: ['INFORCE_CLIENTS'],
+          completedStages: 0,
+        }),
+        update: runUpdate,
+      },
+      nationalLifeConnectorStageReceipt: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: 'receipt-0',
+          sequence: 0,
+          recordCount: 1,
+          writtenCount: 1,
+          duplicateCount: 0,
+          rejectedCount: 0,
+        }]),
+        update: vi.fn(),
+      },
+      nationalLifeConnectorStageCompletion: {
+        upsert: vi.fn().mockResolvedValue({ id: "stage-1", completedAt: now, expectedRecordCount: 1, receivedRecordCount: 1, finalSequence: 0 }),
+        findMany: vi.fn().mockResolvedValue([{ gridKey: 'INFORCE_CLIENTS' }]),
+      },
+      nationalLifeConnectorStageFailure: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      nationalLifeCaseSnapshot: { deleteMany: vi.fn() },
+      nationalLifeInforcePolicy: { deleteMany: vi.fn() },
+      nationalLifeReportRow: { deleteMany: vi.fn() },
+      nationalLifeRawGridPage: {
+        findMany: vi.fn().mockResolvedValue([{
+          sequence: 0,
+          recordCount: 1,
+          records: [{ PolicyNumber: 'P1' }],
+        }]),
+        findFirst: vi.fn().mockResolvedValue({ observedAt: now }),
+        deleteMany: vi.fn(),
+      },
+    }
+    const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
+
+    await expect(completeLocalConnectorStage(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      runId: 'run-raced',
+      gridKey: 'INFORCE_CLIENTS',
+      expectedRecordCount: 1,
+      finalSequence: 0,
+      truncated: false,
+      now,
+    })).rejects.toMatchObject({ code: 'RUN_NOT_ACTIVE' })
+    expect(runUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'run-raced', state: 'RUNNING' },
+      data: expect.objectContaining({ state: 'COMPLETED' }),
+    }))
   })
 
   it.each([

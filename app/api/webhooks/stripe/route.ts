@@ -3,6 +3,7 @@ import { getStripeClient } from '@/lib/stripe/client'
 import { syncStripePlatformSubscription } from '@/lib/stripe/platform-subscription'
 import { syncStripeApplicationAddonSubscription } from '@/lib/stripe/application-addon-subscription'
 import { syncStripeAgencyInvitationSubscription } from '@/lib/stripe/agency-invitation-subscription'
+import { grantPaidFollowupInvoice, syncFollowupSubscription } from '@/lib/kbot-followup/billing'
 
 export const runtime = 'nodejs'
 
@@ -16,6 +17,10 @@ function subscriptionIdFromCheckout(value: unknown): string | null {
 
 async function syncSubscription(stripeSubscriptionId: string): Promise<void> {
   const subscription = await getStripeClient().subscriptions.retrieve(stripeSubscriptionId)
+  if (subscription.metadata.keeprOneAddon === 'K_BOT_FOLLOWUP') {
+    await syncFollowupSubscription(stripeSubscriptionId)
+    return
+  }
   if (subscription.metadata.keeprOnePlatformAddonSubscriptionId) {
     await syncStripeApplicationAddonSubscription(stripeSubscriptionId)
     return
@@ -46,7 +51,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (event.type === 'checkout.session.completed') {
+    if (event.type === 'invoice.paid') {
+      await grantPaidFollowupInvoice(event.data.object.id)
+    } else if (event.type === 'checkout.session.completed') {
       const subscriptionId = subscriptionIdFromCheckout(event.data.object.subscription)
       if (subscriptionId) await syncSubscription(subscriptionId)
     } else if (

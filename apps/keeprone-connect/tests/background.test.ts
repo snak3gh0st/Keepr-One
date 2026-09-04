@@ -3583,3 +3583,197 @@ describe('background plan executor', () => {
     })
   })
 })
+
+describe('explicit National Life sync cancellation', () => {
+  it('aborts the active reader, closes the server run once and ignores stale callbacks', async () => {
+    storage.sync = {
+      runId: 'run-cancel-1',
+      carrierTabId: 7,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 0,
+      status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{
+      id: 7,
+      active: false,
+      url: `${NLG}${NEW_BUSINESS_PATH}`,
+    }])
+    await bootBackground()
+    const begin = beginGridMessage()
+    expect(begin).toMatchObject({ type: 'BEGIN_GRID', gridKey: 'NEW_BUSINESS' })
+    vi.mocked(signedJsonRequest).mockClear()
+
+    const firstResponse = vi.fn()
+    emit(
+      'runtime.onMessageExternal',
+      { type: 'CANCEL_NATIONAL_LIFE_SYNC' },
+      EXTERNAL_SENDER,
+      firstResponse,
+    )
+    await vi.waitFor(() => expect(firstResponse).toHaveBeenCalledWith({
+      ok: true,
+      status: 'CANCELLED',
+    }))
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(7, {
+      type: 'ABORT_GRID',
+      gridKey: 'NEW_BUSINESS',
+      token: begin.token,
+      correlationId: begin.correlationId,
+    })
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST',
+      pathname:
+        '/api/agent/integrations/national-life/local-connector/runs/run-cancel-1/fail',
+      body: { code: 'USER_CANCELLED' },
+    }))
+    expect(storage.device).toMatchObject({ deviceId: 'device-1', status: 'READY' })
+    expect(readSync()).toMatchObject({ runId: 'run-cancel-1', status: 'CANCELLED' })
+    expect(chromeStub.alarms.clear).toHaveBeenCalledWith(
+      'keeprone-national-life-sync-watchdog',
+    )
+
+    const failCallsBeforeRetry = vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/fail')).length
+    const startCallsBeforeWakeups = vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname === '/api/agent/integrations/national-life/local-connector/runs').length
+    const secondResponse = vi.fn()
+    emit(
+      'runtime.onMessageExternal',
+      { type: 'CANCEL_NATIONAL_LIFE_SYNC' },
+      EXTERNAL_SENDER,
+      secondResponse,
+    )
+    emit(
+      'runtime.onMessage',
+      {
+        type: 'GRID_DONE',
+        gridKey: 'NEW_BUSINESS',
+        token: begin.token,
+        correlationId: begin.correlationId,
+      },
+      { tab: { id: 7 }, url: `${NLG}${NEW_BUSINESS_PATH}` },
+      vi.fn(),
+    )
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-sync-watchdog' })
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-scheduled-sync' })
+    emit('tabs.onUpdated', 7, { status: 'complete' }, {
+      id: 7,
+      active: false,
+      url: `${NLG}${NEW_BUSINESS_PATH}`,
+    })
+    await flush()
+
+    expect(secondResponse).toHaveBeenCalledWith({ ok: true, status: 'CANCELLED' })
+    expect(readSync()).toMatchObject({ runId: 'run-cancel-1', status: 'CANCELLED' })
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname.endsWith('/fail')).length).toBe(failCallsBeforeRetry)
+    expect(vi.mocked(signedJsonRequest).mock.calls.filter(([request]) =>
+      request.pathname === '/api/agent/integrations/national-life/local-connector/runs').length)
+      .toBe(startCallsBeforeWakeups)
+  })
+
+  it('cancels a run whose id arrives after the user skips and never navigates it', async () => {
+    storage.sync = { status: 'IDLE' }
+    let resolveRun!: (value: unknown) => void
+    const runResponse = new Promise((resolve) => {
+      resolveRun = resolve
+    })
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (
+        request.method === 'POST' &&
+        request.pathname === '/api/agent/integrations/national-life/local-connector/runs'
+      ) return runResponse as never
+      return {} as never
+    })
+    await bootBackground()
+
+    const startResponse = vi.fn()
+    emit(
+      'runtime.onMessageExternal',
+      { type: 'START_NATIONAL_LIFE_SYNC' },
+      EXTERNAL_SENDER,
+      startResponse,
+    )
+    await vi.waitFor(() => expect(readSync()).toMatchObject({ status: 'STARTING' }))
+
+    const cancelResponse = vi.fn()
+    emit(
+      'runtime.onMessageExternal',
+      { type: 'CANCEL_NATIONAL_LIFE_SYNC' },
+      EXTERNAL_SENDER,
+      cancelResponse,
+    )
+    await vi.waitFor(() => expect(cancelResponse).toHaveBeenCalledWith({
+      ok: true,
+      status: 'CANCELLED',
+    }))
+
+    resolveRun({
+      runId: 'run-arrived-late',
+      schemaVersion: 3,
+      stages: TWO_STAGE_PLAN,
+      completedStages: 0,
+    })
+    await vi.waitFor(() => expect(startResponse).toHaveBeenCalledWith({
+      ok: false,
+      error: 'SYNC_CANCELLED',
+    }))
+
+    expect(readSync()).toMatchObject({
+      runId: 'run-arrived-late',
+      status: 'CANCELLED',
+    })
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname:
+        '/api/agent/integrations/national-life/local-connector/runs/run-arrived-late/fail',
+      body: { code: 'USER_CANCELLED' },
+    }))
+    expect(tabs.create).not.toHaveBeenCalled()
+    expect(tabs.update).not.toHaveBeenCalled()
+  })
+
+  it('allows a later explicit start to leave CANCELLED and create a fresh run', async () => {
+    storage.sync = {
+      runId: 'run-cancelled-old',
+      carrierTabId: 7,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 0,
+      status: 'CANCELLED',
+    }
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      runId: 'run-restarted',
+      schemaVersion: 3,
+      stages: TWO_STAGE_PLAN,
+      completedStages: 0,
+    } as never)
+    await bootBackground()
+    tabs.create.mockClear()
+
+    const response = vi.fn()
+    emit(
+      'runtime.onMessageExternal',
+      { type: 'START_NATIONAL_LIFE_SYNC' },
+      EXTERNAL_SENDER,
+      response,
+    )
+    await vi.waitFor(() => expect(response).toHaveBeenCalledWith({
+      ok: true,
+      status: 'NAVIGATING',
+    }))
+
+    expect(readSync()).toMatchObject({
+      runId: 'run-restarted',
+      status: 'NAVIGATING',
+      stageIndex: 0,
+    })
+    expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST',
+      pathname: '/api/agent/integrations/national-life/local-connector/runs',
+    }))
+    expect(tabs.create).toHaveBeenCalledWith({
+      active: false,
+      url: `${NLG}${NEW_BUSINESS_PATH}`,
+    })
+  })
+})
