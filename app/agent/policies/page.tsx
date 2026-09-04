@@ -1,3 +1,4 @@
+import { loadCurrentNationalLifePortfolio } from '@/lib/national-life/current-portfolio-prisma'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentScopeIds } from '@/lib/agent-access'
@@ -26,10 +27,11 @@ const ALLOWED_STATUS_FILTERS = new Set([
 export default async function PoliciesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; queue?: string }>
+  searchParams: Promise<{ status?: string; queue?: string; view?: string }>
 }) {
   const { copy, language } = await getServerI18n()
-  const { status: requestedStatus, queue: requestedQueue } = await searchParams
+  const { status: requestedStatus, queue: requestedQueue, view } = await searchParams
+  const history = view === 'history'
   const initialStatus = requestedStatus && ALLOWED_STATUS_FILTERS.has(requestedStatus)
     ? requestedStatus
     : 'all'
@@ -63,7 +65,7 @@ export default async function PoliciesPage({
   }
 
   let policies: {
-    id: string
+    id: string | null
     policyNumber: string
     carrier: string
     product: string
@@ -73,12 +75,18 @@ export default async function PoliciesPage({
     sourceStatus: string | null
     statusChangedAt: Date | null
     sourceProvider: string | null
-    client: { name: string } | null
+    client?: { name: string } | null
+    clientName?: string
   }[] = []
   let loadError = false
+  let verified = true
 
   try {
-    policies = await prisma.policy.findMany({
+    if (!history) {
+      const current = await loadCurrentNationalLifePortfolio(prisma, scopeAgentIds)
+      policies = current.rows
+      verified = current.verified
+    } else policies = await prisma.policy.findMany({
       where: { agentId: { in: scopeAgentIds } },
       include: { client: true },
       orderBy: [
@@ -90,15 +98,14 @@ export default async function PoliciesPage({
     console.error('Policies query error', error)
     loadError = true
   }
-  // A carrier-sourced policy with a zero premium means the portal did not supply
-  // one, not that the premium is zero. Counting those would understate nothing
-  // and overstate coverage of the figure, so they are excluded and reported.
+  // Current export rows distinguish an explicit zero from missing (null).
+  // Historical CRM imports can use zero as an absent-carrier-value placeholder.
   const premiumIsKnown = (policy: { premium: unknown; sourceProvider: string | null }) =>
-    policy.sourceProvider === null || decimalToNumber(policy.premium) > 0
+    policy.premium !== null && (!history || policy.sourceProvider === null || decimalToNumber(policy.premium) > 0)
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
-      <PageHeader title={copy("Apólices", "Policies")} eyebrow={copy("Proteção em curso", "Protection in force")} description={copy("Vigência, prêmio e sinais de atenção organizados para cuidar da carteira antes do próximo ciclo.", "Coverage dates, premiums, and attention signals organized so you can care for the portfolio before the next cycle.")}>
+      <PageHeader title={history ? copy("Histórico de apólices", "Policy history") : copy("Apólices atuais", "Current policies")} eyebrow={copy("Proteção em curso", "Protection in force")} description={copy("Vigência, prêmio e sinais de atenção organizados para cuidar da carteira antes do próximo ciclo.", "Coverage dates, premiums, and attention signals organized so you can care for the portfolio before the next cycle.")}>
         <div className="flex flex-wrap gap-3">
           <Link
             href="/agent/cases/new"
@@ -114,6 +121,12 @@ export default async function PoliciesPage({
           </Link>
         </div>
       </PageHeader>
+      <nav className="my-5 flex gap-5" aria-label={copy('Visão da carteira', 'Portfolio view')}>
+        <Link href="/agent/policies?view=current" aria-current={!history ? 'page' : undefined}>{copy('Carteira atual', 'Current portfolio')}</Link>
+        <Link href="/agent/policies?view=history" aria-current={history ? 'page' : undefined}>{copy('Histórico', 'History')}</Link>
+      </nav>
+      {history && <p className="mb-5 text-sm text-ink-muted">{copy('Histórico acumulado dos registros locais, incluindo apólices ausentes da carteira atual.', 'Accumulated local records, including policies absent from the current portfolio.')}</p>}
+      {!history && !verified && <p className="mb-5 text-sm text-ink-muted">{copy('Cobertura parcial: há registros locais sem uma exportação completa validada.', 'Partial coverage: some local records have no verified complete export.')}</p>}
       {loadError && (
         <ErrorBanner>{copy("Não foi possível carregar suas apólices agora. Tente atualizar a página.", "We couldn't load your policies right now. Try refreshing the page.")}</ErrorBanner>
       )}
@@ -130,7 +143,7 @@ export default async function PoliciesPage({
             status: p.status,
             sourceStatus: p.sourceStatus,
             statusChangedAt: p.statusChangedAt?.toISOString() ?? null,
-            clientName: p.client?.name ?? '—',
+            clientName: p.clientName ?? p.client?.name ?? '—',
           }))}
           initialStatus={initialStatus}
         />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
@@ -14,7 +14,7 @@ import { clampPage } from "@/components/Pagination";
 import { useI18n } from "@/components/i18n/LanguageProvider";
 
 type Policy = {
-  id: string;
+  id: string | null;
   policyNumber: string;
   carrier: string;
   product: string;
@@ -87,6 +87,12 @@ function paginationItems(page: number, pageCount: number) {
   });
 
   return items;
+}
+
+function PolicyRowSurface({ id, label, children }: { id: string | null; label: string; children: ReactNode }) {
+  return id
+    ? <Link href={`/agent/policies/${id}`} className="policy-list-row" data-policy-row aria-label={label}>{children}</Link>
+    : <div className="policy-list-row" data-policy-row>{children}</div>;
 }
 
 export function PoliciesList({
@@ -633,16 +639,14 @@ export function PoliciesList({
             </div>
             <ul className="policy-list">
               {pagePolicies.map((policy) => (
-                <li key={policy.id}>
-                  <Link
-                    href={`/agent/policies/${policy.id}`}
-                    className="policy-list-row"
-                    data-policy-row
-                    aria-label={copy("Abrir apólice {number} de {client}", "Open policy {number} for {client}", { number: policy.policyNumber, client: policy.clientName })}
+                <li key={policy.id ?? policy.policyNumber}>
+                  <PolicyRowSurface id={policy.id}
+                    label={copy("Abrir apólice {number} de {client}", "Open policy {number} for {client}", { number: policy.policyNumber, client: policy.clientName })}
                   >
                     <span className="policy-list-identity">
                       <strong>{policy.clientName}</strong>
                       <small>{policy.policyNumber}</small>
+                      {!policy.id && <small>{copy("Fonte: National Life · sem cadastro local", "Source: National Life · no local record")}</small>}
                     </span>
                     <span className="policy-list-market">
                       <strong>{formatFaceAmount(policy.faceAmount, currency)}</strong>
@@ -671,13 +675,13 @@ export function PoliciesList({
                           </small>
                         )}
                       </span>
-                      <span className="policy-list-arrow" aria-hidden="true">
+                      {policy.id && <span className="policy-list-arrow" aria-hidden="true">
                         <svg viewBox="0 0 18 18" fill="none">
                           <path d="M4.5 9h9M10 5.5 13.5 9 10 12.5" />
                         </svg>
-                      </span>
+                      </span>}
                     </span>
-                  </Link>
+                  </PolicyRowSurface>
                 </li>
               ))}
             </ul>

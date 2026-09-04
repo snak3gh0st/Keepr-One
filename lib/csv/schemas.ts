@@ -25,6 +25,13 @@ const numericString = z.string().transform((val, ctx) => {
   return parsed
 })
 
+const optionalPolicyDate = z.string().refine((value) => {
+  if (value === '') return true
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00.000Z`)
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+}, 'data deve ser uma data válida no formato AAAA-MM-DD').optional()
+
 export const PolicyRowSchema = z.object({
   clientName: z.string().min(1),
   clientEmail: z.string().email().optional().or(z.literal('')),
@@ -35,8 +42,8 @@ export const PolicyRowSchema = z.object({
   faceAmount: numericString,
   premium: numericString,
   status: z.enum(['PENDING', 'APPROVED', 'INFORCE', 'LAPSED', 'CANCELLED']),
-  effectiveDate: z.string().optional(),
-  lastPaymentDate: z.string().optional(),
+  effectiveDate: optionalPolicyDate,
+  lastPaymentDate: optionalPolicyDate,
   // Optional provenance for provider-sourced imports. Absent in the existing
   // manual CSV, which stays valid; the service defaults the provider.
   sourceProvider: z.string().optional(),
@@ -55,7 +62,7 @@ export const CommissionRowSchema = z.object({
   policyNumber: z.string().min(1),
   agentNpn: z.string().min(1),
   amount: numericString,
-  period: z.string().regex(/^\d{4}-\d{2}$/, 'período deve estar no formato AAAA-MM'),
+  period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'período deve estar no formato AAAA-MM'),
   // Optional provenance for provider-sourced imports; existing CSV stays valid.
   transactionType: z.enum(COMMISSION_TRANSACTION_TYPES).optional(),
   sourceProvider: z.string().optional(),

@@ -12,6 +12,7 @@ type Result = {
   batchId: string
   status: ImportStatus
   successCount: number
+  warnings?: string[]
   errors: { row: number; message: string }[]
 }
 
@@ -31,6 +32,7 @@ function ImportResultSummary({ result }: { result: Result }) {
           {importedLabel}, {errorLabel}.
         </p>
       </div>
+      {result.warnings?.map((warning) => <p key={warning} className="mt-2 text-ink-muted">{warning}</p>)}
       {result.errors.length > 0 && (
         <ul aria-live="polite" className="mt-1.5 list-disc pl-4 text-ink">
           {result.errors.map((e) => (

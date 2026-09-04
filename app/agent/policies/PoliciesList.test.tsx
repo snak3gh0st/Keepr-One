@@ -61,3 +61,10 @@ describe('PoliciesList retention filters', () => {
     expect(screen.getByText('Mudança em 30/08/2026')).toBeVisible()
   })
 })
+
+it('keeps source-only policies visible with no detail link', () => {
+  render(<PoliciesList policies={[{ id: null, policyNumber: 'SOURCE-ONLY', carrier: 'National Life', product: 'IUL', faceAmount: null, premium: '100', status: 'INFORCE', sourceStatus: 'Pending Lapse', statusChangedAt: null, clientName: 'Source Client' }]} />)
+  expect(screen.getByText('SOURCE-ONLY')).toBeVisible()
+  expect(screen.queryByRole('link', { name: /SOURCE-ONLY/ })).not.toBeInTheDocument()
+  expect(screen.getByText('Fonte: National Life · sem cadastro local')).toBeVisible()
+})

@@ -8,7 +8,7 @@ export async function loadCurrentNationalLifePortfolio(prisma: PrismaClient, age
   const [stored, agents] = await Promise.all([
     prisma.policy.findMany({
       where: { agentId: { in: agentIds }, sourceProvider: 'NATIONAL_LIFE' },
-      select: { agentId: true, policyNumber: true, clientId: true, status: true,
+      select: { id: true, carrier: true, product: true, faceAmount: true, statusChangedAt: true, client: { select: { name: true } }, agentId: true, policyNumber: true, clientId: true, status: true,
         sourceStatus: true, premium: true, sourceUpdatedAt: true },
     }),
     prisma.agent.findMany({ where: { id: { in: agentIds } }, select: { id: true, npn: true } }),
@@ -25,7 +25,7 @@ export async function loadCurrentNationalLifePortfolio(prisma: PrismaClient, age
           select: { sequence: true, recordCount: true, records: true, observedAt: true },
         } } } },
     })
-    if (!completion) return { rows: owned, historicalPolicies: 0, verified: false,
+    if (!completion) return { rows: owned.map((row) => ({ ...row, clientName: row.client?.name ?? '—', sourceProvider: 'NATIONAL_LIFE' as const })), historicalPolicies: 0, verified: false,
       statusCounts: [], productCounts: [], premiumEvolutionRows: [], observedAt: null }
     const pages = verifyPortfolioPages({ ...completion, pages: completion.run.rawGridPages })
     const rows = pages.flatMap((page) => (page.records as GridRow[]).flatMap((raw) => {

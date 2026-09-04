@@ -61,3 +61,11 @@ describe('completed export evidence', () => {
     expect(() => verifyPortfolioPages({ ...complete, ...patch })).toThrow('NATIONAL_PORTFOLIO_SNAPSHOT_INCOMPLETE')
   })
 })
+
+it('exposes the same current set to the list and Today, including snapshot-only rows', () => {
+  const current = currentPortfolioFromSnapshot({ rows: [row('local', '100'), row('source-only', '250', 'Pending Lapse')], stored: [stored('local'), stored('historical')], observedAt })
+  expect(current.rows.map((policy) => policy.policyNumber)).toEqual(['local', 'source-only'])
+  expect(current.rows.find((policy) => policy.policyNumber === 'source-only')).toMatchObject({ id: null, sourceStatus: 'Pending Lapse', sourceProvider: 'NATIONAL_LIFE' })
+  expect(current.rows.filter((policy) => policy.status === 'INFORCE')).toHaveLength(buildNationalLifePortfolioMetrics(current.rows).activePolicies)
+  expect(current.historicalPolicies).toBe(1)
+})
