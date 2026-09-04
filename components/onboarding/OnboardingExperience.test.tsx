@@ -169,6 +169,11 @@ describe("OnboardingExperience", () => {
     expect(within(navigation).getByText("Agenda")).toBeVisible();
     expect(within(navigation).getByText("WhatsApp")).toBeVisible();
     expect(screen.getByRole("progressbar", { name: "Progresso da configuração" })).toHaveAttribute("aria-valuemax", "4");
+    expect(screen.getByRole("progressbar", { name: "Progresso da configuração" })).toHaveAttribute("aria-valuenow", "0");
+    expect(screen.getByRole("progressbar", { name: "Progresso da configuração" })).toHaveAttribute(
+      "aria-valuetext",
+      "0 etapas concluídas; etapa 1 em andamento",
+    );
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Vamos começar pelo básico.");
     expect(screen.queryByText("Ver o percurso")).not.toBeInTheDocument();
     expect(screen.queryByText("Marcar como revisado")).not.toBeInTheDocument();
@@ -190,7 +195,7 @@ describe("OnboardingExperience", () => {
     expect(screen.getAllByText("Step 1 of 4", { exact: false })).toHaveLength(2);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Let's start with the basics.");
     expect(screen.getByLabelText(/Full name/)).toBeEnabled();
-    expect(screen.getByText("Every completed step is saved automatically.")).toBeVisible();
+    expect(screen.getByLabelText(/Your progress is saved automatically/)).toBeVisible();
   });
 
   it("shows only name, phone, and optional NPN while preserving timezone as hidden data", () => {
@@ -205,6 +210,18 @@ describe("OnboardingExperience", () => {
     expect(container.querySelector('input[type="hidden"][name="timeZone"]')).toHaveValue("America/New_York");
   });
 
+  it("updates the K-Bot greeting while the user types their name", async () => {
+    const user = userEvent.setup();
+    render(<OnboardingExperience {...BASE_PROPS} />);
+
+    const name = screen.getByLabelText(/Nome completo/);
+    await user.clear(name);
+    await user.type(name, "Beatriz Lima");
+    await user.tab();
+
+    expect(screen.getByText("Olá, Beatriz")).toBeVisible();
+  });
+
   it("lets the user revisit completed screens and return to the current one", async () => {
     const user = userEvent.setup();
     render(
@@ -217,10 +234,19 @@ describe("OnboardingExperience", () => {
     );
 
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Conecte sua agenda, se quiser.");
+    const currentStepButton = screen.getByRole("button", { name: /Agenda.*Agora/i });
+    expect(currentStepButton).toHaveAttribute("aria-current", "step");
     await user.click(screen.getByRole("button", { name: /Seus dados.*Concluída/i }));
 
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Vamos começar pelo básico.");
     expect(screen.getByLabelText(/Nome completo/)).toBeDisabled();
+    expect(currentStepButton).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("button", { name: /Seus dados.*Revisando/i })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "2");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuetext", "2 etapas concluídas; etapa 3 em andamento");
+    const kbotPosition = screen.getByLabelText("Posição no onboarding");
+    expect(kbotPosition).toHaveTextContent("Revisando: Seus dados");
+    expect(kbotPosition).toHaveTextContent("Retomar: Agenda");
     await user.click(screen.getByRole("button", { name: "Voltar para a etapa atual" }));
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Conecte sua agenda, se quiser.");
     expect(screen.getByRole("button", { name: /WhatsApp.*Em seguida/i })).toBeDisabled();
@@ -338,6 +364,24 @@ describe("OnboardingExperience", () => {
     expect(submitted.get("decision")).toBe("SKIPPED");
   });
 
+  it("hides the skip action after Google Calendar is already connected", () => {
+    render(
+      <OnboardingExperience
+        {...BASE_PROPS}
+        onboarding={onboardingAt("CALENDAR")}
+        integrations={{
+          ...BASE_PROPS.integrations,
+          nationalLife: "VERIFIED_SYNC",
+          calendarConnected: true,
+        }}
+        calendarConfigured
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Fazer depois" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continuar" })).toBeEnabled();
+  });
+
   it.each([
     ["EVOLUTION", "Finalizar conexão Evolution", "evolutionRender"],
     ["META_CLOUD", "Finalizar conexão Meta", "officialRender"],
@@ -353,7 +397,10 @@ describe("OnboardingExperience", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Entrar na Keepr One" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Conectar agora/ }));
+    const setupToggle = screen.getByRole("button", { name: /Conectar agora/ });
+    expect(setupToggle).toHaveAttribute("aria-controls", "onboarding-whatsapp-setup");
+    await user.click(setupToggle);
+    expect(screen.getByRole("region", { name: "Configuração do WhatsApp" })).toBeVisible();
     expect(integrationMocks[renderMock]).toHaveBeenCalledWith(expect.objectContaining({
       onConnectionChange: expect.any(Function),
     }));

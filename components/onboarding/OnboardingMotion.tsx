@@ -3,9 +3,8 @@
 import { useRef } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
 
-gsap.registerPlugin(useGSAP, ScrollTrigger);
+gsap.registerPlugin(useGSAP);
 
 export function OnboardingMotion({
   children,
@@ -24,6 +23,14 @@ export function OnboardingMotion({
         const root = scope.current;
         const stepCard = root?.querySelector<HTMLElement>("[data-onboarding-step-card]");
         const assistant = root?.querySelector<HTMLElement>("[data-onboarding-assistant]");
+        const kbotVisual = root?.querySelector<HTMLElement>("[data-kbot-visual]");
+        const kbotSpeech = root?.querySelector<HTMLElement>("[data-kbot-speech]");
+        const marquee = root?.querySelector<HTMLElement>("[data-onboarding-marquee]");
+        const stagedContent = root
+          ? Array.from(root.querySelectorAll<HTMLElement>(
+            ".onboarding-step-intro > *, .onboarding-profile-field, .onboarding-integration-benefit, .onboarding-unavailable, .onboarding-success-summary, .onboarding-action-row",
+          ))
+          : [];
         const substeps = root
           ? Array.from(root.querySelectorAll<HTMLElement>(".onboarding-kbot-substeps > li"))
           : [];
@@ -43,6 +50,30 @@ export function OnboardingMotion({
             0.08,
           );
         }
+        if (kbotVisual) {
+          timeline.fromTo(
+            kbotVisual,
+            { scale: 0.82, opacity: 0.42 },
+            { scale: 1, opacity: 1, duration: 0.58, clearProps: "transform,opacity" },
+            0.1,
+          );
+        }
+        if (kbotSpeech) {
+          timeline.fromTo(
+            kbotSpeech,
+            { x: 14, opacity: 0 },
+            { x: 0, opacity: 1, duration: 0.42, clearProps: "transform,opacity" },
+            0.14,
+          );
+        }
+        if (stagedContent.length > 0) {
+          timeline.fromTo(
+            stagedContent,
+            { y: 9, opacity: 0 },
+            { y: 0, opacity: 1, duration: 0.32, stagger: 0.035, clearProps: "transform,opacity" },
+            0.12,
+          );
+        }
         if (substeps.length > 0) {
           timeline.fromTo(
             substeps,
@@ -51,25 +82,15 @@ export function OnboardingMotion({
             0.12,
           );
         }
-      });
-
-      media.add(
-        "(min-width: 1024px) and (prefers-reduced-motion: no-preference)",
-        () => {
-          const workspace = scope.current?.querySelector<HTMLElement>(".onboarding-workspace");
-          const assistant = scope.current?.querySelector<HTMLElement>("[data-onboarding-assistant]");
-          if (!workspace || !assistant || workspace.scrollHeight <= window.innerHeight - 112) return;
-
-          ScrollTrigger.create({
-            trigger: workspace,
-            start: "top top+=104",
-            end: "bottom bottom-=32",
-            pin: assistant,
-            pinSpacing: false,
-            invalidateOnRefresh: true,
+        if (marquee) {
+          gsap.to(marquee, {
+            xPercent: -50,
+            duration: 24,
+            repeat: -1,
+            ease: "none",
           });
-        },
-      );
+        }
+      });
 
       return () => media.revert();
     },

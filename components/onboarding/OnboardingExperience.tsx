@@ -142,9 +142,19 @@ function PrimarySubmit({
   );
 }
 
-function OnboardingHeader({ currentIndex }: { currentIndex: number }) {
+function OnboardingHeader({
+  currentIndex,
+  currentStep,
+}: {
+  currentIndex: number;
+  currentStep: VisibleStep;
+}) {
   const { copy, language } = useI18n();
-  const percent = ((currentIndex + 1) / VISIBLE_STEPS.length) * 100;
+  const completion = currentIndex / VISIBLE_STEPS.length;
+  const position = (currentIndex + 0.5) / VISIBLE_STEPS.length;
+  const progressText = language === "PT"
+    ? `${currentIndex} ${currentIndex === 1 ? "etapa concluída" : "etapas concluídas"}; etapa ${currentIndex + 1} em andamento`
+    : `${currentIndex} ${currentIndex === 1 ? "step completed" : "steps completed"}; step ${currentIndex + 1} in progress`;
 
   return (
     <header className="onboarding-header">
@@ -152,7 +162,11 @@ function OnboardingHeader({ currentIndex }: { currentIndex: number }) {
         <Logo size={31} className="text-white" />
         <p>
           <span>{copy("Configuração inicial", "Initial setup")}</span>
-          <strong>{language === "PT" ? `Etapa ${currentIndex + 1} de 4` : `Step ${currentIndex + 1} of 4`}</strong>
+          <strong>
+            {language === "PT" ? `Etapa ${currentIndex + 1} de 4` : `Step ${currentIndex + 1} of 4`}
+            <i aria-hidden="true" />
+            <span>{stepLabel(currentStep, copy)}</span>
+          </strong>
         </p>
         <LanguageSwitcher inverse />
       </div>
@@ -160,11 +174,13 @@ function OnboardingHeader({ currentIndex }: { currentIndex: number }) {
         className="onboarding-progress-line"
         role="progressbar"
         aria-label={copy("Progresso da configuração", "Setup progress")}
-        aria-valuemin={1}
+        aria-valuemin={0}
         aria-valuemax={4}
-        aria-valuenow={currentIndex + 1}
+        aria-valuenow={currentIndex}
+        aria-valuetext={progressText}
       >
-        <span style={{ "--onboarding-progress": percent / 100 } as CSSProperties} />
+        <span style={{ "--onboarding-progress": completion } as CSSProperties} />
+        <i style={{ "--onboarding-position": position } as CSSProperties} aria-hidden="true" />
       </div>
     </header>
   );
@@ -181,21 +197,46 @@ function StepNavigation({
 }) {
   const { copy } = useI18n();
   const currentIndex = indexFor(currentStep);
+  const navigationRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const selected = navigationRef.current?.querySelector<HTMLElement>('[data-viewed="true"]');
+    if (!selected || typeof selected.scrollIntoView !== "function") return;
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    selected.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+  }, [viewedStep]);
 
   return (
-    <nav className="onboarding-step-navigation" aria-label={copy("Etapas do onboarding", "Onboarding steps")}>
+    <nav ref={navigationRef} className="onboarding-step-navigation" aria-label={copy("Etapas do onboarding", "Onboarding steps")}>
       <ol>
         {VISIBLE_STEPS.map((step, index) => {
           const complete = index < currentIndex;
           const current = index === currentIndex;
           const available = index <= currentIndex;
           const selected = step.key === viewedStep;
+          const status = selected && !current
+            ? copy("Revisando", "Reviewing")
+            : complete
+              ? copy("Concluída", "Completed")
+              : current
+                ? copy("Agora", "Now")
+                : copy("Em seguida", "Next");
           return (
-            <li key={step.key} data-state={complete ? "complete" : current ? "current" : "upcoming"}>
+            <li
+              key={step.key}
+              data-state={complete ? "complete" : current ? "current" : "upcoming"}
+              data-viewed={selected ? "true" : "false"}
+            >
               <button
                 type="button"
                 disabled={!available}
-                aria-current={selected ? "step" : undefined}
+                aria-current={current ? "step" : undefined}
+                aria-pressed={selected}
+                aria-label={`${stepLabel(step.key, copy)} · ${status}`}
                 onClick={() => onView(step.key)}
               >
                 <span className="onboarding-step-number" aria-hidden="true">
@@ -203,13 +244,7 @@ function StepNavigation({
                 </span>
                 <span>
                   <strong>{stepLabel(step.key, copy)}</strong>
-                  <small>
-                    {complete
-                      ? copy("Concluída", "Completed")
-                      : current
-                        ? copy("Agora", "Now")
-                        : copy("Em seguida", "Next")}
-                  </small>
+                  <small>{status}</small>
                 </span>
               </button>
             </li>
@@ -222,6 +257,7 @@ function StepNavigation({
 
 function KBotGuide({
   step,
+  currentStep,
   profileName,
   nationalLifeState,
   calendarConnected,
@@ -230,6 +266,7 @@ function KBotGuide({
   feedback,
 }: {
   step: VisibleStep;
+  currentStep: VisibleStep;
   profileName: string;
   nationalLifeState: AgentOnboardingPageData["integrations"]["nationalLife"];
   calendarConnected: boolean;
@@ -239,6 +276,9 @@ function KBotGuide({
 }) {
   const { copy } = useI18n();
   const firstName = profileName.trim().split(/\s+/)[0] || copy("por aí", "there");
+  const currentStepIndex = indexFor(currentStep);
+  const nextStep = VISIBLE_STEPS[currentStepIndex + 1]?.key;
+  const isReviewing = step !== currentStep;
 
   const guidance = useMemo(() => {
     if (feedback.message) {
@@ -336,29 +376,82 @@ function KBotGuide({
   }, [calendarConnected, connectorState, copy, feedback.message, feedback.status, firstName, nationalLifeState, step, whatsappConnected]);
 
   return (
-    <aside className="onboarding-assistant" data-onboarding-assistant aria-label={copy("Ajuda do K-Bot", "K-Bot guidance")}>
+    <aside
+      className="onboarding-assistant"
+      data-onboarding-assistant
+      data-state={guidance.state}
+      aria-label={copy("Ajuda do K-Bot", "K-Bot guidance")}
+    >
       <div className="onboarding-assistant-head">
-        <KBotAvatar state={guidance.state satisfies KBotState} size="lg" />
+        <span className="onboarding-kbot-visual" data-kbot-visual>
+          <KBotAvatar state={guidance.state satisfies KBotState} size="lg" />
+        </span>
         <div>
           <span>K-Bot</span>
           <small>{copy("Seu guia nesta configuração", "Your setup guide")}</small>
         </div>
+        <span className="onboarding-assistant-status">
+          <i aria-hidden="true" />
+          {copy("Acompanhando", "Guiding")}
+        </span>
       </div>
 
-      <div className="onboarding-speech" role="status" aria-live="polite" aria-atomic="true">
+      <div
+        className="onboarding-speech"
+        data-kbot-speech
+        role={feedback.message ? undefined : "status"}
+        aria-live={feedback.message ? "off" : "polite"}
+        aria-atomic="true"
+      >
         <span>{guidance.eyebrow}</span>
         <h2>{guidance.title}</h2>
         <p>{guidance.detail}</p>
       </div>
 
-      <div className="onboarding-feedback-dots" aria-hidden="true">
-        {VISIBLE_STEPS.map((item) => <span key={item.key} className={item.key === step ? "is-active" : ""} />)}
+      <div className="onboarding-assistant-context" aria-label={copy("Posição no onboarding", "Onboarding position")}>
+        <div aria-hidden="true">
+          {VISIBLE_STEPS.map((item, index) => (
+            <span
+              key={item.key}
+              data-state={index < currentStepIndex ? "complete" : item.key === currentStep ? "current" : "upcoming"}
+            />
+          ))}
+        </div>
+        <p>
+          <span>
+            {isReviewing ? copy("Revisando", "Reviewing") : copy("Agora", "Now")}: {" "}
+            <strong>{stepLabel(step, copy)}</strong>
+          </span>
+          <span>
+            {isReviewing
+              ? <>{copy("Retomar", "Resume")}: <strong>{stepLabel(currentStep, copy)}</strong></>
+              : nextStep
+              ? <>{copy("A seguir", "Next")}: <strong>{stepLabel(nextStep, copy)}</strong></>
+              : <strong>{copy("Última etapa", "Last step")}</strong>}
+          </span>
+        </p>
       </div>
 
-      <p className="onboarding-saved-note">
-        <OnboardingIcon name="check" />
-        {copy("Cada etapa concluída fica salva automaticamente.", "Every completed step is saved automatically.")}
-      </p>
+      <div
+        className="onboarding-assistant-marquee"
+        aria-label={copy(
+          "Seu progresso fica salvo automaticamente. Você pode continuar depois. Seus dados permanecem protegidos.",
+          "Your progress is saved automatically. You can continue later. Your data stays protected.",
+        )}
+      >
+        <div data-onboarding-marquee aria-hidden="true">
+          {[0, 1].map((group) => (
+            <span key={group}>
+              <b><OnboardingIcon name="check" />{copy("Progresso salvo", "Progress saved")}</b>
+              <i />
+              <b>{copy("Continue quando quiser", "Continue anytime")}</b>
+              <i />
+              <b>{copy("Dados protegidos", "Data protected")}</b>
+              <i />
+            </span>
+          ))}
+        </div>
+      </div>
     </aside>
   );
 }
@@ -369,18 +462,23 @@ function StepIntro({
   eyebrow,
   title,
   description,
+  duration,
 }: {
   id: string;
   number: number;
   eyebrow: string;
   title: string;
   description: string;
+  duration: string;
 }) {
   const { copy } = useI18n();
   return (
     <header className="onboarding-step-intro">
-      <p>{copy("Etapa {number} de 4", "Step {number} of 4").replace("{number}", String(number))} · {eyebrow}</p>
-      <h1 id={id}>{title}</h1>
+      <div className="onboarding-step-intro-meta">
+        <p>{eyebrow}</p>
+        <span>{copy("Etapa {number} de 4", "Step {number} of 4").replace("{number}", String(number))} · {duration}</span>
+      </div>
+      <h1 id={id} tabIndex={-1}>{title}</h1>
       <span>{description}</span>
     </header>
   );
@@ -406,6 +504,7 @@ function ProfileStep({
   pending,
   isCurrent,
   onReturn,
+  onNameChange,
 }: {
   profile: AgentOnboardingPageData["profile"];
   state: OnboardingActionState;
@@ -413,6 +512,7 @@ function ProfileStep({
   pending: boolean;
   isCurrent: boolean;
   onReturn: () => void;
+  onNameChange: (name: string) => void;
 }) {
   const { copy } = useI18n();
   const nameError = fieldError(state, "name");
@@ -420,67 +520,81 @@ function ProfileStep({
   const npnError = fieldError(state, "npn");
 
   return (
-    <section className="onboarding-step-card" data-onboarding-step-card aria-labelledby="onboarding-profile-title">
+    <section className="onboarding-step-card" data-onboarding-step-card aria-labelledby="onboarding-profile-title" aria-busy={pending}>
       <StepIntro
         id="onboarding-profile-title"
         number={1}
         eyebrow={copy("Preenchimento dos dados", "Your details")}
         title={copy("Vamos começar pelo básico.", "Let's start with the basics.")}
         description={copy("São apenas três informações. Você leva menos de um minuto.", "Just three details. It takes less than a minute.")}
+        duration={copy("menos de 1 min", "under 1 min")}
       />
 
       <form action={action} className="onboarding-profile-form" aria-describedby={state.message ? "onboarding-profile-feedback" : undefined}>
         <input type="hidden" name="timeZone" value={profile.timeZone} />
-        <Field label={copy("Nome completo", "Full name")} htmlFor="onboarding-name" error={nameError} required>
-          <Input
-            id="onboarding-name"
-            name="name"
-            autoComplete="name"
-            maxLength={100}
-            defaultValue={profile.name}
-            placeholder={copy("Como podemos chamar você?", "What should we call you?")}
-            required
-            disabled={!isCurrent || pending}
-            aria-invalid={Boolean(nameError)}
-            aria-describedby={describedBy("onboarding-name", nameError)}
-          />
-        </Field>
-        <Field label={copy("Telefone", "Phone")} htmlFor="onboarding-phone" hint={copy("Use um número que você acessa com frequência.", "Use a number you check regularly.")} error={phoneError} required>
-          <Input
-            id="onboarding-phone"
-            name="phone"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            maxLength={32}
-            defaultValue={profile.phone}
-            placeholder="+1 305 555 0100"
-            required
-            disabled={!isCurrent || pending}
-            aria-invalid={Boolean(phoneError)}
-            aria-describedby={describedBy("onboarding-phone", phoneError, true)}
-          />
-        </Field>
-        <Field label="NPN" htmlFor="onboarding-npn" hint={copy("Opcional. Você pode informar depois em Configurações.", "Optional. You can add it later in Settings.")} error={npnError}>
-          <Input
-            id="onboarding-npn"
-            name="npn"
-            inputMode="numeric"
-            autoComplete="off"
-            minLength={4}
-            maxLength={20}
-            pattern="[0-9]{4,20}"
-            defaultValue={profile.npn}
-            placeholder={copy("Somente números", "Numbers only")}
-            disabled={!isCurrent || pending}
-            aria-invalid={Boolean(npnError)}
-            aria-describedby={describedBy("onboarding-npn", npnError, true)}
-          />
-        </Field>
+        <div className="onboarding-profile-fields">
+          <div className="onboarding-profile-field is-wide">
+            <Field label={copy("Nome completo", "Full name")} htmlFor="onboarding-name" error={nameError} required>
+              <Input
+                id="onboarding-name"
+                name="name"
+                autoComplete="name"
+                maxLength={100}
+                defaultValue={profile.name}
+                placeholder={copy("Como podemos chamar você?", "What should we call you?")}
+                required
+                disabled={!isCurrent || pending}
+                aria-invalid={Boolean(nameError)}
+                aria-describedby={describedBy("onboarding-name", nameError)}
+                onBlur={(event) => onNameChange(event.currentTarget.value)}
+              />
+            </Field>
+          </div>
+          <div className="onboarding-profile-field">
+            <Field label={copy("Telefone", "Phone")} htmlFor="onboarding-phone" hint={copy("Use um número que você acessa com frequência.", "Use a number you check regularly.")} error={phoneError} required>
+              <Input
+                id="onboarding-phone"
+                name="phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                maxLength={32}
+                defaultValue={profile.phone}
+                placeholder="+1 305 555 0100"
+                required
+                disabled={!isCurrent || pending}
+                aria-invalid={Boolean(phoneError)}
+                aria-describedby={describedBy("onboarding-phone", phoneError, true)}
+              />
+            </Field>
+          </div>
+          <div className="onboarding-profile-field">
+            <Field label="NPN" htmlFor="onboarding-npn" hint={copy("Opcional. Você pode informar depois em Configurações.", "Optional. You can add it later in Settings.")} error={npnError}>
+              <Input
+                id="onboarding-npn"
+                name="npn"
+                inputMode="numeric"
+                autoComplete="off"
+                minLength={4}
+                maxLength={20}
+                pattern="[0-9]{4,20}"
+                defaultValue={profile.npn}
+                placeholder={copy("Somente números", "Numbers only")}
+                disabled={!isCurrent || pending}
+                aria-invalid={Boolean(npnError)}
+                aria-describedby={describedBy("onboarding-npn", npnError, true)}
+              />
+            </Field>
+          </div>
+        </div>
 
         <ActionFeedback state={state} id="onboarding-profile-feedback" />
         {isCurrent ? (
           <div className="onboarding-action-row is-end">
+            <p className="onboarding-action-next">
+              <span>{copy("Próxima etapa", "Up next")}</span>
+              <strong>{copy("Configurar o K-Bot", "Set up K-Bot")}</strong>
+            </p>
             <PrimarySubmit
               label={copy("Salvar e continuar", "Save and continue")}
               pendingLabel={copy("Salvando…", "Saving…")}
@@ -554,13 +668,14 @@ function KBotSetupStep({
   ] as const;
 
   return (
-    <section className="onboarding-step-card onboarding-kbot-step" data-onboarding-step-card aria-labelledby="onboarding-kbot-title">
+    <section className="onboarding-step-card onboarding-kbot-step" data-onboarding-step-card aria-labelledby="onboarding-kbot-title" aria-busy={pending}>
       <StepIntro
         id="onboarding-kbot-title"
         number={2}
         eyebrow={copy("Configuração do K-Bot", "K-Bot setup")}
         title={copy("Prepare o K-Bot para trabalhar com você.", "Get K-Bot ready to work with you.")}
         description={copy("Eu acompanho a instalação, espero seu login e processo os dados. Você só precisa seguir a indicação ativa.", "I'll guide installation, wait for your sign-in, and process the data. Just follow the active instruction.")}
+        duration={copy("acompanhado em tempo real", "guided in real time")}
       />
 
       <ol className="onboarding-kbot-substeps" aria-label={copy("Etapas da configuração do K-Bot", "K-Bot setup steps")}>
@@ -606,6 +721,10 @@ function KBotSetupStep({
       <ActionFeedback state={state} id="onboarding-kbot-feedback" />
       {isCurrent && processed ? (
         <form action={action} className="onboarding-action-row is-end" aria-describedby={state.message ? "onboarding-kbot-feedback" : undefined}>
+          <p className="onboarding-action-next">
+            <span>{copy("Próxima etapa", "Up next")}</span>
+            <strong>{copy("Conectar sua agenda", "Connect your calendar")}</strong>
+          </p>
           <PrimarySubmit
             label={copy("Continuar", "Continue")}
             pendingLabel={copy("Verificando…", "Checking…")}
@@ -621,13 +740,15 @@ function IntegrationBenefit({
   icon,
   title,
   detail,
+  connected,
 }: {
   icon: "google-calendar" | "whatsapp";
   title: string;
   detail: string;
+  connected: boolean;
 }) {
   return (
-    <div className="onboarding-integration-benefit">
+    <div className="onboarding-integration-benefit" data-state={connected ? "connected" : "idle"}>
       <span><OnboardingIcon name={icon} /></span>
       <div><strong>{title}</strong><p>{detail}</p></div>
     </div>
@@ -655,17 +776,19 @@ function CalendarStep({
 }) {
   const { copy } = useI18n();
   return (
-    <section className="onboarding-step-card" data-onboarding-step-card aria-labelledby="onboarding-calendar-title">
+    <section className="onboarding-step-card" data-onboarding-step-card aria-labelledby="onboarding-calendar-title" aria-busy={pending}>
       <StepIntro
         id="onboarding-calendar-title"
         number={3}
         eyebrow="Google Calendar"
         title={copy("Conecte sua agenda, se quiser.", "Connect your calendar, if you'd like.")}
         description={copy("É opcional. A conexão ajuda a reunir seus compromissos e evitar conflitos de horário.", "This is optional. Connecting brings your appointments together and helps prevent scheduling conflicts.")}
+        duration={copy("opcional · 1 min", "optional · 1 min")}
       />
 
       <IntegrationBenefit
         icon="google-calendar"
+        connected={connected}
         title={connected ? copy("Google Calendar conectado", "Google Calendar connected") : copy("Uma agenda sempre atualizada", "One always-current calendar")}
         detail={connected
           ? copy("A conexão foi verificada. Você pode continuar.", "The connection was verified. You can continue.")
@@ -694,23 +817,31 @@ function CalendarStep({
       <ActionFeedback state={state} id="onboarding-calendar-feedback" />
       {isCurrent ? (
         <div className="onboarding-action-row">
-          <form action={action}>
-            <input type="hidden" name="decision" value="SKIPPED" />
-            <button type="submit" className="onboarding-secondary-action" disabled={pending}>
-              {copy("Fazer depois", "Do this later")}
-            </button>
-          </form>
-          {connected ? (
-            <form action={action}>
-              <input type="hidden" name="decision" value="CONNECTED" />
-              <PrimarySubmit label={copy("Continuar", "Continue")} pendingLabel={copy("Validando…", "Verifying…")} pending={pending} />
-            </form>
-          ) : configured ? (
-            <Link className="onboarding-primary-action" href="/api/agent/integrations/google-calendar/authorize?returnTo=/onboarding">
-              <span>{copy("Conectar Google Calendar", "Connect Google Calendar")}</span>
-              <OnboardingIcon name="arrow-right" />
-            </Link>
-          ) : null}
+          <p className="onboarding-action-next">
+            <span>{connected ? copy("Conexão confirmada", "Connection confirmed") : copy("Você decide", "Your choice")}</span>
+            <strong>{copy("Depois seguimos para o WhatsApp", "WhatsApp comes next")}</strong>
+          </p>
+          <div className="onboarding-action-buttons">
+            {!connected ? (
+              <form action={action}>
+                <input type="hidden" name="decision" value="SKIPPED" />
+                <button type="submit" className="onboarding-secondary-action" disabled={pending}>
+                  {copy("Fazer depois", "Do this later")}
+                </button>
+              </form>
+            ) : null}
+            {connected ? (
+              <form action={action}>
+                <input type="hidden" name="decision" value="CONNECTED" />
+                <PrimarySubmit label={copy("Continuar", "Continue")} pendingLabel={copy("Validando…", "Verifying…")} pending={pending} />
+              </form>
+            ) : configured ? (
+              <Link className="onboarding-primary-action" href="/api/agent/integrations/google-calendar/authorize?returnTo=/onboarding">
+                <span>{copy("Conectar Google Calendar", "Connect Google Calendar")}</span>
+                <OnboardingIcon name="arrow-right" />
+              </Link>
+            ) : null}
+          </div>
         </div>
       ) : <ReturnToCurrent onClick={onReturn} />}
     </section>
@@ -742,17 +873,19 @@ function WhatsAppStep({
   const [showSetup, setShowSetup] = useState(false);
 
   return (
-    <section className="onboarding-step-card" data-onboarding-step-card aria-labelledby="onboarding-whatsapp-title">
+    <section className="onboarding-step-card" data-onboarding-step-card aria-labelledby="onboarding-whatsapp-title" aria-busy={pending}>
       <StepIntro
         id="onboarding-whatsapp-title"
         number={4}
         eyebrow="WhatsApp"
         title={copy("Última escolha: conectar suas conversas.", "One last choice: connect your conversations.")}
         description={copy("Também é opcional. Se conectar agora, suas conversas ficam próximas dos clientes e tarefas.", "This is optional too. Connect now to keep conversations close to clients and tasks.")}
+        duration={copy("opcional · 2 min", "optional · 2 min")}
       />
 
       <IntegrationBenefit
         icon="whatsapp"
+        connected={connected}
         title={connected ? copy("WhatsApp conectado", "WhatsApp connected") : copy("Conversas no contexto certo", "Conversations in the right context")}
         detail={connected
           ? copy("A conexão foi confirmada. Seu painel está pronto.", "The connection is confirmed. Your dashboard is ready.")
@@ -768,7 +901,12 @@ function WhatsAppStep({
 
       {available && isCurrent && !connected ? (
         <div className="onboarding-expandable">
-          <button type="button" onClick={() => setShowSetup((value) => !value)} aria-expanded={showSetup}>
+          <button
+            type="button"
+            onClick={() => setShowSetup((value) => !value)}
+            aria-expanded={showSetup}
+            aria-controls="onboarding-whatsapp-setup"
+          >
             <span>
               <strong>{copy("Conectar agora", "Connect now")}</strong>
               <small>{copy("Abra o passo a passo sem sair desta tela", "Open the guided setup without leaving this screen")}</small>
@@ -776,7 +914,7 @@ function WhatsAppStep({
             <span aria-hidden="true">{showSetup ? "−" : "+"}</span>
           </button>
           {showSetup ? (
-            <div className="onboarding-whatsapp-setup">
+            <div id="onboarding-whatsapp-setup" className="onboarding-whatsapp-setup" role="region" aria-label={copy("Configuração do WhatsApp", "WhatsApp setup")}>
               {mode === "META_CLOUD"
                 ? <ConnectOfficialWhatsapp onConnectionChange={onConnectionChange} />
                 : <ConnectWhatsapp onConnectionChange={onConnectionChange} />}
@@ -788,20 +926,26 @@ function WhatsAppStep({
       <ActionFeedback state={state} id="onboarding-whatsapp-feedback" />
       {isCurrent ? (
         <div className="onboarding-action-row">
-          {!connected ? (
-            <form action={action}>
-              <input type="hidden" name="decision" value="SKIPPED" />
-              <button type="submit" className="onboarding-secondary-action" disabled={pending}>
-                {copy("Fazer depois e entrar", "Do this later and enter")}
-              </button>
-            </form>
-          ) : null}
-          {connected ? (
-            <form action={action}>
-              <input type="hidden" name="decision" value="CONNECTED" />
-              <PrimarySubmit label={copy("Entrar na Keepr One", "Enter Keepr One")} pendingLabel={copy("Preparando seu painel…", "Preparing your dashboard…")} pending={pending} />
-            </form>
-          ) : null}
+          <p className="onboarding-action-next">
+            <span>{copy("Tudo pronto", "You're all set")}</span>
+            <strong>{copy("Seu painel vem a seguir", "Your dashboard is next")}</strong>
+          </p>
+          <div className="onboarding-action-buttons">
+            {!connected ? (
+              <form action={action}>
+                <input type="hidden" name="decision" value="SKIPPED" />
+                <button type="submit" className="onboarding-secondary-action" disabled={pending}>
+                  {copy("Fazer depois e entrar", "Do this later and enter")}
+                </button>
+              </form>
+            ) : null}
+            {connected ? (
+              <form action={action}>
+                <input type="hidden" name="decision" value="CONNECTED" />
+                <PrimarySubmit label={copy("Entrar na Keepr One", "Enter Keepr One")} pendingLabel={copy("Preparando seu painel…", "Preparing your dashboard…")} pending={pending} />
+              </form>
+            ) : null}
+          </div>
         </div>
       ) : <ReturnToCurrent onClick={onReturn} />}
     </section>
@@ -824,6 +968,7 @@ export function OnboardingExperience({
   const [whatsappState, whatsappAction, whatsappPending] = useActionState(setWhatsAppOnboardingDecisionAction, INITIAL_ONBOARDING_ACTION_STATE);
   const [connectorState, setConnectorState] = useState<NationalLifeConnectorViewState | null>(null);
   const [whatsappConnectionOverride, setWhatsappConnectionOverride] = useState<boolean | null>(null);
+  const [profileNameDraft, setProfileNameDraft] = useState(profile.name);
   const whatsappConnected = whatsappConnectionOverride ?? integrations.whatsappConnected;
 
   const currentOnboarding = latestOnboarding(onboarding, [profileState, nationalLifeState, calendarState, whatsappState]);
@@ -831,12 +976,35 @@ export function OnboardingExperience({
   const currentIndex = indexFor(currentStep);
   const [viewedStep, setViewedStep] = useState(currentStep);
   const previousCurrent = useRef(currentStep);
+  const previousViewed = useRef(viewedStep);
+  const screenRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (previousCurrent.current === currentStep) return;
     previousCurrent.current = currentStep;
     setViewedStep(currentStep);
   }, [currentStep]);
+
+  useEffect(() => {
+    if (previousViewed.current === viewedStep) return;
+    previousViewed.current = viewedStep;
+    const frame = window.requestAnimationFrame(() => {
+      const heading = screenRef.current?.querySelector<HTMLElement>("h1");
+      heading?.focus({ preventScroll: true });
+      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      const compactLayout = window.matchMedia?.("(max-width: 1023px)").matches ?? false;
+      const scrollTarget = compactLayout
+        ? screenRef.current?.closest<HTMLElement>(".onboarding-workspace")
+        : screenRef.current;
+      if (typeof scrollTarget?.scrollIntoView === "function") {
+        scrollTarget.scrollIntoView({
+          behavior: reduceMotion ? "auto" : "smooth",
+          block: "start",
+        });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [viewedStep]);
 
   const viewedIndex = indexFor(viewedStep);
   const activeFeedback = viewedStep === "PROFILE"
@@ -855,15 +1023,15 @@ export function OnboardingExperience({
         <a className="onboarding-skip-link" href="#onboarding-current-step">
           {copy("Ir para a etapa atual", "Skip to the current step")}
         </a>
-        <OnboardingHeader currentIndex={currentIndex} />
+        <OnboardingHeader currentIndex={currentIndex} currentStep={currentStep} />
 
         <div className="onboarding-frame">
           <StepNavigation currentStep={currentStep} viewedStep={viewedStep} onView={setViewedStep} />
 
           <div className="onboarding-workspace" id="onboarding-current-step" tabIndex={-1}>
-            <div className="onboarding-screen" data-onboarding-screen key={viewedStep}>
+            <div ref={screenRef} className="onboarding-screen" data-onboarding-screen key={viewedStep}>
               {viewedStep === "PROFILE" ? (
-                <ProfileStep profile={profile} state={profileState} action={profileAction} pending={profilePending} isCurrent={viewedIndex === currentIndex} onReturn={returnToCurrent} />
+                <ProfileStep profile={profile} state={profileState} action={profileAction} pending={profilePending} isCurrent={viewedIndex === currentIndex} onReturn={returnToCurrent} onNameChange={setProfileNameDraft} />
               ) : null}
               {viewedStep === "NATIONAL_LIFE" ? (
                 <KBotSetupStep integrationState={integrations.nationalLife} config={nationalLifeConfig} connectorState={connectorState} state={nationalLifeState} action={nationalLifeAction} pending={nationalLifePending} isCurrent={viewedIndex === currentIndex} onReturn={returnToCurrent} onConnectorStateChange={setConnectorState} />
@@ -878,7 +1046,8 @@ export function OnboardingExperience({
 
             <KBotGuide
               step={viewedStep}
-              profileName={profile.name}
+              currentStep={currentStep}
+              profileName={profileNameDraft}
               nationalLifeState={integrations.nationalLife}
               calendarConnected={integrations.calendarConnected}
               whatsappConnected={whatsappConnected}
