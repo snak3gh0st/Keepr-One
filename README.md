@@ -29,9 +29,24 @@ O sync de carteira tem um único engine e atravessa sempre as mesmas fronteiras:
 5. o Keepr One valida, elimina duplicidades/redundâncias, persiste o snapshot
    verificado e renderiza somente esse snapshot no app.
 
-O Keepr One não possui formulário próprio para a senha da National Life e não
-armazena a senha do agente. O browser remoto legado não é uma fonte de sync nem
+Na operação normal do conector local, o Keepr One não possui formulário próprio
+nem retém a senha da National Life. O agente conclui login e MFA no navegador
+oficial da seguradora. O browser remoto legado não é uma fonte de sync nem
 alimenta a tela principal de dados.
+
+**Carteira atual** é a projeção reconciliada da última exportação completa
+validada da National Life. **Histórico** é uma leitura local explícita, que
+preserva registros que podem não aparecer na carteira atual; ele não substitui a
+evidência da carteira vigente.
+
+Há também um caminho de credential broker que só pode ser habilitado mediante
+consentimento específico. Quando habilitado, ele mantém no PostgreSQL somente
+ciphertext do Vault Transit e metadados mascarados; o runtime web possui apenas
+identidade de criptografia e não pode descriptografar o material. Um broker
+privado separado realiza a operação de descriptografia necessária para entregar
+um envelope ao dispositivo pareado, e nenhuma API revela ou copia a credencial
+armazenada. Esta descrição não afirma que o recurso esteja ativo em produção;
+consulte o runbook do broker antes de habilitá-lo.
 
 Documentação operacional:
 
@@ -47,14 +62,7 @@ Documentação operacional:
 - KeeproneConnect em Chrome/Edge para o sync autenticado da carteira
 - Runtime National Life em Node.js, Playwright e Steel Browser isolado para
   operações legadas e superfícies que ainda não foram migradas para o conector
-- Coolify/Docker no host de aplicações `btapps`
-
-Superfícies públicas:
-
-- `https://keeprone.com`
-- `https://www.keeprone.com`
-- `https://app.keeprone.com`
-- `https://national-life-viewer.keeprone.com` — somente o broker do viewer
+- Coolify/Docker para publicação do app web
 
 O banco e alguns identificadores de infraestrutura ainda podem conservar nomes
 legados. Eles não representam o nome atual do produto e não devem aparecer na
@@ -81,6 +89,15 @@ pnpm exec tsc --noEmit
 pnpm exec vitest run
 pnpm build
 ```
+
+Um build ou healthcheck verde valida o artefato e a disponibilidade técnica; não
+prova conclusão de sync no carrier, cobrança, criação de reserva ou entrega de
+mensagem. Essas operações exigem a evidência específica do fluxo autorizado.
+
+Antes de anunciar uma página pública de agendamento, confira como visitante a
+página configurada e os horários retornados pela rota pública. Só trate o link
+como publicado depois de confirmar slots públicos compatíveis com a agenda
+configurada; uma tela carregada ou um link renderizado não é essa confirmação.
 
 ## Deploy
 

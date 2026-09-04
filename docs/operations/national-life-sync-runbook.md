@@ -104,11 +104,22 @@ aba inativa da National Life. Não cria um segundo run enquanto outro está ativ
 O Chrome precisa estar aberto e o computador acordado. Se a sessão da National
 Life exigir login ou MFA, a aba é trazida para frente e o run aguarda o agente;
 o Keepr One também cria um aviso no sino de notificações e o resolve quando a
-sessão volta. Nenhuma credencial, resposta de MFA, cookie ou sessão é armazenada
-pelo Keepr One. O `Remember this device`, quando o agente o escolher no portal,
+sessão volta. No fluxo normal do conector local, o Keepr One não retém a senha
+da National Life, nem a resposta de MFA; o agente completa ambas no portal
+oficial. O `Remember this device`, quando o agente o escolher no portal,
 continua pertencendo exclusivamente à National Life e ao perfil do Chrome.
 Fechar a aba vinculada ao conector continua sendo um cancelamento explícito e
 não é desfeito em silêncio.
+
+Existe um credential broker opcional, separado e dependente de consentimento,
+para a recuperação de uma sessão de carrier em uma operação já aprovada. Quando
+ele é deliberadamente habilitado, o banco guarda somente ciphertext do Vault
+Transit e metadados mascarados. O runtime web usa uma identidade apenas de
+criptografia e não consegue descriptografar o material; o broker privado
+separado tem a identidade de descriptografia. Nenhuma API revela ou copia a
+credencial armazenada. Este runbook não afirma que esse recurso esteja ativo em
+produção; siga `docs/operations/kbot-credential-broker-runbook.md` antes de
+qualquer ativação.
 
 ### PDFs de Correspondence sob demanda (extensão 0.1.21+)
 
@@ -164,6 +175,16 @@ Nas quatro fontes `READ_PAGE`, `recebido > 0` e `escrito = 0` é esperado: o
 snapshot foi preservado em `NationalLifeRawGridPage`, mas não virou linha
 operacional. Nas nove fontes estruturadas, a mesma combinação indica mapper sem
 chave natural e precisa ser investigada.
+
+A tela **Carteira atual** usa a projeção da exportação completa reconciliada. O
+**Histórico** é uma leitura local separada, inclusive para registros que não
+aparecem mais nessa projeção; não apresente o histórico como prova da carteira
+vigente.
+
+Build e healthcheck verdes comprovam somente o artefato e a disponibilidade
+técnica. Eles não comprovam um sync no carrier nem um resultado de cobrança;
+para esses fluxos, mantenha a evidência do run e execute apenas o smoke
+explicitamente autorizado.
 
 ## Passo 5 — o export do in-force trouxe contato?
 
