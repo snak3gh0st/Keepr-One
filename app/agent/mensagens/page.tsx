@@ -12,7 +12,9 @@ import { getServerI18n } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
-export default async function MensagensPage() {
+export default async function MensagensPage({ searchParams }: { searchParams: Promise<{ conversation?: string }> }) {
+  const selected = (await searchParams).conversation
+  const initialConversationId = selected && /^\d{1,32}$/.test(selected) ? selected : undefined
   const { copy } = await getServerI18n()
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
@@ -38,6 +40,7 @@ export default async function MensagensPage() {
     <Shell role="AGENT" userName={user?.name ?? ''}>
       {messagingReady ? (
         <MessagingWorkspace
+          initialConversationId={initialConversationId}
           channelMode={whatsappChannelModeFromEnv(process.env)}
         />
       ) : (

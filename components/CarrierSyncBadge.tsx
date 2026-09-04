@@ -67,6 +67,11 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
   const { copy } = useI18n()
   const quickActions = useMemo<KBotAction[]>(() => [
     {
+      href: '/agent/kbot', badge: 'AI',
+      label: copy('Follow-up de clientes', 'Customer follow-up'),
+      detail: copy('Atendimento manual, ações com IA e resultados', 'Manual contact, AI actions and results'),
+    },
+    {
       href: '/agent/integrations/national-life',
       badge: 'NL',
       label: copy('Sincronizar National Life', 'Sync National Life'),

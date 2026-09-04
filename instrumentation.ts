@@ -3,6 +3,12 @@ import * as Sentry from "@sentry/nextjs";
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     await import("./sentry.server.config");
+    try {
+      const { startKBotFollowupScheduler } = await import('./lib/kbot-followup/scheduler');
+      startKBotFollowupScheduler();
+    } catch (error) {
+      Sentry.captureException(error);
+    }
 
     // Varredura das tabelas que o conector local faz crescer para sempre. Este
     // hook é o único ponto de boot que o deploy tem — não há cron — e sem ele a

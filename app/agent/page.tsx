@@ -15,6 +15,7 @@ import { getAgentPromotionSnapshot } from '@/lib/agent-promotion'
 import { getLocalPromotionPreview } from '@/lib/promotion-preview'
 import { getPromotionIdentity, getPromotionJourney } from '@/lib/promotion-journey'
 import { JourneyDashboardPreview } from './JourneyDashboardPreview'
+import { FollowupWorkspace } from './kbot/FollowupWorkspace'
 import { FollowUpActionCard } from '@/components/crm/FollowUpActionCard'
 import { getDueFollowUpsForScope, nyDayBounds, type DueFollowUpView } from '@/lib/crm'
 import {
@@ -476,6 +477,7 @@ export default async function AgentDashboard({
       journeyHref={journeyHref}
     >
       <KeeprDashboardMotion>
+        {process.env.KBOT_FOLLOWUP_ENABLED === 'true' && <FollowupWorkspace compact />}
         {loadError && (
           <div className="mb-5">
             <ErrorBanner>
