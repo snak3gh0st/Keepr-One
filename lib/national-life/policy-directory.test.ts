@@ -100,8 +100,8 @@ describe('readCurrentPolicyDirectory', () => {
       clientName: 'Same source client',
       statusChangedAt: new Date('2026-09-01T00:00:00.000Z'),
     })
-    const sourceA = sourceOnly('agent-a:policy:NL-SOURCE-ONLY')
-    const sourceB = sourceOnly('agent-b:policy:NL-SOURCE-ONLY')
+    const sourceA = sourceOnly('agent-A:policy:NL-SOURCE-ONLY')
+    const sourceB = sourceOnly('agent-a:policy:NL-SOURCE-ONLY')
 
     const firstPage = await readCurrentPolicyDirectory(
       {} as never,

@@ -172,7 +172,8 @@ function sortDirectoryRows(rows: readonly PolicyDirectoryItem[], sort: PolicyDir
     }
     const byPolicyNumber = collator.compare(left.policyNumber, right.policyNumber)
     if (byPolicyNumber !== 0) return byPolicyNumber
-    return collator.compare(left.stableKey, right.stableKey)
+    if (left.stableKey === right.stableKey) return 0
+    return left.stableKey < right.stableKey ? -1 : 1
   })
 }
 
