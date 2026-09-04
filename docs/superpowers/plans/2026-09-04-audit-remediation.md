@@ -35,7 +35,7 @@
 - Produces public slot availability that ignores only recognized Google system calendar IDs ending in `@group.v.calendar.google.com` and remains fail-closed for a selected real conflict calendar that cannot be queried.
 - Produces one account-display time zone for grid, card, and modal; event source time zone remains stored as provenance.
 
-- [ ] **Step 1: Write failing tests for recognized holiday calendars and real conflict calendar errors.**
+- [x] **Step 1: Write failing tests for recognized holiday calendars and real conflict calendar errors.**
 
 ```ts
 it('does not submit a Google holiday calendar to FreeBusy', async () => {
@@ -53,13 +53,13 @@ it('rejects availability when a selected non-system calendar returns an error', 
 })
 ```
 
-- [ ] **Step 2: Run the calendar tests and verify the holiday test fails because the current request includes that calendar.**
+- [x] **Step 2: Run the calendar tests and verify the holiday test fails because the current request includes that calendar.**
 
 Run: `pnpm vitest run lib/calendar/google/freebusy.test.ts lib/scheduling/availability.test.ts lib/scheduling/readiness.test.ts`
 
 Expected: the holiday case fails before the implementation change; existing real-calendar error tests remain meaningful.
 
-- [ ] **Step 3: Implement a narrow system-calendar predicate and use it before building FreeBusy batches.**
+- [x] **Step 3: Implement a narrow system-calendar predicate and use it before building FreeBusy batches.**
 
 ```ts
 export function isGoogleSystemCalendarId(providerCalendarId: string) {
@@ -73,7 +73,7 @@ const conflictCalendars = integration.calendars.filter(
 
 Only recognized Google system IDs are excluded. If no non-system conflict calendar remains, return disconnected/unavailable. Preserve the current error handling for every remaining selected calendar. Events already synchronized from excluded sources remain local busy intervals; this prevents the hotfix from treating an existing local event as free.
 
-- [ ] **Step 4: Write a failing UI/server-adapter test for a São Paulo event displayed by a New York account.**
+- [x] **Step 4: Write a failing UI/server-adapter test for a São Paulo event displayed by a New York account.**
 
 ```ts
 expect(formatCalendarEventTime(event, 'America/New_York')).toContain('12:00')
@@ -82,17 +82,17 @@ expect(formatCalendarEventTime(event, 'America/Sao_Paulo')).toContain('13:00')
 
 The public UI expectation is the account display time zone, so card, modal and grid must assert `12:00` for this fixture.
 
-- [ ] **Step 5: Pass the account display time zone through the view model and format all human-facing event times with it.**
+- [x] **Step 5: Pass the account display time zone through the view model and format all human-facing event times with it.**
 
 Keep `event.timeZone` as source provenance. Do not mutate `startsAt`/`endsAt`. Add an optional `displayTimeZone` to event cards and pass the account time zone from all workspace/today/upcoming/case callers; modal detail labels use its existing account `timeZone` prop. Do not change all-day semantics or event instants during edit.
 
-- [ ] **Step 6: Run targeted tests and commit.**
+- [x] **Step 6: Run targeted tests and commit.**
 
 Run: `pnpm vitest run lib/calendar/google/freebusy.test.ts lib/scheduling/availability.test.ts lib/scheduling/readiness.test.ts components/calendar`
 
 Expected: all selected tests pass, including the system-calendar and cross-time-zone regressions.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git add lib/calendar components/calendar
@@ -108,7 +108,7 @@ git commit -m "fix: restore public scheduling availability and timezone consiste
 - Test: `lib/csv/import-service.test.ts`, `lib/csv/schemas.test.ts` if absent, policy-page/current-portfolio tests, admin production tests
 
 **Interfaces:**
-- Consumes the reconciled current National Life portfolio for visible current counts and explicit historical policy records for history-only views.
+- Consumes the reconciled current National Life portfolio for visible current counts and explicit historical policy records for history-only views. A current snapshot with no local `Policy` remains visible as an explicitly sourced, non-clickable row rather than being dropped to force a total match.
 - Consumes commission rows with optional provider transaction IDs and produces immutable ledger rows plus legacy aggregate rows whose totals equal the ledger total for the same direct/override semantics.
 - Produces a terminal `ImportBatch` state for malformed, row-invalid, and database-failed data without a partially written row.
 
@@ -139,7 +139,7 @@ Use a simulated transaction failure after one row write and assert that row has 
 
 - [ ] **Step 3: Implement deterministic fallback source identity and per-row atomic import.**
 
-For a missing carrier transaction ID, derive identity from normalized financial content plus an occurrence index among identical normalized rows in the parsed file; never use filename or original row order. Read the existing ledger transaction inside the row transaction, compute its amount delta, upsert it, and increment/decrement the direct and override aggregates by that delta. Preserve an explicit carrier transaction ID unchanged.
+For a missing carrier transaction ID, derive identity from normalized financial content plus an occurrence index among identical normalized rows in the parsed file; never use filename or original row order. Read the existing ledger transaction inside the row transaction, compute its amount delta, upsert it, and increment/decrement the direct and override aggregates by the change in its signed financial effect. `PAID` credits its absolute amount, `CHARGEBACK` debits its absolute amount, `ADJUSTMENT` carries its supplied sign, and `EXPECTED` remains in the ledger but contributes zero to the realized-commission aggregate. Preserve an explicit carrier transaction ID unchanged. A changed amount with no explicit origin ID is an ambiguous new transaction, not an inferred correction; surface that limitation in import feedback rather than silently merging money.
 
 ```ts
 const previous = await tx.commissionTransaction.findUnique({ where: sourceKey })
@@ -156,7 +156,7 @@ The default list and summary must consume the same reconciled current set as Tod
 
 - [ ] **Step 5: Make administrative production consume a documented carrier/reconciled source.**
 
-Use the same accepted National Life commission read model as the agent’s commission view, with a period filter. Keep legacy `CommissionRecord` only where it remains an intentional manual-import source and disclose source/coverage. Define production period by carrier-issued/effective business date where that field exists; do not use Keepr One import timestamp as issuance date.
+Build a dedicated global production reader from canonical National Life commission rows: canonicalize, audit, deduplicate globally by earning identity, and map direct production through `WritingAgtNumber -> Agent.npn`. Do not reuse a connector-owner view that duplicates team rows. Keep override out of direct-production ranking and never silently assign a row with no matching NPN. Keep legacy `CommissionRecord` only as an intentional disclosed fallback where no carrier source exists; never add it to the same carrier total. Define policy production period by UTC `effectiveDate`; rows without that business date belong in visible coverage, not in the month of import.
 
 - [ ] **Step 6: Run focused financial tests and commit.**
 
@@ -180,7 +180,7 @@ git commit -m "fix: reconcile portfolio and commission reporting"
 - Test: the two checkout route tests and a focused config/size regression test if an existing config test pattern supports it
 
 **Interfaces:**
-- Same logical checkout attempt sends byte-identical Stripe creation parameters for a reused idempotency key.
+- Same logical checkout attempt sends byte-identical Stripe creation parameters for a reused idempotency key; the optional random `integration_identifier` is removed because no application behavior consumes it.
 - A new logical checkout attempt has a new key; no retry must create a charge or entitlement before Stripe confirms it.
 - The application accepts an uploaded 10 MiB file plus multipart overhead while rejecting an oversized file with the existing friendly validation.
 
