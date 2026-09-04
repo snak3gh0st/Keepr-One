@@ -8,6 +8,7 @@ import {
   FounderAccessRequiredError,
   resolveFounderAccessForAgent,
 } from "@/lib/founder-access";
+import { getCurrentSession } from "@/lib/i18n/server";
 import { buildTrialCountdownView } from "@/lib/trial-countdown";
 import { redirect } from "next/navigation";
 
@@ -18,6 +19,11 @@ export default async function AgentLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const session = await getCurrentSession();
+  if (session?.user.role === "ADMIN") {
+    redirect("/admin/users");
+  }
+
   let agent: Awaited<ReturnType<typeof getCurrentAgent>>;
   try {
     agent = await getCurrentAgent();
