@@ -1,22 +1,23 @@
 import type { PrismaClient } from '@prisma/client'
 import type { IngestDeps } from './portfolio-ingest'
 import type { InforceRow } from './portfolio-reconcile'
+import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './local-connector/config'
 
 export function prismaIngestDeps(prisma: PrismaClient): IngestDeps {
   return {
     loadInforceRows: async (agentId) => {
       const agent = await prisma.agent.findUnique({
         where: { id: agentId },
-        select: { npn: true, status: true },
+        select: { status: true },
       })
       if (!agent || agent.status !== 'ACTIVE') return []
 
       return (await prisma.nationalLifeInforcePolicy.findMany({
         where: {
           agentId,
-          // The authenticated connector owns this partition. NPN is optional;
-          // when supplied it adds a producer filter, never a global lookup.
-          ...(agent.npn ? { agentNumber: agent.npn } : {}),
+          // The paired connector owns this agent/scope partition. Carrier
+          // AgentNumber is source data and cannot narrow the account's book.
+          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
         },
         select: {
           deploymentScope: true,

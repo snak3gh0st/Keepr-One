@@ -49,14 +49,21 @@ const planned: PlannedPolicy & { agentId: string; clientId: string } = {
 }
 
 describe('prismaIngestDeps', () => {
-  it.each([null, '123456'])('accepts the owned connector partition with optional NPN %s', async (npn) => {
-    const findMany = vi.fn().mockResolvedValue([])
-    const deps = prismaIngestDeps({ agent: { findUnique: vi.fn().mockResolvedValue({ status: 'ACTIVE', npn }) },
+  it.each([null, '123456'])('loads the owned connector partition despite NPN metadata %s', async (npn) => {
+    const rows = [
+      { deploymentScope: 'LOCAL_CONNECTOR', agentNumber: 'other-producer' },
+      { deploymentScope: 'LOCAL_CONNECTOR', agentNumber: null },
+    ]
+    const findMany = vi.fn().mockResolvedValue(rows)
+    const findUnique = vi.fn().mockResolvedValue({ status: 'ACTIVE', npn })
+    const deps = prismaIngestDeps({ agent: { findUnique },
       nationalLifeInforcePolicy: { findMany } } as never)
-    await deps.loadInforceRows('a1')
+    expect(await deps.loadInforceRows('a1')).toEqual(rows)
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: npn ? { agentId: 'a1', agentNumber: npn } : { agentId: 'a1' },
+      where: { agentId: 'a1', deploymentScope: 'LOCAL_CONNECTOR' },
     }))
+    expect(findMany.mock.calls[0]?.[0].where).not.toHaveProperty('agentNumber')
+    expect(findUnique).toHaveBeenCalledWith({ where: { id: 'a1' }, select: { status: true } })
   })
 
   it.each([null, { status: 'INACTIVE', npn: '123456' }])('rejects missing/inactive agents', async (agent) => {

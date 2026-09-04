@@ -11,7 +11,7 @@ export async function loadCurrentNationalLifePortfolio(prisma: PrismaClient, age
       select: { id: true, carrier: true, product: true, faceAmount: true, statusChangedAt: true, client: { select: { name: true } }, agentId: true, policyNumber: true, clientId: true, status: true,
         sourceStatus: true, premium: true, sourceUpdatedAt: true },
     }),
-    prisma.agent.findMany({ where: { id: { in: agentIds } }, select: { id: true, npn: true } }),
+    prisma.agent.findMany({ where: { id: { in: agentIds } }, select: { id: true } }),
   ])
   const partitions = await Promise.all(agents.map(async (agent) => {
     const owned = stored.filter((row) => row.agentId === agent.id)
@@ -35,7 +35,10 @@ export async function loadCurrentNationalLifePortfolio(prisma: PrismaClient, age
     const pages = verifyPortfolioPages({ ...completion, pages: completion.run.rawGridPages })
     const rows = pages.flatMap((page) => (page.records as GridRow[]).flatMap((raw) => {
       const row = toInforcePolicySnapshot(raw)
-      if (!row || (agent.npn && row.agentNumber !== agent.npn)) return []
+      // The completed run belongs to the paired connector for this agent. The
+      // carrier's AgentNumber is source data, not an ownership predicate: an
+      // account can legitimately return a different or blank producer number.
+      if (!row) return []
       return [{ ...row, deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE }]
     }))
     const observedAt = new Date(Math.max(...pages.map((page) => page.observedAt.getTime())))

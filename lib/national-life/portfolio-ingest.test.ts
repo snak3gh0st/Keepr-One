@@ -27,6 +27,7 @@ const row = (overrides: Partial<InforceRow>): InforceRow => ({
 function harness(rows: InforceRow[], existing: { id: string; name: string; dateOfBirth: Date | null }[] = []) {
   const createdClients: { name: string }[] = []
   const upserted: { sourceExternalId: string; faceAmount: unknown }[] = []
+  const upsertedAgentIds: string[] = []
   const deps: IngestDeps = {
     loadInforceRows: async () => rows,
     loadClients: async () => existing,
@@ -36,9 +37,10 @@ function harness(rows: InforceRow[], existing: { id: string; name: string; dateO
     },
     upsertPolicy: async (input) => {
       upserted.push({ sourceExternalId: input.sourceExternalId, faceAmount: input.faceAmount })
+      upsertedAgentIds.push(input.agentId)
     },
   }
-  return { deps, createdClients, upserted }
+  return { deps, createdClients, upserted, upsertedAgentIds }
 }
 
 describe('ingestNationalLifePortfolio', () => {
@@ -49,6 +51,22 @@ describe('ingestNationalLifePortfolio', () => {
     expect(h.createdClients).toEqual([{ name: 'Enrico Abdalla' }])
     expect(h.upserted).toEqual([{ sourceExternalId: 'LS1', faceAmount: null }])
     expect(report).toMatchObject({ clientsCreated: 1, policiesUpserted: 1, needsFaceAmount: 1 })
+  })
+
+  it('promotes paired-account rows to the agent despite missing or different carrier numbers', async () => {
+    const h = harness([
+      row({ policyNumber: 'DIFFERENT-CARRIER-NUMBER', agentNumber: 'another-producer' }),
+      row({ policyNumber: 'MISSING-CARRIER-NUMBER', agentNumber: null }),
+    ])
+
+    const report = await ingestNationalLifePortfolio(h.deps, { agentId: 'a1' })
+
+    expect(h.upserted.map(({ sourceExternalId }) => sourceExternalId)).toEqual([
+      'DIFFERENT-CARRIER-NUMBER',
+      'MISSING-CARRIER-NUMBER',
+    ])
+    expect(h.upsertedAgentIds).toEqual(['a1', 'a1'])
+    expect(report.policiesUpserted).toBe(2)
   })
 
   it('is idempotent: a second run against the same data creates no new client', async () => {

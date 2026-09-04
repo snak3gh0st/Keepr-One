@@ -109,13 +109,6 @@ export default async function NationalLifeDataPage() {
     prisma.user.findUnique({ where: { id: agent.userId } }),
     getCurrentAgentAccess(),
   ])
-  const scopedAgents = await prisma.agent.findMany({
-    where: { id: { in: access.scopeAgentIds }, status: 'ACTIVE' },
-    select: { npn: true },
-  })
-  const scopedNpns = scopedAgents
-    .map(({ npn }) => npn?.trim() ?? '')
-    .filter(Boolean)
   const localEnabled = getNationalLifeLocalConnectorConfig().enabled
   const structuredSourceTarget = NATIONAL_LIFE_READ_COVERAGE.filter(
     (source) =>
@@ -161,7 +154,6 @@ export default async function NationalLifeDataPage() {
         where: {
           agentId: { in: access.scopeAgentIds },
           deploymentScope: CANONICAL_SCOPE,
-          writingAgentNumber: { in: scopedNpns },
         },
         select: caseSelect,
         orderBy: [{ submitDate: 'desc' }, { policyNo: 'asc' }],
@@ -170,7 +162,6 @@ export default async function NationalLifeDataPage() {
         where: {
           agentId: { in: access.scopeAgentIds },
           deploymentScope: CANONICAL_SCOPE,
-          agentNumber: { in: scopedNpns },
         },
         select: inforceSelect,
         orderBy: [{ policyStatus: 'asc' }, { policyNumber: 'asc' }],
