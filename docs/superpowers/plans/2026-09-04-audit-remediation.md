@@ -176,15 +176,17 @@ git commit -m "fix: reconcile portfolio and commission reporting"
 **Files:**
 - Modify: `app/api/billing/checkout/route.ts`, `app/api/billing/checkout/route.test.ts`
 - Modify: `app/api/billing/application-addon/checkout/route.ts`, `app/api/billing/application-addon/checkout/route.test.ts`
+- Modify: `lib/stripe/agency-invitation-checkout.ts`, `prisma/schema.prisma`, and an additive nullable migration for its retry snapshot
 - Modify: `next.config.ts`, `package.json`, `pnpm-lock.yaml`
-- Test: the two checkout route tests and a focused config/size regression test if an existing config test pattern supports it
+- Test: both checkout route tests, invitation-checkout retry/concurrency tests, and the existing upload-size regression
 
 **Interfaces:**
 - Same logical checkout attempt sends byte-identical Stripe creation parameters for a reused idempotency key; the optional random `integration_identifier` is removed because no application behavior consumes it.
 - A new logical checkout attempt has a new key; no retry must create a charge or entitlement before Stripe confirms it.
+- An uncertain agency-invitation attempt persists only the non-secret Stripe input snapshot and a SHA-256 redirect fingerprint. It must reuse that snapshot, atomically reserve any replacement attempt, and never attach a late Stripe response to another attempt.
 - The application accepts an uploaded 10 MiB file plus multipart overhead while rejecting an oversized file with the existing friendly validation.
 
-- [ ] **Step 1: Write failing retry tests for both checkout routes.**
+- [x] **Step 1: Write failing retry tests for both checkout routes and the invitation helper.**
 
 ```ts
 await POST(request)
@@ -195,15 +197,15 @@ expect(secondOptions.idempotencyKey).toBe(firstOptions.idempotencyKey)
 expect(secondParams).toEqual(firstParams)
 ```
 
-- [ ] **Step 2: Run those tests and confirm they fail because `integration_identifier` is random on each retry.**
+- [x] **Step 2: Run those tests and confirm they fail because `integration_identifier` is random on each retry.**
 
 Run: `pnpm vitest run app/api/billing/checkout/route.test.ts app/api/billing/application-addon/checkout/route.test.ts`
 
-- [ ] **Step 3: Build Stripe parameters deterministically from the persisted local subscription/add-on identity.**
+- [x] **Step 3: Build Stripe parameters deterministically from the persisted local subscription/add-on identity.**
 
-Remove the random value or replace it with a stable, documented identifier derived from the persisted local ID. Keep the existing time-window idempotency key only if all parameters inside that window are stable. Apply the same rule to the invitation checkout helper when it can retry with the same key.
+Remove the random value or replace it with a stable, documented identifier derived from the persisted local ID. Keep the existing time-window idempotency key only if all parameters inside that window are stable. For the invitation helper, persist the non-secret Stripe snapshot and a SHA-256 fingerprint of its origin/token without storing either raw value; after an uncertain call, retries use the persisted snapshot only. Use conditional reservation by the observed attempt/state and condition session persistence by that exact attempt, so concurrent callers share one Stripe key and a late response cannot overwrite a newer attempt. Legacy records without the fingerprint fail closed until their recorded expiry.
 
-- [ ] **Step 4: Add the Server Action body size configuration and regression assertion.**
+- [x] **Step 4: Add the Server Action body size configuration and regression assertion.**
 
 ```ts
 experimental: {
@@ -214,17 +216,17 @@ experimental: {
 
 The 12 MiB transport limit intentionally accommodates multipart overhead above the 10 MiB product limit; it is not a new product upload limit.
 
-- [ ] **Step 5: Upgrade Next.js and matching Next ESLint package to the current 16.3.3 Active LTS security floor.**
+- [x] **Step 5: Upgrade Next.js and matching Next ESLint package to the current 16.3.3 Active LTS security floor.**
 
 Run `pnpm up next@16.3.3 eslint-config-next@16.3.3` only after the test changes are green. Do not use an unbounded major-version upgrade.
 
-- [ ] **Step 6: Run checkout tests, typecheck, build, and production dependency audit.**
+- [x] **Step 6: Run checkout tests, typecheck, build, and production dependency audit.**
 
 Run: `pnpm vitest run app/api/billing/checkout/route.test.ts app/api/billing/application-addon/checkout/route.test.ts && pnpm exec tsc --noEmit --incremental false && pnpm build && pnpm audit --prod`
 
-Expected: retry tests pass, build succeeds, and the installed Next version is no longer in the audited advisory range.
+Expected: retry tests pass, build succeeds, and the installed Next version is no longer in the audited advisory range. Record any remaining pre-existing transitive production advisories separately; do not call the audit clean unless it exits without findings.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git add app/api/billing next.config.ts package.json pnpm-lock.yaml
