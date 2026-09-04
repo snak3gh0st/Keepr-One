@@ -25,6 +25,25 @@ function mfaNotificationKey(runId: string, authEpoch: number) {
   return `national-life-mfa-required:${runId}:${authEpoch}`
 }
 
+export async function resolveLocalConnectorAuthNotifications(
+  db: Pick<PrismaClient, 'notification'>,
+  input: { recipientUserId: string; runIds: readonly string[]; now?: Date },
+) {
+  if (input.runIds.length === 0) return { count: 0 }
+  const now = input.now ?? new Date()
+  return db.notification.updateMany({
+    where: {
+      recipientUserId: input.recipientUserId,
+      readAt: null,
+      OR: input.runIds.flatMap((runId) => [
+        { dedupeKey: notificationKey(runId) },
+        { dedupeKey: { startsWith: `national-life-mfa-required:${runId}:` } },
+      ]),
+    },
+    data: { readAt: now },
+  })
+}
+
 /**
  * Mirrors only the recoverable authentication state to Keepr One. Carrier
  * credentials, MFA answers and browser session material never cross this API.
@@ -69,7 +88,7 @@ export async function recordLocalConnectorAuthState(
     const authRequiredAt = startsNewEpisode ? now : run.authRequiredAt
     const reportedAuthState = retryRequired ? 'REQUIRED' : input.state
     const authState = reportedAuthState === 'RESTORED' ? 'READY' : reportedAuthState
-    await tx.nationalLifeSyncRun.updateMany({
+    const updatedRun = await tx.nationalLifeSyncRun.updateMany({
       where: {
         id: run.id,
         agentId: input.agentId,
@@ -82,6 +101,9 @@ export async function recordLocalConnectorAuthState(
         authRequiredAt: reportedAuthState === 'RESTORED' ? null : authRequiredAt ?? now,
       },
     })
+    if (updatedRun.count !== 1) {
+      throw new LocalConnectorRunError('RUN_NOT_ACTIVE')
+    }
 
     const dedupeKey = input.state === 'MFA_REQUIRED'
       ? mfaNotificationKey(run.id, authEpoch)
@@ -107,16 +129,10 @@ export async function recordLocalConnectorAuthState(
         },
       })
     } else {
-      await tx.notification.updateMany({
-        where: {
-          recipientUserId: run.agent.userId,
-          readAt: null,
-          OR: [
-            { dedupeKey: notificationKey(run.id) },
-            { dedupeKey: { startsWith: `national-life-mfa-required:${run.id}:` } },
-          ],
-        },
-        data: { readAt: now },
+      await resolveLocalConnectorAuthNotifications(tx, {
+        recipientUserId: run.agent.userId,
+        runIds: [run.id],
+        now,
       })
     }
 

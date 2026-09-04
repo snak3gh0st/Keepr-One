@@ -3,10 +3,12 @@ import 'server-only'
 import type { PrismaClient } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { GOOGLE_CALENDAR_OPTIONAL_SCOPES } from '../constants'
+import { zonedDateTimeToUtc } from '../time'
 import { GoogleCalendarClient } from './client'
 import { getGoogleAccessToken } from './credentials'
 import type { GoogleCalendarEnv } from './env'
 import type { GoogleFetch } from './http'
+import type { GoogleCalendarEvent } from './types'
 
 type FreeBusyDb = Pick<
   PrismaClient,
@@ -34,6 +36,61 @@ function validInstant(value: string | undefined) {
   return Number.isFinite(date.getTime()) ? date : null
 }
 
+function dateOnlyInstant(value: string | undefined, timeZone: string) {
+  const match = value && /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return null
+  try {
+    return zonedDateTimeToUtc({
+      year: Number(match[1]),
+      month: Number(match[2]),
+      day: Number(match[3]),
+      hour: 0,
+      minute: 0,
+      second: 0,
+    }, timeZone)
+  } catch {
+    return null
+  }
+}
+
+function dateTimeInstant(value: string | undefined, timeZone: string) {
+  if (!value) return null
+  if (/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return validInstant(value)
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/.exec(value)
+  if (!match) return null
+  try {
+    return zonedDateTimeToUtc({
+      year: Number(match[1]),
+      month: Number(match[2]),
+      day: Number(match[3]),
+      hour: Number(match[4]),
+      minute: Number(match[5]),
+      second: Number(match[6] ?? 0),
+    }, timeZone)
+  } catch {
+    return null
+  }
+}
+
+function liveEventInterval(event: GoogleCalendarEvent, fallbackTimeZone: string) {
+  const declinedByOwner = event.attendees?.some(
+    (attendee) => attendee.self && attendee.responseStatus === 'declined',
+  )
+  if (event.status === 'cancelled' || event.transparency === 'transparent' || declinedByOwner) {
+    return null
+  }
+  const startTimeZone = event.start?.timeZone ?? event.end?.timeZone ?? fallbackTimeZone
+  const endTimeZone = event.end?.timeZone ?? event.start?.timeZone ?? fallbackTimeZone
+  const start = dateTimeInstant(event.start?.dateTime, startTimeZone) ??
+    dateOnlyInstant(event.start?.date, startTimeZone)
+  const end = dateTimeInstant(event.end?.dateTime, endTimeZone) ??
+    dateOnlyInstant(event.end?.date, endTimeZone)
+  if (!start || !end || end <= start) {
+    throw new Error(`Google returned an invalid event range for ${event.id}`)
+  }
+  return { start, end }
+}
+
 /** Reads live provider availability for only the signed-in user's calendars. */
 export async function getGoogleFreeBusyForUser(
   input: { ownerUserId: string; start: Date; end: Date; timeZone: string },
@@ -56,7 +113,7 @@ export async function getGoogleFreeBusyForUser(
         // the CRM default in the live check as a fail-safe for legacy or
         // partially migrated preference rows where it was hidden by mistake.
         where: { OR: [{ visible: true }, { crmDefault: true }] },
-        select: { id: true, providerCalendarId: true },
+        select: { id: true, providerCalendarId: true, timeZone: true },
       },
     },
   })
@@ -95,7 +152,32 @@ export async function getGoogleFreeBusyForUser(
         throw new Error(`Google FreeBusy omitted calendar ${providerCalendarId}`)
       }
       if (calendar.errors?.length) {
-        throw new Error(`Google FreeBusy failed for calendar ${providerCalendarId}`)
+        const canFallbackToEvents = calendar.errors.every((error) => error.reason === 'notFound')
+        if (!canFallbackToEvents) {
+          throw new Error(`Google FreeBusy failed for calendar ${providerCalendarId}`)
+        }
+        // Google public/subscribed calendars can return `notFound` from
+        // freeBusy even when events.list is authorized. Use that live range as
+        // the source of truth instead of treating a partial response as free.
+        const source = integration.calendars.find(
+          (item) => item.providerCalendarId === providerCalendarId,
+        )
+        const liveRange = await client.listEventsInRange({
+          calendarId: providerCalendarId,
+          timeMin: input.start.toISOString(),
+          timeMax: input.end.toISOString(),
+        })
+        for (const event of liveRange.items) {
+          const busy = liveEventInterval(
+            event,
+            liveRange.timeZone ?? source?.timeZone ?? input.timeZone,
+          )
+          const calendarSourceId = sourceByProvider.get(providerCalendarId)
+          if (busy && calendarSourceId && busy.end > input.start && busy.start < input.end) {
+            intervals.push({ calendarSourceId, providerCalendarId, ...busy })
+          }
+        }
+        continue
       }
       for (const busy of calendar.busy ?? []) {
         const start = validInstant(busy.start)

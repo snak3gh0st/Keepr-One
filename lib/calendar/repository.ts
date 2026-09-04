@@ -374,10 +374,12 @@ export async function lockCalendarSchedulingOwner(
   ownerUserId: string,
 ) {
   if (!ownerUserId.trim()) throw new CalendarDomainError('VALIDATION_ERROR', 'ownerUserId is required')
+  // PostgreSQL returns `void` here. Prisma cannot deserialize that type and
+  // raises P2010 after acquiring the lock unless the unused result is cast.
   await tx.$queryRaw(Prisma.sql`
     SELECT pg_advisory_xact_lock(
       hashtextextended(${`keepr-calendar-scheduling:${ownerUserId}`}, 0)
-    )
+    )::text AS lock_result
   `)
 }
 

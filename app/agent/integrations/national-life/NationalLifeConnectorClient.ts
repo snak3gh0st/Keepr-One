@@ -29,6 +29,7 @@ export type ConnectorResponse = {
 
 type ConnectorMessage =
   | { type: 'START_NATIONAL_LIFE_SYNC'; forceRefresh?: true }
+  | { type: 'CANCEL_NATIONAL_LIFE_SYNC' }
   | { type: 'FETCH_NATIONAL_LIFE_DOCUMENT'; reportRowId: string }
   | { type: 'START_NATIONAL_LIFE_COMMAND'; commandId: string }
   | { type: 'GET_CONNECTOR_STATUS' }

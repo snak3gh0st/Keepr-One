@@ -155,6 +155,8 @@ const tabQueues = new Map<number, Promise<void>>()
 const pendingBridgeMessages = new Map<number, number>()
 const carrierAuthenticationQueues = new Map<number, Promise<void>>()
 let syncStartLock: Promise<unknown> | null = null
+let syncCancelLock: Promise<{ ok: true; status: string }> | null = null
+let syncCancellationVersion = 0
 let tabNavigationLock: Promise<unknown> | null = null
 let commandPollLock: Promise<unknown> | null = null
 const tabReadyLocks = new Map<number, Promise<void>>()
@@ -168,6 +170,7 @@ const TAB_EDIT_RETRY_DELAYS_MS = [50, 100, 200, 400, 800]
 const SYNC_WATCHDOG_ALARM = 'keeprone-national-life-sync-watchdog'
 const SCHEDULED_SYNC_ALARM = 'keeprone-national-life-scheduled-sync'
 const COMMAND_POLL_ALARM = 'keeprone-national-life-command-poll'
+const USER_CANCELLED_SYNC_CODE = 'USER_CANCELLED'
 const COMMAND_POLL_PERIOD_MINUTES = 1
 const SCHEDULED_SYNC_PERIOD_MINUTES = 15
 const SCHEDULED_SYNC_FRESH_MS = 24 * 60 * 60_000
@@ -233,6 +236,11 @@ function policyDetailFailureCode(
 
 function errorCode(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
+}
+
+function isTerminalSyncStatus(status: string): boolean {
+  return status === 'COMPLETED' || status === 'PARTIAL' ||
+    status === 'CANCELLED' || status === 'ERROR'
 }
 
 function isTabEditInProgress(error: unknown): boolean {
@@ -1742,15 +1750,16 @@ async function pollAndExecuteCommand(hint?: chrome.tabs.Tab, requestedCommandId?
   return tracked
 }
 
-async function reportRunFailure(code: string) {
+async function reportRunFailure(code: string, runIdOverride?: string) {
   const device = await readDeviceState()
   const state = await readSyncState()
+  const runId = runIdOverride ?? state.runId
   if (
     device.status !== 'READY' ||
     !device.deviceId ||
     !device.baseUrl ||
-    !state.runId ||
-    state.runId.length > 128
+    !runId ||
+    runId.length > 128
   ) {
     return
   }
@@ -1759,7 +1768,7 @@ async function reportRunFailure(code: string) {
       baseUrl: device.baseUrl,
       deviceId: device.deviceId,
       method: 'POST',
-      pathname: `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}/fail`,
+      pathname: `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(runId)}/fail`,
       body: { code: code.replace(/[^A-Z0-9_]/g, '_').slice(0, 80) || 'SYNC_FAILED' },
     })
   } catch {
@@ -2162,6 +2171,7 @@ async function resolveCommandCredentialIfAuthenticated(tabId: number, rawUrl?: s
 async function requireCarrierAuthentication(
   state: Awaited<ReturnType<typeof readSyncState>>,
 ) {
+  if (state.status === 'CANCELLED') return
   const firstNotice = !state.authRenewalPending
   await writeSyncState({
     ...state,
@@ -2176,11 +2186,13 @@ async function requireCarrierAuthentication(
 
 async function resolveCarrierAuthenticationIfNeeded() {
   const state = await readSyncState()
-  if (!state.authRenewalPending) return
+  if (state.status === 'CANCELLED' || !state.authRenewalPending) return
   if (!(await reportCredentialLeaseOutcome(state.credentialAttempt, 'AUTHENTICATED'))) return
   await reportRunAuthState('RESTORED')
+  const latest = await readSyncState()
+  if (latest.status === 'CANCELLED') return
   await writeSyncState({
-    ...(await readSyncState()),
+    ...latest,
     authRenewalPending: false,
     authRequiredAt: undefined,
     credentialPageReloadedAt: undefined,
@@ -2264,7 +2276,14 @@ async function nudgeUpdateIfSafe(selfTabId?: number): Promise<void> {
 }
 
 async function failSync(code: string, selfTabId?: number) {
-  await writeSyncState({ ...(await readSyncState()), status: 'ERROR', errorCode: code })
+  const current = await readSyncState()
+  // Pular é um desfecho intencional. Um callback atrasado, uma fila que já
+  // estava executando ou o watchdog não podem reclassificá-lo como erro.
+  if (current.status === 'CANCELLED') {
+    await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
+    return
+  }
+  await writeSyncState({ ...current, status: 'ERROR', errorCode: code })
   await reportRunFailure(code)
   await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
   if (revokesDevice(code)) await forgetRevokedDevice()
@@ -2275,7 +2294,64 @@ async function failSync(code: string, selfTabId?: number) {
   if (OUTDATED_CODES.includes(code)) await nudgeUpdateIfSafe(selfTabId)
 }
 
+async function cancelNationalLifeSyncInternal() {
+  const state = await readSyncState()
+  if (state.status === 'COMPLETED' || state.status === 'PARTIAL') {
+    await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
+    return { ok: true as const, status: state.status }
+  }
+
+  if (state.status !== 'CANCELLED') {
+    await writeSyncState({
+      ...state,
+      status: 'CANCELLED',
+      errorCode: undefined,
+      authRenewalPending: undefined,
+      authRequiredAt: undefined,
+      credentialPageReloadedAt: undefined,
+      credentialAttempt: undefined,
+      completedAt: undefined,
+    })
+  }
+
+  // Retira os tokens antes de qualquer await. Assim, mensagens já enfileiradas
+  // deixam de corresponder ao trabalho ativo mesmo enquanto o ABORT atravessa a
+  // fronteira até o content script.
+  const navigations = [...activeNavigations.values()]
+  activeNavigations.clear()
+  tabQueues.clear()
+  pendingBridgeMessages.clear()
+  carrierAuthenticationQueues.clear()
+  tabReadyLocks.clear()
+
+  await Promise.all(navigations.map((active) => abortActiveNavigation(active)))
+  await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
+
+  // Repetir CANCEL é idempotente: o primeiro envio encerra o run; os seguintes
+  // apenas confirmam o mesmo estado local.
+  if (state.status !== 'CANCELLED') {
+    await reportRunFailure(USER_CANCELLED_SYNC_CODE, state.runId)
+  }
+  return { ok: true as const, status: 'CANCELLED' as const }
+}
+
+async function cancelNationalLifeSync() {
+  if (syncCancelLock) return syncCancelLock
+  // Incrementa antes do primeiro await do cancelamento. Um START que já tenha
+  // começado mas ainda esteja lendo storage/configuração enxerga a mudança e
+  // não consegue sobrescrever CANCELLED com STARTING.
+  syncCancellationVersion += 1
+  const operation = cancelNationalLifeSyncInternal()
+  const tracked = operation.finally(() => {
+    if (syncCancelLock === tracked) syncCancelLock = null
+  })
+  syncCancelLock = tracked
+  void tracked.catch(() => {})
+  return operation
+}
+
 async function createRun(forceRefresh = false) {
+  const cancellationVersion = syncCancellationVersion
   const previous = await readSyncState()
   const device = await readDeviceState()
   if (device.status !== 'READY' || !device.deviceId || !device.baseUrl) {
@@ -2294,7 +2370,13 @@ async function createRun(forceRefresh = false) {
   ) {
     throw new Error('CONNECTOR_PAUSED')
   }
+  if (cancellationVersion !== syncCancellationVersion) {
+    throw new Error('SYNC_CANCELLED')
+  }
   await writeSyncState({ ...previous, status: 'STARTING', errorCode: undefined })
+  if (cancellationVersion !== syncCancellationVersion) {
+    throw new Error('SYNC_CANCELLED')
+  }
   const response = await signedJsonRequest<{
     runId?: unknown
     stages?: unknown
@@ -2311,6 +2393,20 @@ async function createRun(forceRefresh = false) {
   })
   if (typeof response.runId !== 'string' || response.runId.length === 0) {
     throw new Error('INVALID_RUN_RESPONSE')
+  }
+  const afterRequest = await readSyncState()
+  if (
+    cancellationVersion !== syncCancellationVersion ||
+    afterRequest.status === 'CANCELLED'
+  ) {
+    // O cancelamento pode chegar enquanto o POST de abertura ainda está em voo,
+    // antes de existir um runId local. Grave somente a identidade devolvida para
+    // que o /fail consiga fechar esse run; jamais prossiga para navegação.
+    if (afterRequest.runId !== response.runId) {
+      await writeSyncState({ ...afterRequest, runId: response.runId })
+      await reportRunFailure(USER_CANCELLED_SYNC_CODE, response.runId)
+    }
+    throw new Error('SYNC_CANCELLED')
   }
   // The server decides which stages this run has and in what order; the extension
   // only checks that every one of them names a capability it implements and a path
@@ -2398,6 +2494,13 @@ async function createRun(forceRefresh = false) {
       carrierTabId: previous.carrierTabId,
     })
   }
+  const persisted = await readSyncState()
+  if (
+    cancellationVersion !== syncCancellationVersion ||
+    persisted.status === 'CANCELLED'
+  ) {
+    throw new Error('SYNC_CANCELLED')
+  }
   if (nextStageIndex >= plan.length) {
     await writeSyncState({
       ...(await readSyncState()),
@@ -2462,18 +2565,22 @@ async function navigatePendingGrid(options?: { foreground?: boolean }) {
     const foreground = options?.foreground === true
     const state = await readSyncState()
     const stage = currentStage(state)
-    if (!state.runId || !stage) return
+    if (!state.runId || !stage || isTerminalSyncStatus(state.status)) return
     const gridKey = stageKey(stage)
     const targetPath = stageTargetPath(state, stage)
     const target = `${NLG_ORIGIN}${targetPath}`
     const existing = await findReusableConnectorTab(state)
+    const afterTabLookup = await readSyncState()
+    if (afterTabLookup.status === 'CANCELLED' || afterTabLookup.runId !== state.runId) return
     const navigationAttempts = state.navigationGridKey === gridKey
       ? state.navigationAttempts ?? 0
       : 0
 
     if (existing?.id !== undefined) {
       if (state.carrierTabId !== existing.id) {
-        await writeSyncState({ ...state, carrierTabId: existing.id })
+        const beforeBind = await readSyncState()
+        if (beforeBind.status === 'CANCELLED' || beforeBind.runId !== state.runId) return
+        await writeSyncState({ ...beforeBind, carrierTabId: existing.id })
       }
       if (foreground && !existing.active) {
         // OPEN_NLG is an explicit user request. Automatic login remains
@@ -2485,7 +2592,10 @@ async function navigatePendingGrid(options?: { foreground?: boolean }) {
           const existingUrl = new URL(existing.url)
           if (existingUrl.origin === NLG_AUTH0_ORIGIN) {
             const requirement = authRequirementForPath(existingUrl.pathname)
-            await requireCarrierAuthentication(await readSyncState())
+            const beforeAuth = await readSyncState()
+            if (beforeAuth.status === 'CANCELLED' || beforeAuth.runId !== state.runId) return
+            await requireCarrierAuthentication(beforeAuth)
+            if ((await readSyncState()).status === 'CANCELLED') return
             if (!foreground) {
               await focusCarrierTabForAuthRequirement(existing.id, requirement, existing.active)
             }
@@ -2494,7 +2604,10 @@ async function navigatePendingGrid(options?: { foreground?: boolean }) {
           }
           if (isAuthPath(existingUrl.pathname)) {
             const requirement = authRequirementForPath(existingUrl.pathname)
-            await requireCarrierAuthentication(await readSyncState())
+            const beforeAuth = await readSyncState()
+            if (beforeAuth.status === 'CANCELLED' || beforeAuth.runId !== state.runId) return
+            await requireCarrierAuthentication(beforeAuth)
+            if ((await readSyncState()).status === 'CANCELLED') return
             if (!foreground) {
               await focusCarrierTabForAuthRequirement(existing.id, requirement, existing.active)
             }
@@ -2517,23 +2630,30 @@ async function navigatePendingGrid(options?: { foreground?: boolean }) {
           // Navigate the one bound tab when its URL is unavailable or malformed.
         }
       }
+      const beforeNavigation = await readSyncState()
+      if (beforeNavigation.status === 'CANCELLED' || beforeNavigation.runId !== state.runId) return
       await writeSyncState({
-        ...(await readSyncState()),
+        ...beforeNavigation,
         status: 'NAVIGATING',
         errorCode: undefined,
         navigationGridKey: gridKey,
         navigationAttempts: navigationAttempts + 1,
       })
+      if ((await readSyncState()).status === 'CANCELLED') return
       // Reuse the existing tab even when it is visible. Creating a background tab
       // here was the source of the tab storm after retries and worker recovery.
       await updateTab(existing.id, { url: target })
       return
     }
 
+    const beforeCreate = await readSyncState()
+    if (beforeCreate.status === 'CANCELLED' || beforeCreate.runId !== state.runId) return
     const created = await chrome.tabs.create({ active: foreground, url: target })
     if (created?.id !== undefined) {
+      const beforeBind = await readSyncState()
+      if (beforeBind.status === 'CANCELLED' || beforeBind.runId !== state.runId) return
       await writeSyncState({
-        ...(await readSyncState()),
+        ...beforeBind,
         carrierTabId: created.id,
         status: 'NAVIGATING',
         errorCode: undefined,
@@ -2577,7 +2697,11 @@ async function startNewSync(forceRefresh = false) {
       // Não pareado não é falha do sync: é o estado inicial de quem ainda não
       // conectou. Gravá-lo como ERROR faria a página abrir acusando um problema.
       if (code === 'CONNECTOR_NOT_PAIRED') {
-        await writeSyncState({ status: 'IDLE' })
+        const latest = await readSyncState()
+        if (latest.status !== 'CANCELLED') await writeSyncState({ status: 'IDLE' })
+        return { ok: false as const, error: code }
+      }
+      if (code === 'SYNC_CANCELLED') {
         return { ok: false as const, error: code }
       }
       await failSync(code)
@@ -2610,6 +2734,8 @@ async function beginCommissionDetailStage(tabId: number) {
       '/stages/COMMISSIONS_EARNING_REPORT/details',
     body: { runId: state.runId, gridKey: 'COMMISSIONS_EARNING_REPORT' },
   })
+  const afterRequest = await readSyncState()
+  if (afterRequest.status === 'CANCELLED' || afterRequest.runId !== state.runId) return
   const links = parseCommissionDetailTargets(response)
   if (links.length === 0) throw new Error('NO_COMMISSION_DETAIL_LINKS')
   const resume = parseCommissionDetailResume(response, links)
@@ -2640,6 +2766,7 @@ async function beginCommissionDetailStage(tabId: number) {
     navigationAttempts: 0,
   }
   await writeSyncState(nextState)
+  if ((await readSyncState()).status === 'CANCELLED') return
   await updateTab(tabId, { url: `${NLG_ORIGIN}${links[resumeIndex]!.path}` })
 }
 
@@ -2657,6 +2784,7 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
   const token = randomToken()
   const correlationId = crypto.randomUUID()
   const state = await readSyncState()
+  if (isTerminalSyncStatus(state.status)) return
   const resumeSequence = state.resumeSequence ?? 0
   const resumeOffset = state.resumeOffset ?? 0
   const detailTarget = isCommissionDetailStage(stage) ? commissionDetailTarget(state) : undefined
@@ -2677,13 +2805,26 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
     tabId,
     ...(detailTarget ? { detailStatementId: detailTarget.statementId } : {}),
   })
+  const beforeExtraction = await readSyncState()
+  if (beforeExtraction.status === 'CANCELLED' || beforeExtraction.runId !== state.runId) {
+    activeNavigations.delete(tabId)
+    return
+  }
   await writeSyncState({
-    ...(await readSyncState()),
+    ...beforeExtraction,
     status: 'EXTRACTING',
     errorCode: undefined,
     navigationGridKey: undefined,
     navigationAttempts: undefined,
   })
+  const extractionState = await readSyncState()
+  const extractionNavigation = activeNavigations.get(tabId)
+  if (
+    extractionState.status === 'CANCELLED' ||
+    extractionState.runId !== state.runId ||
+    extractionNavigation?.token !== token ||
+    extractionNavigation.correlationId !== correlationId
+  ) return
   try {
     // `tabs.onUpdated(..., complete)` can arrive a few hundred milliseconds
     // before the document_start bridge has registered its listener. Treat that
@@ -2715,6 +2856,14 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
       token,
       correlationId,
     })
+    const afterCapture = await readSyncState()
+    const stillActive = activeNavigations.get(tabId)
+    if (
+      afterCapture.status === 'CANCELLED' ||
+      afterCapture.runId !== state.runId ||
+      stillActive?.token !== token ||
+      stillActive.correlationId !== correlationId
+    ) return
     const remaining = records.slice(resumeOffset)
     const chunks = chunkRecordsForUpload(remaining)
     for (const [index, chunk] of chunks.entries()) {
@@ -2738,6 +2887,7 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
     await finishGrid(tabId, gridKey)
   } catch (error) {
     activeNavigations.delete(tabId)
+    if ((await readSyncState()).status === 'CANCELLED') return
     await failSync(errorCode(error, 'BRIDGE_UNAVAILABLE'))
   }
 }
@@ -2753,7 +2903,7 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
   const state = await readSyncState()
   if (state.carrierTabId !== tabId) return
   const stage = currentStage(state)
-  if (!state.runId || !stage || state.status === 'COMPLETED' || state.status === 'ERROR') {
+  if (!state.runId || !stage || isTerminalSyncStatus(state.status)) {
     return
   }
   if (url.origin === NLG_AUTH0_ORIGIN) {
@@ -2792,8 +2942,12 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
       if (state.status !== 'AUTH_REQUIRED') await navigatePendingGrid()
       return
     }
-    if (!(await hasAuthenticatedPortalSession(tabId))) {
-      await requireCarrierAuthentication(state)
+    const authenticated = await hasAuthenticatedPortalSession(tabId)
+    const afterProbe = await readSyncState()
+    if (afterProbe.status === 'CANCELLED' || afterProbe.runId !== state.runId) return
+    if (!authenticated) {
+      await requireCarrierAuthentication(afterProbe)
+      if ((await readSyncState()).status === 'CANCELLED') return
       await updateTab(tabId, { url: `${NLG_ORIGIN}${LOGIN_PATH}` })
       return
     }
@@ -2820,8 +2974,12 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
   // bridge to make one credentialed, non-following request to the agent shell.
   // A redirect to Auth0 is then an explicit negative instead of a page-shape
   // guess, and no extraction begins until this succeeds.
-  if (!(await hasAuthenticatedPortalSession(tabId))) {
-    await requireCarrierAuthentication(state)
+  const authenticated = await hasAuthenticatedPortalSession(tabId)
+  const afterProbe = await readSyncState()
+  if (afterProbe.status === 'CANCELLED' || afterProbe.runId !== state.runId) return
+  if (!authenticated) {
+    await requireCarrierAuthentication(afterProbe)
+    if ((await readSyncState()).status === 'CANCELLED') return
     await updateTab(tabId, { url: `${NLG_ORIGIN}${LOGIN_PATH}` })
     return
   }
@@ -2845,9 +3003,13 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
     !device.baseUrl ||
     !state.runId ||
     state.runId.length > 128 ||
+    state.status === 'CANCELLED' ||
     !stage ||
     stageKey(stage) !== message.gridKey ||
-    (detailStage && !activeNavigation?.detailStatementId)
+    !activeNavigation ||
+    activeNavigation.token !== message.token ||
+    activeNavigation.correlationId !== message.correlationId ||
+    (detailStage && !activeNavigation.detailStatementId)
   ) {
     throw new Error('SYNC_STATE_INVALID')
   }
@@ -2863,6 +3025,14 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
   const sourceOffset = detailBaseOffset + localSourceOffset
   const nextOffset = detailBaseOffset + localNextOffset
   await writeSyncState({ ...state, status: 'UPLOADING', errorCode: undefined })
+  const beforeUpload = await readSyncState()
+  const currentNavigation = activeNavigations.get(tabId)
+  if (
+    beforeUpload.status === 'CANCELLED' ||
+    beforeUpload.runId !== state.runId ||
+    currentNavigation?.token !== message.token ||
+    currentNavigation.correlationId !== message.correlationId
+  ) return
   const pathname = `/api/agent/integrations/national-life/local-connector/runs/${encodeURIComponent(state.runId)}/stages/${encodeURIComponent(message.gridKey)}`
   const baseUrl = device.baseUrl
   const deviceId = device.deviceId
@@ -2947,6 +3117,8 @@ async function finishCommissionDetailGrid(
   const nextIndex = index + 1
   const nextTarget = links[nextIndex]
   if (nextTarget) {
+    const latest = await readSyncState()
+    if (latest.status === 'CANCELLED' || latest.runId !== state.runId) return
     activeNavigations.delete(tabId)
     await writeSyncState({
       ...state,
@@ -2959,6 +3131,7 @@ async function finishCommissionDetailGrid(
       navigationGridKey: gridKey,
       navigationAttempts: 0,
     })
+    if ((await readSyncState()).status === 'CANCELLED') return
     await updateTab(tabId, { url: `${NLG_ORIGIN}${nextTarget.path}` })
     return
   }
@@ -2984,6 +3157,8 @@ async function finishCommissionDetailGrid(
       truncated: false,
     },
   })
+  const afterRequest = await readSyncState()
+  if (afterRequest.status === 'CANCELLED' || afterRequest.runId !== state.runId) return
   activeNavigations.delete(tabId)
   const plan = parseStagePlan(state.plan)
   const fallbackNextIndex = (state.stageIndex ?? 0) + 1
@@ -3015,6 +3190,7 @@ async function finishCommissionDetailGrid(
     status: 'NAVIGATING',
     uploads: state.uploads,
   })
+  if ((await readSyncState()).status === 'CANCELLED') return
   const nextGridKey = stageKey(next)
   await updateTab(tabId, {
     url: `${NLG_ORIGIN}${canonicalNationalLifeNavigatePath(nextGridKey, next.params.navigatePath)}`,
@@ -3024,7 +3200,10 @@ async function finishCommissionDetailGrid(
 async function finishGrid(tabId: number, gridKey: string) {
   const state = await readSyncState()
   const stage = currentStage(state)
-  if (!state.runId || !state.plan || !stage || stageKey(stage) !== gridKey) {
+  if (
+    !state.runId || !state.plan || !stage || stageKey(stage) !== gridKey ||
+    state.status === 'CANCELLED'
+  ) {
     throw new Error('SYNC_STATE_INVALID')
   }
   const active = activeNavigations.get(tabId)
@@ -3062,6 +3241,8 @@ async function finishGrid(tabId: number, gridKey: string) {
       truncated: active.truncated,
     },
   })
+  const afterRequest = await readSyncState()
+  if (afterRequest.status === 'CANCELLED' || afterRequest.runId !== state.runId) return
   activeNavigations.delete(tabId)
   // currentStage already proved the stored plan parses; re-derive it so navigation
   // reads the validated array rather than the raw storage value.
@@ -3095,6 +3276,7 @@ async function finishGrid(tabId: number, gridKey: string) {
     status: 'NAVIGATING',
     uploads: state.uploads,
   })
+  if ((await readSyncState()).status === 'CANCELLED') return
   const nextGridKey = stageKey(next)
   const nextPath = canonicalNationalLifeNavigatePath(nextGridKey, next.params.navigatePath)
   await updateTab(tabId, { url: `${NLG_ORIGIN}${nextPath}` })
@@ -3102,7 +3284,9 @@ async function finishGrid(tabId: number, gridKey: string) {
 
 async function advanceAfterExport(tabId: number, result: { nextStageIndex?: unknown; terminal?: unknown }) {
   const state = await readSyncState()
-  if (!state.runId || !state.plan) throw new Error('SYNC_STATE_INVALID')
+  if (!state.runId || !state.plan || state.status === 'CANCELLED') {
+    throw new Error('SYNC_STATE_INVALID')
+  }
   const plan = parseStagePlan(state.plan)
   const fallbackNextIndex = (state.stageIndex ?? 0) + 1
   const nextIndex = typeof result.nextStageIndex === 'number' && Number.isInteger(result.nextStageIndex) &&
@@ -3116,6 +3300,7 @@ async function advanceAfterExport(tabId: number, result: { nextStageIndex?: unkn
     return
   }
   await writeSyncState({ runId: state.runId, plan, stageIndex: nextIndex, resumeSequence: 0, resumeOffset: 0, status: 'NAVIGATING', uploads: state.uploads })
+  if ((await readSyncState()).status === 'CANCELLED') return
   const nextGridKey = stageKey(next)
   await updateTab(tabId, { url: `${NLG_ORIGIN}${canonicalNationalLifeNavigatePath(nextGridKey, next.params.navigatePath)}` })
 }
@@ -3124,10 +3309,21 @@ async function processExportMessage(tabId: number, message: Extract<BridgeMessag
   const device = await readDeviceState()
   const state = await readSyncState()
   const active = activeNavigations.get(tabId)
-  if (device.status !== 'READY' || !device.deviceId || !device.baseUrl || !state.runId || !active) {
+  if (
+    device.status !== 'READY' || !device.deviceId || !device.baseUrl ||
+    !state.runId || !active || state.status === 'CANCELLED'
+  ) {
     throw new Error('SYNC_STATE_INVALID')
   }
   await writeSyncState({ ...state, status: 'UPLOADING', errorCode: undefined })
+  const beforeExport = await readSyncState()
+  const currentNavigation = activeNavigations.get(tabId)
+  if (
+    beforeExport.status === 'CANCELLED' ||
+    beforeExport.runId !== state.runId ||
+    currentNavigation?.token !== active.token ||
+    currentNavigation.correlationId !== active.correlationId
+  ) return
   if (message.type === 'EXPORT_BEGIN') {
     const result = await signedJsonRequest<{ uploadId?: unknown; nextSequence?: unknown; completed?: unknown }>({
       baseUrl: device.baseUrl,
@@ -3143,6 +3339,7 @@ async function processExportMessage(tabId: number, message: Extract<BridgeMessag
         expectedSha256: message.expectedSha256,
       },
     })
+    if ((await readSyncState()).status === 'CANCELLED') return
     if (typeof result.uploadId !== 'string' || !Number.isInteger(result.nextSequence)) throw new Error('INVALID_EXPORT_RESPONSE')
     activeNavigations.set(tabId, { ...active, exportUploadId: result.uploadId, exportNextSequence: result.nextSequence as number })
     return
@@ -3171,6 +3368,7 @@ async function processExportMessage(tabId: number, message: Extract<BridgeMessag
     pathname: `/api/agent/integrations/national-life/local-connector/exports/${encodeURIComponent(active.exportUploadId)}/complete`,
     body: { uploadId: active.exportUploadId },
   })
+  if ((await readSyncState()).status === 'CANCELLED') return
   await advanceAfterExport(tabId, result)
 }
 
@@ -3364,6 +3562,7 @@ async function skipFailedStage(tabId: number, gridKey: string, code: string) {
   const device = await readDeviceState()
   if (
     !state.runId || !state.plan || !stage || stageKey(stage) !== gridKey ||
+    state.status === 'CANCELLED' ||
     device.status !== 'READY' || !device.deviceId || !device.baseUrl
   ) {
     throw new Error('SYNC_STATE_INVALID')
@@ -3379,6 +3578,8 @@ async function skipFailedStage(tabId: number, gridKey: string, code: string) {
     idempotencyKey: `nlc:${state.runId}:${state.stageIndex ?? 0}:${gridKey}:fail:${code}`,
     body: { runId: state.runId, gridKey, code, retryable: true },
   })
+  const afterRequest = await readSyncState()
+  if (afterRequest.status === 'CANCELLED' || afterRequest.runId !== state.runId) return
   const plan = parseStagePlan(state.plan)
   const fallbackNextIndex = (state.stageIndex ?? 0) + 1
   const nextIndex = typeof result.nextStageIndex === 'number' &&
@@ -3408,6 +3609,7 @@ async function skipFailedStage(tabId: number, gridKey: string, code: string) {
     status: 'NAVIGATING',
     uploads: state.uploads,
   })
+  if ((await readSyncState()).status === 'CANCELLED') return
   const nextGridKey = stageKey(next)
   const nextPath = canonicalNationalLifeNavigatePath(nextGridKey, next.params.navigatePath)
   await updateTab(tabId, { url: `${NLG_ORIGIN}${nextPath}` })
@@ -3423,9 +3625,7 @@ async function skipFailedStage(tabId: number, gridKey: string, code: string) {
 ///
 /// Silenciosa de propósito quando não há extração ativa ou quando a aba sumiu:
 /// as duas coisas são a mesma parada, por outro caminho.
-async function abortExtraction(tabId: number) {
-  const active = activeNavigations.get(tabId)
-  if (!active) return
+async function abortActiveNavigation(active: ActiveNavigation) {
   const message: AbortGridMessage = {
     type: 'ABORT_GRID',
     gridKey: active.gridKey,
@@ -3433,14 +3633,21 @@ async function abortExtraction(tabId: number) {
     correlationId: active.correlationId,
   }
   try {
-    await chrome.tabs.sendMessage(tabId, message)
+    await chrome.tabs.sendMessage(active.tabId, message)
   } catch {
     // Aba fechada, ponte ausente: não há o que parar.
   }
 }
 
+async function abortExtraction(tabId: number) {
+  const active = activeNavigations.get(tabId)
+  if (!active) return
+  await abortActiveNavigation(active)
+}
+
 async function recoverIdempotencyRace(tabId: number): Promise<boolean> {
   const state = await readSyncState()
+  if (state.status === 'CANCELLED') return true
   const stage = currentStage(state)
   if (!stage) return false
   const gridKey = stageKey(stage)
@@ -3544,13 +3751,21 @@ async function retryPendingSync() {
     // Keep the run, plan and stage cursor; clear only the previous delivery
     // attempt so requireCarrierAuthentication reports REQUIRED with a new epoch.
     const renewed = await reportRunAuthState('RETRY_REQUIRED')
+    const afterRenewal = await readSyncState()
+    if (afterRenewal.status === 'CANCELLED' || afterRenewal.runId !== state.runId) {
+      return { ok: false as const, error: 'SYNC_CANCELLED' }
+    }
     if (typeof renewed?.authEpoch !== 'number' || renewed.authEpoch < 1) {
-      await writeSyncState({ ...state, errorCode: 'CREDENTIAL_BROKER_UNAVAILABLE' })
+      await writeSyncState({ ...afterRenewal, errorCode: 'CREDENTIAL_BROKER_UNAVAILABLE' })
       return { ok: false as const, error: 'CREDENTIAL_BROKER_UNAVAILABLE' }
     }
-    const tab = await findConnectorTab(state)
+    const tab = await findConnectorTab(afterRenewal)
+    const beforeRetry = await readSyncState()
+    if (beforeRetry.status === 'CANCELLED' || beforeRetry.runId !== state.runId) {
+      return { ok: false as const, error: 'SYNC_CANCELLED' }
+    }
     await writeSyncState({
-      ...state,
+      ...beforeRetry,
       status: 'AUTH_REQUIRED',
       authRenewalPending: true,
       authRequiredAt: new Date().toISOString(),
@@ -3561,6 +3776,9 @@ async function retryPendingSync() {
       credentialAttempt: undefined,
       errorCode: undefined,
     })
+    if ((await readSyncState()).status === 'CANCELLED') {
+      return { ok: false as const, error: 'SYNC_CANCELLED' }
+    }
     if (tab?.id !== undefined) {
       await updateTab(tab.id, { url: `${NLG_ORIGIN}${LOGIN_PATH}` })
     } else {
@@ -3578,7 +3796,7 @@ async function retryPendingSync() {
 
 async function resumePending(options?: { reconcileWithServer?: boolean }) {
   const state = await readSyncState()
-  if (!state.runId || !currentStage(state) || state.status === 'COMPLETED' || state.status === 'ERROR') {
+  if (!state.runId || !currentStage(state) || isTerminalSyncStatus(state.status)) {
     return
   }
   if (state.status === 'AUTH_REQUIRED') {
@@ -3611,7 +3829,7 @@ async function resumePending(options?: { reconcileWithServer?: boolean }) {
     await createRun()
   }
   const resumed = await readSyncState()
-  if (!resumed.runId || !currentStage(resumed) || resumed.status === 'COMPLETED' || resumed.status === 'ERROR') {
+  if (!resumed.runId || !currentStage(resumed) || isTerminalSyncStatus(resumed.status)) {
     return
   }
   const tab = await findConnectorTab(resumed)
@@ -3722,6 +3940,10 @@ export default defineBackground(() => {
     }
     if (message.type === 'GET_CONNECTOR_STATUS') {
       respond(sendResponse, getConnectorStatus())
+      return true
+    }
+    if (message.type === 'CANCEL_NATIONAL_LIFE_SYNC') {
+      respond(sendResponse, cancelNationalLifeSync())
       return true
     }
     if (message.type === 'UNPAIR_CONNECTOR') {
@@ -3839,7 +4061,7 @@ export default defineBackground(() => {
             }
           }
           const state = await readSyncState()
-          if (state.runId && currentStage(state) && state.status !== 'COMPLETED') {
+          if (state.runId && currentStage(state) && !isTerminalSyncStatus(state.status)) {
             await navigatePendingGrid({ foreground: true })
           } else {
             const tab = await findNationalLifeTab()
@@ -3911,7 +4133,7 @@ export default defineBackground(() => {
     void (async () => {
       const state = await readSyncState()
       if (state.carrierTabId !== tabId) return
-      if (state.status === 'COMPLETED' || state.status === 'ERROR' || !state.runId || !currentStage(state)) {
+      if (isTerminalSyncStatus(state.status) || !state.runId || !currentStage(state)) {
         return
       }
       await writeSyncState({ ...state, carrierTabId: undefined })

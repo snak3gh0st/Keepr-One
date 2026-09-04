@@ -1,6 +1,7 @@
 import type { CarrierSyncState } from '@/lib/national-life/carrier-sync-state'
 
 export type CarrierActivitySnapshot = {
+  nationalLifeSetupRequired?: boolean
   state?: CarrierSyncState | null
   connector?: { enabled: boolean; extensionTarget?: string | null; autoLoginEnabled?: boolean } | null
   sync?: { runId?: string; state?: string; completed: number; total: number; shouldPoll: boolean; startedAt?: string | null; completedAt?: string | null; estimate?: { lowerMinutes: number; upperMinutes: number } | null } | null

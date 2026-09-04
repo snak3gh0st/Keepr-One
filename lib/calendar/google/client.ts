@@ -198,6 +198,42 @@ export class GoogleCalendarClient {
     return nextSyncToken
   }
 
+  /**
+   * Reads a bounded live range without participating in incremental sync.
+   * Some subscribed calendars (notably Google's holiday calendars) reject
+   * freeBusy queries while still allowing their events to be listed.
+   */
+  async listEventsInRange(input: {
+    calendarId: string
+    timeMin: string
+    timeMax: string
+  }) {
+    const items: GoogleCalendarEvent[] = []
+    let timeZone: string | undefined
+    let pageToken: string | undefined
+    do {
+      const url = withQuery(
+        `${this.apiBaseUrl}/calendars/${encodeURIComponent(input.calendarId)}/events`,
+        {
+          maxResults: 2500,
+          pageToken,
+          showDeleted: false,
+          singleEvents: true,
+          timeMin: input.timeMin,
+          timeMax: input.timeMax,
+        },
+      )
+      const page = await this.requestUrl<GoogleEventsListResponse>(url)
+      if (timeZone && page.timeZone && page.timeZone !== timeZone) {
+        throw new Error('Google Calendar changed time zone while paginating an event range')
+      }
+      timeZone ??= page.timeZone
+      items.push(...(page.items ?? []))
+      pageToken = page.nextPageToken
+    } while (pageToken)
+    return { items, timeZone }
+  }
+
   freeBusy(input: { timeMin: string; timeMax: string; timeZone?: string; calendarIds: string[] }) {
     if (!input.calendarIds.length || input.calendarIds.length > 50) {
       throw new Error('Google FreeBusy accepts between 1 and 50 calendars')

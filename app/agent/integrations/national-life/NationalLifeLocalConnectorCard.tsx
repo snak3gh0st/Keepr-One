@@ -48,6 +48,13 @@ export type NationalLifeConnectorViewState = {
   syncComplete: boolean
   botState: KBotState
   progress: number | null
+  sync?: {
+    status: string | null
+    stageIndex: number | null
+    stageKey: string | null
+    totalStages: number | null
+    uploads: number
+  }
 }
 
 type JourneyStepState = 'waiting' | 'active' | 'complete'
@@ -389,6 +396,12 @@ export function NationalLifeLocalConnectorCard({
   })()
   const onboardingVariant = variant === 'onboarding'
   const stateChangeRef = useRef(onStateChange)
+  const hasLiveSync = Boolean(liveSync)
+  const liveSyncStatus = typeof liveSync?.status === 'string' ? liveSync.status : null
+  const liveSyncStageIndex = typeof liveSync?.stageIndex === 'number' ? liveSync.stageIndex : null
+  const liveSyncStageKey = typeof liveSync?.stageKey === 'string' ? liveSync.stageKey : null
+  const liveSyncTotalStages = typeof liveSync?.totalStages === 'number' ? liveSync.totalStages : null
+  const liveSyncUploads = typeof liveSync?.uploads === 'number' ? liveSync.uploads : 0
 
   useEffect(() => {
     stateChangeRef.current = onStateChange
@@ -403,8 +416,30 @@ export function NationalLifeLocalConnectorCard({
       syncComplete: state === 'success',
       botState,
       progress: cornerProgress,
+      ...(hasLiveSync ? {
+        sync: {
+          status: liveSyncStatus,
+          stageIndex: liveSyncStageIndex,
+          stageKey: liveSyncStageKey,
+          totalStages: liveSyncTotalStages,
+          uploads: liveSyncUploads,
+        },
+      } : {}),
     })
-  }, [botState, connectorPresence, cornerProgress, pairedDeviceId, state, syncActive])
+  }, [
+    botState,
+    connectorPresence,
+    cornerProgress,
+    hasLiveSync,
+    liveSyncStageIndex,
+    liveSyncStageKey,
+    liveSyncStatus,
+    liveSyncTotalStages,
+    liveSyncUploads,
+    pairedDeviceId,
+    state,
+    syncActive,
+  ])
 
   /// Toda tentativa nova começa sem o motivo da anterior. Sem isso a frase de um
   /// dispositivo revogado sobrevive por baixo do sucesso seguinte.

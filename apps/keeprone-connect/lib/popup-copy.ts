@@ -10,6 +10,7 @@ const STATUS_TEXT: Record<Exclude<SyncState['status'], 'ERROR'>, string> = {
   AUTH_REQUIRED: 'Sign in to National Life. K-Bot will continue the same sync automatically.',
   COMPLETED: 'K-Bot finished. Your verified data is up to date.',
   PARTIAL: 'K-Bot saved the available areas. Resume from Keepr One to finish the rest.',
+  CANCELLED: 'This sync was skipped. K-Bot is ready whenever you want to connect your data.',
 }
 
 const COMMAND_STATUS_TEXT: Partial<Record<CommandState['status'], string>> = {
@@ -113,6 +114,7 @@ export function popupCanRetry(device: DeviceState, sync: SyncState): boolean {
   if (device.status !== 'READY') return false
   if (sync.status === 'AUTH_REQUIRED') return true
   if (sync.status === 'PARTIAL') return true
+  if (sync.status === 'CANCELLED') return true
   if (sync.status !== 'ERROR') return false
   const action = connectorFailure(sync.errorCode).action
   return action === 'retry' || action === 'support'

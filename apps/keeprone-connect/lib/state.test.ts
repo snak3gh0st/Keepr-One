@@ -61,3 +61,19 @@ describe('parseCommandState', () => {
     },
   )
 })
+
+describe('parseSyncState', () => {
+  it('keeps the durable cancelled terminal state across worker restarts', () => {
+    expect(parseSyncState({
+      status: 'CANCELLED',
+      runId: 'run_1',
+      carrierTabId: 12,
+      stageIndex: 1,
+    })).toEqual({
+      status: 'CANCELLED',
+      runId: 'run_1',
+      carrierTabId: 12,
+      stageIndex: 1,
+    })
+  })
+})

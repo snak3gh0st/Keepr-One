@@ -7,6 +7,7 @@ import {
   saveOnboardingProfileAction,
   setCalendarOnboardingDecisionAction,
   setWhatsAppOnboardingDecisionAction,
+  skipNationalLifeOnboardingAction,
   verifyNationalLifeOnboardingAction,
 } from "@/app/onboarding/actions";
 import {
@@ -19,6 +20,7 @@ import {
   NationalLifeLocalConnectorCard,
   type NationalLifeConnectorViewState,
 } from "@/app/agent/integrations/national-life/NationalLifeLocalConnectorCard";
+import { sendConnectorMessage } from "@/app/agent/integrations/national-life/NationalLifeConnectorClient";
 import { Field, Input } from "@/components/Field";
 import { useI18n } from "@/components/i18n/LanguageProvider";
 import { LanguageSwitcher } from "@/components/i18n/LanguageSwitcher";
@@ -32,6 +34,7 @@ import type { WhatsappChannelMode } from "@/lib/messaging/channel-mode";
 import type { PublicLocalConnectorConfig } from "@/lib/national-life/local-connector/config";
 import { OnboardingIcon } from "./OnboardingIcon";
 import { OnboardingMotion } from "./OnboardingMotion";
+import { NationalLifeSyncModal } from "./NationalLifeSyncModal";
 
 type DurableStep = AgentOnboardingView["currentStep"];
 type VisibleStep = "PROFILE" | "NATIONAL_LIFE" | "CALENDAR" | "WHATSAPP";
@@ -614,6 +617,9 @@ function KBotSetupStep({
   state,
   action,
   pending,
+  skipAction,
+  onSkip,
+  skipPending,
   isCurrent,
   onReturn,
   onConnectorStateChange,
@@ -624,6 +630,9 @@ function KBotSetupStep({
   state: OnboardingActionState;
   action: (payload: FormData) => void;
   pending: boolean;
+  skipAction: (payload: FormData) => void;
+  onSkip: () => void;
+  skipPending: boolean;
   isCurrent: boolean;
   onReturn: () => void;
   onConnectorStateChange: (state: NationalLifeConnectorViewState) => void;
@@ -704,7 +713,7 @@ function KBotSetupStep({
       {isCurrent && !config.enabled ? (
         <div className="onboarding-unavailable" role="status">
           <strong>{copy("O K-Bot ainda não foi liberado neste ambiente.", "K-Bot is not enabled in this environment yet.")}</strong>
-          <p>{copy("A equipe Keepr One precisa habilitar a conexão antes que você avance. Seus dados preenchidos continuam salvos.", "The Keepr One team needs to enable the connection before you can continue. Your details remain saved.")}</p>
+          <p>{copy("Você pode seguir agora e conectar assim que a equipe Keepr One liberar esta opção. Seus dados preenchidos continuam salvos.", "You can continue now and connect as soon as the Keepr One team enables this option. Your details remain saved.")}</p>
         </div>
       ) : null}
 
@@ -719,6 +728,22 @@ function KBotSetupStep({
       ) : null}
 
       <ActionFeedback state={state} id="onboarding-kbot-feedback" />
+      {isCurrent && !processed && !connectorState?.syncActive ? (
+        <div className="onboarding-kbot-skip">
+          <div>
+            <strong>{copy("Prefere configurar depois?", "Would you rather set this up later?")}</strong>
+            <p>{copy(
+              "Você pode continuar o onboarding agora. No painel, o K-Bot lembrará como completar seus dados.",
+              "You can continue onboarding now. In the dashboard, K-Bot will remind you how to complete your data.",
+            )}</p>
+          </div>
+          <form action={skipAction} onSubmit={onSkip}>
+            <button type="submit" className="onboarding-secondary-action" disabled={skipPending} aria-busy={skipPending}>
+              {skipPending ? copy("Salvando…", "Saving…") : copy("Pular sincronização", "Skip sync")}
+            </button>
+          </form>
+        </div>
+      ) : null}
       {isCurrent && processed ? (
         <form action={action} className="onboarding-action-row is-end" aria-describedby={state.message ? "onboarding-kbot-feedback" : undefined}>
           <p className="onboarding-action-next">
@@ -964,6 +989,7 @@ export function OnboardingExperience({
   const { copy } = useI18n();
   const [profileState, profileAction, profilePending] = useActionState(saveOnboardingProfileAction, INITIAL_ONBOARDING_ACTION_STATE);
   const [nationalLifeState, nationalLifeAction, nationalLifePending] = useActionState(verifyNationalLifeOnboardingAction, INITIAL_ONBOARDING_ACTION_STATE);
+  const [nationalLifeSkipState, nationalLifeSkipAction, nationalLifeSkipPending] = useActionState(skipNationalLifeOnboardingAction, INITIAL_ONBOARDING_ACTION_STATE);
   const [calendarState, calendarAction, calendarPending] = useActionState(setCalendarOnboardingDecisionAction, INITIAL_ONBOARDING_ACTION_STATE);
   const [whatsappState, whatsappAction, whatsappPending] = useActionState(setWhatsAppOnboardingDecisionAction, INITIAL_ONBOARDING_ACTION_STATE);
   const [connectorState, setConnectorState] = useState<NationalLifeConnectorViewState | null>(null);
@@ -971,7 +997,7 @@ export function OnboardingExperience({
   const [profileNameDraft, setProfileNameDraft] = useState(profile.name);
   const whatsappConnected = whatsappConnectionOverride ?? integrations.whatsappConnected;
 
-  const currentOnboarding = latestOnboarding(onboarding, [profileState, nationalLifeState, calendarState, whatsappState]);
+  const currentOnboarding = latestOnboarding(onboarding, [profileState, nationalLifeState, nationalLifeSkipState, calendarState, whatsappState]);
   const currentStep = visibleStep(currentOnboarding.currentStep);
   const currentIndex = indexFor(currentStep);
   const [viewedStep, setViewedStep] = useState(currentStep);
@@ -1007,15 +1033,30 @@ export function OnboardingExperience({
   }, [viewedStep]);
 
   const viewedIndex = indexFor(viewedStep);
+  const nationalLifeFeedback = nationalLifeSkipState.message ? nationalLifeSkipState : nationalLifeState;
   const activeFeedback = viewedStep === "PROFILE"
     ? profileState
     : viewedStep === "NATIONAL_LIFE"
-      ? nationalLifeState
+      ? nationalLifeFeedback
       : viewedStep === "CALENDAR"
         ? calendarState
         : whatsappState;
 
   const returnToCurrent = () => setViewedStep(currentStep);
+  const syncModalOpen = viewedStep === "NATIONAL_LIFE"
+    && currentStep === "NATIONAL_LIFE"
+    && Boolean(connectorState?.syncActive);
+  const cancelNationalLifeSync = () => {
+    if (!nationalLifeConfig.enabled) return;
+    void sendConnectorMessage(
+      nationalLifeConfig.extensionTarget,
+      { type: "CANCEL_NATIONAL_LIFE_SYNC" },
+      1_500,
+    ).catch(() => {
+      // The server action still terminates this agent's active run and advances
+      // onboarding when the extension is old, offline or already closed.
+    });
+  };
 
   return (
     <OnboardingMotion step={viewedStep}>
@@ -1034,7 +1075,7 @@ export function OnboardingExperience({
                 <ProfileStep profile={profile} state={profileState} action={profileAction} pending={profilePending} isCurrent={viewedIndex === currentIndex} onReturn={returnToCurrent} onNameChange={setProfileNameDraft} />
               ) : null}
               {viewedStep === "NATIONAL_LIFE" ? (
-                <KBotSetupStep integrationState={integrations.nationalLife} config={nationalLifeConfig} connectorState={connectorState} state={nationalLifeState} action={nationalLifeAction} pending={nationalLifePending} isCurrent={viewedIndex === currentIndex} onReturn={returnToCurrent} onConnectorStateChange={setConnectorState} />
+                <KBotSetupStep integrationState={integrations.nationalLife} config={nationalLifeConfig} connectorState={connectorState} state={nationalLifeFeedback} action={nationalLifeAction} pending={nationalLifePending} skipAction={nationalLifeSkipAction} onSkip={cancelNationalLifeSync} skipPending={nationalLifeSkipPending} isCurrent={viewedIndex === currentIndex} onReturn={returnToCurrent} onConnectorStateChange={setConnectorState} />
               ) : null}
               {viewedStep === "CALENDAR" ? (
                 <CalendarStep connected={integrations.calendarConnected} configured={calendarConfigured} result={calendarResult} state={calendarState} action={calendarAction} pending={calendarPending} isCurrent={viewedIndex === currentIndex} onReturn={returnToCurrent} />
@@ -1056,6 +1097,15 @@ export function OnboardingExperience({
             />
           </div>
         </div>
+        {syncModalOpen && connectorState ? (
+          <NationalLifeSyncModal
+            connectorState={connectorState}
+            skipAction={nationalLifeSkipAction}
+            onSkip={cancelNationalLifeSync}
+            skipPending={nationalLifeSkipPending}
+            skipError={nationalLifeSkipState.status === "error" ? nationalLifeSkipState.message : null}
+          />
+        ) : null}
       </main>
     </OnboardingMotion>
   );

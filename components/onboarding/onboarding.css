@@ -867,6 +867,346 @@
   box-shadow: none;
 }
 
+.onboarding-kbot-skip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  margin-top: 1rem;
+  padding: 1rem 0.15rem 0;
+}
+
+.onboarding-kbot-skip > div {
+  max-width: 34rem;
+}
+
+.onboarding-kbot-skip strong {
+  display: block;
+  color: var(--onboarding-ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.onboarding-kbot-skip p {
+  margin: 0.3rem 0 0;
+  color: var(--onboarding-muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.onboarding-sync-dialog {
+  width: min(calc(100% - 2rem), 960px);
+  max-width: none;
+  max-height: calc(100svh - 2rem);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  border: 0;
+  background: transparent;
+  color: var(--onboarding-ink);
+  font-family: var(--font-outfit), var(--font-geist-sans), ui-sans-serif, sans-serif;
+  outline: none;
+  overscroll-behavior: contain;
+}
+
+.onboarding-sync-dialog::backdrop {
+  background: color-mix(in oklab, var(--color-rail-strong) 58%, transparent);
+  backdrop-filter: blur(12px) saturate(0.72);
+  animation: onboarding-sync-backdrop 280ms ease-out both;
+}
+
+.onboarding-sync-modal {
+  display: grid;
+  grid-auto-flow: dense;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--color-mint) 20%, var(--onboarding-line));
+  border-radius: 26px;
+  background: var(--onboarding-paper);
+  box-shadow: 0 32px 90px rgba(4, 16, 10, 0.28);
+}
+
+.onboarding-sync-modal-kbot {
+  position: relative;
+  display: flex;
+  min-height: 100%;
+  grid-column: span 3;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1.2rem;
+  overflow: hidden;
+  padding: 2rem 1.4rem;
+  background:
+    radial-gradient(circle at 50% 34%, color-mix(in oklab, var(--color-mint) 18%, transparent), transparent 10rem),
+    linear-gradient(150deg, var(--color-rail), var(--color-rail-strong));
+  color: var(--color-paper);
+  text-align: center;
+}
+
+.onboarding-sync-modal-kbot::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--color-mint) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--color-mint) 5%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+  content: "";
+  mask-image: radial-gradient(circle at center, black, transparent 78%);
+}
+
+.onboarding-sync-modal-kbot > * {
+  position: relative;
+  z-index: 1;
+}
+
+.onboarding-sync-modal-kbot > div:last-child {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.onboarding-sync-modal-kbot span {
+  color: var(--color-mint);
+  font-family: var(--font-ibm-plex-mono), var(--font-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.onboarding-sync-modal-kbot strong {
+  max-width: 12rem;
+  font-size: 1.2rem;
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+}
+
+.onboarding-sync-modal-content {
+  display: flex;
+  min-width: 0;
+  grid-column: span 9;
+  flex-direction: column;
+  padding: 2rem 2.2rem;
+}
+
+.onboarding-sync-modal-content > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.onboarding-sync-modal-content > header p {
+  margin: 0 0 0.6rem;
+  color: var(--onboarding-green-deep);
+  font-family: var(--font-ibm-plex-mono), var(--font-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.onboarding-sync-modal-content h2 {
+  max-width: 36rem;
+  margin: 0;
+  color: var(--onboarding-ink);
+  font-size: clamp(1.85rem, 3.7vw, 2.8rem);
+  font-weight: 500;
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+}
+
+.onboarding-sync-modal-content > header > strong {
+  flex: 0 0 auto;
+  color: var(--onboarding-green-deep);
+  font-family: var(--font-ibm-plex-mono), var(--font-mono), ui-monospace, monospace;
+  font-size: clamp(2.15rem, 5vw, 3.65rem);
+  font-weight: 500;
+  line-height: 0.9;
+  letter-spacing: -0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+.onboarding-sync-modal-description {
+  max-width: 40rem;
+  margin: 0.9rem 0 0;
+  color: var(--onboarding-muted);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+.onboarding-sync-current-stage {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.7rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid color-mix(in oklab, var(--onboarding-green) 22%, var(--onboarding-line));
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--color-teal-pale) 68%, var(--onboarding-paper));
+}
+
+.onboarding-sync-current-stage > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.onboarding-sync-current-stage > div > span {
+  color: var(--onboarding-muted);
+  font-family: var(--font-ibm-plex-mono), var(--font-mono), ui-monospace, monospace;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.onboarding-sync-current-stage strong {
+  color: var(--onboarding-ink);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.onboarding-sync-current-stage small {
+  overflow: hidden;
+  color: var(--onboarding-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.onboarding-sync-current-stage > span {
+  flex: 0 0 auto;
+  color: var(--onboarding-green-deep);
+  font-family: var(--font-ibm-plex-mono), var(--font-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.onboarding-sync-progress {
+  height: 0.75rem;
+  margin-top: 1.15rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--onboarding-line) 70%, var(--onboarding-paper));
+  box-shadow: inset 0 1px 2px rgba(5, 25, 14, 0.08);
+}
+
+.onboarding-sync-progress > span {
+  display: block;
+  min-width: 0.35rem;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--onboarding-green-deep), var(--color-mint));
+  box-shadow: 0 0 18px color-mix(in oklab, var(--color-mint) 35%, transparent);
+  transition: width 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.onboarding-sync-progress[data-state="indeterminate"] > span {
+  width: 34%;
+  animation: onboarding-sync-indeterminate 1.4s ease-in-out infinite;
+}
+
+.onboarding-sync-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.55rem;
+  color: var(--onboarding-muted);
+  font-size: 0.75rem;
+}
+
+.onboarding-sync-progress-meta strong {
+  color: var(--onboarding-green-deep);
+  font-family: var(--font-ibm-plex-mono), var(--font-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.onboarding-sync-message {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 1.35rem;
+  padding: 0.8rem 1rem;
+  border-left: 3px solid var(--onboarding-green);
+  background: var(--color-panel);
+}
+
+.onboarding-sync-message > span {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+.onboarding-sync-message p {
+  margin: 0;
+  color: var(--onboarding-ink);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.onboarding-sync-error {
+  margin: 0.8rem 0 0;
+  color: var(--color-danger);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.onboarding-sync-modal-content > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--onboarding-line);
+}
+
+.onboarding-sync-modal-content > footer > p {
+  max-width: 30rem;
+  margin: 0;
+  color: var(--onboarding-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.onboarding-sync-modal-content > footer button {
+  min-height: 44px;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--onboarding-green-deep);
+  border-radius: 999px;
+  background: var(--onboarding-green-deep);
+  color: var(--color-paper);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: transform 160ms var(--ease-standard), background-color 160ms var(--ease-standard);
+}
+
+.onboarding-sync-modal-content > footer button:hover:not(:disabled) {
+  background: var(--color-rail-strong);
+  transform: translateY(-1px);
+}
+
+.onboarding-sync-modal-content > footer button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 .onboarding-success-summary,
 .onboarding-integration-benefit,
 .onboarding-unavailable {
@@ -1028,6 +1368,25 @@
   }
 }
 
+@keyframes onboarding-sync-backdrop {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes onboarding-sync-indeterminate {
+  0% {
+    transform: translateX(-115%);
+  }
+
+  55% {
+    transform: translateX(115%);
+  }
+
+  100% {
+    transform: translateX(290%);
+  }
+}
+
 @media (max-width: 1023px) {
   .onboarding-workspace {
     grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -1050,6 +1409,76 @@
 }
 
 @media (max-width: 720px) {
+  .onboarding-sync-dialog {
+    width: min(calc(100% - 1rem), 960px);
+    max-height: calc(100svh - 1rem);
+    overflow: auto;
+  }
+
+  .onboarding-sync-modal {
+    grid-template-columns: 1fr;
+    border-radius: 20px;
+  }
+
+  .onboarding-sync-modal-kbot,
+  .onboarding-sync-modal-content {
+    grid-column: 1;
+  }
+
+  .onboarding-sync-modal-kbot {
+    min-height: 0;
+    align-items: center;
+    flex-direction: row;
+    justify-content: flex-start;
+    padding: 1rem 1.2rem;
+    text-align: left;
+  }
+
+  .onboarding-sync-modal-kbot > div:last-child {
+    gap: 0.25rem;
+  }
+
+  .onboarding-sync-modal-kbot strong {
+    max-width: none;
+    font-size: 1rem;
+  }
+
+  .onboarding-sync-modal-content {
+    padding: 1.25rem;
+  }
+
+  .onboarding-sync-modal-content > header {
+    gap: 1rem;
+  }
+
+  .onboarding-sync-modal-content h2 {
+    font-size: clamp(1.65rem, 8vw, 2.2rem);
+  }
+
+  .onboarding-sync-current-stage {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .onboarding-sync-current-stage small {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .onboarding-sync-modal-content > footer,
+  .onboarding-kbot-skip {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .onboarding-sync-modal-content > footer form,
+  .onboarding-sync-modal-content > footer button,
+  .onboarding-kbot-skip form,
+  .onboarding-kbot-skip button {
+    width: 100%;
+  }
+
   .onboarding-header-inner {
     width: min(100% - 1.25rem, 1320px);
     grid-template-columns: auto 1fr auto;
@@ -1215,5 +1644,9 @@
 
   .onboarding-assistant-marquee > div {
     transform: none !important;
+  }
+
+  .onboarding-sync-dialog::backdrop {
+    animation: none !important;
   }
 }
