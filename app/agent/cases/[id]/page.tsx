@@ -99,6 +99,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           crmStage: c.crmStage,
           crmStages: pipeline?.stages ?? [],
           crmPipelineAvailable: Boolean(pipeline),
+          readOnly,
           objective: c.objective,
           productType: c.productType,
           carrier: c.carrier,

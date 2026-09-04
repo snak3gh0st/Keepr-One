@@ -47,9 +47,9 @@ vi.mock('@/lib/application-addon/entitlement-prisma', () => ({
 }))
 vi.mock('@/components/Shell', () => ({ Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
 vi.mock('./CaseWorkspace', () => ({
-  CaseWorkspace: ({ caseData }: { caseData: { crmStages: unknown[]; crmPipelineAvailable: boolean } }) => {
+  CaseWorkspace: ({ caseData }: { caseData: { crmStages: unknown[]; crmPipelineAvailable: boolean; readOnly: boolean } }) => {
     mocks.workspaceProps(caseData)
-    return <div data-testid="case-workspace">{caseData.crmPipelineAvailable ? 'configured' : 'not-configured'}</div>
+    return <div data-testid="case-workspace">{caseData.readOnly ? 'read-only' : caseData.crmPipelineAvailable ? 'configured' : 'not-configured'}</div>
   },
 }))
 vi.mock('next/navigation', () => ({ notFound: vi.fn() }))
@@ -100,10 +100,26 @@ describe('CaseDetailPage support preview', () => {
     expect(mocks.findPipelineForAgent).toHaveBeenCalledWith('agent-1')
     expect(mocks.getPipelineForAgent).not.toHaveBeenCalled()
     expect(mocks.workspaceProps).toHaveBeenCalledWith(expect.objectContaining({
-      crmStages: [], crmPipelineAvailable: false,
+      crmStages: [], crmPipelineAvailable: false, readOnly: true,
     }))
     expect(screen.getByRole('status')).toHaveTextContent('modo de suporte')
-    expect(screen.getByTestId('case-workspace')).toHaveTextContent('not-configured')
+    expect(screen.getByTestId('case-workspace')).toHaveTextContent('read-only')
+  })
+
+  it('passes read-only mode to a configured preview workspace so it cannot expose stage changes', async () => {
+    mocks.getCurrentSession.mockResolvedValue({
+      user: { id: 'user-1', role: 'AGENT' },
+      session: { id: 'preview-1', impersonatedBy: 'admin-1' },
+    })
+
+    render(await CaseDetailPage({ params: Promise.resolve({ id: 'case-1' }) }))
+
+    expect(mocks.findPipelineForAgent).toHaveBeenCalledWith('agent-1')
+    expect(mocks.getPipelineForAgent).not.toHaveBeenCalled()
+    expect(mocks.workspaceProps).toHaveBeenCalledWith(expect.objectContaining({
+      crmStages: pipeline.stages, crmPipelineAvailable: true, readOnly: true,
+    }))
+    expect(screen.getByTestId('case-workspace')).toHaveTextContent('read-only')
   })
 
   it('uses the normal pipeline reader outside support preview', async () => {
@@ -112,7 +128,7 @@ describe('CaseDetailPage support preview', () => {
     expect(mocks.getPipelineForAgent).toHaveBeenCalledWith('agent-1')
     expect(mocks.findPipelineForAgent).not.toHaveBeenCalled()
     expect(mocks.workspaceProps).toHaveBeenCalledWith(expect.objectContaining({
-      crmStages: pipeline.stages, crmPipelineAvailable: true,
+      crmStages: pipeline.stages, crmPipelineAvailable: true, readOnly: false,
     }))
   })
 })
