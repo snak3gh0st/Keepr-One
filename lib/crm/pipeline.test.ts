@@ -7,6 +7,8 @@ import {
   legacyCaseStateForCrmSystemKey,
   moveCaseToCrmStage,
   reorderCrmStages,
+  findPipelineForAgent,
+  getPipelineForAgent,
 } from './pipeline'
 
 describe('CRM and technical workflow consistency', () => {
@@ -62,6 +64,82 @@ describe('CRM and technical workflow consistency', () => {
     })
     expect(tx.insuranceCase.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: { crmStageId: 'application' } }))
     expect(tx.caseTimelineEvent.create).not.toHaveBeenCalled()
+  })
+
+  it('reads an existing pipeline without initializing stages or backfilling cases', async () => {
+    const findUnique = vi.fn(async () => ({
+      id: 'pipeline-1',
+      agentId: 'agent-1',
+      stages: [{
+        id: 'stage-1', name: 'Novo Lead', position: 0, systemKey: 'NEW_LEAD', active: true,
+        _count: { cases: 2 },
+      }],
+    }))
+    const db = {
+      crmPipeline: { findUnique, upsert: vi.fn() },
+      crmStage: { count: vi.fn(), createMany: vi.fn(), findFirst: vi.fn() },
+      insuranceCase: { updateMany: vi.fn() },
+      $transaction: vi.fn(),
+    }
+
+    await expect(findPipelineForAgent('agent-1', db as never)).resolves.toMatchObject({
+      id: 'pipeline-1', agentId: 'agent-1', stages: [{
+        id: 'stage-1', name: 'Novo Lead', position: 0, systemKey: 'NEW_LEAD', active: true, caseCount: 2,
+      }],
+    })
+
+    expect(db.$transaction).not.toHaveBeenCalled()
+    expect(db.crmPipeline.upsert).not.toHaveBeenCalled()
+    expect(db.crmStage.createMany).not.toHaveBeenCalled()
+    expect(db.insuranceCase.updateMany).not.toHaveBeenCalled()
+  })
+
+  it('returns null for a missing pipeline without creating it', async () => {
+    const db = {
+      crmPipeline: { findUnique: vi.fn(async () => null), upsert: vi.fn() },
+      crmStage: { count: vi.fn(), createMany: vi.fn(), findFirst: vi.fn() },
+      insuranceCase: { updateMany: vi.fn() },
+      $transaction: vi.fn(),
+    }
+
+    await expect(findPipelineForAgent('agent-1', db as never)).resolves.toBeNull()
+
+    expect(db.$transaction).not.toHaveBeenCalled()
+    expect(db.crmPipeline.upsert).not.toHaveBeenCalled()
+    expect(db.crmStage.createMany).not.toHaveBeenCalled()
+    expect(db.insuranceCase.updateMany).not.toHaveBeenCalled()
+  })
+
+  it('keeps normal pipeline reads lazily initializing a missing account', async () => {
+    const stage = {
+      id: 'stage-1', name: 'Novo Lead', position: 0, systemKey: 'NEW_LEAD', active: true,
+      _count: { cases: 0 },
+    }
+    const transaction = {
+      crmPipeline: { upsert: vi.fn(async () => ({ id: 'pipeline-1' })) },
+      crmStage: {
+        count: vi.fn(async () => 0),
+        createMany: vi.fn(async () => ({ count: 14 })),
+        findFirst: vi.fn(async () => ({ id: 'stage-1' })),
+      },
+      insuranceCase: { updateMany: vi.fn(async () => ({ count: 0 })) },
+    }
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'pipeline-1', agentId: 'agent-1', stages: [stage] })
+    const db = {
+      crmPipeline: { findUnique },
+      crmStage: transaction.crmStage,
+      insuranceCase: transaction.insuranceCase,
+      $transaction: vi.fn(async (operation) => operation(transaction)),
+    }
+
+    await expect(getPipelineForAgent('agent-1', db as never)).resolves.toMatchObject({ id: 'pipeline-1' })
+
+    expect(db.$transaction).toHaveBeenCalledOnce()
+    expect(transaction.crmPipeline.upsert).toHaveBeenCalledOnce()
+    expect(transaction.crmStage.createMany).toHaveBeenCalledOnce()
+    expect(transaction.insuranceCase.updateMany).toHaveBeenCalledOnce()
   })
 })
 

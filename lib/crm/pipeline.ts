@@ -312,6 +312,16 @@ export async function getPipelineForAgent(agentId: string, db: PipelineDb = pris
   return existing?.stages.length ? existing : ensureDefaultCrmPipeline(agentId, db)
 }
 
+/**
+ * Support-preview reads must never trigger the normal first-visit setup. This
+ * deliberately exposes only the existing projection and returns null when no
+ * local pipeline exists, without a transaction, stage creation, or case
+ * backfill.
+ */
+export async function findPipelineForAgent(agentId: string, db: PipelineDb = prisma) {
+  return pipelineView(db, agentId)
+}
+
 export async function listAgentPipelineStages(agentId: string, db: PipelineDb = prisma) {
   return (await getPipelineForAgent(agentId, db)).stages
 }

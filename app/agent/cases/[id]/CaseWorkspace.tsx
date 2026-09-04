@@ -75,6 +75,7 @@ type CaseData = {
   id: string;
   crmStage: Pick<CrmStageView, "id" | "name" | "systemKey"> | null;
   crmStages: CrmStageView[];
+  crmPipelineAvailable: boolean;
   objective: string | null;
   productType: string | null;
   carrier: string | null;
@@ -396,17 +397,19 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         eyebrow={copy("CRM · Oportunidade em andamento", "CRM · Opportunity in progress")}
         description={
           <div className="space-y-3">
-            <CrmStageSelect
-              caseId={c.id}
-              stage={c.crmStage}
-              stages={c.crmStages}
-              onChange={async (caseId, stageId) => {
-                const result = await moveCaseStageAction(caseId, stageId);
-                if (result.ok) router.refresh();
-                return result;
-              }}
-              onFollowUpRequired={setStageFollowUpId}
-            />
+            {c.crmPipelineAvailable && (
+              <CrmStageSelect
+                caseId={c.id}
+                stage={c.crmStage}
+                stages={c.crmStages}
+                onChange={async (caseId, stageId) => {
+                  const result = await moveCaseStageAction(caseId, stageId);
+                  if (result.ok) router.refresh();
+                  return result;
+                }}
+                onFollowUpRequired={setStageFollowUpId}
+              />
+            )}
             <p>
               {objectiveLabel[c.objective ?? ""] ?? "—"} · {productLabel[c.productType ?? ""] ?? c.productType ?? "—"} · {c.carrier ?? "—"}
             </p>

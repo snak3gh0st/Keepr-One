@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSessionCookie } from 'better-auth/cookies'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { isReadOnlySupportPreview } from '@/lib/support-preview'
 import {
   getPlatformModuleForPath,
   normalizePlatformModules,
@@ -63,6 +64,14 @@ function isSafeDuringPreview(request: NextRequest) {
   )
 }
 
+function privateLoginRedirect(request: NextRequest, loginPath: '/login' | '/admin/login') {
+  const destination = new URL(loginPath, request.url)
+  // pathname and search come from Next's parsed request URL, so this can only
+  // carry a same-origin path back through the login flow.
+  destination.searchParams.set('next', `${request.nextUrl.pathname}${request.nextUrl.search}`)
+  return NextResponse.redirect(destination)
+}
+
 export async function proxy(request: NextRequest) {
   const sessionCookie = getSessionCookie(request)
   const pathname = request.nextUrl.pathname
@@ -83,15 +92,26 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  const mustCheckPreview = sessionCookie && !isSafeDuringPreview(request)
-  const mustCheckModule = sessionCookie && requiredModule !== null
-  const session = mustCheckPreview || mustCheckModule
+  const mustCheckPreview = Boolean(sessionCookie) && !isSafeDuringPreview(request)
+  const mustCheckModule = Boolean(sessionCookie) && requiredModule !== null
+  // A present cookie is only a coarse hint. Every protected page validates it
+  // here so an expired/deleted Better Auth session takes the user back through
+  // login instead of surfacing a generic server authorization error later.
+  const mustCheckPrivateSession = Boolean(sessionCookie) && (requiresAdminSession || requiresUserSession)
+  const session = mustCheckPreview || mustCheckModule || mustCheckPrivateSession
     ? await auth.api.getSession({ headers: request.headers })
     : null
 
+  if (!session && sessionCookie && requiresAdminSession) {
+    return privateLoginRedirect(request, '/admin/login')
+  }
+
+  if (!session && sessionCookie && requiresUserSession) {
+    return privateLoginRedirect(request, '/login')
+  }
+
   if (mustCheckPreview) {
-    const impersonatedBy = (session?.session as { impersonatedBy?: unknown } | undefined)?.impersonatedBy
-    if (typeof impersonatedBy === 'string') {
+    if (isReadOnlySupportPreview(session)) {
       return NextResponse.json(
         {
           error: 'READ_ONLY_USER_PREVIEW',

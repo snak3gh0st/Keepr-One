@@ -72,6 +72,26 @@ describe('MessagingWorkspace', () => {
     )
   })
 
+  it('shows existing conversations without connection, send, or read-receipt writes during support preview', async () => {
+    render(<MessagingWorkspace channelMode="EVOLUTION" readOnly />)
+
+    expect((await screen.findAllByText('Ana Ribeiro')).length).toBeGreaterThan(0)
+    expect(await screen.findByText('Olá')).toBeInTheDocument()
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/agent/messaging/conversations/128/messages',
+      { cache: 'no-store' },
+    ))
+
+    const calls = vi.mocked(fetch).mock.calls
+    expect(calls.some(([url, init]) => (
+      String(url).endsWith('/read') && (init as RequestInit | undefined)?.method === 'POST'
+    ))).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Conectar canal' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Conectar agora' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Enviar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Mensagem' })).not.toBeInTheDocument()
+  })
+
   it('removes WhatsApp conversations from the workspace after disconnecting', async () => {
     render(<MessagingWorkspace channelMode="EVOLUTION" />)
 
