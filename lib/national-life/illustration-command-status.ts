@@ -45,11 +45,26 @@ export function latestIllustrationCommandStatus(
   return result
 }
 
-export async function getIllustrationCommandStatuses(agentId: string) {
+/**
+ * Status belongs to the illustrations visible on the current screen. Reading a
+ * fixed global tail made older valid illustrations look silent once more than
+ * 300 commands existed, so callers provide their scoped illustration IDs.
+ */
+export async function getIllustrationCommandStatuses(
+  agentId: string,
+  illustrationIds: readonly string[],
+) {
+  if (illustrationIds.length === 0) return new Map<string, IllustrationPdfStatus>()
   const commands = await prisma.nationalLifeConnectorCommand.findMany({
-    where: { agentId, capability: 'GENERATE_ILLUSTRATION' },
+    where: {
+      agentId,
+      capability: 'GENERATE_ILLUSTRATION',
+      AND: [
+        { target: { path: ['kind'], equals: 'ILLUSTRATION' } },
+        { OR: illustrationIds.map((id) => ({ target: { path: ['id'], equals: id } })) },
+      ],
+    },
     orderBy: { createdAt: 'desc' },
-    take: 300,
     select: { state: true, deviceId: true, target: true, safeErrorCode: true, expiresAt: true },
   })
   return latestIllustrationCommandStatus(commands)

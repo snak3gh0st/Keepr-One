@@ -9,22 +9,21 @@ import { ContextPanel } from '@/components/ContextPanel'
 import { ModuleSummary } from '@/components/ModuleSummary'
 import { ClientsList } from './ClientsList'
 import { getServerI18n } from '@/lib/i18n/server'
+import { parseClientDirectoryFilters, readClientDirectory } from '@/lib/crm/client-directory'
 
 export const dynamic = 'force-dynamic'
 
-export default async function ClientsPage() {
+export default async function ClientsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   const { copy } = await getServerI18n()
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
   const scopeAgentIds = await getAgentScopeIds(agent.id)
-
-  const clients = await prisma.client.findMany({
-    where: { assignedAgentId: { in: scopeAgentIds } },
-    include: { assignedAgent: { include: { user: true } } },
-    orderBy: { name: 'asc' },
-  })
-  const agentsWithClients = new Set(clients.map((client) => client.assignedAgentId)).size
-  const clientsWithEmail = clients.filter((client) => Boolean(client.email)).length
+  const filters = parseClientDirectoryFilters(await searchParams, scopeAgentIds)
+  const directory = await readClientDirectory(prisma, scopeAgentIds, filters)
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
@@ -38,30 +37,22 @@ export default async function ClientsPage() {
           <span className="text-success" aria-hidden>+</span>
           {copy("Novo atendimento", "New case")}
         </Link>
-        <span className="inline-flex rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal">{clients.length === 1 ? copy("1 cliente", "1 client") : copy("{count} clientes", "{count} clients", { count: clients.length })}</span>
+        <span className="inline-flex rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal">{directory.total === 1 ? copy("1 cliente", "1 client") : copy("{count} clientes", "{count} clients", { count: directory.total })}</span>
         </PageHeader>
       </div>
 
       <ModuleSummary
         label={copy("Resumo da base de clientes", "Client base summary")}
         items={[
-          { label: copy('Na base', 'In the base'), value: clients.length, detail: copy('Clientes dentro do seu escopo', 'Clients within your scope') },
-          { label: copy('Agentes responsáveis', 'Assigned agents'), value: agentsWithClients, detail: copy('Responsáveis pelos clientes no seu escopo', 'Agents responsible for clients in your scope'), tone: 'green' },
-          { label: copy('Com contato', 'With contact info'), value: clientsWithEmail, detail: copy('Cadastros com e-mail disponível', 'Records with an available email') },
+          { label: copy('Na base', 'In the base'), value: directory.summary.total, detail: copy('Clientes dentro do resultado filtrado', 'Clients in the filtered result') },
+          { label: copy('Agentes responsáveis', 'Assigned agents'), value: directory.summary.assignedAgents, detail: copy('Responsáveis pelos clientes no resultado', 'Owners in this result'), tone: 'green' },
+          { label: copy('Com contato', 'With contact info'), value: directory.summary.withEmail, detail: copy('Cadastros com e-mail disponível', 'Records with an available email') },
         ]}
       />
 
       <div className="module-content-grid">
         <section className="module-main-surface">
-          <ClientsList
-            clients={clients.map((c) => ({
-              id: c.id,
-              name: c.name,
-              email: c.email,
-              agentId: c.assignedAgentId,
-              agentName: c.assignedAgent.user.name,
-            }))}
-          />
+          <ClientsList {...directory} />
         </section>
         <ContextPanel eyebrow={copy("Continue por aqui", "Continue here")} title={copy("Relacionamento organizado", "Organized relationships")}>
           <p>{copy("Esta lista reúne os clientes que fazem parte do seu acesso atual.", "This list brings together the clients included in your current access.")}</p>

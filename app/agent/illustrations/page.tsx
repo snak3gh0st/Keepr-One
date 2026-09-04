@@ -15,6 +15,11 @@ import { getServerI18n } from '@/lib/i18n/server'
 import { localeFor } from '@/lib/i18n/config'
 import { KBotAvatar } from '@/components/kbot/KBotAvatar'
 import { StartApplicationFromIllustrationButton } from './StartApplicationFromIllustrationButton'
+import {
+  parseIllustrationDirectoryFilters,
+  readIllustrationDirectory,
+  type IllustrationDirectoryFilters,
+} from '@/lib/national-life/illustration-directory'
 
 const currency = (value: number, locale: string) =>
   new Intl.NumberFormat(locale, {
@@ -23,42 +28,39 @@ const currency = (value: number, locale: string) =>
     maximumFractionDigits: 0,
   }).format(value)
 
+function illustrationHref(
+  filters: IllustrationDirectoryFilters,
+  intent: string | undefined,
+  page = filters.page,
+) {
+  const params = new URLSearchParams()
+  if (intent === 'application') params.set('intent', 'application')
+  if (filters.query) params.set('q', filters.query)
+  if (filters.document) params.set('document', filters.document)
+  if (filters.sort !== 'recent') params.set('sort', filters.sort)
+  if (page > 1) params.set('page', String(page))
+  const query = params.toString()
+  return query ? `/agent/illustrations?${query}` : '/agent/illustrations'
+}
+
 export default async function IllustrationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ intent?: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { copy, language } = await getServerI18n()
   const locale = localeFor(language)
-  const { intent } = await searchParams
+  const params = await searchParams
+  const intent = Array.isArray(params.intent) ? params.intent[0] : params.intent
   const applicationIntent = intent === 'application'
   const agent = await getCurrentAgent()
   const localConnector = getNationalLifeLocalConnectorConfig()
-  const [user, illustrations, pdfStatus] = await Promise.all([
+  const filters = parseIllustrationDirectoryFilters(params)
+  const [user, directory] = await Promise.all([
     prisma.user.findUnique({ where: { id: agent.userId } }),
-    // Scoped to the agent who asked for them. A quote names an insured and a
-    // premium, and the only thing that says who may read it is who requested it.
-    prisma.illustration.findMany({
-      where: { agentId: agent.id },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-      select: {
-        id: true,
-        createdAt: true,
-        insuredName: true,
-        faceAmount: true,
-        premium: true,
-        targetPremium: true,
-        targetPremiumSource: true,
-        productName: true,
-        documentFetchedAt: true,
-        documentMimeType: true,
-        client: { select: { id: true, name: true } },
-      },
-    }),
-    // One query for the whole list, so every item can say where its render stands.
-    getIllustrationCommandStatuses(agent.id),
+    readIllustrationDirectory(prisma, agent.id, filters),
   ])
+  const pdfStatus = await getIllustrationCommandStatuses(agent.id, directory.items.map((illustration) => illustration.id))
   const instant = (value: Date) => new Intl.DateTimeFormat(locale, { dateStyle: 'short' }).format(value)
   const pdfMessage = (status: Parameters<typeof illustrationPdfMessage>[0]) => {
     if (language === 'PT') return illustrationPdfMessage(status)
@@ -161,6 +163,38 @@ export default async function IllustrationsPage({
         </section>
       ) : null}
 
+      <section className="mb-5 rounded-xl border border-border-steel bg-paper p-4" aria-label={copy('Filtros de ilustrações', 'Illustration filters')}>
+        <form action="/agent/illustrations" method="get" className="grid gap-3 md:grid-cols-4">
+          {applicationIntent && <input type="hidden" name="intent" value="application" />}
+          <label className="grid gap-1 text-sm text-ink-muted">
+            <span>{copy('Buscar segurado, cliente ou produto', 'Search insured, client, or product')}</span>
+            <input name="q" type="search" defaultValue={directory.filters.query} className="min-h-11 rounded-md border border-border-steel bg-paper px-3 text-ink" />
+          </label>
+          <label className="grid gap-1 text-sm text-ink-muted">
+            <span>{copy('Documento', 'Document')}</span>
+            <select name="document" defaultValue={directory.filters.document ?? ''} className="min-h-11 rounded-md border border-border-steel bg-paper px-3 text-ink">
+              <option value="">{copy('Todos', 'All')}</option>
+              <option value="ready">{copy('PDF disponível', 'PDF available')}</option>
+              <option value="pending">{copy('PDF pendente', 'PDF pending')}</option>
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm text-ink-muted">
+            <span>{copy('Ordenar', 'Sort')}</span>
+            <select name="sort" defaultValue={directory.filters.sort} className="min-h-11 rounded-md border border-border-steel bg-paper px-3 text-ink">
+              <option value="recent">{copy('Mais recentes', 'Most recent')}</option>
+              <option value="oldest">{copy('Mais antigas', 'Oldest')}</option>
+            </select>
+          </label>
+          <div className="flex items-end gap-3">
+            <button type="submit" className="min-h-11 rounded-md bg-rail-strong px-4 text-sm font-semibold text-paper">{copy('Aplicar', 'Apply')}</button>
+            {(directory.filters.query || directory.filters.document || directory.filters.sort !== 'recent') && <Link href={illustrationHref({ query: '', document: null, sort: 'recent', page: 1 }, intent)} className="text-sm font-semibold text-teal">{copy('Limpar', 'Clear')}</Link>}
+          </div>
+        </form>
+        <p className="mt-3 text-xs text-ink-muted" role="status">
+          {copy('{total} ilustrações · {ready} com PDF oficial', '{total} illustrations · {ready} with official PDF', { total: directory.total, ready: directory.summary.ready })}
+        </p>
+      </section>
+
       <section className="module-main-surface">
         <Table>
           <Thead>
@@ -176,7 +210,7 @@ export default async function IllustrationsPage({
             </tr>
           </Thead>
           <tbody>
-            {illustrations.map((illustration) => {
+            {directory.items.map((illustration) => {
               const status = pdfStatus.get(illustration.id)
               const hasCarrierPremium = Boolean(illustration.documentFetchedAt && illustration.premium)
               const premium = hasCarrierPremium ? illustration.premium : illustration.targetPremium
@@ -282,8 +316,17 @@ export default async function IllustrationsPage({
           </tbody>
         </Table>
 
-        {illustrations.length === 0 && (
+        {directory.total === 0 && (
             <EmptyState>{copy("Nenhuma ilustração oficial pedida ainda.", "No official illustrations have been requested yet.")}</EmptyState>
+        )}
+        {directory.pageCount > 1 && (
+          <nav aria-label={copy('Paginação das ilustrações', 'Illustration pagination')} className="mt-4 flex items-center justify-between gap-3 border-t border-border-steel pt-4">
+            {directory.page > 1 ? <Link href={illustrationHref(directory.filters, intent, directory.page - 1)}>{copy('Anterior', 'Previous')}</Link> : <span />}
+            <span className="font-mono text-xs text-ink-muted">
+              {copy('Página {page} de {pages}', 'Page {page} of {pages}', { page: directory.page, pages: directory.pageCount })}
+            </span>
+            {directory.page < directory.pageCount ? <Link href={illustrationHref(directory.filters, intent, directory.page + 1)}>{copy('Próxima', 'Next')}</Link> : <span />}
+          </nav>
         )}
       </section>
     </Shell>

@@ -1,8 +1,6 @@
-import { loadCurrentNationalLifePortfolio } from '@/lib/national-life/current-portfolio-prisma'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentScopeIds } from '@/lib/agent-access'
-import { decimalToNumber } from '@/lib/decimal'
 import Link from 'next/link'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
@@ -12,29 +10,25 @@ import { getServerI18n } from '@/lib/i18n/server'
 import { isNationalPolicyQueueKey } from '@/lib/national-life/policy-queues'
 import { loadNationalPolicyQueues } from '@/lib/national-life/policy-queues-prisma'
 import { NationalPolicyQueueTable, nationalPolicyQueueTitle } from './NationalPolicyQueueTable'
+import {
+  parsePolicyDirectoryFilters,
+  readCurrentPolicyDirectory,
+  readHistoryPolicyDirectory,
+  type PolicyDirectoryResult,
+} from '@/lib/national-life/policy-directory'
 
 export const dynamic = 'force-dynamic'
-
-const ALLOWED_STATUS_FILTERS = new Set([
-  'INFORCE',
-  'PENDING_LAPSE',
-  'APPROVED',
-  'PENDING',
-  'LAPSED',
-  'CANCELLED',
-])
 
 export default async function PoliciesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; queue?: string; view?: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { copy, language } = await getServerI18n()
-  const { status: requestedStatus, queue: requestedQueue, view } = await searchParams
-  const history = view === 'history'
-  const initialStatus = requestedStatus && ALLOWED_STATUS_FILTERS.has(requestedStatus)
-    ? requestedStatus
-    : 'all'
+  const params = await searchParams
+  const requestedQueue = Array.isArray(params.queue) ? params.queue[0] : params.queue
+  const filters = parsePolicyDirectoryFilters(params)
+  const history = filters.view === 'history'
   const agent = await getCurrentAgent()
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
   const scopeAgentIds = await getAgentScopeIds(agent.id)
@@ -64,45 +58,21 @@ export default async function PoliciesPage({
     )
   }
 
-  let policies: {
-    id: string | null
-    policyNumber: string
-    carrier: string
-    product: string
-    faceAmount: unknown
-    premium: unknown
-    status: string
-    sourceStatus: string | null
-    statusChangedAt: Date | null
-    sourceProvider: string | null
-    client?: { name: string } | null
-    clientName?: string
-  }[] = []
+  let directory: PolicyDirectoryResult | null = null
   let loadError = false
   let verified = true
 
   try {
     if (!history) {
-      const current = await loadCurrentNationalLifePortfolio(prisma, scopeAgentIds)
-      policies = current.rows
-      verified = current.verified
-    } else policies = await prisma.policy.findMany({
-      where: { agentId: { in: scopeAgentIds } },
-      include: { client: true },
-      orderBy: [
-        { statusChangedAt: { sort: 'desc', nulls: 'last' } },
-        { createdAt: 'desc' },
-      ],
-    })
+      directory = await readCurrentPolicyDirectory(prisma, scopeAgentIds, filters)
+    } else {
+      directory = await readHistoryPolicyDirectory(prisma, scopeAgentIds, filters)
+    }
+    verified = directory.verified
   } catch (error) {
     console.error('Policies query error', error)
     loadError = true
   }
-  // Current export rows distinguish an explicit zero from missing (null).
-  // Historical CRM imports can use zero as an absent-carrier-value placeholder.
-  const premiumIsKnown = (policy: { premium: unknown; sourceProvider: string | null }) =>
-    policy.premium !== null && (!history || policy.sourceProvider === null || decimalToNumber(policy.premium) > 0)
-
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <PageHeader title={history ? copy("Histórico de apólices", "Policy history") : copy("Apólices atuais", "Current policies")} eyebrow={copy("Proteção em curso", "Protection in force")} description={copy("Vigência, prêmio e sinais de atenção organizados para cuidar da carteira antes do próximo ciclo.", "Coverage dates, premiums, and attention signals organized so you can care for the portfolio before the next cycle.")}>
@@ -132,21 +102,7 @@ export default async function PoliciesPage({
       )}
 
       {!loadError && (
-        <PoliciesList
-          policies={policies.map((p) => ({
-            id: p.id,
-            policyNumber: p.policyNumber,
-            carrier: p.carrier,
-            product: p.product,
-            faceAmount: p.faceAmount == null ? null : decimalToNumber(p.faceAmount).toFixed(2),
-            premium: premiumIsKnown(p) ? decimalToNumber(p.premium).toFixed(2) : null,
-            status: p.status,
-            sourceStatus: p.sourceStatus,
-            statusChangedAt: p.statusChangedAt?.toISOString() ?? null,
-            clientName: p.clientName ?? p.client?.name ?? '—',
-          }))}
-          initialStatus={initialStatus}
-        />
+        directory && <PoliciesList {...directory} />
       )}
     </Shell>
   )
