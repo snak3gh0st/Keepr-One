@@ -120,6 +120,37 @@ export class LocalConnectorStageCompletionError extends Error {
   }
 }
 
+function isMissingRecordError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2025'
+}
+
+/**
+ * Atomically advances a run only while it is still active.
+ *
+ * Reading RUNNING earlier in an interactive transaction is not enough under
+ * READ COMMITTED: a cancellation may commit while the stage is persisting its
+ * rows. Keeping `state: RUNNING` in the unique update turns the final write into
+ * a compare-and-set. If cancellation won, Prisma raises P2025 and the enclosing
+ * transaction rolls every stage write back instead of reopening the run.
+ */
+async function updateRunningRun(
+  tx: Prisma.TransactionClient,
+  runId: string,
+  data: Prisma.NationalLifeSyncRunUpdateManyMutationInput,
+) {
+  try {
+    return await tx.nationalLifeSyncRun.update({
+      where: { id: runId, state: 'RUNNING' },
+      data,
+    })
+  } catch (error) {
+    if (isMissingRecordError(error)) {
+      throw new LocalConnectorRunError('RUN_NOT_ACTIVE')
+    }
+    throw error
+  }
+}
+
 /// The server's own answer to "which grids does this run cover".
 ///
 /// An empty column means the run predates it, and such a run could only have
@@ -631,17 +662,14 @@ export async function failLocalConnectorStage(
       failures.map((row) => row.gridKey),
     )
     const terminal = nextStageIndex === planned.length
-    await tx.nationalLifeSyncRun.update({
-      where: { id: run.id },
-      data: {
-        state: terminal ? 'PARTIAL' : 'RUNNING',
-        completedStages,
-        failedStages,
-        currentGridKey: terminal ? null : planned[nextStageIndex] ?? null,
-        safeErrorCode: terminal ? 'SOURCE_PARTIAL_FAILURE' : null,
-        completedAt: terminal ? now : null,
-        updatedAt: now,
-      },
+    await updateRunningRun(tx, run.id, {
+      state: terminal ? 'PARTIAL' : 'RUNNING',
+      completedStages,
+      failedStages,
+      currentGridKey: terminal ? null : planned[nextStageIndex] ?? null,
+      safeErrorCode: terminal ? 'SOURCE_PARTIAL_FAILURE' : null,
+      completedAt: terminal ? now : null,
+      updatedAt: now,
     })
     return {
       runId: run.id,
@@ -1108,23 +1136,21 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
           finalizedGrids.some((row) => row.gridKey === gridKey),
         ).length
         const completed = completedStages === planned.length
-        await tx.nationalLifeSyncRun.update({
-          where: { id: run.id },
-          data: {
-            state: completed ? 'COMPLETED' : 'RUNNING',
-            completedStages,
-            currentGridKey: completed ? null : input.gridKey,
-            completedAt: completed ? now : null,
-            updatedAt: now,
-          },
+        await updateRunningRun(tx, run.id, {
+          state: completed ? 'COMPLETED' : 'RUNNING',
+          completedStages,
+          currentGridKey: completed ? null : input.gridKey,
+          completedAt: completed ? now : null,
+          updatedAt: now,
         })
       } else {
         // A page receipt is deliberately not a stage completion. The extension
         // must upload every sequence and then call completeLocalConnectorStage,
         // which reconciles this durable receipt set with the carrier total.
-        await tx.nationalLifeSyncRun.update({
-          where: { id: run.id },
-          data: { state: 'RUNNING', currentGridKey: input.gridKey, updatedAt: now },
+        await updateRunningRun(tx, run.id, {
+          state: 'RUNNING',
+          currentGridKey: input.gridKey,
+          updatedAt: now,
         })
       }
       return { receipt: created, duplicate: false as const }
@@ -1351,17 +1377,14 @@ export async function completeLocalConnectorStage(
     )
     const terminal = nextStageIndex === planned.length
     const completed = terminal && failedGrids.length === 0
-    await tx.nationalLifeSyncRun.update({
-      where: { id: run.id },
-      data: {
-        state: completed ? 'COMPLETED' : terminal ? 'PARTIAL' : 'RUNNING',
-        completedStages,
-        failedStages: failedGrids.length,
-        currentGridKey: terminal ? null : planned[nextStageIndex] ?? input.gridKey,
-        safeErrorCode: terminal && !completed ? 'SOURCE_PARTIAL_FAILURE' : null,
-        completedAt: terminal ? now : null,
-        updatedAt: now,
-      },
+    await updateRunningRun(tx, run.id, {
+      state: completed ? 'COMPLETED' : terminal ? 'PARTIAL' : 'RUNNING',
+      completedStages,
+      failedStages: failedGrids.length,
+      currentGridKey: terminal ? null : planned[nextStageIndex] ?? input.gridKey,
+      safeErrorCode: terminal && !completed ? 'SOURCE_PARTIAL_FAILURE' : null,
+      completedAt: terminal ? now : null,
+      updatedAt: now,
     })
     return {
       runId: run.id,

@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
   userUpdate: vi.fn(),
   agentUpdate: vi.fn(),
   invitationUpdateMany: vi.fn(),
+  syncRunUpdateManyAndReturn: vi.fn(),
+  syncRunFindMany: vi.fn(),
+  exportUploadUpdateMany: vi.fn(),
+  notificationUpdateMany: vi.fn(),
   auditCreate: vi.fn(),
   detectIntegrations: vi.fn(),
   getRequiredModules: vi.fn(),
@@ -53,6 +57,7 @@ import {
   saveOnboardingProfileAction,
   setCalendarOnboardingDecisionAction,
   setWhatsAppOnboardingDecisionAction,
+  skipNationalLifeOnboardingAction,
   verifyNationalLifeOnboardingAction,
 } from './actions'
 import { INITIAL_ONBOARDING_ACTION_STATE } from './state'
@@ -73,6 +78,7 @@ function onboarding(
     profileCompletedAt: null,
     nationalLifeVerifiedAt: null,
     nationalLifeVerificationSource: null,
+    nationalLifeSkippedAt: null,
     calendarDecision: null,
     calendarDecidedAt: null,
     whatsappDecision: null,
@@ -100,6 +106,12 @@ const transactionClient = {
   user: { update: mocks.userUpdate },
   agent: { update: mocks.agentUpdate },
   agencyInvitation: { updateMany: mocks.invitationUpdateMany },
+  nationalLifeSyncRun: {
+    updateManyAndReturn: mocks.syncRunUpdateManyAndReturn,
+    findMany: mocks.syncRunFindMany,
+  },
+  nationalLifeExportUpload: { updateMany: mocks.exportUploadUpdateMany },
+  notification: { updateMany: mocks.notificationUpdateMany },
   auditLog: { create: mocks.auditCreate },
 }
 
@@ -138,6 +150,10 @@ beforeEach(() => {
   })
   mocks.getRequiredModules.mockResolvedValue([...requiredModules])
   mocks.invitationUpdateMany.mockResolvedValue({ count: 0 })
+  mocks.syncRunUpdateManyAndReturn.mockResolvedValue([])
+  mocks.syncRunFindMany.mockResolvedValue([])
+  mocks.exportUploadUpdateMany.mockResolvedValue({ count: 0 })
+  mocks.notificationUpdateMany.mockResolvedValue({ count: 0 })
   mocks.headers.mockResolvedValue(new Headers())
   mocks.redirect.mockImplementation(() => {
     throw new Error('NEXT_REDIRECT')
@@ -331,6 +347,192 @@ describe('onboarding server actions', () => {
     expect(mocks.onboardingUpdate).not.toHaveBeenCalled()
   })
 
+  it('records a National Life skip without manufacturing sync evidence', async () => {
+    current = onboarding({
+      currentStep: 'NATIONAL_LIFE',
+      welcomeCompletedAt: now,
+      profileCompletedAt: now,
+    })
+
+    const result = await skipNationalLifeOnboardingAction(
+      INITIAL_ONBOARDING_ACTION_STATE,
+      new FormData(),
+    )
+
+    expect(result).toMatchObject({
+      status: 'success',
+      onboarding: {
+        currentStep: 'CALENDAR',
+        nationalLifeSkippedAt: now.toISOString(),
+        nationalLifeVerifiedAt: null,
+        nationalLifeVerificationSource: null,
+      },
+    })
+    expect(mocks.onboardingUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'onboarding-1' },
+      data: {
+        nationalLifeSkippedAt: now,
+        currentStep: 'CALENDAR',
+      },
+    }))
+    expect(mocks.syncRunUpdateManyAndReturn).toHaveBeenCalledWith({
+      where: {
+        agentId: 'agent-1',
+        provider: 'NATIONAL_LIFE',
+        deploymentScope: 'LOCAL_CONNECTOR',
+        executionSource: 'LOCAL',
+        state: { in: ['QUEUED', 'RUNNING', 'PAUSED'] },
+      },
+      data: {
+        state: 'FAILED',
+        safeErrorCode: 'USER_CANCELLED',
+        currentGridKey: null,
+        authRequiredAt: null,
+        completedAt: now,
+        updatedAt: now,
+      },
+      select: { id: true },
+    })
+    expect(mocks.syncRunFindMany).toHaveBeenCalledWith({
+      where: {
+        agentId: 'agent-1',
+        provider: 'NATIONAL_LIFE',
+        deploymentScope: 'LOCAL_CONNECTOR',
+        executionSource: 'LOCAL',
+        state: { in: ['FAILED', 'PARTIAL'] },
+        authState: { not: 'READY' },
+      },
+      select: { id: true },
+    })
+    expect(mocks.exportUploadUpdateMany).not.toHaveBeenCalled()
+    expect(mocks.notificationUpdateMany).not.toHaveBeenCalled()
+    expect(mocks.auditCreate).toHaveBeenCalledWith({
+      data: {
+        userId: 'user-1',
+        action: 'AGENT_ONBOARDING_NATIONAL_LIFE_SKIPPED',
+        entity: 'AgentOnboarding',
+        entityId: 'onboarding-1',
+        after: {
+          skippedAt: now.toISOString(),
+          currentStep: 'CALENDAR',
+          cancelledRuns: 0,
+          cancelledUploads: 0,
+          resolvedAuthNotifications: 0,
+        },
+      },
+    })
+  })
+
+  it('fails incomplete export uploads belonging to runs canceled by the skip', async () => {
+    current = onboarding({
+      currentStep: 'NATIONAL_LIFE',
+      welcomeCompletedAt: now,
+      profileCompletedAt: now,
+    })
+    mocks.syncRunUpdateManyAndReturn.mockResolvedValue([
+      { id: 'run-1' },
+      { id: 'run-2' },
+    ])
+    mocks.exportUploadUpdateMany.mockResolvedValue({ count: 2 })
+    mocks.notificationUpdateMany.mockResolvedValue({ count: 3 })
+
+    const result = await skipNationalLifeOnboardingAction(
+      INITIAL_ONBOARDING_ACTION_STATE,
+      new FormData(),
+    )
+
+    expect(result.status).toBe('success')
+    expect(mocks.exportUploadUpdateMany).toHaveBeenCalledWith({
+      where: {
+        agentId: 'agent-1',
+        runId: { in: ['run-1', 'run-2'] },
+        state: 'UPLOADING',
+      },
+      data: {
+        state: 'FAILED',
+        safeErrorCode: 'USER_CANCELLED',
+        completedAt: now,
+        updatedAt: now,
+      },
+    })
+    expect(mocks.notificationUpdateMany).toHaveBeenCalledWith({
+      where: {
+        recipientUserId: 'user-1',
+        readAt: null,
+        OR: [
+          { dedupeKey: 'national-life-login-required:run-1' },
+          { dedupeKey: { startsWith: 'national-life-mfa-required:run-1:' } },
+          { dedupeKey: 'national-life-login-required:run-2' },
+          { dedupeKey: { startsWith: 'national-life-mfa-required:run-2:' } },
+        ],
+      },
+      data: { readAt: now },
+    })
+    expect(mocks.auditCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        after: expect.objectContaining({
+          cancelledRuns: 2,
+          cancelledUploads: 2,
+          resolvedAuthNotifications: 3,
+        }),
+      }),
+    }))
+  })
+
+  it('resolves a stale auth warning when the sync failed before the user skipped', async () => {
+    current = onboarding({
+      currentStep: 'NATIONAL_LIFE',
+      welcomeCompletedAt: now,
+      profileCompletedAt: now,
+    })
+    mocks.syncRunFindMany.mockResolvedValue([{ id: 'run-already-failed' }])
+    mocks.notificationUpdateMany.mockResolvedValue({ count: 1 })
+
+    const result = await skipNationalLifeOnboardingAction(
+      INITIAL_ONBOARDING_ACTION_STATE,
+      new FormData(),
+    )
+
+    expect(result.status).toBe('success')
+    expect(mocks.exportUploadUpdateMany).not.toHaveBeenCalled()
+    expect(mocks.notificationUpdateMany).toHaveBeenCalledWith({
+      where: {
+        recipientUserId: 'user-1',
+        readAt: null,
+        OR: [
+          { dedupeKey: 'national-life-login-required:run-already-failed' },
+          { dedupeKey: { startsWith: 'national-life-mfa-required:run-already-failed:' } },
+        ],
+      },
+      data: { readAt: now },
+    })
+    expect(mocks.auditCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        after: expect.objectContaining({ resolvedAuthNotifications: 1 }),
+      }),
+    }))
+  })
+
+  it('rejects a National Life skip after the onboarding has advanced', async () => {
+    current = onboarding({
+      currentStep: 'CALENDAR',
+      welcomeCompletedAt: now,
+      profileCompletedAt: now,
+      nationalLifeSkippedAt: now,
+    })
+
+    const result = await skipNationalLifeOnboardingAction(
+      INITIAL_ONBOARDING_ACTION_STATE,
+      new FormData(),
+    )
+
+    expect(result).toEqual({
+      status: 'error',
+      message: 'Conclua a etapa atual antes de continuar.',
+    })
+    expect(mocks.onboardingUpdate).not.toHaveBeenCalled()
+  })
+
   it('rejects optional CONNECTED without durable provider state', async () => {
     current = onboarding({
       currentStep: 'CALENDAR',
@@ -480,6 +682,36 @@ describe('onboarding server actions', () => {
       },
     })
     expect(mocks.redirect).toHaveBeenCalledWith('/agent?onboarding=completed')
+  })
+
+  it('finishes onboarding after National Life was explicitly skipped', async () => {
+    current = onboarding({
+      currentStep: 'WHATSAPP',
+      welcomeCompletedAt: now,
+      profileCompletedAt: now,
+      nationalLifeSkippedAt: now,
+      calendarDecision: 'SKIPPED',
+      calendarDecidedAt: now,
+    })
+
+    await expect(setWhatsAppOnboardingDecisionAction(
+      INITIAL_ONBOARDING_ACTION_STATE,
+      form({ decision: 'SKIPPED' }),
+    )).rejects.toThrow('NEXT_REDIRECT')
+
+    expect(mocks.onboardingUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        nationalLifeSkippedAt: now,
+        status: 'COMPLETED',
+        currentStep: 'COMPLETED',
+      }),
+    }))
+    expect(mocks.auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'AGENT_ONBOARDING_COMPLETED',
+        after: expect.objectContaining({ nationalLifeOutcome: 'SKIPPED' }),
+      }),
+    })
   })
 
   it('keeps the completion action compatible with legacy MODULES and REVIEW rows', async () => {

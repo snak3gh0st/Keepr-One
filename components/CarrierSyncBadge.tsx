@@ -43,6 +43,7 @@ type BadgeResponse = {
   sync?: CompactSyncStatus | null
   illustration?: IllustrationActivity | null
   application?: ApplicationActivity | null
+  nationalLifeSetupRequired?: boolean
   connector?: {
     enabled: boolean
     extensionTarget?: string | null
@@ -66,9 +67,13 @@ type Notice = {
 export function CarrierSyncBadge({
   separated = false,
   welcome = false,
+  canAccessNationalLife = true,
+  canAccessIllustrations = true,
 }: {
   separated?: boolean
   welcome?: boolean
+  canAccessNationalLife?: boolean
+  canAccessIllustrations?: boolean
 }) {
   const { copy } = useI18n()
   const quickActions = useMemo<KBotAction[]>(() => [
@@ -77,29 +82,29 @@ export function CarrierSyncBadge({
       label: copy('Follow-up de clientes', 'Customer follow-up'),
       detail: copy('Atendimento manual, ações com IA e resultados', 'Manual contact, AI actions and results'),
     },
-    {
+    ...(canAccessNationalLife ? [{
       href: '/agent/integrations/national-life',
       badge: 'NL',
       label: copy('Sincronizar National Life', 'Sync National Life'),
       detail: copy('Atualize os dados da operadora neste navegador', 'Update your carrier data in this browser'),
-    },
-    {
+    }] : []),
+    ...(canAccessIllustrations ? [{
       href: '/agent/illustrations/new',
       badge: 'PDF',
       label: copy('Criar ilustração', 'Create Illustration'),
       detail: copy('Prepare uma ilustração oficial de Term ou IUL', 'Prepare a Term or IUL official illustration'),
-    },
-    {
+    }, {
       href: '/agent/illustrations?intent=application',
       badge: 'iGO',
       label: copy('Criar aplicação no iGO', 'Create Application in iGO'),
       detail: copy('Escolha a ilustração oficial que iniciará a aplicação', 'Choose the official illustration that will start the Application'),
-    },
-  ], [copy])
+    }] : []),
+  ], [canAccessIllustrations, canAccessNationalLife, copy])
   const [state, setState] = useState<CarrierSyncState | null>(null)
   const [sync, setSync] = useState<CompactSyncStatus | null>(null)
   const [illustration, setIllustration] = useState<IllustrationActivity | null>(null)
   const [application, setApplication] = useState<ApplicationActivity | null>(null)
+  const [nationalLifeSetupRequired, setNationalLifeSetupRequired] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [welcomeDismissed, setWelcomeDismissed] = useState(false)
   const showWelcome = welcome && !welcomeDismissed
@@ -176,6 +181,7 @@ export function CarrierSyncBadge({
     setSync(nextSync?.shouldPoll ? nextSync : null)
     setIllustration(nextIllustration)
     setApplication(nextApplication)
+    setNationalLifeSetupRequired(Boolean(body.nationalLifeSetupRequired))
     if ('connector' in body) {
       setExtensionTarget(body.connector?.enabled ? body.connector.extensionTarget ?? null : null)
       setAutoLoginEnabled(Boolean(body.connector?.enabled && body.connector.autoLoginEnabled))
@@ -392,6 +398,7 @@ export function CarrierSyncBadge({
     let actionHref = '/agent/integrations/national-life'
     let actionLabel = copy('Abrir K-Bot', 'Open K-Bot')
     let activityMode: KBotActivityMode = 'idle'
+    let persistentAnnouncement: string | null = null
 
     if (showWelcome) {
       botState = 'success'
@@ -480,6 +487,36 @@ export function CarrierSyncBadge({
       actionHref = `/agent/illustrations/${illustration.id}`
       actionLabel = copy('Ver ilustração', 'View illustration')
       activityMode = 'illustration'
+    } else if (state?.kind === 'WORKING') {
+      botState = 'working'
+      title = copy('Estou organizando seus dados da National Life', 'I am organizing your National Life data')
+      detail = state.count === 1
+        ? copy('1 item está a caminho.', '1 item is on the way.')
+        : copy('{count} itens estão a caminho.', '{count} items are on the way.', { count: state.count })
+      actionLabel = copy('Ver atividade', 'View activity')
+      activityMode = 'sync'
+    } else if (nationalLifeSetupRequired) {
+      botState = 'waiting'
+      title = copy('Seus dados ainda não estão completos', 'Your data is not complete yet')
+      detail = canAccessNationalLife
+        ? copy(
+            'Seu painel está liberado. Conecte a National Life quando puder e eu organizo sua carteira, comissões e pendências em um só lugar.',
+            'Your dashboard is ready. Connect National Life when you can and I will organize your book, commissions, and pending work in one place.',
+          )
+        : copy(
+            'Seu painel está liberado. Assim que o acesso à National Life for habilitado, eu organizo sua carteira, comissões e pendências em um só lugar.',
+            'Your dashboard is ready. As soon as National Life access is enabled, I will organize your book, commissions, and pending work in one place.',
+          )
+      actionLabel = copy('Completar meus dados', 'Complete my data')
+      persistentAnnouncement = canAccessNationalLife
+        ? copy(
+            'Quando você conectar a National Life, eu completo e organizo seus dados por aqui.',
+            'When you connect National Life, I will complete and organize your data here.',
+          )
+        : copy(
+            'Quando o acesso à National Life estiver disponível, eu ajudo você a completar seus dados.',
+            'When National Life access becomes available, I will help you complete your data.',
+          )
     } else if (browserConnectorState === 'missing') {
       botState = 'error'
       title = copy('O K-Bot não está disponível neste navegador', 'K-Bot is not available in this browser')
@@ -500,14 +537,6 @@ export function CarrierSyncBadge({
     } else if (browserConnectorState === 'checking') {
       title = copy('Estou verificando este navegador', 'I am checking this browser')
       detail = copy('Estarei pronto em instantes.', 'I will be ready in a moment.')
-    } else if (state?.kind === 'WORKING') {
-      botState = 'working'
-      title = copy('Estou organizando seus dados da National Life', 'I am organizing your National Life data')
-      detail = state.count === 1
-        ? copy('1 item está a caminho.', '1 item is on the way.')
-        : copy('{count} itens estão a caminho.', '{count} items are on the way.', { count: state.count })
-      actionLabel = copy('Ver atividade', 'View activity')
-      activityMode = 'sync'
     }
 
     return (
@@ -515,7 +544,9 @@ export function CarrierSyncBadge({
         state={botState}
         title={title}
         detail={detail}
-        actionHref={actionHref}
+        actionHref={!canAccessNationalLife && actionHref === '/agent/integrations/national-life'
+          ? null
+          : actionHref}
         actionLabel={actionLabel}
         activity={activityMode}
         progress={syncProgress}
@@ -532,7 +563,7 @@ export function CarrierSyncBadge({
         quickActions={quickActions}
         announcement={showWelcome
           ? copy('Tudo pronto. Que bom ter você aqui.', 'All set. It is great to have you here.')
-          : notice?.message}
+          : notice?.message ?? persistentAnnouncement}
       />
     )
   })()

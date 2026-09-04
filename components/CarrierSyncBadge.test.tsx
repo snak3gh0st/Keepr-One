@@ -241,6 +241,69 @@ describe('CarrierSyncBadge', () => {
     expect(screen.getByRole('button', { name: 'View K-Bot activity' })).toBeTruthy()
   })
 
+  it('keeps an actionable National Life reminder after onboarding was skipped', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        state: { kind: 'IN_SYNC' },
+        nationalLifeSetupRequired: true,
+        connector: { enabled: true, extensionTarget: 'abcdefghijklmnopabcdefghijklmnop' },
+      }),
+    })))
+
+    render(<CarrierSyncBadge />)
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('K-Bot status')).toHaveAttribute('data-state', 'waiting'),
+    )
+    const presence = screen.getByLabelText('K-Bot status')
+    expect(presence).toHaveTextContent('Your data is not complete yet')
+    expect(screen.getByRole('status', { name: 'K-Bot update' })).toHaveTextContent(
+      'When you connect National Life, I will complete and organize your data here.',
+    )
+    expect(screen.getByRole('link', { name: 'Complete my data' })).toHaveAttribute(
+      'href',
+      '/agent/integrations/national-life',
+    )
+  })
+
+  it('keeps active work above the persistent National Life reminder', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        state: { kind: 'IN_SYNC' },
+        nationalLifeSetupRequired: true,
+        sync: { runId: 'run-1', state: 'RUNNING', completed: 3, total: 9, shouldPoll: true },
+      }),
+    })))
+
+    render(<CarrierSyncBadge />)
+
+    expect(await screen.findByText('Updating 3/9')).toBeTruthy()
+    const presence = screen.getByLabelText('K-Bot status')
+    expect(presence).toHaveTextContent('I am updating your National Life data')
+    expect(presence).not.toHaveTextContent('Your data is not complete yet')
+    expect(screen.queryByRole('status', { name: 'K-Bot update' })).toBeNull()
+  })
+
+  it('keeps queued carrier work above the persistent National Life reminder', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        state: { kind: 'WORKING', count: 2 },
+        nationalLifeSetupRequired: true,
+        connector: { enabled: true, extensionTarget: 'abcdefghijklmnopabcdefghijklmnop' },
+      }),
+    })))
+
+    render(<CarrierSyncBadge />)
+
+    expect(await screen.findByText('2 on the way')).toBeTruthy()
+    const presence = screen.getByLabelText('K-Bot status')
+    expect(presence).toHaveTextContent('I am organizing your National Life data')
+    expect(presence).not.toHaveTextContent('Your data is not complete yet')
+  })
+
   it('starts Application selection from official Illustrations, not unrelated cases', async () => {
     answerWith({ kind: 'IN_SYNC' })
     render(<CarrierSyncBadge />)
@@ -252,6 +315,18 @@ describe('CarrierSyncBadge', () => {
       'href',
       '/agent/illustrations?intent=application',
     )
+  })
+
+  it('does not offer Illustration or iGO shortcuts without the module grant', async () => {
+    answerWith({ kind: 'IN_SYNC' })
+    render(<CarrierSyncBadge canAccessIllustrations={false} />)
+    await screen.findByText('Up to date')
+
+    await userEvent.click(screen.getByRole('button', { name: 'View K-Bot activity' }))
+
+    expect(screen.queryByRole('link', { name: /Create Illustration/i })).toBeNull()
+    expect(screen.queryByRole('link', { name: /Create Application in iGO/i })).toBeNull()
+    expect(screen.getByRole('link', { name: /Sync National Life/i })).toBeInTheDocument()
   })
 
   it('keeps K-Bot visible and sad on every page when this browser is disconnected', async () => {

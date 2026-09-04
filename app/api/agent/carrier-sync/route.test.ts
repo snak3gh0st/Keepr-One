@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   sanitizeStatus: vi.fn(),
   commandFindFirst: vi.fn(),
   credentialFindUnique: vi.fn(),
+  onboardingFindUnique: vi.fn(),
+  hasVerifiedNationalLifeSync: vi.fn(),
   illustrationFindFirst: vi.fn(),
   applicationFindFirst: vi.fn(),
 }))
@@ -19,6 +21,7 @@ vi.mock('@/lib/prisma', () => ({
     browserAutomationJob: { count: mocks.count },
     nationalLifeConnectorCommand: { findFirst: mocks.commandFindFirst },
     agentIntegrationCredential: { findUnique: mocks.credentialFindUnique },
+    agentOnboarding: { findUnique: mocks.onboardingFindUnique },
     illustration: { findFirst: mocks.illustrationFindFirst },
     application: { findFirst: mocks.applicationFindFirst },
   },
@@ -32,6 +35,9 @@ vi.mock('@/lib/national-life/sync-run-service', () => ({
 }))
 vi.mock('@/lib/national-life/plan-access', () => ({
   sanitizeNationalLifeSyncStatusForAgent: mocks.sanitizeStatus,
+}))
+vi.mock('@/lib/agent-onboarding', () => ({
+  hasVerifiedNationalLifeSyncForAgent: mocks.hasVerifiedNationalLifeSync,
 }))
 
 import { GET } from './route'
@@ -51,6 +57,8 @@ beforeEach(() => {
   mocks.illustrationFindFirst.mockResolvedValue(null)
   mocks.applicationFindFirst.mockResolvedValue(null)
   mocks.credentialFindUnique.mockResolvedValue(null)
+  mocks.onboardingFindUnique.mockResolvedValue(null)
+  mocks.hasVerifiedNationalLifeSync.mockResolvedValue(false)
 })
 
 describe('carrier sync badge route', () => {
@@ -182,6 +190,37 @@ describe('carrier sync badge route', () => {
     })
   })
 
+  it('asks K-Bot to keep reminding an agent who explicitly skipped National Life', async () => {
+    mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0)
+    mocks.onboardingFindUnique.mockResolvedValue({
+      nationalLifeSkippedAt: new Date('2026-09-04T12:00:00.000Z'),
+    })
+
+    const response = await GET()
+
+    await expect(response.json()).resolves.toEqual({
+      state: { kind: 'IN_SYNC' },
+      connector,
+      nationalLifeSetupRequired: true,
+    })
+    expect(mocks.hasVerifiedNationalLifeSync).toHaveBeenCalledWith('agent-1')
+  })
+
+  it('clears the reminder after a canonical National Life sync is verified', async () => {
+    mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0)
+    mocks.onboardingFindUnique.mockResolvedValue({
+      nationalLifeSkippedAt: new Date('2026-09-04T12:00:00.000Z'),
+    })
+    mocks.hasVerifiedNationalLifeSync.mockResolvedValue(true)
+
+    const response = await GET()
+
+    await expect(response.json()).resolves.toEqual({
+      state: { kind: 'IN_SYNC' },
+      connector,
+    })
+  })
+
   it('calls an illustration ready only after its official PDF is persisted', async () => {
     mocks.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0)
     mocks.commandFindFirst.mockResolvedValue({
@@ -231,11 +270,28 @@ describe('carrier sync badge route', () => {
 
     const response = await GET()
 
-    expect(mocks.getCurrentAgent).not.toHaveBeenCalled()
+    expect(mocks.getCurrentAgent).toHaveBeenCalledOnce()
     expect(mocks.count).not.toHaveBeenCalled()
     await expect(response.json()).resolves.toEqual({
       state: null,
       connector: { enabled: false, extensionTarget: null },
+    })
+  })
+
+  it('keeps the setup reminder visible when the connector is not configured yet', async () => {
+    mocks.localConnectorConfig.mockReturnValue({ enabled: false })
+    mocks.onboardingFindUnique.mockResolvedValue({
+      nationalLifeSkippedAt: new Date('2026-09-04T12:00:00.000Z'),
+    })
+
+    const response = await GET()
+
+    expect(mocks.count).not.toHaveBeenCalled()
+    expect(mocks.hasVerifiedNationalLifeSync).toHaveBeenCalledWith('agent-1')
+    await expect(response.json()).resolves.toEqual({
+      state: null,
+      connector: { enabled: false, extensionTarget: null },
+      nationalLifeSetupRequired: true,
     })
   })
 

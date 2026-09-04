@@ -819,6 +819,7 @@ model AgentOnboarding {
   profileCompletedAt             DateTime?
   nationalLifeVerifiedAt         DateTime?
   nationalLifeVerificationSource AgentOnboardingNationalLifeSource?
+  nationalLifeSkippedAt          DateTime?
   calendarDecision               AgentOnboardingOptionalDecision?
   calendarDecidedAt              DateTime?
   whatsappDecision               AgentOnboardingOptionalDecision?

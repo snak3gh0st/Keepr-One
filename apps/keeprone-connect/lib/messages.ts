@@ -26,6 +26,10 @@ export type StartSyncMessage = {
   forceRefresh?: true
 }
 
+export type CancelSyncMessage = {
+  type: 'CANCEL_NATIONAL_LIFE_SYNC'
+}
+
 export type GetConnectorStatusMessage = {
   type: 'GET_CONNECTOR_STATUS'
 }
@@ -47,6 +51,7 @@ export type StartConnectorCommandMessage = {
 export type ExternalMessage =
   | PairConnectorMessage
   | StartSyncMessage
+  | CancelSyncMessage
   | GetConnectorStatusMessage
   | UnpairConnectorMessage
   | FetchDocumentMessage
@@ -333,7 +338,11 @@ export function parseExternalMessage(value: unknown): ExternalMessage | null {
       ? { type: value.type, forceRefresh: true }
       : null
   }
-  if (value.type === 'GET_CONNECTOR_STATUS' || value.type === 'UNPAIR_CONNECTOR') {
+  if (
+    value.type === 'GET_CONNECTOR_STATUS' ||
+    value.type === 'UNPAIR_CONNECTOR' ||
+    value.type === 'CANCEL_NATIONAL_LIFE_SYNC'
+  ) {
     return hasExactKeys(value, ['type']) ? { type: value.type } : null
   }
   if (value.type === 'FETCH_NATIONAL_LIFE_DOCUMENT') {

@@ -77,6 +77,22 @@ describe('local connector authentication notification', () => {
     expect(JSON.stringify(upsert.mock.calls)).not.toMatch(/password|cookie|mfa|token/i)
   })
 
+  it('does not create a warning when cancellation wins after the active-run read', async () => {
+    const { db, runUpdateMany, upsert, updateMany } = database()
+    runUpdateMany.mockResolvedValueOnce({ count: 0 })
+
+    await expect(recordLocalConnectorAuthState(db, {
+      agentId: 'agent-1',
+      deviceId: 'device-1',
+      runId: 'run-1',
+      state: 'MFA_REQUIRED',
+      now,
+    })).rejects.toMatchObject({ code: 'RUN_NOT_ACTIVE' })
+
+    expect(upsert).not.toHaveBeenCalled()
+    expect(updateMany).not.toHaveBeenCalled()
+  })
+
   it('increments once per authentication episode and keeps MFA on that epoch', async () => {
     const { db, run } = database()
 

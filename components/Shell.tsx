@@ -231,7 +231,11 @@ export function Shell({
     ? `premium-v2:${achievementTone}:${rankTitle}`
     : null;
   const trial = role === "AGENT" ? agentAccess?.trial ?? null : null;
-  const showCarrierSync = role === "AGENT" && (hasModule("INTEGRATIONS") || kbotWelcome);
+  // The Integrations grant controls navigation and route access, but the
+  // global K-Bot also carries account-level guidance (including the durable
+  // National Life reminder after onboarding is skipped). Keep that presence
+  // mounted for every agent so a disabled module cannot silence the reminder.
+  const showCarrierSync = role === "AGENT";
 
   const handleTrialExpire = useCallback(() => {
     // The server remains authoritative. Refreshing the current route makes
@@ -578,7 +582,14 @@ export function Shell({
                     <p className="shell-topbar-title truncate text-sm font-semibold tracking-[-0.02em]">
                       {rankTitle}
                     </p>
-                    {showCarrierSync && <CarrierSyncBadge separated welcome={kbotWelcome} />}
+                    {showCarrierSync && (
+                      <CarrierSyncBadge
+                        separated
+                        welcome={kbotWelcome}
+                        canAccessNationalLife={hasModule("INTEGRATIONS")}
+                        canAccessIllustrations={hasModule("ILLUSTRATIONS")}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
@@ -592,7 +603,13 @@ export function Shell({
                     {currentPage}
                   </p>
                   <span className="shell-topbar-separator hidden h-1 w-1 rounded-full bg-border-steel sm:block" />
-                  {showCarrierSync && <CarrierSyncBadge welcome={kbotWelcome} />}
+                  {showCarrierSync && (
+                    <CarrierSyncBadge
+                      welcome={kbotWelcome}
+                      canAccessNationalLife={hasModule("INTEGRATIONS")}
+                      canAccessIllustrations={hasModule("ILLUSTRATIONS")}
+                    />
+                  )}
                 </div>
               </div>
             )}

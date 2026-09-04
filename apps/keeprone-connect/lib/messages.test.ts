@@ -54,6 +54,13 @@ describe('message validation', () => {
     expect(parseExternalMessage({ type: 'UNPAIR_CONNECTOR' })).toEqual({
       type: 'UNPAIR_CONNECTOR',
     })
+    expect(parseExternalMessage({ type: 'CANCEL_NATIONAL_LIFE_SYNC' })).toEqual({
+      type: 'CANCEL_NATIONAL_LIFE_SYNC',
+    })
+    expect(parseExternalMessage({
+      type: 'CANCEL_NATIONAL_LIFE_SYNC',
+      runId: 'must-not-cross',
+    })).toBeNull()
     expect(parseExternalMessage({
       type: 'FETCH_NATIONAL_LIFE_DOCUMENT',
       reportRowId: 'report_row-1',

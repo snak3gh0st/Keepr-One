@@ -33,8 +33,9 @@ export const MIN_RELOAD_INTERVAL_MS = 6 * 60 * 60 * 1000
 /// é gastar a sessão do agente contra uma parede.
 export const MAX_RELOADS_PER_VERSION = 3
 
-/// Estados em que existe trabalho em voo. `IDLE`, `COMPLETED` e `ERROR` são pontos
-/// seguros — não há fetch nem porta de content script a perder.
+/// Estados em que existe trabalho em voo. `IDLE`, `COMPLETED`, `PARTIAL`,
+/// `CANCELLED` e `ERROR` são pontos seguros — não há fetch nem porta de content
+/// script a perder.
 export const BUSY_SYNC_STATUSES: readonly string[] = [
   'STARTING',
   'NAVIGATING',

@@ -9,6 +9,7 @@ import type { AgentOnboardingView } from "@/lib/agent-onboarding";
 const actionMocks = vi.hoisted(() => ({
   saveOnboardingProfileAction: vi.fn(),
   verifyNationalLifeOnboardingAction: vi.fn(),
+  skipNationalLifeOnboardingAction: vi.fn(),
   setCalendarOnboardingDecisionAction: vi.fn(),
   setWhatsAppOnboardingDecisionAction: vi.fn(),
 }));
@@ -17,6 +18,10 @@ const integrationMocks = vi.hoisted(() => ({
   connectorRender: vi.fn(),
   evolutionRender: vi.fn(),
   officialRender: vi.fn(),
+}));
+
+const connectorClientMocks = vi.hoisted(() => ({
+  sendConnectorMessage: vi.fn(),
 }));
 
 const i18nMock = vi.hoisted(() => ({
@@ -52,6 +57,9 @@ vi.mock("@/components/i18n/LanguageProvider", () => ({
 }));
 
 vi.mock("@/app/onboarding/actions", () => actionMocks);
+vi.mock("@/app/agent/integrations/national-life/NationalLifeConnectorClient", () => ({
+  sendConnectorMessage: connectorClientMocks.sendConnectorMessage,
+}));
 vi.mock("./OnboardingMotion", () => ({
   OnboardingMotion: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -98,6 +106,7 @@ const BASE_ONBOARDING: AgentOnboardingView = {
   profileCompletedAt: null,
   nationalLifeVerifiedAt: null,
   nationalLifeVerificationSource: null,
+  nationalLifeSkippedAt: null,
   calendarDecision: null,
   calendarDecidedAt: null,
   whatsappDecision: null,
@@ -148,6 +157,7 @@ function onboardingAt(
 
 beforeEach(() => {
   i18nMock.language = "PT";
+  connectorClientMocks.sendConnectorMessage.mockResolvedValue({ ok: true, status: "CANCELLED" });
   for (const action of Object.values(actionMocks)) {
     action.mockResolvedValue(INITIAL_ONBOARDING_ACTION_STATE);
   }
@@ -340,6 +350,123 @@ describe("OnboardingExperience", () => {
     expect(within(progress).getByText("Sessão confirmada")).toBeVisible();
     expect(within(progress).getByText("Organizando seus dados")).toBeVisible();
     expect(screen.getByText("Agora pode deixar comigo. Estou organizando seus dados.")).toBeVisible();
+  });
+
+  it("focuses a clear progress modal during sync and lets the user continue without waiting", async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingExperience
+        {...BASE_PROPS}
+        onboarding={onboardingAt("NATIONAL_LIFE")}
+        nationalLifeConfig={{
+          enabled: true,
+          extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          extensionTarget: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          installMode: "store",
+          storeUrl: null,
+          baseUrl: "http://localhost:3000",
+        }}
+      />,
+    );
+
+    const connectorProps = integrationMocks.connectorRender.mock.calls.at(-1)?.[0] as {
+      onStateChange?: (state: Record<string, unknown>) => void;
+    };
+    act(() => {
+      connectorProps.onStateChange?.({
+        phase: "syncing",
+        presence: "installed",
+        paired: true,
+        syncActive: true,
+        syncComplete: false,
+        botState: "working",
+        progress: 0.4,
+        sync: {
+          status: "UPLOADING",
+          stageIndex: 2,
+          stageKey: "RECENTLY_CLOSED",
+          totalStages: 5,
+          uploads: 9,
+        },
+      });
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Seus dados estão sendo organizados." });
+    expect(dialog).toBeVisible();
+    expect(dialog).toHaveFocus();
+    expect(within(dialog).getByRole("progressbar", { name: "Progresso da sincronização" })).toHaveAttribute("aria-valuenow", "40");
+    expect(dialog).toHaveTextContent("40% das áreas concluídas");
+    expect(dialog).toHaveTextContent("Salvando na Keepr One");
+    expect(dialog).toHaveTextContent(/Área 3 de 5/);
+    expect(dialog).toHaveTextContent(/9 lotes salvos/);
+    expect(dialog).toHaveTextContent("Ainda estamos carregando seus dados...");
+    expect(dialog).toHaveTextContent("Ao pular, interrompemos esta sincronização.");
+
+    await user.click(within(dialog).getByRole("button", { name: "Pular por agora" }));
+    expect(connectorClientMocks.sendConnectorMessage).toHaveBeenCalledWith(
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      { type: "CANCEL_NATIONAL_LIFE_SYNC" },
+      1_500,
+    );
+    await waitFor(() => expect(actionMocks.skipNationalLifeOnboardingAction).toHaveBeenCalledOnce());
+  });
+
+  it("announces indeterminate preparation without inventing a zero percent value", () => {
+    render(
+      <OnboardingExperience
+        {...BASE_PROPS}
+        onboarding={onboardingAt("NATIONAL_LIFE")}
+        nationalLifeConfig={{
+          enabled: true,
+          extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          extensionTarget: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          installMode: "store",
+          storeUrl: null,
+          baseUrl: "http://localhost:3000",
+        }}
+      />,
+    );
+
+    const connectorProps = integrationMocks.connectorRender.mock.calls.at(-1)?.[0] as {
+      onStateChange?: (state: Record<string, unknown>) => void;
+    };
+    act(() => {
+      connectorProps.onStateChange?.({
+        phase: "syncing",
+        presence: "installed",
+        paired: true,
+        syncActive: true,
+        syncComplete: false,
+        botState: "working",
+        progress: null,
+      });
+    });
+
+    const progress = screen.getByRole("progressbar", { name: "Progresso da sincronização" });
+    expect(progress).not.toHaveAttribute("aria-valuenow");
+    expect(progress).toHaveAttribute("aria-valuetext", expect.stringContaining("Preparando o cálculo do progresso"));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Calculando o progresso…");
+  });
+
+  it("offers a calm skip action before synchronization begins", async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingExperience
+        {...BASE_PROPS}
+        onboarding={onboardingAt("NATIONAL_LIFE")}
+        nationalLifeConfig={{
+          enabled: true,
+          extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          extensionTarget: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          installMode: "store",
+          storeUrl: null,
+          baseUrl: "http://localhost:3000",
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Pular sincronização" }));
+    await waitFor(() => expect(actionMocks.skipNationalLifeOnboardingAction).toHaveBeenCalledOnce());
   });
 
   it("offers Google OAuth on the onboarding return path and persists the skip decision", async () => {

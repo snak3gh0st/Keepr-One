@@ -15,6 +15,8 @@ describe('popupStatusText', () => {
       'UPLOADING',
       'AUTH_REQUIRED',
       'COMPLETED',
+      'PARTIAL',
+      'CANCELLED',
       'ERROR',
     ]
     for (const status of statuses) {
@@ -55,6 +57,10 @@ describe('popupStatusText', () => {
   it('keeps sync and carrier command copy available as separate K-Bot jobs', () => {
     expect(popupSyncStatusText(ready, { status: 'EXTRACTING' })).toMatch(/K-Bot.*reading/i)
     expect(popupCommandStatusText({ commandId: 'cmd_1', status: 'RUNNING' })).toMatch(/requested work/i)
+  })
+
+  it('explains a skipped sync without presenting it as an error', () => {
+    expect(popupSyncStatusText(ready, { status: 'CANCELLED' })).toMatch(/skipped.*ready/i)
   })
 
   it('describes the exact Foresight step when the executor reports it', () => {
@@ -106,6 +112,7 @@ describe('popupStatusText', () => {
 describe('popupCanRetry', () => {
   it('offers a retry when retrying can work', () => {
     expect(popupCanRetry(ready, { status: 'AUTH_REQUIRED' })).toBe(true)
+    expect(popupCanRetry(ready, { status: 'CANCELLED' })).toBe(true)
     expect(popupCanRetry(ready, { status: 'ERROR', errorCode: 'PORTAL_REQUEST_FAILED' })).toBe(true)
     expect(popupCanRetry(ready, { status: 'ERROR', errorCode: 'MYSTERY' })).toBe(true)
   })
