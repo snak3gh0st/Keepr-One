@@ -76,7 +76,50 @@ export function FollowupWorkspace({ compact = false, initialData }: { compact?: 
       candidates: rows.map(r => ({ id: r.id, fingerprint: r.fingerprint })) })
   }
   if (!data) return compact ? null : <p role="status">{error || copy('Carregando atividades…', 'Loading activities…')}</p>
-  if (!data.enabled) return compact ? null : <p>{copy('O follow-up do K-Bot ainda não está habilitado. O atendimento manual está disponível em Mensagens.', 'K-Bot follow-up is not enabled yet. Manual contact is available in Messages.')} <Link href="/agent/mensagens">{copy('Abrir Mensagens', 'Open Messages')}</Link></p>
+  if (!data.enabled) return compact ? null : (
+    <section
+      aria-label={copy('Disponibilidade do follow-up', 'Follow-up availability')}
+      className="my-6 overflow-hidden rounded-3xl border border-border-steel bg-panel shadow-[var(--shadow-soft)]"
+    >
+      <div className="flex flex-col gap-6 p-5 sm:p-7 lg:flex-row lg:items-center lg:gap-8">
+        <div className="flex min-w-0 flex-1 flex-col items-start gap-4 sm:flex-row sm:gap-5">
+          <KBotAvatar state="idle" size="lg" />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-teal-deep">
+                {copy('Follow-up do K-Bot', 'K-Bot follow-up')}
+              </p>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border-steel bg-paper px-2.5 py-1 text-[11px] font-medium text-ink-muted">
+                <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-ink-muted/60" />
+                {copy('IA indisponível', 'AI unavailable')}
+              </span>
+            </div>
+            <h2 className="mt-3 text-xl font-semibold leading-snug tracking-tight text-ink sm:text-2xl">
+              {copy('Continue o atendimento em Mensagens', 'Continue helping customers in Messages')}
+            </h2>
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-ink-muted">
+              {copy('O follow-up com IA ainda não está disponível. Acesse suas conversas para acompanhar cada cliente pessoalmente.', 'AI follow-up is not available yet. Open your conversations to follow up with each customer personally.')}
+            </p>
+          </div>
+        </div>
+        <Link
+          href="/agent/mensagens"
+          className="inline-flex min-h-12 shrink-0 items-center justify-center gap-3 self-stretch rounded-xl bg-rail-strong px-5 text-sm font-semibold text-paper transition-colors hover:bg-teal-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal sm:self-start lg:self-center"
+        >
+          {copy('Abrir Mensagens', 'Open Messages')}
+          <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" className="h-4 w-4" focusable="false">
+            <path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Link>
+      </div>
+      <div className="flex items-center gap-2.5 border-t border-border-steel bg-teal-pale/35 px-5 py-3.5 text-xs leading-relaxed text-teal-deep sm:px-7">
+        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" className="h-4 w-4 shrink-0" focusable="false">
+          <path d="m5 10 3 3 7-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        {copy('O atendimento manual não usa créditos de IA.', 'Manual contact does not use AI credits.')}
+      </div>
+    </section>
+  )
   const eligible = data.candidates.filter(c => !c.blockedReason).slice(0, 25)
   const working = data.jobs.some(j => ['PENDING', 'PREPARING', 'CANCEL_REQUESTED', 'DISPATCHING', 'ACCEPTED'].includes(j.status))
   const reasons: Record<string, string> = { LAPSED: copy('Apólice lapsed', 'Lapsed policy'), LAPSE_WARNING: copy('Risco de lapse', 'Lapse warning'), PAYMENT: copy('Aviso de pagamento', 'Payment notice'), REQUIREMENT: copy('Pendência na aplicação', 'Application requirement') }
