@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from '@testing-library/react'
+import type { PropsWithChildren } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import ClientsPage from './page'
+
+type ClientRow = { id: string }
 
 const state = vi.hoisted(() => ({ read: vi.fn(), parse: vi.fn() }))
 
@@ -10,15 +13,15 @@ vi.mock('@/lib/prisma', () => ({ prisma: { user: { findUnique: async () => ({ na
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: async () => ({ id: 'agent-1', userId: 'user-1' }) }))
 vi.mock('@/lib/agent-access', () => ({ getAgentScopeIds: async () => ['agent-1'] }))
 vi.mock('@/lib/i18n/server', () => ({ getServerI18n: async () => ({ copy: (pt: string) => pt }) }))
-vi.mock('@/components/Shell', () => ({ Shell: ({ children }: any) => <div>{children}</div> }))
-vi.mock('@/components/PageHeader', () => ({ PageHeader: ({ children }: any) => <div>{children}</div> }))
+vi.mock('@/components/Shell', () => ({ Shell: ({ children }: PropsWithChildren) => <div>{children}</div> }))
+vi.mock('@/components/PageHeader', () => ({ PageHeader: ({ children }: PropsWithChildren) => <div>{children}</div> }))
 vi.mock('@/components/ModuleSummary', () => ({ ModuleSummary: () => null }))
 vi.mock('@/components/CrmNavigation', () => ({ CrmNavigation: () => null }))
 vi.mock('@/lib/crm/client-directory', () => ({
   parseClientDirectoryFilters: state.parse,
   readClientDirectory: state.read,
 }))
-vi.mock('./ClientsList', () => ({ ClientsList: ({ items }: any) => <div data-testid="client-count">{items.length}</div> }))
+vi.mock('./ClientsList', () => ({ ClientsList: ({ items }: { items: readonly ClientRow[] }) => <div data-testid="client-count">{items.length}</div> }))
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 

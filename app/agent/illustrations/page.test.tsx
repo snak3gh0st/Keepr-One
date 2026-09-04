@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from '@testing-library/react'
+import type { PropsWithChildren } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import IllustrationsPage from './page'
 
@@ -21,8 +22,8 @@ vi.mock('@/lib/national-life/illustration-directory', () => ({
   readIllustrationDirectory: state.read,
 }))
 vi.mock('@/lib/national-life/illustration-command-status', () => ({ getIllustrationCommandStatuses: state.statuses }))
-vi.mock('@/components/Shell', () => ({ Shell: ({ children }: any) => <div>{children}</div> }))
-vi.mock('@/components/PageHeader', () => ({ PageHeader: ({ children }: any) => <div>{children}</div> }))
+vi.mock('@/components/Shell', () => ({ Shell: ({ children }: PropsWithChildren) => <div>{children}</div> }))
+vi.mock('@/components/PageHeader', () => ({ PageHeader: ({ children }: PropsWithChildren) => <div>{children}</div> }))
 vi.mock('./IllustrationPdfButton', () => ({ IllustrationPdfButton: () => <button>PDF</button> }))
 vi.mock('./StartApplicationFromIllustrationButton', () => ({ StartApplicationFromIllustrationButton: () => <button>Application</button> }))
 vi.mock('@/components/kbot/KBotAvatar', () => ({ KBotAvatar: () => <div>KBot</div> }))

@@ -1,28 +1,87 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { importCommissions, importPolicies } from './import-service'
 
-const db = vi.hoisted(() => ({ ledger: new Map<string, any>(), aggregates: new Map<string, number>(), status: '', fail: false, failOverride: false, clients: 0 }))
+type LedgerEntry = { amount: number } & Record<string, unknown>
+type BatchUpdateInput = { data: { status: string } }
+type CommissionTransactionLookup = { where: unknown }
+type CommissionTransactionUpsert = {
+  where: unknown
+  create: LedgerEntry
+  update: LedgerEntry
+}
+type CommissionRecordCreate = { type: string; amount: number }
+type CommissionRecordUpdate = { amount: number | { increment: number } }
+type CommissionRecordUpsert = {
+  where: unknown
+  create: CommissionRecordCreate
+  update: CommissionRecordUpdate
+}
+
+interface MockPrisma {
+  importBatch: {
+    create(): Promise<{ id: string }>
+    update(input: BatchUpdateInput): Promise<void>
+  }
+  agent: {
+    findMany(): Promise<Array<{ id: string; parentAgentId: string | null; rank: string }>>
+    findUnique(): Promise<{ id: string }>
+  }
+  commissionPlan: {
+    findMany(): Promise<Array<{ rank: string; downlineLevel: number; overridePercent: number }>>
+  }
+  policy: {
+    findUnique(): Promise<{ id: string }>
+    upsert(): Promise<{ id: string }>
+  }
+  client: {
+    upsert(): Promise<{ id: string }>
+  }
+  commissionTransaction: {
+    findUnique(input: CommissionTransactionLookup): Promise<LedgerEntry | undefined>
+    upsert(input: CommissionTransactionUpsert): Promise<void>
+  }
+  commissionRecord: {
+    upsert(input: CommissionRecordUpsert): Promise<void>
+  }
+  $transaction<T>(work: (client: MockPrisma) => Promise<T>): Promise<T>
+}
+
+const db = vi.hoisted(() => ({ ledger: new Map<string, LedgerEntry>(), aggregates: new Map<string, number>(), status: '', fail: false, failOverride: false, clients: 0 }))
 vi.mock('@/lib/prisma', () => {
-  const api: any = {
-    importBatch: { create: async () => { db.status = 'PROCESSING'; return { id: 'batch' } }, update: async ({ data }: any) => { db.status = data.status } },
+  let transactionClient: MockPrisma | null = null
+  const transaction = async <T>(work: (client: MockPrisma) => Promise<T>): Promise<T> => {
+    const client = transactionClient
+    if (!client) throw new Error('Transaction mock was not initialized')
+    const ledger = new Map(db.ledger)
+    const aggregates = new Map(db.aggregates)
+    const clients = db.clients
+    try {
+      return await work(client)
+    } catch (error) {
+      db.ledger = ledger
+      db.aggregates = aggregates
+      db.clients = clients
+      throw error
+    }
+  }
+  const api: MockPrisma = {
+    importBatch: { create: async () => { db.status = 'PROCESSING'; return { id: 'batch' } }, update: async ({ data }) => { db.status = data.status } },
     agent: { findMany: async () => [{ id: 'a', parentAgentId: 'boss', rank: 'AGENT' }, { id: 'boss', parentAgentId: null, rank: 'LEADER' }], findUnique: async () => ({ id: 'a' }) },
     commissionPlan: { findMany: async () => [{ rank: 'LEADER', downlineLevel: 1, overridePercent: 10 }] },
     policy: { findUnique: async () => ({ id: 'p' }), upsert: async () => { throw new Error('secret database details') } },
     client: { upsert: async () => { db.clients++; return { id: 'c' } } },
     commissionTransaction: {
-      findUnique: async ({ where }: any) => db.ledger.get(JSON.stringify(where)),
-      upsert: async ({ where, create, update }: any) => { const key = JSON.stringify(where); db.ledger.set(key, db.ledger.has(key) ? { ...db.ledger.get(key), ...update } : create) },
+      findUnique: async ({ where }) => db.ledger.get(JSON.stringify(where)),
+      upsert: async ({ where, create, update }) => { const key = JSON.stringify(where); db.ledger.set(key, db.ledger.has(key) ? { ...db.ledger.get(key), ...update } : create) },
     },
-    commissionRecord: { upsert: async ({ where, create, update }: any) => {
+    commissionRecord: { upsert: async ({ where, create, update }) => {
       if (db.fail || (db.failOverride && create.type === 'OVERRIDE')) { db.failOverride = false; throw new Error('secret database details') }
       const key = JSON.stringify(where)
       db.aggregates.set(key, db.aggregates.has(key) ? (typeof update.amount === 'number' ? update.amount : db.aggregates.get(key)! + update.amount.increment) : create.amount)
     } },
+    $transaction: transaction,
   }
-  api.$transaction = async (fn: any) => {
-    const ledger = new Map(db.ledger), aggregates = new Map(db.aggregates), clients = db.clients
-    try { return await fn(api) } catch (error) { db.ledger = ledger; db.aggregates = aggregates; db.clients = clients; throw error }
-  }
+  transactionClient = api
   return { prisma: api }
 })
 const csv = (...rows: string[]) => 'policyNumber,agentNpn,amount,period,transactionType,sourceTransactionId\n' + rows.join('\n')

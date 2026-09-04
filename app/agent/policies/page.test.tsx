@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from '@testing-library/react'
+import type { PropsWithChildren } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import PoliciesPage from './page'
+
+type PolicyRow = { policyNumber: string }
 
 const state = vi.hoisted(() => ({ current: vi.fn(), history: vi.fn() }))
 
@@ -10,8 +13,8 @@ vi.mock('@/lib/prisma', () => ({ prisma: { user: { findUnique: async () => ({ na
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: async () => ({ id: 'a', userId: 'u' }) }))
 vi.mock('@/lib/agent-access', () => ({ getAgentScopeIds: async () => ['a'] }))
 vi.mock('@/lib/i18n/server', () => ({ getServerI18n: async () => ({ copy: (pt: string) => pt, language: 'PT' }) }))
-vi.mock('@/components/Shell', () => ({ Shell: ({ children }: any) => <div>{children}</div> }))
-vi.mock('@/components/PageHeader', () => ({ PageHeader: ({ title, children }: any) => <div>{title}{children}</div> }))
+vi.mock('@/components/Shell', () => ({ Shell: ({ children }: PropsWithChildren) => <div>{children}</div> }))
+vi.mock('@/components/PageHeader', () => ({ PageHeader: ({ title, children }: PropsWithChildren<{ title: string }>) => <div>{title}{children}</div> }))
 vi.mock('@/lib/national-life/policy-directory', () => ({
   parsePolicyDirectoryFilters: (params: Record<string, string>) => ({
     view: params.view === 'history' ? 'history' : 'current',
@@ -20,7 +23,7 @@ vi.mock('@/lib/national-life/policy-directory', () => ({
   readCurrentPolicyDirectory: state.current,
   readHistoryPolicyDirectory: state.history,
 }))
-vi.mock('./PoliciesList', () => ({ PoliciesList: ({ items }: any) => <div>{items.map((p: any) => <span key={p.policyNumber}>{p.policyNumber}</span>)}</div> }))
+vi.mock('./PoliciesList', () => ({ PoliciesList: ({ items }: { items: readonly PolicyRow[] }) => <div>{items.map((policy) => <span key={policy.policyNumber}>{policy.policyNumber}</span>)}</div> }))
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
