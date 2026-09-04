@@ -4,7 +4,13 @@ import { useState } from 'react'
 import { Button } from '@/components/Button'
 import { useI18n } from '@/components/i18n/LanguageProvider'
 
-export function ConnectOfficialWhatsapp() {
+export type ConnectOfficialWhatsappProps = {
+  onConnectionChange?: (connected: boolean) => void
+}
+
+export function ConnectOfficialWhatsapp({
+  onConnectionChange,
+}: ConnectOfficialWhatsappProps = {}) {
   const { copy } = useI18n()
   const [checking, setChecking] = useState(false)
   const [showSetup, setShowSetup] = useState(false)
@@ -18,6 +24,11 @@ export function ConnectOfficialWhatsapp() {
     const response = await fetch('/api/agent/messaging/whatsapp-cloud', { method: 'POST' })
     const body = await response.json().catch(() => ({})) as { error?: string }
     if (response.ok) {
+      if (onConnectionChange) {
+        setChecking(false)
+        onConnectionChange(true)
+        return
+      }
       window.location.reload()
       return
     }

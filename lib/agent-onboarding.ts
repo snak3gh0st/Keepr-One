@@ -16,13 +16,10 @@ import { CANONICAL_NATIONAL_LIFE_SYNC } from '@/lib/national-life/sync-engine'
 import { prisma } from '@/lib/prisma'
 
 export const ONBOARDING_STEPS = [
-  'WELCOME',
   'PROFILE',
   'NATIONAL_LIFE',
   'CALENDAR',
   'WHATSAPP',
-  'MODULES',
-  'REVIEW',
   'COMPLETED',
 ] as const satisfies readonly AgentOnboardingStep[]
 
@@ -170,17 +167,14 @@ export function deriveAgentOnboardingStep(input: Pick<
   | 'completedModules'
 >): AgentOnboardingStep {
   if (input.status === 'COMPLETED') return 'COMPLETED'
-  if (!input.welcomeCompletedAt) return 'WELCOME'
   if (!input.profileCompletedAt) return 'PROFILE'
   if (!input.nationalLifeVerifiedAt) return 'NATIONAL_LIFE'
   if (!input.calendarDecision) return 'CALENDAR'
-  if (!input.whatsappDecision) return 'WHATSAPP'
-
-  const completed = new Set(uniqueModules(input.completedModules))
-  if (uniqueModules(input.requiredModules).some((module) => !completed.has(module))) {
-    return 'MODULES'
-  }
-  return 'REVIEW'
+  // WHATSAPP is the final interactive screen. Its decision and completion are
+  // committed together by the server action, so an in-progress legacy row
+  // remains on this screen even when it already contains a decision from the
+  // former MODULES/REVIEW flow.
+  return 'WHATSAPP'
 }
 
 export function reconcileAgentOnboardingModules(

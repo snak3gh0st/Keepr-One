@@ -107,8 +107,8 @@ describe("OnboardingPage", () => {
     });
 
     await expect(generateMetadata()).resolves.toMatchObject({
-      title: "Set up your access",
-      description: expect.stringContaining("Confirm your details"),
+      title: "Set up your account",
+      description: "Complete four simple steps with guidance from K-Bot.",
       robots: { index: false, follow: false },
     });
   });
@@ -138,8 +138,19 @@ describe("OnboardingPage", () => {
     expect(screen.getByText("Experiência de onboarding")).toBeVisible();
     expect(mocks.experienceProps).toHaveBeenCalledWith(
       expect.objectContaining({
+        calendarResult: null,
         whatsapp: { available: true, mode: "EVOLUTION" },
       }),
+    );
+  });
+
+  it("passes the Google Calendar callback result to the onboarding experience", async () => {
+    render(await OnboardingPage({
+      searchParams: Promise.resolve({ googleCalendar: "connected" }),
+    }));
+
+    expect(mocks.experienceProps).toHaveBeenCalledWith(
+      expect.objectContaining({ calendarResult: "connected" }),
     );
   });
 });

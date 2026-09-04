@@ -52,6 +52,7 @@ import {
   markOnboardingModuleAction,
   saveOnboardingProfileAction,
   setCalendarOnboardingDecisionAction,
+  setWhatsAppOnboardingDecisionAction,
   verifyNationalLifeOnboardingAction,
 } from './actions'
 import { INITIAL_ONBOARDING_ACTION_STATE } from './state'
@@ -194,8 +195,8 @@ describe('onboarding server actions', () => {
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
-  it('saves the profile and advances without an NPN', async () => {
-    current = onboarding({ currentStep: 'PROFILE', welcomeCompletedAt: now })
+  it('saves the profile, acknowledges legacy welcome state and advances without an NPN', async () => {
+    current = onboarding({ currentStep: 'WELCOME', welcomeCompletedAt: null })
 
     const result = await saveOnboardingProfileAction(
       INITIAL_ONBOARDING_ACTION_STATE,
@@ -207,6 +208,14 @@ describe('onboarding server actions', () => {
       where: { id: 'agent-1' },
       data: { phone: '+13055550100', npn: null },
     })
+    expect(mocks.onboardingUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'onboarding-1' },
+      data: expect.objectContaining({
+        welcomeCompletedAt: now,
+        profileCompletedAt: now,
+        currentStep: 'NATIONAL_LIFE',
+      }),
+    }))
   })
 
   it('saves profile fields in the authenticated agent tenant and audits the change', async () => {
@@ -342,6 +351,30 @@ describe('onboarding server actions', () => {
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
+  it('rejects WhatsApp CONNECTED without a verified durable channel', async () => {
+    current = onboarding({
+      currentStep: 'WHATSAPP',
+      welcomeCompletedAt: now,
+      profileCompletedAt: now,
+      nationalLifeVerifiedAt: now,
+      nationalLifeVerificationSource: 'LOCAL_CONNECTOR_SYNC',
+      calendarDecision: 'SKIPPED',
+      calendarDecidedAt: now,
+    })
+
+    const result = await setWhatsAppOnboardingDecisionAction(
+      INITIAL_ONBOARDING_ACTION_STATE,
+      form({ decision: 'CONNECTED' }),
+    )
+
+    expect(result).toMatchObject({
+      status: 'error',
+      fieldErrors: { decision: expect.stringContaining('verificação real') },
+    })
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(mocks.redirect).not.toHaveBeenCalled()
+  })
+
   it('rejects module writes before the MODULES step even with a valid whitelist item', async () => {
     current = onboarding({ currentStep: 'WELCOME' })
 
@@ -358,120 +391,79 @@ describe('onboarding server actions', () => {
     expect(mocks.auditCreate).not.toHaveBeenCalled()
   })
 
-  it('reopens MODULES after an entitlement upgrade and accepts the newly required module', async () => {
+  it('advances a skipped calendar decision to the final WhatsApp screen', async () => {
     current = onboarding({
-      currentStep: 'REVIEW',
+      currentStep: 'CALENDAR',
       welcomeCompletedAt: now,
       profileCompletedAt: now,
       nationalLifeVerifiedAt: now,
-      calendarDecision: 'SKIPPED',
-      whatsappDecision: 'SKIPPED',
-      completedModules: [...requiredModules],
+      nationalLifeVerificationSource: 'LOCAL_CONNECTOR_SYNC',
     })
-    mocks.getRequiredModules.mockResolvedValue(['TODAY', 'TEAM', 'INTEGRATIONS'])
 
-    const result = await markOnboardingModuleAction(
+    const result = await setCalendarOnboardingDecisionAction(
       INITIAL_ONBOARDING_ACTION_STATE,
-      form({ module: 'TEAM' }),
+      form({ decision: 'SKIPPED' }),
     )
 
     expect(result).toMatchObject({
       status: 'success',
       onboarding: {
-        currentStep: 'REVIEW',
-        requiredModules: ['TODAY', 'TEAM', 'INTEGRATIONS'],
-        completedModules: ['TODAY', 'INTEGRATIONS', 'TEAM'],
+        currentStep: 'WHATSAPP',
+        calendarDecision: 'SKIPPED',
       },
     })
   })
 
-  it('drops a no-longer-exposed module and completes after an entitlement downgrade', async () => {
+  it('finishes atomically from WhatsApp, completes legacy modules and activates recruitment', async () => {
     current = onboarding({
-      currentStep: 'MODULES',
-      welcomeCompletedAt: now,
+      currentStep: 'WHATSAPP',
+      welcomeCompletedAt: null,
       profileCompletedAt: now,
       nationalLifeVerifiedAt: now,
       nationalLifeVerificationSource: 'LOCAL_CONNECTOR_SYNC',
       calendarDecision: 'SKIPPED',
       calendarDecidedAt: now,
-      whatsappDecision: 'SKIPPED',
-      whatsappDecidedAt: now,
       requiredModules: ['TODAY', 'TEAM', 'INTEGRATIONS'],
-      completedModules: ['TODAY', 'INTEGRATIONS'],
+      completedModules: [],
     })
+    mocks.getRequiredModules.mockResolvedValue(['TODAY', 'TEAM', 'INTEGRATIONS'])
+    mocks.invitationUpdateMany.mockResolvedValue({ count: 2 })
 
-    await expect(completeOnboardingAction(
+    await expect(setWhatsAppOnboardingDecisionAction(
       INITIAL_ONBOARDING_ACTION_STATE,
-      new FormData(),
+      form({ decision: 'SKIPPED' }),
     )).rejects.toThrow('NEXT_REDIRECT')
 
-    expect(mocks.onboardingUpdate).toHaveBeenCalledWith({
-      where: { id: 'onboarding-1' },
-      data: expect.objectContaining({
-        status: 'COMPLETED',
-        requiredModules: ['TODAY', 'INTEGRATIONS'],
-        completedModules: ['TODAY', 'INTEGRATIONS'],
-      }),
-    })
-  })
-
-  it('completes transactionally only from REVIEW and redirects after commit', async () => {
-    current = onboarding({
-      currentStep: 'REVIEW',
-      welcomeCompletedAt: now,
-      profileCompletedAt: now,
-      nationalLifeVerifiedAt: now,
-      nationalLifeVerificationSource: 'LOCAL_CONNECTOR_SYNC',
-      calendarDecision: 'SKIPPED',
-      calendarDecidedAt: now,
-      whatsappDecision: 'SKIPPED',
-      whatsappDecidedAt: now,
-      completedModules: [...requiredModules],
-    })
-
-    await expect(completeOnboardingAction(
-      INITIAL_ONBOARDING_ACTION_STATE,
-      new FormData(),
-    )).rejects.toThrow('NEXT_REDIRECT')
-
-    expect(mocks.onboardingUpdate).toHaveBeenCalledWith({
+    expect(mocks.onboardingUpdate).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'onboarding-1' },
       data: expect.objectContaining({
         status: 'COMPLETED',
         currentStep: 'COMPLETED',
+        welcomeCompletedAt: now,
+        whatsappDecision: 'SKIPPED',
+        whatsappDecidedAt: now,
+        requiredModules: ['TODAY', 'TEAM', 'INTEGRATIONS'],
+        completedModules: ['TODAY', 'TEAM', 'INTEGRATIONS'],
         completedAt: now,
-        completedModules: [...requiredModules],
+      }),
+    }))
+    expect(mocks.auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'AGENT_ONBOARDING_WHATSAPP_DECIDED',
+        before: { decision: null },
+        after: { decision: 'SKIPPED', currentStep: 'COMPLETED' },
       }),
     })
     expect(mocks.auditCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         action: 'AGENT_ONBOARDING_COMPLETED',
         userId: 'user-1',
+        after: expect.objectContaining({
+          whatsappDecision: 'SKIPPED',
+          activatedRecruitmentInvitations: 2,
+        }),
       }),
     })
-    expect(mocks.redirect).toHaveBeenCalledWith('/agent')
-  })
-
-  it('activates accepted recruitment links with a current membership in the completion transaction', async () => {
-    current = onboarding({
-      currentStep: 'REVIEW',
-      welcomeCompletedAt: now,
-      profileCompletedAt: now,
-      nationalLifeVerifiedAt: now,
-      nationalLifeVerificationSource: 'LOCAL_CONNECTOR_SYNC',
-      calendarDecision: 'SKIPPED',
-      calendarDecidedAt: now,
-      whatsappDecision: 'SKIPPED',
-      whatsappDecidedAt: now,
-      completedModules: [...requiredModules],
-    })
-    mocks.invitationUpdateMany.mockResolvedValue({ count: 2 })
-
-    await expect(completeOnboardingAction(
-      INITIAL_ONBOARDING_ACTION_STATE,
-      new FormData(),
-    )).rejects.toThrow('NEXT_REDIRECT')
-
     expect(mocks.invitationUpdateMany).toHaveBeenCalledWith({
       where: {
         acceptedAgentId: 'agent-1',
@@ -487,13 +479,38 @@ describe('onboarding server actions', () => {
         stageUpdatedAt: now,
       },
     })
-    expect(mocks.auditCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        action: 'AGENT_ONBOARDING_COMPLETED',
-        after: expect.objectContaining({
-          activatedRecruitmentInvitations: 2,
-        }),
-      }),
+    expect(mocks.redirect).toHaveBeenCalledWith('/agent?onboarding=completed')
+  })
+
+  it('keeps the completion action compatible with legacy MODULES and REVIEW rows', async () => {
+    current = onboarding({
+      currentStep: 'MODULES',
+      welcomeCompletedAt: now,
+      profileCompletedAt: now,
+      nationalLifeVerifiedAt: now,
+      nationalLifeVerificationSource: 'LOCAL_CONNECTOR_SYNC',
+      calendarDecision: 'SKIPPED',
+      calendarDecidedAt: now,
+      whatsappDecision: 'SKIPPED',
+      whatsappDecidedAt: now,
+      requiredModules: ['TODAY', 'TEAM', 'INTEGRATIONS'],
+      completedModules: ['TODAY'],
     })
+
+    await expect(completeOnboardingAction(
+      INITIAL_ONBOARDING_ACTION_STATE,
+      new FormData(),
+    )).rejects.toThrow('NEXT_REDIRECT')
+
+    expect(mocks.onboardingUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'onboarding-1' },
+      data: expect.objectContaining({
+        status: 'COMPLETED',
+        currentStep: 'COMPLETED',
+        requiredModules: ['TODAY', 'INTEGRATIONS'],
+        completedModules: ['TODAY', 'INTEGRATIONS'],
+      }),
+    }))
+    expect(mocks.redirect).toHaveBeenCalledWith('/agent?onboarding=completed')
   })
 })

@@ -16,16 +16,21 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata(): Promise<Metadata> {
   const { copy } = await getServerI18n();
   return {
-    title: copy("Prepare seu acesso", "Set up your access"),
+    title: copy("Configure sua conta", "Set up your account"),
     description: copy(
-      "Confirme seus dados, conecte sua operação e conheça as áreas disponíveis na Keepr One.",
-      "Confirm your details, connect your operation, and explore the areas available in Keepr One.",
+      "Conclua quatro etapas simples com a orientação do K-Bot.",
+      "Complete four simple steps with guidance from K-Bot.",
     ),
     robots: { index: false, follow: false },
   };
 }
 
-export default async function OnboardingPage() {
+export default async function OnboardingPage({
+  searchParams = Promise.resolve({}),
+}: {
+  searchParams?: Promise<{ googleCalendar?: string }>;
+} = {}) {
+  const { googleCalendar } = await searchParams;
   let data: Awaited<ReturnType<typeof getCurrentAgentOnboarding>>;
   try {
     data = await getCurrentAgentOnboarding();
@@ -59,6 +64,7 @@ export default async function OnboardingPage() {
       onboarding={data.onboarding}
       nationalLifeConfig={nationalLifeConfig}
       calendarConfigured={calendarConfigured}
+      calendarResult={googleCalendar ?? null}
       whatsapp={{ available: whatsappAvailable, mode: whatsappMode }}
     />
   );

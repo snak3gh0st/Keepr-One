@@ -212,7 +212,11 @@ function requireCurrentStep(
   copy: OnboardingCopy,
 ) {
   const actualStep = deriveAgentOnboardingStep(onboarding)
-  if (actualStep !== expectedStep || onboarding.currentStep !== expectedStep) {
+  const storedStepIsCompatible = onboarding.currentStep === expectedStep
+    || onboarding.currentStep === 'WELCOME'
+    || onboarding.currentStep === 'MODULES'
+    || onboarding.currentStep === 'REVIEW'
+  if (actualStep !== expectedStep || !storedStepIsCompatible) {
     throw new OnboardingActionError(copy(
       'Conclua a etapa atual antes de continuar.',
       'Complete the current step before continuing.',
@@ -235,6 +239,106 @@ function refreshOnboarding() {
   revalidatePath('/onboarding')
 }
 
+function refreshCompletedOnboarding() {
+  refreshOnboarding()
+  revalidatePath('/agent')
+  revalidatePath('/agent/agency')
+  revalidatePath('/agent/hierarchy')
+}
+
+async function completeOnboardingInTransaction(input: {
+  transaction: Prisma.TransactionClient
+  actor: OnboardingActor
+  current: AgentOnboardingRecord
+  requiredModules: OnboardingModuleName[]
+  now: Date
+  copy: OnboardingCopy
+  whatsappDecision?: OnboardingOptionalDecisionName
+  whatsappDecidedAt?: Date
+  auditWhatsAppDecision?: boolean
+}): Promise<AgentOnboardingRecord> {
+  const whatsappDecision = input.whatsappDecision ?? input.current.whatsappDecision
+  const whatsappDecidedAt = input.whatsappDecidedAt ?? input.current.whatsappDecidedAt
+  if (
+    !input.current.profileCompletedAt
+    || !input.current.nationalLifeVerifiedAt
+    || !input.current.nationalLifeVerificationSource
+    || !input.current.calendarDecision
+    || !input.current.calendarDecidedAt
+    || !whatsappDecision
+    || !whatsappDecidedAt
+  ) {
+    throw new OnboardingActionError(input.copy(
+      'Conclua todas as etapas obrigatórias antes de finalizar.',
+      'Complete every required step before finishing.',
+    ))
+  }
+
+  const welcomeCompletedAt = input.current.welcomeCompletedAt
+    ?? input.current.profileCompletedAt
+    ?? input.now
+  const completedModules = [...input.requiredModules]
+  const onboarding = await input.transaction.agentOnboarding.update({
+    where: { id: input.current.id },
+    data: {
+      welcomeCompletedAt,
+      whatsappDecision,
+      whatsappDecidedAt,
+      requiredModules: input.requiredModules,
+      completedModules,
+      status: 'COMPLETED',
+      currentStep: 'COMPLETED',
+      completedAt: input.now,
+    },
+    select: AGENT_ONBOARDING_SELECT,
+  })
+
+  if (input.auditWhatsAppDecision) {
+    await input.transaction.auditLog.create({
+      data: {
+        userId: input.actor.userId,
+        action: 'AGENT_ONBOARDING_WHATSAPP_DECIDED',
+        entity: 'AgentOnboarding',
+        entityId: input.current.id,
+        before: { decision: input.current.whatsappDecision },
+        after: { decision: whatsappDecision, currentStep: 'COMPLETED' },
+      },
+    })
+  }
+
+  const activatedRecruitmentInvitations = await input.transaction.agencyInvitation.updateMany({
+    where: {
+      acceptedAgentId: input.actor.agentId,
+      status: 'ACCEPTED',
+      recruitmentStage: 'ONBOARDING',
+      acceptedMembership: {
+        agentId: input.actor.agentId,
+        endedAt: null,
+      },
+    },
+    data: {
+      recruitmentStage: 'ACTIVE',
+      stageUpdatedAt: input.now,
+    },
+  })
+  await input.transaction.auditLog.create({
+    data: {
+      userId: input.actor.userId,
+      action: 'AGENT_ONBOARDING_COMPLETED',
+      entity: 'AgentOnboarding',
+      entityId: input.current.id,
+      after: {
+        completedAt: input.now.toISOString(),
+        requiredModules: input.requiredModules,
+        calendarDecision: input.current.calendarDecision,
+        whatsappDecision,
+        activatedRecruitmentInvitations: activatedRecruitmentInvitations.count,
+      },
+    },
+  })
+  return onboarding
+}
+
 export async function acknowledgeOnboardingWelcomeAction(
   _previousState: OnboardingActionState,
   _formData: FormData,
@@ -247,9 +351,9 @@ export async function acknowledgeOnboardingWelcomeAction(
     const now = new Date()
     const updated = await prisma.$transaction(async (transaction) => {
       const current = await requireInProgressOnboarding(transaction, actor.agentId, copy)
-      requireCurrentStep(current, 'WELCOME', copy)
+      requireCurrentStep(current, 'PROFILE', copy)
       const welcomeCompletedAt = current.welcomeCompletedAt ?? now
-      const currentStep = nextStep(current, { welcomeCompletedAt })
+      const currentStep = 'PROFILE' as const
       const onboarding = await transaction.agentOnboarding.update({
         where: { id: current.id },
         data: { welcomeCompletedAt, currentStep },
@@ -317,8 +421,9 @@ export async function saveOnboardingProfileAction(
     const updated = await prisma.$transaction(async (transaction) => {
       const current = await requireInProgressOnboarding(transaction, actor.agentId, copy)
       requireCurrentStep(current, 'PROFILE', copy)
+      const welcomeCompletedAt = current.welcomeCompletedAt ?? now
       const profileCompletedAt = now
-      const currentStep = nextStep(current, { profileCompletedAt })
+      const currentStep = nextStep(current, { welcomeCompletedAt, profileCompletedAt })
       await transaction.user.update({
         where: { id: actor.userId },
         data: {
@@ -332,7 +437,7 @@ export async function saveOnboardingProfileAction(
       })
       const onboarding = await transaction.agentOnboarding.update({
         where: { id: current.id },
-        data: { profileCompletedAt, currentStep },
+        data: { welcomeCompletedAt, profileCompletedAt, currentStep },
         select: AGENT_ONBOARDING_SELECT,
       })
       await transaction.auditLog.create({
@@ -472,7 +577,7 @@ async function saveOptionalIntegrationDecision(input: {
   kind: 'CALENDAR' | 'WHATSAPP'
   decision: OnboardingOptionalDecisionName
   copy: OnboardingCopy
-}): Promise<OnboardingActionState> {
+}): Promise<{ state: OnboardingActionState; completed: boolean }> {
   const { copy } = input
   try {
     const actor = await getOnboardingActor(copy)
@@ -498,9 +603,27 @@ async function saveOptionalIntegrationDecision(input: {
     }
 
     const now = new Date()
+    const requiredModules = input.kind === 'WHATSAPP'
+      ? await getRequiredOnboardingModulesForAgent(actor.agentId)
+      : null
     const updated = await prisma.$transaction(async (transaction) => {
       const current = await requireInProgressOnboarding(transaction, actor.agentId, copy)
       requireCurrentStep(current, input.kind, copy)
+
+      if (input.kind === 'WHATSAPP') {
+        return completeOnboardingInTransaction({
+          transaction,
+          actor,
+          current,
+          requiredModules: requiredModules ?? current.requiredModules,
+          now,
+          copy,
+          whatsappDecision: input.decision,
+          whatsappDecidedAt: now,
+          auditWhatsAppDecision: true,
+        })
+      }
+
       const changes = input.kind === 'CALENDAR'
         ? { calendarDecision: input.decision, calendarDecidedAt: now }
         : { whatsappDecision: input.decision, whatsappDecidedAt: now }
@@ -530,18 +653,34 @@ async function saveOptionalIntegrationDecision(input: {
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     })
+    if (input.kind === 'WHATSAPP') {
+      return {
+        completed: true,
+        state: success(updated, copy(
+          'Configuração concluída. Bem-vindo à Keepr One.',
+          'Setup complete. Welcome to Keepr One.',
+        )),
+      }
+    }
+
     refreshOnboarding()
-    return success(
-      updated,
-      input.decision === 'CONNECTED'
-        ? copy('Integração conectada e confirmada.', 'Integration connected and confirmed.')
-        : copy(
-            'Você poderá configurar esta integração mais tarde.',
-            'You can set up this integration later.',
-          ),
-    )
+    return {
+      completed: false,
+      state: success(
+        updated,
+        input.decision === 'CONNECTED'
+          ? copy('Integração conectada e confirmada.', 'Integration connected and confirmed.')
+          : copy(
+              'Você poderá configurar esta integração mais tarde.',
+              'You can set up this integration later.',
+            ),
+      ),
+    }
   } catch (error) {
-    return actionFailure(error, 'Optional onboarding integration decision failed', copy)
+    return {
+      completed: false,
+      state: actionFailure(error, 'Optional onboarding integration decision failed', copy),
+    }
   }
 }
 
@@ -552,7 +691,8 @@ export async function setCalendarOnboardingDecisionAction(
   const { copy } = await getServerI18n()
   const parsed = createOptionalDecisionSchema(copy).safeParse(formString(formData, 'decision'))
   if (!parsed.success) return validationFailure(parsed.error, copy)
-  return saveOptionalIntegrationDecision({ kind: 'CALENDAR', decision: parsed.data, copy })
+  const result = await saveOptionalIntegrationDecision({ kind: 'CALENDAR', decision: parsed.data, copy })
+  return result.state
 }
 
 export async function setWhatsAppOnboardingDecisionAction(
@@ -562,7 +702,12 @@ export async function setWhatsAppOnboardingDecisionAction(
   const { copy } = await getServerI18n()
   const parsed = createOptionalDecisionSchema(copy).safeParse(formString(formData, 'decision'))
   if (!parsed.success) return validationFailure(parsed.error, copy)
-  return saveOptionalIntegrationDecision({ kind: 'WHATSAPP', decision: parsed.data, copy })
+  const result = await saveOptionalIntegrationDecision({ kind: 'WHATSAPP', decision: parsed.data, copy })
+  if (result.completed) {
+    refreshCompletedOnboarding()
+    redirect('/agent?onboarding=completed')
+  }
+  return result.state
 }
 
 export async function markOnboardingModuleAction(
@@ -641,58 +786,13 @@ export async function completeOnboardingAction(
     const now = new Date()
     await prisma.$transaction(async (transaction) => {
       const current = await requireInProgressOnboarding(transaction, actor.agentId, copy)
-      const candidate = reconcileAgentOnboardingModules(current, requiredModules)
-      requireCurrentStep(candidate, 'REVIEW', copy)
-      const completedModules = candidate.completedModules
-      const incompleteStep = deriveAgentOnboardingStep(candidate)
-      if (incompleteStep !== 'REVIEW') {
-        throw new OnboardingActionError(
-          copy(
-            'Conclua todas as etapas obrigatórias antes de finalizar.',
-            'Complete every required step before finishing.',
-          ),
-        )
-      }
-
-      await transaction.agentOnboarding.update({
-        where: { id: current.id },
-        data: {
-          requiredModules,
-          completedModules,
-          status: 'COMPLETED',
-          currentStep: 'COMPLETED',
-          completedAt: now,
-        },
-      })
-      const activatedRecruitmentInvitations = await transaction.agencyInvitation.updateMany({
-        where: {
-          acceptedAgentId: actor.agentId,
-          status: 'ACCEPTED',
-          recruitmentStage: 'ONBOARDING',
-          acceptedMembership: {
-            agentId: actor.agentId,
-            endedAt: null,
-          },
-        },
-        data: {
-          recruitmentStage: 'ACTIVE',
-          stageUpdatedAt: now,
-        },
-      })
-      await transaction.auditLog.create({
-        data: {
-          userId: actor.userId,
-          action: 'AGENT_ONBOARDING_COMPLETED',
-          entity: 'AgentOnboarding',
-          entityId: current.id,
-          after: {
-            completedAt: now.toISOString(),
-            requiredModules,
-            calendarDecision: current.calendarDecision,
-            whatsappDecision: current.whatsappDecision,
-            activatedRecruitmentInvitations: activatedRecruitmentInvitations.count,
-          },
-        },
+      await completeOnboardingInTransaction({
+        transaction,
+        actor,
+        current,
+        requiredModules,
+        now,
+        copy,
       })
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -703,11 +803,8 @@ export async function completeOnboardingAction(
   }
 
   if (completed) {
-    revalidatePath('/onboarding')
-    revalidatePath('/agent')
-    revalidatePath('/agent/agency')
-    revalidatePath('/agent/hierarchy')
-    redirect('/agent')
+    refreshCompletedOnboarding()
+    redirect('/agent?onboarding=completed')
   }
   return {
     status: 'error',

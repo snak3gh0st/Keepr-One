@@ -51,6 +51,7 @@ function answerWithSync() {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.pathname = '/agent'
+  window.history.replaceState({}, '', '/agent')
   mocks.sendConnectorMessage.mockResolvedValue({
     ok: true,
     device: { status: 'READY', deviceId: 'device-1' },
@@ -61,10 +62,39 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
 
 describe('CarrierSyncBadge', () => {
+  it('welcomes a completed onboarding and removes only its query flag without reloading', async () => {
+    answerWith(null)
+    window.history.replaceState(
+      { source: 'onboarding' },
+      '',
+      '/agent?onboarding=completed&preview=black-jacket#today',
+    )
+    const historyState = window.history.state
+    const replaceState = vi.spyOn(window.history, 'replaceState')
+
+    render(<CarrierSyncBadge welcome />)
+
+    expect(
+      await screen.findByRole('status', { name: 'K-Bot update' }),
+    ).toHaveTextContent('All set. It is great to have you here.')
+    expect(screen.getByLabelText('K-Bot status')).toBeVisible()
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/agent')
+      expect(window.location.search).toBe('?preview=black-jacket')
+      expect(window.location.hash).toBe('#today')
+    })
+    expect(replaceState).toHaveBeenCalledWith(
+      historyState,
+      '',
+      '/agent?preview=black-jacket#today',
+    )
+  })
+
   it('shows the active National Life sync progress in the compact badge', async () => {
     const fetchMock = answerWithSync()
     render(<CarrierSyncBadge />)

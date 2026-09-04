@@ -63,7 +63,13 @@ type Notice = {
 /// both activities when they run at the same time. Terminal transitions become
 /// short, useful notices; historical terminal records do not create a toast on
 /// first load.
-export function CarrierSyncBadge({ separated = false }: { separated?: boolean }) {
+export function CarrierSyncBadge({
+  separated = false,
+  welcome = false,
+}: {
+  separated?: boolean
+  welcome?: boolean
+}) {
   const { copy } = useI18n()
   const quickActions = useMemo<KBotAction[]>(() => [
     {
@@ -90,6 +96,8 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
   const [illustration, setIllustration] = useState<IllustrationActivity | null>(null)
   const [application, setApplication] = useState<ApplicationActivity | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
+  const [welcomeDismissed, setWelcomeDismissed] = useState(false)
+  const showWelcome = welcome && !welcomeDismissed
   const [extensionTarget, setExtensionTarget] = useState<string | null | undefined>(undefined)
   const [autoLoginEnabled, setAutoLoginEnabled] = useState(false)
   const [connectorState, setConnectorState] = useState<BrowserConnectorState>('checking')
@@ -98,6 +106,15 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
   const previousSyncPolling = useRef(false)
   const loadedOnce = useRef(false)
   const pathname = usePathname()
+
+  useEffect(() => {
+    if (!welcome) return
+    const url = new URL(window.location.href)
+    url.searchParams.delete('onboarding')
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+    const timer = window.setTimeout(() => setWelcomeDismissed(true), 10_000)
+    return () => window.clearTimeout(timer)
+  }, [welcome])
 
   const applyBody = useCallback((body: BadgeResponse) => {
     const nextSync = body.sync ?? null
@@ -371,7 +388,13 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
     let actionLabel = copy('Abrir K-Bot', 'Open K-Bot')
     let activityMode: KBotActivityMode = 'idle'
 
-    if (notice) {
+    if (showWelcome) {
+      botState = 'success'
+      title = copy('Bem-vindo à Keepr One. Seu espaço está pronto.', 'Welcome to Keepr One. Your workspace is ready.')
+      detail = copy('Eu continuo por perto para ajudar com seus dados e suas próximas tarefas.', 'I will stay nearby to help with your data and next tasks.')
+      actionHref = '/agent'
+      actionLabel = copy('Começar', 'Get started')
+    } else if (notice) {
       botState = 'success'
       title = notice.message
       detail = copy('Organizei o resultado na Keepr One.', 'I organized the result in Keepr One.')
@@ -502,7 +525,9 @@ export function CarrierSyncBadge({ separated = false }: { separated?: boolean })
             : null}
         tasks={tasks}
         quickActions={quickActions}
-        announcement={notice?.message}
+        announcement={showWelcome
+          ? copy('Tudo pronto. Que bom ter você aqui.', 'All set. It is great to have you here.')
+          : notice?.message}
       />
     )
   })()

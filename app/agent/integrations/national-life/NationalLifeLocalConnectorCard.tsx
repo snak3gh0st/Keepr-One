@@ -26,7 +26,7 @@ import {
 } from './NationalLifeConnectorClient'
 import { useI18n } from '@/components/i18n/LanguageProvider'
 
-type ConnectorState =
+export type NationalLifeConnectorPhase =
   | 'idle'
   | 'checking'
   | 'installing'
@@ -38,7 +38,18 @@ type ConnectorState =
   | 'success'
   | 'error'
 
-type ConnectorPresence = 'checking' | 'installed' | 'missing'
+export type NationalLifeConnectorPresence = 'checking' | 'installed' | 'missing'
+
+export type NationalLifeConnectorViewState = {
+  phase: NationalLifeConnectorPhase
+  presence: NationalLifeConnectorPresence
+  paired: boolean
+  syncActive: boolean
+  syncComplete: boolean
+  botState: KBotState
+  progress: number | null
+}
+
 type JourneyStepState = 'waiting' | 'active' | 'complete'
 
 function ConnectionJourneyStep({
@@ -121,7 +132,7 @@ async function readDurableSync(runId: string) {
   }
 }
 
-const storeStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
+const storeStateCopy: Record<Exclude<NationalLifeConnectorPhase, 'error'>, string> = {
   idle: 'K-Bot is ready for the next National Life task.',
   checking: 'K-Bot is checking this browser…',
   installing: 'Install K-Bot by KeeprOne from the Chrome Web Store, then return here. Keepr One will recognize it automatically.',
@@ -133,13 +144,13 @@ const storeStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
   success: 'K-Bot finished. Your National Life data is up to date.',
 }
 
-const pilotStateCopy: Record<Exclude<ConnectorState, 'error'>, string> = {
+const pilotStateCopy: Record<Exclude<NationalLifeConnectorPhase, 'error'>, string> = {
   ...storeStateCopy,
   installing:
     'Load the unpacked extension at chrome://extensions (developer mode), then click again.',
 }
 
-const stateCopyPt: Record<Exclude<ConnectorState, 'error'>, string> = {
+const stateCopyPt: Record<Exclude<NationalLifeConnectorPhase, 'error'>, string> = {
   idle: 'O K-Bot está pronto para a próxima tarefa da National Life.',
   checking: 'O K-Bot está verificando este navegador…',
   installing: 'Instale o K-Bot by KeeprOne pela Chrome Web Store e volte aqui. A Keepr One o reconhecerá automaticamente.',
@@ -187,7 +198,7 @@ function humanizeSourceKey(value: string | undefined): string | null {
 }
 
 function liveProgressCopy(
-  state: ConnectorState,
+  state: NationalLifeConnectorPhase,
   sync: ConnectorResponse['sync'],
   copy: (pt: string, en: string, values?: Record<string, string | number>) => string,
   locale: string,
@@ -214,6 +225,9 @@ export function NationalLifeLocalConnectorCard({
   baseUrl,
   hideDuringActiveSync = false,
   latestRun = null,
+  variant = 'default',
+  showCornerPresence = true,
+  onStateChange,
 }: {
   extensionId: string
   storeUrl?: string | null
@@ -221,16 +235,19 @@ export function NationalLifeLocalConnectorCard({
   baseUrl: string
   hideDuringActiveSync?: boolean
   latestRun?: { runId: string; state: string } | null
+  variant?: 'default' | 'onboarding'
+  showCornerPresence?: boolean
+  onStateChange?: (state: NationalLifeConnectorViewState) => void
 }) {
   const { copy, locale } = useI18n()
   const router = useRouter()
   const installedFlowStarted = useRef(false)
   const watchAbort = useRef(0)
   const handlePrimaryActionRef = useRef<() => Promise<void>>(async () => {})
-  const [state, setState] = useState<ConnectorState>('idle')
+  const [state, setState] = useState<NationalLifeConnectorPhase>('idle')
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [compatible, setCompatible] = useState(false)
-  const [connectorPresence, setConnectorPresence] = useState<ConnectorPresence>('checking')
+  const [connectorPresence, setConnectorPresence] = useState<NationalLifeConnectorPresence>('checking')
   const [pairedDeviceId, setPairedDeviceId] = useState<string | null>(null)
   const [liveSync, setLiveSync] = useState<ConnectorResponse['sync']>(undefined)
   // The capability probe is asynchronous after hydration, but a user can click
@@ -364,10 +381,28 @@ export function NationalLifeLocalConnectorCard({
       default: return state === 'syncing' || state === 'slow' ? 0 : -1
     }
   })()
+  const onboardingVariant = variant === 'onboarding'
+  const stateChangeRef = useRef(onStateChange)
+
+  useEffect(() => {
+    stateChangeRef.current = onStateChange
+  }, [onStateChange])
+
+  useEffect(() => {
+    stateChangeRef.current?.({
+      phase: state,
+      presence: connectorPresence,
+      paired: Boolean(pairedDeviceId),
+      syncActive,
+      syncComplete: state === 'success',
+      botState,
+      progress: cornerProgress,
+    })
+  }, [botState, connectorPresence, cornerProgress, pairedDeviceId, state, syncActive])
 
   /// Toda tentativa nova começa sem o motivo da anterior. Sem isso a frase de um
   /// dispositivo revogado sobrevive por baixo do sucesso seguinte.
-  function beginAttempt(next: ConnectorState) {
+  function beginAttempt(next: NationalLifeConnectorPhase) {
     setErrorCode(null)
     setState(next)
   }
@@ -798,53 +833,73 @@ export function NationalLifeLocalConnectorCard({
 
   return (
     <>
-      <KBotCornerPresence
-        state={botState}
-        title={cornerCopy.title}
-        detail={cornerCopy.detail}
-        activity={syncActive ? 'sync' : 'idle'}
-        progress={cornerProgress}
-        tasks={cornerTasks}
-      />
+      {showCornerPresence ? (
+        <KBotCornerPresence
+          state={botState}
+          title={cornerCopy.title}
+          detail={cornerCopy.detail}
+          activity={syncActive ? 'sync' : 'idle'}
+          progress={cornerProgress}
+          tasks={cornerTasks}
+        />
+      ) : null}
       <section
         aria-labelledby="local-connector-title"
+        data-connector-variant={variant}
         // NationalLifeSyncProgress is the single visible progress surface on
         // the integration page. Keep this controller mounted so its watcher,
         // recovery and completion transitions continue running, but remove the
         // duplicate card while that dedicated panel is active.
         hidden={hideDuringActiveSync && syncActive}
-        className="overflow-hidden rounded-xl border border-border-steel bg-paper"
+        className={`overflow-hidden border border-border-steel bg-paper ${onboardingVariant ? 'rounded-[22px]' : 'rounded-xl'}`}
       >
-      <div className="relative border-b border-border-steel bg-panel/45 p-5 sm:p-7">
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+      <div className={`relative border-b border-border-steel bg-panel/45 ${onboardingVariant ? 'p-4 sm:p-5' : 'p-5 sm:p-7'}`}>
+        <div className={`flex flex-col sm:flex-row sm:items-start sm:justify-between ${onboardingVariant ? 'gap-4' : 'gap-6'}`}>
           <div className="flex items-center gap-3">
             <KBotAvatar state={botState} />
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-teal-deep">
-                K-Bot · {copy('neste computador', 'on this computer')}
+                K-Bot · {onboardingVariant
+                  ? copy('seu guia nesta etapa', 'your guide for this step')
+                  : copy('neste computador', 'on this computer')}
               </p>
-              <h2 id="local-connector-title" className="mt-1 text-2xl font-semibold tracking-[-0.04em] text-ink">
-                {copy('Coloque o K-Bot para trabalhar', 'Put K-Bot to work')}
+              <h2 id="local-connector-title" className={`${onboardingVariant ? 'text-xl' : 'text-2xl'} mt-1 font-semibold tracking-[-0.04em] text-ink`}>
+                {onboardingVariant
+                  ? copy('Vamos preparar seus dados juntos', "Let's get your data ready together")
+                  : copy('Coloque o K-Bot para trabalhar', 'Put K-Bot to work')}
               </h2>
             </div>
           </div>
           <span className="inline-flex w-fit items-center gap-2 rounded-full bg-teal-pale px-3 py-1.5 text-xs font-semibold text-teal-deep">
             <span className="h-1.5 w-1.5 rounded-full bg-teal" aria-hidden="true" />
-            {installMode === 'pilot' ? copy('Piloto', 'Pilot') : copy('Um clique', 'One click')}
+            {onboardingVariant
+              ? copy('Configuração assistida', 'Guided setup')
+              : installMode === 'pilot' ? copy('Piloto', 'Pilot') : copy('Um clique', 'One click')}
           </span>
         </div>
-        <p className="mt-6 max-w-2xl text-sm leading-6 text-ink-muted">
-          {copy(
-            'O K-Bot executa as etapas aprovadas da National Life na sessão do seu navegador. Por padrão, você entra diretamente na National Life. Se optar por isso nas Configurações, a Keepr One protege sua credencial para uma tentativa de login do K-Bot quando essa sessão expirar.',
-            'K-Bot operates the approved National Life steps in your browser session. By default, you sign in directly on National Life. If you opt in under Settings, Keepr One protects your credential for one K-Bot login attempt when that session expires.',
-          )}
-          {installMode === 'pilot'
-            ? copy(' Neste piloto, carregue a extensão descompactada usando o ID configurado para este ambiente.', ' In this pilot, load the unpacked extension using the ID configured for this environment.')
-            : null}
-        </p>
-        <p className="mt-2 max-w-2xl text-xs leading-5 text-ink-muted">
-          {copy('Em um computador particular e confiável, selecionar “Remember this device” na National Life pode reduzir solicitações repetidas de MFA. A National Life controla a duração dessa sessão confiável; a Keepr One nunca ignora o MFA e pausa com segurança quando um novo login é necessário.', 'On a private, trusted computer, selecting “Remember this device” on National Life can reduce repeated MFA prompts. National Life controls how long that trusted session lasts; Keepr One never bypasses MFA and pauses safely when sign-in is required again.')}
-        </p>
+        {onboardingVariant ? (
+          <p className="mt-4 max-w-2xl text-sm leading-6 text-ink-muted">
+            {copy(
+              'Eu ajudo você a instalar o K-Bot, entrar na National Life e trazer seus dados. Acompanhe o próximo passo; quando eu precisar de você, aviso aqui.',
+              'I will help you install K-Bot, sign in to National Life, and bring in your data. Follow the next step; when I need you, I will tell you here.',
+            )}
+          </p>
+        ) : (
+          <>
+            <p className="mt-6 max-w-2xl text-sm leading-6 text-ink-muted">
+              {copy(
+                'O K-Bot executa as etapas aprovadas da National Life na sessão do seu navegador. Por padrão, você entra diretamente na National Life. Se optar por isso nas Configurações, a Keepr One protege sua credencial para uma tentativa de login do K-Bot quando essa sessão expirar.',
+                'K-Bot operates the approved National Life steps in your browser session. By default, you sign in directly on National Life. If you opt in under Settings, Keepr One protects your credential for one K-Bot login attempt when that session expires.',
+              )}
+              {installMode === 'pilot'
+                ? copy(' Neste piloto, carregue a extensão descompactada usando o ID configurado para este ambiente.', ' In this pilot, load the unpacked extension using the ID configured for this environment.')
+                : null}
+            </p>
+            <p className="mt-2 max-w-2xl text-xs leading-5 text-ink-muted">
+              {copy('Em um computador particular e confiável, selecionar “Remember this device” na National Life pode reduzir solicitações repetidas de MFA. A National Life controla a duração dessa sessão confiável; a Keepr One nunca ignora o MFA e pausa com segurança quando um novo login é necessário.', 'On a private, trusted computer, selecting “Remember this device” on National Life can reduce repeated MFA prompts. National Life controls how long that trusted session lasts; Keepr One never bypasses MFA and pauses safely when sign-in is required again.')}
+            </p>
+          </>
+        )}
         {pairedDeviceId && state === 'idle' && (
           <div className="mt-5 inline-flex items-center gap-2 rounded-xl border border-teal/25 bg-paper/80 px-3 py-2 text-sm font-semibold text-teal-deep">
             <span className="grid h-5 w-5 place-items-center rounded-full bg-teal text-[11px] text-paper" aria-hidden="true">
@@ -863,15 +918,17 @@ export function NationalLifeLocalConnectorCard({
         )}
       </div>
 
-      <div className="border-b border-border-steel bg-paper px-5 py-4 sm:px-7">
-        <ol aria-label={copy('Progresso da conexão', 'Connection progress')} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <ConnectionJourneyStep label="K-Bot" detail={extensionStepDetail} state={extensionStepState} />
-          <ConnectionJourneyStep label={copy('Sessão da National Life', 'National Life session')} detail={loginStepDetail} state={loginStepState} />
-          <ConnectionJourneyStep label={copy('Dados verificados', 'Verified data')} detail={syncStepDetail} state={syncStepState} />
-        </ol>
-      </div>
+      {!onboardingVariant ? (
+        <div className="border-b border-border-steel bg-paper px-5 py-4 sm:px-7">
+          <ol aria-label={copy('Progresso da conexão', 'Connection progress')} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <ConnectionJourneyStep label="K-Bot" detail={extensionStepDetail} state={extensionStepState} />
+            <ConnectionJourneyStep label={copy('Sessão da National Life', 'National Life session')} detail={loginStepDetail} state={loginStepState} />
+            <ConnectionJourneyStep label={copy('Dados verificados', 'Verified data')} detail={syncStepDetail} state={syncStepState} />
+          </ol>
+        </div>
+      ) : null}
 
-      <div className="grid gap-5 bg-panel/45 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+      <div className={`grid gap-5 bg-panel/45 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center ${onboardingVariant ? 'p-4 sm:p-5' : 'p-5 sm:p-7'}`}>
         <div className="min-w-0">
           <div className="flex items-start gap-3">
             <span
