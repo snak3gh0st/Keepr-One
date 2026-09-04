@@ -2,8 +2,8 @@ export function getMonthBounds(period: string): { start: Date; end: Date } {
   const [yearStr, monthStr] = period.split('-')
   const year = Number(yearStr)
   const month = Number(monthStr) - 1
-  const start = new Date(year, month, 1)
-  const end = new Date(year, month + 1, 1)
+  const start = new Date(Date.UTC(year, month, 1))
+  const end = new Date(Date.UTC(year, month + 1, 1))
   return { start, end }
 }
 

@@ -351,13 +351,40 @@ describe('AgentDashboard module access', () => {
     expect(within(hero!).getByText('Aguardando agente').closest('a')).toHaveAttribute('href', '/agent/policies?queue=WAITING_AGENT')
     expect(within(hero!).getByText('Aguardando cliente').closest('a')).toHaveAttribute('href', '/agent/policies?queue=WAITING_CLIENT')
 
-    expect(within(queue!).getByText('Pending Lapse').closest('a')).toHaveAttribute('href', '/agent/policies?status=PENDING_LAPSE')
+    expect(within(queue!).getByText('Pending Lapse').closest('a')).toHaveAttribute('href', '/agent/policies?view=current&status=PENDING_LAPSE')
     expect(within(queue!).getByText('Pending Lapse').closest('a')).toHaveTextContent('1')
-    expect(within(queue!).getByText('Lapsed').closest('a')).toHaveAttribute('href', '/agent/policies?status=LAPSED')
+    expect(within(queue!).getByText('Lapsed').closest('a')).toHaveAttribute('href', '/agent/policies?view=current&status=LAPSED')
     expect(within(queue!).getByText('Lapsed').closest('a')).toHaveTextContent('1')
-    expect(within(queue!).getByText('Canceled').closest('a')).toHaveAttribute('href', '/agent/policies?status=CANCELLED')
+    expect(within(queue!).getByText('Canceled').closest('a')).toHaveAttribute('href', '/agent/policies?view=current&status=CANCELLED')
     expect(within(queue!).getByText('Canceled').closest('a')).toHaveTextContent('1')
     expect(within(hero!).getByText('Prêmio anual em risco').parentElement).toHaveTextContent(/1\.800/)
+  })
+
+  it('does not expose a Pending Lapse CTA for a whitespace-padded source status', async () => {
+    mocks.getCurrentAgentAccess.mockResolvedValue({
+      scopeAgentIds: ['agent-1'],
+      enabledModules: ['TODAY', 'POLICIES'],
+      canViewTeamData: false,
+      canViewAgencyNationalLife: false,
+      canManageTeam: false,
+    })
+    mocks.policyCount.mockResolvedValue(1)
+    mocks.policyFindMany.mockResolvedValue([
+      {
+        clientId: 'client-1',
+        policyNumber: 'POLICY-PADDED',
+        status: 'INFORCE',
+        sourceStatus: ' Pending Lapse ',
+        premium: 1_800,
+        sourceUpdatedAt: new Date('2026-09-03T16:00:00.000Z'),
+      },
+    ])
+
+    render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
+
+    const queue = screen.getByRole('heading', { name: 'Prioridades de hoje' }).closest('aside')
+    expect(queue).not.toBeNull()
+    expect(within(queue!).queryByText('Pending Lapse')).not.toBeInTheDocument()
   })
 
   it('does not present a partial AAP subtotal as the whole portfolio', async () => {

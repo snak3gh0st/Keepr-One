@@ -28,7 +28,7 @@ function pageRecord(overrides: Record<string, unknown> = {}) {
       calendarIntegrations: [{
         status: 'CONNECTED',
         grantedScopes: [GOOGLE_CALENDAR_OPTIONAL_SCOPES[0]],
-        calendars: [{ visible: true, crmDefault: true, accessRole: 'owner' }],
+        calendars: [{ visible: true, crmDefault: true, accessRole: 'owner', providerCalendarId: 'primary@example.com' }],
       }],
     },
     ...overrides,

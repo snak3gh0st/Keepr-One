@@ -12,7 +12,6 @@ import { ModuleSummary } from "@/components/ModuleSummary";
 import { computeNeedsAnalysis, type NeedsAnalysisInput } from "@/lib/needs-analysis";
 import { useI18n } from "@/components/i18n/LanguageProvider";
 import type { CrmStageView } from "@/lib/crm";
-import { CrmStageSelect } from "@/components/crm/CrmStageSelect";
 import { localizedCrmTimelineBody, localizedCrmTimelineTitle } from "@/components/crm/i18n";
 import { FollowUpModal } from "@/components/crm/FollowUpModal";
 import { FollowUpPanel } from "@/components/crm/FollowUpPanel";
@@ -42,6 +41,7 @@ import {
   scheduleCaseFollowUp,
 } from "./actions";
 import { ApplicationDossier } from "./ApplicationDossier";
+import { CasePipelineStageControl } from "./CasePipelineStageControl";
 
 const CalendarEventModal = dynamic(
   () =>
@@ -75,6 +75,8 @@ type CaseData = {
   id: string;
   crmStage: Pick<CrmStageView, "id" | "name" | "systemKey"> | null;
   crmStages: CrmStageView[];
+  crmPipelineAvailable: boolean;
+  readOnly: boolean;
   objective: string | null;
   productType: string | null;
   carrier: string | null;
@@ -396,7 +398,9 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         eyebrow={copy("CRM · Oportunidade em andamento", "CRM · Opportunity in progress")}
         description={
           <div className="space-y-3">
-            <CrmStageSelect
+            <CasePipelineStageControl
+              pipelineAvailable={c.crmPipelineAvailable}
+              readOnly={c.readOnly}
               caseId={c.id}
               stage={c.crmStage}
               stages={c.crmStages}
@@ -582,6 +586,7 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         connection={c.calendar.connection}
         events={c.calendar.events}
         now={c.now}
+        timeZone={c.calendar.timeZone}
         systemKey={c.crmStage?.systemKey ?? null}
         prospectName={c.prospect.name}
         onSchedule={() => setCalendarModal({ mode: "create" })}

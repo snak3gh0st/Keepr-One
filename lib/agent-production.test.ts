@@ -4,20 +4,20 @@ import { getMonthBounds, buildProductionRanking } from './agent-production'
 describe('getMonthBounds', () => {
   it('returns the first instant of the month through the first instant of the next month', () => {
     const { start, end } = getMonthBounds('2026-07')
-    expect(start).toEqual(new Date(2026, 6, 1))
-    expect(end).toEqual(new Date(2026, 7, 1))
+    expect(start).toEqual(new Date(Date.UTC(2026, 6, 1)))
+    expect(end).toEqual(new Date(Date.UTC(2026, 7, 1)))
   })
 
   it('rolls over correctly across a year boundary', () => {
     const { start, end } = getMonthBounds('2026-12')
-    expect(start).toEqual(new Date(2026, 11, 1))
-    expect(end).toEqual(new Date(2027, 0, 1))
+    expect(start).toEqual(new Date(Date.UTC(2026, 11, 1)))
+    expect(end).toEqual(new Date(Date.UTC(2027, 0, 1)))
   })
 
   it('pads single-digit months correctly (January)', () => {
     const { start, end } = getMonthBounds('2026-01')
-    expect(start).toEqual(new Date(2026, 0, 1))
-    expect(end).toEqual(new Date(2026, 1, 1))
+    expect(start).toEqual(new Date(Date.UTC(2026, 0, 1)))
+    expect(end).toEqual(new Date(Date.UTC(2026, 1, 1)))
   })
 })
 
@@ -68,4 +68,11 @@ describe('buildProductionRanking', () => {
   it('returns an empty array when there are no agents', () => {
     expect(buildProductionRanking([], [], [])).toEqual([])
   })
+})
+
+it('uses UTC even on a host west of Greenwich', () => {
+  const timezone = process.env.TZ
+  process.env.TZ = 'America/New_York'
+  try { expect(getMonthBounds('2026-09').start.toISOString()).toBe('2026-09-01T00:00:00.000Z') }
+  finally { if (timezone) process.env.TZ = timezone; else delete process.env.TZ }
 })

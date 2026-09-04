@@ -84,10 +84,13 @@ export async function POST(
     // next stage contradicts. This never throws — see `ingestPortfolioIfRunFinished`.
     const portfolio = await ingestPortfolioIfRunFinished(prismaIngestDeps(prisma), {
       agentId: device.agentId,
-      // A replayed completion for an already-settled stage returns without
-      // `terminal`. The ingestion ran on the original request, so the absence is
-      // the answer: do not run it again.
-      terminal: result.terminal === true,
+      deviceId: device.deviceId,
+      runId: result.runId,
+      // A replay is an idempotent recovery point if the process died after the
+      // stage transaction committed but before the portfolio write. The ingest
+      // revalidates this exact run/device snapshot and no-ops for a nonterminal
+      // run, so it cannot promote an earlier page by accident.
+      terminal: result.terminal === true || result.completed === true,
     })
     const promotionCredits = result.terminal === true
       ? await syncStoredNationalLifePromotionCreditsForAgentSafely(

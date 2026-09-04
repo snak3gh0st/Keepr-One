@@ -78,7 +78,7 @@ export async function requestNationalLifeDocumentTransfer(
   db: PrismaClient,
   input: DeviceScope & { reportRowId: string },
 ) {
-  const source = await db.nationalLifeReportRow.findFirst({
+  const source = await db.nationalLifePublishedReportRow.findFirst({
     where: {
       id: input.reportRowId,
       agentId: input.agentId,
@@ -102,8 +102,8 @@ export async function requestNationalLifeDocumentTransfer(
   })
   if (!policy) throw new NationalLifeDocumentTransferError('DOCUMENT_POLICY_NOT_FOUND')
 
-  const stored = await db.policyDocument.findUnique({
-    where: { sourceRowId: source.id },
+  const stored = await db.policyDocument.findFirst({
+    where: { policyId: policy.id, provider: 'NATIONAL_LIFE', externalId: source.rowKey },
     select: { id: true },
   })
   if (stored) {
@@ -111,7 +111,7 @@ export async function requestNationalLifeDocumentTransfer(
   }
 
   const existingTransfer = await db.nationalLifeDocumentTransfer.findUnique({
-    where: { agentId_reportRowId: { agentId: input.agentId, reportRowId: source.id } },
+    where: { agentId_publishedReportRowId: { agentId: input.agentId, publishedReportRowId: source.id } },
     select: { deviceId: true, state: true, updatedAt: true },
   })
   if (
@@ -124,11 +124,11 @@ export async function requestNationalLifeDocumentTransfer(
 
   const fileName = nationalLifeDocumentFileName(raw, policy.policyNumber)
   const transfer = await db.nationalLifeDocumentTransfer.upsert({
-    where: { agentId_reportRowId: { agentId: input.agentId, reportRowId: source.id } },
+    where: { agentId_publishedReportRowId: { agentId: input.agentId, publishedReportRowId: source.id } },
     create: {
       agentId: input.agentId,
       deviceId: input.deviceId,
-      reportRowId: source.id,
+      publishedReportRowId: source.id,
       policyId: policy.id,
       fileName,
     },
@@ -294,6 +294,7 @@ export async function completeNationalLifeDocumentTransfer(
     include: {
       chunks: { orderBy: { sequence: 'asc' } },
       reportRow: { select: { rowKey: true } },
+      publishedReportRow: { select: { rowKey: true } },
     },
   })
   if (!transfer) throw new NationalLifeDocumentTransferError('DOCUMENT_TRANSFER_NOT_FOUND')
@@ -327,12 +328,20 @@ export async function completeNationalLifeDocumentTransfer(
     throw new NationalLifeDocumentTransferError('DOCUMENT_INVALID_PDF')
   }
 
-  const storageKey = nationalLifeDocumentStorageKey(transfer.policyId, transfer.reportRowId)
+  const sourceId = transfer.publishedReportRowId ?? transfer.reportRowId
+  const sourceRow = transfer.publishedReportRow ?? transfer.reportRow
+  if (!sourceId || !sourceRow) {
+    throw new NationalLifeDocumentTransferError('DOCUMENT_SOURCE_NOT_FOUND')
+  }
+  const sourceIdentity = transfer.publishedReportRowId
+    ? { publishedSourceRowId: transfer.publishedReportRowId }
+    : { sourceRowId: transfer.reportRowId! }
+  const storageKey = nationalLifeDocumentStorageKey(transfer.policyId, sourceId)
   await saveUploadedFile(process.env.UPLOADS_DIR ?? './uploads', storageKey, bytes)
   const now = new Date()
   const document = await db.$transaction(async (tx) => {
     const stored = await tx.policyDocument.upsert({
-      where: { sourceRowId: transfer.reportRowId },
+      where: sourceIdentity,
       create: {
         policyId: transfer.policyId,
         filename: transfer.fileName,
@@ -341,8 +350,8 @@ export async function completeNationalLifeDocumentTransfer(
         sizeBytes: bytes.byteLength,
         uploadedById: null,
         provider: 'NATIONAL_LIFE',
-        externalId: transfer.reportRow.rowKey,
-        sourceRowId: transfer.reportRowId,
+        externalId: sourceRow.rowKey,
+        ...sourceIdentity,
         contentHash: transfer.expectedSha256,
         fetchedAt: now,
       },

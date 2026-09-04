@@ -6,6 +6,8 @@ import { NationalLifeExportWorkbookError } from '@/lib/national-life/local-conne
 import { LocalConnectorRequestError, parseJsonBody, readLimitedBody } from '@/lib/national-life/local-connector/request'
 import { refuseLocalConnectorCapability } from '@/lib/national-life/local-connector/remote-config'
 import { LocalConnectorRunError, LocalConnectorStageCompletionError } from '@/lib/national-life/local-connector/run-service'
+import { ingestPortfolioIfRunFinished } from '@/lib/national-life/portfolio-ingest'
+import { prismaIngestDeps } from '@/lib/national-life/portfolio-ingest-prisma'
 import { prisma } from '@/lib/prisma'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
@@ -31,7 +33,20 @@ export async function POST(request: Request, context: { params: Promise<{ upload
       return Response.json({ error: 'INVALID_REQUEST' }, { status: 400, headers: NO_STORE })
     }
     const result = await completeNationalLifeExportUpload(prisma, { ...device, uploadId: body.uploadId })
-    return Response.json(result, { status: result.duplicate ? 200 : 201, headers: NO_STORE })
+    const portfolio = await ingestPortfolioIfRunFinished(prismaIngestDeps(prisma), {
+      agentId: device.agentId,
+      deviceId: device.deviceId,
+      runId: result.runId,
+      // A replay is an idempotent recovery point: the prior response may have
+      // committed the stage but died before portfolio promotion ran. The exact
+      // run/device proof is revalidated by the ingest dependency before any
+      // write, so this cannot borrow another device's partial page.
+      terminal: ('terminal' in result && result.terminal === true) || result.completed === true,
+    })
+    return Response.json(
+      { ...result, portfolio },
+      { status: result.duplicate ? 200 : 201, headers: NO_STORE },
+    )
   } catch (error) {
     if (error instanceof LocalConnectorSignatureError) {
       return Response.json({ error: 'DEVICE_REQUEST_REJECTED' }, { status: 401, headers: { ...NO_STORE, 'x-fyntra-device-error': error.code } })

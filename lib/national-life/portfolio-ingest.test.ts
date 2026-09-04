@@ -6,6 +6,8 @@ import {
 } from './portfolio-ingest'
 import type { InforceRow } from './portfolio-reconcile'
 
+const runScope = { agentId: 'a1', deviceId: 'device-a', runId: 'run-a' }
+
 const row = (overrides: Partial<InforceRow>): InforceRow => ({
   deploymentScope: 'LOCAL_CONNECTOR',
   agentNumber: '10001',
@@ -27,6 +29,7 @@ const row = (overrides: Partial<InforceRow>): InforceRow => ({
 function harness(rows: InforceRow[], existing: { id: string; name: string; dateOfBirth: Date | null }[] = []) {
   const createdClients: { name: string }[] = []
   const upserted: { sourceExternalId: string; faceAmount: unknown }[] = []
+  const upsertedAgentIds: string[] = []
   const deps: IngestDeps = {
     loadInforceRows: async () => rows,
     loadClients: async () => existing,
@@ -36,24 +39,41 @@ function harness(rows: InforceRow[], existing: { id: string; name: string; dateO
     },
     upsertPolicy: async (input) => {
       upserted.push({ sourceExternalId: input.sourceExternalId, faceAmount: input.faceAmount })
+      upsertedAgentIds.push(input.agentId)
     },
   }
-  return { deps, createdClients, upserted }
+  return { deps, createdClients, upserted, upsertedAgentIds }
 }
 
 describe('ingestNationalLifePortfolio', () => {
   it('creates the client, upserts the policy and reports the counts', async () => {
     const h = harness([row({})])
-    const report = await ingestNationalLifePortfolio(h.deps, { agentId: 'a1' })
+    const report = await ingestNationalLifePortfolio(h.deps, runScope)
 
     expect(h.createdClients).toEqual([{ name: 'Enrico Abdalla' }])
     expect(h.upserted).toEqual([{ sourceExternalId: 'LS1', faceAmount: null }])
     expect(report).toMatchObject({ clientsCreated: 1, policiesUpserted: 1, needsFaceAmount: 1 })
   })
 
+  it('promotes paired-account rows to the agent despite missing or different carrier numbers', async () => {
+    const h = harness([
+      row({ policyNumber: 'DIFFERENT-CARRIER-NUMBER', agentNumber: 'another-producer' }),
+      row({ policyNumber: 'MISSING-CARRIER-NUMBER', agentNumber: null }),
+    ])
+
+    const report = await ingestNationalLifePortfolio(h.deps, runScope)
+
+    expect(h.upserted.map(({ sourceExternalId }) => sourceExternalId)).toEqual([
+      'DIFFERENT-CARRIER-NUMBER',
+      'MISSING-CARRIER-NUMBER',
+    ])
+    expect(h.upsertedAgentIds).toEqual(['a1', 'a1'])
+    expect(report.policiesUpserted).toBe(2)
+  })
+
   it('is idempotent: a second run against the same data creates no new client', async () => {
     const second = harness([row({})], [{ id: 'c1', name: 'Enrico Abdalla', dateOfBirth: null }])
-    const report = await ingestNationalLifePortfolio(second.deps, { agentId: 'a1' })
+    const report = await ingestNationalLifePortfolio(second.deps, runScope)
 
     expect(second.createdClients).toEqual([])
     expect(report.clientsCreated).toBe(0)
@@ -66,7 +86,7 @@ describe('ingestNationalLifePortfolio', () => {
       if (input.sourceExternalId === 'LS1') throw new Error('boom')
     }
 
-    const report = await ingestNationalLifePortfolio(h.deps, { agentId: 'a1' })
+    const report = await ingestNationalLifePortfolio(h.deps, runScope)
 
     expect(report.policiesUpserted).toBe(1)
     expect(report.failed).toEqual([{ policyNumber: 'LS1', reason: 'boom' }])
@@ -81,7 +101,7 @@ describe('ingestNationalLifePortfolio', () => {
       touched.push(input.sourceExternalId)
     }
 
-    const report = await ingestNationalLifePortfolio(h.deps, { agentId: 'a1' })
+    const report = await ingestNationalLifePortfolio(h.deps, runScope)
 
     expect(touched).toEqual(['LS1'])
     expect(report.policiesUpserted).toBe(1)
@@ -91,7 +111,7 @@ describe('ingestNationalLifePortfolio', () => {
 describe('ingestPortfolioIfRunFinished', () => {
   it('does nothing while the run still has stages left', async () => {
     const h = harness([row({})])
-    const report = await ingestPortfolioIfRunFinished(h.deps, { agentId: 'a1', terminal: false })
+    const report = await ingestPortfolioIfRunFinished(h.deps, { ...runScope, terminal: false })
 
     expect(report).toBeNull()
     expect(h.upserted).toEqual([])
@@ -99,7 +119,7 @@ describe('ingestPortfolioIfRunFinished', () => {
 
   it('ingests once the last stage settles', async () => {
     const h = harness([row({})])
-    const report = await ingestPortfolioIfRunFinished(h.deps, { agentId: 'a1', terminal: true })
+    const report = await ingestPortfolioIfRunFinished(h.deps, { ...runScope, terminal: true })
 
     expect(report?.policiesUpserted).toBe(1)
   })
@@ -114,7 +134,26 @@ describe('ingestPortfolioIfRunFinished', () => {
     }
 
     await expect(
-      ingestPortfolioIfRunFinished(h.deps, { agentId: 'a1', terminal: true }),
+      ingestPortfolioIfRunFinished(h.deps, { ...runScope, terminal: true }),
     ).resolves.toBeNull()
+  })
+
+  it('never promotes a second device run when its verified source is unavailable', async () => {
+    const h = harness([row({ policyNumber: 'RUN-A' })])
+    const requested: typeof runScope[] = []
+    h.deps.loadInforceRows = async (input) => {
+      requested.push(input)
+      if (input.deviceId === 'device-a' && input.runId === 'run-a') return [row({ policyNumber: 'RUN-A' })]
+      // Device B has only uploaded a partial page; it must never inherit A's
+      // normalized agent-wide rows as a fallback.
+      return null
+    }
+
+    await expect(ingestPortfolioIfRunFinished(h.deps, {
+      agentId: 'a1', deviceId: 'device-b', runId: 'run-b', terminal: true,
+    })).resolves.toBeNull()
+
+    expect(requested).toEqual([{ agentId: 'a1', deviceId: 'device-b', runId: 'run-b' }])
+    expect(h.upserted).toEqual([])
   })
 })

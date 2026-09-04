@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   verify: vi.fn(),
   failStage: vi.fn(),
+  ingest: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock('@/lib/national-life/local-connector/config', () => ({
@@ -18,6 +19,8 @@ vi.mock('@/lib/national-life/local-connector/run-service', async (importOriginal
   return { ...actual, failLocalConnectorStage: mocks.failStage }
 })
 vi.mock('@/lib/prisma', () => ({ prisma: {} }))
+vi.mock('@/lib/national-life/portfolio-ingest', () => ({ ingestPortfolioIfRunFinished: mocks.ingest }))
+vi.mock('@/lib/national-life/portfolio-ingest-prisma', () => ({ prismaIngestDeps: () => ({}) }))
 
 import { POST } from './route'
 
@@ -72,5 +75,16 @@ describe('local connector isolated stage failure route', () => {
 
     expect(response.status).toBe(400)
     expect(mocks.failStage).not.toHaveBeenCalled()
+  })
+
+  it('attempts exact-run portfolio promotion when another source ends the run as partial', async () => {
+    mocks.failStage.mockResolvedValueOnce({ runId: 'run-1', terminal: true, state: 'PARTIAL' })
+    const response = await POST(new Request(url, { method: 'POST', body: JSON.stringify({
+      runId: 'run-1', gridKey: 'PROJECTED_COMMISSIONS', code: 'TEMPLATE_UNAVAILABLE', retryable: true,
+    }) }), { params: Promise.resolve({ runId: 'run-1', gridKey: 'PROJECTED_COMMISSIONS' }) })
+    expect(response.status).toBe(200)
+    expect(mocks.ingest).toHaveBeenCalledWith({}, {
+      agentId: 'agent-1', deviceId: 'device-1', runId: 'run-1', terminal: true,
+    })
   })
 })

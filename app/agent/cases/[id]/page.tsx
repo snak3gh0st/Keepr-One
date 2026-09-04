@@ -8,16 +8,18 @@ import { canAccessCase } from '@/lib/case-access'
 import { decimalToNumber } from '@/lib/decimal'
 import { Shell } from '@/components/Shell'
 import { CaseWorkspace } from './CaseWorkspace'
-import { getPipelineForAgent } from '@/lib/crm'
+import { findPipelineForAgent, getPipelineForAgent } from '@/lib/crm'
 import { getCalendarConnectionForUser, getCalendarEventsForCase } from '@/lib/calendar'
 import { mapDomainCalendarConnectionToUi, mapDomainCalendarEventToUi } from '@/components/calendar/server-adapter'
 import { getKBotApplicationEntitlement } from '@/lib/application-addon/entitlement-prisma'
-import { getServerI18n } from '@/lib/i18n/server'
+import { getCurrentSession, getServerI18n } from '@/lib/i18n/server'
+import { isReadOnlySupportPreview } from '@/lib/support-preview'
 
 export default async function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { language } = await getServerI18n()
   const { id } = await params
   const agent = await getCurrentAgent()
+  const readOnly = isReadOnlySupportPreview(await getCurrentSession())
   const user = await prisma.user.findUnique({ where: { id: agent.userId }, select: { name: true, timeZone: true } })
   const scope = await getAgentScopeIds(agent.id)
 
@@ -43,7 +45,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   })
 
   if (!c || !canAccessCase({ role: 'AGENT', agentScopeIds: scope }, c)) notFound()
-  const pipeline = await getPipelineForAgent(c.assignedAgentId)
+  const pipeline = readOnly
+    ? await findPipelineForAgent(c.assignedAgentId)
+    : await getPipelineForAgent(c.assignedAgentId)
   const ownsCase = c.assignedAgentId === agent.id
   const applicationAddon = ownsCase
     ? await getKBotApplicationEntitlement(agent.id)
@@ -81,12 +85,21 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
+      {!pipeline && (
+        <p className="mx-auto mb-4 max-w-[1800px] rounded-xl border border-border-steel bg-panel px-4 py-3 text-sm text-ink-muted" role="status">
+          {language === 'PT'
+            ? 'O pipeline deste agente ainda não foi configurado. No modo de suporte, nada foi criado.'
+            : 'This agent has no configured pipeline yet. Nothing was created in support mode.'}
+        </p>
+      )}
       <CaseWorkspace
         caseData={{
           id: c.id,
           now: new Date().toISOString(),
           crmStage: c.crmStage,
-          crmStages: pipeline.stages,
+          crmStages: pipeline?.stages ?? [],
+          crmPipelineAvailable: Boolean(pipeline),
+          readOnly,
           objective: c.objective,
           productType: c.productType,
           carrier: c.carrier,
@@ -170,7 +183,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             calendars: mappedCalendar.calendars,
             timeZone: user?.timeZone ?? 'America/New_York',
             events: calendarEventDomains.map((event) => mapDomainCalendarEventToUi(event, {
-              timeZone: event.timeZone ?? 'America/New_York',
+              timeZone: user?.timeZone ?? 'America/New_York',
               case: calendarCase,
               canWrite: ownsCase && (calendarById.get(event.calendar.id)?.canWrite ?? false),
             })),

@@ -179,3 +179,12 @@ describe('PolicyRowSchema provenance columns', () => {
     }
   })
 })
+
+describe('business calendar validation', () => {
+  it.each(['2026-00', '2026-13'])('rejects invalid period %s', (period) => {
+    expect(CommissionRowSchema.safeParse({ policyNumber: 'P', agentNpn: '123', amount: '100', period }).success).toBe(false)
+  })
+  it.each(['not-a-date', '2026-02-29', '2026-04-31', '2026-13-01'])('rejects invalid policy date %s', (effectiveDate) => {
+    expect(PolicyRowSchema.safeParse({ clientName: 'Test', agentNpn: '123', carrier: 'C', product: 'P', policyNumber: 'P', faceAmount: '100', premium: '10', status: 'INFORCE', effectiveDate }).success).toBe(false)
+  })
+})

@@ -885,7 +885,9 @@ describe('local connector runs', () => {
     const caseUpsert = vi.fn().mockResolvedValue({})
     const rawPageUpsert = vi.fn().mockResolvedValue({})
     const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
           id: 'run_1',
           plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
@@ -953,7 +955,9 @@ describe('local connector runs', () => {
   it('keeps the local snapshot receipt successful when promotion sync needs review', async () => {
     const caseUpsert = vi.fn().mockResolvedValue({})
     const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 'run_1', plannedGridKeys: ['NEW_BUSINESS'] }),
         update: vi.fn().mockResolvedValue({}),
       },
@@ -1015,10 +1019,12 @@ describe('local connector runs', () => {
     })
   })
 
-  it('routes a report grid to report rows with the untouched row', async () => {
+  it('keeps a report grid page raw until its stage is proven complete', async () => {
     const reportUpsert = vi.fn().mockResolvedValue({})
     const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 'run_1', plannedGridKeys: ['PAID_COMMISSIONS'] }),
         update: vi.fn().mockResolvedValue({}),
       },
@@ -1064,16 +1070,21 @@ describe('local connector runs', () => {
       },
     })
 
-    const written = reportUpsert.mock.calls[0][0]
-    expect(written.where.agentId_deploymentScope_gridKey_rowKey.gridKey).toBe('PAID_COMMISSIONS')
-    expect(written.create.rowKey).toBe('G1|2026-07-01')
-    expect(written.create.raw).toMatchObject({ GlobalId: 'G1' })
+    expect(reportUpsert).not.toHaveBeenCalled()
+    expect(tx.nationalLifeRawGridPage.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        gridKey: 'PAID_COMMISSIONS',
+        records: [expect.objectContaining({ GlobalId: 'G1' })],
+      }),
+    }))
   })
 
   it('persists a captured server-rendered page only in the raw landing zone', async () => {
     const reportUpsert = vi.fn().mockResolvedValue({})
     const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi
           .fn()
           .mockResolvedValue({ id: 'run_1', plannedGridKeys: ['COMMISSIONS_OVERVIEW'] }),
@@ -1140,8 +1151,10 @@ describe('local connector runs', () => {
     const caseUpsert = vi.fn().mockResolvedValue({})
     const reportUpsert = vi.fn().mockResolvedValue({})
     const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeSyncRun: {
         // A default run: it planned exactly NEW_BUSINESS and INFORCE_CLIENTS.
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
           id: 'run_1',
           plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
@@ -1194,7 +1207,9 @@ describe('local connector runs', () => {
   it('does not let unplanned grids close a run by count alone', async () => {
     const runUpdate = vi.fn().mockResolvedValue({})
     const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
           id: 'run_1',
           plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
@@ -1315,7 +1330,9 @@ describe('local connector runs', () => {
       createdAt: now,
     })
     const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
           id: 'run_1',
           plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
@@ -1382,7 +1399,9 @@ describe('local connector runs', () => {
       updatedAt: now,
     }
     const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
           id: 'run-1',
           plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
@@ -1447,7 +1466,9 @@ describe('local connector runs', () => {
     const runUpdate = vi.fn().mockResolvedValue({})
     const receiptFindMany = vi.fn().mockResolvedValue([])
     const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
           id: 'run-1',
           plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
@@ -1528,7 +1549,9 @@ describe('local connector runs', () => {
       updatedAt: now,
     }
     const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
           id: 'run-1',
           plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
@@ -1585,7 +1608,9 @@ describe('local connector runs', () => {
   it('keeps an installed pre-0.1.2 connector moving during the Store rollout', async () => {
     const runUpdate = vi.fn().mockResolvedValue({})
     const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 'run-legacy', plannedGridKeys: ['NEW_BUSINESS'] }),
         update: runUpdate,
       },
@@ -1655,6 +1680,7 @@ describe('local connector runs', () => {
     })
     const tx = {
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         // The transaction observed RUNNING, then onboarding cancellation won
         // immediately before the conditional run update.
         findFirst: vi.fn().mockResolvedValue({
@@ -1663,6 +1689,7 @@ describe('local connector runs', () => {
         }),
         update: runUpdate,
       },
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
       nationalLifeConnectorStageReceipt: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: receiptCreate,
@@ -1784,7 +1811,8 @@ describe('local connector runs', () => {
     // 4. ingest lookup
     const ingestFindFirst = vi.fn().mockResolvedValue(null)
     const tx = {
-      nationalLifeSyncRun: { findFirst: ingestFindFirst, update: vi.fn() },
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
+      nationalLifeSyncRun: { findFirst: ingestFindFirst, update: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       nationalLifeConnectorStageReceipt: { findUnique: vi.fn(), create: vi.fn(), findMany: vi.fn() },
       nationalLifeCaseSnapshot: { upsert: vi.fn() },
       nationalLifeInforcePolicy: { upsert: vi.fn() },
@@ -1844,6 +1872,7 @@ describe('local connector runs', () => {
     const runUpdate = vi.fn().mockResolvedValue({})
     const tx = {
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
           id: 'run-1',
           plannedGridKeys: ['NEW_BUSINESS', 'PROJECTED_COMMISSIONS', 'INFORCE_CLIENTS'],
@@ -1886,6 +1915,7 @@ describe('local connector runs', () => {
     const runUpdate = vi.fn().mockResolvedValue({})
     const tx = {
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
           id: 'run-1',
           plannedGridKeys: ['NEW_BUSINESS', 'PROJECTED_COMMISSIONS'],
@@ -1920,6 +1950,7 @@ describe('local connector runs', () => {
     const runUpdate = vi.fn().mockResolvedValue({})
     const tx = {
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
           id: 'run-1',
           plannedGridKeys: ['NEW_BUSINESS', 'INFORCE_CLIENTS'],
@@ -1940,7 +1971,7 @@ describe('local connector runs', () => {
         update: vi.fn().mockResolvedValue({}),
       },
       nationalLifeConnectorStageCompletion: {
-        upsert: vi.fn().mockResolvedValue({}),
+        upsert: vi.fn(async ({ create }) => ({ id: 'completion-1', ...create })),
         findMany: vi.fn().mockResolvedValue([{ gridKey: 'NEW_BUSINESS' }]),
       },
       nationalLifeConnectorStageFailure: {
@@ -2001,6 +2032,7 @@ describe('local connector runs', () => {
     const runUpdate = vi.fn().mockRejectedValue(canceled)
     const tx = {
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
           id: 'run-raced',
           state: 'RUNNING',
@@ -2021,7 +2053,7 @@ describe('local connector runs', () => {
         update: vi.fn(),
       },
       nationalLifeConnectorStageCompletion: {
-        upsert: vi.fn().mockResolvedValue({}),
+        upsert: vi.fn().mockResolvedValue({ id: "stage-1", completedAt: now, expectedRecordCount: 1, receivedRecordCount: 1, finalSequence: 0 }),
         findMany: vi.fn().mockResolvedValue([{ gridKey: 'INFORCE_CLIENTS' }]),
       },
       nationalLifeConnectorStageFailure: {
@@ -2061,15 +2093,16 @@ describe('local connector runs', () => {
 
   it.each([
     ['INFORCE_CLIENTS', 'nationalLifeInforcePolicy'],
-    ['PAYABLE_GROSS_COMMISSIONS', 'nationalLifeReportRow'],
+    ['PAYABLE_GROSS_COMMISSIONS', 'nationalLifePublishedReportRow'],
   ] as const)('prunes stale normalized rows after verifying %s', async (gridKey, targetModel) => {
     const models = {
       nationalLifeCaseSnapshot: { deleteMany: vi.fn() },
       nationalLifeInforcePolicy: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
-      nationalLifeReportRow: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
+      nationalLifePublishedReportRow: { upsert: vi.fn().mockResolvedValue({}), deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
     }
     const tx = {
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 'run-1', plannedGridKeys: [gridKey] }),
         update: vi.fn().mockResolvedValue({}),
       },
@@ -2081,7 +2114,7 @@ describe('local connector runs', () => {
         update: vi.fn().mockResolvedValue({}),
       },
       nationalLifeConnectorStageCompletion: {
-        upsert: vi.fn().mockResolvedValue({}),
+        upsert: vi.fn(async ({ create }) => ({ id: 'completion-1', ...create })),
         findMany: vi.fn().mockResolvedValue([{ gridKey }]),
       },
       nationalLifeConnectorStageFailure: {
@@ -2089,6 +2122,7 @@ describe('local connector runs', () => {
         findMany: vi.fn().mockResolvedValue([]),
       },
       ...models,
+      nationalLifeReportPublication: { upsert: vi.fn(async ({ create }) => ({ id: 'cursor-1', ...create })), update: vi.fn() },
       nationalLifeRawGridPage: {
         findMany: vi.fn().mockResolvedValue([{
           sequence: 0,
@@ -2106,12 +2140,18 @@ describe('local connector runs', () => {
       expectedRecordCount: 1, finalSequence: 0, truncated: false, now,
     })
 
-    const expectedWhere = {
-      agentId: 'agent-1',
-      deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-      fetchedAt: { lt: now },
-      ...(targetModel === 'nationalLifeReportRow' ? { gridKey } : {}),
-    }
+    const expectedWhere = targetModel === 'nationalLifePublishedReportRow'
+      ? {
+          agentId: 'agent-1',
+          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+          gridKey,
+          stageCompletionId: { not: 'completion-1' },
+        }
+      : {
+          agentId: 'agent-1',
+          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+          fetchedAt: { lt: now },
+        }
     expect(models[targetModel].deleteMany).toHaveBeenCalledWith({ where: expectedWhere })
   })
 
@@ -2123,6 +2163,7 @@ describe('local connector runs', () => {
     const deleteReportRows = vi.fn()
     const tx = {
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 'run-1', plannedGridKeys: [gridKey] }),
         update: vi.fn().mockResolvedValue({}),
       },
@@ -2134,7 +2175,7 @@ describe('local connector runs', () => {
         update: vi.fn().mockResolvedValue({}),
       },
       nationalLifeConnectorStageCompletion: {
-        upsert: vi.fn().mockResolvedValue({}),
+        upsert: vi.fn(async ({ create }) => ({ id: 'completion-1', ...create })),
         findMany: vi.fn().mockResolvedValue([{ gridKey }]),
       },
       nationalLifeConnectorStageFailure: {
@@ -2143,7 +2184,8 @@ describe('local connector runs', () => {
       },
       nationalLifeCaseSnapshot: { deleteMany: vi.fn() },
       nationalLifeInforcePolicy: { deleteMany: vi.fn() },
-      nationalLifeReportRow: { deleteMany: deleteReportRows },
+      nationalLifePublishedReportRow: { upsert: vi.fn().mockResolvedValue({}), deleteMany: deleteReportRows },
+      nationalLifeReportPublication: { upsert: vi.fn(async ({ create }) => ({ id: 'cursor-1', ...create })), update: vi.fn() },
       nationalLifeRawGridPage: {
         findMany: vi.fn().mockResolvedValue([{
           sequence: 0,
@@ -2168,9 +2210,134 @@ describe('local connector runs', () => {
     expect(deleteReportRows).not.toHaveBeenCalled()
   })
 
-  it('refuses a final marker when a page is missing', async () => {
+  it('does not publish or replace a prior report snapshot when a new page set is partial', async () => {
+    const reportUpsert = vi.fn()
+    const publicationUpsert = vi.fn()
+    const publicationUpdate = vi.fn()
+    const reportDelete = vi.fn()
     const tx = {
       nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst: vi.fn().mockResolvedValue({ id: 'run-b', plannedGridKeys: ['PAYABLE_GROSS_COMMISSIONS'] }),
+      },
+      nationalLifeConnectorStageReceipt: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: 'receipt-b0', sequence: 0, recordCount: 1,
+          writtenCount: 1, duplicateCount: 0, rejectedCount: 0,
+        }]),
+      },
+      nationalLifeRawGridPage: {
+        // Carrier promised two pages. The second page never landed.
+        findMany: vi.fn().mockResolvedValue([{
+          sequence: 0, recordCount: 1, records: [{ PolicyNumber: 'B-PARTIAL' }],
+        }]),
+      },
+      nationalLifeConnectorStageCompletion: { upsert: vi.fn() },
+      nationalLifeReportPublication: { upsert: publicationUpsert, update: publicationUpdate },
+      nationalLifePublishedReportRow: { upsert: reportUpsert, deleteMany: reportDelete },
+    }
+    const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
+
+    await expect(completeLocalConnectorStage(db, {
+      agentId: 'agent-1', deviceId: 'device-b', runId: 'run-b', gridKey: 'PAYABLE_GROSS_COMMISSIONS',
+      expectedRecordCount: 2, finalSequence: 1, truncated: false, now,
+    })).rejects.toThrow('STAGE_INCOMPLETE')
+
+    // The previous verified snapshot is untouched: no cursor move, report
+    // upsert, or prune occurs before page/receipt reconciliation succeeds.
+    expect(publicationUpsert).not.toHaveBeenCalled()
+    expect(reportUpsert).not.toHaveBeenCalled()
+    expect(reportDelete).not.toHaveBeenCalled()
+  })
+
+  it('keeps the newer publication when an older running device repeats completion', async () => {
+    let cursor: Record<string, unknown> | null = null
+    const publicationUpsert = vi.fn(async ({ create }) => {
+      cursor ??= { id: 'cursor-1', ...create }
+      return cursor
+    })
+    const publicationUpdate = vi.fn(async ({ data }) => { cursor = { ...cursor, ...data } })
+    const reportUpsert = vi.fn().mockResolvedValue({})
+    const reportDelete = vi.fn().mockResolvedValue({ count: 1 })
+    const completions = new Map<string, Record<string, unknown>>()
+    const stageCompletionUpsert = vi.fn(async (args: { update: Record<string, unknown>; create: Record<string, unknown>; where: { deviceId_runId_gridKey: { deviceId: string } } }) => {
+      const id = `completion-${args.where.deviceId_runId_gridKey.deviceId}`
+      const value = { ...(completions.get(id) ?? { id, ...args.create }), ...args.update }
+      completions.set(id, value)
+      return value
+    })
+    const complete = async (deviceId: string, runId: string, policyNumber: string, time: Date) => {
+      const tx = {
+        nationalLifeSyncRun: {
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findFirst: vi.fn().mockResolvedValue({ id: runId, state: 'RUNNING', plannedGridKeys: ['PAYABLE_GROSS_COMMISSIONS', 'INFORCE_CLIENTS'] }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        nationalLifeConnectorStageReceipt: {
+          findMany: vi.fn().mockResolvedValue([{
+            id: `receipt-${runId}`, sequence: 0, recordCount: 1,
+            writtenCount: 1, duplicateCount: 0, rejectedCount: 0,
+          }]),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        nationalLifeConnectorStageCompletion: {
+          upsert: stageCompletionUpsert,
+          findMany: vi.fn().mockResolvedValue([{ gridKey: 'PAYABLE_GROSS_COMMISSIONS' }]),
+        },
+        nationalLifeConnectorStageFailure: {
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+        nationalLifeCaseSnapshot: { deleteMany: vi.fn() },
+        nationalLifeInforcePolicy: { deleteMany: vi.fn() },
+        nationalLifeReportPublication: { upsert: publicationUpsert, update: publicationUpdate },
+        nationalLifePublishedReportRow: { upsert: reportUpsert, deleteMany: reportDelete },
+        nationalLifeRawGridPage: {
+          findMany: vi.fn().mockResolvedValue([{
+            sequence: 0, recordCount: 1, records: [{ PolicyNumber: policyNumber }],
+          }]),
+          deleteMany: vi.fn(),
+        },
+      }
+      const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
+      await completeLocalConnectorStage(db, {
+        agentId: 'agent-1', deviceId, runId, gridKey: 'PAYABLE_GROSS_COMMISSIONS',
+        expectedRecordCount: 1, finalSequence: 0, truncated: false, now: time,
+      })
+      expect(tx.nationalLifeRawGridPage.deleteMany).not.toHaveBeenCalled()
+    }
+
+    await complete('device-a', 'run-a', 'A-ONLY', now)
+    await complete('device-b', 'run-b', 'B-ONLY', new Date(now.getTime() + 1000))
+    await complete('device-a', 'run-a', 'A-ONLY', new Date(now.getTime() + 2000))
+    expect(publicationUpdate).toHaveBeenCalledTimes(2)
+    expect(cursor).toMatchObject({ runId: 'run-b' })
+
+    expect(publicationUpsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      create: expect.objectContaining({ deviceId: 'device-a', runId: 'run-a', stageCompletionId: 'completion-device-a' }),
+    }))
+    expect(publicationUpdate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      data: expect.objectContaining({ deviceId: 'device-b', runId: 'run-b', stageCompletionId: 'completion-device-b' }),
+    }))
+    expect(reportUpsert.mock.calls.map(([args]) => args.update.stageCompletionId)).toEqual([
+      'completion-device-a',
+      'completion-device-b',
+    ])
+    expect(reportDelete).toHaveBeenLastCalledWith({
+      where: {
+        agentId: 'agent-1',
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+        gridKey: 'PAYABLE_GROSS_COMMISSIONS',
+        stageCompletionId: { not: 'completion-device-b' },
+      },
+    })
+  })
+
+  it('refuses a final marker when a page is missing', async () => {
+    const tx = {
+      nationalLifeConnectorStageCompletion: { findUnique: vi.fn().mockResolvedValue(null) },
+      nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 'run-1', plannedGridKeys: ['NEW_BUSINESS'] }),
       },
       nationalLifeConnectorStageReceipt: {

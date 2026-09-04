@@ -108,14 +108,14 @@ describe('resolvePolicyExternalId', () => {
 })
 
 describe('deriveCommissionSourceId', () => {
-  const base = { filename: 'jan.csv', rowNumber: 2, policyNumber: 'NLG-0002', agentNpn: '1000003', period: '2026-01' }
+  const base = { amount: 100, occurrence: 1, policyNumber: 'NLG-0002', agentNpn: '1000003', period: '2026-01' }
 
   it('is deterministic for the same inputs', () => {
     expect(deriveCommissionSourceId(base)).toBe(deriveCommissionSourceId(base))
   })
 
   it('differs per row so distinct rows never collide', () => {
-    expect(deriveCommissionSourceId(base)).not.toBe(deriveCommissionSourceId({ ...base, rowNumber: 3 }))
+    expect(deriveCommissionSourceId(base)).not.toBe(deriveCommissionSourceId({ ...base, occurrence: 2 }))
   })
 
   it('prefers an explicit source transaction id', () => {

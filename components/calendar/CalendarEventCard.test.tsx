@@ -83,6 +83,18 @@ describe("CalendarEventCard", () => {
     expect(screen.getByText("✓ Concluída")).toBeInTheDocument();
   });
 
+  it("formats timed events in the account display timezone", () => {
+    render(<CalendarEventCard event={{
+      ...event,
+      startsAt: "2026-09-04T16:00:00.000Z",
+      endsAt: "2026-09-04T16:30:00.000Z",
+      timeZone: "America/Sao_Paulo",
+    }} displayTimeZone="America/New_York" />);
+
+    expect(screen.getByText(/12:00/)).toBeInTheDocument();
+    expect(screen.queryByText(/13:00/)).not.toBeInTheDocument();
+  });
+
   it("renders controls and derived states in English", () => {
     render(
       <LanguageProvider initialLanguage="EN">

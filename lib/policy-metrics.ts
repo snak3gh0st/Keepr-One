@@ -1,4 +1,5 @@
 import { decimalToNumber } from './decimal'
+import { isCanonicalPendingLapse } from './national-life/pending-lapse'
 
 /**
  * Policy.premium is modal when premiumMode is known. National Life's in-force
@@ -66,15 +67,11 @@ export type NationalLifePortfolioMetrics = {
   lastUpdatedAt: Date | null
 }
 
-function isPendingLapse(sourceStatus: string | null): boolean {
-  return (sourceStatus ?? '').trim().toLowerCase() === 'pending lapse'
-}
-
 export function buildNationalLifePortfolioMetrics(
   rows: readonly NationalLifePortfolioMetricRow[],
 ): NationalLifePortfolioMetrics {
   const activeRows = rows.filter((row) => row.status === 'INFORCE')
-  const pendingLapseRows = activeRows.filter((row) => isPendingLapse(row.sourceStatus))
+  const pendingLapseRows = activeRows.filter((row) => isCanonicalPendingLapse(row.sourceStatus))
   const lapsedRows = rows.filter((row) => row.status === 'LAPSED')
   const cancelledRows = rows.filter((row) => row.status === 'CANCELLED')
   const activeAaps = activeRows.map((row) => auditedNationalLifeAap(row.premium))

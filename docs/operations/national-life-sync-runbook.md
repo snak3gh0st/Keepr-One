@@ -104,11 +104,22 @@ aba inativa da National Life. Não cria um segundo run enquanto outro está ativ
 O Chrome precisa estar aberto e o computador acordado. Se a sessão da National
 Life exigir login ou MFA, a aba é trazida para frente e o run aguarda o agente;
 o Keepr One também cria um aviso no sino de notificações e o resolve quando a
-sessão volta. Nenhuma credencial, resposta de MFA, cookie ou sessão é armazenada
-pelo Keepr One. O `Remember this device`, quando o agente o escolher no portal,
+sessão volta. No fluxo normal do conector local, o Keepr One não retém a senha
+da National Life, nem a resposta de MFA; o agente completa ambas no portal
+oficial. O `Remember this device`, quando o agente o escolher no portal,
 continua pertencendo exclusivamente à National Life e ao perfil do Chrome.
 Fechar a aba vinculada ao conector continua sendo um cancelamento explícito e
 não é desfeito em silêncio.
+
+Existe um credential broker opcional, separado e dependente de consentimento,
+para a recuperação de uma sessão de carrier em uma operação já aprovada. Quando
+ele é deliberadamente habilitado, o banco guarda somente ciphertext do Vault
+Transit e metadados mascarados. O runtime web usa uma identidade apenas de
+criptografia e não consegue descriptografar o material; o broker privado
+separado tem a identidade de descriptografia. Nenhuma API revela ou copia a
+credencial armazenada. Este runbook não afirma que esse recurso esteja ativo em
+produção; siga `docs/operations/kbot-credential-broker-runbook.md` antes de
+qualquer ativação.
 
 ### PDFs de Correspondence sob demanda (extensão 0.1.21+)
 
@@ -164,6 +175,103 @@ Nas quatro fontes `READ_PAGE`, `recebido > 0` e `escrito = 0` é esperado: o
 snapshot foi preservado em `NationalLifeRawGridPage`, mas não virou linha
 operacional. Nas nove fontes estruturadas, a mesma combinação indica mapper sem
 chave natural e precisa ser investigada.
+
+A tela **Carteira atual** usa a projeção da exportação completa reconciliada. O
+**Histórico** é uma leitura local separada, inclusive para registros que não
+aparecem mais nessa projeção; não apresente o histórico como prova da carteira
+vigente.
+
+Build e healthcheck verdes comprovam somente o artefato e a disponibilidade
+técnica. Eles não comprovam um sync no carrier nem um resultado de cobrança;
+para esses fluxos, mantenha a evidência do run e execute apenas o smoke
+explicitamente autorizado.
+
+### Publicação de carteira e produção administrativa
+
+A partir da migration
+`20260904190000_publish_verified_national_life_report_rows`, a carteira é
+promovida exclusivamente das páginas raw verificadas do **mesmo** `agentId`,
+`deviceId` e `runId` que acabou de terminar. Um run de outro dispositivo nunca
+empresta linhas normalizadas do agente. Se a prova de páginas, sequências ou
+contagem não estiver íntegra, a promoção falha fechada e não escreve carteira.
+
+As linhas de relatório chegam primeiro em `NationalLifeRawGridPage`. Depois da
+reconciliação, o servidor materializa somente o snapshot completo em
+`NationalLifePublishedReportRow`; comissões, dados National, detalhes de apólice,
+documentos e o painel administrativo leem essa projeção
+separada, nunca a landing table `NationalLifeReportRow`. Cada linha publicada
+guarda o `stageCompletionId`, o `runId` e o `deviceId` que a comprovaram. Uma
+publicação por agente/escopo/grid é serializada por
+`NationalLifeReportPublication`, portanto dois dispositivos não podem misturar
+snapshots no mesmo conjunto de chaves. O horário da completion é imutável:
+repetir uma conclusão antiga não substitui uma publicação mais recente. Novas
+páginas são recusadas para uma etapa já concluída. A promoção de `Policy`
+também compara esse horário antes de atualizar uma linha mais nova.
+As páginas raw de outros runs não são
+apagadas no término do stage: um GC futuro precisa ser consciente de run e de
+consumidores para não remover a prova antes da promoção.
+
+**Ordem obrigatória de rollout:** fazer backup, aplicar a migration, subir a
+imagem que contém esta regra e só então disparar um sync novo. Não subir a nova
+imagem antes da migration. O código anterior pode continuar gravando linhas
+sem prova durante a janela de rollout, mas o novo leitor as recusa; drene as
+réplicas anteriores antes de declarar o rollout concluído.
+
+**Trade-off histórico deliberado:** linhas `LOCAL_CONNECTOR` que já existiam
+não têm `runId`/completion de publicação suficiente para provar que vieram de
+um snapshot completo. A migration não as apaga nem inventa prova, mas elas ficam
+fora das telas de relatório até a primeira captura completa posterior. As
+linhas no escopo legado `keepr-one-production-v1` continuam legíveis. Antes do
+rollout, informe a operação que a produção local pode ficar temporariamente
+vazia até o sync completo; isto é uma quarentena de confiança, não perda de
+dados.
+
+A captura nova recupera somente a janela que o portal fornecer. Histórico local
+mais antigo que essa janela permanece armazenado, mas não deve voltar aos totais
+sem uma prova de captura completa; a primeira sincronização não garante recuperar
+todo esse histórico.
+
+Documentos novos usam `publishedReportRowId` na transferência e
+`publishedSourceRowId` no arquivo salvo. As referências antigas permanecem
+válidas; arquivos já recuperados também são encontrados pela identidade externa
+da correspondência. O histórico de correspondência não é podado durante sync.
+
+Validação local reproduzível: provisionar PostgreSQL descartável em loopback,
+com banco `keeprone_audit_test`, aplicar as migrações e executar
+`NATIONAL_REPORT_TEST_DATABASE_URL=<url-local> pnpm vitest run tests/national-life/report-publication.postgres.test.ts`.
+O teste usa registros sintéticos, verifica publicação concorrente, replay,
+rejeição de nova página após conclusão e transferência de documento até os bytes
+salvos. Nunca apontar essa variável para produção.
+
+Depois do primeiro sync completo, verificar a proveniência, não só a contagem:
+
+```sql
+\set agent_id '<agent-id-exato>'
+
+SELECT r."gridKey", COUNT(*) AS linhas_publicadas,
+       MIN(c."completedAt") AS primeira_prova,
+       MAX(c."completedAt") AS ultima_prova
+FROM "NationalLifePublishedReportRow" r
+JOIN "NationalLifeConnectorStageCompletion" c
+  ON c."id" = r."stageCompletionId"
+JOIN "NationalLifeSyncRun" run ON run."id" = c."runId"
+WHERE r."agentId" = :'agent_id'
+  AND r."deploymentScope" = 'LOCAL_CONNECTOR'
+  AND c."truncated" = false
+  AND run."executionSource" = 'LOCAL'
+GROUP BY r."gridKey" ORDER BY 1;
+
+SELECT "gridKey", "runId", "deviceId", "completedAt"
+FROM "NationalLifeReportPublication"
+WHERE "agentId" = :'agent_id'
+  AND "deploymentScope" = 'LOCAL_CONNECTOR'
+ORDER BY "gridKey";
+```
+
+Se a primeira captura falhar ou terminar parcial, não force um backfill na
+tabela publicada: corrija a causa e execute outra captura completa. Uma rollback
+de código não deve reabilitar leitura administrativa da landing table sem prova;
+mantenha esta versão ou faça uma correção compatível antes de voltar.
 
 ## Passo 5 — o export do in-force trouxe contato?
 

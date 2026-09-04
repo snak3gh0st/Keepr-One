@@ -201,7 +201,7 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
       return null
     }
   })()
-  const commandStatus = (await getIllustrationCommandStatuses(agent.id)).get(illustration.id)
+  const commandStatus = (await getIllustrationCommandStatuses(agent.id, [illustration.id])).get(illustration.id)
   const documentReady = illustration.documentFetchedAt && illustration.documentMimeType === 'application/pdf'
   const foresightResult = documentReady ? foresightResultFrom(illustration.rawPayload) : null
   const quickReview = quickReviewFrom(illustration.rawPayload)

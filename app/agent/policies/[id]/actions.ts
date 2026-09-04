@@ -1,6 +1,7 @@
 'use server'
 
 import { prisma } from '@/lib/prisma'
+import { readNationalLifeReports } from '@/lib/national-life/published-report-reader'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentScopeIds } from '@/lib/agent-access'
 import { canAccessPolicy } from '@/lib/policy-access'
@@ -187,15 +188,11 @@ export async function refreshNationalLifePolicyDetail(
             select: { raw: true },
             orderBy: { fetchedAt: 'desc' },
           }),
-          prisma.nationalLifeReportRow.findMany({
-            where: {
-              agentId: input.agentId,
-              deploymentScope: { in: scopes },
-              gridKey: 'CLIENT_INTELLIGENCE',
-              label: input.policyNumber,
-            },
-            select: { raw: true },
-            orderBy: { fetchedAt: 'desc' },
+          readNationalLifeReports(prisma, {
+            agentId: input.agentId,
+            deploymentScope: { in: scopes },
+            gridKey: 'CLIENT_INTELLIGENCE',
+            label: input.policyNumber,
           }),
           prisma.nationalLifeCaseSnapshot.findMany({
             where: {

@@ -56,9 +56,11 @@ function DeliveryStatus({ status }: { status: MessagingMessage['status'] }) {
 
 export function MessagingWorkspace({
   channelMode,
+  readOnly = false,
   initialConversationId,
 }: {
   channelMode: 'EVOLUTION' | 'META_CLOUD'
+  readOnly?: boolean
   initialConversationId?: string
 }) {
   const { copy, locale } = useI18n()
@@ -125,6 +127,7 @@ export function MessagingWorkspace({
   }, [copy, search, initialConversationId])
 
   const handleWhatsappConnectionChange = useCallback((connected: boolean) => {
+    if (readOnly) return
     if (!connected) {
       const whatsappInboxIds = new Set(
         inboxes.filter((inbox) => inbox.kind === 'WHATSAPP').map((inbox) => inbox.id),
@@ -140,7 +143,7 @@ export function MessagingWorkspace({
     // A successful connection makes the provider inbox visible again and pulls
     // the current conversations immediately instead of waiting for the timer.
     void loadConversations(true)
-  }, [conversations, inboxes, loadConversations, selectedId])
+  }, [conversations, inboxes, loadConversations, readOnly, selectedId])
 
   const loadMessages = useCallback(async (conversationId: string) => {
     await Promise.resolve()
@@ -155,8 +158,10 @@ export function MessagingWorkspace({
     setMessages(body.messages.filter((message) => !message.private && message.direction !== 'SYSTEM'))
     setLoadingMessages(false)
     setConversations((current) => current.map((item) => item.id === conversationId ? { ...item, unreadCount: 0 } : item))
-    void fetch(`/api/agent/messaging/conversations/${conversationId}/read`, { method: 'POST' })
-  }, [copy])
+    if (!readOnly) {
+      void fetch(`/api/agent/messaging/conversations/${conversationId}/read`, { method: 'POST' })
+    }
+  }, [copy, readOnly])
 
   useEffect(() => {
     const initial = window.setTimeout(() => void loadConversations(), 0)
@@ -179,7 +184,7 @@ export function MessagingWorkspace({
 
   async function send() {
     const content = draft.trim()
-    if (!selectedId || !content || sending) return
+    if (readOnly || !selectedId || !content || sending) return
     setSending(true)
     const response = await fetch(`/api/agent/messaging/conversations/${selectedId}/messages`, {
       method: 'POST',
@@ -211,13 +216,15 @@ export function MessagingWorkspace({
         </div>
         <div className="messaging-commandbar-meta">
           <span><b>{unread}</b> {copy('não lidas', 'unread')}</span>
-          <button type="button" onClick={() => setShowConnections((value) => !value)}>
-            {showConnections ? copy('Fechar conexões', 'Close connections') : copy('Conectar canal', 'Connect channel')}
-          </button>
+          {!readOnly && (
+            <button type="button" onClick={() => setShowConnections((value) => !value)}>
+              {showConnections ? copy('Fechar conexões', 'Close connections') : copy('Conectar canal', 'Connect channel')}
+            </button>
+          )}
         </div>
       </header>
 
-      {showConnections && (
+      {showConnections && !readOnly && (
         <div className="messaging-connections">
           <div className="messaging-connections-copy">
             <span>{copy('Conexões', 'Connections')}</span>
@@ -267,7 +274,7 @@ export function MessagingWorkspace({
               <div className="messaging-empty-list">
                 <strong>{copy('Nenhuma conversa aqui.', 'No conversations here.')}</strong>
                 <span>{inboxes.length ? copy('Quando um cliente escrever, ela aparecerá nesta lista.', 'When a client writes, the conversation will appear in this list.') : copy('Conecte seu primeiro canal sem sair do Keepr One.', 'Connect your first channel without leaving Keepr One.')}</span>
-                {!inboxes.length && <button type="button" onClick={() => setShowConnections(true)}>{copy('Conectar agora', 'Connect now')}</button>}
+                {!inboxes.length && !readOnly && <button type="button" onClick={() => setShowConnections(true)}>{copy('Conectar agora', 'Connect now')}</button>}
               </div>
             ) : filtered.map((conversation) => {
               const inbox = inboxById.get(conversation.inboxId)
@@ -329,25 +336,31 @@ export function MessagingWorkspace({
                 <div ref={messageEnd} />
               </div>
 
-              <footer className="messaging-composer">
-                <textarea
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault()
-                      void send()
-                    }
-                  }}
-                  placeholder={activeInbox?.kind === 'EMAIL' ? copy('Responder por e-mail…', 'Reply by email…') : copy('Escrever mensagem…', 'Write a message…')}
-                  aria-label={copy('Mensagem', 'Message')}
-                  rows={1}
-                />
-                <button type="button" onClick={() => void send()} disabled={!draft.trim() || sending}>
-                  {sending ? copy('Enviando…', 'Sending…') : copy('Enviar', 'Send')}
-                </button>
-                <span>{copy('Shift + Enter para nova linha', 'Shift + Enter for a new line')}</span>
-              </footer>
+              {readOnly ? (
+                <p className="messaging-composer text-sm text-ink-muted" role="status">
+                  {copy('Modo de suporte: visualização somente leitura.', 'Support mode: read-only view.')}
+                </p>
+              ) : (
+                <footer className="messaging-composer">
+                  <textarea
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault()
+                        void send()
+                      }
+                    }}
+                    placeholder={activeInbox?.kind === 'EMAIL' ? copy('Responder por e-mail…', 'Reply by email…') : copy('Escrever mensagem…', 'Write a message…')}
+                    aria-label={copy('Mensagem', 'Message')}
+                    rows={1}
+                  />
+                  <button type="button" onClick={() => void send()} disabled={!draft.trim() || sending}>
+                    {sending ? copy('Enviando…', 'Sending…') : copy('Enviar', 'Send')}
+                  </button>
+                  <span>{copy('Shift + Enter para nova linha', 'Shift + Enter for a new line')}</span>
+                </footer>
+              )}
             </>
           ) : (
             <div className="messaging-thread-empty">

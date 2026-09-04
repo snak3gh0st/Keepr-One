@@ -158,4 +158,27 @@ describe('buildNationalLifePortfolioMetrics', () => {
     expect(metrics.atRiskPremiumMissingPolicies).toBe(1)
     expect(metrics.atRiskPremiumCoverageComplete).toBe(false)
   })
+
+  it('counts only canonical Pending Lapse source statuses for retention metrics', () => {
+    const metrics = policyMetrics.buildNationalLifePortfolioMetrics([
+      {
+        clientId: 'client-padded',
+        status: 'INFORCE',
+        sourceStatus: ' Pending Lapse ',
+        premium: 800,
+        sourceUpdatedAt: null,
+      },
+      {
+        clientId: 'client-canonical',
+        status: 'INFORCE',
+        sourceStatus: 'Pending Lapse',
+        premium: 1_200,
+        sourceUpdatedAt: null,
+      },
+    ])
+
+    expect(metrics.pendingLapsePolicies).toBe(1)
+    expect(metrics.attentionPolicies).toBe(1)
+    expect(metrics.atRiskAap).toBe(1_200)
+  })
 })

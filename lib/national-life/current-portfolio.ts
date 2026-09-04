@@ -5,6 +5,23 @@ import type { PremiumEvolutionRow } from './premium-evolution'
 export type StoredPortfolioRow = NationalLifePortfolioMetricRow & {
   agentId: string
   policyNumber: string
+  id?: string
+  carrier?: string
+  product?: string
+  faceAmount?: unknown
+  statusChangedAt?: Date | null
+  client?: { name: string } | null
+}
+
+export type CurrentPortfolioRow = NationalLifePortfolioMetricRow & {
+  id: string | null
+  policyNumber: string
+  carrier: string
+  product: string
+  faceAmount: unknown
+  statusChangedAt: Date | null
+  clientName: string
+  sourceProvider: 'NATIONAL_LIFE'
 }
 
 /** Membership and money come from ONE completed carrier export, never the
@@ -35,7 +52,15 @@ export function currentPortfolioFromSnapshot(input: {
     values.set(parsed.policyNumber, value)
   }
   return {
-    rows: policies.map((row): NationalLifePortfolioMetricRow => ({
+    rows: policies.map((row): CurrentPortfolioRow => ({
+      id: stored.get(row.policyNumber)?.id ?? null,
+      policyNumber: row.policyNumber,
+      carrier: stored.get(row.policyNumber)?.carrier ?? 'National Life',
+      product: row.productName ?? stored.get(row.policyNumber)?.product ?? '—',
+      faceAmount: stored.get(row.policyNumber)?.faceAmount ?? null,
+      statusChangedAt: row.statusChangedAt,
+      clientName: row.insuredName ?? stored.get(row.policyNumber)?.client?.name ?? '—',
+      sourceProvider: 'NATIONAL_LIFE' as const,
       clientId: stored.get(row.policyNumber)?.clientId ?? null,
       status: row.status,
       sourceStatus: row.sourceStatus,

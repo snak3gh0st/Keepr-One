@@ -683,13 +683,13 @@ export function CalendarWorkspace(props: CalendarWorkspaceProps) {
           </div>
 
           <div className={`calendar-list-view ${view === "list" ? "calendar-list-visible" : ""}`}>
-            {visibleEvents.length ? [...visibleEvents].sort((a, b) => (a.startsAt ?? a.startDate ?? "").localeCompare(b.startsAt ?? b.startDate ?? "")).map((event) => <CalendarEventCard key={event.id} event={event} onOpen={(item) => setModal({ mode: "details", event: item })} />) : <CalendarEmptyState onCreate={() => setModal({ mode: "create", start: null, end: null, allDay: false })} />}
+            {visibleEvents.length ? [...visibleEvents].sort((a, b) => (a.startsAt ?? a.startDate ?? "").localeCompare(b.startsAt ?? b.startDate ?? "")).map((event) => <CalendarEventCard key={event.id} event={event} displayTimeZone={data.timeZone} onOpen={(item) => setModal({ mode: "details", event: item })} />) : <CalendarEmptyState onCreate={() => setModal({ mode: "create", start: null, end: null, allDay: false })} />}
           </div>
 
           <div className="calendar-mobile-view">
             <MobileDateRail active={mobileDay} onSelect={selectMobileDay} />
             <div className="calendar-mobile-day-copy"><span>{new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(displayDateForKey(mobileDay))}</span><strong>{copy("{count} {events}", "{count} {events}", { count: mobileEvents.length, events: mobileEvents.length === 1 ? copy("compromisso", "event") : copy("compromissos", "events") })}</strong></div>
-            {mobileEvents.length ? <div className="calendar-mobile-list">{mobileEvents.map((event) => <CalendarEventCard key={event.id} event={event} onOpen={(item) => setModal({ mode: "details", event: item })} />)}</div> : <CalendarEmptyState onCreate={() => openQuickCreate({ start: `${mobileDay}T09:00:00`, end: `${mobileDay}T09:30:00`, allDay: false, anchor: null })} />}
+            {mobileEvents.length ? <div className="calendar-mobile-list">{mobileEvents.map((event) => <CalendarEventCard key={event.id} event={event} displayTimeZone={data.timeZone} onOpen={(item) => setModal({ mode: "details", event: item })} />)}</div> : <CalendarEmptyState onCreate={() => openQuickCreate({ start: `${mobileDay}T09:00:00`, end: `${mobileDay}T09:30:00`, allDay: false, anchor: null })} />}
           </div>
         </main>
       </div>

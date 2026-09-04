@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { prisma } from '@/lib/prisma'
@@ -78,7 +77,6 @@ export async function POST(request: Request) {
     const origin = appOrigin(request)
     const checkout = await stripe.checkout.sessions.create({
       mode: 'subscription',
-      integration_identifier: `keeprone_${randomBytes(6).toString('base64url').slice(0, 8).toLowerCase()}`,
       client_reference_id: local.id,
       ...(local.stripeCustomerId
         ? { customer: local.stripeCustomerId }

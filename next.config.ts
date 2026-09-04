@@ -12,6 +12,8 @@ const nextConfig: NextConfig = {
   // containers even though the old release remains available during the build.
   experimental: {
     cpus: 2,
+    // Allow multipart overhead while document validation retains its 10 MiB limit.
+    serverActions: { bodySizeLimit: '12mb' },
   },
   allowedDevOrigins: ["127.0.0.1"],
   images: {

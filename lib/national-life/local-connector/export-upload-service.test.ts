@@ -148,8 +148,9 @@ describe('National Life export upload layout', () => {
     })).rejects.toMatchObject({ code: 'RUN_NOT_ACTIVE' })
   })
 
-  it('allows a completion retry to recover after its run already reached COMPLETED', async () => {
-    const runFind = vi.fn().mockResolvedValue({ id: 'run-complete' })
+  it.each(['COMPLETED', 'PARTIAL'])('allows completion recovery after its run reached %s', async (state) => {
+    const runFind = vi.fn().mockImplementation(async ({ where }) =>
+      where.state.in.includes(state) ? { id: 'run-complete' } : null)
     const db = {
       nationalLifeSyncRun: { findFirst: runFind },
       nationalLifeExportUpload: {
@@ -173,7 +174,7 @@ describe('National Life export upload layout', () => {
       uploadId: 'upload-1',
     })).rejects.toMatchObject({ code: 'EXPORT_INCOMPLETE' })
     expect(runFind).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ state: { in: ['RUNNING', 'COMPLETED'] } }),
+      where: expect.objectContaining({ state: { in: ['RUNNING', 'COMPLETED', 'PARTIAL'] } }),
     }))
   })
 

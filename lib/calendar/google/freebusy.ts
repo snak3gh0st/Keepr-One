@@ -30,6 +30,11 @@ export class GoogleFreeBusyPermissionMissingError extends Error {
   }
 }
 
+/** Google-owned group calendars (for example, regional holidays) cannot be queried by FreeBusy. */
+export function isGoogleSystemCalendarId(providerCalendarId: string) {
+  return /@group\.v\.calendar\.google\.com$/i.test(providerCalendarId)
+}
+
 function validInstant(value: string | undefined) {
   if (!value) return null
   const date = new Date(value)
@@ -117,7 +122,10 @@ export async function getGoogleFreeBusyForUser(
       },
     },
   })
-  if (!integration || integration.status !== 'CONNECTED' || !integration.calendars.length) {
+  const conflictCalendars = integration?.calendars.filter(
+    (calendar) => !isGoogleSystemCalendarId(calendar.providerCalendarId),
+  ) ?? []
+  if (!integration || integration.status !== 'CONNECTED' || !conflictCalendars.length) {
     return { connected: false, intervals: [] as GoogleBusyInterval[] }
   }
   const freeBusyScope = GOOGLE_CALENDAR_OPTIONAL_SCOPES[0]
@@ -130,11 +138,11 @@ export async function getGoogleFreeBusyForUser(
   })
   const client = new GoogleCalendarClient({ accessToken, fetch: options.fetch })
   const sourceByProvider = new Map(
-    integration.calendars.map((calendar) => [calendar.providerCalendarId, calendar.id]),
+    conflictCalendars.map((calendar) => [calendar.providerCalendarId, calendar.id]),
   )
   const intervals: GoogleBusyInterval[] = []
-  for (let index = 0; index < integration.calendars.length; index += 50) {
-    const providerIds = integration.calendars
+  for (let index = 0; index < conflictCalendars.length; index += 50) {
+    const providerIds = conflictCalendars
       .slice(index, index + 50)
       .map((calendar) => calendar.providerCalendarId)
     const response = await client.freeBusy({

@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
+import { readNationalLifeReports } from '@/lib/national-life/published-report-reader'
 import { requireRole } from '@/lib/require-role'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentScopeIds } from '@/lib/agent-access'
@@ -99,8 +100,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   if (localConnector.enabled && isCarrierNationalLife && policy.policyNumber) {
     const scopeId = LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
     const [commissionRows, documentRows, serviceRows] = await Promise.all([
-      prisma.nationalLifeReportRow.findMany({
-        where: {
+      readNationalLifeReports(prisma, {
           agentId: policy.agentId,
           OR: [
             {
@@ -113,16 +113,8 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             },
           ],
           raw: { path: ['PolicyNumber'], equals: policy.policyNumber },
-        },
-        select: {
-          id: true,
-          agentId: true,
-          deploymentScope: true,
-          raw: true,
-          amounts: true,
-        },
       }),
-      prisma.nationalLifeReportRow.findMany({
+      prisma.nationalLifePublishedReportRow.findMany({
         where: {
           agentId: policy.agentId,
           deploymentScope: scopeId,
@@ -135,12 +127,12 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             raw: { path: ['RefPolicyNumber'], equals: value },
           })),
         },
-        select: { id: true, raw: true, fetchedAt: true },
+        select: { id: true, rowKey: true, raw: true, fetchedAt: true },
       }),
       // Every time this client touched the carrier. It is also the only grid
       // that carries an email or a phone number — the inforce book returns
       // those columns null for every policy it has.
-      prisma.nationalLifeReportRow.findMany({
+      prisma.nationalLifePublishedReportRow.findMany({
         where: {
           agentId: policy.agentId,
           deploymentScope: scopeId,
@@ -167,9 +159,12 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
     const storedBySourceRow = new Map(
       policy.documents
-        .filter((document) => document.sourceRowId)
-        .map((document) => [document.sourceRowId as string, document.id]),
+        .filter((document) => document.publishedSourceRowId)
+        .map((document) => [document.publishedSourceRowId as string, document.id]),
     )
+    const storedByExternalId = new Map(policy.documents
+      .filter((document) => document.provider === 'NATIONAL_LIFE' && document.externalId)
+      .map((document) => [document.externalId, document.id]))
     carrierDocuments = documentRows.map((row) => {
       const raw = (row.raw ?? {}) as Record<string, unknown>
       // These fields arrive as rendered anchors, so the label has to be pulled
@@ -180,7 +175,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         id: row.id,
         date: text(raw.DocumentDate) || '—',
         type: text(raw.DocumentType) || text(raw.DocumentCategory) || copy('Documento', 'Document'),
-        storedDocumentId: storedBySourceRow.get(row.id) ?? null,
+        storedDocumentId: storedBySourceRow.get(row.id) ?? storedByExternalId.get(row.rowKey) ?? null,
       }
     })
 

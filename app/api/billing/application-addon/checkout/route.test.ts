@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getAgent: vi.fn(),
@@ -48,6 +48,8 @@ vi.mock('@/lib/stripe/application-addon-catalog', () => ({
 import { POST } from './route'
 
 beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-09-04T12:05:00.000Z'))
   vi.clearAllMocks()
   mocks.getAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1' })
   mocks.findUser.mockResolvedValue({ email: 'agent@example.com' })
@@ -58,7 +60,28 @@ beforeEach(() => {
   mocks.createCheckout.mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/addon' })
 })
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('K-Bot Application checkout', () => {
+  it('retries the same logical checkout with identical Stripe parameters and key', async () => {
+    const local = { id: 'addon-1', stripeSubscriptionId: null, stripeCustomerId: 'cus_existing' }
+    mocks.findAddon.mockResolvedValue(local)
+    mocks.updateAddon.mockResolvedValue(local)
+    const request = () => new Request('https://app.keeprone.com/api/billing/application-addon/checkout', { method: 'POST' })
+
+    expect((await POST(request())).status).toBe(303)
+    vi.advanceTimersByTime(1_000)
+    expect((await POST(request())).status).toBe(303)
+
+    expect(mocks.createCheckout).toHaveBeenCalledTimes(2)
+    const [firstParams, firstOptions] = mocks.createCheckout.mock.calls[0]!
+    const [secondParams, secondOptions] = mocks.createCheckout.mock.calls[1]!
+    expect(secondOptions.idempotencyKey).toBe(firstOptions.idempotencyKey)
+    expect(secondParams).toEqual(firstParams)
+  })
+
   it('creates one tenant-bound 14-day trial without granting access before Stripe confirms it', async () => {
     const response = await POST(new Request(
       'https://app.keeprone.com/api/billing/application-addon/checkout',

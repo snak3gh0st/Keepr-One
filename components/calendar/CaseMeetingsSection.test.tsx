@@ -78,6 +78,7 @@ describe("CaseMeetingsSection helpers", () => {
         }}
         events={[event({ id: "private-event", title: "Consulta médica particular" })]}
         now="2026-08-12T13:00:00.000Z"
+        timeZone="America/New_York"
         systemKey="QUALIFIED"
         prospectName="Ana"
         onSchedule={vi.fn()}

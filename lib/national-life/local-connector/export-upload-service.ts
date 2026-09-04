@@ -95,9 +95,9 @@ async function assertExportRunCanComplete(
       connectorDeviceId: input.deviceId,
       executionSource: 'LOCAL',
       provider: NATIONAL_LIFE_PROVIDER,
-      // COMPLETED is required for an idempotent recovery when stage completion
+      // Terminal states allow idempotent recovery when stage completion
       // committed but the upload's own terminal write did not.
-      state: { in: ['RUNNING', 'COMPLETED'] },
+      state: { in: ['RUNNING', 'COMPLETED', 'PARTIAL'] },
       plannedGridKeys: { has: input.sourceKey },
     },
     select: { id: true },
@@ -287,6 +287,7 @@ export async function completeNationalLifeExportUpload(
   if (upload.state === 'COMPLETED') {
     return {
       uploadId: upload.id,
+      runId: upload.runId,
       sourceKey: upload.sourceKey,
       rowCount: upload.rowCount ?? 0,
       writtenCount: upload.writtenCount ?? 0,
@@ -467,6 +468,7 @@ export async function completeNationalLifeExportUpload(
   })
   return {
     uploadId: upload.id,
+    runId: upload.runId,
     sourceKey: upload.sourceKey,
     worksheetName: parsed.worksheetName,
     rowCount: parsed.rows.length,

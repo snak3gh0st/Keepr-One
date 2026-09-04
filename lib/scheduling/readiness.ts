@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { GOOGLE_CALENDAR_OPTIONAL_SCOPES } from '@/lib/calendar/constants'
+import { isGoogleSystemCalendarId } from '@/lib/calendar/google/freebusy'
 import { isEmailDeliveryConfigured } from '@/lib/email/client'
 
 type ReadinessDb = Pick<PrismaClient, 'calendarIntegration'>
@@ -20,6 +21,7 @@ export type SchedulingCalendarConnection = {
     visible: boolean
     crmDefault: boolean
     accessRole: string | null
+    providerCalendarId: string
   }>
 } | null
 
@@ -35,13 +37,15 @@ export function evaluateSchedulingReadiness(
   )
   const writableDefaultCalendar = Boolean(
     googleConnected && integration?.calendars.some((calendar) =>
-      calendar.visible && calendar.crmDefault && Boolean(
+      calendar.visible && calendar.crmDefault && !isGoogleSystemCalendarId(calendar.providerCalendarId) && Boolean(
         calendar.accessRole && WRITABLE_ROLES.has(calendar.accessRole),
       ),
     ),
   )
   const hasVisibleConflictCalendar = Boolean(
-    googleConnected && integration?.calendars.some((calendar) => calendar.visible),
+    googleConnected && integration?.calendars.some(
+      (calendar) => calendar.visible && !isGoogleSystemCalendarId(calendar.providerCalendarId),
+    ),
   )
   return {
     googleConnected,
@@ -68,6 +72,7 @@ export async function getSchedulingReadinessForUser(
           visible: true,
           crmDefault: true,
           accessRole: true,
+          providerCalendarId: true,
         },
       },
     },

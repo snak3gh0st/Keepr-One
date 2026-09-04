@@ -5,14 +5,16 @@ import { decimalToNumber } from '@/lib/decimal'
 import { Shell } from '@/components/Shell'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { CasesBoard } from './CasesBoard'
-import { getPipelineForAgent } from '@/lib/crm'
-import { getServerI18n } from '@/lib/i18n/server'
+import { findPipelineForAgent, getPipelineForAgent } from '@/lib/crm'
+import { getCurrentSession, getServerI18n } from '@/lib/i18n/server'
+import { isReadOnlySupportPreview } from '@/lib/support-preview'
 
 export const dynamic = 'force-dynamic'
 
 export default async function CasesPage() {
   const { copy } = await getServerI18n()
   const agent = await getCurrentAgent()
+  const readOnly = isReadOnlySupportPreview(await getCurrentSession())
   const user = await prisma.user.findUnique({ where: { id: agent.userId } })
   const scopeAgentIds = await getAgentScopeIds(agent.id)
 
@@ -25,10 +27,13 @@ export default async function CasesPage() {
     loadError = true
   }
 
-  const pipelines = await Promise.all(scopeAgentIds.map((agentId) => getPipelineForAgent(agentId)))
-  const currentPipeline = pipelines.find((pipeline) => pipeline.agentId === agent.id) ?? pipelines[0]
+  const pipelines = await Promise.all(scopeAgentIds.map((agentId) => (
+    readOnly ? findPipelineForAgent(agentId) : getPipelineForAgent(agentId)
+  )))
+  const currentPipeline = pipelines.find((pipeline) => pipeline?.agentId === agent.id)
+    ?? pipelines.find((pipeline) => pipeline !== null)
   const stageOptionsByAgent = Object.fromEntries(
-    pipelines.map((pipeline) => [pipeline.agentId, pipeline.stages]),
+    pipelines.flatMap((pipeline) => pipeline ? [[pipeline.agentId, pipeline.stages]] : []),
   )
 
   const boardCases = cases
@@ -54,6 +59,11 @@ export default async function CasesPage() {
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       {loadError && <ErrorBanner>{copy('Não foi possível carregar suas oportunidades agora. Tente atualizar a página.', 'Your opportunities could not be loaded right now. Try refreshing the page.')}</ErrorBanner>}
+      {!loadError && !currentPipeline && (
+        <p className="rounded-xl border border-border-steel bg-panel px-4 py-3 text-sm text-ink-muted" role="status">
+          {copy('O pipeline deste agente ainda não foi configurado. No modo de suporte, nada foi criado.', 'This agent has no configured pipeline yet. Nothing was created in support mode.')}
+        </p>
+      )}
       {!loadError && currentPipeline && (
         <CasesBoard
           cases={boardCases}

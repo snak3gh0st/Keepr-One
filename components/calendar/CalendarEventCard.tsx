@@ -4,17 +4,22 @@ import Link from "next/link";
 import { useI18n } from "@/components/i18n/LanguageProvider";
 import type { CalendarEventView } from "./types";
 
-function eventWhen(event: CalendarEventView, locale: string, copy: (pt: string, en: string) => string) {
+function eventWhen(
+  event: CalendarEventView,
+  locale: string,
+  copy: (pt: string, en: string) => string,
+  displayTimeZone?: string,
+) {
   const date = new Intl.DateTimeFormat(locale, {
     weekday: "short",
     day: "2-digit",
     month: "short",
-    timeZone: event.timeZone,
+    timeZone: event.allDay ? event.timeZone : displayTimeZone ?? event.timeZone,
   });
   const time = new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: event.timeZone,
+    timeZone: displayTimeZone ?? event.timeZone,
   });
   if (event.allDay) {
     if (!event.startDate) return copy("Dia inteiro", "All day");
@@ -29,10 +34,12 @@ export function CalendarEventCard({
   event,
   onOpen,
   compact = false,
+  displayTimeZone,
 }: {
   event: CalendarEventView;
   onOpen?: (event: CalendarEventView) => void;
   compact?: boolean;
+  displayTimeZone?: string;
 }) {
   const { copy, locale } = useI18n();
   const pending = event.syncStatus === "PENDING" || event.syncStatus === "PROCESSING";
@@ -41,7 +48,7 @@ export function CalendarEventCard({
 
   const content = (
     <>
-      <span className="calendar-event-card-time">{eventWhen(event, locale, copy)}</span>
+      <span className="calendar-event-card-time">{eventWhen(event, locale, copy, displayTimeZone)}</span>
       <strong>{event.title}</strong>
       <span className="calendar-event-card-meta">
         {event.case?.name ?? event.calendarName}
@@ -112,9 +119,11 @@ function dateKeyInTimeZone(value: Date, timeZone: string) {
 export function MeetingActionCard({
   event,
   onOpen,
+  displayTimeZone,
 }: {
   event: CalendarEventView;
   onOpen?: (event: CalendarEventView) => void;
+  displayTimeZone?: string;
 }) {
-  return <CalendarEventCard event={event} onOpen={onOpen} compact />;
+  return <CalendarEventCard event={event} onOpen={onOpen} compact displayTimeZone={displayTimeZone} />;
 }

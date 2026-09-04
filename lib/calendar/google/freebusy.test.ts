@@ -245,4 +245,81 @@ describe('live Google availability', () => {
     )
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+  it('omits Google system calendars while retaining real conflict calendars', async () => {
+    const access = encryptGoogleSecret('access-token', {
+      purpose: 'google-calendar-token', userId: 'user-a', providerAccountId: 'google-a',
+      tokenKind: 'access',
+    }, env)
+    const db = {
+      calendarIntegration: { findUnique: vi.fn(async () => ({
+        id: 'integration-a', userId: 'user-a', providerAccountId: 'google-a', status: 'CONNECTED',
+        grantedScopes: ['https://www.googleapis.com/auth/calendar.events.freebusy'],
+        tokenExpiresAt: new Date('2099-08-13T00:00:00Z'),
+        accessKeyVersion: access.keyVersion, accessAlgorithm: access.algorithm,
+        accessIv: access.iv, accessCiphertext: access.ciphertext, accessAuthTag: access.authTag,
+        refreshKeyVersion: null, refreshAlgorithm: null, refreshIv: null,
+        refreshCiphertext: null, refreshAuthTag: null,
+        calendars: [
+          { id: 'holiday-source', providerCalendarId: 'en.usa#holiday@group.v.calendar.google.com' },
+          { id: 'read-only-source', providerCalendarId: 'team@example.com' },
+          { id: 'primary-source', providerCalendarId: 'primary@example.com' },
+        ],
+      })) },
+      calendarSource: {}, calendarSyncJob: {}, $transaction: vi.fn(),
+    }
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const body = JSON.parse(String(args[1]?.body)) as { items: Array<{ id: string }> }
+      expect(body.items).toEqual([
+        { id: 'team@example.com' },
+        { id: 'primary@example.com' },
+      ])
+      return new Response(JSON.stringify({
+        calendars: {
+          'team@example.com': { busy: [] },
+          'primary@example.com': { busy: [] },
+        },
+      }))
+    })
+
+    await expect(getGoogleFreeBusyForUser({
+      ownerUserId: 'user-a', start: new Date('2026-08-12T14:00:00Z'),
+      end: new Date('2026-08-12T18:00:00Z'), timeZone: 'America/New_York',
+    }, env, { db: db as never, fetch: fetchMock as typeof fetch })).resolves.toEqual({
+      connected: true,
+      intervals: [],
+    })
+  })
+
+  it('fails closed when a retained real conflict calendar returns an error', async () => {
+    const access = encryptGoogleSecret('access-token', {
+      purpose: 'google-calendar-token', userId: 'user-a', providerAccountId: 'google-a',
+      tokenKind: 'access',
+    }, env)
+    const db = {
+      calendarIntegration: { findUnique: vi.fn(async () => ({
+        id: 'integration-a', userId: 'user-a', providerAccountId: 'google-a', status: 'CONNECTED',
+        grantedScopes: ['https://www.googleapis.com/auth/calendar.events.freebusy'],
+        tokenExpiresAt: new Date('2099-08-13T00:00:00Z'),
+        accessKeyVersion: access.keyVersion, accessAlgorithm: access.algorithm,
+        accessIv: access.iv, accessCiphertext: access.ciphertext, accessAuthTag: access.authTag,
+        refreshKeyVersion: null, refreshAlgorithm: null, refreshIv: null,
+        refreshCiphertext: null, refreshAuthTag: null,
+        calendars: [
+          { id: 'holiday-source', providerCalendarId: 'en.usa#holiday@group.v.calendar.google.com' },
+          { id: 'real-source', providerCalendarId: 'conflicts@example.com' },
+        ],
+      })) },
+      calendarSource: {}, calendarSyncJob: {}, $transaction: vi.fn(),
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      calendars: { 'conflicts@example.com': { errors: [{ reason: 'internalError' }] } },
+    })))
+
+    await expect(getGoogleFreeBusyForUser({
+      ownerUserId: 'user-a', start: new Date('2026-08-12T14:00:00Z'),
+      end: new Date('2026-08-12T18:00:00Z'), timeZone: 'America/New_York',
+    }, env, { db: db as never, fetch: fetchMock as typeof fetch })).rejects.toThrow(
+      'Google FreeBusy failed for calendar conflicts@example.com',
+    )
+  })
 })

@@ -70,6 +70,40 @@ describe('middleware administrative user preview boundary', () => {
     expect(onboarding.headers.get('location')).toBe('http://localhost:3000/login')
   })
 
+  it.each([
+    ['/agent/cases?stage=follow-up', 'http://localhost:3000/login?next=%2Fagent%2Fcases%3Fstage%3Dfollow-up'],
+    ['/client', 'http://localhost:3000/login?next=%2Fclient'],
+    ['/onboarding', 'http://localhost:3000/login?next=%2Fonboarding'],
+    ['/admin/users?query=ana', 'http://localhost:3000/admin/login?next=%2Fadmin%2Fusers%3Fquery%3Dana'],
+  ])('returns a stale private-session cookie from %s to its login page', async (path, location) => {
+    mocks.getSession.mockResolvedValue(null)
+
+    const response = await proxy(request(path))
+
+    expect(response.status).toBe(307)
+    expect(response.headers.get('location')).toBe(location)
+    expect(mocks.getSession).toHaveBeenCalledOnce()
+  })
+
+  it('passes a valid session with the wrong role to the existing authorization gate', async () => {
+    mocks.getSession.mockResolvedValue({
+      user: { id: 'client-1', role: 'CLIENT' },
+      session: { id: 'client-session', impersonatedBy: null },
+    })
+
+    const response = await proxy(request('/agent/cases'))
+
+    expect(response.headers.get('x-middleware-next')).toBe('1')
+    expect(mocks.getSession).toHaveBeenCalledOnce()
+    expect(mocks.findAgent).not.toHaveBeenCalled()
+  })
+
+  it('does not disguise an authentication-service failure as a stale-session redirect', async () => {
+    mocks.getSession.mockRejectedValue(new Error('session lookup unavailable'))
+
+    await expect(proxy(request('/agent/cases'))).rejects.toThrow('session lookup unavailable')
+  })
+
   it('allows reads but rejects writes while an admin is viewing a user', async () => {
     mocks.getSession.mockResolvedValue({
       user: { id: 'agent-1', role: 'AGENT' },
