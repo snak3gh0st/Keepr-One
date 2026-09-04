@@ -20,6 +20,7 @@ function filters(overrides: Record<string, unknown> = {}) {
 function currentRow(index: number) {
   return {
     id: index === 1 ? null : `policy-${index}`,
+    sourceRecordId: `agent-1:policy:NL-${String(index).padStart(3, '0')}`,
     policyNumber: `NL-${String(index).padStart(3, '0')}`,
     carrier: 'National Life',
     product: 'IUL',
@@ -43,6 +44,10 @@ describe('policy directory filters', () => {
       sort: 'database-expression',
       page: '-8',
     })).toEqual(filters({ query: 'Alice' }))
+  })
+
+  it.each(['2junk', '2.9', '0', '-8', ''])('rejects non-positive or non-integer page %j', (page) => {
+    expect(parsePolicyDirectoryFilters({ page }).page).toBe(1)
   })
 })
 
@@ -82,6 +87,57 @@ describe('readCurrentPolicyDirectory', () => {
       sourceStatus: 'Pending Lapse',
     })])
   })
+
+  it('keeps source-only rows stable across page boundaries regardless of loader order', async () => {
+    const earlierRows = Array.from({ length: 24 }, (_, index) => ({
+      ...currentRow(index + 2),
+      statusChangedAt: new Date('2026-09-02T00:00:00.000Z'),
+    }))
+    const sourceOnly = (sourceRecordId: string) => ({
+      ...currentRow(1),
+      sourceRecordId,
+      policyNumber: 'NL-SOURCE-ONLY',
+      clientName: 'Same source client',
+      statusChangedAt: new Date('2026-09-01T00:00:00.000Z'),
+    })
+    const sourceA = sourceOnly('agent-a:policy:NL-SOURCE-ONLY')
+    const sourceB = sourceOnly('agent-b:policy:NL-SOURCE-ONLY')
+
+    const firstPage = await readCurrentPolicyDirectory(
+      {} as never,
+      ['agent-a', 'agent-b'],
+      filters(),
+      vi.fn().mockResolvedValue({ rows: [...earlierRows, sourceB, sourceA], verified: true }),
+    )
+    const repeatedFirstPage = await readCurrentPolicyDirectory(
+      {} as never,
+      ['agent-a', 'agent-b'],
+      filters(),
+      vi.fn().mockResolvedValue({ rows: [sourceA, sourceB, ...[...earlierRows].reverse()], verified: true }),
+    )
+    const secondPage = await readCurrentPolicyDirectory(
+      {} as never,
+      ['agent-a', 'agent-b'],
+      filters({ page: 2 }),
+      vi.fn().mockResolvedValue({ rows: [...earlierRows, sourceB, sourceA], verified: true }),
+    )
+    const repeatedSecondPage = await readCurrentPolicyDirectory(
+      {} as never,
+      ['agent-a', 'agent-b'],
+      filters({ page: 2 }),
+      vi.fn().mockResolvedValue({ rows: [sourceA, sourceB, ...[...earlierRows].reverse()], verified: true }),
+    )
+
+    expect(firstPage.items).toHaveLength(25)
+    expect(firstPage.items).toEqual(repeatedFirstPage.items)
+    expect(secondPage.items).toEqual(repeatedSecondPage.items)
+    expect(firstPage.items.map((item) => item.stableKey)).toEqual(repeatedFirstPage.items.map((item) => item.stableKey))
+    expect(secondPage.items.map((item) => item.stableKey)).toEqual(repeatedSecondPage.items.map((item) => item.stableKey))
+    expect(firstPage.items.at(-1)).toMatchObject({ linkedPolicyId: null, stableKey: sourceA.sourceRecordId })
+    expect(secondPage.items).toHaveLength(1)
+    expect(secondPage.items[0]).toMatchObject({ linkedPolicyId: null, stableKey: sourceB.sourceRecordId })
+    expect(new Set([...firstPage.items, ...secondPage.items].map((item) => item.stableKey)).size).toBe(26)
+  })
 })
 
 describe('readHistoryPolicyDirectory', () => {
@@ -109,6 +165,36 @@ describe('readHistoryPolicyDirectory', () => {
     }))
     expect(policy.groupBy).toHaveBeenCalledWith(expect.objectContaining({
       by: ['status', 'sourceStatus'],
+    }))
+  })
+
+  it('does not advertise whitespace-padded Pending Lapse history rows that the exact status query cannot return', async () => {
+    const policy = {
+      count: vi.fn().mockResolvedValue(0),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { premium: null } }),
+      groupBy: vi.fn().mockResolvedValue([
+        { status: 'INFORCE', sourceStatus: ' Pending Lapse ', _count: { _all: 1 } },
+      ]),
+      findMany: vi.fn().mockResolvedValue([]),
+    }
+
+    const result = await readHistoryPolicyDirectory(
+      { policy } as never,
+      ['agent-1'],
+      filters({ view: 'history' }),
+    )
+
+    expect(result.statusCounts.PENDING_LAPSE).toBeUndefined()
+
+    await readHistoryPolicyDirectory(
+      { policy } as never,
+      ['agent-1'],
+      filters({ view: 'history', status: 'PENDING_LAPSE' }),
+    )
+    expect(policy.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ AND: expect.arrayContaining([
+        { sourceStatus: { equals: 'Pending Lapse', mode: 'insensitive' } },
+      ]) }),
     }))
   })
 })

@@ -23,6 +23,10 @@ describe('illustration directory filters', () => {
       page: '-1',
     })).toEqual(filters({ query: 'Maria' }))
   })
+
+  it.each(['2junk', '2.9', '0', '-1', ''])('rejects non-positive or non-integer page %j', (page) => {
+    expect(parseIllustrationDirectoryFilters({ page }).page).toBe(1)
+  })
 })
 
 describe('readIllustrationDirectory', () => {

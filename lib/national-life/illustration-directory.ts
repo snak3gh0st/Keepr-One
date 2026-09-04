@@ -1,6 +1,7 @@
 import 'server-only'
 
 import type { Prisma, PrismaClient } from '@prisma/client'
+import { parseDirectoryPage } from '@/lib/directory-page'
 
 export const ILLUSTRATION_DIRECTORY_PAGE_SIZE = 25
 
@@ -22,11 +23,6 @@ function firstParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? '' : value ?? ''
 }
 
-function parsePage(value: string): number {
-  const page = Number.parseInt(value, 10)
-  return Number.isSafeInteger(page) && page > 0 ? page : 1
-}
-
 export function parseIllustrationDirectoryFilters(
   params: SearchParams,
 ): IllustrationDirectoryFilters {
@@ -36,7 +32,7 @@ export function parseIllustrationDirectoryFilters(
     query: firstParam(params.q).trim().slice(0, 120),
     document: document === 'ready' || document === 'pending' ? document : null,
     sort: illustrationSorts.has(sort) ? sort : 'recent',
-    page: parsePage(firstParam(params.page)),
+    page: parseDirectoryPage(firstParam(params.page)),
   }
 }
 

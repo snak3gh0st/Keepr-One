@@ -27,6 +27,10 @@ describe('client directory filters', () => {
     }, ['agent-1'])).toEqual(filters({ query: 'Ana' }))
   })
 
+  it.each(['2junk', '2.9', '0', '-1', ''])('rejects non-positive or non-integer page %j', (page) => {
+    expect(parseClientDirectoryFilters({ page }, ['agent-1']).page).toBe(1)
+  })
+
   it('keeps the scope predicate even when a valid owner is selected', () => {
     const where = buildClientDirectoryWhere(['agent-1', 'agent-2'], filters({ ownerId: 'agent-2' }))
     expect(where).toMatchObject({

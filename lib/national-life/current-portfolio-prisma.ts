@@ -25,7 +25,12 @@ export async function loadCurrentNationalLifePortfolio(prisma: PrismaClient, age
           select: { sequence: true, recordCount: true, records: true, observedAt: true },
         } } } },
     })
-    if (!completion) return { rows: owned.map((row) => ({ ...row, clientName: row.client?.name ?? '—', sourceProvider: 'NATIONAL_LIFE' as const })), historicalPolicies: 0, verified: false,
+    if (!completion) return { rows: owned.map((row) => ({
+      ...row,
+      clientName: row.client?.name ?? '—',
+      sourceProvider: 'NATIONAL_LIFE' as const,
+      sourceRecordId: `${agent.id}:policy:${row.policyNumber}`,
+    })), historicalPolicies: 0, verified: false,
       statusCounts: [], productCounts: [], premiumEvolutionRows: [], observedAt: null }
     const pages = verifyPortfolioPages({ ...completion, pages: completion.run.rawGridPages })
     const rows = pages.flatMap((page) => (page.records as GridRow[]).flatMap((raw) => {
@@ -34,7 +39,15 @@ export async function loadCurrentNationalLifePortfolio(prisma: PrismaClient, age
       return [{ ...row, deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE }]
     }))
     const observedAt = new Date(Math.max(...pages.map((page) => page.observedAt.getTime())))
-    return { ...currentPortfolioFromSnapshot({ rows, stored: owned, observedAt }), verified: true }
+    const portfolio = currentPortfolioFromSnapshot({ rows, stored: owned, observedAt })
+    return {
+      ...portfolio,
+      rows: portfolio.rows.map((row) => ({
+        ...row,
+        sourceRecordId: `${agent.id}:policy:${row.policyNumber}`,
+      })),
+      verified: true,
+    }
   }))
   return {
     rows: partitions.flatMap((partition) => partition.rows),

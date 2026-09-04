@@ -24,8 +24,8 @@ describe('loadCurrentNationalLifePortfolio', () => {
     expect(result.verified).toBe(true)
     expect(result.storedPolicies).toBe(1)
     expect(result.rows).toHaveLength(2)
-    expect(result.rows[0]).toMatchObject({ clientId: 'c1', premium: 1200 })
-    expect(result.rows[1]).toMatchObject({ clientId: null, premium: 800 })
+    expect(result.rows[0]).toMatchObject({ clientId: 'c1', premium: 1200, sourceRecordId: 'a1:policy:p1' })
+    expect(result.rows[1]).toMatchObject({ clientId: null, premium: 800, sourceRecordId: 'a1:policy:p2' })
     expect(prisma.policy.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { agentId: { in: ['a1'] }, sourceProvider: 'NATIONAL_LIFE' },
     }))
@@ -37,6 +37,16 @@ describe('loadCurrentNationalLifePortfolio', () => {
   it('keeps the additional producer filter when NPN is supplied', async () => {
     const { prisma } = db('123')
     expect((await loadCurrentNationalLifePortfolio(prisma as never, ['a1'])).rows).toHaveLength(1)
+  })
+  it('preserves agent-qualified carrier identities for source-only rows from separate partitions', async () => {
+    const { prisma } = db()
+    prisma.policy.findMany.mockResolvedValue([])
+    prisma.agent.findMany.mockResolvedValue([{ id: 'a1', npn: null }, { id: 'a2', npn: null }])
+
+    const result = await loadCurrentNationalLifePortfolio(prisma as never, ['a1', 'a2'])
+
+    expect(result.rows.filter((row) => row.policyNumber === 'p1').map((row) => row.sourceRecordId))
+      .toEqual(['a1:policy:p1', 'a2:policy:p1'])
   })
   it('labels the CRM-only fallback unverified when no completed export exists', async () => {
     const { prisma, findFirst } = db()

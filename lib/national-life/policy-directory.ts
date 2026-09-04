@@ -2,6 +2,7 @@ import 'server-only'
 
 import type { PolicyStatus, Prisma, PrismaClient } from '@prisma/client'
 import { decimalToNumber } from '@/lib/decimal'
+import { parseDirectoryPage } from '@/lib/directory-page'
 import { loadCurrentNationalLifePortfolio } from './current-portfolio-prisma'
 
 export const POLICY_DIRECTORY_PAGE_SIZE = 25
@@ -41,6 +42,7 @@ export type PolicyDirectoryFilters = {
 }
 
 export type PolicyDirectoryItem = {
+  stableKey: string
   linkedPolicyId: string | null
   policyNumber: string
   carrier: string
@@ -76,6 +78,7 @@ type SearchParams = Record<string, string | string[] | undefined>
 
 type CurrentPortfolioSourceRow = {
   id: string | null
+  sourceRecordId: string
   policyNumber: string
   carrier: string
   product: string
@@ -96,11 +99,6 @@ function firstParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? '' : value ?? ''
 }
 
-function parsePage(value: string): number {
-  const page = Number.parseInt(value, 10)
-  return Number.isSafeInteger(page) && page > 0 ? page : 1
-}
-
 export function parsePolicyDirectoryFilters(params: SearchParams): PolicyDirectoryFilters {
   const requestedStatus = firstParam(params.status)
   const requestedSort = firstParam(params.sort) as PolicyDirectorySort
@@ -112,7 +110,7 @@ export function parsePolicyDirectoryFilters(params: SearchParams): PolicyDirecto
       : null,
     premiumKnown: firstParam(params.premium) === 'known',
     sort: policySorts.has(requestedSort) ? requestedSort : 'recent',
-    page: parsePage(firstParam(params.page)),
+    page: parseDirectoryPage(firstParam(params.page)),
   }
 }
 
@@ -128,6 +126,7 @@ function numericPremium(value: string | null): number {
 
 function toDirectoryItem(row: CurrentPortfolioSourceRow): PolicyDirectoryItem {
   return {
+    stableKey: row.id ?? row.sourceRecordId,
     linkedPolicyId: row.id,
     policyNumber: row.policyNumber,
     carrier: row.carrier,
@@ -171,7 +170,9 @@ function sortDirectoryRows(rows: readonly PolicyDirectoryItem[], sort: PolicyDir
         - (left.statusChangedAt ? new Date(left.statusChangedAt).getTime() : 0)
       if (byStatusChange !== 0) return byStatusChange
     }
-    return collator.compare(left.policyNumber, right.policyNumber)
+    const byPolicyNumber = collator.compare(left.policyNumber, right.policyNumber)
+    if (byPolicyNumber !== 0) return byPolicyNumber
+    return collator.compare(left.stableKey, right.stableKey)
   })
 }
 
@@ -254,6 +255,11 @@ function statusWhere(status: PolicyDirectoryFilters['status']): Prisma.PolicyWhe
     return { sourceStatus: { equals: 'Pending Lapse', mode: 'insensitive' } }
   }
   return { status: status as PolicyStatus }
+}
+
+/** Prisma's case-insensitive equality does not trim stored status values. */
+function isCanonicalPendingLapse(sourceStatus: string | null): boolean {
+  return sourceStatus?.toLocaleLowerCase('en-US') === 'pending lapse'
 }
 
 function historyBaseWhere(
@@ -345,13 +351,14 @@ export async function readHistoryPolicyDirectory(
   for (const group of statusGroups) {
     const count = group._count._all
     statusCounts[group.status] = (statusCounts[group.status] ?? 0) + count
-    if (group.sourceStatus?.trim().toLocaleLowerCase('en-US') === 'pending lapse') {
+    if (isCanonicalPendingLapse(group.sourceStatus)) {
       statusCounts.PENDING_LAPSE = (statusCounts.PENDING_LAPSE ?? 0) + count
     }
   }
   const premiumSum = premiumAggregate._sum.premium
   return {
     items: rows.map((row) => ({
+      stableKey: row.id,
       linkedPolicyId: row.id,
       policyNumber: row.policyNumber,
       carrier: row.carrier,

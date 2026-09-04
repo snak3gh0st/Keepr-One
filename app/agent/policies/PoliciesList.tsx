@@ -217,7 +217,7 @@ export function PoliciesList({
               </div>
               <ul className="policy-list">
                 {items.map((policy) => (
-                  <li key={policy.linkedPolicyId ?? policy.policyNumber}>
+                  <li key={policy.stableKey}>
                     <PolicyRowSurface
                       linkedPolicyId={policy.linkedPolicyId}
                       label={copy('Abrir apólice {number} de {client}', 'Open policy {number} for {client}', { number: policy.policyNumber, client: policy.clientName })}

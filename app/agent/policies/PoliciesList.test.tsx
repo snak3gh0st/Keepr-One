@@ -29,6 +29,7 @@ const filters = {
 }
 
 const item = {
+  stableKey: 'policy-risk',
   linkedPolicyId: 'policy-risk',
   policyNumber: 'NL-RISK',
   carrier: 'National Life',
@@ -86,5 +87,6 @@ describe('PoliciesList server directory presentation', () => {
     expect(source).not.toContain('items.filter(')
     expect(source).not.toContain('items.slice(')
     expect(source).toContain('method="get"')
+    expect(source).toContain('key={policy.stableKey}')
   })
 })

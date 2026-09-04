@@ -1,6 +1,7 @@
 import 'server-only'
 
 import type { Prisma, PrismaClient } from '@prisma/client'
+import { parseDirectoryPage } from '@/lib/directory-page'
 
 export const CLIENT_DIRECTORY_PAGE_SIZE = 25
 
@@ -47,11 +48,6 @@ function firstParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? '' : value ?? ''
 }
 
-function parsePage(value: string): number {
-  const page = Number.parseInt(value, 10)
-  return Number.isSafeInteger(page) && page > 0 ? page : 1
-}
-
 export function parseClientDirectoryFilters(
   params: SearchParams,
   scopeAgentIds: readonly string[],
@@ -63,7 +59,7 @@ export function parseClientDirectoryFilters(
     ownerId: scopeAgentIds.includes(requestedOwner) ? requestedOwner : null,
     contactMissing: firstParam(params.contact) === 'missing',
     sort: clientSorts.has(requestedSort) ? requestedSort : 'name-asc',
-    page: parsePage(firstParam(params.page)),
+    page: parseDirectoryPage(firstParam(params.page)),
   }
 }
 
