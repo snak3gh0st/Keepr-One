@@ -45,6 +45,7 @@ const checkoutSnapshotSelect = {
   stripeProductId: true,
   stripePriceId: true,
   checkoutRedirectFingerprint: true,
+  checkoutAttemptStartedAt: true,
 } as const satisfies Prisma.AgencyInvitationCheckoutSelect
 
 type CheckoutSnapshot = Prisma.AgencyInvitationCheckoutGetPayload<{
@@ -91,16 +92,25 @@ async function reserveAndCreateInvitationCheckout(
       if (checkout.status !== 'expired') {
         throw new Error('STRIPE_INVITATION_CHECKOUT_PENDING')
       }
-    } else if (existing.checkoutExpiresAt.getTime() > Date.now()) {
-      // Stripe may have accepted the request even if saving its ID failed.
-      // Until expiry, this attempt's snapshot and key must never be replaced.
+    } else {
+      // A non-null marker belongs to either a legacy row or an attempt that
+      // may have reached Stripe. Only this implementation writes null before
+      // the preflight, so uncertain rows must be reconciled rather than renewed.
       if (!existing.checkoutRedirectFingerprint) {
         throw new Error('STRIPE_INVITATION_CHECKOUT_PENDING')
       }
-      if (existing.checkoutRedirectFingerprint !== redirectFingerprint) {
-        throw new Error('STRIPE_INVITATION_REDIRECT_MISMATCH')
+      if (existing.checkoutExpiresAt.getTime() > Date.now()) {
+        // Stripe may have accepted the request even if saving its ID failed.
+        // Until expiry, this attempt's snapshot and key must never be replaced.
+        if (existing.checkoutRedirectFingerprint !== redirectFingerprint) {
+          throw new Error('STRIPE_INVITATION_REDIRECT_MISMATCH')
+        }
+        local = existing
+      } else if (existing.checkoutAttemptStartedAt) {
+        // The local expiry cannot prove a marked provider call did not create
+        // or later finalize a Checkout session. Reconciliation is required.
+        throw new Error('STRIPE_INVITATION_CHECKOUT_PENDING')
       }
-      local = existing
     }
   }
 
@@ -143,10 +153,14 @@ async function reserveAndCreateInvitationCheckout(
       stripePriceId: catalog.priceId,
       stripeCustomerId: input.stripeCustomerId ?? null,
       checkoutRedirectFingerprint: redirectFingerprint,
+      // The database default marks legacy/older-binary inserts as uncertain.
+      // New reservations explicitly start unmarked until this function's CAS.
+      checkoutAttemptStartedAt: null,
     }
     if (existing) {
-      // A retrieved expired session or elapsed recorded expiry proves this is
-      // a new attempt. Only then may new input replace the persisted snapshot.
+      // A retrieved expired session or an elapsed reservation that never
+      // reached the provider proves this is a new attempt. Only then may new
+      // input replace the persisted snapshot.
       const reserved = await prisma.agencyInvitationCheckout.updateMany({
         where: {
           id: existing.id,
@@ -155,6 +169,7 @@ async function reserveAndCreateInvitationCheckout(
           stripeCheckoutSessionId: existing.stripeCheckoutSessionId,
           stripeSubscriptionId: null,
           finalizedAt: null,
+          checkoutAttemptStartedAt: existing.checkoutAttemptStartedAt,
         },
         data: {
           ...pendingData,
@@ -204,6 +219,28 @@ async function reserveAndCreateInvitationCheckout(
         throw error
       }
     }
+  }
+
+  if (!local.checkoutAttemptStartedAt) {
+    const checkoutAttemptStartedAt = new Date()
+    const started = await prisma.agencyInvitationCheckout.updateMany({
+      where: {
+        id: local.id,
+        attemptNumber: local.attemptNumber,
+        status: local.status,
+        stripeCheckoutSessionId: null,
+        stripeSubscriptionId: null,
+        finalizedAt: null,
+        checkoutAttemptStartedAt: null,
+      },
+      data: { checkoutAttemptStartedAt },
+    })
+    if (started.count !== 1) {
+      // Another caller owns this attempt. Re-read its marker and reuse the
+      // same idempotency key instead of creating another payable session.
+      return reserveAndCreateInvitationCheckout(input, reservationRetries - 1)
+    }
+    local = { ...local, checkoutAttemptStartedAt }
   }
 
   const metadata = {

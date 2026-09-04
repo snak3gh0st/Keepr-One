@@ -671,6 +671,7 @@ model AgencyInvitationCheckout {
   attemptNumber           Int                            @default(1)
   stripeCheckoutSessionId String?                        @unique
   checkoutRedirectFingerprint String?
+  checkoutAttemptStartedAt DateTime?                     @default(now())
   stripeCustomerId        String?
   stripeSubscriptionId    String?                        @unique
   stripeProductId         String
