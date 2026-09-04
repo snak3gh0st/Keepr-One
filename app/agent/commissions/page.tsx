@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
+import { readNationalLifeReports } from '@/lib/national-life/published-report-reader'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { decimalToNumber } from '@/lib/decimal'
 import { Shell } from '@/components/Shell'
@@ -110,8 +111,7 @@ export default async function CommissionsPage() {
 
     let carrierRecords: Record_[] = []
     if (localConnectorEnabled) {
-      const carrierRows = await prisma.nationalLifeReportRow.findMany({
-        where: {
+      const carrierRows = await readNationalLifeReports(prisma, {
           agentId: { in: scopeAgentIds },
           OR: [
             {
@@ -123,14 +123,6 @@ export default async function CommissionsPage() {
               gridKey: LEGACY_COMMISSION_EARNING_GRID_KEY,
             },
           ],
-        },
-        select: {
-          id: true,
-          agentId: true,
-          deploymentScope: true,
-          raw: true,
-          amounts: true,
-        },
       })
       const carrierAudit = auditVisibleCarrierCommissionRows(
         preferCanonicalCarrierCommissionRows(carrierRows, LOCAL_CONNECTOR_DEPLOYMENT_SCOPE),

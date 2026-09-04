@@ -35,9 +35,13 @@ export async function POST(request: Request, context: { params: Promise<{ upload
     const result = await completeNationalLifeExportUpload(prisma, { ...device, uploadId: body.uploadId })
     const portfolio = await ingestPortfolioIfRunFinished(prismaIngestDeps(prisma), {
       agentId: device.agentId,
-      // A completed upload replay has no terminal flag. The original terminal
-      // request already attempted promotion, so this remains a no-op.
-      terminal: 'terminal' in result && result.terminal === true,
+      deviceId: device.deviceId,
+      runId: result.runId,
+      // A replay is an idempotent recovery point: the prior response may have
+      // committed the stage but died before portfolio promotion ran. The exact
+      // run/device proof is revalidated by the ingest dependency before any
+      // write, so this cannot borrow another device's partial page.
+      terminal: ('terminal' in result && result.terminal === true) || result.completed === true,
     })
     return Response.json(
       { ...result, portfolio },

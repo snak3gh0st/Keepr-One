@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '@prisma/client'
 import { buildAdminProduction, loadAdminProduction } from './admin-production'
 import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './local-connector/config'
+import {
+  LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
+  LEGACY_COMMISSION_EARNING_GRID_KEY,
+} from './commission-grid-keys'
 const agents = [{ id: 'writer', npn: '123', name: 'Writer' }, { id: 'owner', npn: '999', name: 'Owner' }]
 const carrier = (patch: Record<string, unknown> = {}, owner = 'owner', scope: string = LOCAL_CONNECTOR_DEPLOYMENT_SCOPE) => ({
   id: `${owner}-${JSON.stringify(patch)}`, agentId: owner, deploymentScope: scope, gridKey: 'COMMISSIONS_EARNING_REPORT', amounts: {},
@@ -41,9 +45,38 @@ describe('global administrative production', () => {
   })
   it('does not query manual commissions when carrier evidence exists', async () => {
     const legacy = vi.fn()
-    const prisma = { agent: { findMany: async () => agents.map((a) => ({ ...a, user: { name: a.name } })) }, policy: { findMany: async () => [] }, nationalLifeReportRow: { findMany: async () => [carrier()] }, commissionRecord: { findMany: legacy } } as unknown as PrismaClient
+    const prisma = { agent: { findMany: async () => agents.map((a) => ({ ...a, user: { name: a.name } })) }, policy: { findMany: async () => [] }, nationalLifePublishedReportRow: { findMany: async () => [carrier()] }, nationalLifeReportRow: { findMany: async () => [] }, commissionRecord: { findMany: legacy } } as unknown as PrismaClient
     const result = await loadAdminProduction(prisma, '2026-09')
     expect(legacy).not.toHaveBeenCalled(); expect(result.rows[0].commissionTotal).toBe(100)
+  })
+
+  it('excludes an unproven local page without hiding verified legacy carrier evidence', async () => {
+    const partialLocalPage = carrier({ CommissionStatementId: 'PARTIAL-LOCAL' })
+    const verifiedLegacyRow = {
+      ...carrier({ CommissionStatementId: 'LEGACY-VERIFIED' }, 'owner', LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE),
+      gridKey: LEGACY_COMMISSION_EARNING_GRID_KEY,
+    }
+    const reportFindMany = vi.fn(async (args: { where: { deploymentScope: string } }) => {
+      expect(args.where.deploymentScope).toBe(LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE)
+      return [partialLocalPage, verifiedLegacyRow].filter((row) =>
+        row.deploymentScope !== LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+      )
+    })
+    const legacy = vi.fn()
+    const prisma = {
+      agent: { findMany: async () => agents.map((a) => ({ ...a, user: { name: a.name } })) },
+      policy: { findMany: async () => [] },
+      nationalLifeReportRow: { findMany: reportFindMany },
+      nationalLifePublishedReportRow: { findMany: vi.fn().mockResolvedValue([]) },
+      commissionRecord: { findMany: legacy },
+    } as unknown as PrismaClient
+
+    const result = await loadAdminProduction(prisma, '2026-09')
+
+    expect(reportFindMany).toHaveBeenCalledOnce()
+    expect(result.source).toBe('NATIONAL_LIFE')
+    expect(result.rows.find((row) => row.agentId === 'writer')?.commissionTotal).toBe(100)
+    expect(legacy).not.toHaveBeenCalled()
   })
 })
 

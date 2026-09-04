@@ -55,6 +55,7 @@ function request(body: unknown = params) {
 function completedExport(overrides: Record<string, unknown> = {}) {
   return {
     uploadId: 'upload-1',
+    runId: 'run-1',
     sourceKey: 'INFORCE_CLIENTS',
     rowCount: 2,
     writtenCount: 2,
@@ -88,12 +89,14 @@ describe('local connector National Life export completion route', () => {
     expect(mocks.ingestDeps).toHaveBeenCalledWith(expect.anything())
     expect(mocks.ingest).toHaveBeenCalledWith(dependencies, {
       agentId: 'agent-1',
+      deviceId: 'device-1',
+      runId: 'run-1',
       terminal: true,
     })
     await expect(response.json()).resolves.toMatchObject({ portfolio })
   })
 
-  it('does not promote a non-terminal export', async () => {
+  it('revalidates the exact run before promoting a completed upload', async () => {
     mocks.complete.mockResolvedValue(completedExport({ terminal: false }))
     mocks.ingest.mockResolvedValue(null)
 
@@ -102,14 +105,17 @@ describe('local connector National Life export completion route', () => {
     expect(response.status).toBe(201)
     expect(mocks.ingest).toHaveBeenCalledWith(dependencies, {
       agentId: 'agent-1',
-      terminal: false,
+      deviceId: 'device-1',
+      runId: 'run-1',
+      terminal: true,
     })
     await expect(response.json()).resolves.toMatchObject({ portfolio: null })
   })
 
-  it('does not promote a duplicate completion again', async () => {
+  it('retries portfolio recovery on duplicate completion', async () => {
     mocks.complete.mockResolvedValue({
       uploadId: 'upload-1',
+      runId: 'run-1',
       sourceKey: 'INFORCE_CLIENTS',
       rowCount: 2,
       writtenCount: 2,
@@ -123,7 +129,9 @@ describe('local connector National Life export completion route', () => {
     expect(response.status).toBe(200)
     expect(mocks.ingest).toHaveBeenCalledWith(dependencies, {
       agentId: 'agent-1',
-      terminal: false,
+      deviceId: 'device-1',
+      runId: 'run-1',
+      terminal: true,
     })
     await expect(response.json()).resolves.toMatchObject({ duplicate: true, portfolio: null })
   })

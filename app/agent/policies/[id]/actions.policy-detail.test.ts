@@ -24,7 +24,8 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     policy: { findUnique: mocks.policyFind },
     nationalLifeInforcePolicy: { findMany: mocks.inforceFindMany },
-    nationalLifeReportRow: { findMany: mocks.reportFindMany },
+    nationalLifePublishedReportRow: { findMany: mocks.reportFindMany },
+    nationalLifeReportRow: { findMany: vi.fn().mockResolvedValue([]) },
     nationalLifeCaseSnapshot: { findMany: mocks.caseFindMany },
   },
 }))
@@ -78,13 +79,11 @@ describe('refreshNationalLifePolicyDetail action', () => {
 
     await refreshNationalLifePolicyDetail('policy_1')
 
-    expect(mocks.reportFindMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
+    expect(mocks.reportFindMany.mock.calls[0][0].where.AND[0]).toMatchObject({
         agentId: 'agent_1',
         gridKey: 'CLIENT_INTELLIGENCE',
         label: 'LS1473219',
-      }),
-    }))
+    })
     expect(mocks.caseFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         agentId: 'agent_1',

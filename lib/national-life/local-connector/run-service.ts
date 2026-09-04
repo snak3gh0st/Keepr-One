@@ -10,11 +10,9 @@ import type { NationalLifeGridKey } from '../portal-grid-client'
 import {
   syncConfirmedCasePromotionCreditsSafely,
   syncConfirmedInforcePromotionCreditsSafely,
-  syncNationalLifeCommissionPromotionCreditsSafely,
   type PromotionCreditSyncResult,
   type PromotionDatabase,
 } from '../promotion-credit-sync'
-import { COMMISSION_EARNING_GRID_KEYS } from '../commission-grid-keys'
 import {
   planReadGridStages,
   planReadPageStages,
@@ -82,6 +80,7 @@ export const NATIONAL_LIFE_HISTORICAL_REPORT_GRID_KEYS = new Set<NationalLifeGri
   'COMMISSIONS_EARNING_REPORT',
   'COMMISSIONS_POLICY_HISTORY',
   'POLICY_PAYMENT_HISTORY',
+  'CORRESPONDENCE',
 ])
 const UPSERT_CHUNK_SIZE = 100
 
@@ -93,7 +92,8 @@ type LocalConnectorDb = Pick<
   | 'nationalLifeConnectorStageFailure'
   | 'nationalLifeCaseSnapshot'
   | 'nationalLifeInforcePolicy'
-  | 'nationalLifeReportRow'
+  | 'nationalLifePublishedReportRow'
+  | 'nationalLifeReportPublication'
   | 'nationalLifeRawGridPage'
   | '$transaction'
 >
@@ -794,6 +794,71 @@ async function persistRecords(
     return { writtenCount: 0, duplicateCount: 0, rejectedCount: 0 }
   }
 
+  // Report rows are canonical administrative evidence. Unlike case/policy
+  // snapshots, a partial report page cannot safely be surfaced: the remaining
+  // carrier pages may alter its totals or membership. Keep this page only in
+  // the raw landing zone; the reconciled full snapshot is materialized during
+  // `completeLocalConnectorStage` below.
+  return {
+    writtenCount: plan.rows.length,
+    duplicateCount: plan.stats.duplicateCount,
+    rejectedCount: plan.stats.rejectedCount,
+  }
+}
+
+/// Publishes a report only after receipts and raw pages have reconciled. The
+/// publication cursor has one row per account/grid, so its upsert locks the
+/// whole snapshot while its rows are materialized and stale current-state rows
+/// are pruned. That prevents two devices from interleaving different complete
+/// snapshots into the verified published row table.
+async function publishVerifiedReportRows(
+  tx: Prisma.TransactionClient,
+  input: Pick<IngestInput, 'agentId' | 'deviceId' | 'gridKey'> & { runId: string },
+  rawPages: { records: unknown }[],
+  stageCompletionId: string,
+  completedAt: Date,
+) {
+  const plan = planRawIngest(
+    input.gridKey,
+    rawPages.flatMap((page) => page.records as Record<string, unknown>[]),
+  )
+  if (plan.target !== 'REPORT_ROW') return false
+
+  // Upsert is intentionally before row writes. PostgreSQL holds the unique
+  // cursor-row lock until this transaction commits, making the later writes and
+  // prune one serial publication even when two devices finish together.
+  const cursor = await tx.nationalLifeReportPublication.upsert({
+    where: {
+      agentId_deploymentScope_gridKey: {
+        agentId: input.agentId,
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+        gridKey: input.gridKey,
+      },
+    },
+    create: {
+      agentId: input.agentId,
+      deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+      gridKey: input.gridKey,
+      runId: input.runId,
+      deviceId: input.deviceId,
+      stageCompletionId,
+      completedAt,
+    },
+    update: { gridKey: input.gridKey },
+  })
+  if (cursor.stageCompletionId !== stageCompletionId && cursor.completedAt >= completedAt) {
+    return false
+  }
+  await tx.nationalLifeReportPublication.update({
+    where: { id: cursor.id },
+    data: {
+      runId: input.runId,
+      deviceId: input.deviceId,
+      stageCompletionId,
+      completedAt,
+    },
+  })
+
   await inChunks(plan.rows, (chunk) =>
     Promise.all(
       chunk.map((row) => {
@@ -802,9 +867,12 @@ async function persistRecords(
           label: row.label,
           amounts: row.amounts as Prisma.InputJsonValue,
           raw: row.raw as Prisma.InputJsonValue,
-          fetchedAt: observedAt,
+          fetchedAt: completedAt,
+          stageCompletionId,
+          runId: input.runId,
+          deviceId: input.deviceId,
         }
-        return tx.nationalLifeReportRow.upsert({
+        return tx.nationalLifePublishedReportRow.upsert({
           where: {
             agentId_deploymentScope_gridKey_rowKey: {
               agentId: input.agentId,
@@ -825,24 +893,45 @@ async function persistRecords(
       }),
     ),
   )
-  return {
-    writtenCount: plan.rows.length,
-    duplicateCount: plan.stats.duplicateCount,
-    rejectedCount: plan.stats.rejectedCount,
-  }
+  return true
 }
 
 /// Removes rows that disappeared from a newly verified carrier snapshot.
 ///
 /// Upserts alone cannot do this: a policy or report row that existed yesterday
-/// remains forever when it is absent today. The oldest page timestamp in this
-/// run is the publication boundary. Pruning happens only after every page and
-/// the carrier total reconcile, so an interrupted refresh keeps the last known
-/// complete snapshot intact.
+/// remains forever when it is absent today. Case/policy snapshots use the
+/// oldest page timestamp as their publication boundary; report snapshots use
+/// their verified stage-completion identity. Pruning happens only after every
+/// page and the carrier total reconcile, so an interrupted refresh keeps the
+/// last known complete snapshot intact.
 async function pruneRowsMissingFromVerifiedSnapshot(
   tx: Prisma.TransactionClient,
-  input: Pick<IngestInput, 'agentId' | 'gridKey'> & { runId: string },
+  input: Pick<IngestInput, 'agentId' | 'gridKey'> & {
+    runId: string
+    stageCompletionId?: string
+  },
 ) {
+  const target = planRawIngest(input.gridKey, []).target
+  if (target === 'REPORT_ROW') {
+    if (NATIONAL_LIFE_HISTORICAL_REPORT_GRID_KEYS.has(input.gridKey)) {
+      return { count: 0 }
+    }
+    if (!input.stageCompletionId) {
+      throw new LocalConnectorStageCompletionError('STAGE_INCOMPLETE')
+    }
+    // A cursor lock serializes report publication. Prune by the verified
+    // completion identity rather than client clock time, so a late device can
+    // never leave a mixed set of old/new row keys behind.
+    return tx.nationalLifePublishedReportRow.deleteMany({
+      where: {
+        agentId: input.agentId,
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+        gridKey: input.gridKey,
+        stageCompletionId: { not: input.stageCompletionId },
+      },
+    })
+  }
+
   const firstPage = await tx.nationalLifeRawGridPage.findFirst({
     where: { runId: input.runId, gridKey: input.gridKey },
     orderBy: { observedAt: 'asc' },
@@ -850,17 +939,11 @@ async function pruneRowsMissingFromVerifiedSnapshot(
   })
   if (!firstPage) throw new LocalConnectorStageCompletionError('STAGE_INCOMPLETE')
 
-  if (NATIONAL_LIFE_HISTORICAL_REPORT_GRID_KEYS.has(input.gridKey)) {
-    return { count: 0 }
-  }
-
   const commonWhere = {
     agentId: input.agentId,
     deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
     fetchedAt: { lt: firstPage.observedAt },
   }
-  const target = planRawIngest(input.gridKey, []).target
-
   if (target === 'CASE_SNAPSHOT') {
     return tx.nationalLifeCaseSnapshot.deleteMany({
       where: { ...commonWhere, gridKey: input.gridKey },
@@ -869,9 +952,7 @@ async function pruneRowsMissingFromVerifiedSnapshot(
   if (target === 'INFORCE_POLICY') {
     return tx.nationalLifeInforcePolicy.deleteMany({ where: commonWhere })
   }
-  return tx.nationalLifeReportRow.deleteMany({
-    where: { ...commonWhere, gridKey: input.gridKey },
-  })
+  throw new LocalConnectorStageCompletionError('STAGE_INCOMPLETE')
 }
 
 function publicReceipt(receipt: {
@@ -957,20 +1038,9 @@ async function syncLocalPromotionCredits(
       db,
     )
   }
-  if (
-    plan.target === 'REPORT_ROW' &&
-    (COMMISSION_EARNING_GRID_KEYS as readonly string[]).includes(input.gridKey)
-  ) {
-    return syncNationalLifeCommissionPromotionCreditsSafely(
-      {
-        agentId: input.agentId,
-        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-        rows: input.envelope.records,
-        fetchedAt: observedAt,
-      },
-      db,
-    )
-  }
+  // Report rows become financial evidence only after the stage-completion
+  // transaction materializes the separate published projection. A page receipt
+  // can never create commission credit by itself.
   return undefined
 }
 
@@ -1001,6 +1071,14 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
   const now = input.now ?? new Date()
   try {
     const result = await db.$transaction(async (tx) => {
+      // Serialize receipt writes and completion on this run. Otherwise a new
+      // chunk could land between the completion check and publication.
+      await tx.nationalLifeSyncRun.updateMany({
+        where: { id: input.envelope.runId, agentId: input.agentId,
+          connectorDeviceId: input.deviceId, deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+          executionSource: 'LOCAL', provider: NATIONAL_LIFE_PROVIDER, state: 'RUNNING' },
+        data: { updatedAt: now },
+      })
       const run = await tx.nationalLifeSyncRun.findFirst({
         where: {
           id: input.envelope.runId,
@@ -1038,6 +1116,12 @@ export async function ingestLocalConnectorStage(db: LocalConnectorDb, input: Ing
         throw new LocalConnectorRunError('IDEMPOTENCY_CONFLICT')
       }
 
+      const sealed = await tx.nationalLifeConnectorStageCompletion.findUnique({
+        where: { deviceId_runId_gridKey: { deviceId: input.deviceId,
+          runId: run.id, gridKey: input.gridKey } },
+        select: { id: true },
+      })
+      if (sealed) throw new LocalConnectorRunError('RUN_NOT_ACTIVE')
       const ingest = await persistRecords(tx, input, observedAt)
       // Preserve the carrier payload before normalization. Business models may
       // collapse duplicate policies or reject a row without a natural key; the
@@ -1170,6 +1254,12 @@ export async function completeLocalConnectorStage(
 ) {
   const now = input.now ?? new Date()
   return db.$transaction(async (tx) => {
+    await tx.nationalLifeSyncRun.updateMany({
+      where: { id: input.runId, agentId: input.agentId, connectorDeviceId: input.deviceId,
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE, executionSource: 'LOCAL',
+        provider: NATIONAL_LIFE_PROVIDER, state: { in: ['RUNNING', 'COMPLETED', 'PARTIAL'] } },
+      data: { updatedAt: now },
+    })
     const run = await tx.nationalLifeSyncRun.findFirst({
       where: {
         id: input.runId,
@@ -1178,7 +1268,7 @@ export async function completeLocalConnectorStage(
         connectorDeviceId: input.deviceId,
         executionSource: 'LOCAL',
         provider: NATIONAL_LIFE_PROVIDER,
-        state: { in: ['RUNNING', 'COMPLETED'] },
+        state: { in: ['RUNNING', 'COMPLETED', 'PARTIAL'] },
       },
       select: { id: true, state: true, plannedGridKeys: true, completedStages: true },
     })
@@ -1186,7 +1276,7 @@ export async function completeLocalConnectorStage(
     if (!plannedGridKeys(run).includes(input.gridKey)) {
       throw new LocalConnectorRunError('GRID_NOT_PLANNED')
     }
-    if (run.state === 'COMPLETED') {
+    if (run.state === 'COMPLETED' || run.state === 'PARTIAL') {
       const completed = await tx.nationalLifeConnectorStageCompletion.findUnique({
         where: {
           deviceId_runId_gridKey: {
@@ -1208,7 +1298,8 @@ export async function completeLocalConnectorStage(
           gridKey: input.gridKey,
           receivedRecordCount: completed.receivedRecordCount,
           completedStages: run.completedStages,
-          completed: true,
+          terminal: true,
+          completed: run.state === 'COMPLETED',
         }
       }
       throw new LocalConnectorRunError('RUN_NOT_FOUND')
@@ -1280,7 +1371,7 @@ export async function completeLocalConnectorStage(
       }
     }
 
-    await tx.nationalLifeConnectorStageCompletion.upsert({
+    const stageCompletion = await tx.nationalLifeConnectorStageCompletion.upsert({
       where: {
         deviceId_runId_gridKey: {
           deviceId: input.deviceId,
@@ -1298,36 +1389,42 @@ export async function completeLocalConnectorStage(
         truncated: false,
         completedAt: now,
       },
-      update: {
-        expectedRecordCount: input.expectedRecordCount,
-        receivedRecordCount,
-        finalSequence: input.finalSequence,
-        truncated: false,
-        completedAt: now,
-      },
+      update: {},
+      select: { id: true, completedAt: true, expectedRecordCount: true,
+        receivedRecordCount: true, finalSequence: true },
     })
+    if (stageCompletion.expectedRecordCount !== input.expectedRecordCount ||
+      stageCompletion.receivedRecordCount !== receivedRecordCount ||
+      stageCompletion.finalSequence !== input.finalSequence) {
+      throw new LocalConnectorStageCompletionError('STAGE_INCOMPLETE')
+    }
     await tx.nationalLifeConnectorStageFailure.updateMany({
       where: { runId: run.id, deviceId: input.deviceId, gridKey: input.gridKey, resolvedAt: null },
       data: { resolvedAt: now, updatedAt: now },
     })
 
-    await pruneRowsMissingFromVerifiedSnapshot(tx, {
+    const reportPublished = await publishVerifiedReportRows(
+      tx,
+      { agentId: input.agentId, deviceId: input.deviceId, runId: run.id, gridKey: input.gridKey },
+      rawPages,
+      stageCompletion.id,
+      stageCompletion.completedAt,
+    )
+
+    if (reportPublished || planRawIngest(input.gridKey, []).target !== 'REPORT_ROW') {
+      await pruneRowsMissingFromVerifiedSnapshot(tx, {
       agentId: input.agentId,
       runId: run.id,
       gridKey: input.gridKey,
-    })
+      ...(reportPublished ? { stageCompletionId: stageCompletion.id } : {}),
+      })
+    }
 
-    // Keep exactly one verified raw snapshot per agent and grid. Crucially this
-    // happens only after every page reconciles with the carrier total, so a
-    // failed replacement can never destroy the previous complete snapshot.
-    await tx.nationalLifeRawGridPage.deleteMany({
-      where: {
-        agentId: input.agentId,
-        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
-        gridKey: input.gridKey,
-        runId: { not: run.id },
-      },
-    })
+    // Raw pages are evidence for a specific run/device. Do not delete another
+    // run's evidence here: its route promotes the portfolio after this stage
+    // transaction commits, and a concurrent completion could otherwise erase
+    // that exact source between proof and promotion. Retention belongs to a
+    // separate, run-aware GC after consumers have finished.
 
     const [finalizedGrids, failedGrids] = await Promise.all([
       tx.nationalLifeConnectorStageCompletion.findMany({
@@ -1373,5 +1470,5 @@ export async function completeLocalConnectorStage(
       terminal,
       completed,
     }
-  })
+  }, { maxWait: 15_000, timeout: 60_000 })
 }

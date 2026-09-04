@@ -214,6 +214,7 @@ export async function completeNationalLifeExportUpload(
   if (upload.state === 'COMPLETED') {
     return {
       uploadId: upload.id,
+      runId: upload.runId,
       sourceKey: upload.sourceKey,
       rowCount: upload.rowCount ?? 0,
       writtenCount: upload.writtenCount ?? 0,
@@ -333,6 +334,7 @@ export async function completeNationalLifeExportUpload(
   ])
   return {
     uploadId: upload.id,
+    runId: upload.runId,
     sourceKey: upload.sourceKey,
     worksheetName: parsed.worksheetName,
     rowCount: parsed.rows.length,

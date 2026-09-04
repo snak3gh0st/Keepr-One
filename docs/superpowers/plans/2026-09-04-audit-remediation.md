@@ -419,13 +419,13 @@ git commit -m "docs: align operations guidance with audited behavior"
 **Interfaces:**
 - A signed, paired device and its `agentId` own the captured National Life account partition. Carrier `AgentNumber` and a profile NPN remain source metadata; they must not hide data captured for that agent.
 - The current dashboard reads only a verified `LOCAL_CONNECTOR` snapshot for the authorized agent scope. Data from another agent, a different device-run, or a noncanonical scope remains excluded.
-- The official `INFORCE_CLIENTS` export invokes the same post-terminal portfolio promotion as the generic stage-completion route; replayed or nonterminal completion remains a no-op.
+- The official `INFORCE_CLIENTS` export invokes the same post-terminal portfolio promotion as the generic stage-completion route. A replay revalidates the exact source and can recover an interrupted promotion; a nonterminal run cannot supply portfolio evidence.
 
 - [x] **Step 1: Trace the incident from signed device pairing through run receipts, raw pages, normalized rows, dashboard, and data-page readers.**
 
 - [x] **Step 2: Remove NPN/AgentNumber equality as an ownership predicate while preserving `agentId`, verified run, device, and canonical-scope boundaries.**
 
-- [x] **Step 3: Invoke post-terminal portfolio promotion after an official export completes, without replaying promotion for a duplicate or partial completion.**
+- [x] **Step 3: Invoke post-terminal portfolio promotion after an official export completes; permit idempotent replay after exact run/device proof. A partial run requires a fully verified inforce stage.**
 
 - [x] **Step 4: Add focused regressions and independently review both changes.**
 
@@ -433,6 +433,22 @@ git commit -m "docs: align operations guidance with audited behavior"
 git commit -m "fix: show National portfolio for paired account"
 git commit -m "fix: finalize portfolio after National export"
 ```
+
+### Task 9: Close the final review findings
+
+- [x] Block uncertain Stripe checkout reissue after the idempotency recovery window; preserve an additive migration marker for older writers.
+- [x] Promote National portfolios only from the signed run/device raw pages; retain evidence from concurrent runs and permit recovery on completion replay.
+- [x] Attempt verified portfolio promotion when a different source failure settles the run as partial.
+- [x] Publish report rows in a separate verified projection; update administrative, commission, National data, policy and document readers together.
+- [x] Serialize report publication, preserve completion timestamps, reject new pages for completed stages, and prevent older portfolio replays from overwriting newer policies.
+- [x] Preserve existing document references while new transfers point at published correspondence; verify bytes and foreign keys in disposable PostgreSQL.
+- [x] Apply all 73 migrations to a disposable local PostgreSQL instance and run concurrent publication/replay checks against the real database.
+
+The full suite, connector checks, lint, TypeScript and production build are rerun
+after source changes. Local build succeeds but reports missing `BETTER_AUTH_SECRET`;
+target environment configuration and authenticated production smoke remain
+release checks. The two previously bounded dependency advisories remain visible.
+No production database migration, carrier sync, push or deployment is performed.
 
 ## Plan self-review
 

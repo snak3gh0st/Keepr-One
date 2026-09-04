@@ -50,7 +50,7 @@ vi.mock('@/lib/prisma', () => ({
     user: { findUnique: state.userFindUnique },
     nationalLifeCaseSnapshot: { findMany: state.caseFindMany },
     nationalLifeInforcePolicy: { findMany: state.inforceFindMany },
-    nationalLifeReportRow: { findMany: state.reportFindMany },
+    nationalLifePublishedReportRow: { findMany: state.reportFindMany },
     nationalLifeSyncRun: { findFirst: state.syncRunFindFirst },
     policy: { findMany: state.policyFindMany },
   },

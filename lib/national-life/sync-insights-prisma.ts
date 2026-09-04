@@ -108,7 +108,7 @@ async function runDelta(input: {
         },
         _count: { _all: true },
       }) : emptyGroups,
-      reportKeys.length > 0 ? prisma.nationalLifeReportRow.groupBy({
+      reportKeys.length > 0 ? prisma.nationalLifePublishedReportRow.groupBy({
         by: ['gridKey'],
         where: {
           agentId: input.agentId, deploymentScope: input.deploymentScope,
@@ -116,7 +116,7 @@ async function runDelta(input: {
         },
         _count: { _all: true },
       }) : emptyGroups,
-      reportKeys.length > 0 ? prisma.nationalLifeReportRow.groupBy({
+      reportKeys.length > 0 ? prisma.nationalLifePublishedReportRow.groupBy({
         by: ['gridKey'],
         where: {
           agentId: input.agentId, deploymentScope: input.deploymentScope,
@@ -137,7 +137,7 @@ async function runDelta(input: {
         },
       }) : 0,
       reportKeys.includes('COMMISSIONS_EARNING_REPORT')
-        ? prisma.nationalLifeReportRow.findMany({
+        ? prisma.nationalLifePublishedReportRow.findMany({
             where: {
               agentId: input.agentId,
               deploymentScope: input.deploymentScope,

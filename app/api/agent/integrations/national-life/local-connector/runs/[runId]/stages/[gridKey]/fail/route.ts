@@ -14,6 +14,8 @@ import {
 } from '@/lib/national-life/local-connector/run-service'
 import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '@/lib/national-life/portal-grid-client'
 import { prisma } from '@/lib/prisma'
+import { ingestPortfolioIfRunFinished } from '@/lib/national-life/portfolio-ingest'
+import { prismaIngestDeps } from '@/lib/national-life/portfolio-ingest-prisma'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
 const MAX_FAIL_BODY_BYTES = 1_024
@@ -56,7 +58,10 @@ export async function POST(
       safeErrorCode: body.code,
       retryable: body.retryable,
     })
-    return Response.json(result, { status: 200, headers: NO_STORE })
+    const portfolio = await ingestPortfolioIfRunFinished(prismaIngestDeps(prisma), {
+      ...device, runId: result.runId, terminal: result.terminal,
+    })
+    return Response.json({ ...result, portfolio }, { status: 200, headers: NO_STORE })
   } catch (error) {
     if (error instanceof LocalConnectorSignatureError) {
       return Response.json(

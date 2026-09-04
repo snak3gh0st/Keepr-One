@@ -166,7 +166,7 @@ export default async function NationalLifeDataPage() {
         select: inforceSelect,
         orderBy: [{ policyStatus: 'asc' }, { policyNumber: 'asc' }],
       }),
-      prisma.nationalLifeReportRow.findMany({
+      prisma.nationalLifePublishedReportRow.findMany({
         where: {
           agentId: { in: access.scopeAgentIds },
           deploymentScope: CANONICAL_SCOPE,
@@ -175,7 +175,7 @@ export default async function NationalLifeDataPage() {
         select: reportSelect,
         orderBy: [{ gridKey: 'asc' }, { primaryDate: 'desc' }],
       }),
-      prisma.nationalLifeReportRow.findMany({
+      prisma.nationalLifePublishedReportRow.findMany({
         where: {
           agentId: { in: access.scopeAgentIds },
           deploymentScope: CANONICAL_SCOPE,

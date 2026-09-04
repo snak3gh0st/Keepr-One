@@ -544,6 +544,8 @@ model Agent {
   nationalLifeInforcePolicies           NationalLifeInforcePolicy[]
   nationalLifePolicyDetailSnapshots     NationalLifePolicyDetailSnapshot[]
   nationalLifeReportRows                NationalLifeReportRow[]
+  nationalLifePublishedReportRows       NationalLifePublishedReportRow[]
+  nationalLifeReportPublications        NationalLifeReportPublication[]
   nationalLifeRawGridPages              NationalLifeRawGridPage[]
   nationalLifeConnectorPairings         NationalLifeConnectorPairing[]
   nationalLifeConnectorDevices          NationalLifeConnectorDevice[]
@@ -1001,13 +1003,66 @@ model NationalLifeReportRow {
   @@index([fetchedAt])
 }
 
+/// A one-row publication cursor serializes complete report snapshots for a
+/// connector account/grid. It is deliberately separate from report rows: paid
+/// commission grids are an append-only ledger whose older rows remain tied to
+/// their own verified stage completion.
+model NationalLifeReportPublication {
+  id                String                              @id @default(cuid())
+  agentId           String
+  agent             Agent                               @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope   String
+  gridKey           String
+  runId             String
+  deviceId          String
+  stageCompletionId String                              @unique
+  /// This is the immutable completion time of the carrier snapshot, rather
+  /// than the time a later replay happened to reach this cursor.
+  completedAt       DateTime
+  createdAt         DateTime                            @default(now())
+  updatedAt         DateTime                            @updatedAt
+
+  @@unique([agentId, deploymentScope, gridKey])
+  @@index([runId, gridKey])
+}
+
+/// Verified projection of one reconciled carrier report
+/// snapshot. The page-level landing table above remains intentionally separate:
+/// old connector binaries and interrupted pages can still write there, but they
+/// can never alter this published evidence.
+model NationalLifePublishedReportRow {
+  id                String   @id @default(cuid())
+  agentId           String
+  agent             Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deploymentScope   String
+  gridKey           String
+  rowKey            String
+  primaryDate       String?
+  label             String?
+  amounts           Json
+  raw               Json
+  fetchedAt         DateTime
+  stageCompletionId String
+  runId             String
+  deviceId          String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  policyDocuments   PolicyDocument[]                    @relation("NationalLifePublishedReportPolicyDocuments")
+  documentTransfers NationalLifeDocumentTransfer[]      @relation("NationalLifePublishedReportDocumentTransfers")
+
+  @@unique([agentId, deploymentScope, gridKey, rowKey])
+  @@index([agentId, gridKey])
+  @@index([stageCompletionId])
+  @@index([runId, gridKey])
+}
+
 /// Faithful, page-by-page landing zone for the latest verified carrier grid.
 ///
 /// The normalized models above intentionally collapse duplicate policies and
 /// reject rows without a usable business key. This model does neither: every
 /// record delivered by the National Life grid is retained in its original
-/// order and shape. Pages from an older successful snapshot are removed only
-/// after the replacement stage has reconciled against `recordsTotal`.
+/// order and shape. Stage completion retains other runs' pages so concurrent
+/// consumers can finish using their exact evidence.
 model NationalLifeRawGridPage {
   id              String              @id @default(cuid())
   agentId         String
@@ -2219,8 +2274,13 @@ model NationalLifeDocumentTransfer {
   agent          Agent                       @relation(fields: [agentId], references: [id], onDelete: Cascade)
   deviceId       String
   device         NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  reportRowId    String
-  reportRow      NationalLifeReportRow       @relation(fields: [reportRowId], references: [id], onDelete: Cascade)
+  /// Old transfers keep their landing-row reference. New connector transfers
+  /// point at the verified published row below, so an old writer cannot change
+  /// the document handle selected by the visible policy page.
+  reportRowId          String?
+  reportRow            NationalLifeReportRow?          @relation(fields: [reportRowId], references: [id], onDelete: Cascade)
+  publishedReportRowId String?
+  publishedReportRow   NationalLifePublishedReportRow? @relation("NationalLifePublishedReportDocumentTransfers", fields: [publishedReportRowId], references: [id], onDelete: Cascade)
   policyId       String
   policy         Policy                      @relation(fields: [policyId], references: [id], onDelete: Cascade)
   documentId     String?                     @unique
@@ -2240,6 +2300,7 @@ model NationalLifeDocumentTransfer {
   chunks         NationalLifeDocumentChunk[]
 
   @@unique([agentId, reportRowId])
+  @@unique([agentId, publishedReportRowId])
   @@index([deviceId, state])
   @@index([state, updatedAt])
 }
@@ -2668,6 +2729,8 @@ model PolicyDocument {
   externalId           String?
   sourceRowId          String?                       @unique
   sourceRow            NationalLifeReportRow?        @relation(fields: [sourceRowId], references: [id], onDelete: SetNull)
+  publishedSourceRowId String?                       @unique
+  publishedSourceRow   NationalLifePublishedReportRow? @relation("NationalLifePublishedReportPolicyDocuments", fields: [publishedSourceRowId], references: [id], onDelete: SetNull)
   contentHash          String?
   fetchedAt            DateTime?
   createdAt            DateTime                      @default(now())

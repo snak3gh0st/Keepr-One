@@ -13,6 +13,7 @@ import { getPromotionJourney } from '../promotion-journey'
 import type { CaseSnapshot } from './case-snapshot-service'
 import type { InforcePolicySnapshot } from './inforce-policy-service'
 import { COMMISSION_EARNING_GRID_KEYS } from './commission-grid-keys'
+import { LOCAL_CONNECTOR_DEPLOYMENT_SCOPE } from './local-connector/config'
 import type { NationalLifeGridKey } from './portal-grid-client'
 import {
   toNationalLifePromotionPaymentEvidence,
@@ -140,6 +141,7 @@ export type PromotionDatabase = Pick<PrismaClient, '$transaction' | 'agent'> &
     Pick<
       PrismaClient,
       | 'nationalLifePolicyDetailSnapshot'
+      | 'nationalLifePublishedReportRow'
       | 'nationalLifeReportRow'
     >
   >
@@ -1246,9 +1248,20 @@ async function syncPolicyDetailPromotionCredits(
     }
   }
 
-  const reportRepository = database.nationalLifeReportRow
-  const reportRows = reportRepository
-    ? await reportRepository.findMany({
+  const reportRows = input.deploymentScope === LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
+    ? database.nationalLifePublishedReportRow
+      ? await database.nationalLifePublishedReportRow.findMany({
+          where: {
+            agentId: input.agentId,
+            deploymentScope: input.deploymentScope,
+            gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
+            label: policyNumber,
+          },
+          select: { raw: true },
+        })
+      : []
+    : database.nationalLifeReportRow
+      ? await database.nationalLifeReportRow.findMany({
         where: {
           agentId: input.agentId,
           deploymentScope: input.deploymentScope,
@@ -1257,7 +1270,7 @@ async function syncPolicyDetailPromotionCredits(
         },
         select: { raw: true },
       })
-    : []
+      : []
   const evidence = reportRows.flatMap((row) => {
     const parsed = toNationalLifePromotionPaymentEvidence(row)
     return parsed && parsed.policyNumber === policyNumber ? [parsed] : []
@@ -1408,8 +1421,19 @@ async function syncStoredNationalLifePromotionCreditsForAgent(
     return { status: 'SYNCED', examined: 0, eligible: 0, inserted: 0, skipped: {} }
   }
 
-  const reportRows = database.nationalLifeReportRow
-    ? await database.nationalLifeReportRow.findMany({
+  const reportRows = input.deploymentScope === LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
+    ? database.nationalLifePublishedReportRow
+      ? await database.nationalLifePublishedReportRow.findMany({
+          where: {
+            agentId: input.agentId,
+            deploymentScope: input.deploymentScope,
+            gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
+          },
+          select: { raw: true },
+        })
+      : []
+    : database.nationalLifeReportRow
+      ? await database.nationalLifeReportRow.findMany({
         where: {
           agentId: input.agentId,
           deploymentScope: input.deploymentScope,
@@ -1417,7 +1441,7 @@ async function syncStoredNationalLifePromotionCreditsForAgent(
         },
         select: { raw: true },
       })
-    : []
+      : []
   const detailPolicies = new Set(
     details.map((detail) => canonicalPolicyNumber(detail.policyNumber)),
   )

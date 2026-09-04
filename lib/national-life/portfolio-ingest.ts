@@ -9,7 +9,13 @@ import type { InforceRow } from './portfolio-reconcile'
 /// There is deliberately no `deletePolicy`. A policy absent from the export is not
 /// proof it stopped existing — the carrier may simply have changed a filter.
 export type IngestDeps = {
-  loadInforceRows: (agentId: string) => Promise<InforceRow[]>
+  /**
+   * The portfolio may only be promoted from the raw pages that completed on
+   * this exact signed device/run. Reading the agent-wide normalized table here
+   * would let a terminal run publish pages another device has only partly
+   * landed.
+   */
+  loadInforceRows: (input: PortfolioRunScope) => Promise<(InforceRow & { sourceObservedAt?: Date })[] | null>
   loadClients: (agentId: string) => Promise<{ id: string; name: string; dateOfBirth: Date | null }[]>
   createClient: (input: {
     agentId: string
@@ -18,7 +24,13 @@ export type IngestDeps = {
     email: string | null
     phone: string | null
   }) => Promise<{ id: string }>
-  upsertPolicy: (input: PlannedPolicy & { agentId: string; clientId: string }) => Promise<void>
+  upsertPolicy: (input: PlannedPolicy & { agentId: string; clientId: string; sourceObservedAt?: Date }) => Promise<void>
+}
+
+export type PortfolioRunScope = {
+  agentId: string
+  deviceId: string
+  runId: string
 }
 
 export type IngestReport = {
@@ -32,14 +44,21 @@ export type IngestReport = {
 
 export async function ingestNationalLifePortfolio(
   deps: IngestDeps,
-  input: { agentId: string },
+  input: PortfolioRunScope,
 ): Promise<IngestReport> {
   const [rows, existingClients] = await Promise.all([
-    deps.loadInforceRows(input.agentId),
+    deps.loadInforceRows(input),
     deps.loadClients(input.agentId),
   ])
 
+  // An empty verified export is a valid portfolio. `null` specifically means
+  // the completion/raw-page proof is absent or inconsistent, and must never be
+  // treated as an empty account book.
+  if (rows === null) throw new Error('NATIONAL_PORTFOLIO_SNAPSHOT_UNAVAILABLE')
+
   const plan = planPortfolioIngest({ rows, existingClients })
+  const sourceTimes = rows.flatMap((row) => row.sourceObservedAt ? [row.sourceObservedAt.getTime()] : [])
+  const sourceObservedAt = sourceTimes.length ? new Date(Math.max(...sourceTimes)) : undefined
 
   const report: IngestReport = {
     clientsCreated: 0,
@@ -75,7 +94,7 @@ export async function ingestNationalLifePortfolio(
       continue
     }
     try {
-      await deps.upsertPolicy({ ...policy, agentId: input.agentId, clientId })
+      await deps.upsertPolicy({ ...policy, agentId: input.agentId, clientId, sourceObservedAt })
       report.policiesUpserted += 1
     } catch (error) {
       report.failed.push({
@@ -97,11 +116,15 @@ export async function ingestNationalLifePortfolio(
 /// back as `null` so the caller can say nothing rather than say something false.
 export async function ingestPortfolioIfRunFinished(
   deps: IngestDeps,
-  input: { agentId: string; terminal: boolean },
+  input: PortfolioRunScope & { terminal: boolean },
 ): Promise<IngestReport | null> {
   if (!input.terminal) return null
   try {
-    return await ingestNationalLifePortfolio(deps, { agentId: input.agentId })
+    return await ingestNationalLifePortfolio(deps, {
+      agentId: input.agentId,
+      deviceId: input.deviceId,
+      runId: input.runId,
+    })
   } catch {
     return null
   }

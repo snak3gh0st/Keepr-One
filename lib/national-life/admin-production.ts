@@ -93,17 +93,25 @@ export function buildAdminProduction(input: ProductionInput) {
 }
 
 export async function loadAdminProduction(prisma: PrismaClient, period?: string) {
-  const [agents, policies, carrierRows] = await Promise.all([
+  const [agents, policies, publishedLocalRows, legacyCarrierRows] = await Promise.all([
     prisma.agent.findMany({ select: { id: true, npn: true, user: { select: { name: true } } } }),
     prisma.policy.findMany({ select: { agentId: true, effectiveDate: true, premium: true } }),
+    prisma.nationalLifePublishedReportRow.findMany({
+      where: {
+        deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+        gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
+      },
+      select: { id: true, agentId: true, deploymentScope: true, gridKey: true, raw: true, amounts: true },
+    }),
     prisma.nationalLifeReportRow.findMany({
-      where: { OR: [
-        { deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE, gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] } },
-        { deploymentScope: LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE, gridKey: LEGACY_COMMISSION_EARNING_GRID_KEY },
-      ] },
+      where: {
+        deploymentScope: LEGACY_COMMISSION_EARNING_DEPLOYMENT_SCOPE,
+        gridKey: LEGACY_COMMISSION_EARNING_GRID_KEY,
+      },
       select: { id: true, agentId: true, deploymentScope: true, gridKey: true, raw: true, amounts: true },
     }),
   ])
+  const carrierRows = [...publishedLocalRows, ...legacyCarrierRows]
   const legacy = carrierRows.length === 0
     ? await prisma.commissionRecord.findMany({ where: { type: 'DIRECT' }, select: { agentId: true, period: true, amount: true, type: true } })
     : []
