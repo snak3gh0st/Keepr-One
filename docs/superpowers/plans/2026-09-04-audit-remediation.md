@@ -236,54 +236,52 @@ git commit -m "fix: make checkout retries stable and align upload limits"
 ### Task 4: Make support preview read-only and expired sessions recover to login
 
 **Files:**
-- Modify: `proxy.ts`, `lib/require-role.ts`, `app/agent/layout.tsx`
-- Modify: `app/agent/mensagens/page.tsx`, `lib/crm/pipeline.ts`, callers in `app/agent/cases/page.tsx` and `app/agent/cases/[id]/page.tsx`
-- Test: `lib/require-role.test.ts`, new/nearest proxy tests, messaging page tests, CRM pipeline tests, agent layout tests
+- Modify: `proxy.ts`, new `lib/support-preview.ts`
+- Modify: `app/agent/mensagens/page.tsx`, its workspace, `lib/crm/pipeline.ts`, and callers/components in `app/agent/cases/`
+- Test: `middleware.test.ts`, `lib/support-preview.test.ts`, messaging page/workspace tests, CRM pipeline tests, and Cases list/detail tests
 
 **Interfaces:**
 - A support-preview GET can read existing resources but must not create a Chatwoot account, pipeline, stages, or backfill data.
 - A valid normal user retains lazy setup behavior where the product needs it.
-- A stale or invalid session reaches `/login` with a safe next destination, while forbidden and commercial-gate errors retain their current distinct handling.
+- A stale or deleted cookie-backed session reaches the appropriate user or admin login with a safe next destination, while auth-service errors, forbidden access, and commercial gates retain their current distinct handling.
 
-- [ ] **Step 1: Write failing tests that demonstrate preview-safe reads.**
+- [x] **Step 1: Write failing tests that demonstrate preview-safe reads.**
 
 ```ts
 await renderMensagensPage({ impersonatedBy: 'admin-1', messagingAccount: null })
 expect(provisionAgentInbox).not.toHaveBeenCalled()
 
-await getPipelineForAgent('agent-1', db, { allowInitialization: false })
+await findPipelineForAgent('agent-1', db)
 expect(db.crmPipeline.upsert).not.toHaveBeenCalled()
 ```
 
-- [ ] **Step 2: Write a failing layout test for the authentication-specific error.**
+- [x] **Step 2: Write failing middleware tests for a stale cookie and a valid session that must continue to its existing authorization gate.**
 
 ```ts
-await expect(renderAgentLayoutWithNoSession()).rejects.toMatchObject({
-  digest: expect.any(String),
-})
-expect(redirect).toHaveBeenCalledWith('/login?next=%2Fagent')
+await expect(proxy(staleAgentRequest)).resolves.toMatchObject({ status: 307 })
+expect(location).toContain('/login?next=%2Fagent')
 ```
 
-Use the project’s existing Next redirect mocking pattern; do not encode an arbitrary Error string as the public contract.
+Reuse the existing middleware test pattern; do not catch and convert a real auth-service error into a logout redirect.
 
-- [ ] **Step 3: Introduce a typed authentication error and a read-only-preview signal.**
+- [x] **Step 3: Validate a present cookie centrally and introduce a pure read-only-preview signal.**
 
-`requireRole` throws `UnauthenticatedError` only when session is absent. The agent layout catches that type and redirects to login. Read-only preview is determined from the authenticated session and passed explicitly to mutation-prone page/service calls, rather than treating every GET as harmless.
+For all existing protected route prefixes, a present cookie with `getSession() === null` redirects at the proxy boundary. Read-only preview is determined from the authenticated session by a reusable pure helper and passed explicitly to mutation-prone page/service calls, rather than treating every GET as harmless.
 
-- [ ] **Step 4: Split CRM read from CRM initialization and gate messaging provisioning.**
+- [x] **Step 4: Split CRM read from CRM initialization, gate messaging provisioning, and hide preview-only write controls.**
 
-Add an explicit `allowInitialization` option with default `true` for normal product use. Preview callers pass `false`; if no pipeline/inbox exists, return a non-mutating empty/not-configured state that the UI explains. Do not silently create a resource from a preview.
+Keep normal lazy initialization in `getPipelineForAgent`; preview callers use `findPipelineForAgent`. If no pipeline/inbox exists, return a non-mutating empty/not-configured state that the UI explains. The messaging workspace and case-stage control do not expose write controls in preview. Do not silently create a resource from a preview.
 
-- [ ] **Step 5: Run focused tests and commit.**
+- [x] **Step 5: Run focused tests and commit.**
 
 Run: `pnpm vitest run lib/require-role.test.ts lib/crm app/agent/mensagens app/agent/cases proxy.test.ts`
 
-Expected: preview has no writes; normal account setup behavior remains covered; no-session route redirects to login.
+Expected: preview has no writes or write controls; normal account setup behavior remains covered; stale sessions redirect to login.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
-git add proxy.ts lib/require-role.ts lib/crm app/agent/layout.tsx app/agent/mensagens app/agent/cases
+git add proxy.ts lib/support-preview.ts lib/crm app/agent/mensagens app/agent/cases
 git commit -m "fix: preserve read-only preview and session recovery"
 ```
 
