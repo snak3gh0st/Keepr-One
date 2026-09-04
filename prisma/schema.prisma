@@ -670,6 +670,7 @@ model AgencyInvitationCheckout {
   checkoutExpiresAt       DateTime
   attemptNumber           Int                            @default(1)
   stripeCheckoutSessionId String?                        @unique
+  checkoutRedirectFingerprint String?
   stripeCustomerId        String?
   stripeSubscriptionId    String?                        @unique
   stripeProductId         String

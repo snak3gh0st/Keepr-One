@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   findCheckout: vi.fn(),
@@ -31,8 +31,21 @@ vi.mock('@/lib/stripe/client', () => ({
 
 import { createStripeAgencyInvitationCheckout } from './agency-invitation-checkout'
 
+function invitationInput() {
+  return {
+    invitationId: 'invitation-1', invitedEmail: 'invitee@example.com', name: 'Maria Invitee',
+    agencyName: null, passwordHash: 'argon2-password-hash', userId: null,
+    plan: 'AGENT_AGENCY_MEMBER' as const, inviterRole: 'OWNER' as const, unitAmountCents: 4_990,
+    acceptedTermsAt: new Date('2026-08-31T23:30:00.000Z'),
+    invitationExpiresAt: new Date('2026-09-09T12:00:00.000Z'),
+    origin: 'https://app.keeprone.com', invitationToken: 'a'.repeat(43),
+  }
+}
+
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-09-01T00:00:00.000Z'))
   mocks.findCheckout.mockResolvedValue(null)
   mocks.invitationFindUnique.mockResolvedValue({
     id: 'invitation-1',
@@ -46,7 +59,7 @@ beforeEach(() => {
     agencyInvitation: { findUnique: mocks.invitationFindUnique },
     agencyInvitationCheckout: { create: mocks.createLocalCheckout },
   }))
-  mocks.createLocalCheckout.mockResolvedValue({ id: 'invite-checkout-1', attemptNumber: 1 })
+  mocks.createLocalCheckout.mockImplementation(async ({ data }) => ({ id: 'invite-checkout-1', ...data }))
   mocks.retrievePrice.mockResolvedValue({
     id: 'price_1UAiJ0GJWjOaP9iwDnO3AaXc',
     active: true,
@@ -69,9 +82,68 @@ beforeEach(() => {
   })
 })
 
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllEnvs()
+})
+
 describe('Stripe agency invitation Checkout', () => {
-  it('retries identical Stripe parameters when the session was not persisted', async () => {
+  it.each(['origin', 'invitationToken'] as const)('rejects a changed %s before retrying an uncertain Stripe attempt', async (field) => {
+    const input = invitationInput()
+    let persisted: Record<string, unknown> | null = null
+    mocks.findCheckout.mockImplementation(async () => persisted)
+    mocks.createLocalCheckout.mockImplementation(async ({ data }) => {
+      persisted = { ...data, id: 'invite-checkout-1', status: 'PENDING', stripeCheckoutSessionId: null }
+      return persisted
+    })
+    mocks.updateLocalCheckout.mockRejectedValueOnce(new Error('SESSION_PERSIST_FAILED'))
+    await expect(createStripeAgencyInvitationCheckout(input)).rejects.toThrow('SESSION_PERSIST_FAILED')
+
+    await expect(createStripeAgencyInvitationCheckout({
+      ...input,
+      [field]: field === 'origin' ? 'https://changed.example.com' : 'b'.repeat(43),
+    })).rejects.toThrow('STRIPE_INVITATION_REDIRECT_MISMATCH')
+    expect(mocks.createCheckout).toHaveBeenCalledTimes(1)
+    expect(mocks.updateLocalCheckout).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed for a legacy uncertain attempt until its recorded expiry', async () => {
+    mocks.findCheckout.mockResolvedValue({
+      id: 'invite-checkout-1', status: 'PENDING', attemptNumber: 1,
+      stripeCheckoutSessionId: null, stripeSubscriptionId: null,
+      checkoutRedirectFingerprint: null,
+      checkoutExpiresAt: new Date('2026-09-01T22:30:00.000Z'),
+    })
+    await expect(createStripeAgencyInvitationCheckout(invitationInput()))
+      .rejects.toThrow('STRIPE_INVITATION_CHECKOUT_PENDING')
+    expect(mocks.createCheckout).not.toHaveBeenCalled()
+    expect(mocks.updateLocalCheckout).not.toHaveBeenCalled()
+  })
+
+  it('starts a new fingerprinted attempt only after the legacy recorded expiry', async () => {
+    mocks.findCheckout.mockResolvedValue({
+      id: 'invite-checkout-1', status: 'PENDING', attemptNumber: 1,
+      stripeCheckoutSessionId: null, stripeSubscriptionId: null,
+      checkoutRedirectFingerprint: null,
+      checkoutExpiresAt: new Date('2026-08-31T23:59:00.000Z'),
+    })
+    mocks.updateLocalCheckout.mockImplementationOnce(async ({ data }) => ({
+      ...data, id: 'invite-checkout-1', attemptNumber: 2,
+    }))
+    await createStripeAgencyInvitationCheckout(invitationInput())
+    expect(mocks.createLocalCheckout).not.toHaveBeenCalled()
+    expect(mocks.updateLocalCheckout.mock.calls[0]![0].data).toMatchObject({
+      attemptNumber: { increment: 1 },
+      checkoutRedirectFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+    })
+    expect(mocks.createCheckout.mock.calls[0]![1]).toEqual({
+      idempotencyKey: 'keeprone-agency-invitation-invite-checkout-1-2',
+    })
+  })
+
+  it.each([null, 'cus_original'])('retries the persisted attempt after input changes and session persistence fails (customer %s)', async (stripeCustomerId) => {
     const input = {
+      stripeCustomerId,
       invitationId: 'invitation-1',
       invitedEmail: 'invitee@example.com',
       name: 'Maria Invitee',
@@ -86,19 +158,32 @@ describe('Stripe agency invitation Checkout', () => {
       origin: 'https://app.keeprone.com',
       invitationToken: 'a'.repeat(43),
     }
-    mocks.findCheckout
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        id: 'invite-checkout-1', status: 'PENDING', attemptNumber: 1,
+    let persisted: Record<string, unknown> | null = null
+    mocks.findCheckout.mockImplementation(async () => persisted)
+    mocks.createLocalCheckout.mockImplementation(async ({ data }) => {
+      persisted = {
+        ...data, id: 'invite-checkout-1', status: 'PENDING',
         stripeCheckoutSessionId: null, stripeSubscriptionId: null,
-      })
+      }
+      return persisted
+    })
     mocks.updateLocalCheckout
       .mockRejectedValueOnce(new Error('SESSION_PERSIST_FAILED'))
-      .mockResolvedValueOnce({ id: 'invite-checkout-1', attemptNumber: 1 })
-      .mockResolvedValueOnce({})
+      .mockImplementation(async ({ data }) => ({ ...persisted, ...data }))
 
     await expect(createStripeAgencyInvitationCheckout(input)).rejects.toThrow('SESSION_PERSIST_FAILED')
-    await expect(createStripeAgencyInvitationCheckout(input)).resolves.toEqual({
+    expect(JSON.stringify(persisted)).not.toContain(input.invitationToken)
+    expect(JSON.stringify(persisted)).not.toContain(input.origin)
+    vi.stubEnv('STRIPE_INVITED_AGENT_PRICE_ID', 'price_changed_catalog')
+    await expect(createStripeAgencyInvitationCheckout({
+      ...input,
+      acceptedTermsAt: new Date('2026-09-01T00:30:00.000Z'),
+      invitedEmail: 'changed@example.com',
+      stripeCustomerId: 'cus_changed',
+      passwordHash: 'new-password-hash',
+      plan: 'AGENCY',
+      unitAmountCents: 999_999,
+    })).resolves.toEqual({
       checkoutUrl: 'https://checkout.stripe.com/c/pay/invitation-1',
       checkoutId: 'invite-checkout-1',
     })
@@ -110,6 +195,11 @@ describe('Stripe agency invitation Checkout', () => {
     expect(firstOptions.idempotencyKey).toBe('keeprone-agency-invitation-invite-checkout-1-1')
     expect(secondOptions.idempotencyKey).toBe(firstOptions.idempotencyKey)
     expect(secondParams).toEqual(firstParams)
+    expect(mocks.retrievePrice).toHaveBeenCalledTimes(1)
+    expect(mocks.updateLocalCheckout).toHaveBeenCalledTimes(2)
+    for (const [update] of mocks.updateLocalCheckout.mock.calls) {
+      expect(update.data).toEqual({ stripeCheckoutSessionId: 'cs_live_invitation_1' })
+    }
   })
 
   it('creates only a pending billing handoff before provider confirmation', async () => {
@@ -149,8 +239,10 @@ describe('Stripe agency invitation Checkout', () => {
         attemptNumber: 1,
         stripeProductId: 'prod_VB4QfhI3X92UjL',
         stripePriceId: 'price_1UAiJ0GJWjOaP9iwDnO3AaXc',
+        stripeCustomerId: null,
+        checkoutRedirectFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
       },
-      select: { id: true, attemptNumber: true },
+      select: expect.objectContaining({ id: true, attemptNumber: true }),
     })
 
     const [checkout] = mocks.createCheckout.mock.calls[0]!
@@ -251,7 +343,7 @@ describe('Stripe agency invitation Checkout', () => {
       url: null,
     })
     mocks.updateLocalCheckout
-      .mockResolvedValueOnce({ id: 'invite-checkout-1', attemptNumber: 2 })
+      .mockImplementationOnce(async ({ data }) => ({ ...data, id: 'invite-checkout-1', attemptNumber: 2 }))
       .mockResolvedValueOnce({})
 
     const result = await createStripeAgencyInvitationCheckout({
@@ -279,7 +371,7 @@ describe('Stripe agency invitation Checkout', () => {
         attemptNumber: { increment: 1 },
         stripeCheckoutSessionId: null,
       }),
-      select: { id: true, attemptNumber: true },
+      select: expect.objectContaining({ id: true, attemptNumber: true }),
     })
     expect(mocks.createCheckout.mock.calls[0]![1]).toEqual({
       idempotencyKey: 'keeprone-agency-invitation-invite-checkout-1-2',
