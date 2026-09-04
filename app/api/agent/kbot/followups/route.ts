@@ -5,11 +5,12 @@ import { prisma } from '@/lib/prisma'
 import { getFollowupCandidates } from '@/lib/kbot-followup/candidates'
 import { creditBalance } from '@/lib/kbot-followup/credits'
 import { aiEnabled, featureEnabled, FollowupError, TOKEN_RESERVATION } from '@/lib/kbot-followup/domain'
-import { cancelBatch, changeContactPreference, openManualConversation, startFollowups } from '@/lib/kbot-followup/service'
+import { cancelBatch, changeContactPreference, openManualConversation, startFollowups, saveFollowupPhone } from '@/lib/kbot-followup/service'
 import { followupCatalog } from '@/lib/kbot-followup/billing'
 
 const headers = { 'Cache-Control': 'private, no-store' }
 const schema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('phone'), candidateId: z.string().min(1).max(150), fingerprint: z.string().length(64), phone: z.string().min(1).max(40) }),
   z.strictObject({ action: z.literal('start'), requestKey: z.string().uuid(), language: z.enum(['PT', 'EN']),
     candidates: z.array(z.strictObject({ id: z.string().min(1).max(150), fingerprint: z.string().length(64) })).min(1).max(25) }),
   z.strictObject({ action: z.literal('cancel'), batchId: z.string().uuid() }),
@@ -46,6 +47,7 @@ export async function POST(request: Request) {
     const input = body.data
     let result: unknown = { ok: true }
     if (input.action === 'start') result = await startFollowups(agent.id, input)
+    else if (input.action === 'phone') result = await saveFollowupPhone(agent.id, input)
     else if (input.action === 'cancel') result = await cancelBatch(agent.id, input.batchId)
     else if (input.action === 'open') result = await openManualConversation(agent.id, input.candidateId)
     else await changeContactPreference(agent.id, input.candidateId, input.action)

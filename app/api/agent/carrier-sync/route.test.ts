@@ -3,6 +3,8 @@ import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
 
 const mocks = vi.hoisted(() => ({
   getCurrentAgent: vi.fn(),
+  featureEnabled: vi.fn(),
+  followupCount: vi.fn(),
   count: vi.fn(),
   localConnectorConfig: vi.fn(),
   getStatus: vi.fn(),
@@ -15,10 +17,13 @@ const mocks = vi.hoisted(() => ({
   applicationFindFirst: vi.fn(),
 }))
 
+vi.mock('@/lib/kbot-followup/domain', () => ({ featureEnabled: mocks.featureEnabled }))
+
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     browserAutomationJob: { count: mocks.count },
+    kBotFollowupJob: { count: mocks.followupCount },
     nationalLifeConnectorCommand: { findFirst: mocks.commandFindFirst },
     agentIntegrationCredential: { findUnique: mocks.credentialFindUnique },
     agentOnboarding: { findUnique: mocks.onboardingFindUnique },
@@ -49,6 +54,7 @@ const connector = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.featureEnabled.mockReturnValue(false)
   mocks.localConnectorConfig.mockReturnValue(connector)
   mocks.getStatus.mockResolvedValue(null)
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1' })
@@ -62,6 +68,30 @@ beforeEach(() => {
 })
 
 describe('carrier sync badge route', () => {
+  it('reports owned follow-up work independently of the local connector', async () => {
+    mocks.featureEnabled.mockReturnValue(true)
+    mocks.localConnectorConfig.mockReturnValue({ enabled: false })
+    mocks.followupCount.mockResolvedValueOnce(3).mockResolvedValueOnce(1)
+    const response = await GET()
+    expect((await response.json()).followup).toEqual({ working: 3, attention: 1 })
+    expect(mocks.followupCount.mock.calls.every(([query]) => query.where.agentId === 'agent-1')).toBe(true)
+    expect(mocks.count).not.toHaveBeenCalled()
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+  })
+
+  it('preserves follow-up counts together with a skipped National Life setup reminder', async () => {
+    mocks.featureEnabled.mockReturnValue(true)
+    mocks.localConnectorConfig.mockReturnValue({ enabled: false })
+    mocks.onboardingFindUnique.mockResolvedValue({ nationalLifeSkippedAt: new Date() })
+    mocks.followupCount.mockResolvedValueOnce(2).mockResolvedValueOnce(1)
+    const response = await GET()
+    expect(await response.json()).toMatchObject({
+      nationalLifeSetupRequired: true,
+      followup: { working: 2, attention: 1 },
+    })
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+  })
+
   it('counts working jobs across QUEUED, RUNNING and RETRYABLE, and blocked jobs only where a carrier login would revive them', async () => {
     mocks.count.mockResolvedValueOnce(2).mockResolvedValueOnce(0)
 
@@ -300,6 +330,7 @@ describe('carrier sync badge route', () => {
 
     const response = await GET()
 
+    expect(response.status).toBe(503)
     await expect(response.json()).resolves.toEqual({ state: null, connector })
   })
 
@@ -308,6 +339,7 @@ describe('carrier sync badge route', () => {
 
     const response = await GET()
 
+    expect(response.status).toBe(503)
     await expect(response.json()).resolves.toEqual({ state: null, connector })
   })
 })

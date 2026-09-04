@@ -67,6 +67,25 @@ afterEach(() => {
 })
 
 describe('CarrierSyncBadge', () => {
+  it('shows follow-up work even without a browser connector and directs to the activity center', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ connector: { enabled: false }, followup: { working: 2, attention: 0 } }) })))
+    render(<CarrierSyncBadge />)
+    await waitFor(() => expect(screen.getByLabelText('K-Bot status')).toHaveAttribute('data-state', 'working'))
+    expect(screen.getByLabelText('K-Bot status')).toHaveTextContent('I am handling your follow-ups')
+    await userEvent.click(screen.getByRole('button', { name: 'View K-Bot activity' }))
+    expect(screen.getByRole('link', { name: 'View activities' })).toHaveAttribute('href', '/agent/kbot?view=activities')
+  })
+  it('preserves active work after a failed refresh without announcing completion', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ state: { kind: 'IN_SYNC' }, sync: { runId: 'run', state: 'RUNNING', completed: 2, total: 6, shouldPoll: true } }) }).mockResolvedValue({ ok: false })
+    vi.stubGlobal('fetch', fetch)
+    render(<CarrierSyncBadge />)
+    await screen.findByText('Updating 2/6')
+    await act(async () => { window.dispatchEvent(new Event('keepr-one:kbot-activity-changed')) })
+    await waitFor(() => expect(screen.getByLabelText('K-Bot status')).toHaveTextContent('I could not refresh activities'))
+    expect(screen.getByText('Updating 2/6')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'K-Bot update' })).not.toBeInTheDocument()
+  })
+
   it('welcomes a completed onboarding and removes only its query flag without reloading', async () => {
     answerWith(null)
     window.history.replaceState(
@@ -418,7 +437,7 @@ describe('CarrierSyncBadge', () => {
     const { fetchMock, json } = answerWith(null)
     const { container } = render(<CarrierSyncBadge />)
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/agent/carrier-sync')
+    expect(fetchMock).toHaveBeenCalledWith('/api/agent/carrier-sync', { cache: 'no-store' })
 
     await waitFor(() => {
       expect(json).toHaveBeenCalled()

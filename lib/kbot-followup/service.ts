@@ -1,7 +1,7 @@
 import 'server-only'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
-import { ACTIVE_JOB_STATES, SENT_JOB_STATES, aiEnabled, availableCredits, COOLDOWN_MS, FollowupError, TOKEN_RESERVATION } from './domain'
+import { ACTIVE_JOB_STATES, SENT_JOB_STATES, aiEnabled, availableCredits, COOLDOWN_MS, FollowupError, TOKEN_RESERVATION, normalizePhone } from './domain'
 import { getFollowupCandidates } from './candidates'
 import { grantFreeCredits, lockAgent, settleJob } from './credits'
 import { messagingTransport } from './transport'
@@ -71,6 +71,9 @@ export async function changeContactPreference(agentId: string, candidateId: stri
     const data = action === 'optout' ? { optedOut: true } : action === 'restore' ? { optedOut: false, snoozedUntil: null }
       : action === 'manual' ? { lastManualAt: new Date() } : { snoozedUntil: new Date(Date.now() + 86_400_000) }
     await tx.kBotContactPreference.upsert({ where: { agentId_subjectKey: { agentId, subjectKey } }, create: { agentId, subjectKey, ...data }, update: data })
+    if (action === 'restore' && subjectKey !== candidate.subjectKey) {
+      await tx.kBotContactPreference.updateMany({ where: { agentId, subjectKey: candidate.subjectKey }, data })
+    }
     // A manual contact or opt-out also cancels queued AI work for this recipient.
     if (action === 'manual' || action === 'optout') {
       const jobs = await tx.kBotFollowupJob.findMany({ where: { agentId, phone: candidate.phone ?? '', status: { in: ['PENDING', 'PREPARING'] } } })
@@ -102,4 +105,36 @@ export async function openManualConversation(agentId: string, candidateId: strin
   const conversationId = await transport.conversation(candidate.phone, candidate.customerName)
   await transport.verifyConversation(conversationId, candidate.phone)
   return { href: `/agent/mensagens?conversation=${conversationId}` }
+}
+
+/** Repair only a missing/invalid contact number on a currently owned candidate. */
+export async function saveFollowupPhone(agentId: string, input: { candidateId: string; fingerprint: string; phone: string }) {
+  const phone = normalizePhone(input.phone)
+  if (!phone) throw new FollowupError('PHONE_REQUIRED', 400)
+  const candidate = (await getFollowupCandidates(agentId)).find(c => c.id === input.candidateId)
+  if (!candidate || candidate.fingerprint !== input.fingerprint) throw new FollowupError('SOURCE_CHANGED')
+  if (candidate.blockedReason !== 'PHONE_REQUIRED') throw new FollowupError(candidate.blockedReason ?? 'SOURCE_CHANGED')
+  return prisma.$transaction(async tx => {
+    await lockAgent(tx, agentId)
+    if (candidate.subjectKey.startsWith('client:')) {
+      const id = candidate.subjectKey.slice('client:'.length)
+      const client = await tx.client.findFirst({ where: { id, assignedAgentId: agentId }, select: { phone: true } })
+      if (!client || normalizePhone(client.phone)) throw new FollowupError('SOURCE_CHANGED')
+      const result = await tx.client.updateMany({ where: { id, assignedAgentId: agentId, phone: client.phone }, data: { phone } })
+      if (result.count !== 1) throw new FollowupError('SOURCE_CHANGED')
+    } else if (candidate.subjectKey.startsWith('case:')) {
+      const id = candidate.subjectKey.slice('case:'.length)
+      const insuranceCase = await tx.insuranceCase.findFirst({
+        where: { id, assignedAgentId: agentId, clientId: null, status: 'OPEN', prospect: { assignedAgentId: agentId } },
+        select: { prospect: { select: { id: true, phone: true } } },
+      })
+      if (!insuranceCase || normalizePhone(insuranceCase.prospect.phone)) throw new FollowupError('SOURCE_CHANGED')
+      const result = await tx.prospect.updateMany({ where: {
+        id: insuranceCase.prospect.id, assignedAgentId: agentId, phone: insuranceCase.prospect.phone,
+        cases: { some: { id, assignedAgentId: agentId, clientId: null, status: 'OPEN' } },
+      }, data: { phone } })
+      if (result.count !== 1) throw new FollowupError('SOURCE_CHANGED')
+    } else throw new FollowupError('SOURCE_CHANGED')
+    return { ok: true }
+  })
 }
