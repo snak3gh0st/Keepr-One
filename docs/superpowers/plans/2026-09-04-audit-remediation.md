@@ -19,7 +19,7 @@
 - Do not turn a partial source into a complete-looking financial or portfolio total.
 - Every behavior change gets a failing regression test before production code and targeted tests after it.
 - Keep one authoritative definition for each repaired screen; do not duplicate a reconciliation rule in a component.
-- Upgrade only to a patched Next.js version supported by this application and verify the installed version with the build and production-dependency audit.
+- Upgrade only to the current patched Next.js Active LTS security floor supported by this application and verify the installed version with the build and production-dependency audit.
 
 ---
 
@@ -112,7 +112,7 @@ git commit -m "fix: restore public scheduling availability and timezone consiste
 - Consumes commission rows with optional provider transaction IDs and produces immutable ledger rows plus legacy aggregate rows whose totals equal the ledger total for the same direct/override semantics.
 - Produces a terminal `ImportBatch` state for malformed, row-invalid, and database-failed data without a partially written row.
 
-- [ ] **Step 1: Write failing tests that compare the same reconciled portfolio scope in Today and Apólices.**
+- [x] **Step 1: Write failing tests that compare the same reconciled portfolio scope in Today and Apólices.**
 
 ```ts
 expect(policyListSummary.current.total).toBe(todayMetrics.total)
@@ -122,7 +122,7 @@ expect(policyListSummary.history.total).toBeGreaterThanOrEqual(policyListSummary
 
 The UI must label historical rows as history rather than silently mixing them into “current”.
 
-- [ ] **Step 2: Write failing commission import tests for payment aggregation, renamed-file idempotency, invalid dates/months, and row rollback.**
+- [x] **Step 2: Write failing commission import tests for payment aggregation, renamed-file idempotency, invalid dates/months, and row rollback.**
 
 ```ts
 await importCommissions(twoPaymentsCsv, uploader, 'payments.csv')
@@ -137,7 +137,7 @@ expect(PolicyRowSchema.safeParse({ ...policyRow, effectiveDate: 'not-a-date' }).
 
 Use a simulated transaction failure after one row write and assert that row has no persisted ledger/aggregate effects and that the batch becomes `COMPLETED_WITH_ERRORS` or `FAILED`, never remains `PROCESSING`.
 
-- [ ] **Step 3: Implement deterministic fallback source identity and per-row atomic import.**
+- [x] **Step 3: Implement deterministic fallback source identity and per-row atomic import.**
 
 For a missing carrier transaction ID, derive identity from normalized financial content plus an occurrence index among identical normalized rows in the parsed file; never use filename or original row order. Read the existing ledger transaction inside the row transaction, compute its amount delta, upsert it, and increment/decrement the direct and override aggregates by the change in its signed financial effect. `PAID` credits its absolute amount, `CHARGEBACK` debits its absolute amount, `ADJUSTMENT` carries its supplied sign, and `EXPECTED` remains in the ledger but contributes zero to the realized-commission aggregate. Preserve an explicit carrier transaction ID unchanged. A changed amount with no explicit origin ID is an ambiguous new transaction, not an inferred correction; surface that limitation in import feedback rather than silently merging money.
 
@@ -150,21 +150,21 @@ await incrementCommissionAggregate(tx, directKey, delta)
 
 Validate ISO dates and real calendar months before database access. Catch unexpected row failures, record a non-sensitive row error, and complete the batch state in a `finally`-equivalent path.
 
-- [ ] **Step 4: Implement one current portfolio projection for the policy list and explicitly expose history.**
+- [x] **Step 4: Implement one current portfolio projection for the policy list and explicitly expose history.**
 
 The default list and summary must consume the same reconciled current set as Today. If historical records are shown, use a deliberate history filter/section and label its totals. Do not discard source status such as Pending Lapse.
 
-- [ ] **Step 5: Make administrative production consume a documented carrier/reconciled source.**
+- [x] **Step 5: Make administrative production consume a documented carrier/reconciled source.**
 
 Build a dedicated global production reader from canonical National Life commission rows: canonicalize, audit, deduplicate globally by earning identity, and map direct production through `WritingAgtNumber -> Agent.npn`. Do not reuse a connector-owner view that duplicates team rows. Keep override out of direct-production ranking and never silently assign a row with no matching NPN. Keep legacy `CommissionRecord` only as an intentional disclosed fallback where no carrier source exists; never add it to the same carrier total. Define policy production period by UTC `effectiveDate`; rows without that business date belong in visible coverage, not in the month of import.
 
-- [ ] **Step 6: Run focused financial tests and commit.**
+- [x] **Step 6: Run focused financial tests and commit.**
 
 Run: `pnpm vitest run lib/csv app/agent/policies app/admin/production app/agent/commissions lib/national-life/current-portfolio*`
 
 Expected: regression tests pass; previous imports with explicit source IDs retain their identity.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git add app/agent/policies app/admin/production lib/csv lib/national-life
@@ -214,9 +214,9 @@ experimental: {
 
 The 12 MiB transport limit intentionally accommodates multipart overhead above the 10 MiB product limit; it is not a new product upload limit.
 
-- [ ] **Step 5: Upgrade Next.js and matching Next ESLint package to the patched 16.2.11 floor or newer compatible patched release.**
+- [ ] **Step 5: Upgrade Next.js and matching Next ESLint package to the current 16.3.3 Active LTS security floor.**
 
-Run `pnpm up next@16.2.11 eslint-config-next@16.2.11` only after the test changes are green. Do not use an unbounded major-version upgrade.
+Run `pnpm up next@16.3.3 eslint-config-next@16.3.3` only after the test changes are green. Do not use an unbounded major-version upgrade.
 
 - [ ] **Step 6: Run checkout tests, typecheck, build, and production dependency audit.**
 
