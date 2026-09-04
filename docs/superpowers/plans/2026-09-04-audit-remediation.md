@@ -410,6 +410,30 @@ git add README.md docs/operations docs/superpowers/plans
 git commit -m "docs: align operations guidance with audited behavior"
 ```
 
+### Task 8: Restore National Life visibility for the paired account and finalize export promotion
+
+**Files:**
+- Modify: current National portfolio reader, portfolio ingest reader, National data page, and the official export completion route
+- Test: ownership, NPN-mismatch visibility, canonical source scope, and terminal export promotion
+
+**Interfaces:**
+- A signed, paired device and its `agentId` own the captured National Life account partition. Carrier `AgentNumber` and a profile NPN remain source metadata; they must not hide data captured for that agent.
+- The current dashboard reads only a verified `LOCAL_CONNECTOR` snapshot for the authorized agent scope. Data from another agent, a different device-run, or a noncanonical scope remains excluded.
+- The official `INFORCE_CLIENTS` export invokes the same post-terminal portfolio promotion as the generic stage-completion route; replayed or nonterminal completion remains a no-op.
+
+- [x] **Step 1: Trace the incident from signed device pairing through run receipts, raw pages, normalized rows, dashboard, and data-page readers.**
+
+- [x] **Step 2: Remove NPN/AgentNumber equality as an ownership predicate while preserving `agentId`, verified run, device, and canonical-scope boundaries.**
+
+- [x] **Step 3: Invoke post-terminal portfolio promotion after an official export completes, without replaying promotion for a duplicate or partial completion.**
+
+- [x] **Step 4: Add focused regressions and independently review both changes.**
+
+```bash
+git commit -m "fix: show National portfolio for paired account"
+git commit -m "fix: finalize portfolio after National export"
+```
+
 ## Plan self-review
 
 | Audit requirement | Task |
@@ -428,5 +452,6 @@ git commit -m "docs: align operations guidance with audited behavior"
 | A12 illustration history cap | 5 |
 | Compatible post-upgrade production advisories | 6 |
 | Documentation/runtime truth | 7 |
+| Paired-account National visibility and export promotion | 8 |
 
 No original audit requirement is intentionally deferred. Task 6 does not force the remaining major-version UUID or Prisma paths merely to reduce an audit counter: their compatibility and Docker-runtime boundaries require separate evidence. The only actions intentionally outside this plan are production deployment, real carrier work, payment creation, booking creation, and message delivery; those require a reviewed branch and, for carrier/payment actions, a deliberate authorized smoke.
