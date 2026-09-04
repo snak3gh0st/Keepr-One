@@ -290,7 +290,8 @@ git commit -m "fix: preserve read-only preview and session recovery"
 **Files:**
 - Modify: `app/agent/policies/page.tsx`, `app/agent/policies/PoliciesList.tsx`
 - Modify: `app/agent/clients/page.tsx`, `app/agent/clients/ClientsList.tsx`
-- Modify: `app/agent/illustrations/page.tsx`; either wire `IllustrationsWorkspace.tsx` as the canonical surface or remove it only after preserving its useful behavior in the active page
+- Modify: focused server readers under `lib/national-life/` and `lib/crm/`; share the canonical Pending Lapse semantic with the dashboard metric
+- Modify: `app/agent/illustrations/page.tsx` and remove unimported `IllustrationsWorkspace.tsx`
 - Test: `app/agent/policies/PoliciesList.test.tsx`, new/nearest page query tests, client-list tests, illustration page tests
 
 **Interfaces:**
@@ -298,7 +299,7 @@ git commit -m "fix: preserve read-only preview and session recovery"
 - Server returns `items`, `total`, page metadata and aggregates for the same filter; clients render only that page.
 - Illustration history is discoverable beyond 100 records, with visible pagination/total and no unlabelled hard cap.
 
-- [ ] **Step 1: Write failing page/query tests for scoped server pagination.**
+- [x] **Step 1: Write failing page/query tests for scoped server pagination.**
 
 ```ts
 expect(prisma.policy.findMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -311,32 +312,61 @@ expect(screen.getByText('26–50 de 9.939')).toBeInTheDocument()
 
 Write equivalent client and illustration cases; include invalid page/filter values falling back to page 1/default rather than reaching Prisma unvalidated.
 
-- [ ] **Step 2: Run the list tests and confirm the existing pages load all records before applying `slice`.**
+- [x] **Step 2: Run the list tests and confirm the existing pages load all records before applying `slice`.**
 
 Run: `pnpm vitest run app/agent/policies/PoliciesList.test.tsx app/agent/clients app/agent/illustrations`
 
-- [ ] **Step 3: Move filters, sorting, counts, and pagination to page-level queries.**
+- [x] **Step 3: Move filters, sorting, counts, and pagination to page-level queries.**
 
 Use a shared bounded page size per list, `Promise.all` for count and rows, and precise selects. Preserve current client-side interactions through GET form controls or router-backed search parameters. Do not fetch every row merely to calculate a display count.
 
-- [ ] **Step 4: Make the active illustration page paginate the complete history.**
+- [x] **Step 4: Make the active illustration page paginate the complete history.**
 
 Remove `take: 100` only as part of a real paginated query. Use the active table or wire the workspace deliberately; do not leave a second unused implementation. Existing detail, PDF, and application-start links must remain scoped to the agent.
 
-- [ ] **Step 5: Run focused UI/page tests and commit.**
+- [x] **Step 5: Run focused UI/page tests and commit.**
 
 Run: `pnpm vitest run app/agent/policies app/agent/clients app/agent/illustrations`
 
 Expected: page two does not receive page one’s full dataset, filters preserve scope, and the 101st illustration can be reached through the normal UI.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add app/agent/policies app/agent/clients app/agent/illustrations
 git commit -m "fix: paginate portfolio, clients, and illustration history"
 ```
 
-### Task 6: Update operational documentation and perform full integration verification
+### Task 6: Remediate compatible transitive production dependency advisories
+
+**Files:**
+- Modify: `pnpm-workspace.yaml`, `pnpm-lock.yaml` only if the compatible parent-scoped resolutions are confirmed
+- Verify: package graph, production audit, and application build
+
+**Interfaces:**
+- Pin only advisory fixes that satisfy the existing direct parent's declared semver range, so unrelated package versions and application behavior do not drift.
+- Treat `uuid` under ExcelJS and `deepmerge-ts` under Prisma separately: no major override is allowed without evidence of compatibility and, for Prisma, equivalent coverage of the independent Docker migration CLI tree.
+
+- [ ] **Step 1: Record the production audit and dependency paths before resolution.**
+
+Confirm the exact paths for `brace-expansion` through `minimatch`, `fast-uri` through `ajv`, `uuid` through ExcelJS, and `deepmerge-ts` through Prisma. Do not treat a development-only path as production proof or a green UI as dependency evidence.
+
+- [ ] **Step 2: Apply only compatible parent-scoped overrides.**
+
+Use the smallest declared-compatible fixes: `minimatch@3.1.5 > brace-expansion@1.1.18`, `minimatch@10.2.5 > brace-expansion@5.0.9`, and `ajv@8.20.0 > fast-uri@3.1.6`. Regenerate the lockfile without broad upgrades.
+
+- [ ] **Step 3: Verify the resolved graph, build, and audit.**
+
+Run `pnpm install --frozen-lockfile`, `pnpm why`, `pnpm build`, and `pnpm audit --prod`. The compatible advisory paths must disappear. Report any remaining advisory by exact package/path and runtime boundary; do not call the audit clean when output remains.
+
+- [ ] **Step 4: Commit.**
+
+```bash
+git add pnpm-workspace.yaml pnpm-lock.yaml
+git commit -m "fix: resolve compatible production dependency advisories"
+```
+
+### Task 7: Update operational documentation and perform full integration verification
 
 **Files:**
 - Modify: `README.md` and the relevant operations runbook under `docs/operations/`
@@ -396,6 +426,7 @@ git commit -m "docs: align operations guidance with audited behavior"
 | A10 stale session recovery | 4 |
 | A11 server-side pagination | 5 |
 | A12 illustration history cap | 5 |
-| Documentation/runtime truth | 6 |
+| Compatible post-upgrade production advisories | 6 |
+| Documentation/runtime truth | 7 |
 
-No requirement is intentionally deferred. The only actions intentionally outside this plan are production deployment, real carrier work, payment creation, booking creation, and message delivery; those require a reviewed branch and, for carrier/payment actions, a deliberate authorized smoke.
+No original audit requirement is intentionally deferred. Task 6 does not force the remaining major-version UUID or Prisma paths merely to reduce an audit counter: their compatibility and Docker-runtime boundaries require separate evidence. The only actions intentionally outside this plan are production deployment, real carrier work, payment creation, booking creation, and message delivery; those require a reviewed branch and, for carrier/payment actions, a deliberate authorized smoke.
