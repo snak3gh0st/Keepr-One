@@ -1,6 +1,5 @@
 import 'server-only'
 
-import { randomBytes } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { PlatformPlanName } from '@/lib/plans'
@@ -150,7 +149,6 @@ export async function createStripeAgencyInvitationCheckout(
   }
   const checkout = await stripe.checkout.sessions.create({
     mode: 'subscription',
-    integration_identifier: `keeprone_inv_${randomBytes(6).toString('base64url').slice(0, 8).toLowerCase()}`,
     client_reference_id: local.id,
     ...(input.stripeCustomerId
       ? { customer: input.stripeCustomerId }

@@ -70,6 +70,48 @@ beforeEach(() => {
 })
 
 describe('Stripe agency invitation Checkout', () => {
+  it('retries identical Stripe parameters when the session was not persisted', async () => {
+    const input = {
+      invitationId: 'invitation-1',
+      invitedEmail: 'invitee@example.com',
+      name: 'Maria Invitee',
+      agencyName: null,
+      passwordHash: 'argon2-password-hash',
+      userId: null,
+      plan: 'AGENT_AGENCY_MEMBER' as const,
+      inviterRole: 'OWNER' as const,
+      unitAmountCents: 4_990,
+      acceptedTermsAt: new Date('2026-08-31T23:30:00.000Z'),
+      invitationExpiresAt: new Date('2026-09-09T12:00:00.000Z'),
+      origin: 'https://app.keeprone.com',
+      invitationToken: 'a'.repeat(43),
+    }
+    mocks.findCheckout
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'invite-checkout-1', status: 'PENDING', attemptNumber: 1,
+        stripeCheckoutSessionId: null, stripeSubscriptionId: null,
+      })
+    mocks.updateLocalCheckout
+      .mockRejectedValueOnce(new Error('SESSION_PERSIST_FAILED'))
+      .mockResolvedValueOnce({ id: 'invite-checkout-1', attemptNumber: 1 })
+      .mockResolvedValueOnce({})
+
+    await expect(createStripeAgencyInvitationCheckout(input)).rejects.toThrow('SESSION_PERSIST_FAILED')
+    await expect(createStripeAgencyInvitationCheckout(input)).resolves.toEqual({
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/invitation-1',
+      checkoutId: 'invite-checkout-1',
+    })
+
+    expect(mocks.createLocalCheckout).toHaveBeenCalledTimes(1)
+    expect(mocks.createCheckout).toHaveBeenCalledTimes(2)
+    const [firstParams, firstOptions] = mocks.createCheckout.mock.calls[0]!
+    const [secondParams, secondOptions] = mocks.createCheckout.mock.calls[1]!
+    expect(firstOptions.idempotencyKey).toBe('keeprone-agency-invitation-invite-checkout-1-1')
+    expect(secondOptions.idempotencyKey).toBe(firstOptions.idempotencyKey)
+    expect(secondParams).toEqual(firstParams)
+  })
+
   it('creates only a pending billing handoff before provider confirmation', async () => {
     const result = await createStripeAgencyInvitationCheckout({
       invitationId: 'invitation-1',
@@ -134,7 +176,7 @@ describe('Stripe agency invitation Checkout', () => {
       cancel_url: `https://app.keeprone.com/convites/agencia/${'a'.repeat(43)}?billing=canceled`,
     })
     expect(checkout).not.toHaveProperty('payment_method_types')
-    expect(checkout.integration_identifier).toMatch(/^keeprone_inv_[a-z0-9_-]{8}$/)
+    expect(checkout).not.toHaveProperty('integration_identifier')
     expect(mocks.updateLocalCheckout).toHaveBeenCalledWith({
       where: { id: 'invite-checkout-1' },
       data: { stripeCheckoutSessionId: 'cs_live_invitation_1' },

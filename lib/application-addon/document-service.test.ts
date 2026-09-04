@@ -13,6 +13,13 @@ describe('Application document validation', () => {
     expect(result.contentHash).toMatch(/^[a-f0-9]{64}$/)
   })
 
+  it('accepts the advertised 10 MiB product limit', () => {
+    expect(validateApplicationDocument({
+      type: 'OTHER', filename: 'max-size.pdf', mimeType: 'application/pdf',
+      bytes: new Uint8Array(10 * 1024 * 1024),
+    }).contentHash).toMatch(/^[a-f0-9]{64}$/)
+  })
+
   it('sanitizes the filename without accepting a path', () => {
     expect(validateApplicationDocument({
       type: 'AUTHORIZATION',

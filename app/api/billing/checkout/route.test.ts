@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   requireRole: vi.fn(),
@@ -42,6 +42,8 @@ vi.mock('@/lib/stripe/platform-catalog', () => ({
 import { POST } from './route'
 
 beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-09-04T12:05:00.000Z'))
   vi.clearAllMocks()
   mocks.requireRole.mockResolvedValue({
     user: { id: 'user-1', email: 'agent@example.com' },
@@ -61,7 +63,25 @@ beforeEach(() => {
   mocks.createCheckout.mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/test' })
 })
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('Stripe platform checkout', () => {
+  it('retries the same logical checkout with identical Stripe parameters and key', async () => {
+    const request = () => new Request('https://app.keeprone.com/api/billing/checkout', { method: 'POST' })
+
+    expect((await POST(request())).status).toBe(303)
+    vi.advanceTimersByTime(1_000)
+    expect((await POST(request())).status).toBe(303)
+
+    expect(mocks.createCheckout).toHaveBeenCalledTimes(2)
+    const [firstParams, firstOptions] = mocks.createCheckout.mock.calls[0]!
+    const [secondParams, secondOptions] = mocks.createCheckout.mock.calls[1]!
+    expect(secondOptions.idempotencyKey).toBe(firstOptions.idempotencyKey)
+    expect(secondParams).toEqual(firstParams)
+  })
+
   it('creates a tenant-bound subscription Checkout without hardcoded payment methods', async () => {
     const response = await POST(new Request('https://app.keeprone.com/api/billing/checkout', {
       method: 'POST',
@@ -87,7 +107,7 @@ describe('Stripe platform checkout', () => {
       },
     })
     expect(params).not.toHaveProperty('payment_method_types')
-    expect(params.integration_identifier).toMatch(/^keeprone_[a-z0-9_-]{8}$/)
+    expect(params).not.toHaveProperty('integration_identifier')
   })
 
   it('refuses to create a second Checkout for an already linked subscription', async () => {
