@@ -53,3 +53,5 @@
 
 ## Verification record
 Completed locally: 39 targeted tests, 11 PostgreSQL integration tests, TypeScript, targeted ESLint, Prisma validation, production build, additive migration check, desktop/mobile synthetic browser inspection. Exact evidence and rollout boundaries are recorded in the spec. No real customer sends or Stripe charges occurred.
+
+Pre-publication review: current main integrated without conflicts; final targeted run passed 86 tests in 13 files (16 with isolated PostgreSQL), and the production build passed. Receipt progression, opt-out persistence, notification counts and whole-number reservation ceilings were corrected. Live provider and paid-catalog gates remain in docs/operations/kbot-followup.md.

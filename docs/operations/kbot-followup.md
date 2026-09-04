@@ -49,3 +49,5 @@ Release gates still open:
 - Approve monthly price/allowance, configure Stripe product/price and test checkout, paid invoice, renewal and cancellation in Stripe test mode before selling credits. USD 9 / 100,000 tokens remains a proposal.
 
 A release with both feature flags false can ship the inactive foundation. Enabling automated sending or paid purchases requires the gates above.
+
+Final local checks after merging current `origin/main` (`1a71ad4`): 86 tests passed across 13 files, including 16 PostgreSQL integration tests and 6 checkout boundary tests; production build (including TypeScript) passed. Targeted ESLint passed before the merge; the merge did not change the follow-up modules. Main integrated without conflicts. No push, production deployment, live charge or real client message was performed.
