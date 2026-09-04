@@ -375,18 +375,18 @@ git commit -m "fix: resolve compatible production dependency advisories"
 **Interfaces:**
 - Documentation accurately describes the protected optional credential vault, current deployment topology at a high level without secrets, public booking readiness, data-source semantics, and the required carrier smoke sequence.
 
-- [ ] **Step 1: Write documentation assertions/checklist before changing documentation.**
+- [x] **Step 1: Write documentation assertions/checklist before changing documentation.**
 
 ```md
-- [ ] States that carrier credentials are optional, encrypted, and human MFA remains required.
-- [ ] Separates current reconciled portfolio from historical policy records.
-- [ ] Requires public scheduling slot verification before calling a link published.
-- [ ] States that a green build/healthcheck does not prove carrier or billing completion.
+- [x] States that carrier credentials are optional, encrypted, and human MFA remains required.
+- [x] Separates current reconciled portfolio from historical policy records.
+- [x] Requires public scheduling slot verification before calling a link published.
+- [x] States that a green build/healthcheck does not prove carrier or billing completion.
 ```
 
-- [ ] **Step 2: Update the docs to meet every checklist item without including credentials, customer data, host secrets, or an instruction to bypass MFA.**
+- [x] **Step 2: Update the docs to meet every checklist item without including credentials, customer data, host secrets, or an instruction to bypass MFA.**
 
-- [ ] **Step 3: Run complete fresh verification.**
+- [x] **Step 3: Run complete fresh verification.**
 
 Run:
 
@@ -403,7 +403,7 @@ pnpm audit --prod
 
 Also run the static route/link checker from the audit evidence against the changed source. Review the final diff for accidental secrets and verify `git status --short` contains only this branch’s intentional changes.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git add README.md docs/operations docs/superpowers/plans
