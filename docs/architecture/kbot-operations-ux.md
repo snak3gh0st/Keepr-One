@@ -27,6 +27,24 @@ commands remain the product actions; K-Bot makes their state understandable.
 - Status is always expressed with text, not color or motion alone. Live updates
   use polite status announcements and all animation honors reduced-motion.
 
+## Activity center
+
+`/agent/kbot?view=activities` combines the latest sync, illustration and
+application operation with up to 100 recent follow-up jobs. It is a bounded
+operational view, not a complete carrier audit ledger. Attention comes first,
+then active work, then history; each carrier row links to its existing workflow.
+
+Carrier status comes from the existing user-owned `/api/agent/carrier-sync`
+snapshot. Refresh errors preserve the last known state and show an unavailable
+notice. Partial or failed syncs never receive a completion message. An installed
+extension does not establish an authenticated carrier session, and a completed
+previous sync is identified as the last update rather than a new verification.
+
+Follow-up status keeps preparation, provider acceptance, sending and delivery
+separate. An unconfirmed send requires review and never triggers an automatic
+resend. Generation credits are shown separately from message delivery. The
+activity center introduces no new executor or automatic provider action.
+
 ## Naming boundary
 
 `K-Bot by KeeprOne` is the public product name. Internal package names,

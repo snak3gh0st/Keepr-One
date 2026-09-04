@@ -292,7 +292,8 @@ export function NationalLifeLocalConnectorCard({
     } as Record<string, string>)[rawFailure.action], rawFailure.message),
   } : null
   const loginComplete = ['syncing', 'slow', 'partial', 'success'].includes(state)
-  const syncComplete = state === 'partial' || state === 'success'
+  const syncComplete = state === 'success'
+  const displayedSyncState = state === 'idle' ? latestRun?.state : state === 'partial' ? 'PARTIAL' : null
   const syncActive = state === 'syncing' || state === 'slow'
   const disconnected = connectorPresence === 'installed' && !pairedDeviceId && state === 'idle'
   const extensionStepState: JourneyStepState = connectorPresence === 'installed' ? 'complete' : 'active'
@@ -301,7 +302,7 @@ export function NationalLifeLocalConnectorCard({
     : connectorPresence === 'installed'
       ? 'active'
       : 'waiting'
-  const syncStepState: JourneyStepState = syncComplete ? 'complete' : syncActive ? 'active' : 'waiting'
+  const syncStepState: JourneyStepState = syncComplete || displayedSyncState === 'COMPLETED' ? 'complete' : syncActive ? 'active' : 'waiting'
   const extensionStepDetail = connectorPresence === 'installed'
     ? copy('Instalado', 'Installed')
     : connectorPresence === 'checking'
@@ -314,9 +315,14 @@ export function NationalLifeLocalConnectorCard({
     : state === 'login-required'
       ? copy('Aguardando login', 'Waiting for sign-in')
       : connectorPresence === 'installed'
-        ? state === 'connecting' || state === 'checking' ? copy('Abrindo portal', 'Opening portal') : copy('Pronto', 'Ready')
+        ? state === 'connecting' || state === 'checking' ? copy('Abrindo portal', 'Opening portal') : copy('Verificar ao iniciar', 'Check when starting')
         : copy('Próximo', 'Next')
-  const syncStepDetail = syncComplete ? copy('Atualizado', 'Up to date') : syncActive ? copy('Sincronizando', 'Syncing') : copy('Aguardando', 'Waiting')
+  const syncStepDetail = syncComplete || displayedSyncState === 'COMPLETED' ? copy('Atualizado', 'Up to date')
+    : syncActive ? copy('Sincronizando', 'Syncing')
+    : displayedSyncState === 'PARTIAL' ? copy('Parcial — confira o resultado', 'Partial — check the result')
+    : displayedSyncState === 'FAILED' ? copy('Interrompido — confira o resultado', 'Interrupted — check the result')
+    : displayedSyncState === 'PAUSED' ? copy('Pausado', 'Paused')
+    : copy('Ainda não verificado', 'Not verified yet')
   const botState: KBotState = state === 'error' || disconnected || connectorPresence === 'missing'
     ? 'error'
     : state === 'login-required' || state === 'partial'
@@ -885,8 +891,9 @@ export function NationalLifeLocalConnectorCard({
             )}
           </p>
         ) : (
-          <>
-            <p className="mt-6 max-w-2xl text-sm leading-6 text-ink-muted">
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm font-medium text-teal-deep">{copy('Sobre o login e a sessão da National Life', 'About National Life sign-in and session')}</summary>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-ink-muted">
               {copy(
                 'O K-Bot executa as etapas aprovadas da National Life na sessão do seu navegador. Por padrão, você entra diretamente na National Life. Se optar por isso nas Configurações, a Keepr One protege sua credencial para uma tentativa de login do K-Bot quando essa sessão expirar.',
                 'K-Bot operates the approved National Life steps in your browser session. By default, you sign in directly on National Life. If you opt in under Settings, Keepr One protects your credential for one K-Bot login attempt when that session expires.',
@@ -898,7 +905,7 @@ export function NationalLifeLocalConnectorCard({
             <p className="mt-2 max-w-2xl text-xs leading-5 text-ink-muted">
               {copy('Em um computador particular e confiável, selecionar “Remember this device” na National Life pode reduzir solicitações repetidas de MFA. A National Life controla a duração dessa sessão confiável; a Keepr One nunca ignora o MFA e pausa com segurança quando um novo login é necessário.', 'On a private, trusted computer, selecting “Remember this device” on National Life can reduce repeated MFA prompts. National Life controls how long that trusted session lasts; Keepr One never bypasses MFA and pauses safely when sign-in is required again.')}
             </p>
-          </>
+          </details>
         )}
         {pairedDeviceId && state === 'idle' && (
           <div className="mt-5 inline-flex items-center gap-2 rounded-xl border border-teal/25 bg-paper/80 px-3 py-2 text-sm font-semibold text-teal-deep">
@@ -923,7 +930,7 @@ export function NationalLifeLocalConnectorCard({
           <ol aria-label={copy('Progresso da conexão', 'Connection progress')} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <ConnectionJourneyStep label="K-Bot" detail={extensionStepDetail} state={extensionStepState} />
             <ConnectionJourneyStep label={copy('Sessão da National Life', 'National Life session')} detail={loginStepDetail} state={loginStepState} />
-            <ConnectionJourneyStep label={copy('Dados verificados', 'Verified data')} detail={syncStepDetail} state={syncStepState} />
+            <ConnectionJourneyStep label={state === 'idle' && latestRun ? copy('Última atualização', 'Last update') : copy('Dados desta execução', 'Data from this run')} detail={syncStepDetail} state={syncStepState} />
           </ol>
         </div>
       ) : null}

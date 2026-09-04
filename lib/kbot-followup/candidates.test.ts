@@ -16,6 +16,16 @@ describe('candidate ownership and current facts', () => {
     expect(mocks.policy).toHaveBeenCalledWith(expect.objectContaining({ where: { agentId: 'agent1', client: { assignedAgentId: 'agent1' } } }))
     expect(rows[0].blockedReason).toBeNull()
   })
+  it('preserves preferences stored on the client before a phone correction', async () => {
+    for (const [preference, expected] of [
+      [{ optedOut: true }, 'OPTED_OUT'],
+      [{ snoozedUntil: new Date(now.getTime() + 10000) }, 'SNOOZED'],
+      [{ lastManualAt: now }, 'RECENT_CONTACT'],
+    ] as const) {
+      mocks.pref.mockResolvedValue([{ subjectKey: 'client:c1', ...preference }])
+      expect((await getFollowupCandidates('agent1', now))[0].blockedReason).toBe(expected)
+    }
+  })
   it('groups multiple policies by normalized phone', async () => {
     mocks.policy.mockResolvedValue([policy, { ...policy, id: 'p2', policyNumber: '2' }])
     expect(await getFollowupCandidates('agent1', now)).toHaveLength(1)

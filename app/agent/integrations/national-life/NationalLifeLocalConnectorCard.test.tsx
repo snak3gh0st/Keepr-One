@@ -67,6 +67,19 @@ afterEach(() => {
 })
 
 describe('NationalLifeLocalConnectorCard', () => {
+  it('distinguishes the saved last update from an unverified browser session', async () => {
+    installChromeMock((_message, callback) => callback())
+    const { rerender } = render(<NationalLifeLocalConnectorCard extensionId={extensionId} baseUrl={baseUrl} latestRun={{ runId: 'saved', state: 'COMPLETED' }} />)
+    const progress = screen.getByRole('list', { name: 'Connection progress' })
+    expect(within(progress).getByText('Last update')).toBeInTheDocument()
+    expect(within(progress).getByText('Up to date')).toBeInTheDocument()
+    expect(within(progress).queryByText('Connected')).not.toBeInTheDocument()
+    rerender(<NationalLifeLocalConnectorCard extensionId={extensionId} baseUrl={baseUrl} latestRun={{ runId: 'saved', state: 'PARTIAL' }} />)
+    expect(within(progress).getByText('Partial — check the result')).toBeInTheDocument()
+    expect(within(progress).queryByText('Up to date')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Put K-Bot to work' })).toBeInTheDocument())
+  })
+
   it('offers a compact guided presentation for onboarding without mounting the corner portal', async () => {
     installChromeMock((_message, callback) => callback())
 
@@ -173,7 +186,7 @@ describe('NationalLifeLocalConnectorCard', () => {
     expect(within(progress).getByText('K-Bot')).toBeInTheDocument()
     expect(within(progress).getByText('Install')).toBeInTheDocument()
     expect(within(progress).getByText('National Life session')).toBeInTheDocument()
-    expect(within(progress).getByText('Verified data')).toBeInTheDocument()
+    expect(within(progress).getByText('Data from this run')).toBeInTheDocument()
     const presence = screen.getByLabelText('K-Bot status')
     expect(presence).toHaveTextContent('Install K-Bot to begin')
     expect(presence.querySelector('[data-kbot-character="true"]')).toHaveAttribute(
