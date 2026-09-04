@@ -4,14 +4,18 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { KBotAvatar } from '@/components/kbot/KBotAvatar'
 import { useI18n } from '@/components/i18n/LanguageProvider'
+import { PhoneRepairForm } from './PhoneRepairForm'
+import type { FollowupOutcome, FollowupResults } from '@/lib/kbot-followup/outcome-types'
+import type { PhoneIssue } from '@/lib/kbot-followup/contact-quality'
 import { KBotActivityCenter } from './KBotActivityCenter'
 import { formatCredits } from '@/lib/kbot-followup/credit-display'
 
 export type FollowupView = {
   enabled: boolean; aiAvailable: boolean; reservationPerMessage: number
   balance: { available: number; reserved: number; spent: number }
-  candidates: Array<{ id: string; customerName: string; phone: string | null; reason: string; fingerprint: string; blockedReason: string | null; sourceHref: string; sourceAt: string }>
-  jobs: Array<{ id: string; batchId: string; customerName: string; status: string; conversationId: string | null; content: string | null; inputTokens: number; outputTokens: number; creditState: string; billedTokens: number; reservedTokens: number; errorCode: string | null; createdAt: string }>
+  candidates: Array<{ id: string; customerName: string; phone: string | null; reason: string; fingerprint: string; blockedReason: string | null; sourceHref: string; sourceAt: string; contactHref?: string; contactPhone?: string | null; phoneIssue?: PhoneIssue | null }>
+  jobs: Array<{ id: string; batchId: string; customerName: string; status: string; conversationId: string | null; content: string | null; inputTokens: number; outputTokens: number; creditState: string; billedTokens: number; reservedTokens: number; errorCode: string | null; createdAt: string; outcome?: FollowupOutcome | null }>
+  results?: FollowupResults
   catalog: { tokens: number; cents: number } | null; hasSubscription: boolean
 }
 
@@ -29,7 +33,6 @@ export function FollowupWorkspace({ compact = false, initialData }: { compact?: 
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Record<string, string>>({})
   const [editing, setEditing] = useState<string | null>(null)
-  const [phone, setPhone] = useState('')
   const busyRef = useRef(false)
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('view') === 'activities') {
@@ -79,7 +82,7 @@ export function FollowupWorkspace({ compact = false, initialData }: { compact?: 
       if (result.href) window.location.assign(result.href)
       else {
         if (body.action === 'start') { request.current = null; setSelected({}); setNotice(copy('Follow-up iniciado. Você pode sair desta página; o K-Bot avisará o resultado.', 'Follow-up started. You can leave this page; K-Bot will notify you of the result.')) }
-        if (body.action === 'phone') { setEditing(null); setPhone(''); setNotice(copy('Telefone salvo. A lista foi atualizada; selecione o contato quando estiver pronto.', 'Phone saved. The list has been refreshed; select the contact when ready.')) }
+        if (body.action === 'phone') { setEditing(null); setNotice(copy('Telefone salvo. A lista foi atualizada; selecione o contato quando estiver pronto.', 'Phone saved. The list has been refreshed; select the contact when ready.')) }
         if (body.action === 'manual') setNotice(copy('Contato manual registrado por você. A pendência continua acompanhada.', 'Manual contact recorded by you. The pending item remains tracked.'))
         await load()
       }
@@ -208,6 +211,11 @@ export function FollowupWorkspace({ compact = false, initialData }: { compact?: 
           <label className="grid gap-1 text-xs text-ink-muted">{copy('Buscar cliente', 'Search customers')}<input type="search" className={field} value={query} placeholder={copy('Nome do cliente', 'Customer name')} onChange={e => { setQuery(e.target.value); setPage(0) }} /></label>
           <label className="grid gap-1 text-xs text-ink-muted">{copy('Tipo de pendência', 'Pending item type')}<select className={field} value={reason} onChange={e => { setReason(e.target.value); setPage(0) }}><option value="all">{copy('Todas as pendências', 'All pending items')}</option>{Object.entries(reasons).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
         </div>
+        {filter === 'contact' && <p className="mt-4 text-sm text-ink-muted">{copy('Nesta lista: {missing} sem telefone · {country} sem DDI confirmado · {other} para revisão.', 'In this list: {missing} missing phone · {country} unconfirmed country code · {other} needing review.', {
+          missing: filtered.filter(c => c.phoneIssue === 'MISSING').length,
+          country: filtered.filter(c => c.phoneIssue === 'COUNTRY_REQUIRED').length,
+          other: filtered.filter(c => !['MISSING', 'COUNTRY_REQUIRED'].includes(c.phoneIssue ?? '')).length,
+        })}</p>}
         <div className="mt-4 rounded-xl border border-border-steel bg-paper p-4">
           <div className="flex flex-wrap items-end gap-3">
             <label className="grid gap-1 text-xs text-ink-muted">{copy('Idioma das mensagens', 'Message language')}<select className={field} disabled={busy} value={recipientLanguage} onChange={e => setRecipientLanguage(e.target.value as 'PT' | 'EN')}><option value="PT">Português</option><option value="EN">English</option></select></label>
@@ -231,12 +239,12 @@ export function FollowupWorkspace({ compact = false, initialData }: { compact?: 
                 {!c.blockedReason && <input className="mt-1 h-5 w-5 shrink-0 accent-teal" type="checkbox" aria-label={copy('Selecionar {name}', 'Select {name}', { name: c.customerName })} checked={!!selected[c.id]} disabled={busy || !data.aiAvailable || (!selected[c.id] && selection.length >= capacity)} onChange={() => toggle(c)} />}
                 <div className="min-w-0"><h3 className="break-words font-semibold text-ink">{c.customerName}</h3><p className="mt-1 text-sm text-ink-muted">{reasons[c.reason] ?? c.reason}</p>
                   <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-ink-muted"><Link className="text-teal-deep underline" href={c.sourceHref}>{copy('Ver pendência', 'View pending item')}</Link><span>{copy('Dados de', 'Data from')} {new Date(c.sourceAt).toLocaleDateString(locale)}</span></div>
-                  {c.blockedReason && <p className="mt-2 max-w-xl text-xs leading-relaxed text-ink-muted">{messages[c.blockedReason] ?? copy('Revise a pendência antes de continuar.', 'Review the pending item before continuing.')}</p>}
+                  {c.blockedReason && <p className="mt-2 max-w-xl text-xs leading-relaxed text-ink-muted">{c.blockedReason === 'PHONE_REQUIRED' && c.phoneIssue === 'COUNTRY_REQUIRED' ? copy('O número cadastrado precisa de um DDI confirmado.', 'The saved number needs a confirmed country code.') : c.blockedReason === 'PHONE_REQUIRED' && c.phoneIssue === 'MISSING' ? copy('Este cadastro ainda não tem telefone.', 'This record has no phone number yet.') : messages[c.blockedReason] ?? copy('Revise a pendência antes de continuar.', 'Review the pending item before continuing.')}</p>}
                 </div>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
-                {c.blockedReason === 'PHONE_REQUIRED' && <button className={secondary} disabled={busy} onClick={() => { setEditing(c.id); setPhone('') }}>{copy('Corrigir telefone', 'Fix phone')}</button>}
-                {c.blockedReason === 'CONTACT_AMBIGUOUS' && <Link className={secondary} href={c.sourceHref}>{copy('Revisar cadastro', 'Review contact')}</Link>}
+                {c.blockedReason === 'PHONE_REQUIRED' && <button className={secondary} disabled={busy} onClick={() => { setEditing(c.id) }}>{copy('Corrigir telefone', 'Fix phone')}</button>}
+                {c.blockedReason === 'CONTACT_AMBIGUOUS' && <Link className={secondary} href={c.contactHref ?? c.sourceHref}>{copy('Revisar cadastro', 'Review contact')}</Link>}
                 {c.blockedReason === 'SYNC_REQUIRED' && <Link className={secondary} href="/agent/integrations/national-life">{copy('Atualizar dados', 'Refresh data')}</Link>}
                 {c.phone && c.blockedReason !== 'OPTED_OUT' && <button className={secondary} disabled={busy} onClick={() => void action({ action: 'open', candidateId: c.id })}>{copy('Abrir WhatsApp', 'Open WhatsApp')}</button>}
                 {!c.blockedReason && <button className={button} disabled={busy || !data.aiAvailable || !capacity} onClick={() => start([c])}>{copy('Fazer com IA', 'Use AI')} · {copy('até', 'up to')} {reservedCredits(data.reservationPerMessage)}</button>}
@@ -248,18 +256,14 @@ export function FollowupWorkspace({ compact = false, initialData }: { compact?: 
                 </div></details>
               </div>
             </div>
-            {editing === c.id && <form className="mt-3 rounded-xl bg-paper p-4" onSubmit={e => { e.preventDefault(); void action({ action: 'phone', candidateId: c.id, fingerprint: c.fingerprint, phone }) }}>
-              <label className="grid max-w-sm gap-2 text-sm text-ink">{copy('Telefone com código do país', 'Phone with country code')}<input autoFocus required type="tel" maxLength={40} placeholder="+1 407 555 0100" className={field} value={phone} onChange={e => setPhone(e.target.value)} /></label>
-              <p className="mt-2 text-xs text-ink-muted">{copy('Confirme o número com o cliente. Salvar atualiza o cadastro na Keepr One e não envia mensagem.', 'Confirm the number with the customer. Saving updates the Keepr One record and sends no message.')}</p>
-              <div className="mt-3 flex gap-2"><button className={button} disabled={busy}>{copy('Salvar telefone', 'Save phone')}</button><button type="button" className={secondary} disabled={busy} onClick={() => setEditing(null)}>{copy('Cancelar', 'Cancel')}</button></div>
-            </form>}
+            {editing === c.id && <PhoneRepairForm key={c.id} initialPhone={c.contactPhone} busy={busy} onCancel={() => setEditing(null)} onSave={phone => void action({ action: 'phone', candidateId: c.id, fingerprint: c.fingerprint, phone })} />}
           </article>)}
         </div>
         <nav className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border-steel pt-4" aria-label={copy('Páginas de contatos', 'Contact pages')}>
           <p className="text-xs tabular-nums text-ink-muted">{filtered.length ? currentPage * 25 + 1 : 0}–{Math.min((currentPage + 1) * 25, filtered.length)} {copy('de', 'of')} {filtered.length}</p>
           <div className="flex items-center gap-3"><button className={secondary} disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{copy('Anterior', 'Previous')}</button><span className="text-xs tabular-nums text-ink-muted">{currentPage + 1} / {pageCount}</span><button className={secondary} disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>{copy('Próxima', 'Next')}</button></div>
         </nav>
-      </> : <KBotActivityCenter jobs={data.jobs} busy={busy} onCancel={batchId => void action({ action: 'cancel', batchId })} />}
+      </> : <KBotActivityCenter results={data.results} jobs={data.jobs} busy={busy} onCancel={batchId => void action({ action: 'cancel', batchId })} />}
     </>}
   </section>
 }

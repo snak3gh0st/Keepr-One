@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { phoneIssue, type PhoneIssue } from './contact-quality'
 
 export const REASONS = ['LAPSED', 'LAPSE_WARNING', 'PAYMENT', 'REQUIREMENT'] as const
 export type FollowupReason = typeof REASONS[number]
@@ -6,6 +7,7 @@ export type Candidate = {
   id: string; subjectKey: string; customerName: string; phone: string | null
   reason: FollowupReason; sourceHref: string; sourceAt: string; fingerprint: string
   blockedReason: string | null
+  contactHref?: string; contactPhone?: string | null; phoneIssue?: PhoneIssue | null
 }
 export const ACTIVE_JOB_STATES = ['PENDING', 'PREPARING', 'CANCEL_REQUESTED', 'DISPATCHING', 'ACCEPTED', 'UNKNOWN']
 export const SENT_JOB_STATES = ['SENT', 'DELIVERED', 'READ']
@@ -15,10 +17,8 @@ export const COOLDOWN_MS = 7 * 86_400_000
 export const TOKEN_RESERVATION = 192
 
 export function normalizePhone(value: string | null | undefined): string | null {
-  if (!value || !/^\s*\+/.test(value)) return null
-  if (/[^+\d\s().-]/.test(value)) return null
-  const phone = '+' + value.replace(/\D/g, '')
-  return /^\+[1-9]\d{7,14}$/.test(phone) ? phone : null
+  if (!value || phoneIssue(value) !== null) return null
+  return '+' + value.replace(/\D/g, '')
 }
 
 export function fingerprint(value: object): string {

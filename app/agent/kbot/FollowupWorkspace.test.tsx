@@ -119,6 +119,6 @@ describe('prioritized queue and explicit batches', () => {
     await userEvent.type(screen.getByRole('textbox', { name: 'Telefone com código do país' }), '+1 407 555 0100')
     await userEvent.click(screen.getByRole('button', { name: 'Salvar telefone' }))
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Telefone salvo'))
-    expect(fetch.mock.calls.filter(c => c[1]?.method === 'POST').map(c => JSON.parse(c[1]!.body as string))).toEqual([{ action: 'phone', candidateId: 'policy:one', fingerprint: 'f'.repeat(64), phone: '+1 407 555 0100' }])
+    expect(fetch.mock.calls.filter(c => c[1]?.method === 'POST').map(c => JSON.parse(c[1]!.body as string))).toEqual([{ action: 'phone', candidateId: 'policy:one', fingerprint: 'f'.repeat(64), phone: '+14075550100' }])
   })
 })
