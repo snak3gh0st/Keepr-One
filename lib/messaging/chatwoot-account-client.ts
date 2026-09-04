@@ -49,6 +49,7 @@ export type MessagingConversation = {
 }
 
 export type ChatwootAccountClient = {
+  getConversation: (input: { accountId: string; token: string; conversationId: string }) => Promise<MessagingConversation>
   listInboxes: (input: { accountId: string; token: string }) => Promise<MessagingInbox[]>
   listConversations: (input: {
     accountId: string
@@ -210,6 +211,9 @@ export function createChatwootAccountClient(config: {
   }
 
   return {
+    getConversation: async ({ accountId, token, conversationId }) => parseConversation(await call(
+      `/api/v1/accounts/${accountId}/conversations/${encodeURIComponent(conversationId)}`, token,
+    )),
     listInboxes: async ({ accountId, token }) => {
       const body = record(await call(`/api/v1/accounts/${accountId}/inboxes`, token))
       return array(body.payload).map(parseInbox).filter((inbox) => inbox.id)
