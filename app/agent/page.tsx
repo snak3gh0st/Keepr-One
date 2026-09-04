@@ -845,7 +845,9 @@ export default async function AgentDashboard({
               )}
               {canUsePolicies && (
                 <>
-                  <PriorityRow href="/agent/policies?view=current&status=PENDING_LAPSE" label="Pending Lapse" value={loadError ? null : portfolioMetrics.pendingLapsePolicies} tone="amber" />
+                  {portfolioMetrics.pendingLapsePolicies > 0 && (
+                    <PriorityRow href="/agent/policies?view=current&status=PENDING_LAPSE" label="Pending Lapse" value={loadError ? null : portfolioMetrics.pendingLapsePolicies} tone="amber" />
+                  )}
                   <PriorityRow href="/agent/policies?view=current&status=LAPSED" label="Lapsed" value={loadError ? null : portfolioMetrics.lapsedPolicies} tone="danger" />
                   <PriorityRow href="/agent/policies?view=current&status=CANCELLED" label="Canceled" value={loadError ? null : portfolioMetrics.cancelledPolicies} tone="danger" />
                 </>
