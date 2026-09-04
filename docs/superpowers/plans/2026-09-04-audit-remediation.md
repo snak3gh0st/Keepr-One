@@ -347,19 +347,19 @@ git commit -m "fix: paginate portfolio, clients, and illustration history"
 - Pin only advisory fixes that satisfy the existing direct parent's declared semver range, so unrelated package versions and application behavior do not drift.
 - Treat `uuid` under ExcelJS and `deepmerge-ts` under Prisma separately: no major override is allowed without evidence of compatibility and, for Prisma, equivalent coverage of the independent Docker migration CLI tree.
 
-- [ ] **Step 1: Record the production audit and dependency paths before resolution.**
+- [x] **Step 1: Record the production audit and dependency paths before resolution.**
 
 Confirm the exact paths for `brace-expansion` through `minimatch`, `fast-uri` through `ajv`, `uuid` through ExcelJS, and `deepmerge-ts` through Prisma. Do not treat a development-only path as production proof or a green UI as dependency evidence.
 
-- [ ] **Step 2: Apply only compatible parent-scoped overrides.**
+- [x] **Step 2: Apply only compatible parent-scoped overrides.**
 
 Use the smallest declared-compatible fixes: `minimatch@3.1.5 > brace-expansion@1.1.18`, `minimatch@10.2.5 > brace-expansion@5.0.9`, and `ajv@8.20.0 > fast-uri@3.1.6`. Regenerate the lockfile without broad upgrades.
 
-- [ ] **Step 3: Verify the resolved graph, build, and audit.**
+- [x] **Step 3: Verify the resolved graph, build, and audit.**
 
 Run `pnpm install --frozen-lockfile`, `pnpm why`, `pnpm build`, and `pnpm audit --prod`. The compatible advisory paths must disappear. Report any remaining advisory by exact package/path and runtime boundary; do not call the audit clean when output remains.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git add pnpm-workspace.yaml pnpm-lock.yaml
