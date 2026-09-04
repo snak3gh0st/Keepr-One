@@ -36,6 +36,7 @@ const checkoutSnapshotSelect = {
   attemptNumber: true,
   stripeCheckoutSessionId: true,
   stripeSubscriptionId: true,
+  finalizedAt: true,
   email: true,
   plan: true,
   unitAmountCents: true,
@@ -53,6 +54,14 @@ type CheckoutSnapshot = Prisma.AgencyInvitationCheckoutGetPayload<{
 export async function createStripeAgencyInvitationCheckout(
   input: CreateAgencyInvitationCheckoutInput,
 ): Promise<{ checkoutUrl: string; checkoutId: string }> {
+  return reserveAndCreateInvitationCheckout(input, 3)
+}
+
+async function reserveAndCreateInvitationCheckout(
+  input: CreateAgencyInvitationCheckoutInput,
+  reservationRetries: number,
+): Promise<{ checkoutUrl: string; checkoutId: string }> {
+  if (reservationRetries === 0) throw new Error('STRIPE_INVITATION_CHECKOUT_PENDING')
   // Bind redirects without storing the invitation's bearer token or full URL.
   const redirectFingerprint = createHash('sha256')
     .update(JSON.stringify([input.origin, input.invitationToken]))
@@ -64,7 +73,7 @@ export async function createStripeAgencyInvitationCheckout(
   })
   let local: CheckoutSnapshot | undefined
   if (existing) {
-    if (existing.status === 'FINALIZED' || existing.stripeSubscriptionId) {
+    if (existing.status === 'FINALIZED' || existing.stripeSubscriptionId || existing.finalizedAt) {
       throw new Error('STRIPE_INVITATION_ALREADY_FINALIZED')
     }
     if (existing.stripeCheckoutSessionId) {
@@ -113,6 +122,9 @@ export async function createStripeAgencyInvitationCheckout(
       invitationExpiresAt,
       acceptedAt + 23 * 60 * 60 * 1_000,
     ) / 1_000)
+    if (checkoutExpiresAt * 1_000 <= Date.now() + 30 * 60 * 1_000) {
+      throw new Error('STRIPE_INVITATION_EXPIRY_TOO_CLOSE')
+    }
     const price = await stripe.prices.retrieve(catalog.priceId, { expand: ['product'] })
     assertStripePriceMatchesPlan(price, catalog)
 
@@ -135,35 +147,62 @@ export async function createStripeAgencyInvitationCheckout(
     if (existing) {
       // A retrieved expired session or elapsed recorded expiry proves this is
       // a new attempt. Only then may new input replace the persisted snapshot.
-      local = await prisma.agencyInvitationCheckout.update({
-        where: { id: existing.id },
+      const reserved = await prisma.agencyInvitationCheckout.updateMany({
+        where: {
+          id: existing.id,
+          attemptNumber: existing.attemptNumber,
+          status: existing.status,
+          stripeCheckoutSessionId: existing.stripeCheckoutSessionId,
+          stripeSubscriptionId: null,
+          finalizedAt: null,
+        },
         data: {
           ...pendingData,
           attemptNumber: { increment: 1 },
           stripeCheckoutSessionId: null,
         },
-        select: checkoutSnapshotSelect,
       })
+      if (reserved.count !== 1) {
+        // Another caller owns the next attempt. Re-read its snapshot and reuse
+        // its key instead of incrementing the stale attempt again.
+        return reserveAndCreateInvitationCheckout(input, reservationRetries - 1)
+      }
+      local = {
+        ...existing,
+        ...pendingData,
+        attemptNumber: existing.attemptNumber + 1,
+        stripeCheckoutSessionId: null,
+      }
     } else {
-      local = await prisma.$transaction(async (transaction) => {
-        const invitation = await transaction.agencyInvitation.findUnique({
-          where: { id: input.invitationId },
-          select: { id: true, status: true, expiresAt: true },
+      try {
+        local = await prisma.$transaction(async (transaction) => {
+          const invitation = await transaction.agencyInvitation.findUnique({
+            where: { id: input.invitationId },
+            select: { id: true, status: true, expiresAt: true },
+          })
+          if (
+            !invitation
+            || invitation.status !== 'PENDING'
+            || invitation.expiresAt.getTime() !== input.invitationExpiresAt.getTime()
+          ) {
+            throw new Error('AGENCY_INVITATION_NOT_RESERVABLE')
+          }
+          return transaction.agencyInvitationCheckout.create({
+            data: { invitationId: input.invitationId, ...pendingData, attemptNumber: 1 },
+            select: checkoutSnapshotSelect,
+          })
+        }, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
         })
-        if (
-          !invitation
-          || invitation.status !== 'PENDING'
-          || invitation.expiresAt.getTime() !== input.invitationExpiresAt.getTime()
-        ) {
-          throw new Error('AGENCY_INVITATION_NOT_RESERVABLE')
+      } catch (error) {
+        // The unique invitation key / serializable transaction chooses one
+        // initial reservation. A loser must use that committed attempt.
+        if (error && typeof error === 'object' && 'code' in error
+          && (error.code === 'P2002' || error.code === 'P2034')) {
+          return reserveAndCreateInvitationCheckout(input, reservationRetries - 1)
         }
-        return transaction.agencyInvitationCheckout.create({
-          data: { invitationId: input.invitationId, ...pendingData, attemptNumber: 1 },
-          select: checkoutSnapshotSelect,
-        })
-      }, {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      })
+        throw error
+      }
     }
   }
 
@@ -189,10 +228,29 @@ export async function createStripeAgencyInvitationCheckout(
   })
   if (!checkout.url) throw new Error('STRIPE_CHECKOUT_URL_MISSING')
 
-  await prisma.agencyInvitationCheckout.update({
-    where: { id: local.id },
+  const saved = await prisma.agencyInvitationCheckout.updateMany({
+    where: {
+      id: local.id,
+      attemptNumber: local.attemptNumber,
+      status: local.status,
+      stripeSubscriptionId: null,
+      finalizedAt: null,
+      OR: [{ stripeCheckoutSessionId: null }, { stripeCheckoutSessionId: checkout.id }],
+    },
     data: { stripeCheckoutSessionId: checkout.id },
   })
+  if (saved.count !== 1) {
+    const current = await prisma.agencyInvitationCheckout.findUnique({
+      where: { id: local.id },
+      select: checkoutSnapshotSelect,
+    })
+    // A late response cannot associate its session with a newer attempt or
+    // overwrite a finalized result. Do not initiate another checkout here.
+    if (current?.stripeSubscriptionId || current?.finalizedAt || current?.status === 'FINALIZED') {
+      throw new Error('STRIPE_INVITATION_CHECKOUT_PROCESSING')
+    }
+    throw new Error('STRIPE_INVITATION_CHECKOUT_PENDING')
+  }
 
   return { checkoutUrl: checkout.url, checkoutId: local.id }
 }
