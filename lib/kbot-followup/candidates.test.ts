@@ -5,6 +5,7 @@ vi.mock('@/lib/prisma', () => ({ prisma: {
   policy: { findMany: mocks.policy }, applicationRequirement: { findMany: mocks.requirement }, nationalLifeReportRow: { findMany: mocks.event },
   kBotContactPreference: { findMany: mocks.pref }, kBotFollowupJob: { findMany: mocks.job },
 } }))
+import { fingerprint } from './domain'
 import { getFollowupCandidates } from './candidates'
 const now = new Date('2026-09-04T12:00:00Z')
 const policy = { id: 'p1', clientId: 'c1', policyNumber: '1', status: 'LAPSED', sourceStatus: 'Lapsed', sourceUpdatedAt: now, client: { name: 'Ana', phone: '+14075550100' } }
@@ -25,6 +26,12 @@ describe('candidate ownership and current facts', () => {
       mocks.pref.mockResolvedValue([{ subjectKey: 'client:c1', ...preference }])
       expect((await getFollowupCandidates('agent1', now))[0].blockedReason).toBe(expected)
     }
+  })
+  it('adds contact diagnostics without changing the authorization fingerprint', async () => {
+    mocks.policy.mockResolvedValue([{ ...policy, client: { name: 'Ana', phone: '(407) 555-0100' } }])
+    const [row] = await getFollowupCandidates('agent1', now)
+    expect(row).toMatchObject({ phoneIssue: 'COUNTRY_REQUIRED', contactPhone: '(407) 555-0100', contactHref: '/agent/clients/c1', blockedReason: 'PHONE_REQUIRED' })
+    expect(row.fingerprint).toBe(fingerprint({ id: 'policy:p1', subjectKey: 'client:c1', customerName: 'Ana', phone: null, reason: 'LAPSED', sourceHref: '/agent/policies/p1', sourceAt: now.toISOString() }))
   })
   it('groups multiple policies by normalized phone', async () => {
     mocks.policy.mockResolvedValue([policy, { ...policy, id: 'p2', policyNumber: '2' }])

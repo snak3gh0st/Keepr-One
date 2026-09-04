@@ -6,6 +6,7 @@ import { getFollowupCandidates } from '@/lib/kbot-followup/candidates'
 import { creditBalance } from '@/lib/kbot-followup/credits'
 import { aiEnabled, featureEnabled, FollowupError, TOKEN_RESERVATION } from '@/lib/kbot-followup/domain'
 import { cancelBatch, changeContactPreference, openManualConversation, startFollowups, saveFollowupPhone } from '@/lib/kbot-followup/service'
+import { getFollowupOutcomes } from '@/lib/kbot-followup/outcomes'
 import { followupCatalog } from '@/lib/kbot-followup/billing'
 
 const headers = { 'Cache-Control': 'private, no-store' }
@@ -23,14 +24,15 @@ export async function GET() {
     const [candidates, balance, jobs, channel, subscription] = await Promise.all([
       getFollowupCandidates(agent.id), creditBalance(agent.id),
       prisma.kBotFollowupJob.findMany({ where: { agentId: agent.id }, orderBy: { createdAt: 'desc' }, take: 100,
-        select: { id: true, batchId: true, customerName: true, status: true, conversationId: true, inputTokens: true, outputTokens: true,
+        select: { id: true, candidateId: true, sourceHref: true, reason: true, updatedAt: true, batchId: true, customerName: true, status: true, conversationId: true, inputTokens: true, outputTokens: true,
           creditState: true, billedTokens: true, reservedTokens: true, errorCode: true, createdAt: true, content: true } }),
       prisma.agentMessagingChannel.findUnique({ where: { agentId_kind: { agentId: agent.id, kind: 'WHATSAPP' } }, select: { status: true, provider: true } }),
       prisma.platformAddonSubscription.findFirst({ where: { agentId: agent.id, addon: 'K_BOT_FOLLOWUP', stripeSubscriptionId: { not: null }, status: { in: ['ACTIVE', 'PAST_DUE', 'TRIALING'] } }, select: { id: true } }),
     ])
+    const { byJob, results } = await getFollowupOutcomes(agent.id, jobs)
     const catalog = followupCatalog()
     return Response.json({ enabled: true, aiAvailable: aiEnabled() && channel?.status === 'CONNECTED' && channel.provider === 'EVOLUTION',
-      candidates, balance, jobs, reservationPerMessage: TOKEN_RESERVATION,
+      candidates, balance, jobs: jobs.map(job => ({ ...job, outcome: byJob[job.id] ?? null })), results, reservationPerMessage: TOKEN_RESERVATION,
       catalog: catalog ? { tokens: catalog.tokens, cents: catalog.cents } : null, hasSubscription: !!subscription }, { headers })
   } catch { return Response.json({ error: 'FOLLOWUP_UNAVAILABLE' }, { status: 503, headers }) }
 }

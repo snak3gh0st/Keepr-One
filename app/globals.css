@@ -33,43 +33,28 @@
 }
 
 @keyframes kbot-character-work {
-  0%, 100% { transform: translate(0, 0); }
-  25% { transform: translate(-1px, -3px); }
-  50% { transform: translate(0, -1px); }
-  75% { transform: translate(1px, -3px); }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
 }
-
 @keyframes kbot-character-idle {
   0%, 100% { transform: translateY(0); }
-  46% { transform: translateY(-1px); }
-  52% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
 }
-
 @keyframes kbot-character-wait {
-  0%, 100% { transform: translateY(0) rotate(0); }
-  50% { transform: translateY(-2px) rotate(-2deg); }
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
 }
-
 @keyframes kbot-character-success {
-  0%, 100% { transform: translateY(0) scale(1); }
-  45% { transform: translateY(-7px) scale(1.02); }
-  60% { transform: translateY(0) scale(1); }
+  0%, 100% { transform: translateY(0); }
+  45% { transform: translateY(-3px); }
 }
-
-@keyframes kbot-character-arm-left {
-  0%, 100% { transform: rotate(5deg); }
-  50% { transform: rotate(-12deg); }
+@keyframes kbot-gentle-blink {
+  0%, 92%, 96%, 100% { transform: scaleY(1); }
+  94% { transform: scaleY(0.12); }
 }
-
-@keyframes kbot-character-arm-right {
-  0%, 100% { transform: rotate(-5deg); }
-  50% { transform: rotate(12deg); }
-}
-
-@keyframes kbot-character-scan {
-  0% { opacity: 0; transform: translateY(0); }
-  20%, 75% { opacity: 0.7; }
-  100% { opacity: 0; transform: translateY(9px); }
+@keyframes kbot-core-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
 }
 
 @keyframes kbot-secondary-progress {
@@ -119,7 +104,6 @@
     radial-gradient(circle at 35% 18%, color-mix(in oklab, var(--color-mint) 18%, transparent), transparent 48%),
     var(--color-rail-strong);
   border: 1px solid color-mix(in oklab, var(--color-mint) 22%, transparent);
-  image-rendering: pixelated;
 }
 
 .kbot-avatar[data-state="waiting"] {
@@ -217,84 +201,41 @@
 .kbot-character {
   position: relative;
   isolation: isolate;
-  image-rendering: pixelated;
   transform-origin: center bottom;
-  filter: drop-shadow(0 7px 7px rgba(11, 24, 17, 0.18));
+  filter: drop-shadow(0 2px 0 rgba(22, 54, 39, 0.16));
   transition: filter 180ms ease;
-}
-
-.kbot-character::before {
-  position: absolute;
-  z-index: -1;
-  top: 16px;
-  left: 8px;
-  width: 54px;
-  height: 58px;
-  background:
-    linear-gradient(currentColor, currentColor) 8px 0 / 38px 1px no-repeat,
-    linear-gradient(currentColor, currentColor) 0 8px / 1px 39px no-repeat,
-    linear-gradient(currentColor, currentColor) 53px 8px / 1px 39px no-repeat,
-    linear-gradient(currentColor, currentColor) 8px 57px / 38px 1px no-repeat;
-  content: '';
-  opacity: 0.16;
-  pointer-events: none;
-  transform: translateY(2px);
-  transition: opacity 180ms ease, transform 180ms ease;
 }
 
 .kbot-character-head-motion {
   transform-box: fill-box;
   transform-origin: center;
   transform: translate(var(--kbot-head-x, 0px), var(--kbot-head-y, 0px));
-  transition: transform 140ms steps(3, end);
+  transition: transform 180ms ease-out;
 }
 
 .kbot-eye-pupils {
   transform-box: fill-box;
   transform-origin: center;
   transform: translate(var(--kbot-eye-x, 0px), var(--kbot-eye-y, 0px));
-  transition: transform 110ms steps(2, end);
+  transition: transform 140ms ease-out;
 }
 
 .kbot-character-stage:hover .kbot-character {
-  filter: drop-shadow(0 9px 10px rgba(11, 24, 17, 0.22));
-}
-
-.kbot-character-stage:hover .kbot-character::before,
-.kbot-character-stage:focus-visible .kbot-character::before {
-  opacity: 0.28;
-  transform: translateY(0);
+  filter: drop-shadow(0 3px 0 rgba(22, 54, 39, 0.22));
 }
 
 .kbot-character-stage {
-  border: 1px solid color-mix(in oklab, var(--color-ink-muted) 12%, transparent);
-  background:
-    radial-gradient(circle at 50% 68%, color-mix(in oklab, var(--color-mint) 17%, transparent), transparent 43%),
-    linear-gradient(180deg, color-mix(in oklab, white 58%, transparent), color-mix(in oklab, var(--color-teal-pale) 32%, transparent));
-  box-shadow: 0 10px 20px rgba(16, 41, 29, 0.08), inset 0 0 0 1px rgba(255, 255, 255, 0.46);
+  border: 1px solid color-mix(in oklab, var(--color-teal) 15%, transparent);
+  background: color-mix(in oklab, var(--color-paper) 94%, transparent);
+  box-shadow: 0 5px 16px rgba(16, 41, 29, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  padding-bottom: 7px;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
-}
-
-.kbot-character-stage::before {
-  position: absolute;
-  inset: 4px;
-  border: 1px solid color-mix(in oklab, var(--color-teal) 26%, transparent);
-  border-radius: 0.65rem;
-  content: '';
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 180ms ease;
 }
 
 .kbot-character-stage:hover,
 .kbot-character-stage:focus-visible {
-  border-color: color-mix(in oklab, var(--color-teal) 36%, transparent);
-  box-shadow: 0 12px 24px rgba(16, 41, 29, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.58);
-}
-
-.kbot-character-stage:hover::before,
-.kbot-character-stage:focus-visible::before {
-  opacity: 1;
+  border-color: color-mix(in oklab, var(--color-teal) 40%, transparent);
+  box-shadow: 0 7px 20px rgba(16, 41, 29, 0.12);
 }
 
 .kbot-status-glyph {
@@ -311,7 +252,6 @@
   background: color-mix(in oklab, var(--color-paper) 88%, transparent);
   color: var(--color-teal-deep);
   box-shadow: 0 3px 8px rgba(16, 41, 29, 0.12);
-  image-rendering: pixelated;
 }
 
 .kbot-status-glyph-working {
@@ -352,7 +292,6 @@
   height: 3px;
   background: var(--color-success);
   opacity: 0;
-  image-rendering: pixelated;
   animation: kbot-celebration 650ms steps(4, end) 1 both;
 }
 
@@ -361,43 +300,31 @@
 .kbot-celebration-pixel-c { top: 55px; left: 30px; --kbot-celebrate-x: -15px; --kbot-celebrate-y: 7px; animation-delay: 70ms; }
 .kbot-celebration-pixel-d { top: 53px; left: 46px; --kbot-celebrate-x: 14px; --kbot-celebrate-y: 6px; animation-delay: 105ms; }
 .kbot-character[data-state="idle"] {
-  animation: kbot-character-idle 3.8s steps(3, end) infinite;
+  animation: kbot-character-idle 6s ease-in-out infinite;
 }
-
 .kbot-character[data-state="working"] {
-  animation: kbot-character-work 1s steps(4, end) infinite;
+  animation: kbot-character-work 2.8s ease-in-out infinite;
 }
-
 .kbot-character[data-state="waiting"] {
-  animation: kbot-character-wait 2.4s steps(3, end) infinite;
-}
-
-.kbot-character[data-state="success"] {
-  animation: kbot-character-success 650ms steps(5, end) 1;
-}
-
-.kbot-character[data-state="error"] {
   animation: none;
 }
-
-.kbot-character-arm,
-.kbot-character-leg {
-  transform-box: fill-box;
-  transform-origin: center top;
+.kbot-character[data-state="waiting"] .kbot-character-antenna {
+  animation: kbot-character-wait 3.6s ease-in-out infinite;
 }
-
-.kbot-character[data-state="working"] .kbot-character-arm-left,
-.kbot-character[data-state="working"] .kbot-character-leg-right {
-  animation: kbot-character-arm-left 0.8s steps(2, end) infinite;
+.kbot-character[data-state="success"] {
+  animation: kbot-character-success 700ms ease-out 1;
 }
-
-.kbot-character[data-state="working"] .kbot-character-arm-right,
-.kbot-character[data-state="working"] .kbot-character-leg-left {
-  animation: kbot-character-arm-right 0.8s steps(2, end) infinite;
+.kbot-character[data-state="error"] { animation: none; }
+.kbot-character-eyes {
+  transform-box: view-box;
+  transform-origin: 32px 27px;
 }
-
-.kbot-character[data-state="working"] .kbot-character-scan {
-  animation: kbot-character-scan 1.25s steps(5, end) infinite;
+.kbot-character[data-state="idle"] .kbot-character-eyes,
+.kbot-character[data-state="working"] .kbot-character-eyes {
+  animation: kbot-gentle-blink 6.8s ease-in-out infinite;
+}
+.kbot-character[data-state="working"] .kbot-core-light {
+  animation: kbot-core-pulse 2.8s ease-in-out infinite;
 }
 
 .kbot-secondary-progress {
@@ -409,7 +336,7 @@
 .kbot-character-paper {
   transform-box: fill-box;
   transform-origin: center;
-  animation: kbot-character-paper 0.9s steps(2, end) infinite;
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

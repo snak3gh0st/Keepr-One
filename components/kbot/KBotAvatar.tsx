@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { KBotDrawing } from './KBotDrawing'
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { useI18n } from '@/components/i18n/LanguageProvider'
@@ -38,8 +39,8 @@ const stateClass: Record<KBotState, string> = {
 
 const subscribeToBrowserMount = () => () => {}
 /**
- * K-Bot is an operational indicator, not a chat persona. The 16 × 16 drawing
- * intentionally resembles a compact terminal/scanner and stays crisp at every
+ * K-Bot is an operational indicator, not a chat persona. The shared drawing
+ * keeps the same face in badges and the floating character at every
  * supported size. All meaning is repeated in adjacent text.
  */
 export function KBotAvatar({
@@ -55,24 +56,7 @@ export function KBotAvatar({
       data-state={state}
       className={`kbot-avatar relative inline-grid shrink-0 place-items-center overflow-hidden bg-rail-strong shadow-[inset_0_0_0_1px_rgba(255,255,255,0.09),0_10px_24px_rgba(11,24,17,0.12)] ${sizeClass[size]} ${stateClass[state]}`}
     >
-      <svg
-        viewBox="0 0 16 16"
-        className="h-full w-full"
-        shapeRendering="crispEdges"
-        focusable="false"
-      >
-        <rect className="fill-paper/32" x="7" y="0" width="2" height="2" />
-        <rect className="fill-paper/18" x="6" y="2" width="4" height="2" />
-        <rect className="fill-current" x="2" y="4" width="12" height="9" />
-        <rect className="fill-rail-strong" x="3" y="5" width="10" height="6" />
-        <rect className="kbot-eye fill-current" x="5" y="7" width="2" height="2" />
-        <rect className="kbot-eye fill-current" x="9" y="7" width="2" height="2" />
-        <rect className="fill-current opacity-55" x="5" y="11" width="6" height="1" />
-        <rect className="fill-current opacity-70" x="0" y="6" width="2" height="4" />
-        <rect className="fill-current opacity-70" x="14" y="6" width="2" height="4" />
-        <rect className="fill-paper/24" x="4" y="13" width="3" height="2" />
-        <rect className="fill-paper/24" x="9" y="13" width="3" height="2" />
-      </svg>
+      <KBotDrawing state={state} faceOnly />
       <span className="kbot-scan absolute left-2 right-2 top-2 h-px bg-paper/70 opacity-0" />
     </span>
   )
@@ -174,138 +158,13 @@ function KBotCelebration() {
   )
 }
 
-function KBotCharacter({
-  state,
-  activity = 'idle',
-}: {
-  state: KBotState
-  activity?: KBotActivityMode
-}) {
-  const carriesPaper = activity === 'illustration' || activity === 'application' || activity === 'combined'
-
-  return (
-    <span
-      aria-hidden="true"
-      data-kbot-character="true"
-      data-state={state}
-      data-activity={activity}
-      data-expression={state === 'error' ? 'sad' : state === 'success' ? 'happy' : 'focused'}
-      className={`kbot-character relative block h-[88px] w-[70px] shrink-0 ${stateClass[state]}`}
-    >
-      <svg
-        viewBox="0 0 32 40"
-        className="h-full w-full overflow-visible"
-        shapeRendering="crispEdges"
-        focusable="false"
-      >
-        <g className="kbot-character-head-motion">
-          <g className="kbot-character-antenna">
-            <rect className="fill-mint/35" x="14" y="2" width="4" height="5" />
-            <rect className="fill-current" x="15" y="1" width="2" height="5" />
-            <rect className="fill-paper/70" x="15" y="1" width="2" height="1" />
-          </g>
-
-          <g className="kbot-character-head">
-            <rect className="fill-mint/35" x="4" y="8" width="24" height="14" />
-            <rect className="fill-mint/70" x="6" y="5" width="20" height="17" />
-            <rect className="fill-mint" x="7" y="6" width="18" height="16" />
-            <rect className="fill-rail-strong" x="8" y="9" width="16" height="9" />
-            <rect className="fill-paper/24" x="9" y="7" width="8" height="1" />
-            <rect className="fill-rail-strong" x="6" y="5" width="2" height="2" />
-            <rect className="fill-rail-strong" x="24" y="5" width="2" height="2" />
-            <rect className="fill-mint/70" x="2" y="10" width="4" height="8" />
-            <rect className="fill-mint/70" x="26" y="10" width="4" height="8" />
-            <rect className="fill-paper/20" x="3" y="11" width="1" height="5" />
-            <rect className="fill-paper/20" x="28" y="11" width="1" height="5" />
-          </g>
-
-          <g className="kbot-character-eyes">
-            {state === 'error' ? (
-              <>
-                <rect className="fill-paper" x="10" y="12" width="4" height="3" />
-                <rect className="fill-paper" x="18" y="12" width="4" height="3" />
-                <g className="kbot-eye-pupils">
-                  <rect className="fill-mint" x="11" y="13" width="2" height="2" />
-                  <rect className="fill-mint" x="19" y="13" width="2" height="2" />
-                </g>
-                <rect className="fill-mint/65" x="10" y="10" width="3" height="1" />
-                <rect className="fill-mint/65" x="13" y="11" width="1" height="1" />
-                <rect className="fill-mint/65" x="19" y="11" width="1" height="1" />
-                <rect className="fill-mint/65" x="20" y="10" width="3" height="1" />
-              </>
-            ) : (
-              <>
-                <rect className="fill-paper" x="10" y="11" width="4" height="4" />
-                <rect className="fill-paper" x="18" y="11" width="4" height="4" />
-                <g className="kbot-eye-pupils">
-                  <rect className="fill-mint" x="11" y="12" width="2" height="2" />
-                  <rect className="fill-mint" x="19" y="12" width="2" height="2" />
-                </g>
-              </>
-            )}
-          </g>
-          {state === 'error' ? (
-            <g className="kbot-character-sad-face">
-              <rect className="fill-mint/65" x="12" y="17" width="2" height="1" />
-              <rect className="fill-mint/65" x="14" y="16" width="4" height="1" />
-              <rect className="fill-mint/65" x="18" y="17" width="2" height="1" />
-              <rect className="fill-sky-300" x="23" y="14" width="1" height="2" />
-              <rect className="fill-sky-300" x="24" y="16" width="1" height="2" />
-            </g>
-          ) : state === 'success' ? (
-            <g className="kbot-character-happy-face">
-              <rect className="fill-mint/65" x="12" y="16" width="2" height="1" />
-              <rect className="fill-mint/65" x="14" y="17" width="4" height="1" />
-              <rect className="fill-mint/65" x="18" y="16" width="2" height="1" />
-            </g>
-          ) : (
-            <rect className="fill-mint/65" x="13" y="17" width="6" height="1" />
-          )}
-          <rect className="kbot-character-scan fill-paper/70" x="8" y="8" width="16" height="1" />
-        </g>
-
-        <g className="kbot-character-body">
-          <rect className="fill-mint/35" x="8" y="24" width="16" height="12" />
-          <rect className="fill-mint/75" x="13" y="22" width="6" height="4" />
-          <rect className="fill-mint" x="8" y="25" width="16" height="10" />
-          <rect className="fill-paper/20" x="10" y="26" width="12" height="1" />
-          <rect className="fill-rail-strong" x="11" y="28" width="10" height="5" />
-          <rect className="fill-current" x="14" y="29" width="4" height="2" />
-          <rect className="fill-paper/24" x="13" y="32" width="2" height="1" />
-          <rect className="fill-paper/24" x="17" y="32" width="2" height="1" />
-        </g>
-
-        <g className="kbot-character-arm kbot-character-arm-left">
-          <rect className="fill-mint/80" x="4" y="26" width="4" height="8" />
-          <rect className="fill-paper/20" x="5" y="27" width="1" height="5" />
-          <rect className="fill-mint" x="3" y="32" width="5" height="3" />
-        </g>
-        <g className="kbot-character-arm kbot-character-arm-right">
-          <rect className="fill-mint/80" x="24" y="26" width="4" height="8" />
-          <rect className="fill-paper/20" x="26" y="27" width="1" height="5" />
-          <rect className="fill-mint" x="24" y="32" width="5" height="3" />
-        </g>
-        {carriesPaper ? (
-          <g className="kbot-character-paper" data-kbot-paper="true">
-            <rect className="fill-paper" x="25" y="27" width="7" height="9" />
-            <rect className="fill-teal/55" x="27" y="29" width="3" height="1" />
-            <rect className="fill-teal/35" x="27" y="32" width="4" height="1" />
-          </g>
-        ) : null}
-
-        <g className="kbot-character-leg kbot-character-leg-left">
-          <rect className="fill-mint/80" x="10" y="35" width="5" height="4" />
-          <rect className="fill-mint" x="8" y="38" width="7" height="2" />
-          <rect className="fill-paper/20" x="9" y="38" width="3" height="1" />
-        </g>
-        <g className="kbot-character-leg kbot-character-leg-right">
-          <rect className="fill-mint/80" x="18" y="35" width="5" height="4" />
-          <rect className="fill-mint" x="18" y="38" width="7" height="2" />
-          <rect className="fill-paper/20" x="20" y="38" width="3" height="1" />
-        </g>
-      </svg>
-    </span>
-  )
+/** The floating character shares the same drawing as compact badges. */
+export function KBotCharacter({ state, activity = 'idle' }: { state: KBotState; activity?: KBotActivityMode }) {
+  return <span aria-hidden="true" data-kbot-character="true" data-state={state} data-activity={activity}
+    data-expression={state === 'error' ? 'sad' : state === 'success' ? 'happy' : 'focused'}
+    className={`kbot-character relative block h-20 w-16 shrink-0 ${stateClass[state]}`}>
+    <KBotDrawing state={state} activity={activity} />
+  </span>
 }
 
 function KBotProgressRings({

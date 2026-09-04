@@ -5,14 +5,16 @@ import { useCallback, useEffect, useState } from 'react'
 import { useI18n } from '@/components/i18n/LanguageProvider'
 import { carrierActivities, followupActivityGroup, type ActivityGroup, type CarrierActivitySnapshot } from '@/lib/kbot/activities'
 import { formatCredits } from '@/lib/kbot-followup/credit-display'
+import type { FollowupResults } from '@/lib/kbot-followup/outcome-types'
 import type { FollowupView } from './FollowupWorkspace'
 
 type Props = {
   jobs: FollowupView['jobs']; busy: boolean; onCancel: (batchId: string) => void
+  results?: FollowupResults
   initialCarrier?: CarrierActivitySnapshot
 }
 
-export function KBotActivityCenter({ jobs, busy, onCancel, initialCarrier }: Props) {
+export function KBotActivityCenter({ jobs, busy, onCancel, initialCarrier, results }: Props) {
   const { copy, locale } = useI18n()
   const [snapshot, setSnapshot] = useState<CarrierActivitySnapshot | null>(initialCarrier ?? null)
   const [unavailable, setUnavailable] = useState(false)
@@ -71,6 +73,18 @@ export function KBotActivityCenter({ jobs, busy, onCancel, initialCarrier }: Pro
     { id: 'working', label: copy('Em andamento', 'In progress') }, { id: 'history', label: copy('Histórico', 'History') },
   ] as const
   return <section className="pt-5" aria-label={copy('Central de atividades do K-Bot', 'K-Bot activity center')}>
+    {results && results.tracked > 0 && <div className="mb-5 border-b border-border-steel pb-4">
+      <h2 className="text-sm font-semibold text-ink">{copy('Resultado dos follow-ups', 'Follow-up results')}</h2>
+      <dl className="mt-3 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {[
+          [copy('Mensagens entregues', 'Messages delivered'), results.delivered],
+          [copy('Pendências regularizadas', 'Pending items resolved'), results.resolved],
+          [copy('Ainda pendentes', 'Still pending'), results.pending],
+          [copy('A confirmar', 'To be confirmed'), results.unverified],
+        ].map(([label, value]) => <div key={label}><dt className="text-xs text-ink-muted">{label}</dt><dd className="mt-1 text-xl font-semibold tabular-nums text-ink">{value}</dd></div>)}
+      </dl>
+      <p className="mt-3 max-w-2xl text-xs leading-relaxed text-ink-muted">{copy('Pendências únicas nos últimos 100 follow-ups, com envio confirmado. Regularização exige dados posteriores da operadora; não comprova que o contato causou a mudança.', 'Unique pending items in the latest 100 follow-ups with confirmed sending. Resolution requires later carrier data; it does not prove the contact caused the change.')}</p>
+    </div>}
     <h2 className="text-lg font-semibold text-ink">{copy('Operações recentes', 'Recent operations')}</h2>
     {unavailable ? <div role="alert" className="mt-4 rounded-xl bg-gold-pale p-3 text-sm text-ink"><p>{copy('Não foi possível atualizar as operações da National Life. A última informação conhecida foi mantida.', 'Could not refresh National Life operations. The last known information has been kept.')}</p><button className={`${button} mt-2`} onClick={retry}>{copy('Tentar novamente', 'Try again')}</button></div>
       : !snapshot && <p role="status" className="mt-4 text-sm text-ink-muted">{copy('Consultando operações da National Life…', 'Checking National Life operations…')}</p>}
@@ -93,6 +107,16 @@ export function KBotActivityCenter({ jobs, busy, onCancel, initialCarrier }: Pro
         {operation?.status === 'NEEDS_YOU' && <p className="mt-2 text-sm text-ink-muted">{copy('Entre na National Life para continuar a mesma operação.', 'Sign in to National Life to continue the same operation.')}</p>}
         {operation?.status === 'NEEDS_KBOT' && <p className="mt-2 text-sm text-ink-muted">{copy('Reconecte o K-Bot neste computador para continuar a solicitação.', 'Reconnect K-Bot on this computer to continue the request.')}</p>}
         {job && <p className="mt-2 text-xs text-ink-muted">{credits} {isReserved ? credits === '1' ? copy('crédito reservado', 'credit reserved') : copy('créditos reservados', 'credits reserved') : credits === '1' ? copy('crédito utilizado', 'credit used') : copy('créditos utilizados', 'credits used')}</p>}
+        {job?.outcome && <div className="mt-3 border-l-2 border-border-steel pl-3 text-sm">
+          <p className={job.outcome.state === 'RESOLVED' ? 'font-medium text-teal-deep' : 'font-medium text-ink'}>{({
+            RESOLVED: copy('Regularização confirmada pela operadora', 'Resolution confirmed by carrier'),
+            PENDING: copy('A pendência continua na operadora', 'The item is still pending with the carrier'),
+            AWAITING_UPDATE: copy('Aguardando atualização da operadora', 'Awaiting carrier update'),
+            REVIEW_REQUIRED: copy('Regularização ainda não confirmada', 'Resolution not yet confirmed'),
+          })[job.outcome.state]}</p>
+          {job.outcome.checkedAt && <p className="mt-1 text-xs text-ink-muted">{copy('Dados verificados em', 'Data checked on')} {new Date(job.outcome.checkedAt).toLocaleString(locale)}</p>}
+          {job.outcome.sourceHref && <Link className="mt-1 inline-flex min-h-11 items-center text-xs text-teal-deep underline" href={job.outcome.sourceHref}>{copy('Conferir pendência', 'Review pending item')}</Link>}
+        </div>}
         {job?.status === 'UNKNOWN' && <p className="mt-2 text-xs text-ink-muted">{copy('A mensagem não será reenviada automaticamente. Confira a conversa antes de fazer um novo contato.', 'The message will not be resent automatically. Check the conversation before making another contact.')}</p>}
         {job?.errorCode && job.status !== 'UNKNOWN' && <p className="mt-2 text-xs text-ink-muted">{copy('Ação não concluída. Consulte a conversa ou realize o contato manual.', 'Action not completed. Check the conversation or contact manually.')}</p>}
         {job?.content && <details className="mt-2 text-sm text-ink-muted"><summary className="cursor-pointer py-2">{copy('Ver mensagem preparada', 'View prepared message')}</summary><p className="mt-2 whitespace-pre-wrap">{job.content}</p></details>}

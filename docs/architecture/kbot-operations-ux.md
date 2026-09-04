@@ -62,3 +62,29 @@ saved password. A rejection disables automatic login until replacement.
 The popup distinguishes automatic login in progress, MFA, rejected/disabled
 credential, private-broker failure, no configured credential and ordinary
 manual login. These are persisted safe states, not inferred animations.
+
+## Contact quality and follow-up results
+
+Phone review distinguishes missing numbers, unconfirmed country codes and invalid
+or shared contacts. The UI preserves the current number for review, requires an
+explicit country selection for national numbers and previews the exact value to
+save. Contact diagnostics do not participate in authorization fingerprints.
+
+The activity center compares the latest 100 follow-ups with currently owned,
+module-accessible records. Only confirmed sends are tracked; repeated contacts
+for one policy or requirement count once. A lapse is considered resolved only
+when a later National Life observation reports a recognized normal in-force
+status. Cancellation, missing records, future timestamps, manual source data,
+and delivery receipts are not recovery evidence. The comparison uses the last
+job update as a conservative boundary for subsequent carrier evidence.
+
+Payment notices and application requirements remain subject to review: a normal
+policy status does not prove payment of a bill, and requirement statuses can be
+edited manually. The result measures observed state, not attribution to K-Bot.
+
+The selected smooth avatar shares its drawing across compact and floating sizes.
+Its idle breathing is one pixel over six seconds, work movement stays below two
+pixels, blinking is occasional, and completion gets one short lift. Errors stay
+still. Existing pointer tracking, announcements, focus/keyboard behavior and
+reduced-motion support remain intact. The pixel alternative is retained only in
+the local comparison preview.
