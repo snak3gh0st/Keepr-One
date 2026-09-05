@@ -96,6 +96,13 @@ afterEach(() => {
 })
 
 describe('Shell plan access', () => {
+  it('opens the personal AI control center from the main navigation', () => {
+    mocks.pathname = '/agent/ai'
+    const { container } = render(<Shell role="AGENT" userName="Ana"><p>AI</p></Shell>)
+    expect(screen.getByRole('link', { name: 'K-Bot AI' })).toHaveAttribute('href', '/agent/ai')
+    expect(screen.getByRole('link', { name: 'K-Bot AI' })).toHaveAttribute('aria-current', 'page')
+    expect(container.querySelector('.shell-topbar-title')).toHaveTextContent('K-Bot AI')
+  })
   it('keeps an individual agent in a personal workspace without team navigation', () => {
     render(
       <Shell role="AGENT" userName="Ana">

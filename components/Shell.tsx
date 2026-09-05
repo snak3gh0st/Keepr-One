@@ -63,6 +63,7 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
   AGENT: [
     { href: "/agent", labelKey: "nav.today", icon: "grid", groupKey: "nav.group.operations", module: "TODAY" },
     { href: "/agent/calendar", labelKey: "nav.calendar", icon: "calendar", groupKey: "nav.group.operations", module: "CALENDAR" },
+    { href: "/agent/ai", labelKey: "nav.ai", icon: "ai", groupKey: "nav.group.operations" },
     {
       href: "/agent/cases",
       labelKey: "nav.crm",
@@ -113,6 +114,7 @@ const PAGE_NAMES: Record<string, MessageKey> = {
   "/admin/integrations/national-life": "page.adminNationalLife",
   "/agent": "page.today",
   "/agent/calendar": "page.calendar",
+  "/agent/ai": "nav.ai",
   "/agent/cases": "page.crmOpportunities",
   "/agent/cases/new": "page.newService",
   "/agent/activities": "page.crmActivities",

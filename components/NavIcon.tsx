@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 export type NavIconName =
+  | "ai"
   | "grid"
   | "hierarchy"
   | "chart"
@@ -16,6 +17,12 @@ export type NavIconName =
   | "settings";
 
 const ICON_PATHS: Record<NavIconName, ReactNode> = {
+  ai: (
+    <>
+      <rect x="5" y="6" width="14" height="14" rx="5" />
+      <path d="M12 3v3M2 11v4M22 11v4M9 11v2M15 11v2M9 16h6" />
+    </>
+  ),
   chat: (
     <>
       <path d="M20 12a7 7 0 0 1-7 7H8l-4 3v-5.2A7 7 0 0 1 4 12a7 7 0 0 1 7-7h2a7 7 0 0 1 7 7Z" />

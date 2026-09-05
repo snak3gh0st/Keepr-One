@@ -55,6 +55,7 @@ export const messages = {
   "nav.audit": { PT: "Auditoria", EN: "Audit" },
   "nav.integrations": { PT: "Integrações", EN: "Integrations" },
   "nav.today": { PT: "Hoje", EN: "Today" },
+  "nav.ai": { PT: "K-Bot AI", EN: "K-Bot AI" },
   "nav.calendar": { PT: "Agenda", EN: "Calendar" },
   "nav.crm": { PT: "CRM", EN: "CRM" },
   "nav.messages": { PT: "Mensagens", EN: "Messages" },
