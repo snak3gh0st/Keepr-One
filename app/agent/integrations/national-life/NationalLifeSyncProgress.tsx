@@ -300,7 +300,7 @@ export function NationalLifeSyncProgress({
         ? copy('O K-Bot está coletando suas informações de {area} na National Life. Tudo que já foi coletado está seguro.', 'K-Bot is collecting your {area} information from National Life. Everything already collected is safe.', { area: status.currentGridLabel })
         : copy('O K-Bot está abrindo a próxima área necessária na National Life.', 'K-Bot is opening the next place it needs in National Life.')
       : status.state === 'COMPLETED'
-        ? copy('Os dados verificados estão disponíveis em toda a Keepr One.', 'Verified data is ready throughout Keepr One.')
+        ? copy('O plano desta execução terminou. Confira abaixo os dados estruturados e as fontes apenas capturadas.', 'This run’s plan is complete. Review the structured data and capture-only sources below.')
         : copy('Você pode tentar novamente apenas as áreas que a National Life não retornou.', 'You can retry only the areas National Life did not return.')
 
   return (
@@ -328,8 +328,18 @@ export function NationalLifeSyncProgress({
         </div>
         <div className="text-right">
           <span className="block font-mono text-sm font-semibold tabular-nums text-teal">
-            {copy('{checked} de {total} áreas do portal verificadas', '{checked} of {total} portal areas checked', { checked, total: status.total })}
+            {copy('{checked} de {total} etapas do plano encerradas', '{checked} of {total} plan stages finished', { checked, total: status.total })}
           </span>
+          {status.failed > 0 && (
+            <span className="mt-1 block text-xs text-amber-800">
+              {copy('{count} etapas com falha; precisam de nova tentativa.', '{count} failed stages need another attempt.', { count: status.failed })}
+            </span>
+          )}
+          {status.state === 'COMPLETED' && !!status.stageCoverage?.length && (
+            <span className="mt-1 block max-w-sm text-xs text-ink-muted">
+              {copy('Plano concluído: {structured} fontes estruturadas + {captured} fontes apenas capturadas.', 'Plan complete: {structured} structured sources + {captured} capture-only sources.', { structured: plannedStructuredSources, captured: plannedSnapshotSources })}
+            </span>
+          )}
           {status.estimate && (
             <span className="mt-1 block text-xs text-ink-muted">
               <span className="block">

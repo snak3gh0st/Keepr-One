@@ -12,6 +12,8 @@ import {
   uploadKBotApplicationDocument,
 } from "./actions";
 
+import { ApplicationAvailability, useApplicationAvailability } from "./ApplicationAvailability";
+
 type ApplicationView = {
   id: string;
   createdByName: string | null;
@@ -76,11 +78,12 @@ export function ApplicationDossier({
   illustrations,
 }: {
   application: ApplicationView;
-  addon: { entitled: boolean; status: string | null; canAutomate: boolean };
+  addon: { entitled: boolean; status: string | null; canAutomate: boolean; extensionTarget?: string | null; preparationEnabled?: boolean };
   prospect: ProspectDefaults;
   illustrations: IllustrationOption[];
 }) {
   const { copy, locale } = useI18n();
+  const availability = useApplicationAvailability(addon.extensionTarget, addon.preparationEnabled === true);
   const stateCopy: Record<string, string> = {
     COLLECTING: copy("Reunindo informações", "Collecting information"),
     READY_FOR_REVIEW: copy("Pronto para sua revisão", "Ready for your review"),
@@ -223,12 +226,13 @@ export function ApplicationDossier({
   }
 
   function prepareDraft() {
+    if (availability.state !== "READY" || !addon.canAutomate) return;
     setMessage(null);
     startTransition(async () => {
       const result = await prepareKBotApplicationDraft(application.id);
       if (!result.ok) setMessage(result.message);
       else {
-        setMessage(copy("K-Bot começou a preparar o rascunho no iGO. Você pode continuar trabalhando.", "K-Bot has started preparing the draft in iGO. You can keep working."));
+        setMessage(copy("Preparação autorizada. O K-Bot aguardará a extensão e a sessão do iGO. Você pode continuar trabalhando.", "Preparation authorized. K-Bot will wait for the extension and iGO session. You can keep working."));
         router.refresh();
       }
     });
@@ -250,10 +254,12 @@ export function ApplicationDossier({
         </span>
       </div>
 
+      <ApplicationAvailability availability={availability} />
+
       {!addon.entitled ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
           <div>
-            <p>{copy("Você pode organizar o dossiê agora. Para o K-Bot preparar e enviar no iGO, ative o add-on Application.", "You can organize the dossier now. Activate the Application add-on so K-Bot can prepare and send it through iGO.")}</p>
+            <p>{copy("Você pode organizar o dossiê agora. O add-on Application permite autorizar a preparação do rascunho no iGO quando a extensão for compatível. Anexos no iGO e submissão final ainda não estão disponíveis.", "You can organize the dossier now. The Application add-on lets you authorize draft preparation in iGO with a compatible extension. iGO attachments and final submission are not available yet.")}</p>
             <p className="mt-1 text-xs text-amber-800">{copy("US$ 12,99/mês por agente · primeiros 14 dias grátis.", "US$12.99/month per agent · first 14 days free.")}</p>
           </div>
           <form action="/api/billing/application-addon/checkout" method="post">
@@ -374,7 +380,7 @@ export function ApplicationDossier({
         <div className="flex flex-wrap gap-2">
           <Button type="submit" variant="secondary" disabled={pending}>{pending ? copy("Salvando…", "Saving…") : copy("Salvar informações", "Save information")}</Button>
           {addon.entitled && application.automationState === "READY_TO_PREPARE" ? (
-            <Button type="button" onClick={prepareDraft} disabled={pending}>
+            <Button type="button" onClick={prepareDraft} disabled={pending || !addon.canAutomate || availability.state !== "READY"}>
               {pending ? copy("Preparando…", "Preparing…") : copy("Preparar rascunho no iGO", "Prepare draft in iGO")}
             </Button>
           ) : null}
@@ -384,7 +390,7 @@ export function ApplicationDossier({
       <div className="space-y-3 border-t border-border-steel pt-5">
         <div>
           <h4 className="text-sm font-semibold text-ink">{copy("5. Documentos", "5. Documents")}</h4>
-          <p className="text-xs text-ink-muted">{copy("PDF, PNG ou JPG, até 10 MB. O K-Bot só poderá usar documentos revisados.", "PDF, PNG, or JPG, up to 10 MB. K-Bot can only use reviewed documents.")}</p>
+          <p className="text-xs text-ink-muted">{copy("PDF, PNG ou JPG, até 10 MB. Os arquivos ficam no dossiê da KeeprOne. A transferência para o iGO ainda não está disponível.", "PDF, PNG, or JPG, up to 10 MB. Files stay in the KeeprOne dossier. Transfer to iGO is not available yet.")}</p>
         </div>
         <form onSubmit={upload} className="flex flex-wrap items-end gap-3">
           <label className={labelClass}>{copy("Tipo", "Type")}<select name="type" className={fieldClass}><option value="IDENTITY">{copy("Identidade", "Identity")}</option><option value="AUTHORIZATION">{copy("Autorização", "Authorization")}</option><option value="FINANCIAL">{copy("Financeiro", "Financial")}</option><option value="REPLACEMENT">{copy("Substituição", "Replacement")}</option><option value="OTHER">{copy("Outro", "Other")}</option></select></label>

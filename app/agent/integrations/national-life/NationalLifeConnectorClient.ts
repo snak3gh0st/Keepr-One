@@ -1,6 +1,8 @@
 'use client'
 
 export type ConnectorResponse = {
+  extensionVersion?: string
+  commandCapabilities?: string[]
   ok: boolean
   error?: string
   status?: string

@@ -331,7 +331,7 @@ export function CarrierSyncBadge({
     tasks.push({
       id: 'sync',
       label: copy('Atualizando seus dados', 'Updating your data'),
-      detail: copy('{completed} de {total} áreas verificadas', '{completed} of {total} areas checked', { completed: sync.completed, total: sync.total }),
+      detail: copy('{completed} de {total} etapas concluídas do plano', '{completed} of {total} plan stages completed', { completed: sync.completed, total: sync.total }),
       state: sync.state === 'PAUSED' ? 'waiting' : 'working',
       progress: syncProgress,
       estimate: syncEstimate,
@@ -449,7 +449,7 @@ export function CarrierSyncBadge({
     } else if (sync) {
       botState = 'working'
       title = copy('Estou atualizando seus dados da National Life', 'I am updating your National Life data')
-      detail = copy('{completed} de {total} áreas verificadas.', '{completed} of {total} areas checked.', { completed: sync.completed, total: sync.total })
+      detail = copy('{completed} de {total} etapas concluídas do plano.', '{completed} of {total} plan stages completed.', { completed: sync.completed, total: sync.total })
       actionLabel = copy('Ver atualização', 'View update')
       activityMode = 'sync'
     } else if (illustration?.state === 'NEEDS_KBOT') {

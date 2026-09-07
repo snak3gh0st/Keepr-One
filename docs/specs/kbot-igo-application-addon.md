@@ -19,6 +19,16 @@ as a separate result and drive the Application. When National Life confirms a
 different valid Term duration, KeeprOne shows requested versus confirmed and
 uses the confirmed duration in the official PDF and iGO draft.
 
+## Current delivery scope
+
+The current extension implements draft preparation. Document transfer to iGO and
+final submission are not implemented and must not be advertised as available
+with this subscription. Saving a document in the KeeprOne dossier does not send
+it to iGO. The lifecycle below describes the target product, not proof of release.
+The dossier checks the installed extension's reported command capabilities;
+missing capability metadata means compatibility is unverified, not supported.
+Server entitlement, confirmation and command validation remain authoritative.
+
 ## Product boundary
 
 - KeeprOne owns intake, readiness, consent, document inventory, paid entitlement, audit history, and user-facing status.
@@ -65,7 +75,7 @@ Medical, financial, suitability, replacement, and state-specific carrier questio
 - Every row is scoped through the owning case and assigned agent.
 - Application intake is a versioned JSON snapshot with a server-computed SHA-256 hash. Commands reference the snapshot hash and cannot silently switch inputs after approval.
 - Documents use the existing KeeprOne storage boundary and record filename, MIME type, size, SHA-256, uploader, and review state. K-Bot receives a short-lived, command-bound transfer, not a public URL.
-- National Life credentials, cookies, MFA secrets, and passwords are not stored by KeeprOne. The agent's trusted browser session remains the authentication boundary.
+- The agent's browser session remains the carrier authentication boundary. With explicit Settings consent, a National Life credential may be stored in the protected Vault and leased for the approved login operation. It can be replaced or revoked in Settings. MFA remains manual; credentials never belong in Application dossiers, documents or logs.
 - Safe errors shown to users contain no carrier HTML, credentials, health data, or document contents.
 
 ## Connector protocol
