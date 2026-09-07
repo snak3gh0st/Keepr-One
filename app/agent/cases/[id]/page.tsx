@@ -12,6 +12,8 @@ import { findPipelineForAgent, getPipelineForAgent } from '@/lib/crm'
 import { getCalendarConnectionForUser, getCalendarEventsForCase } from '@/lib/calendar'
 import { mapDomainCalendarConnectionToUi, mapDomainCalendarEventToUi } from '@/components/calendar/server-adapter'
 import { getKBotApplicationEntitlement } from '@/lib/application-addon/entitlement-prisma'
+import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
+import { getLocalConnectorRemoteConfig } from '@/lib/national-life/local-connector/remote-config'
 import { getCurrentSession, getServerI18n } from '@/lib/i18n/server'
 import { isReadOnlySupportPreview } from '@/lib/support-preview'
 
@@ -48,6 +50,8 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   const pipeline = readOnly
     ? await findPipelineForAgent(c.assignedAgentId)
     : await getPipelineForAgent(c.assignedAgentId)
+  const connector = getNationalLifeLocalConnectorConfig()
+  const remote = getLocalConnectorRemoteConfig()
   const ownsCase = c.assignedAgentId === agent.id
   const applicationAddon = ownsCase
     ? await getKBotApplicationEntitlement(agent.id)
@@ -152,6 +156,8 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             entitled: applicationAddon.entitled,
             status: applicationAddon.status,
             canAutomate: ownsCase && applicationAddon.entitled,
+            extensionTarget: connector.enabled ? connector.extensionTarget : null,
+            preparationEnabled: connector.enabled && remote.syncEnabled && !remote.disabledCapabilities.includes('PREPARE_APPLICATION_DRAFT'),
           },
           policies: c.policies.map((p) => ({
             id: p.id,

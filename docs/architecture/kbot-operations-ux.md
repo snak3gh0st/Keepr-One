@@ -88,3 +88,19 @@ pixels, blinking is occasional, and completion gets one short lift. Errors stay
 still. Existing pointer tracking, announcements, focus/keyboard behavior and
 reduced-motion support remain intact. The pixel alternative is retained only in
 the local comparison preview.
+
+## Scope and compatibility presentation
+
+Sync progress counts finished plan stages (including failed attempts), with the
+failure count shown separately. A completed plan lists structured and capture-only
+sources; it does not claim full portal coverage. The product-wide structured-source
+coverage remains a separate denominator.
+
+Extension 0.1.84 reports its version and executable command capabilities through
+the existing read-only status message. The same registry dispatches commands.
+The Application dossier checks that metadata and pairing before enabling draft
+preparation. Older builds without metadata are unverified; install the updated
+extension before rolling out the dossier compatibility gate. This probe is a UX
+check, not entitlement, carrier-session proof or a server authorization boundary.
+Document transfer to iGO and final submission remain unavailable. Dossier storage
+and subscription access must not be described as successful carrier execution.

@@ -103,7 +103,7 @@ import {
   writeSyncState,
   type CredentialAttempt,
 } from '../lib/state'
-import { commandExecutorFor } from '../lib/command-executor'
+import { commandExecutorFor, EXECUTABLE_COMMAND_CAPABILITIES } from '../lib/command-executor'
 import {
   parseIgoApplicationSnapshot,
   sha256IgoApplicationDossier,
@@ -3847,6 +3847,8 @@ async function getConnectorStatus() {
   const stage = currentStage(sync)
   return {
     ok: true as const,
+    extensionVersion: readExtensionVersion(),
+    commandCapabilities: EXECUTABLE_COMMAND_CAPABILITIES,
     device,
     sync: {
       ...sync,

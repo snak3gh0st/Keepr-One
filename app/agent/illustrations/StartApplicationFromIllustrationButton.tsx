@@ -37,7 +37,7 @@ export function StartApplicationFromIllustrationButton({
         onClick={startApplication}
         className={compact ? 'w-full' : ''}
       >
-        {pending ? 'Criando Application…' : 'Criar Application no iGO'}
+        {pending ? 'Abrindo dossiê…' : 'Preparar Application'}
       </Button>
       {message ? <p role="alert" className="mt-2 max-w-xs text-xs leading-5 text-danger">{message}</p> : null}
     </div>

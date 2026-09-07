@@ -95,7 +95,7 @@ describe('NationalLifeSyncProgress', () => {
     expect(screen.getByText(
       'K-Bot is collecting your correspondence information from National Life. Everything already collected is safe.',
     )).toBeTruthy()
-    expect(screen.getByText('3 of 13 portal areas checked')).toBeTruthy()
+    expect(screen.getByText('3 of 13 plan stages finished')).toBeTruthy()
     expect(screen.getByText('Reading and saving correspondence.')).toBeTruthy()
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '3')
     expect(screen.getByRole('progressbar')).toHaveAttribute('max', '13')
@@ -225,6 +225,7 @@ describe('NationalLifeSyncProgress', () => {
     expect(screen.getByText('K-Bot preserved your previous National Life sync')).toBeTruthy()
     expect(screen.getByText(/broader portal run/i)).toBeTruthy()
     expect(document.body.textContent).toContain('Previous run plan: 1 structured + 1 snapshot sources')
+    expect(screen.getByText('Plan complete: 1 structured sources + 1 capture-only sources.')).toBeTruthy()
     expect(screen.queryByText('K-Bot finished updating your priority data')).toBeNull()
   })
 
@@ -257,7 +258,7 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.getByText('Sign in to National Life to keep going.')).toBeTruthy()
     expect(screen.queryByText('AUTHENTICATION_STATE_INVALID')).toBeNull()
-    await waitFor(() => expect(screen.getByText('0 of 13 portal areas checked')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('0 of 13 plan stages finished')).toBeTruthy())
   })
 
   it('dates the last sync instead of saying "done" forever', () => {
@@ -378,7 +379,7 @@ describe('NationalLifeSyncProgress', () => {
 
     window.dispatchEvent(new Event(NATIONAL_LIFE_SYNC_STARTED_EVENT))
 
-    await waitFor(() => expect(screen.getByText('1 of 13 portal areas checked')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('1 of 13 plan stages finished')).toBeTruthy())
     expect(screen.getByText('Reading and saving new business.')).toBeTruthy()
   })
 
@@ -438,6 +439,7 @@ describe('NationalLifeSyncProgress', () => {
     expect(screen.getByText('1,003')).toBeTruthy()
     expect(document.body.textContent).toMatch(/not counted as operational rows/i)
     expect(document.body.textContent).toContain('Previous run plan: 1 structured + 1 snapshot sources')
+    expect(screen.getByText('Plan complete: 1 structured sources + 1 capture-only sources.')).toBeTruthy()
   })
 
   it('shows an isolated failure as non-blocking while the remaining areas continue', () => {
@@ -451,7 +453,9 @@ describe('NationalLifeSyncProgress', () => {
       />,
     )
 
-    expect(screen.getByText('5 of 13 portal areas checked')).toBeTruthy()
+    expect(screen.getByText('5 of 13 plan stages finished')).toBeTruthy()
+    expect(screen.getByText('1 failed stages need another attempt.')).toBeTruthy()
+    expect(screen.queryByText(/Plan complete:/)).toBeNull()
     expect(screen.getByText(/The sync is continuing with the remaining areas/)).toBeTruthy()
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '5')
   })
@@ -484,7 +488,7 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.getByText('Reused')).toBeTruthy()
     expect(screen.getByText(/1 previously verified area was reused/)).toBeTruthy()
-    expect(screen.getByText('4 of 12 portal areas checked')).toBeTruthy()
+    expect(screen.getByText('4 of 12 plan stages finished')).toBeTruthy()
   })
 
   it('does not mention reuse on a fresh verified run', () => {

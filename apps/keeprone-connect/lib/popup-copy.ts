@@ -8,7 +8,7 @@ const STATUS_TEXT: Record<Exclude<SyncState['status'], 'ERROR'>, string> = {
   EXTRACTING: 'K-Bot is reading the information shown by National Life…',
   UPLOADING: 'K-Bot is organizing this information in Keepr One…',
   AUTH_REQUIRED: 'Sign in to National Life. K-Bot will continue the same sync automatically.',
-  COMPLETED: 'K-Bot finished. Your verified data is up to date.',
+  COMPLETED: 'K-Bot finished this sync plan. Open Keepr One to review its results and source coverage.',
   PARTIAL: 'K-Bot saved the available areas. Resume from Keepr One to finish the rest.',
   CANCELLED: 'This sync was skipped. K-Bot is ready whenever you want to connect your data.',
 }

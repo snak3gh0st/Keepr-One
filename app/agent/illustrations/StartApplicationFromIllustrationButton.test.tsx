@@ -27,7 +27,7 @@ describe('StartApplicationFromIllustrationButton', () => {
   it('creates the Application from the selected Illustration and opens its dossier', async () => {
     render(<StartApplicationFromIllustrationButton illustrationId="illustration-1" />)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Criar Application no iGO' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Preparar Application' }))
 
     await waitFor(() => {
       expect(mocks.start).toHaveBeenCalledWith('illustration-1')
@@ -39,7 +39,7 @@ describe('StartApplicationFromIllustrationButton', () => {
     mocks.start.mockResolvedValue({ ok: false, message: 'Aguarde o PDF oficial.' })
     render(<StartApplicationFromIllustrationButton illustrationId="illustration-1" />)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Criar Application no iGO' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Preparar Application' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Aguarde o PDF oficial.')
     expect(mocks.push).not.toHaveBeenCalled()
