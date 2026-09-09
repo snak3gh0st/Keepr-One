@@ -34,7 +34,7 @@
     "@sentry/nextjs": "^10.68.0",
     "@xyflow/react": "^12.11.2",
     "better-auth": "^1.6.23",
-    "csv-parse": "^7.0.1",
+    "csv-parse": "^7.0.2",
     "dagre": "^0.8.5",
     "decimal.js": "^10.6.0",
     "exceljs": "4.4.0",
