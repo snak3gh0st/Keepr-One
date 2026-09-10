@@ -65,13 +65,15 @@ export async function backfillClientContactFromServiceLog(
     // One refused row must not cost the rest of the book its contacts; the gap
     // simply survives to the next sync.
     try {
-      await updateClientContact({
+      const filled = await updateClientContact({
         agentId: input.agentId,
         clientId: contact.clientId,
         email: contact.email,
         phone: contact.phone,
       })
-      clientsContactFilled += 1
+      // The sink reports whether a row actually changed: the plan was read
+      // before this write and the agent may have filled the field meanwhile.
+      if (filled) clientsContactFilled += 1
     } catch {
       // Intentionally swallowed: this is an enrichment pass, not the sync.
     }
