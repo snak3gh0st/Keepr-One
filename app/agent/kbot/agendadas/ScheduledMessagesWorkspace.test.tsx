@@ -6,13 +6,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   toggle: vi.fn(),
+  autoSend: vi.fn(),
   consent: vi.fn(),
+  approve: vi.fn(),
+  discard: vi.fn(),
 }))
 
 vi.mock('./actions', () => ({
   saveScheduledTemplate: mocks.save,
   setScheduledCategoryEnabled: mocks.toggle,
+  setScheduledCategoryAutoSend: mocks.autoSend,
   setContactConsent: mocks.consent,
+  approveScheduledProposals: mocks.approve,
+  discardScheduledProposals: mocks.discard,
 }))
 
 import { ScheduledMessagesWorkspace, type ScheduledMessagesView } from './ScheduledMessagesWorkspace'
@@ -23,15 +29,18 @@ beforeEach(() => {
   mocks.save.mockResolvedValue({ ok: true })
   mocks.toggle.mockResolvedValue({ ok: true })
   mocks.consent.mockResolvedValue({ ok: true })
+  mocks.autoSend.mockResolvedValue({ ok: true })
+  mocks.approve.mockResolvedValue({ ok: true, released: 1 })
+  mocks.discard.mockResolvedValue({ ok: true, released: 1 })
 })
 
 const view: ScheduledMessagesView = {
   categories: [
-    { category: 'BIRTHDAY', enabled: false, languages: [
+    { category: 'BIRTHDAY', enabled: false, autoSend: false, languages: [
       { language: 'PT', body: 'Feliz aniversário, {{primeiro_nome}}! — {{agente}}', updatedAt: '2026-09-01T12:00:00.000Z' },
       { language: 'EN', body: '', updatedAt: null },
     ] },
-    { category: 'ANNUAL_REVIEW', enabled: false, languages: [
+    { category: 'ANNUAL_REVIEW', enabled: false, autoSend: false, languages: [
       { language: 'PT', body: '', updatedAt: null },
       { language: 'EN', body: '', updatedAt: null },
     ] },
@@ -44,6 +53,7 @@ const view: ScheduledMessagesView = {
       status: 'SENT', bucket: 'SENT', blockedReason: null, content: 'Feliz aniversário, João!',
       createdAt: '2026-09-01T12:00:00.000Z', updatedAt: '2026-09-01T12:00:00.000Z' },
   ],
+  proposals: [],
   contacts: [{ subjectKey: '+14075550100', optedOut: true, snoozedUntil: null }],
   consent: [
     { id: 'e1', subjectKey: '+14075550100', action: 'OPT_OUT', source: 'WHATSAPP_REPLY',
@@ -117,5 +127,144 @@ describe('consent history', () => {
     expect(screen.getByText('+14075550100')).toBeInTheDocument()
     expect(screen.getByText(/resposta no WhatsApp/)).toBeInTheDocument()
     expect(screen.getByText('PARE')).toBeInTheDocument()
+  })
+})
+
+const proposal = (over: Partial<ScheduledMessagesView['proposals'][number]> = {}): ScheduledMessagesView['proposals'][number] => ({
+  id: 'p1',
+  category: 'BIRTHDAY',
+  customerName: 'Ana Ribeiro',
+  phone: '+14075550100',
+  language: 'PT',
+  // Deliberately not the sample preview text: the template editor on the same
+  // screen renders that one, and a test that cannot tell them apart proves
+  // nothing about the queue.
+  text: 'Parabéns, Ana! Que o ano seja bom. — Paulo Loureiro',
+  problem: null,
+  unknown: [],
+  createdAt: '2026-09-01T12:00:00.000Z',
+  expiresAt: '2999-01-01T00:00:00.000Z',
+  ...over,
+})
+
+describe('the queue waiting for the agent', () => {
+  it('shows the exact text that will go out, with the client behind it', () => {
+    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal()] }} />)
+
+    expect(screen.getByText('Parabéns, Ana! Que o ano seja bom. — Paulo Loureiro')).toBeInTheDocument()
+    expect(screen.getByText(/\+14075550100/)).toBeInTheDocument()
+    expect(screen.getByText('Esperando você liberar')).toBeInTheDocument()
+  })
+
+  it('releases only what was selected, and says how many actually went', async () => {
+    mocks.approve.mockResolvedValue({ ok: true, released: 1 })
+    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal(), proposal({ id: 'p2', customerName: 'João Silva' })] }} />)
+
+    await userEvent.click(screen.getAllByRole('checkbox')[1])
+    await userEvent.click(screen.getByRole('button', { name: /Enviar selecionadas/ }))
+
+    expect(mocks.approve).toHaveBeenCalledWith({ jobIds: ['p2'] })
+    expect(await screen.findByText(/1 mensagem\(ns\) liberada\(s\)/)).toBeInTheDocument()
+  })
+
+  it('discards what the agent chose not to send', async () => {
+    mocks.discard.mockResolvedValue({ ok: true, released: 1 })
+    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal()] }} />)
+
+    await userEvent.click(screen.getAllByRole('checkbox')[0])
+    await userEvent.click(screen.getByRole('button', { name: /Descartar selecionadas/ }))
+
+    expect(mocks.discard).toHaveBeenCalledWith({ jobIds: ['p1'] })
+  })
+
+  it('says how long is left, because a proposal that vanishes reads as a bug', async () => {
+    const expiresAt = new Date(Date.now() + 3 * 3_600_000 + 30 * 60_000).toISOString()
+    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal({ expiresAt })] }} />)
+
+    expect(await screen.findByText(/Expira em 3h(29|30)/)).toBeInTheDocument()
+  })
+
+  it('says a closed window is closed instead of letting the row look alive', async () => {
+    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal({ expiresAt: '2020-01-01T00:00:00.000Z' })] }} />)
+
+    expect(await screen.findByText(/Expirou/)).toBeInTheDocument()
+    await userEvent.click(screen.getAllByRole('checkbox')[0])
+    expect(screen.getByRole('button', { name: /Enviar selecionadas/ })).toBeDisabled()
+  })
+
+  it('never prints a raw variable, and will not let the agent release it', async () => {
+    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal({ text: null, problem: 'UNRENDERABLE', unknown: ['apelido'] })] }} />)
+
+    expect(screen.queryByText(/\{\{ *apelido *\}\}/)).toBeNull()
+    expect(screen.getByRole('alert')).toHaveTextContent('apelido')
+    // Selecting it still offers the one decision that remains available.
+    await userEvent.click(screen.getAllByRole('checkbox')[0])
+    expect(screen.getByRole('button', { name: /Enviar selecionadas/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Descartar selecionadas/ })).toBeEnabled()
+  })
+
+  it('leaves a proposal whose template was switched off unreleasable', async () => {
+    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal({ text: null, problem: 'TEMPLATE_MISSING' })] }} />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('desligado')
+    await userEvent.click(screen.getAllByRole('checkbox')[0])
+    expect(screen.getByRole('button', { name: /Enviar selecionadas/ })).toBeDisabled()
+  })
+
+  it('selects only what can actually be sent', async () => {
+    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal(), proposal({ id: 'p2', text: null, problem: 'TEMPLATE_MISSING' })] }} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Selecionar todas' }))
+    await userEvent.click(screen.getByRole('button', { name: /Enviar selecionadas/ }))
+
+    expect(mocks.approve).toHaveBeenCalledWith({ jobIds: ['p1'] })
+  })
+
+  it('stays out of the way when there is nothing to approve', () => {
+    render(<ScheduledMessagesWorkspace view={view} />)
+    expect(screen.queryByText('Esperando você liberar')).toBeNull()
+  })
+})
+
+describe('automatic sending', () => {
+  it('starts off and does not borrow the verb activation already uses', () => {
+    render(<ScheduledMessagesWorkspace view={view} />)
+
+    expect(screen.getAllByRole('button', { name: 'Ativar categoria' })).toHaveLength(2)
+    const auto = screen.getAllByRole('button', { name: 'Mandar sem me perguntar' })
+    expect(auto).toHaveLength(2)
+    expect(auto[0]).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getAllByText(/espera você ler e liberar/)).toHaveLength(2)
+  })
+
+  it('asks again before letting a message out without anyone reading it', async () => {
+    render(<ScheduledMessagesWorkspace view={view} />)
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Mandar sem me perguntar' })[0])
+    expect(mocks.autoSend).not.toHaveBeenCalled()
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('sem passar por você')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sim, mandar sem me perguntar' }))
+    expect(mocks.autoSend).toHaveBeenCalledWith({ category: 'BIRTHDAY', autoSend: true })
+  })
+
+  it('lets the agent back out of the confirmation without changing anything', async () => {
+    render(<ScheduledMessagesWorkspace view={view} />)
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Mandar sem me perguntar' })[0])
+    await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+
+    expect(mocks.autoSend).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('turns off without a second question', async () => {
+    const on = { ...view, categories: view.categories.map((c, index) => index === 0 ? { ...c, autoSend: true } : c) }
+    render(<ScheduledMessagesWorkspace view={on} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Voltar a me perguntar' }))
+
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(mocks.autoSend).toHaveBeenCalledWith({ category: 'BIRTHDAY', autoSend: false })
   })
 })

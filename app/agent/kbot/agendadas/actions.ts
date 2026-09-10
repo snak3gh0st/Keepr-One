@@ -8,6 +8,7 @@ import { lockAgent } from '@/lib/kbot-followup/credits'
 import { getServerI18n } from '@/lib/i18n/server'
 import { prisma } from '@/lib/prisma'
 import { assertSameOriginAction } from '@/lib/security/same-origin-action'
+import { approveScheduledMessages, discardScheduledMessages } from '@/lib/kbot-messaging/approval'
 import { SCHEDULED_CATEGORIES, sampleValues, TEMPLATE_LANGUAGES } from '@/lib/kbot-templates/categories'
 import {
   TEMPLATE_BODY_MAX_LENGTH,
@@ -15,7 +16,9 @@ import {
   type TemplateBodyError,
 } from '@/lib/kbot-templates/variables'
 
-export type ScheduledActionResult = { ok: true; preview?: string } | { ok: false; message: string }
+export type ScheduledActionResult =
+  | { ok: true; preview?: string; released?: number }
+  | { ok: false; message: string }
 
 const PATH = '/agent/kbot/agendadas'
 
@@ -30,6 +33,18 @@ const templateSchema = z.strictObject({
 const toggleSchema = z.strictObject({
   category: z.enum(SCHEDULED_CATEGORIES),
   enabled: z.boolean(),
+})
+
+const autoSendSchema = z.strictObject({
+  category: z.enum(SCHEDULED_CATEGORIES),
+  autoSend: z.boolean(),
+})
+
+/// The screen never sends an agent id — the agent comes from the session, and
+/// `approval.ts` filters on it again. Bounded because the queue itself is
+/// bounded: a list longer than this is not a screen anyone read.
+const proposalsSchema = z.strictObject({
+  jobIds: z.array(z.string().min(1).max(64)).min(1).max(200),
 })
 
 /// Consent is recorded against the phone number, the same key
@@ -192,6 +207,82 @@ export async function setContactConsent(input: unknown): Promise<ScheduledAction
     ])
     revalidatePath(PATH)
     return { ok: true }
+  } catch {
+    return { ok: false, message: unavailable(copy) }
+  }
+}
+
+/// Turns automatic sending on or off for a whole category.
+///
+/// This is not the same decision as `setScheduledCategoryEnabled`. Activating a
+/// category says "prepare these messages for me"; this one says "and send them
+/// without asking me". `autoSend` lives per (category, language) because it sits
+/// on the template row, but nobody means "send birthdays unattended in English
+/// only" — so every language row moves together, under the same lock the other
+/// two writers take.
+export async function setScheduledCategoryAutoSend(input: unknown): Promise<ScheduledActionResult> {
+  const { copy } = await getServerI18n()
+  const parsed = autoSendSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, message: unavailable(copy) }
+  const { category, autoSend } = parsed.data
+  try {
+    const agent = await currentAgent()
+    const written = await prisma.$transaction(async (tx) => {
+      await lockAgent(tx, agent.id)
+      const existing = await tx.kBotMessageTemplate.count({ where: { agentId: agent.id, category } })
+      if (!existing) return 0
+      const result = await tx.kBotMessageTemplate.updateMany({
+        where: { agentId: agent.id, category },
+        data: { autoSend },
+      })
+      return result.count
+    })
+    if (!written) {
+      return {
+        ok: false,
+        message: copy(
+          'Escreva e salve a mensagem desta categoria antes de mudar o envio.',
+          'Write and save this category message before changing how it is sent.',
+        ),
+      }
+    }
+    revalidatePath(PATH)
+    return { ok: true }
+  } catch {
+    return { ok: false, message: unavailable(copy) }
+  }
+}
+
+/// Releases the proposals the agent read and chose to send.
+///
+/// The agent id comes from the session and never from the request body, so no
+/// screen — stale, forged or otherwise — can release another agent's message.
+export async function approveScheduledProposals(input: unknown): Promise<ScheduledActionResult> {
+  const { copy } = await getServerI18n()
+  const parsed = proposalsSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, message: unavailable(copy) }
+  try {
+    const agent = await currentAgent()
+    const { released } = await approveScheduledMessages(agent.id, parsed.data.jobIds)
+    revalidatePath(PATH)
+    return { ok: true, released }
+  } catch {
+    return { ok: false, message: unavailable(copy) }
+  }
+}
+
+/// Drops the proposals the agent read and chose not to send. The reservation
+/// goes back with them — `discardScheduledMessages` settles the job rather than
+/// flipping a status.
+export async function discardScheduledProposals(input: unknown): Promise<ScheduledActionResult> {
+  const { copy } = await getServerI18n()
+  const parsed = proposalsSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, message: unavailable(copy) }
+  try {
+    const agent = await currentAgent()
+    const { released } = await discardScheduledMessages(agent.id, parsed.data.jobIds)
+    revalidatePath(PATH)
+    return { ok: true, released }
   } catch {
     return { ok: false, message: unavailable(copy) }
   }

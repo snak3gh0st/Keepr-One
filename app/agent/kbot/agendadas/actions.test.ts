@@ -11,12 +11,18 @@ const mocks = vi.hoisted(() => ({
   preferenceUpsert: vi.fn(),
   consentCreate: vi.fn(),
   transaction: vi.fn(),
+  approve: vi.fn(),
+  discard: vi.fn(),
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
 vi.mock('next/headers', () => ({ headers: mocks.headers }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 vi.mock('@/lib/security/same-origin-action', () => ({ assertSameOriginAction: mocks.assertSameOriginAction }))
+vi.mock('@/lib/kbot-messaging/approval', () => ({
+  approveScheduledMessages: mocks.approve,
+  discardScheduledMessages: mocks.discard,
+}))
 vi.mock('@/lib/i18n/server', () => ({
   getServerI18n: async () => ({ language: 'EN', copy: (_pt: string, en: string) => en }),
 }))
@@ -29,7 +35,14 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-import { saveScheduledTemplate, setContactConsent, setScheduledCategoryEnabled } from './actions'
+import {
+  approveScheduledProposals,
+  discardScheduledProposals,
+  saveScheduledTemplate,
+  setContactConsent,
+  setScheduledCategoryAutoSend,
+  setScheduledCategoryEnabled,
+} from './actions'
 
 const tx = {
   // The per-agent advisory lock that serializes saving a template against
@@ -44,6 +57,11 @@ beforeEach(() => {
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1' })
   mocks.transaction.mockImplementation(async (arg: unknown) =>
     typeof arg === 'function' ? (arg as (client: typeof tx) => unknown)(tx) : Promise.all(arg as Promise<unknown>[]))
+  // `clearAllMocks` clears calls but keeps implementations, and one test below
+  // makes this one throw. Reset it so the throw cannot leak into its neighbours.
+  mocks.assertSameOriginAction.mockImplementation(() => {})
+  mocks.approve.mockResolvedValue({ released: 2 })
+  mocks.discard.mockResolvedValue({ released: 2 })
 })
 
 describe('saving a scheduled template', () => {
@@ -137,5 +155,76 @@ describe('opting a contact out from the screen', () => {
   it('rejects a subject key that is not a phone number', async () => {
     await expect(setContactConsent({ subjectKey: 'client:abc', optedOut: true })).resolves.toMatchObject({ ok: false })
     expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+})
+
+describe('turning automatic sending on', () => {
+  it('moves every language of the category together, under the agent lock', async () => {
+    mocks.templateCount.mockResolvedValue(2)
+    mocks.templateUpdateMany.mockResolvedValue({ count: 2 })
+
+    const result = await setScheduledCategoryAutoSend({ category: 'BIRTHDAY', autoSend: true })
+
+    expect(result).toEqual({ ok: true })
+    expect(tx.$executeRaw).toHaveBeenCalled()
+    expect(mocks.templateUpdateMany).toHaveBeenCalledWith({
+      where: { agentId: 'agent-1', category: 'BIRTHDAY' },
+      data: { autoSend: true },
+    })
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/kbot/agendadas')
+  })
+
+  it('refuses a category that has no text at all', async () => {
+    mocks.templateCount.mockResolvedValue(0)
+
+    const result = await setScheduledCategoryAutoSend({ category: 'BIRTHDAY', autoSend: true })
+
+    expect(result).toEqual({ ok: false, message: expect.stringContaining('before changing how it is sent') })
+    expect(mocks.templateUpdateMany).not.toHaveBeenCalled()
+  })
+
+  it('rejects anything that is not a scheduled category', async () => {
+    const result = await setScheduledCategoryAutoSend({ category: 'FOLLOWUP', autoSend: true })
+    expect(result.ok).toBe(false)
+    expect(mocks.templateUpdateMany).not.toHaveBeenCalled()
+  })
+})
+
+describe('releasing proposals', () => {
+  it('passes the signed-in agent, never an id from the screen', async () => {
+    const result = await approveScheduledProposals({ jobIds: ['j1', 'j2'] })
+
+    expect(mocks.approve).toHaveBeenCalledWith('agent-1', ['j1', 'j2'])
+    expect(result).toEqual({ ok: true, released: 2 })
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/kbot/agendadas')
+  })
+
+  it('refuses a payload that tries to name its own agent', async () => {
+    const result = await approveScheduledProposals({ jobIds: ['j1'], agentId: 'agent-2' })
+
+    expect(result.ok).toBe(false)
+    expect(mocks.approve).not.toHaveBeenCalled()
+  })
+
+  it('checks the request came from this site before touching anything', async () => {
+    mocks.assertSameOriginAction.mockImplementation(() => { throw new Error('cross-origin') })
+
+    const result = await approveScheduledProposals({ jobIds: ['j1'] })
+
+    expect(result.ok).toBe(false)
+    expect(mocks.approve).not.toHaveBeenCalled()
+  })
+
+  it('hands the discarded ones to the path that gives the credit back', async () => {
+    const result = await discardScheduledProposals({ jobIds: ['j1', 'j2'] })
+
+    expect(mocks.discard).toHaveBeenCalledWith('agent-1', ['j1', 'j2'])
+    expect(result).toEqual({ ok: true, released: 2 })
+  })
+
+  it('refuses an empty selection instead of reporting a no-op as done', async () => {
+    const result = await approveScheduledProposals({ jobIds: [] })
+    expect(result.ok).toBe(false)
+    expect(mocks.approve).not.toHaveBeenCalled()
   })
 })

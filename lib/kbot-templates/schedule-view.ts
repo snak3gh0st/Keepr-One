@@ -9,6 +9,10 @@ import type { SendGateBlockReason } from '@/lib/kbot-messaging/send-gate'
 /// here needs a migration — and the reason union is imported from the gate
 /// rather than retyped, so the screen cannot drift from the rule.
 export const SCHEDULED_BLOCKED_STATUS = 'BLOCKED'
+/// The same string as `AWAITING_APPROVAL` in `lib/kbot-followup/domain.ts`,
+/// repeated rather than imported: that module reaches for `node:crypto` and
+/// this one is read by the client bundle. The test pins the two together.
+export const AWAITING_APPROVAL_STATUS = 'AWAITING_APPROVAL'
 
 /// Waiting for its moment, or already in the worker's hands.
 const SCHEDULED_STATUSES = ['PENDING', 'PREPARING', 'DISPATCHING', 'CANCEL_REQUESTED']
@@ -36,7 +40,12 @@ export type ScheduledJobRow = {
 /// apart from `BLOCKED` on purpose: "we chose not to message this person" and
 /// "we tried and something broke" are different answers to the agent's
 /// question, and merging them hides both.
-export type ScheduledBucket = 'SCHEDULED' | 'SENT' | 'BLOCKED' | 'ATTENTION'
+///
+/// `AWAITING_APPROVAL` is named here even though the deliveries query excludes
+/// it: those proposals live in the approval queue at the top of the screen, and
+/// without a case of their own they would fall through to `ATTENTION` — a
+/// message waiting for the agent, filed as a message that went wrong.
+export type ScheduledBucket = 'AWAITING_APPROVAL' | 'SCHEDULED' | 'SENT' | 'BLOCKED' | 'ATTENTION'
 
 export type ScheduledEntry = {
   id: string
@@ -54,6 +63,7 @@ export type ScheduledEntry = {
 }
 
 export function bucketForJob(row: Pick<ScheduledJobRow, 'status'>): ScheduledBucket {
+  if (row.status === AWAITING_APPROVAL_STATUS) return 'AWAITING_APPROVAL'
   if (row.status === SCHEDULED_BLOCKED_STATUS) return 'BLOCKED'
   if (SCHEDULED_STATUSES.includes(row.status)) return 'SCHEDULED'
   if (SENT_STATUSES.includes(row.status)) return 'SENT'

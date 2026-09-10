@@ -28,7 +28,7 @@ vi.mock('@/lib/kbot-followup/transport', async (importOriginal) => ({
   }),
 }))
 
-import { processNextScheduledMessage, releaseExpiredScheduledLeases, renderTemplate } from './scheduled-worker'
+import { processNextScheduledMessage, releaseExpiredScheduledLeases } from './scheduled-worker'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -40,20 +40,6 @@ beforeEach(() => {
   // has to be settled, which is the path these tests walk.
   mocks.agent.mockResolvedValue(null)
   mocks.findUniqueOrThrow.mockResolvedValue({ id: 'job1', agentId: 'a1', status: 'PREPARING', creditState: 'RESERVED', grantId: null })
-})
-
-describe('renderTemplate', () => {
-  it('puts the client name into the agent own text and changes nothing else', () => {
-    expect(renderTemplate('Feliz aniversário, {{name}}!', { customerName: 'Ana' })).toBe('Feliz aniversário, Ana!')
-    expect(renderTemplate('Oi {{ NAME }}, tudo bem?', { customerName: 'Ana' })).toBe('Oi Ana, tudo bem?')
-  })
-
-  it('leaves a template with no placeholder exactly as the agent wrote it', () => {
-    // The template is the message. Nothing here composes prose the agent has
-    // not read, so an unrecognised placeholder is left alone rather than guessed.
-    expect(renderTemplate('Feliz aniversário!', { customerName: 'Ana' })).toBe('Feliz aniversário!')
-    expect(renderTemplate('Oi {{sobrenome}}', { customerName: 'Ana' })).toBe('Oi {{sobrenome}}')
-  })
 })
 
 describe('scheduled queue claiming', () => {
@@ -107,8 +93,8 @@ describe('sending a scheduled message', () => {
     mocks.queryRaw.mockResolvedValue([{ id: 'job1' }])
     mocks.update.mockResolvedValue(job)
     mocks.findUniqueOrThrow.mockResolvedValue(job)
-    mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { banned: false } })
-    mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{name}}!' })
+    mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { banned: false, name: 'Paulo Loureiro' } })
+    mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{nome}}!' })
     mocks.pref.mockResolvedValue([])
     mocks.messages.mockResolvedValue([])
     mocks.allocation.mockResolvedValue([{ grantId: 'g1', reservedTokens: 192 }])
@@ -119,6 +105,24 @@ describe('sending a scheduled message', () => {
   it('sends the agent template text, with the name filled in', async () => {
     expect(await processNextScheduledMessage()).toEqual({ outcome: 'SENT', id: 'job1' })
     expect(mocks.send).toHaveBeenCalledWith('10', 'Feliz aniversário, Ana!', 'job1', '+13055550142')
+  })
+
+  it('sends exactly the text the approval screen rendered', async () => {
+    // One renderer for the screen, the validation and the wire. A second one
+    // here with its own vocabulary would show the agent a filled-in name and
+    // send the client `{{primeiro_nome}}` — the failure the validation exists
+    // to prevent, reintroduced one layer further down.
+    mocks.template.mockResolvedValue({ enabled: true, body: 'Oi {{primeiro_nome}}, aqui é {{agente}}.' })
+    await processNextScheduledMessage()
+    expect(mocks.send).toHaveBeenCalledWith('10', 'Oi Ana, aqui é Paulo Loureiro.', 'job1', '+13055550142')
+  })
+
+  it('refuses to send a template it cannot fill', async () => {
+    // The save path rejects unknown variables, so this means the template
+    // changed underneath. Braces never reach the client.
+    mocks.template.mockResolvedValue({ enabled: true, body: 'Oi {{sobrenome}}' })
+    expect(await processNextScheduledMessage()).toEqual({ outcome: 'SETTLED', id: 'job1' })
+    expect(mocks.send).not.toHaveBeenCalled()
   })
 
   it('hands the reservation back at dispatch, because no model was called', async () => {
