@@ -67,8 +67,10 @@ export async function enqueueScheduledMessagesForAgent(
   })
   // Keyed the same way the lookup below asks for it, carrying the one bit that
   // decides whether the message waits for the agent or not.
-  const enabledFor = new Map(templates.map((template) =>
-    [`${template.category}:${template.language}`, template.autoSend === true] as const))
+  // Typed as a plain string key: `as const` on the entry would infer a
+  // template-literal key type that the `string` lookups below cannot satisfy.
+  const enabledFor = new Map<string, boolean>(templates.map((template) =>
+    [`${template.category}:${template.language}`, template.autoSend === true]))
 
   const [clients, policies] = await Promise.all([
     prisma.client.findMany({
