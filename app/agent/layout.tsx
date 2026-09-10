@@ -37,9 +37,13 @@ export default async function AgentLayout({
     throw error;
   }
   const now = new Date();
+  // requireRole() already resolved this agent's founder access moments ago, and
+  // the promotion snapshot below asks for the same commercial boundary. Both
+  // helpers memoize per request, so calling them without an explicit timestamp
+  // reuses that work instead of re-running roughly a dozen queries.
   const [access, platformAccess] = await Promise.all([
     getAgentAccessForAgent(agent.id),
-    resolveFounderAccessForAgent(agent.id, now),
+    resolveFounderAccessForAgent(agent.id),
   ]);
   const promotion = access.enabledModules === null || access.enabledModules.includes("JOURNEY")
     ? await getAgentPromotionSnapshot(agent.id)

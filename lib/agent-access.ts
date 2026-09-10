@@ -188,7 +188,7 @@ function selectAccessSubscription(
  * capability. The fail-closed fallback still lets the signed-in agent work on
  * their own records so additive rollouts do not expose another producer's data.
  */
-export async function getAgentAccessForAgent(agentId: string): Promise<AgentAccessContext> {
+async function resolveAgentAccessForAgent(agentId: string): Promise<AgentAccessContext> {
   const [subject, membership, individualSubscriptions] = await Promise.all([
     prisma.agent.findUnique({
       where: { id: agentId },
@@ -348,6 +348,15 @@ export async function getAgentAccessForAgent(agentId: string): Promise<AgentAcce
     enabledModules,
   })
 }
+
+/**
+ * Resolving a boundary costs three parallel queries plus a conditional fourth,
+ * and a single navigation asks for the same agent's boundary from the layout,
+ * the promotion snapshot and each page's scope lookup. `cache` keys on agentId
+ * and collapses those into one resolution per request; it never persists across
+ * requests, so a subscription change is still visible on the next navigation.
+ */
+export const getAgentAccessForAgent = cache(resolveAgentAccessForAgent)
 
 const getCachedCurrentAgentAccess = cache(async (): Promise<AgentAccessContext> => {
   const agent = await getCurrentAgent()

@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { cache } from 'react'
 import { prisma } from '@/lib/prisma'
 import type { PlatformPlanName } from '@/lib/plans'
 
@@ -415,9 +416,9 @@ function resolveAdminProvisionedAccess(
  * accepted invitation takes precedence because it identifies the person's
  * current, exact commercial subject.
  */
-export async function resolveFounderAccessForAgent(
+async function computeFounderAccessForAgent(
   agentId: string,
-  now = new Date(),
+  now: Date,
 ): Promise<FounderAccessResolution> {
   const nowTimestamp = requireValidDate(now, 'now')
   const [founder, acceptedInvitation, provisionedAccess] = await Promise.all([
@@ -538,6 +539,30 @@ export async function resolveFounderAccessForAgent(
   )
 }
 
+/**
+ * One navigation resolves this boundary twice: once inside requireRole() and
+ * again in the agent layout. Both callers want "now", so an explicit Date on
+ * every call would defeat any memoization — the request anchors a single
+ * timestamp instead, and callers that need a specific instant (tests, backfills)
+ * still pass one and bypass the cache entirely.
+ */
+const requestNow = cache(() => new Date())
+
+const resolveFounderAccessForAgentAtRequestTime = cache(
+  (agentId: string): Promise<FounderAccessResolution> =>
+    computeFounderAccessForAgent(agentId, requestNow()),
+)
+
+export async function resolveFounderAccessForAgent(
+  agentId: string,
+  now?: Date,
+): Promise<FounderAccessResolution> {
+  if (now === undefined) {
+    return resolveFounderAccessForAgentAtRequestTime(agentId)
+  }
+  return computeFounderAccessForAgent(agentId, now)
+}
+
 export class FounderAccessRequiredError extends Error {
   readonly code = 'FOUNDER_ACCESS_REQUIRED'
   readonly access: FounderAccessResolution
@@ -551,7 +576,7 @@ export class FounderAccessRequiredError extends Error {
 
 export async function requireFounderAccessForAgent(
   agentId: string,
-  now = new Date(),
+  now?: Date,
 ): Promise<FounderAccessResolution> {
   const access = await resolveFounderAccessForAgent(agentId, now)
   if (!access.hasAccess) throw new FounderAccessRequiredError(access)
@@ -566,7 +591,7 @@ export async function requireFounderAccessForAgent(
  */
 export async function requireFounderAccessForUser(
   userId: string,
-  now = new Date(),
+  now?: Date,
 ): Promise<FounderAccessResolution> {
   const agent = await prisma.agent.findUnique({
     where: { userId },
