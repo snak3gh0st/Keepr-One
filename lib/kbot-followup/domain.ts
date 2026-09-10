@@ -10,6 +10,17 @@ export type Candidate = {
   contactHref?: string; contactPhone?: string | null; phoneIssue?: PhoneIssue | null
 }
 export const ACTIVE_JOB_STATES = ['PENDING', 'PREPARING', 'CANCEL_REQUESTED', 'DISPATCHING', 'ACCEPTED', 'UNKNOWN']
+/// A scheduled message the agent has not released yet.
+///
+/// Deliberately outside ACTIVE_JOB_STATES: a proposal nobody has approved must
+/// not silence a follow-up the agent decides to send by hand. If they approve
+/// it afterwards, the window is re-read at dispatch, which is where that check
+/// belongs anyway.
+export const AWAITING_APPROVAL = 'AWAITING_APPROVAL'
+/// How long a proposal waits before it is dropped and its credit reservation
+/// handed back. A greeting nobody released within two days is not worth
+/// sending late, and the reservation must not sit there forever.
+export const APPROVAL_WINDOW_MS = 2 * 86_400_000
 export const SENT_JOB_STATES = ['SENT', 'DELIVERED', 'READ']
 export const COOLDOWN_MS = 7 * 86_400_000
 // Ledger stores integer tokens; display uses 100 tokens per credit.

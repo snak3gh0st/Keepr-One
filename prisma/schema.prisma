@@ -3043,6 +3043,13 @@ model KBotMessageTemplate {
   language  String
   body      String
   enabled   Boolean  @default(false)
+  /// Whether this category may leave without the agent pressing send.
+  ///
+  /// Off by default and only the agent turns it on. Enabling a category means
+  /// "prepare these for me"; this means "and send them without asking". The
+  /// two are separate decisions because only the second one puts text on a
+  /// client's phone with nobody having read it.
+  autoSend  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

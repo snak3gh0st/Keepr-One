@@ -2,7 +2,7 @@ import 'server-only'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { availableCredits, fingerprint, normalizePhone, TOKEN_RESERVATION } from '@/lib/kbot-followup/domain'
-import { ACTIVE_JOB_STATES, SENT_JOB_STATES, COOLDOWN_MS } from '@/lib/kbot-followup/domain'
+import { ACTIVE_JOB_STATES, AWAITING_APPROVAL, SENT_JOB_STATES, COOLDOWN_MS } from '@/lib/kbot-followup/domain'
 import { grantFreeCredits, lockAgent, type Tx } from '@/lib/kbot-followup/credits'
 import { evaluateSendGate, type SendGateBlockReason } from './send-gate'
 import { SCHEDULED_CATEGORIES, scheduledCandidatesForDay, type ScheduledCandidate } from './scheduled-triggers'
@@ -63,9 +63,12 @@ export async function enqueueScheduledMessagesForAgent(
   const language = agent.user.language
   const templates = await prisma.kBotMessageTemplate.findMany({
     where: { agentId, enabled: true, category: { in: [...SCHEDULED_CATEGORIES] } },
-    select: { category: true, language: true },
+    select: { category: true, language: true, autoSend: true },
   })
-  const enabledFor = new Set(templates.map((template) => `${template.category}:${template.language}`))
+  // Keyed the same way the lookup below asks for it, carrying the one bit that
+  // decides whether the message waits for the agent or not.
+  const enabledFor = new Map(templates.map((template) =>
+    [`${template.category}:${template.language}`, template.autoSend === true] as const))
 
   const [clients, policies] = await Promise.all([
     prisma.client.findMany({
@@ -90,11 +93,15 @@ export async function enqueueScheduledMessagesForAgent(
     const skip = (reason: ScheduledSkipReason) => {
       skipped.push({ candidateId: candidate.candidateId, category: candidate.category, reason, timeZone: candidate.timeZone })
     }
-    if (!enabledFor.has(`${candidate.category}:${language}`)) {
+    const key = `${candidate.category}:${language}`
+    // Existence and the flag are asked separately: keying "is there a template"
+    // off the flag's value would make a template whose flag is absent look like
+    // no template at all.
+    if (!enabledFor.has(key)) {
       skip('TEMPLATE_MISSING')
       continue
     }
-    const outcome = await queueOne(agentId, candidate, language, now)
+    const outcome = await queueOne(agentId, candidate, language, now, enabledFor.get(key) ?? false)
     if (outcome === 'QUEUED') queued += 1
     else skip(outcome)
   }
@@ -107,6 +114,7 @@ async function queueOne(
   candidate: ScheduledCandidate,
   language: string,
   now: Date,
+  autoSend: boolean,
 ): Promise<'QUEUED' | ScheduledSkipReason> {
   return prisma.$transaction(async (tx: Tx) => {
     // Same lock the manual path takes, so a pass and an agent pressing send
@@ -174,6 +182,9 @@ async function queueOne(
       sourceHref: candidate.sourceHref,
       grantId: grant.id,
       reservedTokens: TOKEN_RESERVATION,
+      // Nothing leaves without the agent releasing it. `autoSend` is the one
+      // way past this, and only the agent turns that on, per category.
+      status: autoSend ? 'PENDING' : AWAITING_APPROVAL,
     } })
 
     let remaining = TOKEN_RESERVATION
@@ -207,9 +218,14 @@ export async function runScheduledMessageEnqueuePass(now = new Date()): Promise<
 ///
 /// The drain is bounded so one call cannot run for an unbounded time; whatever
 /// is left is taken by the next pass.
-export async function runScheduledMessagePass(now = new Date(), maxSends = 50): Promise<ScheduledPassReport & { sent: number; settled: number; deferred: number }> {
+export async function runScheduledMessagePass(now = new Date(), maxSends = 50): Promise<ScheduledPassReport & { sent: number; settled: number; expired: number; deferred: number }> {
   const { releaseExpiredScheduledLeases, processNextScheduledMessage } = await import('./scheduled-worker')
   await releaseExpiredScheduledLeases(now)
+  // Before enqueuing more: proposals nobody released go back, reservation and
+  // all. Otherwise an agent who never opens the screen loses their allowance to
+  // messages that were never sent.
+  const { expireStaleScheduledProposals } = await import('./approval')
+  const expired = await expireStaleScheduledProposals(now)
   const report = await runScheduledMessageEnqueuePass(now)
   // A job put back for quiet hours is still the oldest PENDING row, so the
   // drain has to step over it. Without this, one recipient in the wrong time
@@ -231,5 +247,5 @@ export async function runScheduledMessagePass(now = new Date(), maxSends = 50): 
     if (turn.outcome === 'SENT') sent += 1
     else settled += 1
   }
-  return { ...report, sent, settled, deferred: deferred.length }
+  return { ...report, sent, settled, expired, deferred: deferred.length }
 }
