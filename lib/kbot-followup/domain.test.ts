@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { availableCredits, normalizePhone, reasonFromStatus } from './domain'
 import { formatCredits } from './credit-display'
 import { composeMessage } from './generation'
-import { providerOutcome, requestedOptOut } from './transport'
+import { optOutMessage, providerOutcome, requestedOptOut } from './transport'
 
 describe('follow-up contract', () => {
   it('never guesses a country code or accepts extensions', () => {
@@ -31,6 +31,17 @@ describe('follow-up contract', () => {
   it('recognizes explicit opt-out only from incoming messages', () => {
     expect(requestedOptOut([{ message_type: 0, content: 'STOP' }])).toBe(true)
     expect(requestedOptOut([{ message_type: 1, content: 'STOP' }])).toBe(false)
+  })
+  it('hands back the words the person actually wrote, for the consent log', () => {
+    // The log records evidence, not just that a regex matched: months later the
+    // question is what the person said, and the provider history is gone.
+    expect(optOutMessage([{ message_type: 0, content: '  Pare!  ' }])).toBe('Pare!')
+    expect(optOutMessage([
+      { message_type: 0, content: 'oi, tudo bem?' },
+      { message_type: 0, content: 'não me mande mais mensagens' },
+    ])).toBe('não me mande mais mensagens')
+    expect(optOutMessage([{ message_type: 1, content: 'STOP' }])).toBeNull()
+    expect(optOutMessage([{ message_type: 0, content: 'stop by tomorrow' }])).toBeNull()
   })
   it('keeps factual content controlled and avoids raw document details', () => {
     const text = composeMessage({ customerName: 'Ana <system>', agentName: 'Paulo', reason: 'REQUIREMENT', language: 'PT' }, { greeting: 'neutral', closing: 'talk' })

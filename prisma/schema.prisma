@@ -516,6 +516,8 @@ model Agent {
   kbotCreditGrants       KBotCreditGrant[]
   kbotFollowupJobs       KBotFollowupJob[]
   kbotContactPreferences KBotContactPreference[]
+  kbotConsentEvents      KBotContactConsentEvent[]
+  kbotMessageTemplates   KBotMessageTemplate[]
   id                   String               @id @default(cuid())
   userId               String               @unique
   user                 User                 @relation(fields: [userId], references: [id])
@@ -2941,6 +2943,16 @@ model KBotCreditGrant {
 }
 
 model KBotFollowupJob {
+  /// What produced this message. The recency window that stops a client being
+  /// texted twice in a week is a query over `agentId` + `phone` on this table,
+  /// so a scheduled birthday and a lapse warning cap each other by construction
+  /// — which they would not if scheduled sends lived in a table of their own.
+  category     String @default("FOLLOWUP")
+  /// The client-scoped consent key this message was raised under, kept so the
+  /// check at dispatch can look under the same keys the enqueue did. A stop
+  /// request filed against the client id — not the number — would otherwise be
+  /// invisible in the seconds before sending.
+  subjectKey   String?
   billedTokens Int @default(0)
   allocations         KBotCreditAllocation[]
   id                  String                 @id @default(cuid())
@@ -2992,6 +3004,49 @@ model KBotContactPreference {
   updatedAt    DateTime  @updatedAt
 
   @@unique([agentId, subjectKey])
+}
+
+/// Append-only record of every change to a contact's messaging consent.
+///
+/// `KBotContactPreference` is the fast projection the send path reads; it is a
+/// mutable row and can only answer *what* the current state is. Once messages
+/// go out without a human pressing send, "when did they ask to stop, and how"
+/// stops being a curiosity and becomes the thing you must be able to show.
+model KBotContactConsentEvent {
+  id         String   @id @default(cuid())
+  agentId    String
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  subjectKey String
+  /// OPT_OUT | OPT_IN | SNOOZE
+  action     String
+  /// WHATSAPP_REPLY | AGENT_UI | SYSTEM
+  source     String
+  /// The inbound text that was read as a stop request, when there was one.
+  evidence   String?
+  snoozedUntil DateTime?
+  occurredAt DateTime @default(now())
+
+  @@index([agentId, subjectKey, occurredAt])
+}
+
+/// The text an agent chose for a scheduled category, in one language.
+///
+/// Absent means the category is not set up for that agent: the engine writes
+/// nothing rather than falling back to a house default, because a message that
+/// goes out over someone's name should be text they actually approved.
+model KBotMessageTemplate {
+  id        String   @id @default(cuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  /// BIRTHDAY | ANNUAL_REVIEW | POLICY_ANNIVERSARY
+  category  String
+  language  String
+  body      String
+  enabled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([agentId, category, language])
 }
 
 model KBotCreditAllocation {

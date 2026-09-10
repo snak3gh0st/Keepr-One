@@ -5,18 +5,25 @@ import { getFollowupCandidates } from './candidates'
 import { generateFollowup, GenerationFailure } from './generation'
 import { lockAgent, settleJob, settleGeneration } from './credits'
 import { aiEnabled, FollowupError, positiveInteger, type FollowupReason } from './domain'
-import { hasRecentOutgoing, messagingTransport, providerOutcome, requestedOptOut } from './transport'
+import { hasRecentOutgoing, messagingTransport, optOutMessage, providerOutcome, requestedOptOut } from './transport'
 
 const receiptProgress: Record<string, number> = { SENT: 1, DELIVERED: 2, READ: 3 }
 const unconfirmedStates = ['DISPATCHING', 'ACCEPTED', 'UNKNOWN']
 
 async function checkOptOut(agentId: string, phone: string, messages: Parameters<typeof requestedOptOut>[0]) {
-  if (!requestedOptOut(messages)) return
+  const evidence = optOutMessage(messages)
+  if (evidence === null) return
   // Preserve the request after the incoming STOP scrolls out of provider history.
   await prisma.$transaction(async tx => {
     await lockAgent(tx, agentId)
     await tx.kBotContactPreference.upsert({ where: { agentId_subjectKey: { agentId, subjectKey: phone } },
       create: { agentId, subjectKey: phone, optedOut: true }, update: { optedOut: true } })
+    // The projection says the messages stop; the log says the person asked, in
+    // their own words, on this date. Once sends happen without a human pressing
+    // a button, that second record is the one that has to exist.
+    await tx.kBotContactConsentEvent.create({
+      data: { agentId, subjectKey: phone, action: 'OPT_OUT', source: 'WHATSAPP_REPLY', evidence },
+    })
   })
   throw new FollowupError('OPTED_OUT')
 }
@@ -93,7 +100,12 @@ export async function processNextFollowup() {
     // Global serialization makes the daily API-call ceiling valid across server instances.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('kbot-followup-generation'))`
     const now = new Date()
-    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "KBotFollowupJob" WHERE "status" = 'PENDING' ORDER BY "createdAt" FOR UPDATE SKIP LOCKED LIMIT 1`
+    // Only the manual category. Scheduled jobs share this table on purpose —
+    // that is what makes the recency window see across features — but they are
+    // sent from an agent's template, not generated, and running one through
+    // this path would look up a follow-up candidate that was never there and
+    // fail it as SOURCE_CHANGED.
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "KBotFollowupJob" WHERE "status" = 'PENDING' AND "category" = 'FOLLOWUP' ORDER BY "createdAt" FOR UPDATE SKIP LOCKED LIMIT 1`
     if (!rows[0]) return null
     const job = await tx.kBotFollowupJob.findUniqueOrThrow({ where: { id: rows[0].id } })
     const day = new Date(now.toISOString().slice(0, 10))
@@ -182,13 +194,23 @@ export async function processNextFollowup() {
 }
 
 export async function maintainFollowups() {
-  const stalePending = await prisma.kBotFollowupJob.findMany({ where: { status: 'PENDING', createdAt: { lt: new Date(Date.now() - 86_400_000) } }, take: 25 })
+  // Manual jobs only. A scheduled job sits in PENDING on purpose — quiet hours
+  // return it there — and it has no authorization to expire, so cancelling it
+  // as AUTHORIZATION_EXPIRED would quietly delete a greeting nobody withdrew.
+  const stalePending = await prisma.kBotFollowupJob.findMany({ where: { category: 'FOLLOWUP', status: 'PENDING', createdAt: { lt: new Date(Date.now() - 86_400_000) } }, take: 25 })
   for (const job of stalePending) await terminal(job.id, 'CANCELLED', 'AUTHORIZATION_EXPIRED')
   await prisma.kBotFollowupJob.updateMany({ where: { status: { in: ['ACCEPTED', 'DISPATCHING'] }, createdAt: { lt: new Date(Date.now() - 86_400_000) } }, data: { status: 'UNKNOWN', errorCode: 'SEND_UNCONFIRMED' } })
-  const expired = await prisma.kBotFollowupJob.findMany({ where: { status: { in: ['PREPARING', 'CANCEL_REQUESTED'] }, leaseExpiresAt: { lt: new Date() } }, take: 25 })
+  // A scheduled lease has its own owner, which returns it to PENDING rather
+  // than failing it: nothing was generated, so there is nothing to give up on.
+  const expired = await prisma.kBotFollowupJob.findMany({ where: { category: 'FOLLOWUP', status: { in: ['PREPARING', 'CANCEL_REQUESTED'] }, leaseExpiresAt: { lt: new Date() } }, take: 25 })
   for (const job of expired) await terminal(job.id, 'FAILED', 'PREPARATION_EXPIRED')
   await reconcileFollowups()
-  const jobs = await prisma.kBotFollowupJob.findMany({ where: { notifiedAt: null, status: { in: ['SENT', 'DELIVERED', 'READ', 'FAILED', 'CANCELLED', 'UNKNOWN'] } }, take: 50,
+  // Manual batches only. A scheduled message is its own batch of one, so this
+  // would post a separate "Resultado do follow-up" notification per birthday —
+  // twenty greetings, twenty notifications, all mislabelled and all pointing at
+  // the wrong screen. What was sent and what was held back is exactly what
+  // /agent/kbot/agendadas shows.
+  const jobs = await prisma.kBotFollowupJob.findMany({ where: { category: 'FOLLOWUP', notifiedAt: null, status: { in: ['SENT', 'DELIVERED', 'READ', 'FAILED', 'CANCELLED', 'UNKNOWN'] } }, take: 50,
     select: { batchId: true, agentId: true } })
   for (const batch of new Map(jobs.map(j => [j.batchId, j])).values()) {
     await prisma.$transaction(async tx => {
