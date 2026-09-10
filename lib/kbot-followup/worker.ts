@@ -205,7 +205,12 @@ export async function maintainFollowups() {
   const expired = await prisma.kBotFollowupJob.findMany({ where: { category: 'FOLLOWUP', status: { in: ['PREPARING', 'CANCEL_REQUESTED'] }, leaseExpiresAt: { lt: new Date() } }, take: 25 })
   for (const job of expired) await terminal(job.id, 'FAILED', 'PREPARATION_EXPIRED')
   await reconcileFollowups()
-  const jobs = await prisma.kBotFollowupJob.findMany({ where: { notifiedAt: null, status: { in: ['SENT', 'DELIVERED', 'READ', 'FAILED', 'CANCELLED', 'UNKNOWN'] } }, take: 50,
+  // Manual batches only. A scheduled message is its own batch of one, so this
+  // would post a separate "Resultado do follow-up" notification per birthday —
+  // twenty greetings, twenty notifications, all mislabelled and all pointing at
+  // the wrong screen. What was sent and what was held back is exactly what
+  // /agent/kbot/agendadas shows.
+  const jobs = await prisma.kBotFollowupJob.findMany({ where: { category: 'FOLLOWUP', notifiedAt: null, status: { in: ['SENT', 'DELIVERED', 'READ', 'FAILED', 'CANCELLED', 'UNKNOWN'] } }, take: 50,
     select: { batchId: true, agentId: true } })
   for (const batch of new Map(jobs.map(j => [j.batchId, j])).values()) {
     await prisma.$transaction(async tx => {
