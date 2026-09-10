@@ -505,6 +505,8 @@ model User {
   requestedEmailChanges     AdminEmailChangeRequest[]   @relation("AdminEmailChangeRequester")
   adminAccessesProvisioned  AdminProvisionedAccess[]    @relation("AdminProvisionedAccessCreator")
   adminAccessesUpdated      AdminProvisionedAccess[]    @relation("AdminProvisionedAccessUpdater")
+  marketingLeads            MarketingLead[]            @relation("MarketingLeadOwner")
+  marketingLeadNotes        MarketingLeadNote[]        @relation("MarketingLeadNoteAuthor")
 
   @@index([banned])
   @@map("user")
@@ -789,15 +791,88 @@ model PlatformAddonSubscription {
   @@index([stripePriceId])
 }
 
-/// Prospective founders who requested access. Leads do not create accounts,
-/// enrollments, or trials until the separate onboarding process begins.
-model FounderLead {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  phone     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum MarketingLeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  LOST
+}
+
+enum MarketingCampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum MarketingCampaignChannel {
+  ORGANIC
+  META_ADS
+  GOOGLE_ADS
+  EMAIL
+  WHATSAPP
+  OTHER
+}
+
+model MarketingCampaign {
+  id          String                   @id @default(cuid())
+  slug        String                   @unique
+  name        String
+  description String?
+  channel     MarketingCampaignChannel @default(ORGANIC)
+  status      MarketingCampaignStatus  @default(DRAFT)
+  budgetCents Int?
+  startsAt    DateTime?
+  endsAt      DateTime?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  leads       MarketingLead[]
+
+  @@index([status, createdAt])
+}
+
+/// Captured contacts, independent of accounts, enrollment and trial access.
+/// Retains the original table so existing founders and old deployments coexist.
+model MarketingLead {
+  id            String              @id @default(cuid())
+  name          String
+  email         String              @unique(map: "FounderLead_email_key")
+  phone         String
+  status        MarketingLeadStatus @default(NEW)
+  campaignId    String              @default("founders-program")
+  source        String              @default("FOUNDERS")
+  ownerId       String?
+  nextContactAt DateTime?
+  utmSource     String?
+  utmMedium     String?
+  utmCampaign   String?
+  utmContent    String?
+  utmTerm       String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  campaign      MarketingCampaign  @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  owner         User?              @relation("MarketingLeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  notes         MarketingLeadNote[]
+
+  @@index([createdAt, id])
+  @@index([status, createdAt])
+  @@index([campaignId, createdAt])
+  @@index([ownerId, nextContactAt])
+  @@map("FounderLead")
+}
+
+model MarketingLeadNote {
+  id        String        @id @default(cuid())
+  leadId    String
+  authorId  String?
+  body      String
+  createdAt DateTime      @default(now())
+  lead      MarketingLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  author    User?         @relation("MarketingLeadNoteAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, createdAt])
+  @@index([authorId])
 }
 
 /// Marks accounts created through the founders program. Its presence is the

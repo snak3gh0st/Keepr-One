@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 export type NavIconName =
+  | "megaphone"
   | "ai"
   | "grid"
   | "hierarchy"
@@ -17,6 +18,12 @@ export type NavIconName =
   | "settings";
 
 const ICON_PATHS: Record<NavIconName, ReactNode> = {
+  megaphone: (
+    <>
+      <path d="m5 9 13-5v16L5 15H3V9h2ZM6 15l2 6h3l-2-5M21 9v6" />
+      <path d="M5 9v6" />
+    </>
+  ),
   ai: (
     <>
       <rect x="5" y="6" width="14" height="14" rx="5" />

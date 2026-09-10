@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   headers: vi.fn(),
   consumeRateLimit: vi.fn(),
   createMany: vi.fn(),
+  campaignFind: vi.fn(),
 }))
 
 vi.mock('next/headers', () => ({ headers: mocks.headers }))
@@ -11,10 +12,15 @@ vi.mock('@/lib/founder-rate-limit', () => ({
   consumeFounderRegistrationRateLimit: mocks.consumeRateLimit,
 }))
 vi.mock('@/lib/prisma', () => ({
-  prisma: { founderLead: { createMany: mocks.createMany } },
+  prisma: { marketingLead: { createMany: mocks.createMany }, marketingCampaign: { findUnique: mocks.campaignFind } },
 }))
 
 import { registerFounderLeadAction } from './lead-actions'
+
+const attribution = {
+  source: 'FOUNDERS', campaignId: 'founders-program',
+  utmSource: null, utmMedium: null, utmCampaign: null, utmContent: null, utmTerm: null,
+}
 
 function registrationForm(overrides: Record<string, string> = {}) {
   const form = new FormData()
@@ -33,6 +39,7 @@ describe('registerFounderLeadAction', () => {
     mocks.headers.mockResolvedValue(new Headers({ 'x-forwarded-for': '203.0.113.8' }))
     mocks.consumeRateLimit.mockResolvedValue({ allowed: true })
     mocks.createMany.mockResolvedValue({ count: 1 })
+    mocks.campaignFind.mockResolvedValue(null)
   })
 
   afterEach(() => {
@@ -48,7 +55,7 @@ describe('registerFounderLeadAction', () => {
 
     expect(result).toEqual({ ok: true })
     expect(mocks.createMany).toHaveBeenCalledExactlyOnceWith({
-      data: [{ name: 'Maria Founder', email: 'maria@example.com', phone: '+12125550100' }],
+      data: [{ name: 'Maria Founder', email: 'maria@example.com', phone: '+12125550100', ...attribution }],
       skipDuplicates: true,
     })
   })
@@ -61,9 +68,38 @@ describe('registerFounderLeadAction', () => {
       phone: '(305) 555-0100',
     }))).toEqual({ ok: true })
     expect(mocks.createMany).toHaveBeenCalledExactlyOnceWith({
-      data: [{ name: 'Another Name', email: 'maria@example.com', phone: '+13055550100' }],
+      data: [{ name: 'Another Name', email: 'maria@example.com', phone: '+13055550100', ...attribution }],
       skipDuplicates: true,
     })
+  })
+
+  it('routes campaign attribution while keeping source and account fields server-controlled', async () => {
+    mocks.campaignFind.mockResolvedValue({ id: 'campaign-1' })
+    expect(await registerFounderLeadAction(registrationForm({
+      marketing_campaign: 'fall-launch', utm_source: '  instagram  ', utm_medium: 'paid_social',
+      utm_campaign: 'fall', utm_content: 'reel-1', utm_term: 'advisor',
+      status: 'CONVERTED', ownerId: 'fake-admin', source: 'OVERRIDE',
+    }))).toEqual({ ok: true })
+    expect(mocks.campaignFind).toHaveBeenCalledWith({ where: { slug: 'fall-launch' }, select: { id: true } })
+    expect(mocks.createMany).toHaveBeenCalledWith({
+      data: [{
+        name: 'Maria Founder', email: 'maria@example.com', phone: '+12125550100',
+        campaignId: 'campaign-1', source: 'FOUNDERS', utmSource: 'instagram', utmMedium: 'paid_social',
+        utmCampaign: 'fall', utmContent: 'reel-1', utmTerm: 'advisor',
+      }], skipDuplicates: true,
+    })
+  })
+
+  it('falls back to the founders program for an unknown campaign', async () => {
+    await registerFounderLeadAction(registrationForm({ marketing_campaign: 'missing' }))
+    expect(mocks.createMany).toHaveBeenCalledWith(expect.objectContaining({ data: [expect.objectContaining({ campaignId: 'founders-program' })] }))
+  })
+
+  it('keeps first-touch attribution and lead management intact on duplicate submission', async () => {
+    mocks.createMany.mockResolvedValue({ count: 0 })
+    mocks.campaignFind.mockResolvedValue({ id: 'another-campaign' })
+    expect(await registerFounderLeadAction(registrationForm({ marketing_campaign: 'new-campaign' }))).toEqual({ ok: true })
+    expect(mocks.createMany).toHaveBeenCalledWith(expect.objectContaining({ skipDuplicates: true }))
   })
 
   it('returns field errors without persisting an invalid lead', async () => {

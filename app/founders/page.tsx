@@ -29,7 +29,16 @@ export const metadata: Metadata = {
   },
 };
 
-export default function FoundersPage() {
+export default async function FoundersPage({ searchParams }: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
+  const params = await searchParams;
+  const attribution = Object.fromEntries(
+    ["marketing_campaign", "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"].map((key) => {
+      const raw = params[key];
+      return [key, (Array.isArray(raw) ? raw[0] ?? "" : raw ?? "").slice(0, 200)];
+    }),
+  );
   return (
     <FoundersShell>
       <section className={styles.signup} aria-labelledby="founders-title">
@@ -74,7 +83,7 @@ export default function FoundersPage() {
             </p>
           </div>
         </div>
-        <FounderLeadForm />
+        <FounderLeadForm attribution={attribution} />
       </section>
     </FoundersShell>
   );

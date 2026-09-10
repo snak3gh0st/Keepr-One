@@ -59,6 +59,7 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
   ADMIN: [
     { href: "/admin", labelKey: "nav.dashboard", icon: "grid", groupKey: "nav.group.platform" },
     { href: "/admin/users", labelKey: "nav.users", icon: "users", groupKey: "nav.group.platform" },
+    { href: "/admin/marketing", labelKey: "nav.marketing", icon: "megaphone", groupKey: "nav.group.platform" },
   ],
   AGENT: [
     { href: "/agent", labelKey: "nav.today", icon: "grid", groupKey: "nav.group.operations", module: "TODAY" },
@@ -104,6 +105,7 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
 const PAGE_NAMES: Record<string, MessageKey> = {
   "/admin": "page.admin",
   "/admin/users": "page.adminUsers",
+  "/admin/marketing": "page.adminMarketing",
   "/admin/users/new": "page.adminUserCreate",
   "/admin/agents": "page.adminAgents",
   "/admin/pipeline": "page.adminPipeline",
@@ -138,6 +140,7 @@ const PAGE_NAMES: Record<string, MessageKey> = {
 
 function resolvePageName(pathname: string, role: "ADMIN" | "AGENT" | "CLIENT", t: (key: MessageKey) => string) {
   if (PAGE_NAMES[pathname]) return t(PAGE_NAMES[pathname]);
+  if (pathname.startsWith("/admin/marketing/")) return t("page.adminMarketing");
   if (/^\/admin\/users\/[^/]+$/.test(pathname)) return t("page.adminUserDetail");
   if (/^\/agent\/cases\/[^/]+$/.test(pathname)) return t("page.caseDetail");
   if (/^\/agent\/policies\/[^/]+$/.test(pathname)) return t("page.policyDetail");
@@ -184,7 +187,7 @@ export function Shell({
     return true;
   });
   const mobileItemWidth =
-    role === "AGENT" ? "w-1/5 min-w-[68px]" : role === "CLIENT" ? "w-full" : "w-1/2 min-w-[92px]";
+    role === "AGENT" ? "w-1/5 min-w-[68px]" : role === "CLIENT" ? "w-full" : "w-1/3 min-w-0";
   const currentPage = resolvePageName(pathname, role, t);
   const roleLabel =
     role === "ADMIN"
