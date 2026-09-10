@@ -89,6 +89,15 @@ export async function changeContactPreference(agentId: string, candidateId: stri
     const data = action === 'optout' ? { optedOut: true } : action === 'restore' ? { optedOut: false, snoozedUntil: null }
       : action === 'manual' ? { lastManualAt: new Date() } : { snoozedUntil: new Date(Date.now() + 86_400_000) }
     await tx.kBotContactPreference.upsert({ where: { agentId_subjectKey: { agentId, subjectKey } }, create: { agentId, subjectKey, ...data }, update: data })
+    // Consent changes are logged; `manual` is not one — it records that the
+    // agent spoke to the person, which silences the queue for a week but is
+    // not the person asking anything.
+    const logged = action === 'optout' ? 'OPT_OUT' : action === 'restore' ? 'OPT_IN' : action === 'snooze' ? 'SNOOZE' : null
+    if (logged) {
+      await tx.kBotContactConsentEvent.create({
+        data: { agentId, subjectKey, action: logged, source: 'AGENT_UI', snoozedUntil: data.snoozedUntil ?? null },
+      })
+    }
     if (action === 'restore' && subjectKey !== candidate.subjectKey) {
       await tx.kBotContactPreference.updateMany({ where: { agentId, subjectKey: candidate.subjectKey }, data })
     }

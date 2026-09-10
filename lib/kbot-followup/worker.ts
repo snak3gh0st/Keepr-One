@@ -5,18 +5,25 @@ import { getFollowupCandidates } from './candidates'
 import { generateFollowup, GenerationFailure } from './generation'
 import { lockAgent, settleJob, settleGeneration } from './credits'
 import { aiEnabled, FollowupError, positiveInteger, type FollowupReason } from './domain'
-import { hasRecentOutgoing, messagingTransport, providerOutcome, requestedOptOut } from './transport'
+import { hasRecentOutgoing, messagingTransport, optOutMessage, providerOutcome, requestedOptOut } from './transport'
 
 const receiptProgress: Record<string, number> = { SENT: 1, DELIVERED: 2, READ: 3 }
 const unconfirmedStates = ['DISPATCHING', 'ACCEPTED', 'UNKNOWN']
 
 async function checkOptOut(agentId: string, phone: string, messages: Parameters<typeof requestedOptOut>[0]) {
-  if (!requestedOptOut(messages)) return
+  const evidence = optOutMessage(messages)
+  if (evidence === null) return
   // Preserve the request after the incoming STOP scrolls out of provider history.
   await prisma.$transaction(async tx => {
     await lockAgent(tx, agentId)
     await tx.kBotContactPreference.upsert({ where: { agentId_subjectKey: { agentId, subjectKey: phone } },
       create: { agentId, subjectKey: phone, optedOut: true }, update: { optedOut: true } })
+    // The projection says the messages stop; the log says the person asked, in
+    // their own words, on this date. Once sends happen without a human pressing
+    // a button, that second record is the one that has to exist.
+    await tx.kBotContactConsentEvent.create({
+      data: { agentId, subjectKey: phone, action: 'OPT_OUT', source: 'WHATSAPP_REPLY', evidence },
+    })
   })
   throw new FollowupError('OPTED_OUT')
 }

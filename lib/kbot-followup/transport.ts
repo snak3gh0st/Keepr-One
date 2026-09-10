@@ -109,9 +109,18 @@ export function providerOutcome(message: Obj): 'SENT' | 'DELIVERED' | 'READ' | '
   return ['SENT', 'DELIVERED', 'READ'].includes(status) ? status as 'SENT' | 'DELIVERED' | 'READ' : null
 }
 
+const OPT_OUT_TEXT = /^(stop|unsubscribe|pare|parar|sair|não (?:me )?(?:mande|envie)(?: mais)? mensagens)[.!\s]*$/i
+
 export function requestedOptOut(messages: Obj[]) {
-  return messages.some(m => (m.message_type === 0 || m.message_type === 'incoming') &&
-    /^(stop|unsubscribe|pare|parar|sair|não (?:me )?(?:mande|envie)(?: mais)? mensagens)[.!\s]*$/i.test(String(m.content ?? '').trim()))
+  return optOutMessage(messages) !== null
+}
+
+/// The message that was read as a stop request, so the consent log can record
+/// what the person actually wrote rather than just that something matched.
+export function optOutMessage(messages: Obj[]): string | null {
+  const found = messages.find(m => (m.message_type === 0 || m.message_type === 'incoming') &&
+    OPT_OUT_TEXT.test(String(m.content ?? '').trim()))
+  return found ? String(found.content ?? '').trim() : null
 }
 
 export function hasRecentOutgoing(messages: Obj[], now = Date.now()) {
