@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   ingest: vi.fn(),
   ingestDeps: vi.fn(),
   syncCredits: vi.fn(),
+  backfillContacts: vi.fn(),
 }))
 
 vi.mock('@/lib/national-life/local-connector/config', () => ({
@@ -34,6 +35,9 @@ vi.mock('@/lib/national-life/portfolio-ingest', () => ({
 }))
 vi.mock('@/lib/national-life/portfolio-ingest-prisma', () => ({
   prismaIngestDeps: mocks.ingestDeps,
+}))
+vi.mock('@/lib/national-life/client-contact-backfill-prisma', () => ({
+  backfillClientContactFromServiceLogSafely: mocks.backfillContacts,
 }))
 vi.mock('@/lib/national-life/promotion-credit-sync', () => ({
   syncStoredNationalLifePromotionCreditsForAgentSafely: mocks.syncCredits,
@@ -65,6 +69,10 @@ describe('local connector National Life stage completion route', () => {
     mocks.ingestDeps.mockReturnValue(dependencies)
     mocks.ingest.mockResolvedValue({ clientsCreated: 1, policiesUpserted: 2 })
     mocks.syncCredits.mockResolvedValue({ generated: 0 })
+    mocks.backfillContacts.mockResolvedValue({
+      planned: 0, clientsContactFilled: 0,
+      skipped: { unmatchedPolicy: 0, nameMismatch: 0, agentOwnPhone: 0 },
+    })
   })
 
   it('promotes only the exact signed terminal run', async () => {
@@ -77,6 +85,11 @@ describe('local connector National Life stage completion route', () => {
     expect(mocks.ingest).toHaveBeenCalledWith(dependencies, {
       agentId: 'agent-1', deviceId: 'device-1', runId: 'run-1', terminal: true,
     })
+    // The contact backfill reads rows earlier stages wrote and clients the
+    // ingest above may have just created, so it only runs on a settled run.
+    expect(mocks.backfillContacts).toHaveBeenCalledWith(expect.anything(), { agentId: 'agent-1' })
+    // Its counts stay out of the response: the connector parses this body.
+    expect(await response.json()).not.toHaveProperty('contacts')
   })
 
   it('does not promote a non-terminal stage', async () => {
@@ -92,5 +105,6 @@ describe('local connector National Life stage completion route', () => {
     expect(mocks.ingest).toHaveBeenCalledWith(dependencies, {
       agentId: 'agent-1', deviceId: 'device-1', runId: 'run-1', terminal: false,
     })
+    expect(mocks.backfillContacts).not.toHaveBeenCalled()
   })
 })
