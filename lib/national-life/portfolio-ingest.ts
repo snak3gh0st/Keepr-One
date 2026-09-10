@@ -16,7 +16,13 @@ export type IngestDeps = {
    * landed.
    */
   loadInforceRows: (input: PortfolioRunScope) => Promise<(InforceRow & { sourceObservedAt?: Date })[] | null>
-  loadClients: (agentId: string) => Promise<{ id: string; name: string; dateOfBirth: Date | null }[]>
+  loadClients: (agentId: string) => Promise<{
+    id: string
+    name: string
+    dateOfBirth: Date | null
+    email: string | null
+    phone: string | null
+  }[]>
   createClient: (input: {
     agentId: string
     name: string
@@ -24,6 +30,19 @@ export type IngestDeps = {
     email: string | null
     phone: string | null
   }) => Promise<{ id: string }>
+  /**
+   * Fills contact gaps on a client the CRM already had. Scoped by agent so a
+   * carrier row can never reach another producer's record.
+   */
+  /// Resolves to whether a row actually changed, so the report counts writes
+  /// that landed rather than writes that were attempted: the field may have
+  /// been filled between the snapshot read and this update.
+  updateClientContact: (input: {
+    agentId: string
+    clientId: string
+    email: string | null
+    phone: string | null
+  }) => Promise<boolean>
   upsertPolicy: (input: PlannedPolicy & { agentId: string; clientId: string; sourceObservedAt?: Date }) => Promise<void>
 }
 
@@ -35,6 +54,7 @@ export type PortfolioRunScope = {
 
 export type IngestReport = {
   clientsCreated: number
+  clientsContactFilled: number
   policiesUpserted: number
   needsFaceAmount: number
   lowConfidence: { policyNumber: string; clientId: string; name: string }[]
@@ -62,11 +82,28 @@ export async function ingestNationalLifePortfolio(
 
   const report: IngestReport = {
     clientsCreated: 0,
+    clientsContactFilled: 0,
     policiesUpserted: 0,
     needsFaceAmount: plan.needsFaceAmount.length,
     lowConfidence: plan.lowConfidence,
     discarded: plan.discarded.length,
     failed: [],
+  }
+
+  // Backfilling contact details must never cost the caller a policy. A client
+  // row that refuses the update leaves the gap for the next run to retry.
+  for (const contact of plan.clientsToUpdate) {
+    try {
+      const filled = await deps.updateClientContact({
+        agentId: input.agentId,
+        clientId: contact.clientId,
+        email: contact.email,
+        phone: contact.phone,
+      })
+      if (filled) report.clientsContactFilled += 1
+    } catch {
+      // Intentionally swallowed: the portfolio is the deliverable here.
+    }
   }
 
   const createdIdByKey = new Map<string, string>()

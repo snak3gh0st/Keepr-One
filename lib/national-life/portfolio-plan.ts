@@ -38,10 +38,24 @@ export type PlannedPolicy = {
 
 export type LowConfidenceMatch = { policyNumber: string; clientId: string; name: string }
 
+/// Contact details the carrier holds for a client the CRM already knows.
+///
+/// Only ever emitted for a field the existing record leaves blank. An agent who
+/// typed a phone number is a better source than a carrier export, so this fills
+/// gaps and never overwrites — the ingestion has no way to tell a corrected
+/// number from a stale one, and silently replacing the agent's own work would
+/// be the worse failure.
+export type PlannedClientContact = {
+  clientId: string
+  email: string | null
+  phone: string | null
+}
+
 export type DiscardedEntry = DiscardedRow | { reason: 'MISSING_INSURED_NAME'; policyStatus: string | null }
 
 export type PortfolioIngestPlan = {
   clientsToCreate: PlannedClient[]
+  clientsToUpdate: PlannedClientContact[]
   policies: PlannedPolicy[]
   needsFaceAmount: string[]
   lowConfidence: LowConfidenceMatch[]
@@ -64,6 +78,7 @@ export function planPortfolioIngest(input: {
 
   const plan: PortfolioIngestPlan = {
     clientsToCreate: [],
+    clientsToUpdate: [],
     policies: [],
     needsFaceAmount: [],
     lowConfidence: [],
@@ -73,6 +88,9 @@ export function planPortfolioIngest(input: {
   // Clients planned in this same run must be visible to later policies, or two
   // policies of one person would plan that person twice.
   const plannedByKey = new Map<string, PlannedClient>()
+  // One entry per client, so two policies of the same person do not queue two
+  // writes for the same gap.
+  const contactGaps = new Map<string, PlannedClientContact>()
 
   for (const policy of reconciled) {
     if (!policy.insuredName) {
@@ -104,6 +122,7 @@ export function planPortfolioIngest(input: {
         clientRef = { kind: 'NEW', key }
       } else {
         clientRef = { kind: 'EXISTING', clientId: match.clientId }
+        planContactBackfill(plan, contactGaps, input.existingClients, match.clientId, policy)
         if (match.kind === 'MATCHED_LOW_CONFIDENCE') {
           plan.lowConfidence.push({
             policyNumber: policy.policyNumber,
@@ -132,4 +151,46 @@ export function planPortfolioIngest(input: {
   }
 
   return plan
+}
+
+
+/// Records a contact backfill for an already-known client.
+///
+/// A field is filled only when the CRM leaves it blank and the carrier supplies
+/// something. The first policy that offers a value wins: later rows for the same
+/// person carry the same contact details, and preferring a later one would just
+/// make the result depend on export order.
+function planContactBackfill(
+  plan: PortfolioIngestPlan,
+  gaps: Map<string, PlannedClientContact>,
+  existing: readonly ClientCandidate[],
+  clientId: string,
+  policy: { insuredEmail: string | null; insuredPhone: string | null },
+): void {
+  const current = existing.find((one) => one.id === clientId)
+  if (!current) return
+
+  const email = blank(current.email) ? trimmed(policy.insuredEmail) : null
+  const phone = blank(current.phone) ? trimmed(policy.insuredPhone) : null
+  if (!email && !phone) return
+
+  const queued = gaps.get(clientId)
+  if (queued) {
+    queued.email = queued.email ?? email
+    queued.phone = queued.phone ?? phone
+    return
+  }
+
+  const entry: PlannedClientContact = { clientId, email, phone }
+  gaps.set(clientId, entry)
+  plan.clientsToUpdate.push(entry)
+}
+
+function trimmed(value: string | null): string | null {
+  const text = value?.trim()
+  return text ? text : null
+}
+
+function blank(value: string | null | undefined): boolean {
+  return value === undefined || value === null || value.trim() === ''
 }

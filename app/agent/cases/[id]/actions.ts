@@ -593,11 +593,17 @@ export async function reviewKBotApplicationDossier(
   try {
     const agent = await getCurrentAgent()
     const entitlement = await getKBotApplicationEntitlement(agent.id)
+    // A paying subscriber whose feature is switched off must not be told they
+    // lack the add-on they bought. `entitled` alone cannot carry that
+    // difference downstream, so the distinction is raised here.
+    if (entitlement.unavailableReason === 'FEATURE_DISABLED') {
+      throw new Error('K_BOT_APPLICATION_DISABLED')
+    }
     const reviewed = await reviewApplicationDossier(prismaApplicationDossierRepository, {
       applicationId,
       agentId: agent.id,
       userId: agent.userId,
-      entitled: entitlement.entitled,
+      entitled: entitlement.available,
     })
     const application = await prisma.application.findFirst({
       where: { id: applicationId, insuranceCase: { assignedAgentId: agent.id } },
@@ -607,7 +613,9 @@ export async function reviewKBotApplicationDossier(
     return { ok: true, ready: true, missing: [], dossierHash: reviewed.dossierHash }
   } catch (error) {
     const code = error instanceof Error ? error.message : 'UNKNOWN'
-    const message = code === 'K_BOT_APPLICATION_ADDON_REQUIRED'
+    const message = code === 'K_BOT_APPLICATION_DISABLED'
+      ? await localizedMessage('A preparação no iGO está temporariamente indisponível.', 'Preparing in iGO is temporarily unavailable.')
+      : code === 'K_BOT_APPLICATION_ADDON_REQUIRED'
       ? await localizedMessage('Ative o add-on K-Bot Application para preparar este caso no iGO.', 'Activate the K-Bot Application add-on to prepare this case in iGO.')
       : code === 'APPLICATION_DOSSIER_INCOMPLETE'
         ? await localizedMessage('Complete as informações obrigatórias antes de revisar.', 'Complete the required information before reviewing.')
@@ -641,9 +649,15 @@ export async function prepareKBotApplicationDraft(
     ])
     if (!application) return actionError('Aplicação não encontrada.', 'Application not found.')
 
+    // A paying subscriber whose feature is switched off must not be told they
+    // lack the add-on they bought. `entitled` alone cannot carry that
+    // difference downstream, so the distinction is raised here.
+    if (entitlement.unavailableReason === 'FEATURE_DISABLED') {
+      throw new Error('K_BOT_APPLICATION_DISABLED')
+    }
     const commandInput = planApplicationDraftCommand(application, {
       agentId: agent.id,
-      entitled: entitlement.entitled,
+      entitled: entitlement.available,
       expiresAt: new Date(Date.now() + 60 * 60_000),
     })
     const issued = await issueConnectorCommand(prismaConnectorCommandRepository, commandInput)
@@ -677,7 +691,9 @@ export async function prepareKBotApplicationDraft(
       },
       data: { automationState: 'READY_TO_PREPARE', safeErrorCode: code.slice(0, 80) },
     })
-    const message = code === 'K_BOT_APPLICATION_ADDON_REQUIRED'
+    const message = code === 'K_BOT_APPLICATION_DISABLED'
+      ? await localizedMessage('A preparação no iGO está temporariamente indisponível.', 'Preparing in iGO is temporarily unavailable.')
+      : code === 'K_BOT_APPLICATION_ADDON_REQUIRED'
       ? await localizedMessage('Ative o add-on K-Bot Application antes de preparar no iGO.', 'Activate the K-Bot Application add-on before preparing in iGO.')
       : code === 'APPLICATION_NOT_REVIEWED' || code === 'APPLICATION_NOT_READY'
         ? await localizedMessage('Revise novamente as informações antes de preparar no iGO.', 'Review the information again before preparing it in iGO.')
