@@ -4,20 +4,20 @@ import { prisma } from '@/lib/prisma'
 import { lockAgent, settleJob, type Tx } from '@/lib/kbot-followup/credits'
 import { ACTIVE_JOB_STATES, COOLDOWN_MS, FollowupError, SENT_JOB_STATES } from '@/lib/kbot-followup/domain'
 import { hasRecentOutgoing, messagingTransport, requestedOptOut } from '@/lib/kbot-followup/transport'
+import { renderTemplate } from '@/lib/kbot-templates/variables'
+import { templateValuesFor } from '@/lib/kbot-templates/approval-view'
 import { evaluateSendGate } from './send-gate'
 import { SCHEDULED_CATEGORIES } from './scheduled-triggers'
 
 const LEASE_MS = 120_000
 const unconfirmedStates = ['DISPATCHING', 'ACCEPTED', 'UNKNOWN']
 
-/// The agent's own text, with the client's name in it.
-///
-/// Deliberately the only substitution there is. A scheduled message goes out
-/// over the agent's name without anyone reading it first, so the template is
-/// the message — nothing here composes prose the agent has not seen.
-export function renderTemplate(body: string, values: { customerName: string }): string {
-  return body.replace(/\{\{\s*name\s*\}\}/gi, values.customerName)
-}
+/// The text that goes out is produced by the same function that produced the
+/// text the agent read on the approval screen, and validated the template when
+/// it was saved. There is deliberately no second renderer here: one that knew a
+/// different set of variable names would send `{{primeiro_nome}}` verbatim to a
+/// client while the screen showed a filled-in name — which is exactly what the
+/// validation exists to prevent.
 
 /// Record a stop request before it scrolls out of the provider's history.
 ///
@@ -131,7 +131,15 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
     }
     if (hasRecentOutgoing(messages)) throw new FollowupError('RECENT_CONTACT')
 
-    const content = renderTemplate(template.body, { customerName: claimed.customerName })
+    const rendered = renderTemplate(
+      template.body,
+      templateValuesFor({ customerName: claimed.customerName, agentName: agent.user.name ?? '' }),
+    )
+    // Total by construction: a template that cannot be filled has no text, and
+    // a message with no text does not go out. The save path refuses unknown
+    // variables, so reaching here means the template changed underneath.
+    if (!rendered.ok) throw new FollowupError('TEMPLATE_UNRENDERABLE')
+    const content = rendered.text
 
     const dispatch = await prisma.$transaction(async (tx) => {
       await lockAgent(tx, claimed.agentId)
@@ -208,9 +216,15 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
       await prisma.kBotFollowupJob.updateMany({ where: { id: claimed.id, status: { in: unconfirmedStates } }, data: {
         status: 'UNKNOWN', errorCode: 'SEND_UNCONFIRMED',
       } })
-    } else {
-      await terminal(claimed.id, 'FAILED', error instanceof FollowupError ? error.code : 'PREPARATION_FAILED')
+      // The provider already has the text, so this turn did put a message on
+      // the wire and counts against the send budget.
+      return { outcome: 'SENT', id: claimed.id }
     }
+    await terminal(claimed.id, 'FAILED', error instanceof FollowupError ? error.code : 'PREPARATION_FAILED')
+    // Nothing was sent. Reporting this as a send would let a queue of failures
+    // — a withdrawn template, a contact who opted out — spend the whole budget
+    // and stop the pass with the sendable messages still waiting.
+    return { outcome: 'SETTLED', id: claimed.id }
   }
   return { outcome: 'SENT', id: claimed.id }
 }

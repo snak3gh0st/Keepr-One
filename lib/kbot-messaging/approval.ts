@@ -22,6 +22,7 @@ export type ApprovalResult = { released: number }
 export async function approveScheduledMessages(
   agentId: string,
   jobIds: readonly string[],
+  now = new Date(),
 ): Promise<ApprovalResult> {
   if (jobIds.length === 0) return { released: 0 }
   const released = await prisma.$transaction(async (tx) => {
@@ -32,6 +33,10 @@ export async function approveScheduledMessages(
         agentId,
         category: { in: [...SCHEDULED_CATEGORIES] },
         status: AWAITING_APPROVAL,
+        // The window is re-checked here, not only by the sweep. A tab left open
+        // overnight would otherwise release a greeting that expired hours ago,
+        // in the gap before the sweep next runs.
+        createdAt: { gte: new Date(now.getTime() - APPROVAL_WINDOW_MS) },
       },
       data: { status: 'PENDING' },
     })

@@ -48,6 +48,14 @@ describe('approveScheduledMessages', () => {
     expect(mocks.updateMany).not.toHaveBeenCalled()
   })
 
+  it('refuses a proposal that already expired, without waiting for the sweep', async () => {
+    // A tab left open overnight must not release a greeting that timed out
+    // hours ago just because the sweep has not come round yet.
+    await approveScheduledMessages('a1', ['job1'], new Date('2026-03-14T12:00:00Z'))
+    expect(mocks.updateMany.mock.calls[0][0].where.createdAt.gte)
+      .toEqual(new Date('2026-03-12T12:00:00Z'))
+  })
+
   it('is scoped to the agent who is approving', async () => {
     await approveScheduledMessages('a1', ['job1'])
     expect(mocks.updateMany.mock.calls[0][0].where.agentId).toBe('a1')
