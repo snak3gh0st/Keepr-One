@@ -13,6 +13,10 @@ export type ClientCandidate = {
   id: string | null
   name: string
   dateOfBirth: Date | null
+  /// Contact fields take no part in matching. They ride along so the planner can
+  /// see which existing records are missing a phone or email the carrier knows.
+  email?: string | null
+  phone?: string | null
 }
 
 export type IdentityMatch =

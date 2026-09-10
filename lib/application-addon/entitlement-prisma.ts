@@ -1,13 +1,23 @@
 import 'server-only'
 
 import { prisma } from '@/lib/prisma'
+import { isKBotApplicationEnabled } from './config'
 import { hasCurrentKBotApplicationEntitlement } from './entitlement'
 
-export async function getKBotApplicationEntitlement(agentId: string): Promise<{
+export type KBotApplicationEntitlement = {
+  /** The agent holds a current paid entitlement. Independent of the switch. */
   entitled: boolean
+  /** The feature may actually be used: entitled AND globally enabled. */
+  available: boolean
+  /** Why `available` is false while `entitled` is true. */
+  unavailableReason: 'FEATURE_DISABLED' | null
   subscriptionId: string | null
   status: string | null
-}> {
+}
+
+export async function getKBotApplicationEntitlement(
+  agentId: string,
+): Promise<KBotApplicationEntitlement> {
   const subscriptions = await prisma.platformAddonSubscription.findMany({
     where: { agentId, addon: 'K_BOT_APPLICATION' },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -22,8 +32,14 @@ export async function getKBotApplicationEntitlement(agentId: string): Promise<{
     hasCurrentKBotApplicationEntitlement(subscription),
   )
   const latest = current ?? subscriptions[0] ?? null
+  const entitled = current !== undefined
+  const enabled = isKBotApplicationEnabled()
   return {
-    entitled: current !== undefined,
+    entitled,
+    available: entitled && enabled,
+    // Only report the switch to someone who would otherwise be allowed in;
+    // an agent without a subscription is simply not entitled.
+    unavailableReason: entitled && !enabled ? 'FEATURE_DISABLED' : null,
     subscriptionId: latest?.id ?? null,
     status: latest?.status ?? null,
   }
@@ -31,5 +47,8 @@ export async function getKBotApplicationEntitlement(agentId: string): Promise<{
 
 export async function requireKBotApplicationEntitlement(agentId: string): Promise<void> {
   const entitlement = await getKBotApplicationEntitlement(agentId)
-  if (!entitlement.entitled) throw new Error('K_BOT_APPLICATION_ADDON_REQUIRED')
+  if (entitlement.unavailableReason === 'FEATURE_DISABLED') {
+    throw new Error('K_BOT_APPLICATION_DISABLED')
+  }
+  if (!entitlement.available) throw new Error('K_BOT_APPLICATION_ADDON_REQUIRED')
 }
