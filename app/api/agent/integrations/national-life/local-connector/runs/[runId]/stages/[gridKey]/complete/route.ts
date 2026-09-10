@@ -99,7 +99,13 @@ export async function POST(
     // Deliberately absent from the response: the connector has no use for the
     // count, and the enrichment must not change a contract it parses.
     if (result.terminal === true) {
-      await backfillClientContactFromServiceLogSafely(prisma, { agentId: device.agentId })
+      // Not awaited: this is the connector's own handshake, and the enrichment
+      // reads the agent's whole book and writes one client at a time. On a
+      // 10k-policy account that is seconds the connector would spend waiting
+      // for work whose result it never reads. `...Safely` swallows every
+      // failure, so nothing here can reject unhandled, and a pass lost to a
+      // restart simply happens on the next sync.
+      void backfillClientContactFromServiceLogSafely(prisma, { agentId: device.agentId })
     }
     const promotionCredits = result.terminal === true
       ? await syncStoredNationalLifePromotionCreditsForAgentSafely(
