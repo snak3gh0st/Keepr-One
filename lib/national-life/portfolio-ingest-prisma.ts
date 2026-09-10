@@ -97,18 +97,22 @@ export function prismaIngestDeps(prisma: PrismaClient): IngestDeps {
     /// checks repeat here because the plan was built from a snapshot read before
     /// this write, and an agent may have filled the field in between.
     updateClientContact: async ({ agentId, clientId, email, phone }) => {
+      let changed = 0
       if (email) {
-        await prisma.client.updateMany({
+        const filled = await prisma.client.updateMany({
           where: { id: clientId, assignedAgentId: agentId, OR: [{ email: null }, { email: '' }] },
           data: { email },
         })
+        changed += filled.count
       }
       if (phone) {
-        await prisma.client.updateMany({
+        const filled = await prisma.client.updateMany({
           where: { id: clientId, assignedAgentId: agentId, OR: [{ phone: null }, { phone: '' }] },
           data: { phone },
         })
+        changed += filled.count
       }
+      return changed > 0
     },
 
     createClient: async ({ agentId, name, dateOfBirth, email, phone }) =>

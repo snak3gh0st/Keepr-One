@@ -593,6 +593,12 @@ export async function reviewKBotApplicationDossier(
   try {
     const agent = await getCurrentAgent()
     const entitlement = await getKBotApplicationEntitlement(agent.id)
+    // A paying subscriber whose feature is switched off must not be told they
+    // lack the add-on they bought. `entitled` alone cannot carry that
+    // difference downstream, so the distinction is raised here.
+    if (entitlement.unavailableReason === 'FEATURE_DISABLED') {
+      throw new Error('K_BOT_APPLICATION_DISABLED')
+    }
     const reviewed = await reviewApplicationDossier(prismaApplicationDossierRepository, {
       applicationId,
       agentId: agent.id,
@@ -643,6 +649,12 @@ export async function prepareKBotApplicationDraft(
     ])
     if (!application) return actionError('Aplicação não encontrada.', 'Application not found.')
 
+    // A paying subscriber whose feature is switched off must not be told they
+    // lack the add-on they bought. `entitled` alone cannot carry that
+    // difference downstream, so the distinction is raised here.
+    if (entitlement.unavailableReason === 'FEATURE_DISABLED') {
+      throw new Error('K_BOT_APPLICATION_DISABLED')
+    }
     const commandInput = planApplicationDraftCommand(application, {
       agentId: agent.id,
       entitled: entitlement.available,

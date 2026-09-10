@@ -34,7 +34,7 @@ type ExistingClient = {
   phone?: string | null
 }
 
-function harness(rows: InforceRow[], existing: ExistingClient[] = []) {
+function harness(rows: InforceRow[], existing: ExistingClient[] = [], contactWriteLands = true) {
   const createdClients: { name: string }[] = []
   const upserted: { sourceExternalId: string; faceAmount: unknown }[] = []
   const upsertedAgentIds: string[] = []
@@ -52,6 +52,7 @@ function harness(rows: InforceRow[], existing: ExistingClient[] = []) {
     },
     updateClientContact: async ({ clientId, email, phone }) => {
       contactUpdates.push({ clientId, email, phone })
+      return contactWriteLands
     },
     upsertPolicy: async (input) => {
       upserted.push({ sourceExternalId: input.sourceExternalId, faceAmount: input.faceAmount })
@@ -184,6 +185,21 @@ describe('ingestPortfolioIfRunFinished', () => {
       { clientId: 'client-1', email: 'enrico@example.com', phone: '561-726-0051' },
     ])
     expect(report).toMatchObject({ clientsCreated: 0, clientsContactFilled: 1 })
+  })
+
+  it('does not count a contact write the guarded update refused', async () => {
+    // The plan is built from a snapshot read before the write, so the agent may
+    // have filled the field in between and the update matches no row. Counting
+    // the attempt would report contacts the book never gained.
+    const h = harness(
+      [row({ insuredPhoneNumber: '561-726-0051', insuredEmail: 'enrico@example.com' })],
+      [{ id: 'client-1', name: 'Enrico Abdalla', dateOfBirth: null, email: null, phone: null }],
+      false,
+    )
+    const report = await ingestNationalLifePortfolio(h.deps, runScope)
+
+    expect(h.contactUpdates).toHaveLength(1)
+    expect(report).toMatchObject({ clientsContactFilled: 0 })
   })
 
   it('never overwrites contact details the agent already recorded', async () => {

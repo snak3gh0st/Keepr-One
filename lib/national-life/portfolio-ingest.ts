@@ -34,12 +34,15 @@ export type IngestDeps = {
    * Fills contact gaps on a client the CRM already had. Scoped by agent so a
    * carrier row can never reach another producer's record.
    */
+  /// Resolves to whether a row actually changed, so the report counts writes
+  /// that landed rather than writes that were attempted: the field may have
+  /// been filled between the snapshot read and this update.
   updateClientContact: (input: {
     agentId: string
     clientId: string
     email: string | null
     phone: string | null
-  }) => Promise<void>
+  }) => Promise<boolean>
   upsertPolicy: (input: PlannedPolicy & { agentId: string; clientId: string; sourceObservedAt?: Date }) => Promise<void>
 }
 
@@ -91,13 +94,13 @@ export async function ingestNationalLifePortfolio(
   // row that refuses the update leaves the gap for the next run to retry.
   for (const contact of plan.clientsToUpdate) {
     try {
-      await deps.updateClientContact({
+      const filled = await deps.updateClientContact({
         agentId: input.agentId,
         clientId: contact.clientId,
         email: contact.email,
         phone: contact.phone,
       })
-      report.clientsContactFilled += 1
+      if (filled) report.clientsContactFilled += 1
     } catch {
       // Intentionally swallowed: the portfolio is the deliverable here.
     }
