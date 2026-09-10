@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { isValidIanaTimeZone } from '@/lib/calendar/time'
 import {
   SCHEDULING_DEFAULT_PUBLIC_RANGE_DAYS,
+  SCHEDULING_MAX_AGENT_SLOTS,
   SCHEDULING_MAX_PUBLIC_RANGE_DAYS,
   SCHEDULING_SLUG_PATTERN,
 } from './constants'
@@ -62,6 +63,19 @@ export const publicSlotsQuerySchema = z.strictObject({
   timeZone: z.string().trim().min(1).max(100).refine(isValidIanaTimeZone),
 })
 
+/**
+ * Query for the agentId-keyed slots route. `agentId` stays optional so the
+ * default is always the signed-in caller; the route still scopes it before use.
+ */
+export const agentSchedulingSlotsQuerySchema = z.strictObject({
+  agentId: z.string().trim().min(1).max(100).optional(),
+  days: z.coerce.number().int().min(1).max(SCHEDULING_MAX_PUBLIC_RANGE_DAYS)
+    .default(SCHEDULING_DEFAULT_PUBLIC_RANGE_DAYS),
+  limit: z.coerce.number().int().min(1).max(SCHEDULING_MAX_AGENT_SLOTS)
+    .default(SCHEDULING_MAX_AGENT_SLOTS),
+  timeZone: z.string().trim().min(1).max(100).refine(isValidIanaTimeZone).optional(),
+})
+
 const absoluteInstantSchema = z.string().trim().max(64).refine((value) => {
   if (!/(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return false
   return Number.isFinite(new Date(value).getTime())
@@ -78,5 +92,6 @@ export const publicBookingInputSchema = z.strictObject({
   hp: z.literal('').optional(),
 })
 
+export type AgentSchedulingSlotsQuery = z.infer<typeof agentSchedulingSlotsQuerySchema>
 export type SchedulingPageInput = z.infer<typeof schedulingPageInputSchema>
 export type PublicBookingInput = z.infer<typeof publicBookingInputSchema>

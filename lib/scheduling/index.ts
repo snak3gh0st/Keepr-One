@@ -1,4 +1,5 @@
 export * from './availability'
+export * from './agent-availability'
 export * from './bookings'
 export * from './constants'
 export * from './errors'
