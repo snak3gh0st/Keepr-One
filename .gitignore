@@ -45,3 +45,9 @@ next-env.d.ts
 
 # Agent scratch, not project source.
 .superpowers/
+
+# Generated architecture artifacts (kept on disk, not versioned).
+# public-site/ carries its own nested .git checkout.
+/docs/architecture/*.visual-check.*
+/docs/architecture/public-site/
+/docs/architecture/keeprone-architecture.archify.json
