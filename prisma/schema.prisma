@@ -789,6 +789,17 @@ model PlatformAddonSubscription {
   @@index([stripePriceId])
 }
 
+/// Prospective founders who requested access. Leads do not create accounts,
+/// enrollments, or trials until the separate onboarding process begins.
+model FounderLead {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  phone     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// Marks accounts created through the founders program. Its presence is the
 /// additive boundary that allows legacy users to keep their historical access
 /// while founder accounts become subject to trial/payment enforcement.
