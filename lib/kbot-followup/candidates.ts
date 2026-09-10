@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAgentAccessForAgent } from '@/lib/agent-access'
 import { toClientServiceEvent } from '@/lib/national-life/client-intelligence'
 import { CANONICAL_NATIONAL_LIFE_SYNC } from '@/lib/national-life/sync-engine'
+import { evaluateSendGate } from '@/lib/kbot-messaging/send-gate'
 import { ACTIVE_JOB_STATES, SENT_JOB_STATES, COOLDOWN_MS, fingerprint, normalizePhone, reasonFromStatus, type Candidate } from './domain'
 
 export async function getFollowupCandidates(agentId: string, now = new Date()): Promise<Candidate[]> {
@@ -34,11 +35,17 @@ export async function getFollowupCandidates(agentId: string, now = new Date()): 
   function add(input: Omit<Candidate, 'fingerprint' | 'blockedReason'>, contact: { contactPhone: string | null; contactHref: string }) {
     // A phone repair must not discard a preference saved before a phone existed.
     const prefs = [preferenceBySubject.get(input.subjectKey), input.phone ? preferenceBySubject.get(input.phone) : undefined]
+      .filter(p => p !== undefined)
     const stale = now.getTime() - new Date(input.sourceAt).getTime() > 72 * 3_600_000
-    const blockedReason = prefs.some(p => p?.optedOut) ? 'OPTED_OUT' : prefs.some(p => p?.snoozedUntil && p.snoozedUntil > now) ? 'SNOOZED'
-      : prefs.some(p => p?.lastManualAt && now.getTime() - p.lastManualAt.getTime() < COOLDOWN_MS) ? 'RECENT_CONTACT'
-      : input.phone && contactedPhones.has(input.phone) ? 'RECENT_CONTACT'
-      : !input.phone ? 'PHONE_REQUIRED' : stale ? 'SYNC_REQUIRED' : null
+    // Opt-out, snooze and recency are the shared gate's call, so this list and a
+    // birthday greeting cap each other. The job query above already filtered by
+    // the window, so a phone in that set is recent by construction. Quiet hours
+    // are not enforced: this list is what a human is about to choose from.
+    const gate = evaluateSendGate({
+      phone: input.phone, preferences: prefs, now, enforceQuietHours: false,
+      recentJobs: input.phone && contactedPhones.has(input.phone) ? [{ sentAt: now }] : [],
+    })
+    const blockedReason = gate.reason ?? (!input.phone ? 'PHONE_REQUIRED' : stale ? 'SYNC_REQUIRED' : null)
     rows.push({ ...input, fingerprint: fingerprint(input), blockedReason, ...contact, phoneIssue: phoneIssue(contact.contactPhone) })
   }
   for (const p of policies) {

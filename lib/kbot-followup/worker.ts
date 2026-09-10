@@ -93,7 +93,12 @@ export async function processNextFollowup() {
     // Global serialization makes the daily API-call ceiling valid across server instances.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('kbot-followup-generation'))`
     const now = new Date()
-    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "KBotFollowupJob" WHERE "status" = 'PENDING' ORDER BY "createdAt" FOR UPDATE SKIP LOCKED LIMIT 1`
+    // Only the manual category. Scheduled jobs share this table on purpose —
+    // that is what makes the recency window see across features — but they are
+    // sent from an agent's template, not generated, and running one through
+    // this path would look up a follow-up candidate that was never there and
+    // fail it as SOURCE_CHANGED.
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "KBotFollowupJob" WHERE "status" = 'PENDING' AND "category" = 'FOLLOWUP' ORDER BY "createdAt" FOR UPDATE SKIP LOCKED LIMIT 1`
     if (!rows[0]) return null
     const job = await tx.kBotFollowupJob.findUniqueOrThrow({ where: { id: rows[0].id } })
     const day = new Date(now.toISOString().slice(0, 10))
@@ -185,7 +190,9 @@ export async function maintainFollowups() {
   const stalePending = await prisma.kBotFollowupJob.findMany({ where: { status: 'PENDING', createdAt: { lt: new Date(Date.now() - 86_400_000) } }, take: 25 })
   for (const job of stalePending) await terminal(job.id, 'CANCELLED', 'AUTHORIZATION_EXPIRED')
   await prisma.kBotFollowupJob.updateMany({ where: { status: { in: ['ACCEPTED', 'DISPATCHING'] }, createdAt: { lt: new Date(Date.now() - 86_400_000) } }, data: { status: 'UNKNOWN', errorCode: 'SEND_UNCONFIRMED' } })
-  const expired = await prisma.kBotFollowupJob.findMany({ where: { status: { in: ['PREPARING', 'CANCEL_REQUESTED'] }, leaseExpiresAt: { lt: new Date() } }, take: 25 })
+  // A scheduled lease has its own owner, which returns it to PENDING rather
+  // than failing it: nothing was generated, so there is nothing to give up on.
+  const expired = await prisma.kBotFollowupJob.findMany({ where: { category: 'FOLLOWUP', status: { in: ['PREPARING', 'CANCEL_REQUESTED'] }, leaseExpiresAt: { lt: new Date() } }, take: 25 })
   for (const job of expired) await terminal(job.id, 'FAILED', 'PREPARATION_EXPIRED')
   await reconcileFollowups()
   const jobs = await prisma.kBotFollowupJob.findMany({ where: { notifiedAt: null, status: { in: ['SENT', 'DELIVERED', 'READ', 'FAILED', 'CANCELLED', 'UNKNOWN'] } }, take: 50,

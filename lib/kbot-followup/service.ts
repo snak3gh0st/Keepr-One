@@ -1,7 +1,21 @@
 import 'server-only'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
+import { evaluateSendGate, type SendGateBlockReason } from '@/lib/kbot-messaging/send-gate'
 import { ACTIVE_JOB_STATES, SENT_JOB_STATES, aiEnabled, availableCredits, COOLDOWN_MS, FollowupError, TOKEN_RESERVATION, normalizePhone } from './domain'
+
+/// The gate names the reason; this path names it the way the agent's screen has
+/// always named it. Opt-out and snooze collapse into one code on purpose: to
+/// whoever just pressed send, both mean "you cannot reach this person now", and
+/// the difference is the agent's own doing either way. QUIET_HOURS cannot occur
+/// here — a human is choosing the moment — but the map stays total so a new
+/// gate reason is a type error rather than an `undefined` error code.
+const MANUAL_GATE_ERRORS: Record<SendGateBlockReason, string> = {
+  OPTED_OUT: 'CONTACT_UNAVAILABLE',
+  SNOOZED: 'CONTACT_UNAVAILABLE',
+  RECENT_CONTACT: 'RECENT_CONTACT',
+  QUIET_HOURS: 'RECENT_CONTACT',
+}
 import { getFollowupCandidates } from './candidates'
 import { grantFreeCredits, lockAgent, settleJob } from './credits'
 import { messagingTransport } from './transport'
@@ -32,11 +46,15 @@ export async function startFollowups(agentId: string, input: { requestKey: strin
     const now = new Date()
     for (const c of candidates) {
       const pref = await tx.kBotContactPreference.findUnique({ where: { agentId_subjectKey: { agentId, subjectKey: c.phone! } } })
-      if (pref?.optedOut || (pref?.snoozedUntil && pref.snoozedUntil > now)) throw new FollowupError('CONTACT_UNAVAILABLE')
+      // Every category counts, which is why the filter is on phone alone. The
+      // query already encodes the window (COOLDOWN_MS === RECENCY_WINDOW_MS), so
+      // a hit is recent by construction and the gate only has to see it exists.
       const recent = await tx.kBotFollowupJob.findFirst({ where: { agentId, phone: c.phone!, OR: [
         { status: { in: ACTIVE_JOB_STATES } }, { status: { in: SENT_JOB_STATES }, updatedAt: { gte: new Date(now.getTime() - COOLDOWN_MS) } },
       ] } })
-      if (recent || (pref?.lastManualAt && now.getTime() - pref.lastManualAt.getTime() < COOLDOWN_MS)) throw new FollowupError('RECENT_CONTACT')
+      const gate = evaluateSendGate({ phone: c.phone, preferences: pref ? [pref] : [],
+        recentJobs: recent ? [{ sentAt: now }] : [], now, enforceQuietHours: false })
+      if (gate.reason) throw new FollowupError(MANUAL_GATE_ERRORS[gate.reason])
     }
     await grantFreeCredits(tx, agentId, now)
     const grants = await tx.kBotCreditGrant.findMany({ where: { agentId, expiresAt: { gt: now } }, orderBy: { expiresAt: 'asc' } })
