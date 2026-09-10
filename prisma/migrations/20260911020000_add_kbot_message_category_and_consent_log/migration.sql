@@ -4,6 +4,10 @@
 -- have let both fire on the same afternoon.
 ALTER TABLE "KBotFollowupJob" ADD COLUMN "category" TEXT NOT NULL DEFAULT 'FOLLOWUP';
 
+-- Nullable: existing rows were raised by the manual path, which resolves the
+-- subject at request time and has no use for a stored one.
+ALTER TABLE "KBotFollowupJob" ADD COLUMN "subjectKey" TEXT;
+
 CREATE INDEX "KBotFollowupJob_agentId_phone_idx" ON "KBotFollowupJob"("agentId", "phone");
 
 -- Append-only. KBotContactPreference stays the mutable projection the send path

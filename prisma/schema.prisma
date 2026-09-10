@@ -2948,6 +2948,11 @@ model KBotFollowupJob {
   /// so a scheduled birthday and a lapse warning cap each other by construction
   /// — which they would not if scheduled sends lived in a table of their own.
   category     String @default("FOLLOWUP")
+  /// The client-scoped consent key this message was raised under, kept so the
+  /// check at dispatch can look under the same keys the enqueue did. A stop
+  /// request filed against the client id — not the number — would otherwise be
+  /// invisible in the seconds before sending.
+  subjectKey   String?
   billedTokens Int @default(0)
   allocations         KBotCreditAllocation[]
   id                  String                 @id @default(cuid())

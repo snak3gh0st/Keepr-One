@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  updateMany: vi.fn(), queryRaw: vi.fn(), update: vi.fn(), findUniqueOrThrow: vi.fn(), agent: vi.fn(),
+  updateMany: vi.fn(), queryRaw: vi.fn(), update: vi.fn(), findUniqueOrThrow: vi.fn(), findFirst: vi.fn(), agent: vi.fn(),
   template: vi.fn(), pref: vi.fn(), allocation: vi.fn(), grantUpdate: vi.fn(), send: vi.fn(), messages: vi.fn(),
 }))
 
 const tx = {
   $queryRaw: mocks.queryRaw,
   $executeRaw: vi.fn(),
-  kBotFollowupJob: { update: mocks.update, findUniqueOrThrow: mocks.findUniqueOrThrow },
+  kBotFollowupJob: { update: mocks.update, findUniqueOrThrow: mocks.findUniqueOrThrow, findFirst: mocks.findFirst },
   kBotContactPreference: { findMany: mocks.pref },
   kBotCreditAllocation: { findMany: mocks.allocation },
   kBotCreditGrant: { update: mocks.grantUpdate },
@@ -34,6 +34,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.updateMany.mockResolvedValue({ count: 0 })
   mocks.queryRaw.mockResolvedValue([])
+  // Nothing else reached this recipient recently; the tests that care set it.
+  mocks.findFirst.mockResolvedValue(null)
   // No agent behind the job: the claim still has to happen and the job still
   // has to be settled, which is the path these tests walk.
   mocks.agent.mockResolvedValue(null)
@@ -65,6 +67,8 @@ describe('scheduled queue claiming', () => {
     // this exclusion the drain loop would re-claim it every turn and never
     // reach anything behind it.
     mocks.queryRaw.mockResolvedValue([])
+  // Nothing else reached this recipient recently; the tests that care set it.
+  mocks.findFirst.mockResolvedValue(null)
     await processNextScheduledMessage(['job1', 'job2'])
     expect(mocks.queryRaw.mock.calls[0][0].join('?')).toContain('NOT ("id" = ANY(')
     // Tagged template: the interpolated values follow the strings array.
@@ -113,7 +117,7 @@ describe('sending a scheduled message', () => {
   afterEach(() => { vi.useRealTimers() })
 
   it('sends the agent template text, with the name filled in', async () => {
-    expect(await processNextScheduledMessage()).toEqual({ outcome: 'WORKED', id: 'job1' })
+    expect(await processNextScheduledMessage()).toEqual({ outcome: 'SENT', id: 'job1' })
     expect(mocks.send).toHaveBeenCalledWith('10', 'Feliz aniversário, Ana!', 'job1', '+13055550142')
   })
 
@@ -143,6 +147,34 @@ describe('sending a scheduled message', () => {
     expect(mocks.send).not.toHaveBeenCalled()
     // Back on the queue, not failed: it is a "not yet", not a "never".
     expect(mocks.update).toHaveBeenCalledWith({ where: { id: 'job1' }, data: { status: 'PENDING', leaseExpiresAt: null } })
+  })
+
+  it('re-reads the weekly window at dispatch, not just at enqueue', async () => {
+    // The job may have waited days in the queue. If a message of any category
+    // reached this person meanwhile, the check made when it was enqueued is
+    // stale — and that shared window is the whole reason scheduled messages
+    // live in the same table as follow-ups.
+    mocks.findFirst.mockResolvedValue({ id: 'lapse-job' })
+    expect(await processNextScheduledMessage()).toEqual({ outcome: 'SETTLED', id: 'job1' })
+    expect(mocks.send).not.toHaveBeenCalled()
+    expect(mocks.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      // Never itself: the job being dispatched is not evidence against itself.
+      where: expect.objectContaining({ phone: job.phone, id: { not: 'job1' } }),
+    }))
+  })
+
+  it('looks for a stop request under the client key as well as the number', async () => {
+    // A stop filed against the client id, in the seconds after enqueue, has to
+    // be visible here or the message goes out after the person said no.
+    const keyedJob = { ...job, subjectKey: 'client:c1' }
+    mocks.update.mockResolvedValue(keyedJob)
+    mocks.findUniqueOrThrow.mockResolvedValue(keyedJob)
+    mocks.pref.mockResolvedValue([{ subjectKey: 'client:c1', optedOut: true }])
+    expect(await processNextScheduledMessage()).toEqual({ outcome: 'SETTLED', id: 'job1' })
+    expect(mocks.send).not.toHaveBeenCalled()
+    expect(mocks.pref).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ subjectKey: { in: [job.phone, 'client:c1'] } }),
+    }))
   })
 })
 

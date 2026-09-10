@@ -4,6 +4,7 @@ import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { getCurrentAgent } from '@/lib/agent-context'
+import { lockAgent } from '@/lib/kbot-followup/credits'
 import { getServerI18n } from '@/lib/i18n/server'
 import { prisma } from '@/lib/prisma'
 import { assertSameOriginAction } from '@/lib/security/same-origin-action'
@@ -93,6 +94,11 @@ export async function saveScheduledTemplate(input: unknown): Promise<ScheduledAc
     const checked = validateTemplateBody(body, sampleValues(language))
     if (!checked.ok) return { ok: false, message: bodyMessage(checked.error, copy) }
     await prisma.$transaction(async (tx) => {
+      // Serialized against the category switch below. Without it, this can read
+      // "category is on", the switch can turn every existing row off and
+      // commit, and this can then create the new language row `enabled: true` —
+      // a category the screen reports as off, still sending in one language.
+      await lockAgent(tx, agent.id)
       // A brand-new row joins the category in the state the category is
       // already in. Hardcoding `false` here would mean that adding English to
       // a category the agent turned on months ago silently leaves English
@@ -128,6 +134,8 @@ export async function setScheduledCategoryEnabled(input: unknown): Promise<Sched
   try {
     const agent = await currentAgent()
     const written = await prisma.$transaction(async (tx) => {
+      // Same lock as the save above: the two decide the same field.
+      await lockAgent(tx, agent.id)
       const existing = await tx.kBotMessageTemplate.count({ where: { agentId: agent.id, category } })
       if (!existing) return 0
       const result = await tx.kBotMessageTemplate.updateMany({

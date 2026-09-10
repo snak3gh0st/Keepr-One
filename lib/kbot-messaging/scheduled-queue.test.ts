@@ -111,12 +111,15 @@ describe('enqueueScheduledMessagesForAgent', () => {
     expect(mocks.jobCreate).not.toHaveBeenCalled()
   })
 
-  it('refuses to queue at the wrong hour where the recipient is', async () => {
-    // 06:00 in California, from a number whose area code says California.
+  it('still queues at an hour it may not send in, because the date comes once', async () => {
+    // 06:00 in California, from a number whose area code says California. The
+    // birthday candidate exists only today: refusing here would drop the
+    // greeting for good, since tomorrow there is nothing to enqueue. The hour
+    // is enforced at dispatch, where a refusal puts the job back on the queue.
     mocks.client.mockResolvedValue([{ id: 'c1', name: 'Ana', phone: '+14155550142', dateOfBirth: new Date('1980-03-11T00:00:00Z') }])
     const result = await enqueueScheduledMessagesForAgent('a1', new Date('2026-03-11T13:00:00Z'))
-    expect(result.skipped).toEqual([expect.objectContaining({ reason: 'QUIET_HOURS', timeZone: 'America/Los_Angeles' })])
-    expect(mocks.jobCreate).not.toHaveBeenCalled()
+    expect(result.skipped).toEqual([])
+    expect(mocks.jobCreate).toHaveBeenCalled()
   })
 
   it('does not queue what it cannot pay for', async () => {

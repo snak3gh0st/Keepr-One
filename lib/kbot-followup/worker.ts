@@ -194,7 +194,10 @@ export async function processNextFollowup() {
 }
 
 export async function maintainFollowups() {
-  const stalePending = await prisma.kBotFollowupJob.findMany({ where: { status: 'PENDING', createdAt: { lt: new Date(Date.now() - 86_400_000) } }, take: 25 })
+  // Manual jobs only. A scheduled job sits in PENDING on purpose — quiet hours
+  // return it there — and it has no authorization to expire, so cancelling it
+  // as AUTHORIZATION_EXPIRED would quietly delete a greeting nobody withdrew.
+  const stalePending = await prisma.kBotFollowupJob.findMany({ where: { category: 'FOLLOWUP', status: 'PENDING', createdAt: { lt: new Date(Date.now() - 86_400_000) } }, take: 25 })
   for (const job of stalePending) await terminal(job.id, 'CANCELLED', 'AUTHORIZATION_EXPIRED')
   await prisma.kBotFollowupJob.updateMany({ where: { status: { in: ['ACCEPTED', 'DISPATCHING'] }, createdAt: { lt: new Date(Date.now() - 86_400_000) } }, data: { status: 'UNKNOWN', errorCode: 'SEND_UNCONFIRMED' } })
   // A scheduled lease has its own owner, which returns it to PENDING rather

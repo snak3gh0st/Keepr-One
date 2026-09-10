@@ -2,7 +2,7 @@ import 'server-only'
 import type { KBotFollowupJob } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { lockAgent, settleJob, type Tx } from '@/lib/kbot-followup/credits'
-import { FollowupError } from '@/lib/kbot-followup/domain'
+import { ACTIVE_JOB_STATES, COOLDOWN_MS, FollowupError, SENT_JOB_STATES } from '@/lib/kbot-followup/domain'
 import { hasRecentOutgoing, messagingTransport, requestedOptOut } from '@/lib/kbot-followup/transport'
 import { evaluateSendGate } from './send-gate'
 import { SCHEDULED_CATEGORIES } from './scheduled-triggers'
@@ -70,12 +70,18 @@ async function terminal(id: string, status: string, errorCode?: string, provider
 ///
 /// `DEFERRED` is not a failure and not work: the job went back on the queue for
 /// a later hour. A caller draining the queue has to be able to tell it apart
-/// from `WORKED`, because a deferred job is still the oldest PENDING row — a
+/// from a job that was actually handled, because a deferred job is still the
+/// oldest PENDING row — a
 /// loop that only asked "did something happen" would re-claim it every turn and
 /// never reach anything behind it.
+///
+/// `SENT` and `SETTLED` are kept apart for the same reason. A drain bounded by
+/// "sends" that counted a cancelled job as one would spend its whole budget on
+/// fifty jobs whose template is switched off and stop, leaving the messages that
+/// could actually go out untouched.
 export type ScheduledTurn =
   | { outcome: 'IDLE' }
-  | { outcome: 'WORKED' | 'DEFERRED'; id: string }
+  | { outcome: 'SENT' | 'SETTLED' | 'DEFERRED'; id: string }
 
 /// Claim and send one scheduled message.
 ///
@@ -133,14 +139,38 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
       // A lease that expired while the provider was slow means another worker
       // may already own this job. Losing the race is not an error.
       if (job.status !== 'PREPARING' || !job.leaseExpiresAt || job.leaseExpiresAt < new Date()) return 'LOST' as const
+      // Both keys, exactly as the enqueue read them: a stop request filed
+      // against the client id rather than the number must still be seen in the
+      // seconds before sending.
+      const subjectKeys = job.subjectKey ? [job.phone, job.subjectKey] : [job.phone]
       const preferences = await tx.kBotContactPreference.findMany({
-        where: { agentId: job.agentId, subjectKey: job.phone },
+        where: { agentId: job.agentId, subjectKey: { in: subjectKeys } },
+      })
+      // The weekly window is re-read here, not carried from enqueue time. A job
+      // that waited in the queue while something else reached the same person
+      // must not go out on the strength of a check made days ago — that window
+      // is the whole reason scheduled messages share this table.
+      const recent = await tx.kBotFollowupJob.findFirst({
+        where: {
+          agentId: job.agentId,
+          phone: job.phone,
+          id: { not: job.id },
+          OR: [
+            { status: { in: ACTIVE_JOB_STATES } },
+            { status: { in: SENT_JOB_STATES }, updatedAt: { gte: new Date(Date.now() - COOLDOWN_MS) } },
+          ],
+        },
+        select: { id: true },
       })
       // The hour is checked again here, against the moment of sending. A job
       // queued inside the window but held up in a backlog must not go out at
       // midnight just because it was fine when it was enqueued.
       const gate = evaluateSendGate({
-        phone: job.phone, preferences, recentJobs: [], now: new Date(), enforceQuietHours: true,
+        phone: job.phone,
+        preferences,
+        recentJobs: recent ? [{ sentAt: new Date() }] : [],
+        now: new Date(),
+        enforceQuietHours: true,
       })
       if (gate.reason) {
         // Quiet hours are a "not yet", not a "never": leave it PENDING for the
@@ -160,7 +190,7 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
       return 'SEND' as const
     })
     if (dispatch === 'DEFERRED') return { outcome: 'DEFERRED', id: claimed.id }
-    if (dispatch !== 'SEND') return { outcome: 'WORKED', id: claimed.id }
+    if (dispatch !== 'SEND') return { outcome: 'SETTLED', id: claimed.id }
 
     dispatched = true
     const receipt = await transport.send(conversationId, content, claimed.id, claimed.phone)
@@ -182,7 +212,7 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
       await terminal(claimed.id, 'FAILED', error instanceof FollowupError ? error.code : 'PREPARATION_FAILED')
     }
   }
-  return { outcome: 'WORKED', id: claimed.id }
+  return { outcome: 'SENT', id: claimed.id }
 }
 
 /// Release scheduled jobs whose worker died mid-lease.

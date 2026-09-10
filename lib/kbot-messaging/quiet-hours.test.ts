@@ -30,6 +30,14 @@ describe('timeZoneForPhone', () => {
     expect(timeZoneForPhone('+14155550142')).toBe('America/Los_Angeles')
   })
 
+  it('declines Alaska, where one area code covers two zones', () => {
+    // 907 is all of Alaska, and Adak runs an hour behind Anchorage on
+    // Hawaii-Aleutian time. Treating the code as Anchorage would call 08:00 in
+    // Adak 09:00 and open the window an hour early there.
+    expect(timeZoneForPhone('+19075550142')).toBeNull()
+    expect(withinSendWindow('+19075550142', new Date('2026-01-15T18:00:00Z'))).toMatchObject({ derived: false })
+  })
+
   it('declines codes that straddle a zone boundary', () => {
     // Florida's panhandle is Central while the rest of 850 is Eastern; Indiana,
     // the Dakotas and western Kansas split the same way. The fallback is the

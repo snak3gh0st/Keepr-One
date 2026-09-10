@@ -32,6 +32,9 @@ vi.mock('@/lib/prisma', () => ({
 import { saveScheduledTemplate, setContactConsent, setScheduledCategoryEnabled } from './actions'
 
 const tx = {
+  // The per-agent advisory lock that serializes saving a template against
+  // switching the category on or off.
+  $executeRaw: vi.fn(),
   kBotMessageTemplate: { count: mocks.templateCount, updateMany: mocks.templateUpdateMany, upsert: mocks.templateUpsert },
 }
 

@@ -143,9 +143,12 @@ async function queueOne(
       preferences,
       recentJobs: recent ? [{ sentAt: now }] : [],
       now,
-      // Nobody is watching this one go out, so the recipient's clock is the
-      // only thing standing between them and a 3am message.
-      enforceQuietHours: true,
+      // Not here. A birthday candidate exists only on its own local date: if
+      // this pass happens to run during the recipient's quiet hours, refusing
+      // now would drop the greeting for good, because tomorrow the candidate is
+      // gone. Enqueuing is an intention, not a send — the hour is enforced at
+      // dispatch, where a refusal returns the job to PENDING for the next pass.
+      enforceQuietHours: false,
     })
     if (gate.reason) return gate.reason
 
@@ -165,6 +168,7 @@ async function queueOne(
       fingerprint: fingerprint({ requestKey: candidate.requestKey, candidateId: candidate.candidateId, phone: candidate.phone }),
       customerName: candidate.customerName,
       phone: candidate.phone,
+      subjectKey: candidate.subjectKey,
       language,
       reason: candidate.category,
       sourceHref: candidate.sourceHref,
@@ -203,7 +207,7 @@ export async function runScheduledMessageEnqueuePass(now = new Date()): Promise<
 ///
 /// The drain is bounded so one call cannot run for an unbounded time; whatever
 /// is left is taken by the next pass.
-export async function runScheduledMessagePass(now = new Date(), maxSends = 50): Promise<ScheduledPassReport & { sent: number; deferred: number }> {
+export async function runScheduledMessagePass(now = new Date(), maxSends = 50): Promise<ScheduledPassReport & { sent: number; settled: number; deferred: number }> {
   const { releaseExpiredScheduledLeases, processNextScheduledMessage } = await import('./scheduled-worker')
   await releaseExpiredScheduledLeases(now)
   const report = await runScheduledMessageEnqueuePass(now)
@@ -213,11 +217,19 @@ export async function runScheduledMessagePass(now = new Date(), maxSends = 50): 
   // reached — this pass or any other.
   const deferred: string[] = []
   let sent = 0
-  while (sent < maxSends) {
+  let settled = 0
+  // Two bounds, because they answer different questions. `maxSends` caps how
+  // many messages one pass may put on the wire; `maxTurns` caps how long the
+  // loop may run at all, so a queue full of jobs that only ever settle — a
+  // template switched off, a contact who opted out — cannot spin here, and
+  // cannot eat the send budget either.
+  const maxTurns = maxSends * 4
+  for (let turns = 0; turns < maxTurns && sent < maxSends; turns += 1) {
     const turn = await processNextScheduledMessage(deferred)
     if (turn.outcome === 'IDLE') break
     if (turn.outcome === 'DEFERRED') { deferred.push(turn.id); continue }
-    sent += 1
+    if (turn.outcome === 'SENT') sent += 1
+    else settled += 1
   }
-  return { ...report, sent, deferred: deferred.length }
+  return { ...report, sent, settled, deferred: deferred.length }
 }

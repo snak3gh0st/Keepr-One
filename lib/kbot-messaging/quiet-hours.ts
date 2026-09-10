@@ -58,7 +58,10 @@ const AREA_CODE_ZONES: Record<string, string[]> = {
     '714', '725', '747', '760', '775', '805', '818', '820', '831', '858', '909', '916', '925', '949',
     '951',
   ],
-  'America/Anchorage': ['907'],
+  // 907 is absent on purpose: it is the whole of Alaska, and Adak keeps
+  // Hawaii-Aleutian time, an hour behind Anchorage. One code, two zones, so it
+  // takes the fallback like every other split code.
+
   'Pacific/Honolulu': ['808'],
 }
 
