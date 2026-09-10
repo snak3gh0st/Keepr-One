@@ -1,0 +1,138 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mocks = vi.hoisted(() => ({
+  getCurrentAgent: vi.fn(),
+  headers: vi.fn(),
+  assertSameOriginAction: vi.fn(),
+  revalidatePath: vi.fn(),
+  templateUpsert: vi.fn(),
+  templateCount: vi.fn(),
+  templateUpdateMany: vi.fn(),
+  preferenceUpsert: vi.fn(),
+  consentCreate: vi.fn(),
+  transaction: vi.fn(),
+}))
+
+vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
+vi.mock('next/headers', () => ({ headers: mocks.headers }))
+vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
+vi.mock('@/lib/security/same-origin-action', () => ({ assertSameOriginAction: mocks.assertSameOriginAction }))
+vi.mock('@/lib/i18n/server', () => ({
+  getServerI18n: async () => ({ language: 'EN', copy: (_pt: string, en: string) => en }),
+}))
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    kBotMessageTemplate: { upsert: mocks.templateUpsert, count: mocks.templateCount, updateMany: mocks.templateUpdateMany },
+    kBotContactPreference: { upsert: mocks.preferenceUpsert },
+    kBotContactConsentEvent: { create: mocks.consentCreate },
+    $transaction: mocks.transaction,
+  },
+}))
+
+import { saveScheduledTemplate, setContactConsent, setScheduledCategoryEnabled } from './actions'
+
+const tx = {
+  kBotMessageTemplate: { count: mocks.templateCount, updateMany: mocks.templateUpdateMany, upsert: mocks.templateUpsert },
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mocks.headers.mockResolvedValue(new Headers({ origin: 'https://app.keepr.one', host: 'app.keepr.one' }))
+  mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1' })
+  mocks.transaction.mockImplementation(async (arg: unknown) =>
+    typeof arg === 'function' ? (arg as (client: typeof tx) => unknown)(tx) : Promise.all(arg as Promise<unknown>[]))
+})
+
+describe('saving a scheduled template', () => {
+  it('refuses an unknown variable before anything is written', async () => {
+    await expect(saveScheduledTemplate({ category: 'BIRTHDAY', language: 'PT', body: 'Oi {{nome_do_cliente}}' })).resolves.toEqual({
+      ok: false,
+      message: 'These variables do not exist: nome_do_cliente. Use only the ones listed.',
+    })
+    expect(mocks.templateUpsert).not.toHaveBeenCalled()
+  })
+
+  it('refuses an empty body and an unmatched brace', async () => {
+    await expect(saveScheduledTemplate({ category: 'BIRTHDAY', language: 'PT', body: '  ' })).resolves.toMatchObject({ ok: false })
+    await expect(saveScheduledTemplate({ category: 'BIRTHDAY', language: 'PT', body: 'Oi {{nome' })).resolves.toEqual({
+      ok: false,
+      message: 'There is an unmatched {{ or }} in the message. Close the variable before saving.',
+    })
+    expect(mocks.templateUpsert).not.toHaveBeenCalled()
+  })
+
+  it('creates the first template switched off and returns the preview that was checked', async () => {
+    mocks.templateCount.mockResolvedValue(0)
+    const result = await saveScheduledTemplate({ category: 'BIRTHDAY', language: 'PT', body: ' Feliz aniversário, {{primeiro_nome}}! ' })
+    expect(result).toEqual({ ok: true, preview: 'Feliz aniversário, Ana!' })
+    expect(mocks.templateUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: { agentId: 'agent-1', category: 'BIRTHDAY', language: 'PT', body: 'Feliz aniversário, {{primeiro_nome}}!', enabled: false },
+      update: { body: 'Feliz aniversário, {{primeiro_nome}}!' },
+    }))
+  })
+
+  it('lets a new language join a category that is already on', async () => {
+    mocks.templateCount.mockResolvedValue(1)
+    await expect(saveScheduledTemplate({ category: 'BIRTHDAY', language: 'EN', body: 'Happy birthday, {{primeiro_nome}}!' })).resolves.toMatchObject({ ok: true })
+    expect(mocks.templateUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ language: 'EN', enabled: true }),
+    }))
+  })
+
+  it('never reaches the database for a caller without an agent', async () => {
+    mocks.getCurrentAgent.mockRejectedValue(new Error('Forbidden'))
+    await expect(saveScheduledTemplate({ category: 'BIRTHDAY', language: 'PT', body: 'Oi {{nome}}' })).resolves.toMatchObject({ ok: false })
+    expect(mocks.templateUpsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('turning a category on', () => {
+  it('refuses to activate a category that has no text yet', async () => {
+    mocks.templateCount.mockResolvedValue(0)
+    await expect(setScheduledCategoryEnabled({ category: 'ANNUAL_REVIEW', enabled: true })).resolves.toEqual({
+      ok: false,
+      message: 'Write and save this category message before turning it on.',
+    })
+    expect(mocks.templateUpdateMany).not.toHaveBeenCalled()
+  })
+
+  it('moves every language of the category together', async () => {
+    mocks.templateCount.mockResolvedValue(2)
+    mocks.templateUpdateMany.mockResolvedValue({ count: 2 })
+    await expect(setScheduledCategoryEnabled({ category: 'ANNUAL_REVIEW', enabled: true })).resolves.toEqual({ ok: true })
+    expect(mocks.templateUpdateMany).toHaveBeenCalledWith({
+      where: { agentId: 'agent-1', category: 'ANNUAL_REVIEW' },
+      data: { enabled: true },
+    })
+  })
+})
+
+describe('opting a contact out from the screen', () => {
+  it('writes the event and the projection on the same key, in one transaction', async () => {
+    await expect(setContactConsent({ subjectKey: '+14075550100', optedOut: true })).resolves.toEqual({ ok: true })
+    expect(mocks.transaction).toHaveBeenCalledTimes(1)
+    expect(mocks.preferenceUpsert).toHaveBeenCalledWith({
+      where: { agentId_subjectKey: { agentId: 'agent-1', subjectKey: '+14075550100' } },
+      create: { agentId: 'agent-1', subjectKey: '+14075550100', optedOut: true },
+      update: { optedOut: true },
+    })
+    expect(mocks.consentCreate).toHaveBeenCalledWith({
+      data: { agentId: 'agent-1', subjectKey: '+14075550100', action: 'OPT_OUT', source: 'AGENT_UI' },
+    })
+  })
+
+  it('records allowing contact again as its own event rather than erasing the old one', async () => {
+    await expect(setContactConsent({ subjectKey: '+14075550100', optedOut: false })).resolves.toEqual({ ok: true })
+    expect(mocks.preferenceUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: { optedOut: false, snoozedUntil: null },
+    }))
+    expect(mocks.consentCreate).toHaveBeenCalledWith({
+      data: { agentId: 'agent-1', subjectKey: '+14075550100', action: 'OPT_IN', source: 'AGENT_UI' },
+    })
+  })
+
+  it('rejects a subject key that is not a phone number', async () => {
+    await expect(setContactConsent({ subjectKey: 'client:abc', optedOut: true })).resolves.toMatchObject({ ok: false })
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+})

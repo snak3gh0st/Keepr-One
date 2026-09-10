@@ -16,7 +16,10 @@ export default async function KBotPage() {
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink">{copy('Sua próxima ação', 'Your next action')}</h1>
         <p className="mt-2 text-sm text-ink-muted">{copy('Priorize os contatos, resolva bloqueios e acompanhe os resultados.', 'Prioritize contacts, resolve blockers and track results.')}</p>
       </div>
-      <Link href="/agent/integrations/national-life" className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-semibold text-teal-deep">{copy('Conexão National Life', 'National Life connection')}</Link>
+      <div className="flex flex-wrap gap-3">
+        <Link href="/agent/kbot/agendadas" className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-semibold text-teal-deep">{copy('Mensagens agendadas', 'Scheduled messages')}</Link>
+        <Link href="/agent/integrations/national-life" className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-semibold text-teal-deep">{copy('Conexão National Life', 'National Life connection')}</Link>
+      </div>
     </header>
     <FollowupWorkspace />
   </Shell>
