@@ -16,6 +16,7 @@ import {
   LocalConnectorRunError,
   LocalConnectorStageCompletionError,
 } from '@/lib/national-life/local-connector/run-service'
+import { backfillClientContactFromServiceLogSafely } from '@/lib/national-life/client-contact-backfill-prisma'
 import { NATIONAL_LIFE_GRIDS, type NationalLifeGridKey } from '@/lib/national-life/portal-grid-client'
 import { ingestPortfolioIfRunFinished } from '@/lib/national-life/portfolio-ingest'
 import { prismaIngestDeps } from '@/lib/national-life/portfolio-ingest-prisma'
@@ -92,6 +93,20 @@ export async function POST(
       // run, so it cannot promote an earlier page by accident.
       terminal: result.terminal === true || result.completed === true,
     })
+    // Only once the run is terminal: the client intelligence rows and the
+    // policies this reads are written by earlier stages, and the portfolio
+    // ingest above is what gives a new client a row to fill in the first place.
+    // Deliberately absent from the response: the connector has no use for the
+    // count, and the enrichment must not change a contract it parses.
+    if (result.terminal === true) {
+      // Not awaited: this is the connector's own handshake, and the enrichment
+      // reads the agent's whole book and writes one client at a time. On a
+      // 10k-policy account that is seconds the connector would spend waiting
+      // for work whose result it never reads. `...Safely` swallows every
+      // failure, so nothing here can reject unhandled, and a pass lost to a
+      // restart simply happens on the next sync.
+      void backfillClientContactFromServiceLogSafely(prisma, { agentId: device.agentId })
+    }
     const promotionCredits = result.terminal === true
       ? await syncStoredNationalLifePromotionCreditsForAgentSafely(
           {
