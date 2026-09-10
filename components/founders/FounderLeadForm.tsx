@@ -25,7 +25,7 @@ function formatPhone(value: string) {
   return `(${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`;
 }
 
-export function FounderLeadForm() {
+export function FounderLeadForm({ attribution = {} }: { attribution?: Record<string, string> }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const submittingRef = useRef(false);
@@ -92,6 +92,9 @@ export function FounderLeadForm() {
         noValidate
         aria-busy={pending}
       >
+        {Object.entries(attribution).map(([key, value]) => (
+          <input key={key} type="hidden" name={key} value={value} />
+        ))}
         <noscript>
           <p className={styles.formError}>
             Ative o JavaScript no navegador para enviar seu cadastro.

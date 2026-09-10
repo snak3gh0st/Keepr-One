@@ -96,6 +96,13 @@ afterEach(() => {
 })
 
 describe('Shell plan access', () => {
+  it('includes Marketing for admins and identifies its nested routes', () => {
+    mocks.pathname = '/admin/marketing/campaigns/founders-program'
+    const { container } = render(<Shell role="ADMIN" userName="Admin"><p>Campanhas</p></Shell>)
+    expect(screen.getByRole('link', { name: 'Marketing' })).toHaveAttribute('href', '/admin/marketing')
+    expect(screen.getByRole('link', { name: 'Marketing' })).toHaveAttribute('aria-current', 'page')
+    expect(container.querySelector('.shell-topbar-title')).toHaveTextContent('Marketing')
+  })
   it('opens the personal AI control center from the main navigation', () => {
     mocks.pathname = '/agent/ai'
     const { container } = render(<Shell role="AGENT" userName="Ana"><p>AI</p></Shell>)
@@ -330,7 +337,7 @@ describe('Shell plan access', () => {
     expect(container.querySelector('.shell-topbar-title')).toHaveTextContent('Detalhe do usuário')
   })
 
-  it('keeps only overview and users in the administrative navigation', () => {
+  it('shows overview, users and marketing in the administrative navigation', () => {
     mocks.pathname = '/admin'
 
     render(
@@ -344,7 +351,7 @@ describe('Shell plan access', () => {
       navigation.querySelectorAll('ul a[aria-label]'),
     ).map((element) => element.getAttribute('aria-label'))
 
-    expect(navigationLabels).toEqual(['Visão geral', 'Usuários'])
+    expect(navigationLabels).toEqual(['Visão geral', 'Usuários', 'Marketing'])
     expect(screen.queryByRole('link', { name: 'Integrações' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Auditoria' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Importar dados' })).toBeNull()

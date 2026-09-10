@@ -8,6 +8,7 @@ import {
 } from '@/lib/founder-lead-validation'
 import { consumeFounderRegistrationRateLimit } from '@/lib/founder-rate-limit'
 import { prisma } from '@/lib/prisma'
+import { FOUNDERS_CAMPAIGN_ID, readLeadAttribution } from '@/lib/marketing/attribution'
 
 export type FounderLeadRegistrationResult =
   | { ok: true }
@@ -75,10 +76,18 @@ export async function registerFounderLeadAction(
       }
     }
 
+    const { campaignSlug, ...attribution } = readLeadAttribution(formData)
+    const campaign = campaignSlug
+      ? await prisma.marketingCampaign.findUnique({ where: { slug: campaignSlug }, select: { id: true } })
+      : null
+
     // PostgreSQL's conflict handling is atomic, including concurrent requests.
     // Repeated emails return the same success without changing an existing lead.
-    await prisma.founderLead.createMany({
-      data: [parsed.data],
+    await prisma.marketingLead.createMany({
+      data: [{
+        ...parsed.data, ...attribution,
+        source: 'FOUNDERS', campaignId: campaign?.id ?? FOUNDERS_CAMPAIGN_ID,
+      }],
       skipDuplicates: true,
     })
 

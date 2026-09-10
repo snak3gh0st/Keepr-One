@@ -4,16 +4,33 @@
 é **QUERO SER FOUNDER**. Um envio persistido redireciona para
 `/founders/obrigado`, que anuncia a liberação futura do acesso com 30 dias grátis.
 
-Os contatos ficam na tabela `FounderLead`, separados de `User`, `Agent` e
-`FounderEnrollment`. A inscrição não cria uma conta e não inicia um trial.
+Os contatos entram no módulo administrativo de [Marketing](marketing.md), em
+`/admin/marketing`. O modelo Prisma é `MarketingLead`, mapeado para a tabela física
+original `FounderLead`, separado de `User`, `Agent` e `FounderEnrollment`. A
+inscrição não cria uma conta e não inicia um trial.
+
 E-mails são normalizados em minúsculas e únicos. Reenvios retornam sucesso sem
-sobrescrever o nome ou telefone previamente cadastrados. Telefones são validados
-como US usando `libphonenumber-js/max` e salvos em E.164 (`+1…`).
+sobrescrever o contato, sua campanha/UTMs do primeiro cadastro ou o acompanhamento
+feito pela equipe. Telefones são validados como US usando
+`libphonenumber-js/max` e salvos em E.164 (`+1…`).
+
+O programa padrão de captação é `founders-program` (slug `founders`). Links podem
+usar `marketing_campaign` com o slug de outra campanha e os parâmetros
+`utm_source`, `utm_medium`, `utm_campaign`, `utm_content` e `utm_term`. A campanha
+e os metadados são capturados por campos ocultos; o usuário continua preenchendo
+somente os três campos de contato. Campanha inexistente ou ausente usa o programa
+padrão. Ver regras de primeiro cadastro e atribuição em [marketing.md](marketing.md).
 
 ## Configuração e publicação
 
-Aplicar a migration `20260910090000_add_founder_leads` antes de disponibilizar
-o formulário no ambiente de destino. No fluxo normal de deploy:
+O histórico inclui `20260910090000_add_founder_leads` e, para a integração com
+Marketing, `20260911010000_add_marketing_workspace`. A segunda migration preserva
+a tabela original e atribui todos os registros históricos ao Programa Founders.
+Ela precisa estar aplicada antes de servir o novo código que usa as colunas de
+Marketing. Na entrega atual, essa integração foi aplicada e validada somente no
+banco local; ainda não houve publicação em produção.
+
+No fluxo normal de deploy no ambiente de destino:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -65,5 +82,7 @@ pnpm exec tsc --noEmit
 ```
 
 No navegador, verificar campos vazios, número não US, envio válido, persistência
-do contato e navegação ao agradecimento. Confirmar o destino do botão do WhatsApp
+do contato em `/admin/marketing`, atribuição da campanha e navegação ao agradecimento.
+Reenviar o mesmo e-mail com outra campanha deve preservar o primeiro cadastro.
+Confirmar o destino do botão do WhatsApp
 e o redirecionamento automático após 30 segundos. Dados pessoais não vão na URL.
