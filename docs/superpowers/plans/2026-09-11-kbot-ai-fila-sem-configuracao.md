@@ -156,21 +156,22 @@ describe('checkMessageVoice', () => {
 
   it('refuses a lapse message that states a figure', () => {
     const check = checkMessageVoice('Oi Ana, sua apólice está com R$ 340 em aberto.', 'Ana', 'LAPSE_RECOVERY')
-    expect(check).toMatchObject({ ok: false, reason: 'FORBIDDEN_CLAIM' })
+    expect(check).toMatchObject({ ok: false, reason: 'CONTAINS_NUMBER' })
   })
 
   it('refuses a lapse message that states a date', () => {
     const check = checkMessageVoice('Oi Ana, sua apólice caiu em 12/08 e precisa de ação.', 'Ana', 'LAPSE_RECOVERY')
-    expect(check).toMatchObject({ ok: false, reason: 'FORBIDDEN_CLAIM' })
+    expect(check).toMatchObject({ ok: false, reason: 'CONTAINS_NUMBER' })
   })
 
   it('refuses any message carrying a link', () => {
     const check = checkMessageVoice('Oi Ana, acesse http://exemplo.com para revisar.', 'Ana', 'ANNUAL_REVIEW')
-    expect(check).toMatchObject({ ok: false, reason: 'FORBIDDEN_CLAIM' })
+    expect(check).toMatchObject({ ok: false, reason: 'CONTAINS_LINK' })
   })
 
   it('refuses a message that never addresses the client by name', () => {
-    expect(checkMessageVoice('Bom dia, podemos conversar sobre sua apólice?', 'Ana', 'ANNUAL_REVIEW').ok).toBe(false)
+    expect(checkMessageVoice('Bom dia, podemos conversar sobre sua apólice?', 'Ana', 'ANNUAL_REVIEW'))
+      .toMatchObject({ ok: false, reason: 'NAME_MISSING' })
   })
 })
 ```
@@ -182,14 +183,16 @@ Expected: FAIL com "Failed to resolve import './message-voice'".
 
 - [ ] **Step 3: Exportar as peças reaproveitáveis do validador de aniversário**
 
-Em `lib/kbot-messaging/birthday-voice.ts`, trocar `const FORBIDDEN = [` por `export const FORBIDDEN = [` para que o novo módulo herde a lista do aniversário sem copiá-la.
+Em `lib/kbot-messaging/birthday-voice.ts`, trocar `function fold(` por `export function fold(`. É a normalização que tira acento e caixa; o novo módulo precisa comparar do mesmo jeito que o aniversário compara, e reimplementá-la seria criar uma segunda regra de comparação que pode divergir.
+
+Não exportar `FORBIDDEN`: a lista do aniversário proíbe "apólice", e as categorias novas precisam poder dizer essa palavra. Elas têm a própria lista, menor e declarada no módulo novo.
 
 - [ ] **Step 4: Escrever o validador por categoria**
 
 ```ts
 // lib/kbot-messaging/message-voice.ts
 import type { ScheduledCategory } from '@/lib/kbot-templates/categories'
-import { checkBirthdayVoice, FORBIDDEN, MAX_LENGTH, MIN_LENGTH, type VoiceCheck } from './birthday-voice'
+import { checkBirthdayVoice, fold, MAX_LENGTH, MIN_LENGTH, type VoiceCheck } from './birthday-voice'
 
 /// A mesma hostilidade do aniversário, ajustada ao que cada categoria pode dizer.
 ///
@@ -199,11 +202,18 @@ import { checkBirthdayVoice, FORBIDDEN, MAX_LENGTH, MIN_LENGTH, type VoiceCheck 
 /// proibido nelas é AFIRMAR: número, valor, data, link. Convidar para conversar
 /// é do agente; afirmar um fato sobre o contrato é do sistema, e o modelo não
 /// tem acesso a fato nenhum.
-const CLAIM_PATTERNS: readonly RegExp[] = [
-  /\d/u,
-  /https?:\/\//iu,
-  /www\./iu,
-]
+/// O que nem estas categorias podem dizer.
+///
+/// A lista do aniversário proíbe todo o vocabulário de negócio, inclusive
+/// "apólice" — correto lá, impossível aqui: uma mensagem de lapso que não pode
+/// dizer "apólice" não existe. Então a divisão não é "com ou sem negócio", é
+/// "convidar ou afirmar". Falar da apólice em geral é convidar; dinheiro,
+/// prazo e contrato são afirmação, e o modelo não recebe fato nenhum sobre
+/// isso — qualquer um que escrevesse seria inventado.
+const MONEY_AND_CONTRACT = [
+  'prêmio', 'premio', 'premium', 'pagamento', 'payment', 'desconto', 'discount',
+  'benefício', 'beneficio', 'benefit', 'contrato', 'contract', 'proposta', 'quote',
+] as const
 
 export function checkMessageVoice(
   raw: string,
@@ -213,27 +223,26 @@ export function checkMessageVoice(
   if (category === 'BIRTHDAY') return checkBirthdayVoice(raw, firstName)
 
   const text = raw.trim().replace(/\s+/gu, ' ')
+  if (!text) return { ok: false, reason: 'EMPTY' }
   if (text.length < MIN_LENGTH) return { ok: false, reason: 'TOO_SHORT' }
   if (text.length > MAX_LENGTH) return { ok: false, reason: 'TOO_LONG' }
   // Sem o primeiro nome não é uma mensagem para alguém, é um comunicado.
-  if (!text.includes(firstName)) return { ok: false, reason: 'MISSING_NAME' }
-  if (CLAIM_PATTERNS.some((pattern) => pattern.test(text))) {
-    return { ok: false, reason: 'FORBIDDEN_CLAIM' }
-  }
-  // As palavras que nem estas categorias podem usar: promessa de dinheiro e
-  // qualquer coisa que soe como cobrança vinda do bot.
-  const lowered = text.toLowerCase()
-  const moneyWords = FORBIDDEN.filter((word) => /\b(pag|cobran|valor|reembols|desconto|payment|charge|refund|discount)/iu.test(word))
-  if (moneyWords.some((word) => lowered.includes(word.toLowerCase()))) {
-    return { ok: false, reason: 'FORBIDDEN_CLAIM' }
+  if (!text.includes(firstName)) return { ok: false, reason: 'NAME_MISSING' }
+  // Todo número é uma afirmação: valor, data, prazo, número de apólice.
+  if (/\d/u.test(text)) return { ok: false, reason: 'CONTAINS_NUMBER' }
+  if (/https?:\/\/|www\./iu.test(text)) return { ok: false, reason: 'CONTAINS_LINK' }
+  if (/\{\{|\}\}|\[|\]/u.test(text)) return { ok: false, reason: 'CONTAINS_PLACEHOLDER' }
+  const lowered = fold(text)
+  if (MONEY_AND_CONTRACT.some((word) => lowered.includes(fold(word)))) {
+    return { ok: false, reason: 'MENTIONS_BUSINESS' }
   }
   return { ok: true, text }
 }
 ```
 
-- [ ] **Step 5: Ajustar `VoiceRejection` se necessário**
+- [ ] **Step 5: Conferir que nenhum motivo novo foi inventado**
 
-Abrir `lib/kbot-messaging/birthday-voice.ts` e conferir se `VoiceRejection` já inclui `'TOO_SHORT' | 'TOO_LONG' | 'MISSING_NAME' | 'FORBIDDEN_CLAIM'`. Se algum faltar, acrescentar ao union — sem remover nenhum existente, porque `birthday-generation.ts` já os devolve.
+`VoiceRejection` já tem os oito motivos que este módulo usa: `EMPTY`, `TOO_SHORT`, `TOO_LONG`, `NAME_MISSING`, `CONTAINS_NUMBER`, `CONTAINS_LINK`, `CONTAINS_PLACEHOLDER`, `MENTIONS_BUSINESS`. **Não acrescentar nenhum.** Um motivo novo aqui obrigaria `birthday-generation.ts`, a contabilidade de tokens e a tela a aprenderem um vocabulário que já existe com outro nome.
 
 - [ ] **Step 6: Rodar os testes**
 
@@ -290,7 +299,7 @@ describe('generateScheduledMessage', () => {
 
   it('refuses text that states a figure, and still reports the tokens it cost', async () => {
     state.create.mockResolvedValue({ status: 'completed', output_text: 'Oi Ana, há R$ 340 em aberto.', usage: { input_tokens: 120, output_tokens: 12 } })
-    await expect(generateScheduledMessage(input)).resolves.toMatchObject({ ok: false, reason: 'FORBIDDEN_CLAIM', attempted: true, inputTokens: 120, outputTokens: 12 })
+    await expect(generateScheduledMessage(input)).resolves.toMatchObject({ ok: false, reason: 'CONTAINS_NUMBER', attempted: true, inputTokens: 120, outputTokens: 12 })
   })
 
   it('charges a timeout as an attempt, because the other side may have processed it', async () => {
@@ -482,7 +491,7 @@ it('prefers the agent own text over the model when a body exists', async () => {
 })
 
 it('skips the category, never invents a message, when the model output is refused', async () => {
-  generateScheduledMessage.mockResolvedValue({ ok: false, reason: 'FORBIDDEN_CLAIM', attempted: true, model: 'test', inputTokens: 10, outputTokens: 5 })
+  generateScheduledMessage.mockResolvedValue({ ok: false, reason: 'CONTAINS_NUMBER', attempted: true, model: 'test', inputTokens: 10, outputTokens: 5 })
   const result = await enqueueScheduledMessagesForAgent(agentId, now)
   expect(result.queued).toBe(0)
   expect(result.skipped).toContainEqual(expect.objectContaining({ reason: 'MESSAGE_UNAVAILABLE' }))
