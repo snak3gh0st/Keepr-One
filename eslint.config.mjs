@@ -20,6 +20,10 @@ const eslintConfig = defineConfig([
     // Local git worktrees (see .gitignore) are separate checkouts with their own
     // .next builds; the patterns above are anchored and don't reach nested paths.
     ".worktrees/**",
+    // Scratch previews and planning notes, also git-ignored. CI checks out none
+    // of this, so linting it only ever reports errors that cannot reach a build
+    // — and a red local lint that CI does not share teaches people to ignore it.
+    ".superpowers/**",
   ]),
 ]);
 
