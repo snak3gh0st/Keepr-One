@@ -3040,9 +3040,12 @@ model KBotContactConsentEvent {
 
 /// The text an agent chose for a scheduled category, in one language.
 ///
-/// Absent means the category is not set up for that agent: the engine writes
-/// nothing rather than falling back to a house default, because a message that
-/// goes out over someone's name should be text they actually approved.
+/// A missing row means the category is not set up for that agent: the engine
+/// writes nothing rather than falling back to a house default. A row whose
+/// `body` is null means the opposite — the category is on and the engine
+/// writes the text itself, because a message that goes out over someone's
+/// name should be text they actually approved, and here approval happens by
+/// reading it before it goes rather than by typing it upfront.
 model KBotMessageTemplate {
   id        String   @id @default(cuid())
   agentId   String
@@ -3050,12 +3053,13 @@ model KBotMessageTemplate {
   /// BIRTHDAY | ANNUAL_REVIEW | POLICY_ANNIVERSARY
   category  String
   language  String
-  /// O texto que o agente aprovou, ou nulo enquanto o K-Bot ainda escreve.
+  /// The text the agent approved, or null while the K-Bot still writes it.
   ///
-  /// Nulo não é "categoria desligada" — isso é `enabled`. Nulo é "ligada, e o
-  /// texto de cada mensagem sai do modelo até o agente aprovar um". Enquanto as
-  /// duas ideias moravam na mesma coluna, um agente que nunca escreveu nada não
-  /// recebia mensagem nenhuma, que é a barreira que esta coluna desfaz.
+  /// Null is not "category off" — that is `enabled`. Null is "on, and each
+  /// message's text comes from the model until the agent approves one".
+  /// While the two ideas shared one column, an agent who never wrote
+  /// anything received no messages at all — that is the barrier this column
+  /// undoes.
   body      String?
   enabled   Boolean  @default(false)
   /// Whether this category may leave without the agent pressing send.
