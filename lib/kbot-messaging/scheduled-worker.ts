@@ -3,7 +3,7 @@ import type { KBotFollowupJob } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { lockAgent, settleJob, type Tx } from '@/lib/kbot-followup/credits'
 import { ACTIVE_JOB_STATES, COOLDOWN_MS, FollowupError, SENT_JOB_STATES } from '@/lib/kbot-followup/domain'
-import { hasRecentOutgoing, messagingTransport, requestedOptOut } from '@/lib/kbot-followup/transport'
+import { hasRecentOutgoing, messagingTransport, optOutMessage } from '@/lib/kbot-followup/transport'
 import { renderTemplate } from '@/lib/kbot-templates/variables'
 import { templateValuesFor } from '@/lib/kbot-templates/approval-view'
 import { evaluateSendGate } from './send-gate'
@@ -125,8 +125,11 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
     const conversationId = await transport.conversation(claimed.phone, claimed.customerName)
     await transport.verifyConversation(conversationId, claimed.phone)
     const messages = await transport.messages(conversationId)
-    if (requestedOptOut(messages)) {
-      await recordOptOut(claimed.agentId, claimed.phone, null)
+    const stopRequest = optOutMessage(messages)
+    if (stopRequest !== null) {
+      // The words, not just the fact. Months later the question is what the
+      // person actually wrote, and the provider's history is long gone.
+      await recordOptOut(claimed.agentId, claimed.phone, stopRequest)
       throw new FollowupError('OPTED_OUT')
     }
     if (hasRecentOutgoing(messages)) throw new FollowupError('RECENT_CONTACT')
