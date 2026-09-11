@@ -11,6 +11,16 @@ import { FALLBACK_ZONE, timeZoneForPhone } from './quiet-hours'
 export const SCHEDULED_CATEGORIES = ['BIRTHDAY', 'ANNUAL_REVIEW'] as const
 export type ScheduledCategory = typeof SCHEDULED_CATEGORIES[number]
 
+/// Every category that travels the proposal path: agent's own template, waits
+/// for approval, dispatched by the scheduled worker.
+///
+/// Wider than SCHEDULED_CATEGORIES because not every proposal comes from a
+/// date. Lapse recovery is raised by a policy changing state, and the two sets
+/// are kept apart so the date engine cannot accidentally try to compute an
+/// anniversary for something that has none.
+export const PROPOSAL_CATEGORIES = [...SCHEDULED_CATEGORIES, 'LAPSE_RECOVERY'] as const
+export type ProposalCategory = typeof PROPOSAL_CATEGORIES[number]
+
 export type TriggerClient = {
   id: string
   name: string

@@ -17,6 +17,22 @@ describe('candidate ownership and current facts', () => {
     expect(mocks.policy).toHaveBeenCalledWith(expect.objectContaining({ where: { agentId: 'agent1', client: { assignedAgentId: 'agent1' } } }))
     expect(rows[0].blockedReason).toBeNull()
   })
+  it('does not offer a lapse that is already waiting in the approval queue', async () => {
+    // The proposal and this entry are the same message about the same event.
+    // Offering both lets the agent send it by hand, approve it in the queue,
+    // and lose the second to RECENT_CONTACT with nothing on screen saying why.
+    // Fifth call is the recency query, sixth is the proposals query.
+    mocks.job.mockResolvedValueOnce([]).mockResolvedValueOnce([{ phone: '+14075550100', candidateId: 'policy:p1' }])
+    const rows = await getFollowupCandidates('agent1', now)
+    expect(rows[0].blockedReason).toBe('ALREADY_PROPOSED')
+  })
+
+  it('leaves a candidate alone when the proposal is for a different one', async () => {
+    mocks.job.mockResolvedValueOnce([]).mockResolvedValueOnce([{ phone: '+14075550100', candidateId: 'policy:other' }])
+    const rows = await getFollowupCandidates('agent1', now)
+    expect(rows[0].blockedReason).toBeNull()
+  })
+
   it('preserves preferences stored on the client before a phone correction', async () => {
     for (const [preference, expected] of [
       [{ optedOut: true }, 'OPTED_OUT'],

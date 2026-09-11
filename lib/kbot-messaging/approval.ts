@@ -3,7 +3,7 @@ import 'server-only'
 import { prisma } from '@/lib/prisma'
 import { lockAgent, settleJob } from '@/lib/kbot-followup/credits'
 import { APPROVAL_WINDOW_MS, AWAITING_APPROVAL } from '@/lib/kbot-followup/domain'
-import { SCHEDULED_CATEGORIES } from './scheduled-triggers'
+import { PROPOSAL_CATEGORIES } from './scheduled-triggers'
 
 /// Releasing scheduled messages the agent has read.
 ///
@@ -31,7 +31,7 @@ export async function approveScheduledMessages(
       where: {
         id: { in: [...jobIds] },
         agentId,
-        category: { in: [...SCHEDULED_CATEGORIES] },
+        category: { in: [...PROPOSAL_CATEGORIES] },
         status: AWAITING_APPROVAL,
         // The window is re-checked here, not only by the sweep. A tab left open
         // overnight would otherwise release a greeting that expired hours ago,
@@ -57,7 +57,7 @@ export async function discardScheduledMessages(
       where: {
         id: { in: [...jobIds] },
         agentId,
-        category: { in: [...SCHEDULED_CATEGORIES] },
+        category: { in: [...PROPOSAL_CATEGORIES] },
         status: AWAITING_APPROVAL,
       },
     })
@@ -79,7 +79,7 @@ export async function expireStaleScheduledProposals(now = new Date()): Promise<n
   const stale = await prisma.kBotFollowupJob.findMany({
     where: {
       status: AWAITING_APPROVAL,
-      category: { in: [...SCHEDULED_CATEGORIES] },
+      category: { in: [...PROPOSAL_CATEGORIES] },
       createdAt: { lt: new Date(now.getTime() - APPROVAL_WINDOW_MS) },
     },
     take: 100,

@@ -7,7 +7,7 @@ import { hasRecentOutgoing, messagingTransport, optOutMessage } from '@/lib/kbot
 import { renderTemplate } from '@/lib/kbot-templates/variables'
 import { templateValuesFor } from '@/lib/kbot-templates/approval-view'
 import { evaluateSendGate } from './send-gate'
-import { SCHEDULED_CATEGORIES } from './scheduled-triggers'
+import { PROPOSAL_CATEGORIES } from './scheduled-triggers'
 
 const LEASE_MS = 120_000
 const unconfirmedStates = ['DISPATCHING', 'ACCEPTED', 'UNKNOWN']
@@ -94,7 +94,7 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
     const now = new Date()
     const rows = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id" FROM "KBotFollowupJob"
-      WHERE "status" = 'PENDING' AND "category" = ANY(${[...SCHEDULED_CATEGORIES]})
+      WHERE "status" = 'PENDING' AND "category" = ANY(${[...PROPOSAL_CATEGORIES]})
         AND NOT ("id" = ANY(${[...skipIds]}))
       ORDER BY "createdAt"
       FOR UPDATE SKIP LOCKED LIMIT 1`
@@ -235,7 +235,7 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
 /// Release scheduled jobs whose worker died mid-lease.
 export async function releaseExpiredScheduledLeases(now = new Date()) {
   const { count } = await prisma.kBotFollowupJob.updateMany({
-    where: { status: 'PREPARING', category: { in: [...SCHEDULED_CATEGORIES] }, leaseExpiresAt: { lt: now } },
+    where: { status: 'PREPARING', category: { in: [...PROPOSAL_CATEGORIES] }, leaseExpiresAt: { lt: now } },
     data: { status: 'PENDING', leaseExpiresAt: null },
   })
   return count
