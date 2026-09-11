@@ -37,6 +37,34 @@ export async function settleJob(tx: Tx, job: KBotFollowupJob, status: string, er
     notifiedAt: null, errorCode: errorCode ?? null, ...(providerMessageId ? { providerMessageId } : {}) } })
 }
 
+/// Charge tokens the agent owes with no job to attach them to.
+///
+/// Every other spend in this ledger hangs off a job, because every other spend
+/// produced a message. A scheduled proposal whose text the model refused
+/// produced nothing to queue — and no job is created on purpose, so the same
+/// client can be tried again on the next pass — but the request did reach the
+/// provider. Left uncharged it would be a free retry: ask, be refused, pay
+/// nothing, every pass, for as long as the candidate lasts. That is the same
+/// hole `ASSUMED_ATTEMPT_TOKENS` closes for a timeout.
+///
+/// Spends the grants that expire first and never past what they hold, so the
+/// balance can only fall to zero. No allocation row is written: an allocation
+/// answers "what did this job cost", and there is no job — nothing reads them
+/// as a second account of the grant.
+export async function spendWithoutJob(tx: Tx, agentId: string, tokens: number, now = new Date()) {
+  let remaining = Math.max(0, tokens)
+  if (!remaining) return 0
+  const grants = await tx.kBotCreditGrant.findMany({ where: { agentId, expiresAt: { gt: now } }, orderBy: { expiresAt: 'asc' } })
+  for (const grant of grants) {
+    const amount = Math.min(remaining, Math.max(0, grant.allowance - grant.spent - grant.reserved))
+    if (!amount) continue
+    await tx.kBotCreditGrant.update({ where: { id: grant.id }, data: { spent: { increment: amount } } })
+    remaining -= amount
+    if (!remaining) break
+  }
+  return tokens - remaining
+}
+
 export async function settleGeneration(tx: Tx, job: KBotFollowupJob, inputTokens: number, outputTokens: number) {
   if (job.creditState !== 'RESERVED' || !job.grantId) return
   // A provider anomaly cannot spend above the ceiling accepted by the user.

@@ -2,16 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   agent: vi.fn(), template: vi.fn(), client: vi.fn(), policy: vi.fn(),
-  jobFindFirst: vi.fn(), jobCreate: vi.fn(), pref: vi.fn(),
-  grantFindMany: vi.fn(), grantUpsert: vi.fn(), grantUpdate: vi.fn(), allocationCreate: vi.fn(),
+  jobFindFirst: vi.fn(), jobCreate: vi.fn(), jobUpdate: vi.fn(), pref: vi.fn(),
+  grantFindMany: vi.fn(), grantUpsert: vi.fn(), grantUpdate: vi.fn(),
+  allocationCreate: vi.fn(), allocationFindMany: vi.fn(), allocationUpdate: vi.fn(),
+  generate: vi.fn(),
 }))
 
 const tx = {
   $executeRaw: vi.fn(),
-  kBotFollowupJob: { findFirst: mocks.jobFindFirst, create: mocks.jobCreate },
+  kBotFollowupJob: { findFirst: mocks.jobFindFirst, create: mocks.jobCreate, update: mocks.jobUpdate },
   kBotContactPreference: { findMany: mocks.pref },
   kBotCreditGrant: { findMany: mocks.grantFindMany, upsert: mocks.grantUpsert, update: mocks.grantUpdate },
-  kBotCreditAllocation: { create: mocks.allocationCreate },
+  kBotCreditAllocation: { create: mocks.allocationCreate, findMany: mocks.allocationFindMany, update: mocks.allocationUpdate },
 }
 
 vi.mock('@/lib/prisma', () => ({ prisma: {
@@ -19,8 +21,14 @@ vi.mock('@/lib/prisma', () => ({ prisma: {
   kBotMessageTemplate: { findMany: mocks.template },
   client: { findMany: mocks.client },
   policy: { findMany: mocks.policy },
+  // The reads the pass makes before asking the model anything are the same
+  // reads the transaction makes, so they answer from the same mocks.
+  kBotFollowupJob: { findFirst: mocks.jobFindFirst },
+  kBotContactPreference: { findMany: mocks.pref },
+  kBotCreditGrant: { findMany: mocks.grantFindMany },
   $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
 } }))
+vi.mock('./scheduled-generation', () => ({ generateScheduledMessage: mocks.generate }))
 
 import { enqueueScheduledMessagesForAgent } from './scheduled-queue'
 import { LAPSE_RECENCY_MS } from './lapse-triggers'
@@ -29,15 +37,23 @@ import { LAPSE_RECENCY_MS } from './lapse-triggers'
 // decides a test unless the test is about the hour.
 const now = new Date('2026-03-11T17:00:00Z')
 const phone = '+13055550142'
+/// The agent's own text. Most cases below are about the gate and the
+/// reservation, not about who wrote the message, so they carry a body and stay
+/// on the path where the model is never asked.
+const body = 'Oi {{primeiro_nome}}, aqui é {{agente}}.'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { language: 'PT', banned: false } })
-  mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT' }])
+  mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { language: 'PT', banned: false, name: 'Paulo' } })
+  mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body }])
   mocks.client.mockResolvedValue([{ id: 'c1', name: 'Ana', phone, dateOfBirth: new Date('1980-03-11T00:00:00Z') }])
   mocks.policy.mockResolvedValue([])
   mocks.jobFindFirst.mockResolvedValue(null)
-  mocks.jobCreate.mockResolvedValue({ id: 'job1' })
+  // What `create` hands back is the row the settlement then charges against.
+  mocks.jobCreate.mockResolvedValue({ id: 'job1', agentId: 'a1', grantId: 'g1', creditState: 'RESERVED', reservedTokens: 192 })
+  mocks.allocationFindMany.mockResolvedValue([{ id: 'al1', grantId: 'g1', reservedTokens: 192 }])
+  mocks.generate.mockResolvedValue({ ok: true, text: 'Ana, tudo de bom hoje!', attempted: true,
+    model: 'test-model', inputTokens: 120, outputTokens: 30 })
   mocks.pref.mockResolvedValue([])
   mocks.grantFindMany.mockResolvedValue([{ id: 'g1', allowance: 1000, reserved: 0, spent: 0 }])
 })
@@ -69,7 +85,7 @@ describe('enqueueScheduledMessagesForAgent', () => {
   it('writes nothing when the agent has no enabled template for the language', async () => {
     // There is no house default. A message going out over someone's name is
     // text they approved or it does not go out.
-    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'EN' }])
+    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'EN', body }])
     const result = await enqueueScheduledMessagesForAgent('a1', now)
     expect(result.queued).toBe(0)
     expect(result.skipped).toEqual([expect.objectContaining({ reason: 'TEMPLATE_MISSING', category: 'BIRTHDAY' })])
@@ -105,8 +121,8 @@ describe('enqueueScheduledMessagesForAgent', () => {
       [{ lastManualAt: now }, 'RECENT_CONTACT'],
     ] as const) {
       vi.clearAllMocks()
-      mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { language: 'PT', banned: false } })
-      mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT' }])
+      mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { language: 'PT', banned: false, name: 'Paulo' } })
+      mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body }])
       mocks.client.mockResolvedValue([{ id: 'c1', name: 'Ana', phone, dateOfBirth: new Date('1980-03-11T00:00:00Z') }])
       mocks.policy.mockResolvedValue([])
       mocks.jobFindFirst.mockResolvedValue(null)
@@ -160,9 +176,9 @@ describe('enqueueScheduledMessagesForAgent', () => {
   })
 
   it('does no work at all for an inactive or banned agent', async () => {
-    mocks.agent.mockResolvedValue({ id: 'a1', status: 'SUSPENDED', user: { language: 'PT', banned: false } })
+    mocks.agent.mockResolvedValue({ id: 'a1', status: 'SUSPENDED', user: { language: 'PT', banned: false, name: 'Paulo' } })
     expect(await enqueueScheduledMessagesForAgent('a1', now)).toEqual({ queued: 0, skipped: [] })
-    mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { language: 'PT', banned: true } })
+    mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { language: 'PT', banned: true, name: 'Paulo' } })
     expect(await enqueueScheduledMessagesForAgent('a1', now)).toEqual({ queued: 0, skipped: [] })
     expect(mocks.client).not.toHaveBeenCalled()
   })
@@ -181,7 +197,7 @@ describe('enqueueScheduledMessagesForAgent, lapse recovery', () => {
   beforeEach(() => {
     // No birthday today, so nothing but the lapse can produce a candidate.
     mocks.client.mockResolvedValue([{ id: 'c1', name: 'Ana', phone, dateOfBirth: null }])
-    mocks.template.mockResolvedValue([{ category: 'LAPSE_RECOVERY', language: 'PT' }])
+    mocks.template.mockResolvedValue([{ category: 'LAPSE_RECOVERY', language: 'PT', body }])
   })
 
   it('proposes a lapse under a key naming the event, waiting for the agent', async () => {
@@ -218,7 +234,7 @@ describe('enqueueScheduledMessagesForAgent, lapse recovery', () => {
 
   it('writes nothing without an enabled lapse template', async () => {
     // There is no house text for a lapse either.
-    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT' }])
+    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body }])
     lapsePolicies([lapsed])
     const result = await enqueueScheduledMessagesForAgent('a1', now)
     expect(result.queued).toBe(0)
@@ -242,11 +258,15 @@ describe('enqueueScheduledMessagesForAgent, lapse recovery', () => {
     expect(mocks.jobCreate).not.toHaveBeenCalled()
 
     vi.clearAllMocks()
-    mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { language: 'PT', banned: false } })
-    mocks.template.mockResolvedValue([{ category: 'LAPSE_RECOVERY', language: 'PT' }])
+    mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { language: 'PT', banned: false, name: 'Paulo' } })
+    mocks.template.mockResolvedValue([{ category: 'LAPSE_RECOVERY', language: 'PT', body }])
     mocks.client.mockResolvedValue([{ id: 'c1', name: 'Ana', phone, dateOfBirth: null }])
     mocks.jobFindFirst.mockResolvedValue(null)
-    mocks.jobCreate.mockResolvedValue({ id: 'job1' })
+    // What `create` hands back is the row the settlement then charges against.
+  mocks.jobCreate.mockResolvedValue({ id: 'job1', agentId: 'a1', grantId: 'g1', creditState: 'RESERVED', reservedTokens: 192 })
+  mocks.allocationFindMany.mockResolvedValue([{ id: 'al1', grantId: 'g1', reservedTokens: 192 }])
+  mocks.generate.mockResolvedValue({ ok: true, text: 'Ana, tudo de bom hoje!', attempted: true,
+    model: 'test-model', inputTokens: 120, outputTokens: 30 })
     mocks.pref.mockResolvedValue([])
     mocks.grantFindMany.mockResolvedValue([{ id: 'g1', allowance: 1000, reserved: 0, spent: 0 }])
     lapsePolicies([lapsed])
@@ -265,5 +285,167 @@ describe('enqueueScheduledMessagesForAgent, lapse recovery', () => {
     expect(mocks.template).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ category: { in: ['BIRTHDAY', 'ANNUAL_REVIEW', 'LAPSE_RECOVERY'] } }),
     }))
+  })
+})
+
+/// A category that is on but has no text yet.
+///
+/// `body` null is not "off" — it is "on, and the K-Bot writes this one". What
+/// waits for the agent has to carry the text before they see it: the promise of
+/// the approval screen is that they read the message that will actually leave.
+describe('enqueueScheduledMessagesForAgent, a category the K-Bot writes', () => {
+  beforeEach(() => {
+    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body: null }])
+  })
+
+  it('writes the message at enqueue, so the agent reads what will be sent', async () => {
+    const result = await enqueueScheduledMessagesForAgent('a1', now)
+    expect(result).toMatchObject({ queued: 1, skipped: [] })
+    expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({
+      category: 'BIRTHDAY', firstName: 'Ana', language: 'PT',
+    }))
+    expect(mocks.jobCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      status: 'AWAITING_APPROVAL', content: 'Ana, tudo de bom hoje!', model: 'test-model',
+    }) }))
+  })
+
+  it('registers the call against the platform daily ceiling', async () => {
+    // The ceiling in the manual worker counts `generationStartedAt` across the
+    // whole table. A generation that never stamped it would be spending the
+    // provider budget where the cap cannot see it.
+    await enqueueScheduledMessagesForAgent('a1', now)
+    expect(mocks.jobCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      generationStartedAt: now,
+    }) }))
+  })
+
+  it('registers nothing when the model was never asked', async () => {
+    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body }])
+    mocks.generate.mockResolvedValue({ ok: false, reason: 'UNAVAILABLE', attempted: false,
+      model: 'test-model', inputTokens: 0, outputTokens: 0 })
+    await enqueueScheduledMessagesForAgent('a1', now)
+    expect(mocks.jobCreate.mock.calls[0][0].data.generationStartedAt).toBeUndefined()
+  })
+
+  it('charges the tokens the text cost against the job that carries it', async () => {
+    // The model was called at enqueue, so the reservation is spent at enqueue.
+    // A generated message nobody is charged for is as much a defect as a
+    // double charge.
+    await enqueueScheduledMessagesForAgent('a1', now)
+    expect(mocks.grantUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'g1' }, data: { reserved: { decrement: 192 }, spent: { increment: 150 } },
+    }))
+    expect(mocks.jobUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'job1' },
+      data: expect.objectContaining({ creditState: 'SPENT', inputTokens: 120, outputTokens: 30 }),
+    }))
+  })
+
+  it('prefers the agent own text over the model when a body exists', async () => {
+    // True of the review and the lapse. The birthday is the exception, below.
+    mocks.client.mockResolvedValue([{ id: 'c1', name: 'Ana', phone, dateOfBirth: null }])
+    mocks.policy.mockResolvedValue([{ id: 'p1', clientId: 'c1', effectiveDate: new Date('2021-03-11T00:00:00Z') }])
+    mocks.template.mockResolvedValue([{ category: 'ANNUAL_REVIEW', language: 'PT', body }])
+    await enqueueScheduledMessagesForAgent('a1', now)
+    expect(mocks.generate).not.toHaveBeenCalled()
+    expect(mocks.jobCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      category: 'ANNUAL_REVIEW', content: 'Oi Ana, aqui é Paulo.',
+    }) }))
+  })
+
+  it('writes the birthday even when the agent has a template, because the same words every year is the problem', async () => {
+    // The whole reason this category is the exception. A template is the floor
+    // it can fall back to, never a reason to send the same sentence for the
+    // rest of the client's life.
+    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body }])
+    await enqueueScheduledMessagesForAgent('a1', now)
+    expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ category: 'BIRTHDAY' }))
+    expect(mocks.jobCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      content: 'Ana, tudo de bom hoje!', model: 'test-model',
+    }) }))
+  })
+
+  it('falls back to the agent template when the model strays, and charges the attempt to the job', async () => {
+    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body }])
+    mocks.generate.mockResolvedValue({ ok: false, reason: 'MENTIONS_BUSINESS', attempted: true,
+      model: 'test-model', inputTokens: 120, outputTokens: 30 })
+    const result = await enqueueScheduledMessagesForAgent('a1', now)
+    expect(result).toMatchObject({ queued: 1, skipped: [] })
+    const created = mocks.jobCreate.mock.calls[0][0].data
+    expect(created.content).toBe('Oi Ana, aqui é Paulo.')
+    // The words are the agent's, so the model is not credited with them.
+    expect(created.model).toBeUndefined()
+    // The request still reached the provider, and there is a job to charge.
+    expect(mocks.grantUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: { reserved: { decrement: 192 }, spent: { increment: 150 } },
+    }))
+  })
+
+  it('charges a refused attempt that has no job to be charged to', async () => {
+    // No job is created, on purpose, so the client can be tried again. Without
+    // this the next pass would ask, be refused, and pay nothing again — free
+    // retries for as long as the candidate lasts.
+    mocks.generate.mockResolvedValue({ ok: false, reason: 'CONTAINS_NUMBER', attempted: true,
+      model: 'test-model', inputTokens: 120, outputTokens: 30 })
+    const result = await enqueueScheduledMessagesForAgent('a1', now)
+    expect(result.skipped).toEqual([expect.objectContaining({ reason: 'MESSAGE_UNAVAILABLE' })])
+    expect(mocks.jobCreate).not.toHaveBeenCalled()
+    expect(mocks.grantUpdate).toHaveBeenCalledWith({ where: { id: 'g1' }, data: { spent: { increment: 150 } } })
+  })
+
+  it('charges nothing when nothing was asked of anyone', async () => {
+    // The model is switched off. No request left this process, so no one owes
+    // anything, and the candidate waits for the day it is turned on.
+    mocks.generate.mockResolvedValue({ ok: false, reason: 'UNAVAILABLE', attempted: false,
+      model: 'test-model', inputTokens: 0, outputTokens: 0 })
+    const result = await enqueueScheduledMessagesForAgent('a1', now)
+    expect(result.skipped).toEqual([expect.objectContaining({ reason: 'MESSAGE_UNAVAILABLE' })])
+    expect(mocks.grantUpdate).not.toHaveBeenCalled()
+  })
+
+  it('skips the category, and never invents a message, when the model is refused', async () => {
+    mocks.generate.mockResolvedValue({ ok: false, reason: 'CONTAINS_NUMBER', attempted: true,
+      model: 'test-model', inputTokens: 120, outputTokens: 30 })
+    const result = await enqueueScheduledMessagesForAgent('a1', now)
+    expect(result.queued).toBe(0)
+    expect(result.skipped).toEqual([expect.objectContaining({ reason: 'MESSAGE_UNAVAILABLE', category: 'BIRTHDAY' })])
+    expect(mocks.jobCreate).not.toHaveBeenCalled()
+  })
+
+  it('leaves the text to dispatch for a category that sends on its own', async () => {
+    // Nobody reads an automatic message before it goes, so there is nothing to
+    // gain by writing it early — and writing it early means paying for what
+    // the dispatch gate then stops, again on every pass.
+    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body: null, autoSend: true }])
+    await enqueueScheduledMessagesForAgent('a1', now)
+    expect(mocks.generate).not.toHaveBeenCalled()
+    expect(mocks.jobCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      status: 'PENDING', content: null,
+    }) }))
+  })
+
+  it('does not pay the model for a candidate the pass is about to refuse', async () => {
+    // The gate comes first, exactly as it does at dispatch: a second pass over
+    // a birthday already queued, or a contact who opted out, must not cost a
+    // model call every time the cron runs.
+    for (const arrange of [
+      () => mocks.jobFindFirst.mockResolvedValue({ id: 'existing' }),
+      () => mocks.pref.mockResolvedValue([{ subjectKey: phone, optedOut: true }]),
+      () => mocks.grantFindMany.mockResolvedValue([{ id: 'g1', allowance: 100, reserved: 0, spent: 0 }]),
+    ]) {
+      vi.clearAllMocks()
+      mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { language: 'PT', banned: false, name: 'Paulo' } })
+      mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body: null }])
+      mocks.client.mockResolvedValue([{ id: 'c1', name: 'Ana', phone, dateOfBirth: new Date('1980-03-11T00:00:00Z') }])
+      mocks.policy.mockResolvedValue([])
+      mocks.jobFindFirst.mockResolvedValue(null)
+      mocks.pref.mockResolvedValue([])
+      mocks.grantFindMany.mockResolvedValue([{ id: 'g1', allowance: 1000, reserved: 0, spent: 0 }])
+      arrange()
+      const result = await enqueueScheduledMessagesForAgent('a1', now)
+      expect(result.queued).toBe(0)
+      expect(mocks.generate).not.toHaveBeenCalled()
+      expect(mocks.jobCreate).not.toHaveBeenCalled()
+    }
   })
 })

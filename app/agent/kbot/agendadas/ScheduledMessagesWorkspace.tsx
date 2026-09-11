@@ -30,6 +30,10 @@ export type ScheduledMessagesView = {
     enabled: boolean
     /// Whether this category's messages leave without the agent reading them.
     autoSend: boolean
+    /// Whether the agent may turn automatic sending on at all. False while any
+    /// row of the category has no saved text: the K-Bot would be writing where
+    /// nobody reads, which automatic sending has never meant.
+    canAutoSend: boolean
     languages: Array<{ language: TemplateLanguage; body: string; updatedAt: string | null }>
   }>
   /// Messages already written and waiting for the agent to release them.
@@ -325,7 +329,7 @@ function CategoryEditor({ entry, label, pending, onSave, onToggle, onAutoSend }:
         </div>
         <button
           className={secondary}
-          disabled={pending}
+          disabled={pending || (!entry.autoSend && !entry.canAutoSend)}
           aria-pressed={entry.autoSend}
           onClick={() => {
             if (entry.autoSend) onAutoSend(false)
@@ -335,6 +339,12 @@ function CategoryEditor({ entry, label, pending, onSave, onToggle, onAutoSend }:
           ? copy('Voltar a me perguntar', 'Ask me again')
           : copy('Mandar sem me perguntar', 'Send without asking me')}</button>
       </div>
+      {/* Said where the button is, not after the click: offering a switch that
+          the server will refuse is how an agent learns to distrust the screen. */}
+      {!entry.autoSend && !entry.canAutoSend && <p className="mt-2 text-sm text-ink-muted">{copy(
+        'Só depois de salvar o texto desta categoria em cada idioma. O envio automático manda o que você aprovou — sem texto salvo, ninguém teria lido o que sai.',
+        'Only after this category text is saved in each language. Automatic sending delivers what you approved — with no saved text, nobody would have read what goes out.',
+      )}</p>}
       {confirming && !entry.autoSend && <div role="alertdialog" aria-label={copy('Confirmar envio automático', 'Confirm automatic sending')} className="mt-3 rounded-xl bg-danger/10 p-3">
         <p className="text-sm leading-relaxed text-ink">{copy(
           `A partir daí, as mensagens de ${label} vão para o cliente sem passar por você. Você não vai ler nenhuma delas antes.`,
@@ -348,14 +358,20 @@ function CategoryEditor({ entry, label, pending, onSave, onToggle, onAutoSend }:
     </div>
 
     <div className="mt-4 flex flex-wrap gap-2">
-      {entry.languages.map((row) => <button key={row.language} className={language === row.language ? `${secondary} border-teal bg-teal-pale text-teal-deep` : secondary} aria-pressed={language === row.language} onClick={() => setLanguage(row.language)}>{row.language === 'PT' ? 'Português' : 'English'}{!bodies[row.language]?.trim() && <span className="ml-2 text-xs text-ink-muted">{copy('sem texto', 'no text')}</span>}</button>)}
+      {entry.languages.map((row) => <button key={row.language} className={language === row.language ? `${secondary} border-teal bg-teal-pale text-teal-deep` : secondary} aria-pressed={language === row.language} onClick={() => setLanguage(row.language)}>{row.language === 'PT' ? 'Português' : 'English'}{!bodies[row.language]?.trim() && <span className="ml-2 text-xs text-ink-muted">{copy('K-Bot escreve', 'K-Bot writes')}</span>}</button>)}
     </div>
-    {/* A category can be on while one language has no text: the engine writes
-        nothing rather than falling back to a house default, so those clients
-        simply hear nothing. Better to say so than to let the card read "on". */}
-    {entry.enabled && entry.languages.some((row) => !bodies[row.language]?.trim()) && <p className="mt-2 text-sm text-ink-muted">{copy(
-      'Um dos idiomas está sem texto. Os clientes desse idioma não recebem nada nesta categoria.',
-      'One of the languages has no text. Clients in that language receive nothing in this category.',
+    {/* A category can be on with no text of its own. That used to mean nobody
+        was messaged; it now means the K-Bot writes each message and the agent
+        reads it before it goes. Saying "these clients receive nothing" would be
+        telling every agent, on their first day, that the feature is broken.
+        `!autoSend` is load-bearing, not defensive: this sentence promises the
+        message waits, and with automatic sending on it does not. A category
+        whose rows all carry text can still leave a language slot blank here —
+        that is the ordinary shape after the migration — so without the guard
+        the promise is made exactly where it is false. */}
+    {entry.enabled && !entry.autoSend && entry.languages.some((row) => !bodies[row.language]?.trim()) && <p className="mt-2 text-sm text-ink-muted">{copy(
+      'Sem texto salvo, o K-Bot escreve cada mensagem e ela espera você ler antes de sair.',
+      'With no saved text, the K-Bot writes each message and it waits for you to read it before it goes.',
     )}</p>}
 
     <label className="mt-4 grid gap-1 text-xs text-ink-muted">

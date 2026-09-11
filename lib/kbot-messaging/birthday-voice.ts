@@ -41,8 +41,48 @@ export type VoiceCheck =
   | { ok: true; text: string }
   | { ok: false; reason: VoiceRejection }
 
-function fold(value: string): string {
+export function fold(value: string): string {
   return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
+/// Folds and splits text into whole words, dropping punctuation and
+/// whitespace. The one tokenisation rule for this module — `isAddressedTo`
+/// and the word-list checks in `message-voice.ts` both compare whole tokens
+/// against it, so there is exactly one place that decides what counts as a
+/// word boundary, never a second implementation of the same idea drifting
+/// out of step with this one.
+export function tokenize(text: string): string[] {
+  return fold(text)
+    .split(/[^\p{L}\p{M}\p{N}']+/u)
+    .filter(Boolean)
+}
+
+/// Whether the text is addressed to this person. Matched at word boundaries,
+/// not by substring: `Ana` is inside `Banana` (and inside `Anabela`), and a
+/// check that accepts that is a check that accepts a message addressed to
+/// nobody, or to the wrong person. An empty name fails outright —
+/// `includes('')` is true for every string, so without this guard the whole
+/// check would silently pass everything.
+///
+/// Shared by every category's voice check, birthday included, so the name
+/// guard cannot quietly diverge between them.
+export function isAddressedTo(text: string, firstName: string): boolean {
+  const wanted = fold(firstName.trim())
+  if (!wanted) return false
+  return tokenize(text).some((token) => token === wanted)
+}
+
+/// Bare domains count: `veja em exemplo.com` is a link to the person reading
+/// it, whether or not the model wrote a scheme in front of it. Shared by
+/// every category's voice check.
+export function containsLink(text: string): boolean {
+  return /https?:\/\/|www\.|@\w+\.\w|\b[\p{L}\p{N}-]+\.(com|net|org|io|br|co|app|link)\b/iu.test(text)
+}
+
+/// A single brace is as wrong as a double one: `{nome}` is as much a leftover
+/// placeholder as `{{nome}}`. Shared by every category's voice check.
+export function containsPlaceholder(text: string): boolean {
+  return /[{}[\]]/.test(text)
 }
 
 /// Whether the model's greeting may be sent as written.
@@ -53,27 +93,12 @@ export function checkBirthdayVoice(raw: string, firstName: string): VoiceCheck {
   if (text.length > MAX_LENGTH) return { ok: false, reason: 'TOO_LONG' }
   // It has to be addressed to the person. A greeting that forgot the name reads
   // like a broadcast, which is the one thing it must not look like.
-  //
-  // Matched at word boundaries, not by substring: `Ana` is inside `Banana`, and
-  // a check that accepts that is a check that accepts a greeting addressed to
-  // nobody. An empty name fails outright — `includes('')` is true for every
-  // string, so without this the whole check would silently pass everything.
-  const wanted = fold(firstName.trim())
-  if (!wanted) return { ok: false, reason: 'NAME_MISSING' }
-  const named = fold(text)
-    .split(/[^\p{L}\p{M}\p{N}']+/u)
-    .some((token) => token === wanted)
-  if (!named) return { ok: false, reason: 'NAME_MISSING' }
+  if (!isAddressedTo(text, firstName)) return { ok: false, reason: 'NAME_MISSING' }
   // No digits at all: an age, a year, a figure, a date — none of them are safe
   // to invent, and a birthday greeting needs none of them.
   if (/\d/.test(text)) return { ok: false, reason: 'CONTAINS_NUMBER' }
-  // Bare domains count: `veja em exemplo.com` is a link to the person reading
-  // it, whether or not the model wrote a scheme in front of it.
-  if (/https?:\/\/|www\.|@\w+\.\w|\b[\p{L}\p{N}-]+\.(com|net|org|io|br|co|app|link)\b/iu.test(text)) {
-    return { ok: false, reason: 'CONTAINS_LINK' }
-  }
-  // Single braces too: `{nome}` is as wrong in a client's chat as `{{nome}}`.
-  if (/[{}[\]]/.test(text)) return { ok: false, reason: 'CONTAINS_PLACEHOLDER' }
+  if (containsLink(text)) return { ok: false, reason: 'CONTAINS_LINK' }
+  if (containsPlaceholder(text)) return { ok: false, reason: 'CONTAINS_PLACEHOLDER' }
   const folded = fold(text)
   if (FORBIDDEN.some((word) => folded.includes(fold(word)))) {
     return { ok: false, reason: 'MENTIONS_BUSINESS' }

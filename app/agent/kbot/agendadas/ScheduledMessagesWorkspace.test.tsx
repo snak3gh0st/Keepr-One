@@ -36,11 +36,11 @@ beforeEach(() => {
 
 const view: ScheduledMessagesView = {
   categories: [
-    { category: 'BIRTHDAY', enabled: false, autoSend: false, languages: [
+    { category: 'BIRTHDAY', enabled: false, autoSend: false, canAutoSend: true, languages: [
       { language: 'PT', body: 'Feliz aniversário, {{primeiro_nome}}! — {{agente}}', updatedAt: '2026-09-01T12:00:00.000Z' },
       { language: 'EN', body: '', updatedAt: null },
     ] },
-    { category: 'ANNUAL_REVIEW', enabled: false, autoSend: false, languages: [
+    { category: 'ANNUAL_REVIEW', enabled: false, autoSend: false, canAutoSend: false, languages: [
       { language: 'PT', body: '', updatedAt: null },
       { language: 'EN', body: '', updatedAt: null },
     ] },
@@ -256,6 +256,55 @@ describe('automatic sending', () => {
 
     expect(mocks.autoSend).not.toHaveBeenCalled()
     expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  // A migration deu a todo agente uma linha ligada com `body` nulo em cada
+  // categoria. Se o botão só olhasse a existência da linha, bastaria um clique
+  // para o modelo escrever sobre um lapso e a mensagem sair sem ninguém ler.
+  it('does not offer automatic sending for a category the K-Bot still writes', async () => {
+    render(<ScheduledMessagesWorkspace view={view} />)
+
+    const auto = screen.getAllByRole('button', { name: 'Mandar sem me perguntar' })
+    expect(auto[1]).toBeDisabled()
+    expect(screen.getByText(/Só depois de salvar o texto desta categoria/)).toBeInTheDocument()
+
+    await userEvent.click(auto[1])
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(mocks.autoSend).not.toHaveBeenCalled()
+  })
+
+  // Texto digitado e não salvo é texto que ninguém aprovou: o botão lê a
+  // verdade do servidor, não a caixa de edição.
+  it('stays closed while the text is only typed, never saved', async () => {
+    render(<ScheduledMessagesWorkspace view={view} />)
+
+    const editors = screen.getAllByRole('textbox')
+    await userEvent.type(editors[1], 'Oi {{primeiro_nome}}')
+
+    expect(screen.getAllByRole('button', { name: 'Mandar sem me perguntar' })[1]).toBeDisabled()
+  })
+
+  // A forma comum depois da migration: idioma do agente com texto salvo, o outro
+  // sem linha nenhuma, automático ligado. A frase promete que a mensagem espera
+  // leitura — e com o automático ligado ela não espera, ela sai.
+  it('never promises the message waits for a category that sends on its own', () => {
+    const auto = {
+      ...view,
+      categories: view.categories.map((c, index) => index === 0 ? { ...c, enabled: true, autoSend: true } : c),
+    }
+    render(<ScheduledMessagesWorkspace view={auto} />)
+
+    expect(screen.queryByText(/espera você ler antes de sair/)).toBeNull()
+  })
+
+  it('still says who writes the text while the category waits for the agent', () => {
+    const waiting = {
+      ...view,
+      categories: view.categories.map((c, index) => index === 0 ? { ...c, enabled: true } : c),
+    }
+    render(<ScheduledMessagesWorkspace view={waiting} />)
+
+    expect(screen.getByText(/espera você ler antes de sair/)).toBeInTheDocument()
   })
 
   it('turns off without a second question', async () => {

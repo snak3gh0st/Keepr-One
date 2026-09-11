@@ -31,7 +31,8 @@ export function templateValuesFor(input: { customerName: string; agentName: stri
 export type ApprovalProblem =
   /// The category's template for this language is gone or switched off since
   /// the proposal was raised. The worker re-reads the template at dispatch and
-  /// would settle the job as `TEMPLATE_MISSING`, so approving is pointless.
+  /// would settle the job as `TEMPLATE_MISSING`, so approving is pointless —
+  /// true even when the proposal already carries its text.
   | 'TEMPLATE_MISSING'
   /// The template was edited into something `renderTemplate` will not fill.
   | 'UNRENDERABLE'
@@ -60,7 +61,7 @@ export type ApprovalProposal = {
 /// client component, and `lib/kbot-followup/domain.ts` reaches for `node:crypto`.
 export function toApprovalProposal(
   row: ScheduledJobRow,
-  options: { agentName: string; templateBody: string | null; approvalWindowMs: number },
+  options: { agentName: string; templateBody: string | null; templateEnabled: boolean; approvalWindowMs: number },
 ): ApprovalProposal {
   const base = {
     id: row.id,
@@ -71,6 +72,22 @@ export function toApprovalProposal(
     createdAt: row.createdAt.toISOString(),
     expiresAt: new Date(row.createdAt.getTime() + options.approvalWindowMs).toISOString(),
   }
+  // Asked before the text, and before anything else: the worker re-reads the
+  // template at dispatch and refuses a category that was switched off since,
+  // so a card offering to release one would settle the job as
+  // `TEMPLATE_MISSING` — nothing sent, and the event already taken, which for a
+  // birthday means the year is gone. A card that says "ready" and quietly costs
+  // the client their message is worse than one that says why it cannot.
+  if (!options.templateEnabled) return { ...base, text: null, problem: 'TEMPLATE_MISSING', unknown: [] }
+
+  // The text the job already carries is the text that will be sent: it was
+  // resolved when the proposal was raised, and the worker sends it word for
+  // word. Rendering the template over it here would show the agent something
+  // other than what leaves — and for a category the K-Bot writes there is no
+  // template to render at all.
+  const stored = row.content?.trim()
+  if (stored) return { ...base, text: stored, problem: null, unknown: [] }
+
   const body = options.templateBody?.trim()
   if (!body) return { ...base, text: null, problem: 'TEMPLATE_MISSING', unknown: [] }
   const rendered = renderTemplate(body, templateValuesFor({ customerName: row.customerName, agentName: options.agentName }))

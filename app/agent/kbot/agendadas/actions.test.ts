@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   revalidatePath: vi.fn(),
   templateUpsert: vi.fn(),
   templateCount: vi.fn(),
+  templateFindMany: vi.fn(),
   templateUpdateMany: vi.fn(),
   preferenceUpsert: vi.fn(),
   consentCreate: vi.fn(),
@@ -28,7 +29,7 @@ vi.mock('@/lib/i18n/server', () => ({
 }))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    kBotMessageTemplate: { upsert: mocks.templateUpsert, count: mocks.templateCount, updateMany: mocks.templateUpdateMany },
+    kBotMessageTemplate: { upsert: mocks.templateUpsert, count: mocks.templateCount, updateMany: mocks.templateUpdateMany, findMany: mocks.templateFindMany },
     kBotContactPreference: { upsert: mocks.preferenceUpsert },
     kBotContactConsentEvent: { create: mocks.consentCreate },
     $transaction: mocks.transaction,
@@ -48,7 +49,7 @@ const tx = {
   // The per-agent advisory lock that serializes saving a template against
   // switching the category on or off.
   $executeRaw: vi.fn(),
-  kBotMessageTemplate: { count: mocks.templateCount, updateMany: mocks.templateUpdateMany, upsert: mocks.templateUpsert },
+  kBotMessageTemplate: { count: mocks.templateCount, updateMany: mocks.templateUpdateMany, upsert: mocks.templateUpsert, findMany: mocks.templateFindMany },
 }
 
 beforeEach(() => {
@@ -160,7 +161,7 @@ describe('opting a contact out from the screen', () => {
 
 describe('turning automatic sending on', () => {
   it('moves every language of the category together, under the agent lock', async () => {
-    mocks.templateCount.mockResolvedValue(2)
+    mocks.templateFindMany.mockResolvedValue([{ body: 'Parabéns, {{primeiro_nome}}!' }, { body: 'Happy birthday, {{primeiro_nome}}!' }])
     mocks.templateUpdateMany.mockResolvedValue({ count: 2 })
 
     const result = await setScheduledCategoryAutoSend({ category: 'BIRTHDAY', autoSend: true })
@@ -174,13 +175,49 @@ describe('turning automatic sending on', () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/kbot/agendadas')
   })
 
-  it('refuses a category that has no text at all', async () => {
-    mocks.templateCount.mockResolvedValue(0)
+  it('refuses a category that has no rows at all', async () => {
+    mocks.templateFindMany.mockResolvedValue([])
 
     const result = await setScheduledCategoryAutoSend({ category: 'BIRTHDAY', autoSend: true })
 
     expect(result).toEqual({ ok: false, message: expect.stringContaining('before changing how it is sent') })
     expect(mocks.templateUpdateMany).not.toHaveBeenCalled()
+  })
+
+  // O caso que a migration tornou universal: a linha existe, ligada, com `body`
+  // nulo. Automático aí significaria o modelo escrevendo sobre uma apólice em
+  // lapso e a mensagem saindo sem ninguém ter lido.
+  it('refuses a category the K-Bot still writes, however the row got there', async () => {
+    mocks.templateFindMany.mockResolvedValue([{ body: null }])
+
+    const result = await setScheduledCategoryAutoSend({ category: 'LAPSE_RECOVERY', autoSend: true })
+
+    expect(result).toEqual({ ok: false, message: expect.stringContaining('delivers the text you approved') })
+    expect(mocks.templateUpdateMany).not.toHaveBeenCalled()
+  })
+
+  // O motor lê a linha do idioma do próprio agente, e o `updateMany` liga todas.
+  // Uma linha com texto não pode autorizar as outras.
+  it('refuses when one language has text and the other has none', async () => {
+    mocks.templateFindMany.mockResolvedValue([{ body: 'Happy birthday!' }, { body: '   ' }])
+
+    const result = await setScheduledCategoryAutoSend({ category: 'BIRTHDAY', autoSend: true })
+
+    expect(result.ok).toBe(false)
+    expect(mocks.templateUpdateMany).not.toHaveBeenCalled()
+  })
+
+  it('never blocks turning it back off', async () => {
+    mocks.templateFindMany.mockResolvedValue([{ body: null }])
+    mocks.templateUpdateMany.mockResolvedValue({ count: 1 })
+
+    const result = await setScheduledCategoryAutoSend({ category: 'LAPSE_RECOVERY', autoSend: false })
+
+    expect(result).toEqual({ ok: true })
+    expect(mocks.templateUpdateMany).toHaveBeenCalledWith({
+      where: { agentId: 'agent-1', category: 'LAPSE_RECOVERY' },
+      data: { autoSend: false },
+    })
   })
 
   it('rejects anything that is not a scheduled category', async () => {

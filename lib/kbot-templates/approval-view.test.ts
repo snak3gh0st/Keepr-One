@@ -16,7 +16,7 @@ const row: ScheduledJobRow = {
   updatedAt: new Date('2026-09-01T12:00:00.000Z'),
 }
 
-const options = { agentName: 'Paulo Loureiro', approvalWindowMs: APPROVAL_WINDOW_MS }
+const options = { agentName: 'Paulo Loureiro', templateEnabled: true, approvalWindowMs: APPROVAL_WINDOW_MS }
 
 describe('the values a proposal is rendered with', () => {
   it('greets by the first name and signs with the agent', () => {
@@ -93,5 +93,38 @@ describe('where a proposal is filed', () => {
   it('is never mistaken for a delivery that needs attention', () => {
     expect(AWAITING_APPROVAL_STATUS).toBe(AWAITING_APPROVAL)
     expect(bucketForJob({ status: AWAITING_APPROVAL })).toBe('AWAITING_APPROVAL')
+  })
+})
+
+describe('a proposal that already carries its text', () => {
+  // A category the K-Bot writes has no template to render: the text was written
+  // when the proposal was raised, and it is what the client will read.
+  const written: ScheduledJobRow = { ...row, content: 'Ana, tudo de bom hoje!' }
+
+  it('shows the stored text, not the template', () => {
+    const proposal = toApprovalProposal(written, { ...options, templateBody: 'Feliz aniversário, {{nome}}!' })
+    expect(proposal.text).toBe('Ana, tudo de bom hoje!')
+    expect(proposal.problem).toBeNull()
+  })
+
+  it('is approvable with no template text at all', () => {
+    // The K-Bot writes this category: on, and with no text of the agent's.
+    const proposal = toApprovalProposal(written, { ...options, templateBody: null })
+    expect(proposal.text).toBe('Ana, tudo de bom hoje!')
+    expect(canApprove(proposal, new Date('2026-09-01T13:00:00.000Z').getTime())).toBe(true)
+  })
+})
+
+describe('a proposal whose category was switched off after it was raised', () => {
+  // The worker re-reads the template at dispatch and refuses. Offering to
+  // release it would settle the job with nothing sent — and the event is
+  // already taken, so for a birthday the year is gone.
+  const written: ScheduledJobRow = { ...row, content: 'Ana, tudo de bom hoje!' }
+
+  it('is not approvable, even carrying the text it would have sent', () => {
+    const proposal = toApprovalProposal(written, { ...options, templateEnabled: false, templateBody: 'Feliz aniversário, {{nome}}!' })
+    expect(proposal.problem).toBe('TEMPLATE_MISSING')
+    expect(proposal.text).toBeNull()
+    expect(canApprove(proposal, new Date('2026-09-01T13:00:00.000Z').getTime())).toBe(false)
   })
 })

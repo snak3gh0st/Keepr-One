@@ -54,6 +54,36 @@ describe.skipIf(!enabled)('follow-up PostgreSQL accounting and dispatch', () => 
     expect(await prisma.kBotFollowupJob.count({ where: { agentId } })).toBe(1)
     expect(await creditBalance(agentId)).toEqual({ available: 0, reserved: 192, spent: 0 })
   })
+  it('scheduled generations do not spend the manual follow-up attempts budget', async () => {
+    // The per-grant attempts cap bounds retries on one agent's manual batch.
+    // Scheduled messages stamp the same column — that is how the platform's
+    // daily ceiling sees them — but they are a different flow, with their own
+    // bounds. Counting them here would fail an unrelated follow-up with
+    // GENERATION_LIMIT and consume the work the agent just authorized.
+    const { id: grantId } = await prisma.kBotCreditGrant.upsert({
+      where: { sourceKey: `free:${agentId}:manual-cap` },
+      update: {},
+      create: { agentId, sourceKey: `free:${agentId}:manual-cap`, allowance: 1000,
+        expiresAt: new Date(Date.now() + 86_400_000) },
+    })
+    // Well past `ceil(allowance / 128)` — eight, on this grant.
+    for (let i = 0; i < 10; i += 1) {
+      await prisma.kBotFollowupJob.create({ data: {
+        agentId, category: 'BIRTHDAY', batchId: randomUUID(), requestKey: `birthday:${i}`,
+        candidateId: `birthday:${i}`, fingerprint: `b${i}`.padEnd(64, '0'), customerName: 'Ana',
+        phone: `+1305555${String(2000 + i)}`, language: 'PT', reason: 'BIRTHDAY',
+        sourceHref: '/agent/clients/x', grantId, status: 'SENT', creditState: 'SPENT',
+        generationStartedAt: new Date(),
+      } })
+    }
+
+    await startFollowups(agentId, input())
+    expect(await processNextFollowup()).toBe(true)
+    const job = await prisma.kBotFollowupJob.findFirstOrThrow({ where: { agentId, category: 'FOLLOWUP' } })
+    expect(job.errorCode).not.toBe('GENERATION_LIMIT')
+    expect(job.content).toBe('Olá, Cliente. Podemos conversar?')
+  })
+
   it('replaying the same authorization reserves only once', async () => {
     const request = input()
     const first = await startFollowups(agentId, request)
