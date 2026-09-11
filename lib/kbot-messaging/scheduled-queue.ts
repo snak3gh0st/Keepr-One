@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { availableCredits, fingerprint, normalizePhone, TOKEN_RESERVATION } from '@/lib/kbot-followup/domain'
 import { ACTIVE_JOB_STATES, AWAITING_APPROVAL, SENT_JOB_STATES, COOLDOWN_MS } from '@/lib/kbot-followup/domain'
-import { grantFreeCredits, lockAgent, settleGeneration, type Tx } from '@/lib/kbot-followup/credits'
+import { grantFreeCredits, lockAgent, settleGeneration, spendWithoutJob, type Tx } from '@/lib/kbot-followup/credits'
 import { renderTemplate } from '@/lib/kbot-templates/variables'
 import { templateValuesFor } from '@/lib/kbot-templates/approval-view'
 import type { ScheduledCategory } from '@/lib/kbot-templates/categories'
@@ -242,7 +242,10 @@ async function queueOne(
       // that one is written at dispatch. The worker reads this column as the
       // final word: a job that carries text is sent with it, unchanged.
       content,
-      ...(voice ? { model: voice.model } : {}),
+      // Only when the model wrote what is in `content`. A refused attempt is
+      // still charged below, but the text is the agent's, and stamping the
+      // model on it would credit the wrong author.
+      ...(voice?.ok ? { model: voice.model } : {}),
     } })
 
     let remaining = TOKEN_RESERVATION
@@ -258,7 +261,10 @@ async function queueOne(
     // The model was called before this transaction, so the reservation is spent
     // in it. The allocations have to exist first — this charges against them —
     // and a job created without this step would carry text nobody paid for.
-    if (voice) await settleGeneration(tx, job, voice.inputTokens, voice.outputTokens)
+    // `attempted` covers the refusal that fell back to the agent's template:
+    // the request reached the provider either way, and the job it produced is
+    // the right thing to charge it to.
+    if (voice && (voice.attempted || voice.ok)) await settleGeneration(tx, job, voice.inputTokens, voice.outputTokens)
     return 'QUEUED'
   })
 }
@@ -333,13 +339,21 @@ async function textForApproval(input: {
 }): Promise<ApprovalText> {
   const { agentId, candidate, language, entry, now } = input
   const values = templateValuesFor({ customerName: candidate.customerName, agentName: input.agentName })
-  // The agent's own words win. The model writes only what does not exist yet.
-  if (entry.body != null) {
-    const rendered = renderTemplate(entry.body, values)
-    // The save path refuses unknown variables, so reaching here means the
-    // template changed underneath. There is nothing to show and nothing to
-    // invent; the candidate comes back on the next pass.
-    return rendered.ok ? { ok: true, text: rendered.text, voice: null } : { ok: false, reason: 'MESSAGE_UNAVAILABLE' }
+
+  const floor = entry.body == null ? null : renderTemplate(entry.body, values)
+  // The save path refuses unknown variables, so reaching here means the
+  // template changed underneath. There is nothing to show and nothing to
+  // invent; the candidate comes back on the next pass.
+  if (floor && !floor.ok) return { ok: false, reason: 'MESSAGE_UNAVAILABLE' }
+  const floorText = floor?.ok ? floor.text : null
+
+  // A birthday is the one category where the same words every year is the
+  // problem, so the model writes it even when the agent has a template — the
+  // template is the floor it falls back to, which is exactly what the dispatch
+  // path does. For the other two the agent's own words win, and the model
+  // writes only what does not exist yet.
+  if (candidate.category !== 'BIRTHDAY' && floorText !== null) {
+    return { ok: true, text: floorText, voice: null }
   }
 
   // Not the authority — `queueOne` makes every one of these checks again, under
@@ -358,11 +372,28 @@ async function textForApproval(input: {
     language,
     category: candidate.category as ScheduledCategory,
   })
-  // Refused by the check, or no model to ask: the category is skipped. There is
-  // no house text to fall back to, and writing one here would be exactly what
-  // the check just refused.
-  if (!written.ok) return { ok: false, reason: 'MESSAGE_UNAVAILABLE' }
-  return { ok: true, text: written.text, voice: written }
+  if (written.ok) return { ok: true, text: written.text, voice: written }
+
+  // Refused by the check, or no model to ask. The agent's template is the floor:
+  // the job is still raised, in their own words, and carries the charge for the
+  // attempt.
+  if (floorText !== null) return { ok: true, text: floorText, voice: written }
+
+  // No floor to land on. Nothing is queued — writing text here is exactly what
+  // the check just refused — but the provider was asked, and an attempt nobody
+  // is charged for is a retry that costs the agent nothing and us something,
+  // every pass. With no job to hang it on, it goes straight against the
+  // allowance; that also ends the loop, because the preflight above stops
+  // asking once the allowance is gone.
+  if (written.attempted) {
+    await prisma.$transaction(async (tx: Tx) => {
+      await lockAgent(tx, agentId)
+      // The same ceiling `settleGeneration` applies: a provider anomaly cannot
+      // spend more than one message was ever authorized to cost.
+      await spendWithoutJob(tx, agentId, Math.min(TOKEN_RESERVATION, written.inputTokens + written.outputTokens), now)
+    })
+  }
+  return { ok: false, reason: 'MESSAGE_UNAVAILABLE' }
 }
 
 /// One enqueue pass over every agent that has a template.

@@ -153,6 +153,37 @@ describe.skipIf(!enabled)('scheduled messages end to end', () => {
     expect(await prisma.kBotCreditGrant.findFirstOrThrow({ where: { agentId } })).toMatchObject({ reserved: 0, spent: 0 })
   })
 
+  it('charges a refused attempt even with no job to charge it to', async () => {
+    // No job is created, so the client can be tried again — and without this
+    // the next pass would ask, be refused and pay nothing again. There is no
+    // allocation row to write, so the charge lands on the grant itself.
+    await template({ body: null })
+    state.generate.mockResolvedValue({ ok: false, reason: 'CONTAINS_NUMBER', attempted: true,
+      model: 'test-model', inputTokens: 120, outputTokens: 30 })
+    expect(await enqueueScheduledMessagesForAgent(agentId, now)).toMatchObject({ queued: 0 })
+    expect(await prisma.kBotFollowupJob.count({ where: { agentId } })).toBe(0)
+    expect(await prisma.kBotCreditGrant.findFirstOrThrow({ where: { agentId } })).toMatchObject({ reserved: 0, spent: 150 })
+  })
+
+  it('writes a birthday over the agent template, and falls back to it when the model strays', async () => {
+    // The category exists as the exception because the same sentence every year
+    // is the problem. The template is the floor, never the reason not to write.
+    await template()
+    state.generate.mockResolvedValue({ ok: true, text: 'Ana, um dia tranquilo e bem seu hoje.',
+      attempted: true, model: 'test-model', inputTokens: 120, outputTokens: 30 })
+    await enqueueScheduledMessagesForAgent(agentId, now)
+    expect(await prisma.kBotFollowupJob.findFirstOrThrow({ where: { agentId } }))
+      .toMatchObject({ content: 'Ana, um dia tranquilo e bem seu hoje.', model: 'test-model', creditState: 'SPENT' })
+
+    await reset()
+    await template()
+    state.generate.mockResolvedValue({ ok: false, reason: 'MENTIONS_BUSINESS', attempted: true,
+      model: 'test-model', inputTokens: 120, outputTokens: 30 })
+    await enqueueScheduledMessagesForAgent(agentId, now)
+    expect(await prisma.kBotFollowupJob.findFirstOrThrow({ where: { agentId } }))
+      .toMatchObject({ content: 'Feliz aniversário, Ana! Abraço, Paulo Loureiro.', model: null, creditState: 'SPENT' })
+  })
+
   it('sends without asking only when the agent turned that on', async () => {
     await template({ autoSend: true })
     await enqueueScheduledMessagesForAgent(agentId, now)

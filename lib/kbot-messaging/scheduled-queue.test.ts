@@ -324,12 +324,65 @@ describe('enqueueScheduledMessagesForAgent, a category the K-Bot writes', () => 
   })
 
   it('prefers the agent own text over the model when a body exists', async () => {
-    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body }])
+    // True of the review and the lapse. The birthday is the exception, below.
+    mocks.client.mockResolvedValue([{ id: 'c1', name: 'Ana', phone, dateOfBirth: null }])
+    mocks.policy.mockResolvedValue([{ id: 'p1', clientId: 'c1', effectiveDate: new Date('2021-03-11T00:00:00Z') }])
+    mocks.template.mockResolvedValue([{ category: 'ANNUAL_REVIEW', language: 'PT', body }])
     await enqueueScheduledMessagesForAgent('a1', now)
     expect(mocks.generate).not.toHaveBeenCalled()
     expect(mocks.jobCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
-      content: 'Oi Ana, aqui é Paulo.',
+      category: 'ANNUAL_REVIEW', content: 'Oi Ana, aqui é Paulo.',
     }) }))
+  })
+
+  it('writes the birthday even when the agent has a template, because the same words every year is the problem', async () => {
+    // The whole reason this category is the exception. A template is the floor
+    // it can fall back to, never a reason to send the same sentence for the
+    // rest of the client's life.
+    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body }])
+    await enqueueScheduledMessagesForAgent('a1', now)
+    expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ category: 'BIRTHDAY' }))
+    expect(mocks.jobCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      content: 'Ana, tudo de bom hoje!', model: 'test-model',
+    }) }))
+  })
+
+  it('falls back to the agent template when the model strays, and charges the attempt to the job', async () => {
+    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body }])
+    mocks.generate.mockResolvedValue({ ok: false, reason: 'MENTIONS_BUSINESS', attempted: true,
+      model: 'test-model', inputTokens: 120, outputTokens: 30 })
+    const result = await enqueueScheduledMessagesForAgent('a1', now)
+    expect(result).toMatchObject({ queued: 1, skipped: [] })
+    const created = mocks.jobCreate.mock.calls[0][0].data
+    expect(created.content).toBe('Oi Ana, aqui é Paulo.')
+    // The words are the agent's, so the model is not credited with them.
+    expect(created.model).toBeUndefined()
+    // The request still reached the provider, and there is a job to charge.
+    expect(mocks.grantUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: { reserved: { decrement: 192 }, spent: { increment: 150 } },
+    }))
+  })
+
+  it('charges a refused attempt that has no job to be charged to', async () => {
+    // No job is created, on purpose, so the client can be tried again. Without
+    // this the next pass would ask, be refused, and pay nothing again — free
+    // retries for as long as the candidate lasts.
+    mocks.generate.mockResolvedValue({ ok: false, reason: 'CONTAINS_NUMBER', attempted: true,
+      model: 'test-model', inputTokens: 120, outputTokens: 30 })
+    const result = await enqueueScheduledMessagesForAgent('a1', now)
+    expect(result.skipped).toEqual([expect.objectContaining({ reason: 'MESSAGE_UNAVAILABLE' })])
+    expect(mocks.jobCreate).not.toHaveBeenCalled()
+    expect(mocks.grantUpdate).toHaveBeenCalledWith({ where: { id: 'g1' }, data: { spent: { increment: 150 } } })
+  })
+
+  it('charges nothing when nothing was asked of anyone', async () => {
+    // The model is switched off. No request left this process, so no one owes
+    // anything, and the candidate waits for the day it is turned on.
+    mocks.generate.mockResolvedValue({ ok: false, reason: 'UNAVAILABLE', attempted: false,
+      model: 'test-model', inputTokens: 0, outputTokens: 0 })
+    const result = await enqueueScheduledMessagesForAgent('a1', now)
+    expect(result.skipped).toEqual([expect.objectContaining({ reason: 'MESSAGE_UNAVAILABLE' })])
+    expect(mocks.grantUpdate).not.toHaveBeenCalled()
   })
 
   it('skips the category, and never invents a message, when the model is refused', async () => {
