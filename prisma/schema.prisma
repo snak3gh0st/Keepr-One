@@ -3050,7 +3050,13 @@ model KBotMessageTemplate {
   /// BIRTHDAY | ANNUAL_REVIEW | POLICY_ANNIVERSARY
   category  String
   language  String
-  body      String
+  /// O texto que o agente aprovou, ou nulo enquanto o K-Bot ainda escreve.
+  ///
+  /// Nulo não é "categoria desligada" — isso é `enabled`. Nulo é "ligada, e o
+  /// texto de cada mensagem sai do modelo até o agente aprovar um". Enquanto as
+  /// duas ideias moravam na mesma coluna, um agente que nunca escreveu nada não
+  /// recebia mensagem nenhuma, que é a barreira que esta coluna desfaz.
+  body      String?
   enabled   Boolean  @default(false)
   /// Whether this category may leave without the agent pressing send.
   ///
