@@ -90,6 +90,18 @@ export type SyncState = {
   /// Quando o último run terminou de verdade. Um `COMPLETED` sem data é grudento
   /// e mente: a página passaria a vida dizendo "concluído".
   completedAt?: string
+  /// Quando o run andou para a frente pela última vez: um lote novo aceito, um
+  /// statement concluído, uma etapa trocada. Deliberadamente **não** é carimbado
+  /// por toda escrita de estado — uma tentativa que se repete é atividade sem
+  /// movimento, e carimbá-la faria a própria repetição adiar para sempre a
+  /// recuperação que o watchdog existe para fazer.
+  lastProgressAt?: string
+  /// Quantas vezes o watchdog já reabriu **esta** etapa sem que nada andasse
+  /// depois. Segue o mesmo desenho de `commissionDetailRecoveryAttempts`: uma
+  /// recuperação que não recupera precisa terminar em fonte pulada, não em
+  /// reconciliação a cada oito minutos para sempre. Zerado por movimento real.
+  stallRecoveryGridKey?: string
+  stallRecoveryAttempts?: number
 }
 
 export type CommandStatus =

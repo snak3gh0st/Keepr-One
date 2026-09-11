@@ -9,11 +9,13 @@ import {
   parseBeginExportMessage,
   parseProbeAuthMessage,
   parseExecuteFlexLifeQuoteMessage,
+  parseExtractionStartedMessage,
   parseFlexLifeQuoteMainResult,
   type BeginGridMessage,
   type BeginDocumentMessage,
 } from '../lib/messages'
 import { NLG_ORIGIN, shouldInstrumentNationalLifePath } from '../lib/constants'
+import { fetchWithinBudget } from '../lib/fetch-budget'
 import { isAuthenticatedAgentResponse } from '../lib/auth-probe'
 import { capturePageSnapshot } from '../lib/page-snapshot'
 import { captureNationalLifePolicyDetail } from '../lib/policy-detail'
@@ -21,6 +23,12 @@ import { locateCurrentPolicyDetailPath } from '../lib/policy-detail-locator'
 import { exactIgoEAppHref, parseOpenIgoEAppMessage } from '../lib/nlg-tool-launcher'
 
 const CHANNEL = 'FYNTRA_NL_CONNECTOR_V1'
+/// Quanto a sonda de sessão pode ficar calada antes de virar falha. Generoso para
+/// um portal lento, finito para um portal mudo.
+const AUTH_PROBE_BUDGET_MS = 20_000
+/// O mundo MAIN roda no mesmo documento: confirmar o início é um `postMessage` de
+/// ida e volta, não uma ida à seguradora.
+const EXTRACTION_START_BUDGET_MS = 3_000
 
 export default defineContentScript({
   matches: ['https://www.nationallife.com/agent/*'],
@@ -33,6 +41,12 @@ export default defineContentScript({
       null = null
     const quoteResponses = new Map<string, {
       inputHash: string
+      timer: ReturnType<typeof setTimeout>
+      sendResponse: (value: unknown) => void
+    }>()
+    /// BEGIN_GRID esperando o mundo MAIN confirmar que a extração começou.
+    const extractionStarts = new Map<string, {
+      gridKey: string
       timer: ReturnType<typeof setTimeout>
       sendResponse: (value: unknown) => void
     }>()
@@ -67,12 +81,17 @@ export default defineContentScript({
       }
       const probe = parseProbeAuthMessage(value)
       if (probe) {
-        void fetch(`${NLG_ORIGIN}/agent/`, {
-          method: 'GET',
-          credentials: 'include',
-          cache: 'no-store',
-          redirect: 'manual',
-        }).then(
+        // Sem orçamento, esta era a espera que travava o run inteiro: uma conexão
+        // pendurada com a seguradora nunca resolve nem rejeita, `sendResponse`
+        // nunca é chamado, e o background fica preso neste `await` a cada tique do
+        // alarme. Silêncio precisa virar falha reportável — é a mesma lição que o
+        // cabeçalho de `fetch-budget.ts` registra para o export XLSX.
+        void fetchWithinBudget(
+          fetch,
+          `${NLG_ORIGIN}/agent/`,
+          { method: 'GET', credentials: 'include', cache: 'no-store', redirect: 'manual' },
+          AUTH_PROBE_BUDGET_MS,
+        ).then(
           (response) => {
             sendResponse({
               ok: true,
@@ -82,13 +101,29 @@ export default defineContentScript({
               authenticated: isAuthenticatedAgentResponse(response),
             })
           },
-          () => sendResponse({
-            ok: true,
-            type: 'AUTH_PROBED',
-            token: probe.token,
-            correlationId: probe.correlationId,
-            authenticated: false,
-          }),
+          (error: unknown) => {
+            // Um portal mudo não é uma sessão encerrada. Responder
+            // `authenticated: false` mandaria o conector para a tela de login e
+            // pediria uma senha que ninguém precisou digitar; a falha explícita
+            // deixa o background recarregar a aba e repetir a etapa.
+            if (error instanceof Error && error.message === 'PORTAL_REQUEST_FAILED') {
+              sendResponse({
+                ok: false,
+                type: 'AUTH_PROBE_FAILED',
+                token: probe.token,
+                correlationId: probe.correlationId,
+                code: 'AUTH_PROBE_TIMEOUT',
+              })
+              return
+            }
+            sendResponse({
+              ok: true,
+              type: 'AUTH_PROBED',
+              token: probe.token,
+              correlationId: probe.correlationId,
+              authenticated: false,
+            })
+          },
         )
         return true
       }
@@ -193,15 +228,26 @@ export default defineContentScript({
       const begin = parseBeginGridMessage(value)
       if (begin) {
         active = begin
+        // O ACK espera o mundo MAIN dizer que começou. Responder na entrega
+        // prometia ao background uma extração que podia nunca ter existido: se o
+        // `postMessage` se perde entre os dois mundos, ninguém lê o portal e nada
+        // no laço estoura, porque não há laço. Uma falha aqui é retentável — o
+        // background reenvia o mesmo token e o eco confirma.
+        const key = `${begin.token}:${begin.correlationId}`
+        const timer = setTimeout(() => {
+          extractionStarts.delete(key)
+          sendResponse({
+            ok: false,
+            type: 'BEGIN_GRID_FAILED',
+            gridKey: begin.gridKey,
+            token: begin.token,
+            correlationId: begin.correlationId,
+            code: 'EXTRACTION_NEVER_STARTED',
+          })
+        }, EXTRACTION_START_BUDGET_MS)
+        extractionStarts.set(key, { gridKey: begin.gridKey, timer, sendResponse })
         window.postMessage({ channel: CHANNEL, payload: begin }, location.origin)
-        sendResponse({
-          ok: true,
-          type: 'BEGIN_GRID_ACK',
-          gridKey: begin.gridKey,
-          token: begin.token,
-          correlationId: begin.correlationId,
-        })
-        return false
+        return true
       }
       const beginExport = parseBeginExportMessage(value)
       if (beginExport) {
@@ -261,6 +307,22 @@ export default defineContentScript({
     window.addEventListener('message', (event) => {
       if (event.source !== window || event.origin !== location.origin) return
       if (typeof event.data !== 'object' || event.data === null || event.data.channel !== CHANNEL) return
+      const started = parseExtractionStartedMessage(event.data.payload)
+      if (started) {
+        const key = `${started.token}:${started.correlationId}`
+        const pending = extractionStarts.get(key)
+        if (!pending || pending.gridKey !== started.gridKey) return
+        clearTimeout(pending.timer)
+        extractionStarts.delete(key)
+        pending.sendResponse({
+          ok: true,
+          type: 'BEGIN_GRID_ACK',
+          gridKey: started.gridKey,
+          token: started.token,
+          correlationId: started.correlationId,
+        })
+        return
+      }
       const quote = parseFlexLifeQuoteMainResult(event.data.payload)
       if (quote) {
         const key = `${quote.token}:${quote.correlationId}`

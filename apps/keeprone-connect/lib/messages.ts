@@ -66,6 +66,17 @@ export type BeginGridMessage = {
   offsetStart?: number
 }
 
+/// O sinal que o mundo MAIN devolve à ponte quando o laço de extração realmente
+/// começou. O ACK do BEGIN_GRID prova entrega à ponte, não que alguém extraiu —
+/// e um `postMessage` perdido entre os dois mundos deixava o run em EXTRACTING
+/// para sempre, porque toda espera do laço é limitada mas o laço nunca existiu.
+export type ExtractionStartedMessage = {
+  type: 'EXTRACTION_STARTED'
+  gridKey: string
+  token: string
+  correlationId: string
+}
+
 export type CapturePageMessage = {
   type: 'CAPTURE_PAGE'
   sourceKey: string
@@ -400,6 +411,20 @@ export function parseBeginGridMessage(value: unknown): BeginGridMessage | null {
 
 export function parseAbortGridMessage(value: unknown): AbortGridMessage | null {
   return parseGridControlMessage(value, 'ABORT_GRID') as AbortGridMessage | null
+}
+
+export function parseExtractionStartedMessage(value: unknown): ExtractionStartedMessage | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ['type', 'gridKey', 'token', 'correlationId']) ||
+    value.type !== 'EXTRACTION_STARTED' ||
+    !isGridKeyLabel(value.gridKey) ||
+    !isShortString(value.token, 128, 32) ||
+    !isShortString(value.correlationId, 128, 16)
+  ) {
+    return null
+  }
+  return value as ExtractionStartedMessage
 }
 
 export function parseCapturePageMessage(value: unknown): CapturePageMessage | null {

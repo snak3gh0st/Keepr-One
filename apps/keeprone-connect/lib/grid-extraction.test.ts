@@ -241,6 +241,11 @@ describe('grid extraction runner', () => {
     return { runner, posts, fetchPage }
   }
 
+  /// O aviso de início é protocolo com a ponte, não trabalho no portal: estes
+  /// testes falam sobre o que foi extraído, e é isso que sobra depois de tirá-lo.
+  const extracted = (posts: Record<string, unknown>[]) =>
+    posts.filter((post) => post.type !== 'EXTRACTION_STARTED')
+
   it('volta a extrair no estágio seguinte a um que foi parado', async () => {
     // A pergunta que nada respondia antes: depois de uma pausa, o conector
     // volta a funcionar, ou fica morto até a aba recarregar? Uma bandeira de
@@ -251,7 +256,7 @@ describe('grid extraction runner', () => {
     const first = h.runner.begin(MESSAGE)
     h.runner.abort(abortFor(MESSAGE))
     await first
-    expect(h.posts).toEqual([])
+    expect(extracted(h.posts)).toEqual([])
 
     await h.runner.begin(SECOND)
 
@@ -285,7 +290,7 @@ describe('grid extraction runner', () => {
     await first
 
     expect(h.fetchPage).not.toHaveBeenCalled()
-    expect(h.posts).toEqual([])
+    expect(extracted(h.posts)).toEqual([])
   })
 
   it('recusa um BEGIN reemitido com um token que já foi parado', async () => {
@@ -301,7 +306,25 @@ describe('grid extraction runner', () => {
     await h.runner.begin(MESSAGE)
 
     expect(h.fetchPage).not.toHaveBeenCalled()
-    expect(h.posts).toEqual([])
+    expect(extracted(h.posts)).toEqual([])
+  })
+
+  it('avisa que começou mesmo no eco, que é o que a ponte espera para confirmar', async () => {
+    // O background reenvia o mesmo token quando o ACK não chega. Se o eco ficasse
+    // calado, a ponte recusaria um BEGIN de uma extração que já está rodando e o
+    // estágio morreria por excesso de zelo.
+    const h = runnerHarness([{ data: rows(10), recordsTotal: 10 }])
+
+    const running = h.runner.begin(MESSAGE)
+    const echo = h.runner.begin(MESSAGE)
+    await Promise.all([running, echo])
+
+    expect(h.posts.filter((post) => post.type === 'EXTRACTION_STARTED')).toEqual([
+      { type: 'EXTRACTION_STARTED', gridKey: MESSAGE.gridKey, token: MESSAGE.token, correlationId: MESSAGE.correlationId },
+      { type: 'EXTRACTION_STARTED', gridKey: MESSAGE.gridKey, token: MESSAGE.token, correlationId: MESSAGE.correlationId },
+    ])
+    // Confirmar não é trabalhar: o portal continua sendo lido uma vez só.
+    expect(h.fetchPage).toHaveBeenCalledTimes(1)
   })
 
   it('ignora um eco da mesma ordem de começar', async () => {
@@ -327,6 +350,12 @@ describe('grid extraction runner', () => {
     // O `waitForTemplate` passou a ser injetado, então quem o captura mudou de
     // `try`. O código continua sendo o do portal, e não "resposta inválida".
     expect(posts).toEqual([
+      {
+        type: 'EXTRACTION_STARTED',
+        gridKey: MESSAGE.gridKey,
+        token: MESSAGE.token,
+        correlationId: MESSAGE.correlationId,
+      },
       {
         type: 'GRID_ERROR',
         gridKey: MESSAGE.gridKey,
