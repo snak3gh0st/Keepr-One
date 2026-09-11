@@ -15,6 +15,8 @@ import { getServerI18n } from '@/lib/i18n/server'
 import { localeFor } from '@/lib/i18n/config'
 import { KBotAvatar } from '@/components/kbot/KBotAvatar'
 import { StartApplicationFromIllustrationButton } from './StartApplicationFromIllustrationButton'
+import { ReadyToSendIllustrations } from './ReadyToSendIllustrations'
+import { readReadyToSendIllustrations } from './ready-to-send'
 import {
   parseIllustrationDirectoryFilters,
   readIllustrationDirectory,
@@ -56,9 +58,12 @@ export default async function IllustrationsPage({
   const agent = await getCurrentAgent()
   const localConnector = getNationalLifeLocalConnectorConfig()
   const filters = parseIllustrationDirectoryFilters(params)
-  const [user, directory] = await Promise.all([
+  const [user, directory, readyToSend] = await Promise.all([
     prisma.user.findUnique({ where: { id: agent.userId } }),
     readIllustrationDirectory(prisma, agent.id, filters),
+    // Hidden in application-picking mode below: that mode is a picker, not a
+    // send surface, and a send button there is a different decision entirely.
+    readReadyToSendIllustrations(agent.id),
   ])
   const pdfStatus = await getIllustrationCommandStatuses(agent.id, directory.items.map((illustration) => illustration.id))
   const instant = (value: Date) => new Intl.DateTimeFormat(locale, { dateStyle: 'short' }).format(value)
@@ -162,6 +167,8 @@ export default async function IllustrationsPage({
           </Link>
         </section>
       ) : null}
+
+      {applicationIntent ? null : <ReadyToSendIllustrations items={readyToSend} />}
 
       <section className="mb-5 rounded-xl border border-border-steel bg-paper p-4" aria-label={copy('Filtros de ilustrações', 'Illustration filters')}>
         <form action="/agent/illustrations" method="get" className="grid gap-3 md:grid-cols-4">

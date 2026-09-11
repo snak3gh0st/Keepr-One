@@ -27,6 +27,9 @@ vi.mock('@/components/PageHeader', () => ({ PageHeader: ({ children }: PropsWith
 vi.mock('./IllustrationPdfButton', () => ({ IllustrationPdfButton: () => <button>PDF</button> }))
 vi.mock('./StartApplicationFromIllustrationButton', () => ({ StartApplicationFromIllustrationButton: () => <button>Application</button> }))
 vi.mock('@/components/kbot/KBotAvatar', () => ({ KBotAvatar: () => <div>KBot</div> }))
+// The ready-to-send section is its own island with its own tests; this page
+// only has to place it, and in application-picking mode not place it at all.
+vi.mock('./ready-to-send', () => ({ readReadyToSendIllustrations: async () => [] }))
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 

@@ -5,28 +5,34 @@ import { availableCredits, fingerprint, normalizePhone, TOKEN_RESERVATION } from
 import { ACTIVE_JOB_STATES, AWAITING_APPROVAL, SENT_JOB_STATES, COOLDOWN_MS } from '@/lib/kbot-followup/domain'
 import { grantFreeCredits, lockAgent, type Tx } from '@/lib/kbot-followup/credits'
 import { evaluateSendGate, type SendGateBlockReason } from './send-gate'
-import { SCHEDULED_CATEGORIES, scheduledCandidatesForDay, type ScheduledCandidate } from './scheduled-triggers'
+import { PROPOSAL_CATEGORIES, scheduledCandidatesForDay, type ProposalCandidate } from './scheduled-triggers'
+import { LAPSE_RECENCY_MS, lapseCandidatesForPass } from './lapse-triggers'
 
-/// Why a candidate whose date was today did not become a job.
+/// Why a candidate this pass raised did not become a job.
 ///
 /// A skip is not an error and is not silent: the pass returns every one of
-/// these, so "nobody got a birthday message today" always has an answer that
-/// is not "look through the logs".
+/// these, so "nobody got a birthday message today" — or "that lapse never
+/// reached me" — always has an answer that is not "look through the logs".
 export type ScheduledSkipReason =
   /// The agent has no enabled template for this category and language. There is
   /// no house default to fall back to, on purpose.
   | 'TEMPLATE_MISSING'
-  /// This year's job already exists. The normal outcome of a second pass.
+  /// A job already exists for this event: this year's birthday, this lapse. The
+  /// normal outcome of a second pass.
   | 'ALREADY_QUEUED'
   /// The agent's credit grants cannot cover another reservation.
   | 'INSUFFICIENT_CREDITS'
+  /// Two clients of this agent share the number, so a message naming one of
+  /// them would reach the other. The manual screen refuses the same case.
+  | 'CONTACT_AMBIGUOUS'
   | SendGateBlockReason
 
 export type ScheduledSkip = {
   candidateId: string
   category: string
   reason: ScheduledSkipReason
-  /// The zone the date and the hour were both judged in.
+  /// The zone the candidate was judged in, and the one its hour will be judged
+  /// in at dispatch.
   timeZone: string
 }
 
@@ -36,20 +42,23 @@ export type ScheduledPassReport = {
   skipped: ScheduledSkip[]
 }
 
-/// Agents that have at least one enabled scheduled template.
+/// Agents that have at least one enabled proposal template.
 ///
 /// The template is what makes the feature exist for an agent, so it is also the
 /// cheapest way to avoid walking the book of everyone who never set one up.
-async function agentsWithScheduledTemplates(): Promise<string[]> {
+/// Every proposal category counts, not only the dated ones: an agent whose only
+/// enabled template is lapse recovery would otherwise never be visited.
+async function agentsWithProposalTemplates(): Promise<string[]> {
   const templates = await prisma.kBotMessageTemplate.findMany({
-    where: { enabled: true, category: { in: [...SCHEDULED_CATEGORIES] } },
+    where: { enabled: true, category: { in: [...PROPOSAL_CATEGORIES] } },
     select: { agentId: true },
     distinct: ['agentId'],
   })
   return templates.map((template) => template.agentId)
 }
 
-/// Everything today asks of one agent's book, gated and queued.
+/// Everything one agent's book asks of this pass, gated and queued: the dates
+/// that fall today, and the policies that fell out of force lately.
 export async function enqueueScheduledMessagesForAgent(
   agentId: string,
   now = new Date(),
@@ -62,7 +71,7 @@ export async function enqueueScheduledMessagesForAgent(
 
   const language = agent.user.language
   const templates = await prisma.kBotMessageTemplate.findMany({
-    where: { agentId, enabled: true, category: { in: [...SCHEDULED_CATEGORIES] } },
+    where: { agentId, enabled: true, category: { in: [...PROPOSAL_CATEGORIES] } },
     select: { category: true, language: true, autoSend: true },
   })
   // Keyed the same way the lookup below asks for it, carrying the one bit that
@@ -72,7 +81,7 @@ export async function enqueueScheduledMessagesForAgent(
   const enabledFor = new Map<string, boolean>(templates.map((template) =>
     [`${template.category}:${template.language}`, template.autoSend === true]))
 
-  const [clients, policies] = await Promise.all([
+  const [clients, policies, lapsed] = await Promise.all([
     prisma.client.findMany({
       where: { assignedAgentId: agentId },
       select: { id: true, name: true, phone: true, dateOfBirth: true },
@@ -81,19 +90,43 @@ export async function enqueueScheduledMessagesForAgent(
       where: { agentId, status: 'INFORCE', client: { assignedAgentId: agentId } },
       select: { id: true, clientId: true, effectiveDate: true },
     }),
+    // Its own read, deliberately: the query above is filtered to INFORCE
+    // because that is what an annual review is about, and relaxing it to serve
+    // lapse would start proposing reviews for policies that are no longer
+    // there. The window is repeated here only to keep the read small — the
+    // engine re-checks it and stays the authority on what counts as recent.
+    prisma.policy.findMany({
+      where: { agentId, status: 'LAPSED', client: { assignedAgentId: agentId },
+        statusChangedAt: { gte: new Date(now.getTime() - LAPSE_RECENCY_MS), lte: now } },
+      select: { id: true, clientId: true, status: true, sourceStatus: true, statusChangedAt: true },
+    }),
   ])
 
-  const candidates = scheduledCandidatesForDay({
-    // The engine wants a number it can send to, so normalization happens here
-    // rather than leaving the engine to know what a valid number looks like.
-    clients: clients.map((client) => ({ ...client, phone: normalizePhone(client.phone) })),
-    policies,
-    now,
-  })
+  // The engine wants a number it can send to, so normalization happens here
+  // rather than leaving the engine to know what a valid number looks like.
+  const reachable = clients.map((client) => ({ ...client, phone: normalizePhone(client.phone) }))
+  // A number that belongs to two people in the same book cannot be messaged
+  // about either of them: a household sharing a line would get a lapse notice
+  // naming the wrong person, on their own phone. The manual screen already
+  // refuses this as CONTACT_AMBIGUOUS; the proposal path had no such check, and
+  // nothing downstream would have caught it.
+  const clientsByPhone = new Map<string, number>()
+  for (const client of reachable) {
+    if (client.phone) clientsByPhone.set(client.phone, (clientsByPhone.get(client.phone) ?? 0) + 1)
+  }
+  const shared = new Set([...clientsByPhone].filter(([, count]) => count > 1).map(([phone]) => phone))
+  const candidates: ProposalCandidate[] = [
+    ...scheduledCandidatesForDay({ clients: reachable, policies, now }),
+    ...lapseCandidatesForPass({ clients: reachable, policies: lapsed, now }),
+  ]
 
   for (const candidate of candidates) {
     const skip = (reason: ScheduledSkipReason) => {
       skipped.push({ candidateId: candidate.candidateId, category: candidate.category, reason, timeZone: candidate.timeZone })
+    }
+    if (candidate.phone && shared.has(candidate.phone)) {
+      skip('CONTACT_AMBIGUOUS')
+      continue
     }
     const key = `${candidate.category}:${language}`
     // Existence and the flag are asked separately: keying "is there a template"
@@ -113,7 +146,7 @@ export async function enqueueScheduledMessagesForAgent(
 
 async function queueOne(
   agentId: string,
-  candidate: ScheduledCandidate,
+  candidate: ProposalCandidate,
   language: string,
   now: Date,
   autoSend: boolean,
@@ -123,7 +156,8 @@ async function queueOne(
     // cannot both spend the last reservation.
     await lockAgent(tx, agentId)
 
-    // The deterministic key is what makes a second pass today a no-op. The
+    // The deterministic key is what makes a second pass over the same event a
+    // no-op — today's date, or the lapse that has not changed since. The
     // unique index is the real guarantee; this read is what lets the report say
     // "already queued" instead of surfacing a constraint violation.
     const existing = await tx.kBotFollowupJob.findFirst({
@@ -205,7 +239,7 @@ async function queueOne(
 
 /// One enqueue pass over every agent that has a template.
 export async function runScheduledMessageEnqueuePass(now = new Date()): Promise<ScheduledPassReport> {
-  const agentIds = await agentsWithScheduledTemplates()
+  const agentIds = await agentsWithProposalTemplates()
   const report: ScheduledPassReport = { agents: agentIds.length, queued: 0, skipped: [] }
   for (const agentId of agentIds) {
     // One agent's bad data must not stop the rest of the book being greeted.
@@ -220,7 +254,7 @@ export async function runScheduledMessageEnqueuePass(now = new Date()): Promise<
 ///
 /// The drain is bounded so one call cannot run for an unbounded time; whatever
 /// is left is taken by the next pass.
-export async function runScheduledMessagePass(now = new Date(), maxSends = 50): Promise<ScheduledPassReport & { sent: number; settled: number; expired: number; deferred: number }> {
+export async function runScheduledMessagePass(now = new Date(), maxSends = 50): Promise<ScheduledPassReport & { sent: number; settled: number; expired: number; deferred: number; illustrationsExpired: number }> {
   const { releaseExpiredScheduledLeases, processNextScheduledMessage } = await import('./scheduled-worker')
   await releaseExpiredScheduledLeases(now)
   // Before enqueuing more: proposals nobody released go back, reservation and
@@ -228,6 +262,11 @@ export async function runScheduledMessagePass(now = new Date(), maxSends = 50): 
   // messages that were never sent.
   const { expireStaleScheduledProposals } = await import('./approval')
   const expired = await expireStaleScheduledProposals(now)
+  // The illustration requests ride the same pass rather than earning a cron of
+  // their own: both are "something the agent never got to", both hold a slot,
+  // and a second scheduled entry point is a second thing to forget to set up.
+  const { expireStaleIllustrationRequests } = await import('@/lib/kbot-illustration/delivery')
+  const illustrations = await expireStaleIllustrationRequests(now)
   const report = await runScheduledMessageEnqueuePass(now)
   // A job put back for quiet hours is still the oldest PENDING row, so the
   // drain has to step over it. Without this, one recipient in the wrong time
@@ -249,5 +288,5 @@ export async function runScheduledMessagePass(now = new Date(), maxSends = 50): 
     if (turn.outcome === 'SENT') sent += 1
     else settled += 1
   }
-  return { ...report, sent, settled, expired, deferred: deferred.length }
+  return { ...report, sent, settled, expired, deferred: deferred.length, illustrationsExpired: illustrations.expired }
 }

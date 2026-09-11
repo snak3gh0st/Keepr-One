@@ -58,10 +58,16 @@ export function ScheduledMessagesWorkspace({ view }: { view: ScheduledMessagesVi
   const [error, setError] = useState('')
   const [pending, startTransition] = useTransition()
 
-  const categoryLabels: Record<string, string> = {
+  // Typed by the category union rather than `string`, so a category added to
+  // the engine fails to compile here instead of rendering with no name.
+  const categoryLabels: Record<ScheduledCategory, string> = {
     BIRTHDAY: copy('Aniversário', 'Birthday'),
     ANNUAL_REVIEW: copy('Revisão anual', 'Annual review'),
+    LAPSE_RECOVERY: copy('Recuperação de lapso', 'Lapse recovery'),
   }
+  // The column is free text in the database, so the lookup takes a string while
+  // the table above stays exhaustive over the union.
+  const categoryLabel = (value: string) => categoryLabels[value as ScheduledCategory] ?? value
   /// The single most useful line on the screen: why a client did not hear from
   /// the agent. Each one is written as the fact, not as an error code.
   const blockLabels: Record<SendGateBlockReason, string> = {
@@ -171,7 +177,7 @@ export function ScheduledMessagesWorkspace({ view }: { view: ScheduledMessagesVi
       {view.categories.map((entry) => <CategoryEditor
         key={entry.category}
         entry={entry}
-        label={categoryLabels[entry.category] ?? entry.category}
+        label={categoryLabel(entry.category)}
         pending={pending}
         onSave={(language, body) => run(
           () => saveScheduledTemplate({ category: entry.category, language, body }),
@@ -210,7 +216,7 @@ export function ScheduledMessagesWorkspace({ view }: { view: ScheduledMessagesVi
         {entries.map((entry) => <article key={entry.id} className="flex flex-col justify-between gap-3 py-4 lg:flex-row lg:items-start">
           <div className="min-w-0">
             <h3 className="break-words font-semibold text-ink">{entry.customerName}</h3>
-            <p className="mt-1 text-sm text-ink-muted">{categoryLabels[entry.category] ?? entry.category} · {when(entry.updatedAt)}</p>
+            <p className="mt-1 text-sm text-ink-muted">{categoryLabel(entry.category)} · {when(entry.updatedAt)}</p>
             {entry.bucket === 'BLOCKED' && <p className="mt-2 max-w-xl text-sm leading-relaxed text-ink">
               <span className="font-semibold">{entry.blockedReason ? blockLabels[entry.blockedReason] : copy('Barrada sem motivo registrado', 'Held back with no recorded reason')}</span>
               {entry.blockedReason && <span className="mt-1 block text-xs leading-relaxed text-ink-muted">{blockDetails[entry.blockedReason]}</span>}

@@ -432,11 +432,19 @@ describe('local connector command dispatch', () => {
       }),
     }
 
+    // The moment the numbers exist: the receipt matched and the figures are
+    // stored, so the agent now has something to read and decide about. Without
+    // this call the request sits in GENERATING until the sweep closes it.
+    const markKBotIllustrationReadySafely = vi.fn().mockResolvedValue({ moved: 1 })
+
     await recordDeviceConnectorCommandEvent(repo, {
       agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', event, now,
-      foresightArtifactRepository,
+      foresightArtifactRepository, markKBotIllustrationReadySafely,
     })
     expect(foresightArtifactRepository.findOwnedArtifact).toHaveBeenCalledWith({
+      agentId: 'agent_1', illustrationId: 'illustration_1',
+    })
+    expect(markKBotIllustrationReadySafely).toHaveBeenCalledWith({
       agentId: 'agent_1', illustrationId: 'illustration_1',
     })
     expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({

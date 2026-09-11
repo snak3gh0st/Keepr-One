@@ -500,11 +500,11 @@ model User {
   schedulingPage            SchedulingPage?            @relation("SchedulingPageOwner")
   schedulingBookings        SchedulingBooking[]        @relation("SchedulingBookingOwner")
   agencyInvitationCheckouts AgencyInvitationCheckout[]
-  createdApplications       Application[]               @relation("ApplicationCreator")
-  pendingEmailChange        AdminEmailChangeRequest?    @relation("AdminEmailChangeTarget")
-  requestedEmailChanges     AdminEmailChangeRequest[]   @relation("AdminEmailChangeRequester")
-  adminAccessesProvisioned  AdminProvisionedAccess[]    @relation("AdminProvisionedAccessCreator")
-  adminAccessesUpdated      AdminProvisionedAccess[]    @relation("AdminProvisionedAccessUpdater")
+  createdApplications       Application[]              @relation("ApplicationCreator")
+  pendingEmailChange        AdminEmailChangeRequest?   @relation("AdminEmailChangeTarget")
+  requestedEmailChanges     AdminEmailChangeRequest[]  @relation("AdminEmailChangeRequester")
+  adminAccessesProvisioned  AdminProvisionedAccess[]   @relation("AdminProvisionedAccessCreator")
+  adminAccessesUpdated      AdminProvisionedAccess[]   @relation("AdminProvisionedAccessUpdater")
   marketingLeads            MarketingLead[]            @relation("MarketingLeadOwner")
   marketingLeadNotes        MarketingLeadNote[]        @relation("MarketingLeadNoteAuthor")
 
@@ -513,24 +513,25 @@ model User {
 }
 
 model Agent {
-  kbotCreditGrants       KBotCreditGrant[]
-  kbotFollowupJobs       KBotFollowupJob[]
-  kbotContactPreferences KBotContactPreference[]
-  kbotConsentEvents      KBotContactConsentEvent[]
-  kbotMessageTemplates   KBotMessageTemplate[]
-  id                   String               @id @default(cuid())
-  userId               String               @unique
-  user                 User                 @relation(fields: [userId], references: [id])
-  parentAgentId        String?
-  parentAgent          Agent?               @relation("AgentHierarchy", fields: [parentAgentId], references: [id])
-  subAgents            Agent[]              @relation("AgentHierarchy")
-  rank                 String
-  npn                  String?              @unique
-  phone                String?
-  status               AgentStatus          @default(ACTIVE)
-  promotionAccessScope PromotionAccessScope @default(PERSONAL)
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
+  kbotCreditGrants         KBotCreditGrant[]
+  kbotFollowupJobs         KBotFollowupJob[]
+  kbotContactPreferences   KBotContactPreference[]
+  kbotIllustrationRequests KBotIllustrationRequest[]
+  kbotConsentEvents        KBotContactConsentEvent[]
+  kbotMessageTemplates     KBotMessageTemplate[]
+  id                       String                    @id @default(cuid())
+  userId                   String                    @unique
+  user                     User                      @relation(fields: [userId], references: [id])
+  parentAgentId            String?
+  parentAgent              Agent?                    @relation("AgentHierarchy", fields: [parentAgentId], references: [id])
+  subAgents                Agent[]                   @relation("AgentHierarchy")
+  rank                     String
+  npn                      String?                   @unique
+  phone                    String?
+  status                   AgentStatus               @default(ACTIVE)
+  promotionAccessScope     PromotionAccessScope      @default(PERSONAL)
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
 
   clients                               Client[]
   policies                              Policy[]
@@ -665,31 +666,31 @@ model AgencyInvitation {
 /// Holds a billing handoff without creating an account, membership, or access.
 /// Provider-confirmed finalization is the only path that consumes these fields.
 model AgencyInvitationCheckout {
-  id                      String                         @id @default(cuid())
-  invitationId            String                         @unique
-  email                   String
-  name                    String
-  agencyName              String?
-  passwordHash            String?
-  userId                  String?
-  plan                    PlatformPlan
-  inviterRole             AgencyMembershipRole
-  status                  AgencyInvitationCheckoutStatus @default(PENDING)
-  unitAmountCents         Int
-  acceptedTermsAt         DateTime
-  checkoutExpiresAt       DateTime
-  attemptNumber           Int                            @default(1)
-  stripeCheckoutSessionId String?                        @unique
+  id                          String                         @id @default(cuid())
+  invitationId                String                         @unique
+  email                       String
+  name                        String
+  agencyName                  String?
+  passwordHash                String?
+  userId                      String?
+  plan                        PlatformPlan
+  inviterRole                 AgencyMembershipRole
+  status                      AgencyInvitationCheckoutStatus @default(PENDING)
+  unitAmountCents             Int
+  acceptedTermsAt             DateTime
+  checkoutExpiresAt           DateTime
+  attemptNumber               Int                            @default(1)
+  stripeCheckoutSessionId     String?                        @unique
   checkoutRedirectFingerprint String?
-  checkoutAttemptStartedAt DateTime?                     @default(now())
-  stripeCustomerId        String?
-  stripeSubscriptionId    String?                        @unique
-  stripeProductId         String
-  stripePriceId           String
-  platformSubscriptionId  String?                        @unique
-  finalizedAt             DateTime?
-  createdAt               DateTime                       @default(now())
-  updatedAt               DateTime                       @updatedAt
+  checkoutAttemptStartedAt    DateTime?                      @default(now())
+  stripeCustomerId            String?
+  stripeSubscriptionId        String?                        @unique
+  stripeProductId             String
+  stripePriceId               String
+  platformSubscriptionId      String?                        @unique
+  finalizedAt                 DateTime?
+  createdAt                   DateTime                       @default(now())
+  updatedAt                   DateTime                       @updatedAt
 
   invitation           AgencyInvitation      @relation(fields: [invitationId], references: [id], onDelete: Restrict)
   user                 User?                 @relation(fields: [userId], references: [id], onDelete: Restrict)
@@ -769,24 +770,24 @@ model AdminProvisionedAccess {
 /// CRM ownership, hierarchy, or the agent's historical Application records.
 model PlatformAddonSubscription {
   stripeCheckoutSessionId String?
-  checkoutExpiresAt DateTime?
-  id                   String                     @id @default(cuid())
-  addon                PlatformAddon
-  status               PlatformSubscriptionStatus @default(TRIALING)
-  agentId              String
-  agent                Agent                      @relation(fields: [agentId], references: [id], onDelete: Restrict)
-  unitAmountCents      Int
-  currency             String                     @default("USD")
-  currentPeriodStart   DateTime?
-  currentPeriodEnd     DateTime?
-  cancelAtPeriodEnd    Boolean                    @default(false)
-  canceledAt           DateTime?
-  stripeCustomerId     String?
-  stripeSubscriptionId String?                    @unique
-  stripeProductId      String?
-  stripePriceId        String?
-  createdAt            DateTime                   @default(now())
-  updatedAt            DateTime                   @updatedAt
+  checkoutExpiresAt       DateTime?
+  id                      String                     @id @default(cuid())
+  addon                   PlatformAddon
+  status                  PlatformSubscriptionStatus @default(TRIALING)
+  agentId                 String
+  agent                   Agent                      @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  unitAmountCents         Int
+  currency                String                     @default("USD")
+  currentPeriodStart      DateTime?
+  currentPeriodEnd        DateTime?
+  cancelAtPeriodEnd       Boolean                    @default(false)
+  canceledAt              DateTime?
+  stripeCustomerId        String?
+  stripeSubscriptionId    String?                    @unique
+  stripeProductId         String?
+  stripePriceId           String?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
 
   @@index([agentId, addon, status])
   @@index([stripeCustomerId])
@@ -853,8 +854,8 @@ model MarketingLead {
   utmTerm       String?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
-  campaign      MarketingCampaign  @relation(fields: [campaignId], references: [id], onDelete: Restrict)
-  owner         User?              @relation("MarketingLeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  campaign      MarketingCampaign   @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  owner         User?               @relation("MarketingLeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   notes         MarketingLeadNote[]
 
   @@index([createdAt, id])
@@ -1103,19 +1104,19 @@ model NationalLifeReportRow {
 /// commission grids are an append-only ledger whose older rows remain tied to
 /// their own verified stage completion.
 model NationalLifeReportPublication {
-  id                String                              @id @default(cuid())
+  id                String   @id @default(cuid())
   agentId           String
-  agent             Agent                               @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent             Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   deploymentScope   String
   gridKey           String
   runId             String
   deviceId          String
-  stageCompletionId String                              @unique
+  stageCompletionId String   @unique
   /// This is the immutable completion time of the carrier snapshot, rather
   /// than the time a later replay happened to reach this cursor.
   completedAt       DateTime
-  createdAt         DateTime                            @default(now())
-  updatedAt         DateTime                            @updatedAt
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@unique([agentId, deploymentScope, gridKey])
   @@index([runId, gridKey])
@@ -1126,9 +1127,9 @@ model NationalLifeReportPublication {
 /// old connector binaries and interrupted pages can still write there, but they
 /// can never alter this published evidence.
 model NationalLifePublishedReportRow {
-  id                String   @id @default(cuid())
+  id                String                         @id @default(cuid())
   agentId           String
-  agent             Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent             Agent                          @relation(fields: [agentId], references: [id], onDelete: Cascade)
   deploymentScope   String
   gridKey           String
   rowKey            String
@@ -1140,10 +1141,10 @@ model NationalLifePublishedReportRow {
   stageCompletionId String
   runId             String
   deviceId          String
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  policyDocuments   PolicyDocument[]                    @relation("NationalLifePublishedReportPolicyDocuments")
-  documentTransfers NationalLifeDocumentTransfer[]      @relation("NationalLifePublishedReportDocumentTransfers")
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
+  policyDocuments   PolicyDocument[]               @relation("NationalLifePublishedReportPolicyDocuments")
+  documentTransfers NationalLifeDocumentTransfer[] @relation("NationalLifePublishedReportDocumentTransfers")
 
   @@unique([agentId, deploymentScope, gridKey, rowKey])
   @@index([agentId, gridKey])
@@ -1299,9 +1300,10 @@ model Client {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  policies       Policy[]
-  insuranceCases InsuranceCase[]
-  illustrations  Illustration[]
+  policies                 Policy[]
+  insuranceCases           InsuranceCase[]
+  illustrations            Illustration[]
+  kbotIllustrationRequests KBotIllustrationRequest[]
 
   @@index([assignedAgentId])
 }
@@ -1584,30 +1586,30 @@ model CalendarIntegration {
 /// A calendar returned by Google CalendarList. Visibility and CRM default are
 /// user preferences; syncToken belongs to this exact event collection.
 model CalendarSource {
-  id                    String              @id @default(cuid())
-  integrationId         String
-  integration           CalendarIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
-  providerCalendarId    String
-  name                  String
-  description           String?
-  colorId               String?
-  backgroundColor       String?
-  foregroundColor       String?
-  isPrimary             Boolean             @default(false)
-  visible               Boolean             @default(true)
-  crmDefault            Boolean             @default(false)
-  accessRole            String?
-  timeZone              String?
+  id                         String              @id @default(cuid())
+  integrationId              String
+  integration                CalendarIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  providerCalendarId         String
+  name                       String
+  description                String?
+  colorId                    String?
+  backgroundColor            String?
+  foregroundColor            String?
+  isPrimary                  Boolean             @default(false)
+  visible                    Boolean             @default(true)
+  crmDefault                 Boolean             @default(false)
+  accessRole                 String?
+  timeZone                   String?
   /// Some read-only/system Google calendars reject events.watch even though
   /// their events remain readable and fully eligible for polling sync.
   pushNotificationsSupported Boolean?
-  syncToken             String?
-  syncStatus            CalendarSyncStatus  @default(PENDING)
-  lastIncrementalSyncAt DateTime?           @db.Timestamptz(3)
-  lastFullSyncAt        DateTime?           @db.Timestamptz(3)
-  lastErrorCode         String?
-  createdAt             DateTime            @default(now()) @db.Timestamptz(3)
-  updatedAt             DateTime            @updatedAt @db.Timestamptz(3)
+  syncToken                  String?
+  syncStatus                 CalendarSyncStatus  @default(PENDING)
+  lastIncrementalSyncAt      DateTime?           @db.Timestamptz(3)
+  lastFullSyncAt             DateTime?           @db.Timestamptz(3)
+  lastErrorCode              String?
+  createdAt                  DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt                  DateTime            @updatedAt @db.Timestamptz(3)
 
   events        CalendarEvent[]
   watchChannels CalendarWatchChannel[]
@@ -2364,11 +2366,11 @@ model NationalLifeExportChunk {
 /// The carrier handle remains in the already-protected source row; this table
 /// stores only the bounded transfer and its integrity proof.
 model NationalLifeDocumentTransfer {
-  id             String                      @id @default(cuid())
-  agentId        String
-  agent          Agent                       @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  deviceId       String
-  device         NationalLifeConnectorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  id                   String                          @id @default(cuid())
+  agentId              String
+  agent                Agent                           @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  deviceId             String
+  device               NationalLifeConnectorDevice     @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   /// Old transfers keep their landing-row reference. New connector transfers
   /// point at the verified published row below, so an old writer cannot change
   /// the document handle selected by the visible policy page.
@@ -2376,23 +2378,23 @@ model NationalLifeDocumentTransfer {
   reportRow            NationalLifeReportRow?          @relation(fields: [reportRowId], references: [id], onDelete: Cascade)
   publishedReportRowId String?
   publishedReportRow   NationalLifePublishedReportRow? @relation("NationalLifePublishedReportDocumentTransfers", fields: [publishedReportRowId], references: [id], onDelete: Cascade)
-  policyId       String
-  policy         Policy                      @relation(fields: [policyId], references: [id], onDelete: Cascade)
-  documentId     String?                     @unique
-  document       PolicyDocument?             @relation(fields: [documentId], references: [id], onDelete: SetNull)
-  fileName       String
-  contentType    String?
-  expectedBytes  Int?
-  expectedSha256 String?
-  totalChunks    Int?
-  state          String                      @default("REQUESTED")
-  receivedBytes  Int                         @default(0)
-  receivedChunks Int                         @default(0)
-  safeErrorCode  String?
-  completedAt    DateTime?
-  createdAt      DateTime                    @default(now())
-  updatedAt      DateTime                    @updatedAt
-  chunks         NationalLifeDocumentChunk[]
+  policyId             String
+  policy               Policy                          @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  documentId           String?                         @unique
+  document             PolicyDocument?                 @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  fileName             String
+  contentType          String?
+  expectedBytes        Int?
+  expectedSha256       String?
+  totalChunks          Int?
+  state                String                          @default("REQUESTED")
+  receivedBytes        Int                             @default(0)
+  receivedChunks       Int                             @default(0)
+  safeErrorCode        String?
+  completedAt          DateTime?
+  createdAt            DateTime                        @default(now())
+  updatedAt            DateTime                        @updatedAt
+  chunks               NationalLifeDocumentChunk[]
 
   @@unique([agentId, reportRowId])
   @@unique([agentId, publishedReportRowId])
@@ -2416,17 +2418,17 @@ model NationalLifeDocumentChunk {
 }
 
 model Illustration {
-  id                  String                 @id @default(cuid())
+  id                  String                   @id @default(cuid())
   // A quote is pre-sale: the insured is a prospect who has no case and often no
   // client record either. Requiring a case made the table impossible to write
   // to — it stayed empty from the day it was created.
   caseId              String?
-  insuranceCase       InsuranceCase?         @relation(fields: [caseId], references: [id])
+  insuranceCase       InsuranceCase?           @relation(fields: [caseId], references: [id])
   clientId            String?
-  client              Client?                @relation(fields: [clientId], references: [id])
+  client              Client?                  @relation(fields: [clientId], references: [id])
   // Always known, and the only thing that scopes a quote to who may read it.
   agentId             String
-  agent               Agent                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent               Agent                    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   kind                IllustrationKind
   provider            String?
   externalId          String?
@@ -2452,9 +2454,10 @@ model Illustration {
   documentMimeType    String?
   documentFetchedAt   DateTime?
   rawPayload          Json?
-  createdAt           DateTime               @default(now())
-  updatedAt           DateTime               @updatedAt
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
   scenarios           IllustrationScenario[]
+  kbotRequest         KBotIllustrationRequest?
 
   @@unique([provider, externalId])
   @@index([caseId])
@@ -2811,24 +2814,24 @@ model ImportBatch {
 }
 
 model PolicyDocument {
-  id                   String                        @id @default(cuid())
+  id                   String                          @id @default(cuid())
   policyId             String
-  policy               Policy                        @relation(fields: [policyId], references: [id])
+  policy               Policy                          @relation(fields: [policyId], references: [id])
   filename             String
   storedPath           String
   mimeType             String
   sizeBytes            Int
   uploadedById         String?
-  uploadedBy           User?                         @relation(fields: [uploadedById], references: [id])
+  uploadedBy           User?                           @relation(fields: [uploadedById], references: [id])
   provider             String?
   externalId           String?
-  sourceRowId          String?                       @unique
-  sourceRow            NationalLifeReportRow?        @relation(fields: [sourceRowId], references: [id], onDelete: SetNull)
-  publishedSourceRowId String?                       @unique
+  sourceRowId          String?                         @unique
+  sourceRow            NationalLifeReportRow?          @relation(fields: [sourceRowId], references: [id], onDelete: SetNull)
+  publishedSourceRowId String?                         @unique
   publishedSourceRow   NationalLifePublishedReportRow? @relation("NationalLifePublishedReportPolicyDocuments", fields: [publishedSourceRowId], references: [id], onDelete: SetNull)
   contentHash          String?
   fetchedAt            DateTime?
-  createdAt            DateTime                      @default(now())
+  createdAt            DateTime                        @default(now())
   nationalLifeTransfer NationalLifeDocumentTransfer?
 
   @@unique([provider, externalId])
@@ -2947,13 +2950,13 @@ model KBotFollowupJob {
   /// texted twice in a week is a query over `agentId` + `phone` on this table,
   /// so a scheduled birthday and a lapse warning cap each other by construction
   /// — which they would not if scheduled sends lived in a table of their own.
-  category     String @default("FOLLOWUP")
+  category            String                 @default("FOLLOWUP")
   /// The client-scoped consent key this message was raised under, kept so the
   /// check at dispatch can look under the same keys the enqueue did. A stop
   /// request filed against the client id — not the number — would otherwise be
   /// invisible in the seconds before sending.
-  subjectKey   String?
-  billedTokens Int @default(0)
+  subjectKey          String?
+  billedTokens        Int                    @default(0)
   allocations         KBotCreditAllocation[]
   id                  String                 @id @default(cuid())
   agentId             String
@@ -3013,18 +3016,18 @@ model KBotContactPreference {
 /// go out without a human pressing send, "when did they ask to stop, and how"
 /// stops being a curiosity and becomes the thing you must be able to show.
 model KBotContactConsentEvent {
-  id         String   @id @default(cuid())
-  agentId    String
-  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  subjectKey String
+  id           String    @id @default(cuid())
+  agentId      String
+  agent        Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  subjectKey   String
   /// OPT_OUT | OPT_IN | SNOOZE
-  action     String
+  action       String
   /// WHATSAPP_REPLY | AGENT_UI | SYSTEM
-  source     String
+  source       String
   /// The inbound text that was read as a stop request, when there was one.
-  evidence   String?
+  evidence     String?
   snoozedUntil DateTime?
-  occurredAt DateTime @default(now())
+  occurredAt   DateTime  @default(now())
 
   @@index([agentId, subjectKey, occurredAt])
 }
@@ -3066,4 +3069,46 @@ model KBotCreditAllocation {
   spentTokens    Int             @default(0)
 
   @@unique([jobId, grantId])
+}
+
+/// An illustration the K-Bot raised from a conversation, and the agent's
+/// reading of it before the client ever sees a number.
+///
+/// It is a table of its own rather than a KBotFollowupJob row: that model lives
+/// in the follow-up module, is keyed to a phone number and carries token
+/// reservation and credit-settlement semantics that mean nothing here - the
+/// cost of an illustration is a carrier run, not a message credit.
+model KBotIllustrationRequest {
+  id               String        @id @default(cuid())
+  agentId          String
+  agent            Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  /// Always a client of this agent. An illustration carries face amount and
+  /// premium in the agent's name, so there is no prospect-without-a-record path
+  /// here the way there is on the manual screen.
+  clientId         String
+  client           Client        @relation(fields: [clientId], references: [id])
+  productKey       String
+  /// Where the interest came from - conversation id, who detected it, the
+  /// excerpt. Held so the agent reviewing the numbers can see what prompted
+  /// them, and so an intent detector can later be audited against outcomes.
+  signal           Json
+  /// GENERATING, DELIVERING, DELIVERED, BLOCKED, FAILED.
+  ///
+  /// The bot answers a question the client asked, so there is no approval step:
+  /// the numbers go back as soon as the carrier produces them. BLOCKED is the
+  /// one refusal that survives — a client who asked not to be contacted is not
+  /// messaged, whatever they asked for before.
+  status           String        @default("GENERATING")
+  illustrationId   String?       @unique
+  illustration     Illustration? @relation(fields: [illustrationId], references: [id])
+  commandId        String?
+  deliveredAt      DateTime?
+  closedAt         DateTime?
+  safeErrorCode    String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([agentId, status])
+  @@index([agentId, clientId, productKey, status])
+  @@index([status, createdAt])
 }

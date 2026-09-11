@@ -1,16 +1,28 @@
+import type { ProposalCategory } from '@/lib/kbot-messaging/scheduled-triggers'
 import type { TemplateValues } from './variables'
 
-/// The scheduled categories an agent can set up today. `KBotFollowupJob.category`
-/// also carries `FOLLOWUP`, which is the agent-triggered path and is not
-/// configured here.
-export const SCHEDULED_CATEGORIES = ['BIRTHDAY', 'ANNUAL_REVIEW'] as const
-export type ScheduledCategory = (typeof SCHEDULED_CATEGORIES)[number]
+/// The categories an agent can write a template for — re-exported, never
+/// redeclared.
+///
+/// This list decides what `setScheduledCategoryEnabled` accepts, and the
+/// proposal engine decides what it raises. A second copy here already drifted
+/// once: the engine gained `LAPSE_RECOVERY` and this list did not, so no agent
+/// could enable the template, and the engine refuses to propose without one —
+/// a feature switched off by a constant in another file.
+///
+/// `scheduled-triggers` is pure (its only import is the timezone table), so the
+/// client bundle can read this.
+export {
+  PROPOSAL_CATEGORIES as SCHEDULED_CATEGORIES,
+  type ProposalCategory as ScheduledCategory,
+} from '@/lib/kbot-messaging/scheduled-triggers'
+import { PROPOSAL_CATEGORIES } from '@/lib/kbot-messaging/scheduled-triggers'
 
 export const TEMPLATE_LANGUAGES = ['PT', 'EN'] as const
 export type TemplateLanguage = (typeof TEMPLATE_LANGUAGES)[number]
 
-export function isScheduledCategory(value: string): value is ScheduledCategory {
-  return (SCHEDULED_CATEGORIES as readonly string[]).includes(value)
+export function isScheduledCategory(value: string): value is ProposalCategory {
+  return (PROPOSAL_CATEGORIES as readonly string[]).includes(value)
 }
 
 /// The names the preview is rendered with. Deliberately a real-looking person

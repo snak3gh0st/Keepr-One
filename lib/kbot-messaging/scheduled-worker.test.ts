@@ -190,7 +190,7 @@ describe('releaseExpiredScheduledLeases', () => {
     const now = new Date('2026-03-11T17:00:00Z')
     expect(await releaseExpiredScheduledLeases(now)).toBe(2)
     expect(mocks.updateMany).toHaveBeenCalledWith({
-      where: { status: 'PREPARING', category: { in: ['BIRTHDAY', 'ANNUAL_REVIEW'] }, leaseExpiresAt: { lt: now } },
+      where: { status: 'PREPARING', category: { in: ['BIRTHDAY', 'ANNUAL_REVIEW', 'LAPSE_RECOVERY'] }, leaseExpiresAt: { lt: now } },
       data: { status: 'PENDING', leaseExpiresAt: null },
     })
   })
