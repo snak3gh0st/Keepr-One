@@ -1,11 +1,12 @@
 import 'server-only'
 import type { KBotFollowupJob } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { lockAgent, settleJob, type Tx } from '@/lib/kbot-followup/credits'
+import { lockAgent, settleGeneration, settleJob, type Tx } from '@/lib/kbot-followup/credits'
 import { ACTIVE_JOB_STATES, COOLDOWN_MS, FollowupError, SENT_JOB_STATES } from '@/lib/kbot-followup/domain'
 import { hasRecentOutgoing, messagingTransport, optOutMessage } from '@/lib/kbot-followup/transport'
 import { renderTemplate } from '@/lib/kbot-templates/variables'
 import { templateValuesFor } from '@/lib/kbot-templates/approval-view'
+import { generateBirthdayGreeting } from './birthday-generation'
 import { evaluateSendGate } from './send-gate'
 import { PROPOSAL_CATEGORIES } from './scheduled-triggers'
 
@@ -134,15 +135,14 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
     }
     if (hasRecentOutgoing(messages)) throw new FollowupError('RECENT_CONTACT')
 
-    const rendered = renderTemplate(
-      template.body,
-      templateValuesFor({ customerName: claimed.customerName, agentName: agent.user.name ?? '' }),
-    )
+    const values = templateValuesFor({ customerName: claimed.customerName, agentName: agent.user.name ?? '' })
+    const rendered = renderTemplate(template.body, values)
     // Total by construction: a template that cannot be filled has no text, and
     // a message with no text does not go out. The save path refuses unknown
     // variables, so reaching here means the template changed underneath.
     if (!rendered.ok) throw new FollowupError('TEMPLATE_UNRENDERABLE')
-    const content = rendered.text
+
+    let content = rendered.text
 
     const dispatch = await prisma.$transaction(async (tx) => {
       await lockAgent(tx, claimed.agentId)
@@ -194,7 +194,9 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
         await settleJob(tx, job, 'CANCELLED', gate.reason)
         return 'CANCELLED' as const
       }
-      await releaseReservation(tx, job)
+      // Credit is settled after this transaction, not inside it: whether a model
+      // was called is only known once the job is certain to go out, and calling
+      // it before that would spend on messages the gate is about to stop.
       await tx.kBotFollowupJob.update({ where: { id: job.id }, data: {
         status: 'DISPATCHING', content, conversationId, senderIdentity: transport.identity, leaseExpiresAt: null,
       } })
@@ -202,6 +204,46 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
     })
     if (dispatch === 'DEFERRED') return { outcome: 'DEFERRED', id: claimed.id }
     if (dispatch !== 'SEND') return { outcome: 'SETTLED', id: claimed.id }
+
+    // Past the gate, so this message is going out: now the model may be asked.
+    //
+    // A birthday is the one category where the same words every year is the
+    // problem, so the model writes it — checked, never trusted. Anything that
+    // strays, and anything the model cannot answer, falls back to the agent's
+    // template, which stays the floor.
+    //
+    // Deliberately after the gate rather than before it: generating first meant
+    // paying for greetings the gate then stopped, and paying again on every
+    // pass for a job quiet hours keeps putting back.
+    let voice: Awaited<ReturnType<typeof generateBirthdayGreeting>> | null = null
+    if (claimed.category === 'BIRTHDAY') {
+      voice = await generateBirthdayGreeting({
+        firstName: values.primeiro_nome,
+        agentName: values.agente,
+        language: claimed.language,
+      })
+      if (voice.ok) {
+        content = voice.text
+        await prisma.kBotFollowupJob.updateMany({
+          where: { id: claimed.id, status: 'DISPATCHING' },
+          data: { content, model: voice.model },
+        })
+      }
+    }
+
+    // Settled before the send, so a provider failure cannot leave a model call
+    // unpaid. `attempted` covers the timeout: the request may well have been
+    // processed on the other side, and treating unknown usage as "no model was
+    // called" would make a retry loop free.
+    await prisma.$transaction(async (tx) => {
+      await lockAgent(tx, claimed.agentId)
+      const job = await tx.kBotFollowupJob.findUniqueOrThrow({ where: { id: claimed.id } })
+      if (voice && (voice.attempted || voice.ok)) {
+        await settleGeneration(tx, job, voice.inputTokens, voice.outputTokens)
+      } else {
+        await releaseReservation(tx, job)
+      }
+    })
 
     dispatched = true
     const receipt = await transport.send(conversationId, content, claimed.id, claimed.phone)

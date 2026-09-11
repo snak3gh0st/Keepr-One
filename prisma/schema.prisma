@@ -531,7 +531,7 @@ model Agent {
   status                   AgentStatus               @default(ACTIVE)
   promotionAccessScope     PromotionAccessScope      @default(PERSONAL)
   createdAt                DateTime                  @default(now())
-  updatedAt                DateTime                  @updatedAt
+  updatedAt                DateTime                  @default(now()) @updatedAt
 
   clients                               Client[]
   policies                              Policy[]
@@ -964,7 +964,7 @@ model NationalLifeCaseSnapshot {
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
-  @@unique([agentId, deploymentScope, gridKey, policyNo])
+  @@unique([agentId, deploymentScope, gridKey, policyNo], map: "NationalLifeCaseSnapshot_agentId_deploymentScope_gridKey_pol_ke")
   @@index([agentId, gridKey])
   @@index([fetchedAt])
 }
@@ -1028,7 +1028,7 @@ model NationalLifeInforcePolicy {
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
-  @@unique([agentId, deploymentScope, policyNumber])
+  @@unique([agentId, deploymentScope, policyNumber], map: "NationalLifeInforcePolicy_agentId_deploymentScope_policyNu_key")
   @@index([agentId])
   @@index([fetchedAt])
 }
@@ -1094,7 +1094,7 @@ model NationalLifeReportRow {
   policyDocuments   PolicyDocument[]
   documentTransfers NationalLifeDocumentTransfer[]
 
-  @@unique([agentId, deploymentScope, gridKey, rowKey])
+  @@unique([agentId, deploymentScope, gridKey, rowKey], map: "NationalLifeReportRow_agentId_deploymentScope_gridKey_rowK_key")
   @@index([agentId, gridKey])
   @@index([fetchedAt])
 }
@@ -1298,7 +1298,7 @@ model Client {
   assignedAgentId String
   assignedAgent   Agent     @relation(fields: [assignedAgentId], references: [id])
   createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  updatedAt       DateTime  @default(now()) @updatedAt
 
   policies                 Policy[]
   insuranceCases           InsuranceCase[]
@@ -1340,6 +1340,8 @@ model Policy {
   importBatchId          String?
   importBatch            ImportBatch?                      @relation(fields: [importBatchId], references: [id])
   caseId                 String?
+  /// Left implicit, Prisma would promise `SetNull` for an optional relation and
+  /// the schema would be describing behaviour nobody has.
   case                   InsuranceCase?                    @relation(fields: [caseId], references: [id])
   sourceProvider         String?
   sourceExternalId       String?
@@ -1578,8 +1580,8 @@ model CalendarIntegration {
   watchChannels CalendarWatchChannel[]
   syncJobs      CalendarSyncJob[]
 
-  @@unique([userId, provider])
-  @@index([userId, status])
+  @@unique([userId, provider], map: "CalendarIntegration_user_provider_key")
+  @@index([userId, status], map: "CalendarIntegration_user_status_idx")
   @@index([provider, status])
 }
 
@@ -1615,9 +1617,9 @@ model CalendarSource {
   watchChannels CalendarWatchChannel[]
   syncJobs      CalendarSyncJob[]
 
-  @@unique([integrationId, providerCalendarId])
-  @@index([integrationId, visible])
-  @@index([integrationId, crmDefault])
+  @@unique([integrationId, providerCalendarId], map: "CalendarSource_integration_providerCalendar_key")
+  @@index([integrationId, visible], map: "CalendarSource_integration_visible_idx")
+  @@index([integrationId, crmDefault], map: "CalendarSource_integration_default_idx")
 }
 
 /// Local projection of one provider event. External events remain owned by the
@@ -1675,12 +1677,12 @@ model CalendarEvent {
   notifications     Notification[]
   schedulingBooking SchedulingBooking?
 
-  @@unique([calendarId, providerEventId])
-  @@index([ownerUserId, startsAt, status])
-  @@index([ownerUserId, startDate, status])
-  @@index([insuranceCaseId, startsAt])
-  @@index([integrationId, syncStatus])
-  @@index([providerRecurringEventId, providerOriginalStartAt])
+  @@unique([calendarId, providerEventId], map: "CalendarEvent_calendar_providerEvent_key")
+  @@index([ownerUserId, startsAt, status], map: "CalendarEvent_owner_starts_status_idx")
+  @@index([ownerUserId, startDate, status], map: "CalendarEvent_owner_startDate_status_idx")
+  @@index([insuranceCaseId, startsAt], map: "CalendarEvent_case_starts_idx")
+  @@index([integrationId, syncStatus], map: "CalendarEvent_integration_syncStatus_idx")
+  @@index([providerRecurringEventId, providerOriginalStartAt], map: "CalendarEvent_recurring_originalStart_idx")
 }
 
 model CalendarEventAttendee {
@@ -1695,7 +1697,7 @@ model CalendarEventAttendee {
   createdAt      DateTime                       @default(now()) @db.Timestamptz(3)
   updatedAt      DateTime                       @updatedAt @db.Timestamptz(3)
 
-  @@unique([eventId, email])
+  @@unique([eventId, email], map: "CalendarEventAttendee_event_email_key")
   @@index([email])
 }
 
@@ -1718,8 +1720,8 @@ model CalendarWatchChannel {
   createdAt         DateTime            @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
 
-  @@index([calendarId, status, expiresAt])
-  @@index([integrationId, status])
+  @@index([calendarId, status, expiresAt], map: "CalendarWatchChannel_calendar_status_expires_idx")
+  @@index([integrationId, status], map: "CalendarWatchChannel_integration_status_idx")
 }
 
 /// Durable outbox and background work queue. Local event mutations enqueue a
@@ -1748,9 +1750,9 @@ model CalendarSyncJob {
   updatedAt       DateTime              @updatedAt @db.Timestamptz(3)
 
   @@index([status, availableAt])
-  @@index([integrationId, status])
-  @@index([calendarId, status])
-  @@index([eventId, status])
+  @@index([integrationId, status], map: "CalendarSyncJob_integration_status_idx")
+  @@index([calendarId, status], map: "CalendarSyncJob_calendar_status_idx")
+  @@index([eventId, status], map: "CalendarSyncJob_event_status_idx")
   @@index([leaseExpiresAt])
 }
 
@@ -1773,8 +1775,8 @@ model CalendarOAuthState {
   consumedAt         DateTime?        @db.Timestamptz(3)
   createdAt          DateTime         @default(now()) @db.Timestamptz(3)
 
-  @@index([userId, expiresAt])
-  @@index([expiresAt, consumedAt])
+  @@index([userId, expiresAt], map: "CalendarOAuthState_user_expires_idx")
+  @@index([expiresAt, consumedAt], map: "CalendarOAuthState_expires_consumed_idx")
 }
 
 /// Public, agent-owned booking page. Google Calendar remains the source used
@@ -1815,8 +1817,8 @@ model SchedulingWeeklyWindow {
   endMinute   Int
   createdAt   DateTime       @default(now()) @db.Timestamptz(3)
 
-  @@unique([pageId, weekday, startMinute, endMinute])
-  @@index([pageId, weekday])
+  @@unique([pageId, weekday, startMinute, endMinute], map: "SchedulingWeeklyWindow_page_weekday_start_end_key")
+  @@index([pageId, weekday], map: "SchedulingWeeklyWindow_page_weekday_idx")
 }
 
 /// Immutable guest and schedule snapshot for one public booking. The linked
@@ -1847,8 +1849,8 @@ model SchedulingBooking {
 
   confirmationEmailJob SchedulingEmailJob?
 
-  @@index([ownerUserId, startsAt, status])
-  @@index([pageId, startsAt, status])
+  @@index([ownerUserId, startsAt, status], map: "SchedulingBooking_owner_starts_status_idx")
+  @@index([pageId, startsAt, status], map: "SchedulingBooking_page_starts_status_idx")
   @@index([inviteeEmail, createdAt])
 }
 
@@ -1871,7 +1873,7 @@ model SchedulingEmailJob {
   lastErrorCode     String?
   sentAt            DateTime?                @db.Timestamptz(3)
   createdAt         DateTime                 @default(now()) @db.Timestamptz(3)
-  updatedAt         DateTime                 @updatedAt @db.Timestamptz(3)
+  updatedAt         DateTime                 @default(now()) @updatedAt @db.Timestamptz(3)
 
   @@index([status, availableAt])
   @@index([leaseExpiresAt])
@@ -2186,7 +2188,7 @@ model NationalLifeCredentialLease {
   createdAt     DateTime                    @default(now())
   updatedAt     DateTime                    @updatedAt
 
-  @@unique([deviceId, operationKind, operationId, authEpoch])
+  @@unique([deviceId, operationKind, operationId, authEpoch], map: "NationalLifeCredentialLease_deviceId_operationKind_operationId_")
   @@index([agentId, issuedAt])
   @@index([status, expiresAt])
 }
@@ -2268,7 +2270,7 @@ model NationalLifeConnectorStageReceipt {
   createdAt      DateTime                    @default(now())
   updatedAt      DateTime                    @updatedAt
 
-  @@unique([deviceId, runId, gridKey, sequence])
+  @@unique([deviceId, runId, gridKey, sequence], map: "NationalLifeConnectorStageReceipt_deviceId_runId_gridKey_sequen")
   @@index([runId, gridKey])
   @@index([runId, truncated])
 }
@@ -2423,7 +2425,10 @@ model Illustration {
   // client record either. Requiring a case made the table impossible to write
   // to — it stayed empty from the day it was created.
   caseId              String?
-  insuranceCase       InsuranceCase?           @relation(fields: [caseId], references: [id])
+  /// `Restrict` is what the database enforces here, in production too. Left
+  /// implicit, Prisma promises `SetNull` for an optional relation, and the
+  /// schema would be describing behaviour nobody has.
+  insuranceCase       InsuranceCase?           @relation(fields: [caseId], references: [id], onDelete: Restrict)
   clientId            String?
   client              Client?                  @relation(fields: [clientId], references: [id])
   // Always known, and the only thing that scopes a quote to who may read it.
@@ -2822,7 +2827,8 @@ model PolicyDocument {
   mimeType             String
   sizeBytes            Int
   uploadedById         String?
-  uploadedBy           User?                           @relation(fields: [uploadedById], references: [id])
+  /// Same as above: the database restricts, so the schema says restrict.
+  uploadedBy           User?                           @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
   provider             String?
   externalId           String?
   sourceRowId          String?                         @unique
