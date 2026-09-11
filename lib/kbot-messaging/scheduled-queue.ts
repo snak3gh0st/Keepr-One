@@ -237,7 +237,7 @@ export async function runScheduledMessageEnqueuePass(now = new Date()): Promise<
 ///
 /// The drain is bounded so one call cannot run for an unbounded time; whatever
 /// is left is taken by the next pass.
-export async function runScheduledMessagePass(now = new Date(), maxSends = 50): Promise<ScheduledPassReport & { sent: number; settled: number; expired: number; deferred: number }> {
+export async function runScheduledMessagePass(now = new Date(), maxSends = 50): Promise<ScheduledPassReport & { sent: number; settled: number; expired: number; deferred: number; illustrationsExpired: number }> {
   const { releaseExpiredScheduledLeases, processNextScheduledMessage } = await import('./scheduled-worker')
   await releaseExpiredScheduledLeases(now)
   // Before enqueuing more: proposals nobody released go back, reservation and
@@ -245,6 +245,11 @@ export async function runScheduledMessagePass(now = new Date(), maxSends = 50): 
   // messages that were never sent.
   const { expireStaleScheduledProposals } = await import('./approval')
   const expired = await expireStaleScheduledProposals(now)
+  // The illustration requests ride the same pass rather than earning a cron of
+  // their own: both are "something the agent never got to", both hold a slot,
+  // and a second scheduled entry point is a second thing to forget to set up.
+  const { expireStaleIllustrationRequests } = await import('@/lib/kbot-illustration/delivery')
+  const illustrations = await expireStaleIllustrationRequests(now)
   const report = await runScheduledMessageEnqueuePass(now)
   // A job put back for quiet hours is still the oldest PENDING row, so the
   // drain has to step over it. Without this, one recipient in the wrong time
@@ -266,5 +271,5 @@ export async function runScheduledMessagePass(now = new Date(), maxSends = 50): 
     if (turn.outcome === 'SENT') sent += 1
     else settled += 1
   }
-  return { ...report, sent, settled, expired, deferred: deferred.length }
+  return { ...report, sent, settled, expired, deferred: deferred.length, illustrationsExpired: illustrations.expired }
 }

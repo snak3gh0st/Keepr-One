@@ -86,7 +86,7 @@ describe('local connector command event route', () => {
       now: expect.any(Date),
       policyDetailRepository: { kind: 'policy-detail-repository' },
       syncPolicyDetailPromotionCreditsSafely: expect.any(Function),
-      deliverKBotIllustrationSafely: expect.any(Function),
+      markKBotIllustrationReadySafely: expect.any(Function),
       foresightArtifactRepository: expect.objectContaining({
         findOwnedArtifact: expect.any(Function),
         persistTermResult: expect.any(Function),

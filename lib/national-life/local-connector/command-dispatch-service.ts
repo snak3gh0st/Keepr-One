@@ -354,12 +354,12 @@ export async function recordDeviceConnectorCommandEvent(
       policyNumber: string
       fetchedAt: Date
     }) => Promise<unknown>
-    /// Called once the carrier's numbers are validated and stored, to hand a
-    /// K-Bot-raised quote back to the client who asked for it. Injected rather
-    /// than imported so this service keeps knowing nothing about the K-Bot;
-    /// without it a request raised by the bot would sit in GENERATING until the
-    /// sweep closed it, and the client would never get an answer.
-    deliverKBotIllustrationSafely?: (input: {
+    /// Called once the carrier's numbers are validated and stored, to mark a
+    /// K-Bot-raised quote as ready for the agent to send. Injected rather than
+    /// imported so this service keeps knowing nothing about the K-Bot; without
+    /// it a request raised by the bot would sit in GENERATING until the sweep
+    /// closed it, and the agent would never be offered it.
+    markKBotIllustrationReadySafely?: (input: {
       agentId: string
       illustrationId: string
     }) => Promise<unknown>
@@ -482,7 +482,7 @@ export async function recordDeviceConnectorCommandEvent(
     // After the receipt matched and the figures were stored: the illustration
     // now exists with real numbers, which is exactly the moment it becomes
     // readable by the agent who has to approve it.
-    await input.deliverKBotIllustrationSafely?.({
+    await input.markKBotIllustrationReadySafely?.({
       agentId: input.agentId,
       illustrationId: publicCommand.target.id,
     })

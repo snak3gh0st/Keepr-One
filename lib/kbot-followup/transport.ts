@@ -92,6 +92,19 @@ export async function messagingTransport(agentId: string, automated = true) {
       })
       return { id: numericId(message.id), sourceId: typeof message.source_id === 'string' ? message.source_id : null, status: null }
     },
+    /// A document and its explanation, in one message.
+    ///
+    /// Only over the agent's own WhatsApp: the Chatwoot fallback this module
+    /// keeps for the manual path posts text, and a quote arriving as a caption
+    /// with no file would be worse than not sending it. Every check the text
+    /// path passed — the module, the channel, the sender identity — was already
+    /// made above, which is why this lives here and not in a second client.
+    sendDocument: async (input: { phone: string; media: string; mimeType: string; fileName: string; caption: string }) => {
+      if (!whatsappClient) throw new FollowupError('WHATSAPP_DISCONNECTED')
+      if (!normalizePhone(input.phone)) throw new FollowupError('PHONE_REQUIRED')
+      const receipt = await whatsappClient.sendMedia({ agentId, ...input })
+      return { sourceId: receipt.providerMessageId, status: receipt.status }
+    },
     providerStatus: async (phone: string, providerMessageId: string) => {
       if (!whatsappClient) return null
       if (await whatsappClient.connectionState({ agentId }) !== 'open') throw new FollowupError('WHATSAPP_DISCONNECTED')

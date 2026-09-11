@@ -1,31 +1,41 @@
-/// A quote the client asked for, on its way back to them.
+/// A quote the client asked for: generated on its own, sent by a person.
 ///
-/// There is no approval step. The bot is answering a question the client just
-/// asked in a conversation, so the numbers go back as soon as the carrier
-/// produces them — the same way an agent who ran the illustration by hand would
-/// paste the PDF into the chat.
+/// The two halves are deliberately different. Generating an illustration
+/// happens inside Keeprone — it costs a carrier run and produces a document the
+/// agent can look at, and nothing leaves the building. Putting it in the
+/// client's WhatsApp is the part that cannot be taken back, so that half waits
+/// for the agent to press send.
 ///
-/// One refusal survives that: a client who asked not to be contacted is not
-/// messaged, whatever they asked for before. Consent is not approval; it is the
-/// client's own instruction, and it outlives the request.
+/// Consent sits underneath both: a client who asked not to be contacted is not
+/// messaged even after the agent presses send. That is the client's own
+/// instruction, not a review step, and it outlives the request.
 
 export const GENERATING = 'GENERATING'
+/// The numbers exist in Keeprone and the agent can read them. Nothing has been
+/// sent, and nothing will be until they say so.
+export const READY_TO_SEND = 'READY_TO_SEND'
 export const DELIVERING = 'DELIVERING'
 export const DELIVERED = 'DELIVERED'
 export const BLOCKED = 'BLOCKED'
 export const FAILED = 'FAILED'
 
+export const DISCARDED = 'DISCARDED'
+export const EXPIRED = 'EXPIRED'
+
 export type IllustrationRequestStatus =
   | typeof GENERATING
+  | typeof READY_TO_SEND
   | typeof DELIVERING
   | typeof DELIVERED
   | typeof BLOCKED
+  | typeof DISCARDED
+  | typeof EXPIRED
   | typeof FAILED
 
 /// States that still occupy the client-and-product slot, so a second request
 /// for the same pair must not be raised: a connector run is a browser session
 /// driving the carrier, which is the expensive thing here.
-export const IN_FLIGHT_STATUSES = [GENERATING, DELIVERING] as const
+export const IN_FLIGHT_STATUSES = [GENERATING, READY_TO_SEND, DELIVERING] as const
 
 /// How long a request may sit in GENERATING before the slot is released. It
 /// matches the connector command's own expiry: once the command can no longer
@@ -47,12 +57,17 @@ export type IllustrationRefusal =
   | 'QUOTE_INPUT_INVALID'
   | 'DISPATCH_FAILED'
 
+/// How long generated numbers wait for the agent to send them. The carrier's
+/// assumptions age, so an illustration nobody sent within this window stops
+/// being sendable rather than going out stale weeks later.
+export const SEND_WINDOW_MS = 3 * 86_400_000
+
 /// Why a delivery did not happen.
 ///
 /// `OPTED_OUT` is the one that is not a failure: the client asked not to be
 /// contacted, and the request is closed rather than retried.
 export type DeliveryRefusal =
-  | 'NOT_GENERATING'
+  | 'NOT_READY_TO_SEND'
   | 'OPTED_OUT'
   | 'CLIENT_UNREACHABLE'
   | 'ILLUSTRATION_MISSING'

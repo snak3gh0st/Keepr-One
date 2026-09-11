@@ -31,6 +31,20 @@ export type WhatsappClient = {
   connectionState: (input: { agentId: string }) => Promise<string>
   connectionIdentity: (input: { agentId: string }) => Promise<WhatsappIdentity | null>
   sendText: (input: { agentId: string; phone: string; text: string }) => Promise<WhatsappSendReceipt>
+  /// A document with its explanation in one message.
+  ///
+  /// Separate from `sendText` because a caption is not a second message: the
+  /// client sees one bubble with the PDF and the words that explain it, which
+  /// is what an agent sending this by hand would do. `media` is base64 without
+  /// a data: prefix, which is the shape the provider expects.
+  sendMedia: (input: {
+    agentId: string
+    phone: string
+    media: string
+    mimeType: string
+    fileName: string
+    caption: string
+  }) => Promise<WhatsappSendReceipt>
   messageStatus: (input: { agentId: string; phone: string; providerMessageId: string }) => Promise<WhatsappDeliveryStatus | null>
   logoutInstance: (input: { agentId: string }) => Promise<void>
   enforcePrivateChatSettings: (input: { agentId: string }) => Promise<void>
@@ -131,6 +145,29 @@ export function createWhatsappClient(config: {
         method: 'POST', body: JSON.stringify({ number: target.number, text }),
       })
       const key = asRecord(body.key)
+      if (typeof key.id !== 'string' || key.id.length === 0 || key.fromMe !== true || key.remoteJid !== target.remoteJid) {
+        throw new WhatsappRequestError(502)
+      }
+      return { providerMessageId: key.id, status: deliveryStatus([body.status]) }
+    },
+
+    sendMedia: async ({ agentId, phone, media, mimeType, fileName, caption }) => {
+      const target = targetFor(phone)
+      const body = await call(`/message/sendMedia/${instanceNameFor(agentId)}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          number: target.number,
+          mediatype: 'document',
+          mimetype: mimeType,
+          media,
+          fileName,
+          caption,
+        }),
+      })
+      const key = asRecord(body.key)
+      // The same receipt check `sendText` makes: an id, sent by us, to the
+      // number we aimed at. Anything else is a provider answering about some
+      // other conversation.
       if (typeof key.id !== 'string' || key.id.length === 0 || key.fromMe !== true || key.remoteJid !== target.remoteJid) {
         throw new WhatsappRequestError(502)
       }

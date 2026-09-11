@@ -4,6 +4,9 @@ import { prisma } from '@/lib/prisma'
 import { normalizePhone } from '@/lib/kbot-followup/domain'
 import {
   BLOCKED,
+  READY_TO_SEND,
+  SEND_WINDOW_MS,
+  EXPIRED,
   DELIVERED,
   DELIVERING,
   FAILED,
@@ -13,39 +16,65 @@ import {
   type IllustrationDeliveryEnvelope,
 } from './domain'
 
-/// Carrier numbers going back to the client who asked for them.
+/// Carrier numbers reaching the client, once a person says so.
 ///
-/// The only gate is consent. There is no approval queue: the client asked a
-/// question in a conversation and this is the answer, so making them wait for
-/// the agent to read it first would turn a reply into a delay.
+/// Generating costs a carrier run and produces a document inside Keeprone;
+/// sending it puts text on someone's phone. Only the second one is gated, and
+/// the gate is the agent pressing send — `markIllustrationReadyToSend` is what
+/// the connector's completion calls, and it stops there.
 ///
-/// Quiet hours are deliberately not applied either — they exist so an
-/// unprompted birthday greeting does not arrive at 3am, and a reply to a
-/// message the client just sent is not unprompted.
+/// Quiet hours are deliberately not applied: they exist so an unprompted
+/// birthday greeting does not arrive at 3am, and an agent choosing to send is
+/// already choosing the moment.
 
-/// The carrier finished and the numbers are on the illustration: send them.
+/// The carrier finished and the numbers are on the illustration.
 ///
-/// Claims the request out of GENERATING with an `updateMany` predicate, so two
-/// completion events for the same run cannot both deliver. A claim that matches
-/// nothing means someone else already took it, which is not an error.
-export async function deliverGeneratedIllustration(
-  input: { agentId: string; illustrationId: string; now?: Date },
+/// Moves the request to READY_TO_SEND and stops. Nothing is sent here — this is
+/// the point at which the agent has something to look at.
+export async function markIllustrationReadyToSend(input: {
+  agentId: string
+  illustrationId: string
+}): Promise<{ moved: number }> {
+  // An illustration the agent ran by hand has no request behind it, and this is
+  // simply not about it.
+  const result = await prisma.kBotIllustrationRequest.updateMany({
+    where: { agentId: input.agentId, illustrationId: input.illustrationId, status: GENERATING },
+    data: { status: READY_TO_SEND },
+  })
+  return { moved: result.count }
+}
+
+/// The agent read the numbers and chose to send them.
+///
+/// The `updateMany` predicate is the authority: the owning agent, the waiting
+/// state and the send window are all re-checked, so a stale screen sending
+/// something already sent, discarded or expired matches nothing. Consent is
+/// checked after the claim, because a stop request can arrive at any point and
+/// the client's instruction outranks the agent's click.
+export async function sendIllustrationRequest(
+  input: { agentId: string; requestId: string; now?: Date },
   send: (envelope: IllustrationDeliveryEnvelope) => Promise<void>,
 ): Promise<{ ok: true } | { ok: false; reason: DeliveryRefusal }> {
   const now = input.now ?? new Date()
-  const request = await prisma.kBotIllustrationRequest.findFirst({
-    where: { agentId: input.agentId, illustrationId: input.illustrationId, status: GENERATING },
-    select: { id: true, clientId: true },
-  })
-  // An illustration the agent ran by hand has no request behind it, and this is
-  // simply not about it.
-  if (!request) return { ok: false, reason: 'NOT_GENERATING' }
-
   const claimed = await prisma.kBotIllustrationRequest.updateMany({
-    where: { id: request.id, agentId: input.agentId, status: GENERATING },
+    where: {
+      id: input.requestId,
+      agentId: input.agentId,
+      status: READY_TO_SEND,
+      createdAt: { gte: new Date(now.getTime() - SEND_WINDOW_MS) },
+    },
     data: { status: DELIVERING },
   })
-  if (claimed.count === 0) return { ok: false, reason: 'NOT_GENERATING' }
+  if (claimed.count === 0) return { ok: false, reason: 'NOT_READY_TO_SEND' }
+
+  const request = await prisma.kBotIllustrationRequest.findFirst({
+    where: { id: input.requestId, agentId: input.agentId },
+    select: { id: true, clientId: true, illustrationId: true },
+  })
+  if (!request?.illustrationId) {
+    await close(input.requestId, input.agentId, FAILED, 'ILLUSTRATION_MISSING', now)
+    return { ok: false, reason: 'ILLUSTRATION_MISSING' }
+  }
 
   const agent = await prisma.agent.findUnique({
     where: { id: input.agentId },
@@ -61,10 +90,9 @@ export async function deliverGeneratedIllustration(
     return { ok: false, reason: 'CLIENT_UNREACHABLE' }
   }
 
-  // Consent outlives the request. Someone may have asked for a quote last week
-  // and asked to be left alone since; the second instruction is the current one.
-  // Checked here rather than at dispatch time because the carrier run takes
-  // minutes, and a stop request can arrive inside them.
+  // Consent outranks the agent's click. Someone may have asked for a quote last
+  // week and asked to be left alone since; the second instruction is the
+  // current one, and it is read here rather than when the screen was drawn.
   const preferences = await prisma.kBotContactPreference.findMany({
     where: { agentId: input.agentId, subjectKey: { in: [phone, `client:${client.id}`] } },
     select: { optedOut: true },
@@ -75,7 +103,7 @@ export async function deliverGeneratedIllustration(
   }
 
   const illustration = await prisma.illustration.findFirst({
-    where: { id: input.illustrationId, agentId: input.agentId },
+    where: { id: request.illustrationId, agentId: input.agentId },
     select: { id: true, productName: true, faceAmount: true, targetPremium: true, documentUrl: true },
   })
   if (!illustration) {
@@ -152,5 +180,12 @@ export async function expireStaleIllustrationRequests(now = new Date()): Promise
     where: { status: GENERATING, createdAt: { lt: new Date(now.getTime() - GENERATION_WINDOW_MS) } },
     data: { status: FAILED, closedAt: now, safeErrorCode: 'GENERATION_TIMED_OUT' },
   })
-  return { expired: abandoned.count }
+  // Numbers nobody sent within the window stop being sendable. The carrier's
+  // assumptions age, and a quote going out a week late over the agent's name is
+  // worse than one that was never sent.
+  const unsent = await prisma.kBotIllustrationRequest.updateMany({
+    where: { status: READY_TO_SEND, createdAt: { lt: new Date(now.getTime() - SEND_WINDOW_MS) } },
+    data: { status: EXPIRED, closedAt: now, safeErrorCode: 'SEND_WINDOW_EXPIRED' },
+  })
+  return { expired: abandoned.count + unsent.count }
 }
