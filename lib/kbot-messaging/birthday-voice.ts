@@ -45,6 +45,18 @@ export function fold(value: string): string {
   return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 }
 
+/// Folds and splits text into whole words, dropping punctuation and
+/// whitespace. The one tokenisation rule for this module — `isAddressedTo`
+/// and the word-list checks in `message-voice.ts` both compare whole tokens
+/// against it, so there is exactly one place that decides what counts as a
+/// word boundary, never a second implementation of the same idea drifting
+/// out of step with this one.
+export function tokenize(text: string): string[] {
+  return fold(text)
+    .split(/[^\p{L}\p{M}\p{N}']+/u)
+    .filter(Boolean)
+}
+
 /// Whether the text is addressed to this person. Matched at word boundaries,
 /// not by substring: `Ana` is inside `Banana` (and inside `Anabela`), and a
 /// check that accepts that is a check that accepts a message addressed to
@@ -57,9 +69,7 @@ export function fold(value: string): string {
 export function isAddressedTo(text: string, firstName: string): boolean {
   const wanted = fold(firstName.trim())
   if (!wanted) return false
-  return fold(text)
-    .split(/[^\p{L}\p{M}\p{N}']+/u)
-    .some((token) => token === wanted)
+  return tokenize(text).some((token) => token === wanted)
 }
 
 /// Bare domains count: `veja em exemplo.com` is a link to the person reading

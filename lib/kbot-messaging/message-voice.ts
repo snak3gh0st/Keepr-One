@@ -7,6 +7,7 @@ import {
   isAddressedTo,
   MAX_LENGTH,
   MIN_LENGTH,
+  tokenize,
   type VoiceCheck,
 } from './birthday-voice'
 
@@ -29,16 +30,45 @@ import {
 /// contract exactly like a figure or a date does — and it is the fact that
 /// does the most damage when the model invented it. The agent is who tells a
 /// client their policy's real status, in a conversation; the bot is not.
-const MONEY_AND_CONTRACT = [
+///
+/// Matched on whole tokens (via `tokenize`, the one tokenisation rule this
+/// module shares with `isAddressedTo`), never by substring: `ativa` as a
+/// substring is inside "iniciativa", "criativa", "nativa" — ordinary words
+/// with no business content — and a check that flags those kills a good
+/// message by accident instead of catching an invented claim.
+///
+/// Single-token entries only. A phrase like "em atraso" has no single token
+/// to match — it needs its own list below, checked as a run of consecutive
+/// tokens.
+const MONEY_AND_CONTRACT_WORDS = [
   'prêmio', 'premio', 'premium', 'pagamento', 'payment', 'desconto', 'discount',
   'benefício', 'beneficio', 'benefit', 'contrato', 'contract', 'proposta', 'quote',
   'cancelada', 'cancelado', 'cancelled', 'canceled',
   'vencida', 'vencido', 'expired',
   'suspensa', 'suspenso', 'suspended',
-  'em atraso', 'overdue',
+  'overdue',
   'inadimplente', 'lapsed', 'lapse',
   'ativa', 'ativo', 'active',
 ] as const
+
+/// Multi-word entries that `MONEY_AND_CONTRACT_WORDS` cannot express as a
+/// single token. Checked as a run of consecutive tokens, so "em atraso" only
+/// matches when both words appear adjacent, in order — not "atraso" alone,
+/// which is already covered by nothing here on purpose: "atraso" by itself
+/// ("um atraso no aeroporto") is not a status claim about the policy, only
+/// the full phrase is.
+const MONEY_AND_CONTRACT_PHRASES = ['em atraso'] as const
+
+/// Whether `tokens` contains `phrase`'s words, in order, adjacent — the
+/// multi-word counterpart to a whole-token match in `MONEY_AND_CONTRACT_WORDS`.
+function containsPhrase(tokens: string[], phrase: string): boolean {
+  const wanted = tokenize(phrase)
+  if (wanted.length === 0) return false
+  for (let start = 0; start + wanted.length <= tokens.length; start++) {
+    if (wanted.every((word, offset) => tokens[start + offset] === word)) return true
+  }
+  return false
+}
 
 export function checkMessageVoice(
   raw: string,
@@ -58,8 +88,11 @@ export function checkMessageVoice(
   if (/\d/u.test(text)) return { ok: false, reason: 'CONTAINS_NUMBER' }
   if (containsLink(text)) return { ok: false, reason: 'CONTAINS_LINK' }
   if (containsPlaceholder(text)) return { ok: false, reason: 'CONTAINS_PLACEHOLDER' }
-  const lowered = fold(text)
-  if (MONEY_AND_CONTRACT.some((word) => lowered.includes(fold(word)))) {
+  const words = tokenize(text)
+  if (MONEY_AND_CONTRACT_WORDS.some((word) => words.includes(fold(word)))) {
+    return { ok: false, reason: 'MENTIONS_BUSINESS' }
+  }
+  if (MONEY_AND_CONTRACT_PHRASES.some((phrase) => containsPhrase(words, phrase))) {
     return { ok: false, reason: 'MENTIONS_BUSINESS' }
   }
   return { ok: true, text }

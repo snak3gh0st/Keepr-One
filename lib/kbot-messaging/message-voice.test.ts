@@ -81,4 +81,23 @@ describe('checkMessageVoice', () => {
     // what these categories exist to do.
     expect(checkMessageVoice('Oi Ana, podemos conversar sobre sua apólice?', 'Ana', 'ANNUAL_REVIEW').ok).toBe(true)
   })
+
+  it('does not reject a word that merely contains a status fragment', () => {
+    // "iniciativa" contains "ativa" as a substring — the regression a
+    // substring check would introduce. Matched on whole tokens, this passes.
+    expect(checkMessageVoice('Oi Ana, tive uma iniciativa que pode ajudar. Podemos conversar?', 'Ana', 'LAPSE_RECOVERY').ok).toBe(true)
+  })
+
+  it('does not reject another ordinary word containing a status fragment', () => {
+    // "relativo" contains "ativo" as a substring, same regression as above
+    // from a different fragment.
+    expect(checkMessageVoice('Oi Ana, isso é relativo à sua conversa com o agente. Podemos falar?', 'Ana', 'ANNUAL_REVIEW').ok).toBe(true)
+  })
+
+  it('still refuses a message that asserts the policy is active', () => {
+    // Boundaries remove the false positives, but the claim itself is still
+    // invented and still blocked.
+    expect(checkMessageVoice('Oi Ana, sua apólice está ativa. Podemos conversar?', 'Ana', 'LAPSE_RECOVERY'))
+      .toMatchObject({ ok: false, reason: 'MENTIONS_BUSINESS' })
+  })
 })
