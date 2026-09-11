@@ -1,11 +1,12 @@
 import 'server-only'
 import type { KBotFollowupJob } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { lockAgent, settleJob, type Tx } from '@/lib/kbot-followup/credits'
+import { lockAgent, settleGeneration, settleJob, type Tx } from '@/lib/kbot-followup/credits'
 import { ACTIVE_JOB_STATES, COOLDOWN_MS, FollowupError, SENT_JOB_STATES } from '@/lib/kbot-followup/domain'
 import { hasRecentOutgoing, messagingTransport, optOutMessage } from '@/lib/kbot-followup/transport'
 import { renderTemplate } from '@/lib/kbot-templates/variables'
 import { templateValuesFor } from '@/lib/kbot-templates/approval-view'
+import { generateBirthdayGreeting } from './birthday-generation'
 import { evaluateSendGate } from './send-gate'
 import { PROPOSAL_CATEGORIES } from './scheduled-triggers'
 
@@ -134,15 +135,32 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
     }
     if (hasRecentOutgoing(messages)) throw new FollowupError('RECENT_CONTACT')
 
-    const rendered = renderTemplate(
-      template.body,
-      templateValuesFor({ customerName: claimed.customerName, agentName: agent.user.name ?? '' }),
-    )
+    const values = templateValuesFor({ customerName: claimed.customerName, agentName: agent.user.name ?? '' })
+    const rendered = renderTemplate(template.body, values)
     // Total by construction: a template that cannot be filled has no text, and
     // a message with no text does not go out. The save path refuses unknown
     // variables, so reaching here means the template changed underneath.
     if (!rendered.ok) throw new FollowupError('TEMPLATE_UNRENDERABLE')
-    const content = rendered.text
+
+    // A birthday is the one category where the same words every year is the
+    // problem, so the model writes it — checked, never trusted. Anything it
+    // returns that strays is discarded and the agent's own template goes out,
+    // which is also what happens when the model is unavailable. The template
+    // is therefore always the floor, and the greeting can only get better than
+    // it, never different from what the agent approved in substance.
+    let content = rendered.text
+    let voiceUsage: { inputTokens: number; outputTokens: number } | null = null
+    if (claimed.category === 'BIRTHDAY') {
+      const greeting = await generateBirthdayGreeting({
+        firstName: values.primeiro_nome,
+        agentName: values.agente,
+        language: claimed.language,
+      })
+      if (greeting.inputTokens > 0 || greeting.outputTokens > 0) {
+        voiceUsage = { inputTokens: greeting.inputTokens, outputTokens: greeting.outputTokens }
+      }
+      if (greeting.ok) content = greeting.text
+    }
 
     const dispatch = await prisma.$transaction(async (tx) => {
       await lockAgent(tx, claimed.agentId)
@@ -194,7 +212,11 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
         await settleJob(tx, job, 'CANCELLED', gate.reason)
         return 'CANCELLED' as const
       }
-      await releaseReservation(tx, job)
+      // The reservation exists to bound what a trigger can queue. A template
+      // send calls no model and hands it back; a greeting the model wrote spent
+      // real tokens, so that one is settled rather than released.
+      if (voiceUsage) await settleGeneration(tx, job, voiceUsage.inputTokens, voiceUsage.outputTokens)
+      else await releaseReservation(tx, job)
       await tx.kBotFollowupJob.update({ where: { id: job.id }, data: {
         status: 'DISPATCHING', content, conversationId, senderIdentity: transport.identity, leaseExpiresAt: null,
       } })

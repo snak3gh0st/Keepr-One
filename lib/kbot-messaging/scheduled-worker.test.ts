@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   updateMany: vi.fn(), queryRaw: vi.fn(), update: vi.fn(), findUniqueOrThrow: vi.fn(), findFirst: vi.fn(), agent: vi.fn(),
-  template: vi.fn(), pref: vi.fn(), allocation: vi.fn(), grantUpdate: vi.fn(), send: vi.fn(), messages: vi.fn(),
+  template: vi.fn(), pref: vi.fn(), greeting: vi.fn(), settleGeneration: vi.fn(), allocation: vi.fn(), grantUpdate: vi.fn(), send: vi.fn(), messages: vi.fn(),
 }))
 
 const tx = {
@@ -20,6 +20,11 @@ vi.mock('@/lib/prisma', () => ({ prisma: {
   kBotMessageTemplate: { findUnique: mocks.template },
   $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
 } }))
+vi.mock('./birthday-generation', () => ({ generateBirthdayGreeting: mocks.greeting }))
+vi.mock('@/lib/kbot-followup/credits', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/kbot-followup/credits')>(),
+  settleGeneration: mocks.settleGeneration,
+}))
 vi.mock('@/lib/kbot-followup/transport', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/kbot-followup/transport')>(),
   messagingTransport: async () => ({
@@ -36,6 +41,8 @@ beforeEach(() => {
   mocks.queryRaw.mockResolvedValue([])
   // Nothing else reached this recipient recently; the tests that care set it.
   mocks.findFirst.mockResolvedValue(null)
+  // The model is unavailable by default; the tests about it say otherwise.
+  mocks.greeting.mockResolvedValue({ ok: false, reason: 'UNAVAILABLE', model: 'm', inputTokens: 0, outputTokens: 0 })
   // No agent behind the job: the claim still has to happen and the job still
   // has to be settled, which is the path these tests walk.
   mocks.agent.mockResolvedValue(null)
@@ -55,6 +62,8 @@ describe('scheduled queue claiming', () => {
     mocks.queryRaw.mockResolvedValue([])
   // Nothing else reached this recipient recently; the tests that care set it.
   mocks.findFirst.mockResolvedValue(null)
+  // The model is unavailable by default; the tests about it say otherwise.
+  mocks.greeting.mockResolvedValue({ ok: false, reason: 'UNAVAILABLE', model: 'm', inputTokens: 0, outputTokens: 0 })
     await processNextScheduledMessage(['job1', 'job2'])
     expect(mocks.queryRaw.mock.calls[0][0].join('?')).toContain('NOT ("id" = ANY(')
     // Tagged template: the interpolated values follow the strings array.
@@ -115,6 +124,52 @@ describe('sending a scheduled message', () => {
     mocks.template.mockResolvedValue({ enabled: true, body: 'Oi {{primeiro_nome}}, aqui é {{agente}}.' })
     await processNextScheduledMessage()
     expect(mocks.send).toHaveBeenCalledWith('10', 'Oi Ana, aqui é Paulo Loureiro.', 'job1', '+13055550142')
+  })
+
+  it('lets the model write the birthday, when it stays inside the rules', async () => {
+    // The one category where the same words every year is the problem.
+    mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{nome}}!' })
+    mocks.greeting.mockResolvedValue({
+      ok: true, text: 'Ana, tudo de bom hoje! Aproveite o seu dia com quem você gosta.',
+      model: 'm', inputTokens: 90, outputTokens: 30,
+    })
+    await processNextScheduledMessage()
+    expect(mocks.send).toHaveBeenCalledWith('10', 'Ana, tudo de bom hoje! Aproveite o seu dia com quem você gosta.', 'job1', '+13055550142')
+  })
+
+  it('falls back to the words the agent approved when the model strays', async () => {
+    // The template is the floor: the greeting can be better than it, never
+    // something nobody read.
+    mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{nome}}!' })
+    mocks.greeting.mockResolvedValue({
+      ok: false, reason: 'MENTIONS_BUSINESS', model: 'm', inputTokens: 90, outputTokens: 30,
+    })
+    await processNextScheduledMessage()
+    expect(mocks.send).toHaveBeenCalledWith('10', 'Feliz aniversário, Ana!', 'job1', '+13055550142')
+  })
+
+  it('spends the reservation when a model was called, instead of handing it back', async () => {
+    // Releasing was justified by "a template send calls no model". A greeting
+    // the model wrote spent real tokens, and an unbilled call is a free one.
+    mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{nome}}!' })
+    mocks.greeting.mockResolvedValue({
+      ok: true, text: 'Ana, um ótimo dia para você hoje! Aproveite bastante.',
+      model: 'm', inputTokens: 90, outputTokens: 30,
+    })
+    await processNextScheduledMessage()
+    expect(mocks.settleGeneration).toHaveBeenCalledWith(expect.anything(), expect.anything(), 90, 30)
+    expect(mocks.grantUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { reserved: { decrement: 192 } } }),
+    )
+  })
+
+  it('does not ask the model for anything but a birthday', async () => {
+    // The claim returns the row, so that is where the category comes from.
+    const review = { ...job, category: 'ANNUAL_REVIEW' }
+    mocks.update.mockResolvedValue(review)
+    mocks.findUniqueOrThrow.mockResolvedValue(review)
+    await processNextScheduledMessage()
+    expect(mocks.greeting).not.toHaveBeenCalled()
   })
 
   it('refuses to send a template it cannot fill', async () => {
