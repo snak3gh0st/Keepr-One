@@ -13,12 +13,24 @@ import type { IllustrationDeliveryEnvelope } from './domain'
 /// to meet — the client cannot tell who pressed the button and should not have
 /// to.
 
-const currency = (value: string | null, language: string): string | null => {
+/// Two formatters, because the two figures are read differently.
+///
+/// Coverage is a round headline number and cents on it are noise. A premium is
+/// what the client pays: rounding 62.92 to 63 would put a figure in the message
+/// that does not match the PDF attached to it, which is the one thing the
+/// message must never do.
+const money = (value: string | null, language: string, cents: boolean): string | null => {
   if (value === null) return null
   const amount = Number(value)
   if (!Number.isFinite(amount)) return null
   return new Intl.NumberFormat(language === 'EN' ? 'en-US' : 'pt-BR', {
-    style: 'currency', currency: 'USD', maximumFractionDigits: 0,
+    style: 'currency',
+    currency: 'USD',
+    ...(cents
+      // Whole dollars stay whole: `$180.00` reads like a form, `$62.92` is the
+      // real number. `minimumFractionDigits: 0` gives both.
+      ? { minimumFractionDigits: 0, maximumFractionDigits: 2 }
+      : { maximumFractionDigits: 0 }),
   }).format(amount)
 }
 
@@ -40,8 +52,8 @@ export function illustrationMessage(
   const pt = language !== 'EN'
   const firstName = envelope.clientName.trim().split(/\s+/)[0] ?? envelope.clientName
   // The carrier's own number first; the requested target is only a fallback.
-  const cover = currency(envelope.faceAmount, language)
-  const monthly = currency(envelope.premium ?? envelope.targetPremium, language)
+  const cover = money(envelope.faceAmount, language, false)
+  const monthly = money(envelope.premium ?? envelope.targetPremium, language, true)
   const product = envelope.productName?.trim() || null
 
   const opening = pt

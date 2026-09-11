@@ -22,6 +22,9 @@ export type ScheduledSkipReason =
   | 'ALREADY_QUEUED'
   /// The agent's credit grants cannot cover another reservation.
   | 'INSUFFICIENT_CREDITS'
+  /// Two clients of this agent share the number, so a message naming one of
+  /// them would reach the other. The manual screen refuses the same case.
+  | 'CONTACT_AMBIGUOUS'
   | SendGateBlockReason
 
 export type ScheduledSkip = {
@@ -102,6 +105,16 @@ export async function enqueueScheduledMessagesForAgent(
   // The engine wants a number it can send to, so normalization happens here
   // rather than leaving the engine to know what a valid number looks like.
   const reachable = clients.map((client) => ({ ...client, phone: normalizePhone(client.phone) }))
+  // A number that belongs to two people in the same book cannot be messaged
+  // about either of them: a household sharing a line would get a lapse notice
+  // naming the wrong person, on their own phone. The manual screen already
+  // refuses this as CONTACT_AMBIGUOUS; the proposal path had no such check, and
+  // nothing downstream would have caught it.
+  const clientsByPhone = new Map<string, number>()
+  for (const client of reachable) {
+    if (client.phone) clientsByPhone.set(client.phone, (clientsByPhone.get(client.phone) ?? 0) + 1)
+  }
+  const shared = new Set([...clientsByPhone].filter(([, count]) => count > 1).map(([phone]) => phone))
   const candidates: ProposalCandidate[] = [
     ...scheduledCandidatesForDay({ clients: reachable, policies, now }),
     ...lapseCandidatesForPass({ clients: reachable, policies: lapsed, now }),
@@ -110,6 +123,10 @@ export async function enqueueScheduledMessagesForAgent(
   for (const candidate of candidates) {
     const skip = (reason: ScheduledSkipReason) => {
       skipped.push({ candidateId: candidate.candidateId, category: candidate.category, reason, timeZone: candidate.timeZone })
+    }
+    if (candidate.phone && shared.has(candidate.phone)) {
+      skip('CONTACT_AMBIGUOUS')
+      continue
     }
     const key = `${candidate.category}:${language}`
     // Existence and the flag are asked separately: keying "is there a template"

@@ -62,6 +62,11 @@ export type IllustrationRefusal =
 /// being sendable rather than going out stale weeks later.
 export const SEND_WINDOW_MS = 3 * 86_400_000
 
+/// How long a delivery may sit claimed before it is treated as interrupted.
+/// Handing a PDF to the provider is seconds of work; ten minutes means the
+/// process that claimed it is gone.
+export const DELIVERY_STUCK_MS = 10 * 60_000
+
 /// Why a delivery did not happen.
 ///
 /// `OPTED_OUT` is the one that is not a failure: the client asked not to be

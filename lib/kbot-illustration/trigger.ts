@@ -14,6 +14,8 @@ import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-c
 import { dispatchForesightIllustration } from '@/lib/national-life/foresight-illustration-dispatch'
 import {
   DELIVERING,
+  READY_TO_SEND,
+  SEND_WINDOW_MS,
   FAILED,
   GENERATING,
   GENERATION_WINDOW_MS,
@@ -154,9 +156,14 @@ export async function requestIllustrationForSignal(input: {
           // not in flight any more; it is stale, and it must not block the
           // client from asking again.
           { status: GENERATING, createdAt: { gte: new Date(now.getTime() - GENERATION_WINDOW_MS) } },
-          // A delivery in progress is measured in seconds, so it needs no
-          // window of its own: if it is still DELIVERING, it is happening now.
-          { status: DELIVERING },
+          // Numbers already waiting for the agent are the answer to this
+          // signal. Leaving them out would start a second carrier run for a
+          // quote that is sitting on their screen.
+          { status: READY_TO_SEND, createdAt: { gte: new Date(now.getTime() - SEND_WINDOW_MS) } },
+          // A send takes seconds, but the process can die inside them, so this
+          // one is bounded too — by the sweep, which closes a stuck delivery
+          // rather than letting it hold the slot forever.
+          { status: DELIVERING, createdAt: { gte: new Date(now.getTime() - SEND_WINDOW_MS) } },
         ],
       },
       orderBy: { createdAt: 'desc' },
@@ -233,6 +240,21 @@ export async function requestIllustrationForSignal(input: {
       where: { id: requestId, agentId, status: GENERATING },
       data: { illustrationId: issued.illustrationId, commandId: issued.command.commandId },
     })
+    // The command became claimable the moment the dispatch transaction
+    // committed, which is before the link above existed. If the connector was
+    // fast, its completion hook looked for a request carrying this illustration
+    // id and found none — so the request would sit in GENERATING until the
+    // sweep closed it, and the agent would never be offered numbers that are
+    // sitting right there. Catch up, but only once the document actually
+    // arrived: this must not mark a run ready while it is still running.
+    const finished = await prisma.illustration.findFirst({
+      where: { id: issued.illustrationId, agentId, documentFetchedAt: { not: null } },
+      select: { id: true },
+    })
+    if (finished) {
+      const { markIllustrationReadyToSend } = await import('./delivery')
+      await markIllustrationReadyToSend({ agentId, illustrationId: issued.illustrationId })
+    }
     return { ok: true, requestId, illustrationId: issued.illustrationId, commandId: issued.command.commandId }
   } catch (error) {
     console.error('KBOT_ILLUSTRATION_DISPATCH_FAILED', {

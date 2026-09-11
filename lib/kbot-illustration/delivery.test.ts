@@ -3,12 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   requestFindFirst: vi.fn(), requestUpdateMany: vi.fn(),
   clientFindFirst: vi.fn(), prefFindMany: vi.fn(), illustrationFindFirst: vi.fn(),
-  agentFindUnique: vi.fn(), prefUpsert: vi.fn(),
+  agentFindUnique: vi.fn(), prefUpsert: vi.fn(), requestFindMany: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({ prisma: {
   agent: { findUnique: mocks.agentFindUnique },
-  kBotIllustrationRequest: { findFirst: mocks.requestFindFirst, updateMany: mocks.requestUpdateMany },
+  kBotIllustrationRequest: { findFirst: mocks.requestFindFirst, findMany: mocks.requestFindMany, updateMany: mocks.requestUpdateMany },
   client: { findFirst: mocks.clientFindFirst },
   kBotContactPreference: { findMany: mocks.prefFindMany, upsert: mocks.prefUpsert },
   illustration: { findFirst: mocks.illustrationFindFirst },
@@ -26,6 +26,7 @@ beforeEach(() => {
   mocks.requestUpdateMany.mockResolvedValue({ count: 1 })
   mocks.clientFindFirst.mockResolvedValue({ id: 'client_1', name: 'Ana Ribeiro', phone: '+13055550142' })
   mocks.prefFindMany.mockResolvedValue([])
+  mocks.requestFindMany.mockResolvedValue([])
   mocks.agentFindUnique.mockResolvedValue({ user: { language: 'EN' } })
   mocks.prefUpsert.mockResolvedValue({})
   mocks.illustrationFindFirst.mockResolvedValue({
@@ -131,15 +132,34 @@ describe('sendIllustrationRequest', () => {
 })
 
 describe('expireStaleIllustrationRequests', () => {
-  it('releases a slot whose carrier run never finished, and one nobody sent', async () => {
+  it('rescues a request whose document arrived but whose hook missed it', async () => {
+    // The completion hook is best-effort on purpose — an outage there must not
+    // cost the whole connector event. A carrier run whose PDF exists belongs on
+    // the agent's screen, not in the bin.
+    mocks.requestFindMany.mockResolvedValue([{ id: 'req_1' }])
+    mocks.requestUpdateMany.mockResolvedValue({ count: 0 })
+    expect(await expireStaleIllustrationRequests(now)).toMatchObject({ recovered: 1 })
+    expect(mocks.requestUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: { in: ['req_1'] }, status: 'GENERATING' },
+      data: { status: 'READY_TO_SEND' },
+    }))
+  })
+
+  it('releases every slot nobody is using: dead run, unsent, and stuck send', async () => {
     mocks.requestUpdateMany.mockResolvedValue({ count: 2 })
-    expect(await expireStaleIllustrationRequests(now)).toEqual({ expired: 4 })
+    expect(await expireStaleIllustrationRequests(now)).toEqual({ expired: 6, recovered: 0 })
     // The dead run is measured against the connector command's own expiry...
     expect(mocks.requestUpdateMany.mock.calls[0][0].where.createdAt.lt)
       .toEqual(new Date('2026-03-11T16:00:00Z'))
-    // ...and the unsent figures against how long a quote stays current.
+    // ...the unsent figures against how long a quote stays current...
     expect(mocks.requestUpdateMany.mock.calls[1][0].where.createdAt.lt)
       .toEqual(new Date('2026-03-08T17:00:00Z'))
+    // ...and a claimed delivery whose process died, which would otherwise hold
+    // the client-and-product slot forever.
+    expect(mocks.requestUpdateMany.mock.calls[2][0]).toMatchObject({
+      where: { status: 'DELIVERING', updatedAt: { lt: new Date('2026-03-11T16:50:00Z') } },
+      data: expect.objectContaining({ status: 'FAILED', safeErrorCode: 'DELIVERY_INTERRUPTED' }),
+    })
   })
 })
 
@@ -170,6 +190,16 @@ describe('illustrationMessage', () => {
     expect(said(envelope)).not.toContain('999')
     // With no carrier result, the target is better than silence — but only then.
     expect(said({ ...envelope, premium: null })).toContain('US$ 999')
+  })
+
+  it('quotes the premium to the cent, because the PDF does', () => {
+    // Rounding 62.92 to 63 would put a figure in the message that does not
+    // match the document attached to it.
+    expect(said({ ...envelope, premium: '62.92' })).toContain('US$ 62,92')
+    // A whole premium stays whole: `US$ 180,00` reads like a form.
+    expect(said({ ...envelope, premium: '180' })).toContain('US$ 180 por mês')
+    // Coverage keeps no cents: it is a headline number.
+    expect(said(envelope)).toContain('US$ 250.000 de cobertura')
   })
 
   it('still reads as a sentence when the carrier returned almost nothing', () => {

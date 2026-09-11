@@ -8,6 +8,7 @@ import {
   DISCARDED,
   READY_TO_SEND,
   SEND_WINDOW_MS,
+  DELIVERY_STUCK_MS,
   EXPIRED,
   DELIVERED,
   DELIVERING,
@@ -205,7 +206,29 @@ export async function discardIllustrationRequest(input: {
 ///
 /// Without this a dead run would hold the client-and-product slot forever and
 /// the client could never ask again.
-export async function expireStaleIllustrationRequests(now = new Date()): Promise<{ expired: number }> {
+export async function expireStaleIllustrationRequests(
+  now = new Date(),
+): Promise<{ expired: number; recovered: number }> {
+  // Before failing anything: a request whose document actually arrived belongs
+  // on the agent's screen, not in the bin. The completion hook can miss it —
+  // it is deliberately best-effort, so an outage there must not cost the whole
+  // connector event — and this is where that gets repaired rather than becoming
+  // a carrier run nobody ever sees the result of.
+  const arrived = await prisma.kBotIllustrationRequest.findMany({
+    where: {
+      status: GENERATING,
+      createdAt: { lt: new Date(now.getTime() - GENERATION_WINDOW_MS) },
+      illustration: { documentFetchedAt: { not: null } },
+    },
+    select: { id: true },
+    take: 100,
+  })
+  if (arrived.length > 0) {
+    await prisma.kBotIllustrationRequest.updateMany({
+      where: { id: { in: arrived.map((request) => request.id) }, status: GENERATING },
+      data: { status: READY_TO_SEND },
+    })
+  }
   const abandoned = await prisma.kBotIllustrationRequest.updateMany({
     where: { status: GENERATING, createdAt: { lt: new Date(now.getTime() - GENERATION_WINDOW_MS) } },
     data: { status: FAILED, closedAt: now, safeErrorCode: 'GENERATION_TIMED_OUT' },
@@ -217,5 +240,18 @@ export async function expireStaleIllustrationRequests(now = new Date()): Promise
     where: { status: READY_TO_SEND, createdAt: { lt: new Date(now.getTime() - SEND_WINDOW_MS) } },
     data: { status: EXPIRED, closedAt: now, safeErrorCode: 'SEND_WINDOW_EXPIRED' },
   })
-  return { expired: abandoned.count + unsent.count }
+  // A process that died between the claim and the provider's answer leaves the
+  // row in DELIVERING, and `IN_FLIGHT_STATUSES` counts that as occupied — so
+  // without this the client-and-product slot is held forever and nobody can
+  // ask again.
+  //
+  // Closed as FAILED rather than returned to READY_TO_SEND on purpose: we do
+  // not know whether the provider took the message. Freeing the slot costs the
+  // agent a click to raise it again; guessing wrong would send the same quote
+  // twice.
+  const stuck = await prisma.kBotIllustrationRequest.updateMany({
+    where: { status: DELIVERING, updatedAt: { lt: new Date(now.getTime() - DELIVERY_STUCK_MS) } },
+    data: { status: FAILED, closedAt: now, safeErrorCode: 'DELIVERY_INTERRUPTED' },
+  })
+  return { expired: abandoned.count + unsent.count + stuck.count, recovered: arrived.length }
 }

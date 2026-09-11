@@ -43,6 +43,20 @@ beforeEach(() => {
 })
 
 describe('enqueueScheduledMessagesForAgent', () => {
+  it('refuses a number two clients of the same agent share', async () => {
+    // A household on one line: a lapse notice naming one of them lands on the
+    // other's phone. The manual screen already refuses this; nothing in the
+    // proposal path did.
+    mocks.client.mockResolvedValue([
+      { id: 'c1', name: 'Ana', phone, dateOfBirth: new Date('1980-03-11T00:00:00Z') },
+      { id: 'c2', name: 'João', phone, dateOfBirth: new Date('1980-03-11T00:00:00Z') },
+    ])
+    const result = await enqueueScheduledMessagesForAgent('a1', now)
+    expect(result.queued).toBe(0)
+    expect(result.skipped.map((entry) => entry.reason)).toEqual(['CONTACT_AMBIGUOUS', 'CONTACT_AMBIGUOUS'])
+    expect(mocks.jobCreate).not.toHaveBeenCalled()
+  })
+
   it('queues a birthday under its own category and a key naming the year', async () => {
     const result = await enqueueScheduledMessagesForAgent('a1', now)
     expect(result).toMatchObject({ queued: 1, skipped: [] })

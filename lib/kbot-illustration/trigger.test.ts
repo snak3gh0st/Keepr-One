@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   createRequest: vi.fn(),
   updateRequests: vi.fn(),
   dispatch: vi.fn(),
+  findIllustration: vi.fn(),
+  markReady: vi.fn(),
 }))
 
 vi.mock('@/lib/national-life/local-connector/config', () => ({
@@ -17,10 +19,12 @@ vi.mock('@/lib/national-life/local-connector/config', () => ({
 vi.mock('@/lib/national-life/foresight-illustration-dispatch', () => ({
   dispatchForesightIllustration: mocks.dispatch,
 }))
+vi.mock('./delivery', () => ({ markIllustrationReadyToSend: mocks.markReady }))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     agent: { findUnique: mocks.findAgent },
     client: { findFirst: mocks.findClient },
+    illustration: { findFirst: mocks.findIllustration },
     kBotIllustrationRequest: { updateMany: mocks.updateRequests },
     $transaction: async (callback: (tx: unknown) => unknown) => callback({
       $queryRaw: mocks.lock,
@@ -53,6 +57,9 @@ function call(overrides: Partial<Parameters<typeof requestIllustrationForSignal>
 
 describe('raising an illustration from a conversation signal', () => {
   beforeEach(() => {
+  // The connector has not finished by default; the race test says otherwise.
+  mocks.findIllustration.mockResolvedValue(null)
+  mocks.markReady.mockResolvedValue({ moved: 1 })
     vi.clearAllMocks()
     mocks.enabled.mockReturnValue(true)
     mocks.findAgent.mockResolvedValue({ adminProvisionedAccess: null, agencyInvitationsAccepted: [] })
@@ -142,5 +149,22 @@ describe('raising an illustration from a conversation signal', () => {
     mocks.enabled.mockReturnValue(false)
     expect(await call()).toEqual({ ok: false, reason: 'CONNECTOR_NOT_CONNECTED' })
     expect(mocks.dispatch).not.toHaveBeenCalled()
+  })
+
+  describe('the connector finishing before the request is linked', () => {
+    it('marks the quote ready instead of leaving it to be swept', async () => {
+      // The command becomes claimable when the dispatch transaction commits,
+      // which is before the illustration id is written onto the request. A fast
+      // connector therefore completes against a request it cannot find.
+      mocks.findIllustration.mockResolvedValue({ id: 'ill_1' })
+      await call()
+      expect(mocks.markReady).toHaveBeenCalledWith({ agentId: 'agent_1', illustrationId: 'ill_1' })
+    })
+
+    it('does not mark a run ready while it is still running', async () => {
+      mocks.findIllustration.mockResolvedValue(null)
+      await call()
+      expect(mocks.markReady).not.toHaveBeenCalled()
+    })
   })
 })
