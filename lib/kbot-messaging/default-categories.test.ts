@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 
-/// A migration só pode ligar o que nunca foi decidido.
+/// O texto do SQL da migration — nada além disso.
 ///
-/// Um agente que desligou uma categoria de propósito não pode encontrá-la ligada
-/// de volta depois de um deploy: isso é o app passando por cima de uma decisão
-/// dele, que é o oposto do que esta entrega inteira busca.
+/// Estes casos leem o arquivo; eles não sabem o que o banco faz com ele. A
+/// pergunta que importa — um agente que desligou uma categoria continua com ela
+/// desligada depois do deploy? — é respondida em
+/// `default-categories.integration.test.ts`, rodando a migration num PostgreSQL
+/// de verdade. Um nome de teste afirmando a invariante sem exercê-la é pior do
+/// que teste nenhum, e já esteve aqui.
 describe('default categories migration', () => {
   const sql = readFileSync('prisma/migrations/20260912110000_kbot_default_categories_on/migration.sql', 'utf8')
 
-  it('never touches a row that already exists', () => {
+  it('carries both guards: the row-level conflict clause and the category-level one', () => {
     expect(sql).toMatch(/ON CONFLICT [\s\S]* DO NOTHING/i)
+    expect(sql).toMatch(/NOT EXISTS[\s\S]*t\."category" = c\."category"/i)
   })
 
   it('creates them waiting for the agent, never sending on their own', () => {
