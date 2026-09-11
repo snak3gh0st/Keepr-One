@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ send: vi.fn(), messages: vi.fn(), providerStatus: vi.fn() }))
+const state = vi.hoisted(() => ({ send: vi.fn(), messages: vi.fn(), providerStatus: vi.fn(), generate: vi.fn() }))
 
 vi.mock('@/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
@@ -20,6 +20,12 @@ vi.mock('@/lib/kbot-followup/transport', async (importOriginal) => ({
     providerStatus: state.providerStatus,
   }),
 }))
+
+// The only thing faked besides the provider: asking a real model for text from
+// a test would be slow, paid and non-deterministic. Everything it feeds — the
+// column the text lands in, the ledger it is charged to, the string the
+// transport is handed — is the real database.
+vi.mock('./scheduled-generation', () => ({ generateScheduledMessage: state.generate }))
 
 import { prisma } from '@/lib/prisma'
 import { approveScheduledMessages, discardScheduledMessages } from './approval'
@@ -47,12 +53,14 @@ async function reset() {
   await prisma.kBotMessageTemplate.deleteMany({ where: { agentId } })
 }
 
-async function template(overrides: { enabled?: boolean; autoSend?: boolean; body?: string } = {}) {
+// `body: null` is a category that is on with no text of its own — the K-Bot
+// writes that one. Distinguished from an absent key, which takes the default.
+async function template(overrides: { enabled?: boolean; autoSend?: boolean; body?: string | null } = {}) {
   await prisma.kBotMessageTemplate.create({ data: {
     agentId,
     category: 'BIRTHDAY',
     language: 'PT',
-    body: overrides.body ?? 'Feliz aniversário, {{primeiro_nome}}! Abraço, {{agente}}.',
+    body: overrides.body === undefined ? 'Feliz aniversário, {{primeiro_nome}}! Abraço, {{agente}}.' : overrides.body,
     enabled: overrides.enabled ?? true,
     autoSend: overrides.autoSend ?? false,
   } })
@@ -73,6 +81,9 @@ describe.skipIf(!enabled)('scheduled messages end to end', () => {
     vi.clearAllMocks()
     state.messages.mockResolvedValue([])
     state.send.mockResolvedValue({ id: '99', sourceId: null, status: null })
+    // No model by default, exactly as a deployment with the flag off: the cases
+    // that are about the model say otherwise.
+    state.generate.mockResolvedValue({ ok: false, reason: 'UNAVAILABLE', attempted: false, model: 'test-model', inputTokens: 0, outputTokens: 0 })
   })
   afterAll(async () => {
     await reset()
@@ -99,6 +110,47 @@ describe.skipIf(!enabled)('scheduled messages end to end', () => {
     vi.useRealTimers()
 
     expect(state.send).toHaveBeenCalledWith('10', 'Feliz aniversário, Ana! Abraço, Paulo Loureiro.', proposal.id, phone)
+  })
+
+  it('writes the text of a category that has none, and sends that exact text', async () => {
+    // The whole point of resolving the text at enqueue: what the agent reads on
+    // the screen is the row the worker later hands to the provider, unchanged.
+    await template({ body: null })
+    state.generate.mockResolvedValue({ ok: true, text: 'Ana, que o seu dia seja leve e cheio de gente boa.',
+      attempted: true, model: 'test-model', inputTokens: 120, outputTokens: 30 })
+    expect(await enqueueScheduledMessagesForAgent(agentId, now)).toMatchObject({ queued: 1 })
+
+    const proposal = await prisma.kBotFollowupJob.findFirstOrThrow({ where: { agentId } })
+    expect(proposal).toMatchObject({
+      status: 'AWAITING_APPROVAL',
+      content: 'Ana, que o seu dia seja leve e cheio de gente boa.',
+      model: 'test-model',
+      // The model was called at enqueue, so the reservation is spent at enqueue.
+      creditState: 'SPENT', inputTokens: 120, outputTokens: 30, billedTokens: 150,
+    })
+    expect(await prisma.kBotCreditGrant.findFirstOrThrow({ where: { agentId } })).toMatchObject({ reserved: 0, spent: 150 })
+
+    expect(await approveScheduledMessages(agentId, [proposal.id], now)).toEqual({ released: 1 })
+    vi.setSystemTime(now)
+    expect(await processNextScheduledMessage()).toEqual({ outcome: 'SENT', id: proposal.id })
+    vi.useRealTimers()
+
+    expect(state.send).toHaveBeenCalledWith('10', 'Ana, que o seu dia seja leve e cheio de gente boa.', proposal.id, phone)
+    // Asked once, at enqueue. Asking again at dispatch is how the agent would
+    // release one message and the client receive another.
+    expect(state.generate).toHaveBeenCalledTimes(1)
+  })
+
+  it('proposes nothing at all when there is no text to propose', async () => {
+    // No model to ask and no text of the agent's to fall back to. Inventing one
+    // is exactly what the check refuses, so the candidate simply waits.
+    await template({ body: null })
+    const result = await enqueueScheduledMessagesForAgent(agentId, now)
+    expect(result.queued).toBe(0)
+    expect(result.skipped).toEqual([expect.objectContaining({ reason: 'MESSAGE_UNAVAILABLE', category: 'BIRTHDAY' })])
+    expect(await prisma.kBotFollowupJob.count({ where: { agentId } })).toBe(0)
+    // Nothing was asked of anyone, so nothing is held either.
+    expect(await prisma.kBotCreditGrant.findFirstOrThrow({ where: { agentId } })).toMatchObject({ reserved: 0, spent: 0 })
   })
 
   it('sends without asking only when the agent turned that on', async () => {
