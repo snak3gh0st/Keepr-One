@@ -348,6 +348,15 @@ describe('a scheduled message the K-Bot writes at dispatch', () => {
     expect(mocks.send).toHaveBeenCalledWith('10', 'Ana, vi algo na sua apólice e queria te ajudar.', 'job1', '+13055550142')
   })
 
+  it('registers the call against the platform daily ceiling', async () => {
+    mocks.greeting.mockResolvedValue({ ok: true, text: 'Ana, vi algo na sua apólice e queria te ajudar.',
+      attempted: true, model: 'm', inputTokens: 90, outputTokens: 30 })
+    await processNextScheduledMessage()
+    expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ generationStartedAt: expect.any(Date) }),
+    }))
+  })
+
   it('sends nothing, and still pays for the attempt, when nothing usable came back', async () => {
     // There is no template to fall back to here, and inventing one is exactly
     // what the check just refused.

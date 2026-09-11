@@ -127,6 +127,9 @@ describe.skipIf(!enabled)('scheduled messages end to end', () => {
       model: 'test-model',
       // The model was called at enqueue, so the reservation is spent at enqueue.
       creditState: 'SPENT', inputTokens: 120, outputTokens: 30, billedTokens: 150,
+      // And the call is visible to the platform's daily ceiling, which counts
+      // this column across the whole table.
+      generationStartedAt: now,
     })
     expect(await prisma.kBotCreditGrant.findFirstOrThrow({ where: { agentId } })).toMatchObject({ reserved: 0, spent: 150 })
 

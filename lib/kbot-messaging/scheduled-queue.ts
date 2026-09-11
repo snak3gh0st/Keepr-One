@@ -246,6 +246,12 @@ async function queueOne(
       // still charged below, but the text is the agent's, and stamping the
       // model on it would credit the wrong author.
       ...(voice?.ok ? { model: voice.model } : {}),
+      // The platform's daily model-call ceiling counts this column across the
+      // whole table (`lib/kbot-followup/worker.ts`). Stamped whenever the
+      // provider was actually asked — a cap that cannot see most of the calls
+      // is not a cap. It is the same budget the manual follow-ups draw on, on
+      // purpose: two ceilings each seeing half the calls would be worse.
+      ...(voice && (voice.attempted || voice.ok) ? { generationStartedAt: now } : {}),
     } })
 
     let remaining = TOKEN_RESERVATION

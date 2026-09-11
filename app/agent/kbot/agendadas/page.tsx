@@ -87,7 +87,11 @@ export default async function KBotScheduledMessagesPage() {
       const template = templateByKey.get(`${row.category}:${row.language}`)
       return toApprovalProposal(row, {
         agentName: user.name,
-        templateBody: template?.enabled ? template.body : null,
+        // Told apart, not folded together: a category that is on with no text
+        // of its own is a K-Bot-written one, and its proposal carries the text
+        // already. Only "switched off" makes a proposal unreleasable.
+        templateBody: template?.body ?? null,
+        templateEnabled: template?.enabled === true,
         approvalWindowMs: APPROVAL_WINDOW_MS,
       })
     }),

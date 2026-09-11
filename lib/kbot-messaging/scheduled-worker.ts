@@ -127,10 +127,10 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
       ORDER BY "createdAt"
       FOR UPDATE SKIP LOCKED LIMIT 1`
     if (!rows[0]) return null
-    // Deliberately no `generationStartedAt`: nothing is generated here, and the
-    // manual path counts that column across the whole table to enforce its
-    // daily model-call ceiling. Stamping it would let a busy birthday morning
-    // spend the platform's generation budget and shut off real follow-ups.
+    // Deliberately no `generationStartedAt` at the claim: the model may not be
+    // asked at all on this turn, and the column is stamped where the call
+    // actually happens, further down, so the platform's daily ceiling counts
+    // calls rather than claims.
     return tx.kBotFollowupJob.update({ where: { id: rows[0].id }, data: {
       status: 'PREPARING', leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
     } })
@@ -255,11 +255,15 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
         language: claimed.language,
         category: claimed.category as ScheduledCategory,
       })
-      if (voice.ok) {
-        content = voice.text
+      if (voice.ok) content = voice.text
+      // Recorded whenever the provider was asked, refusal included: the manual
+      // path's daily ceiling counts this column across the whole table, and a
+      // call that never registered is a call the cap cannot see. Nothing is
+      // stamped when the model is switched off, because nothing was asked.
+      if (voice.attempted || voice.ok) {
         await prisma.kBotFollowupJob.updateMany({
           where: { id: claimed.id, status: 'DISPATCHING' },
-          data: { content, model: voice.model },
+          data: { generationStartedAt: new Date(), ...(voice.ok ? { content, model: voice.model } : {}) },
         })
       }
     }

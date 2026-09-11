@@ -309,6 +309,24 @@ describe('enqueueScheduledMessagesForAgent, a category the K-Bot writes', () => 
     }) }))
   })
 
+  it('registers the call against the platform daily ceiling', async () => {
+    // The ceiling in the manual worker counts `generationStartedAt` across the
+    // whole table. A generation that never stamped it would be spending the
+    // provider budget where the cap cannot see it.
+    await enqueueScheduledMessagesForAgent('a1', now)
+    expect(mocks.jobCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      generationStartedAt: now,
+    }) }))
+  })
+
+  it('registers nothing when the model was never asked', async () => {
+    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body }])
+    mocks.generate.mockResolvedValue({ ok: false, reason: 'UNAVAILABLE', attempted: false,
+      model: 'test-model', inputTokens: 0, outputTokens: 0 })
+    await enqueueScheduledMessagesForAgent('a1', now)
+    expect(mocks.jobCreate.mock.calls[0][0].data.generationStartedAt).toBeUndefined()
+  })
+
   it('charges the tokens the text cost against the job that carries it', async () => {
     // The model was called at enqueue, so the reservation is spent at enqueue.
     // A generated message nobody is charged for is as much a defect as a
