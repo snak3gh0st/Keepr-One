@@ -657,7 +657,9 @@ SELECT
   gen_random_uuid()::text,
   a."id",
   c."category",
-  u."language",
+  -- `user.language` é o enum UserLanguage; `KBotMessageTemplate.language` é text.
+  -- Sem o cast o INSERT falha com erro de tipo.
+  u."language"::text,
   NULL,
   true,
   false,
