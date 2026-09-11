@@ -4,12 +4,8 @@ import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { getCurrentAgent as readCurrentAgent } from '@/lib/agent-context'
 import { prisma } from '@/lib/prisma'
-import {
-  approveConnectorCommand,
-  ConnectorCommandError,
-  createPrismaConnectorCommandRepository,
-  issueConnectorCommand,
-} from '@/lib/national-life/connector-command-service'
+import { ConnectorCommandError } from '@/lib/national-life/connector-command-service'
+import { dispatchForesightIllustration } from '@/lib/national-life/foresight-illustration-dispatch'
 import {
   buildForesightIllustrationSnapshot,
   FORESIGHT_ISSUE_STATES,
@@ -21,7 +17,6 @@ import {
 } from '@/lib/national-life/foresight-term-contract'
 import { getForesightIllustrationProduct } from '@/lib/national-life/foresight-product-catalog'
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
-import { NATIONAL_LIFE_PROVIDER } from '@/lib/national-life/constants'
 import { getServerI18n } from '@/lib/i18n/server'
 import { requireAgentModule } from '@/lib/require-agent-module'
 
@@ -59,20 +54,6 @@ const IUL_SOLVE_METHOD_BASIS: Record<string, 'DEATH_BENEFIT' | 'PREMIUM'> = {
   Protection_Focus: 'DEATH_BENEFIT',
   Retirement_Focus: 'DEATH_BENEFIT',
 }
-const ACTIVE_ILLUSTRATION_COMMAND_STATES = [
-  'QUEUED',
-  'RUNNING',
-  'AUTH_REQUIRED',
-  'WAITING_FOR_CONFIRMATION',
-  'PAUSED',
-] as const
-
-function targetIllustrationId(target: unknown): string | null {
-  if (!target || typeof target !== 'object' || Array.isArray(target)) return null
-  const value = target as Record<string, unknown>
-  return value.kind === 'ILLUSTRATION' && typeof value.id === 'string' ? value.id : null
-}
-
 /// Creates the exact, reviewable instruction that the Foresight executor will
 /// write into the carrier. It intentionally does not call Rapid Solve: capital
 /// or monthly premium is the agent's explicit source, while the other value is
@@ -207,76 +188,29 @@ export async function requestForesightIllustration(
   }
 
   try {
-    const issued = await prisma.$transaction(async (tx) => {
-      // Serialize per agent inside Postgres. This protects every browser tab and
-      // survives two requests arriving before either UI can repaint.
-      // Postgres returns `void` from pg_advisory_xact_lock. Prisma cannot
-      // deserialize that type and raises P2010 after the lock was acquired, so
-      // expose the otherwise-unused result as text.
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`foresight:${agent.id}`}, 0))::text AS lock_result`
-      const active = await tx.nationalLifeConnectorCommand.findFirst({
-        where: {
-          agentId: agent.id,
-          capability: 'GENERATE_ILLUSTRATION',
-          state: { in: [...ACTIVE_ILLUSTRATION_COMMAND_STATES] },
-          expiresAt: { gt: new Date() },
-        },
-        orderBy: { createdAt: 'desc' },
-        select: { id: true, target: true },
-      })
-      const activeIllustrationId = targetIllustrationId(active?.target)
-      if (active && activeIllustrationId) {
-        return {
-          command: { commandId: active.id },
-          illustrationId: activeIllustrationId,
-        }
-      }
-
-      const repository = createPrismaConnectorCommandRepository(tx)
-      const created = await tx.illustration.create({
-        data: {
-          id: illustrationId,
-          agentId: agent.id,
-          clientId: clientId || null,
-          kind: 'PRELIMINARY',
-          productName: product.carrierName,
-          provider: NATIONAL_LIFE_PROVIDER,
-          externalId: illustrationId,
-          faceAmount: isPremiumSolve ? null : faceAmount,
-          premium: null,
-          targetPremium: product.kind === 'IUL' && (isPremiumSolve || !isExplicitIulSolve)
-            ? monthlyPremium
-            : null,
-          targetPremiumSource: product.kind === 'IUL'
-            ? isPremiumSolve || !isExplicitIulSolve
-              ? 'AGENT_INPUT_FOR_FORESIGHT'
-              : 'FORESIGHT_CALCULATES_PREMIUM_FROM_DEATH_BENEFIT'
-            : null,
-          insuredName: `${firstName} ${lastName}`,
-          insuredDateOfBirth: dateOfBirth,
-          rawPayload,
-        },
-        select: { id: true, createdAt: true },
-      })
-      const source = { ...created, caseId: null, productName: product.carrierName, rawPayload }
-      const inputHash = product.kind === 'IUL'
+    const issued = await dispatchForesightIllustration({
+      agentId: agent.id,
+      userId: agent.userId,
+      draft: {
+        illustrationId,
+        clientId: clientId || null,
+        productName: product.carrierName,
+        faceAmount: isPremiumSolve ? null : faceAmount,
+        targetPremium: product.kind === 'IUL' && (isPremiumSolve || !isExplicitIulSolve)
+          ? monthlyPremium
+          : null,
+        targetPremiumSource: product.kind === 'IUL'
+          ? isPremiumSolve || !isExplicitIulSolve
+            ? 'AGENT_INPUT_FOR_FORESIGHT'
+            : 'FORESIGHT_CALCULATES_PREMIUM_FROM_DEATH_BENEFIT'
+          : null,
+        insuredName: `${firstName} ${lastName}`,
+        insuredDateOfBirth: dateOfBirth,
+        rawPayload,
+      },
+      inputHash: (source) => product.kind === 'IUL'
         ? foresightIllustrationInputHash(buildForesightIllustrationSnapshot(source))
-        : foresightTermIllustrationInputHash(buildForesightTermIllustrationSnapshot(source))
-      const command = await issueConnectorCommand(repository, {
-        agentId: agent.id,
-        capability: 'GENERATE_ILLUSTRATION',
-        target: { kind: 'ILLUSTRATION', id: created.id },
-        params: { illustrationId: created.id, inputHash },
-        idempotencyKey: `foresight:${created.id}:${inputHash}`,
-        expiresAt: new Date(Date.now() + 60 * 60_000),
-      })
-      await approveConnectorCommand(repository, {
-        agentId: agent.id,
-        commandId: command.command.commandId,
-        payloadHash: command.payloadHash,
-        confirmedByUserId: agent.userId,
-      })
-      return { ...command, illustrationId: created.id }
+        : foresightTermIllustrationInputHash(buildForesightTermIllustrationSnapshot(source)),
     })
     return {
       ok: true,
