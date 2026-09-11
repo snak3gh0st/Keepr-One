@@ -50,6 +50,7 @@ import {
   type DocumentControlAck,
 } from '../lib/messages'
 import { chunkRecordsForUpload } from '../lib/record-chunks'
+import { withDeadline } from '../lib/deadline'
 import {
   parseCommissionDetailResume,
   parseCommissionDetailTargets,
@@ -187,6 +188,20 @@ const STALE_AUTH_RECOVERY_MS = 31 * 60_000
 // redirect can be the carrier's canonical route. If that canonical route still
 // does not match, a third trip would be a loop, so isolate the source instead.
 const MAX_STAGE_NAVIGATION_ATTEMPTS = 2
+// Quanto o background espera a ponte responder à sonda de sessão. Maior que o
+// orçamento da própria sonda dentro da ponte, para que a resposta dela — inclusive
+// a que diz que o portal ficou mudo — chegue antes deste prazo.
+const AUTH_PROBE_BRIDGE_BUDGET_MS = 25_000
+// Folgado de propósito: uma página de grade tem 60 s de orçamento por ida ao
+// portal e o export do in-force tem 3 minutos, então o limite precisa caber a
+// etapa mais lenta que existe, com retentativa. Oito minutos sem nenhum lote
+// aceito, statement virado ou etapa trocada não é lentidão: é uma etapa que
+// parou de existir sem avisar.
+const STAGE_STALL_TIMEOUT_MS = 8 * 60_000
+// Uma reabertura cobre o caso comum (extração que se perdeu, worker despejado no
+// meio). A segunda cobre o azar. A terceira seria insistência: o portal não vai
+// entregar esta fonte neste run.
+const MAX_STALL_RECOVERIES = 2
 const IGO_ORIGIN = 'https://igoforms2.ipipeline.com'
 const IGO_HANDOFF_ORIGINS = [
   'https://pipepasstoigo.ipipeline.com',
@@ -556,17 +571,95 @@ async function withTabReadyLock(tabId: number, operation: () => Promise<void>): 
   return run
 }
 
+/// A ponte respondeu dizendo que a própria sonda falhou (o portal ficou mudo
+/// dentro do orçamento dela). Não é sessão negada — é ausência de resposta do
+/// portal, e tratar como logout mandaria o agente para um login desnecessário.
+function isProbeFailure(value: unknown, token: string, correlationId: string): boolean {
+  if (!value || typeof value !== 'object') return false
+  const ack = value as { ok?: unknown; type?: unknown; token?: unknown; correlationId?: unknown }
+  return ack.ok === false && ack.type === 'AUTH_PROBE_FAILED' &&
+    ack.token === token && ack.correlationId === correlationId
+}
+
+/// Uma etapa cuja ponte não responde recomeça com documento novo: o recarregamento
+/// traz um par de content scripts limpo, e o `tabs.onUpdated` reentra em
+/// `handleTabReady`. O contador é o que impede que isso vire um laço — depois dele
+/// a etapa é pulada e o run segue para as próximas fontes, que é o que o agente
+/// precisa: os dados da National Life, não um run parado esperando por uma aba.
+async function recoverUnresponsiveStage(tabId: number, gridKey: string) {
+  const state = await readSyncState()
+  if (isTerminalSyncStatus(state.status) || !currentStage(state)) return
+  const attempts = state.navigationGridKey === gridKey ? state.navigationAttempts ?? 0 : 0
+  activeNavigations.delete(tabId)
+  if (attempts >= MAX_STAGE_NAVIGATION_ATTEMPTS) {
+    await skipFailedStage(tabId, gridKey, 'PORTAL_BRIDGE_UNRESPONSIVE')
+    return
+  }
+  await writeSyncState({
+    ...state,
+    status: 'NAVIGATING',
+    errorCode: undefined,
+    navigationGridKey: gridKey,
+    navigationAttempts: attempts + 1,
+  })
+  if ((await readSyncState()).status === 'CANCELLED') return
+  await chrome.tabs.reload(tabId)
+}
+
+/// Movimento para a frente, e só ele: lote aceito, statement virado, etapa
+/// trocada. Uma tentativa repetida não passa por aqui — é o que impede que o
+/// próprio laço de retentativa adie para sempre a recuperação do watchdog.
+function movedForward(): {
+  lastProgressAt: string
+  stallRecoveryGridKey: undefined
+  stallRecoveryAttempts: undefined
+} {
+  // Andar para a frente também perdoa as recuperações anteriores: a conta existe
+  // para limitar reaberturas estéreis, e esta não foi estéril.
+  return {
+    lastProgressAt: new Date().toISOString(),
+    stallRecoveryGridKey: undefined,
+    stallRecoveryAttempts: undefined,
+  }
+}
+
+/// Reabrir uma etapa reinicia o relógio sem perdoar a conta: é ação nossa, não
+/// prova de que o portal voltou a entregar linha.
+function touchedProgressClock(): { lastProgressAt: string } {
+  return { lastProgressAt: new Date().toISOString() }
+}
+
+function isUnresponsiveBridgeError(error: unknown): boolean {
+  // "Could not establish connection. Receiving end does not exist." é a forma que
+  // o Chrome dá ao par de content scripts que sumiu da aba — e era ela que, cru,
+  // virava o código de falha do run inteiro. É uma aba a recarregar, não um run a
+  // perder: o reload traz os dois mundos de volta, o que reinjetar só a ponte não
+  // faria.
+  return isMissingMessageReceiver(error) || (error instanceof Error &&
+    (error.message === 'PORTAL_PROBE_UNAVAILABLE' || error.message === 'BRIDGE_UNAVAILABLE'))
+}
+
 async function hasAuthenticatedPortalSession(tabId: number): Promise<boolean> {
   const token = randomToken()
   const correlationId = crypto.randomUUID()
   let lastError: unknown
   for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
-      const response = parseProbeAuthAck(await chrome.tabs.sendMessage(tabId, {
-        type: 'PROBE_AUTH',
-        token,
-        correlationId,
-      }))
+      // O prazo é a diferença entre uma etapa lenta e um run morto. A ponte só
+      // responde quando o portal responde, e uma conexão pendurada nunca resolve
+      // nem rejeita: sem esta corrida, este `await` é o ponto onde cada tique do
+      // alarme entrava e nunca mais saía.
+      const raw = await withDeadline(
+        chrome.tabs.sendMessage(tabId, { type: 'PROBE_AUTH', token, correlationId }),
+        AUTH_PROBE_BRIDGE_BUDGET_MS,
+        'PORTAL_PROBE_UNAVAILABLE',
+      )
+      // Uma recusa explícita da ponte é resposta, não ausência: repetir só gastaria
+      // o mesmo prazo de novo contra o mesmo portal mudo.
+      if (isProbeFailure(raw, token, correlationId)) {
+        throw new Error('PORTAL_PROBE_UNAVAILABLE')
+      }
+      const response = parseProbeAuthAck(raw)
       if (
         !response ||
         response.token !== token ||
@@ -576,6 +669,7 @@ async function hasAuthenticatedPortalSession(tabId: number): Promise<boolean> {
       }
       return response.authenticated
     } catch (error) {
+      if (error instanceof Error && error.message === 'PORTAL_PROBE_UNAVAILABLE') throw error
       lastError = error
       const delay = BRIDGE_RETRY_DELAYS_MS[attempt]
       if (delay === undefined) break
@@ -2452,6 +2546,7 @@ async function createRun(forceRefresh = false) {
     // acknowledgement and the following navigation.
     await writeSyncState({
       ...previous,
+      ...touchedProgressClock(),
       runId: response.runId,
       plan,
       stageIndex: nextStageIndex,
@@ -2483,6 +2578,7 @@ async function createRun(forceRefresh = false) {
     })
   } else {
     await writeSyncState({
+      ...touchedProgressClock(),
       runId: response.runId,
       plan,
       stageIndex: nextStageIndex,
@@ -2754,6 +2850,7 @@ async function beginCommissionDetailStage(tabId: number) {
 
   const nextState = {
     ...state,
+    ...movedForward(),
     commissionDetailLinks: links,
     commissionDetailIndex: resumeIndex,
     commissionDetailOffset: resume?.baseOffset ?? 0,
@@ -2888,6 +2985,13 @@ async function beginExtraction(tabId: number, stage: StagePlan) {
   } catch (error) {
     activeNavigations.delete(tabId)
     if ((await readSyncState()).status === 'CANCELLED') return
+    // Uma ponte que não confirma o início da extração não é um run perdido: é um
+    // documento a recarregar. Falhar aqui era o que transformava um `postMessage`
+    // perdido entre os mundos em sync interrompido.
+    if (isUnresponsiveBridgeError(error)) {
+      await recoverUnresponsiveStage(tabId, gridKey)
+      return
+    }
     await failSync(errorCode(error, 'BRIDGE_UNAVAILABLE'))
   }
 }
@@ -2942,7 +3046,14 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
       if (state.status !== 'AUTH_REQUIRED') await navigatePendingGrid()
       return
     }
-    const authenticated = await hasAuthenticatedPortalSession(tabId)
+    let authenticated: boolean
+    try {
+      authenticated = await hasAuthenticatedPortalSession(tabId)
+    } catch (error) {
+      if (!isUnresponsiveBridgeError(error)) throw error
+      await recoverUnresponsiveStage(tabId, gridKey)
+      return
+    }
     const afterProbe = await readSyncState()
     if (afterProbe.status === 'CANCELLED' || afterProbe.runId !== state.runId) return
     if (!authenticated) {
@@ -2974,7 +3085,14 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
   // bridge to make one credentialed, non-following request to the agent shell.
   // A redirect to Auth0 is then an explicit negative instead of a page-shape
   // guess, and no extraction begins until this succeeds.
-  const authenticated = await hasAuthenticatedPortalSession(tabId)
+  let authenticated: boolean
+  try {
+    authenticated = await hasAuthenticatedPortalSession(tabId)
+  } catch (error) {
+    if (!isUnresponsiveBridgeError(error)) throw error
+    await recoverUnresponsiveStage(tabId, gridKey)
+    return
+  }
   const afterProbe = await readSyncState()
   if (afterProbe.status === 'CANCELLED' || afterProbe.runId !== state.runId) return
   if (!authenticated) {
@@ -3079,6 +3197,7 @@ async function uploadChunk(tabId: number, message: Extract<BridgeMessage, { type
     : after.commissionDetailReceivedRecords
   await writeSyncState({
     ...after,
+    ...movedForward(),
     uploads: (after.uploads ?? 0) + 1,
     ...(detailStage
       ? {
@@ -3122,6 +3241,7 @@ async function finishCommissionDetailGrid(
     activeNavigations.delete(tabId)
     await writeSyncState({
       ...state,
+      ...movedForward(),
       commissionDetailIndex: nextIndex,
       commissionDetailOffset: (state.commissionDetailOffset ?? 0) + currentOffset,
       commissionDetailCurrentOffset: 0,
@@ -3184,6 +3304,7 @@ async function finishCommissionDetailGrid(
   await writeSyncState({
     runId: state.runId,
     plan,
+    ...movedForward(),
     stageIndex: resolvedNextIndex,
     resumeSequence: 0,
     resumeOffset: 0,
@@ -3270,6 +3391,7 @@ async function finishGrid(tabId: number, gridKey: string) {
   await writeSyncState({
     runId: state.runId,
     plan,
+    ...movedForward(),
     stageIndex: nextIndex,
     resumeSequence: 0,
     resumeOffset: 0,
@@ -3299,7 +3421,10 @@ async function advanceAfterExport(tabId: number, result: { nextStageIndex?: unkn
     await chrome.alarms.clear(SYNC_WATCHDOG_ALARM)
     return
   }
-  await writeSyncState({ runId: state.runId, plan, stageIndex: nextIndex, resumeSequence: 0, resumeOffset: 0, status: 'NAVIGATING', uploads: state.uploads })
+  await writeSyncState({
+    runId: state.runId, plan, ...movedForward(), stageIndex: nextIndex,
+    resumeSequence: 0, resumeOffset: 0, status: 'NAVIGATING', uploads: state.uploads,
+  })
   if ((await readSyncState()).status === 'CANCELLED') return
   const nextGridKey = stageKey(next)
   await updateTab(tabId, { url: `${NLG_ORIGIN}${canonicalNationalLifeNavigatePath(nextGridKey, next.params.navigatePath)}` })
@@ -3358,7 +3483,7 @@ async function processExportMessage(tabId: number, message: Extract<BridgeMessag
     const latest = activeNavigations.get(tabId)
     if (latest) activeNavigations.set(tabId, { ...latest, exportNextSequence: message.sequence + 1 })
     const after = await readSyncState()
-    await writeSyncState({ ...after, uploads: (after.uploads ?? 0) + 1 })
+    await writeSyncState({ ...after, ...movedForward(), uploads: (after.uploads ?? 0) + 1 })
     return
   }
   const result = await signedJsonRequest<{ nextStageIndex?: unknown; terminal?: unknown }>({
@@ -3603,6 +3728,7 @@ async function skipFailedStage(tabId: number, gridKey: string, code: string) {
   await writeSyncState({
     runId: state.runId,
     plan,
+    ...movedForward(),
     stageIndex: nextIndex,
     resumeSequence: 0,
     resumeOffset: 0,
@@ -3794,6 +3920,14 @@ async function retryPendingSync() {
   return startNewSync()
 }
 
+/// Sem carimbo não há acusação: um estado gravado por uma versão anterior não
+/// pode ser lido como parado, senão a atualização reabriria etapas saudáveis.
+function hasStalled(state: Awaited<ReturnType<typeof readSyncState>>): boolean {
+  const stamp = state.lastProgressAt ? Date.parse(state.lastProgressAt) : Number.NaN
+  if (!Number.isFinite(stamp)) return false
+  return Date.now() - stamp > STAGE_STALL_TIMEOUT_MS
+}
+
 async function resumePending(options?: { reconcileWithServer?: boolean }) {
   const state = await readSyncState()
   if (!state.runId || !currentStage(state) || isTerminalSyncStatus(state.status)) {
@@ -3817,6 +3951,45 @@ async function resumePending(options?: { reconcileWithServer?: boolean }) {
       return
     }
     await handleTabReady(authTab.id, authTab.url)
+    return
+  }
+  // Uma etapa que parou de dar sinal de vida é reaberta pelo cursor durável do
+  // servidor. É a rede de segurança para tudo que ainda possa ficar mudo entre o
+  // background, a ponte e a página: o run volta a andar sozinho, sem erro e sem
+  // perder o que já foi lido, em vez de esperar para sempre por uma extração que
+  // não existe mais.
+  if (
+    (state.status === 'EXTRACTING' || state.status === 'UPLOADING') &&
+    !state.lastProgressAt
+  ) {
+    // Estado escrito por uma versão sem carimbo. Começar o relógio agora é o que
+    // permite recuperar um run que a atualização encontrou no meio; sem isto, uma
+    // etapa travada de antes ficaria imune ao watchdog para sempre.
+    await writeSyncState({ ...state, ...touchedProgressClock() })
+  } else if (
+    (state.status === 'EXTRACTING' || state.status === 'UPLOADING') &&
+    hasStalled(state)
+  ) {
+    const stalledGridKey = stageKey(currentStage(state)!)
+    const recoveries = state.stallRecoveryGridKey === stalledGridKey
+      ? state.stallRecoveryAttempts ?? 0
+      : 0
+    if (typeof state.carrierTabId === 'number') activeNavigations.delete(state.carrierTabId)
+    // Duas reaberturas sem que nada andasse são a resposta do portal: esta fonte
+    // não vai sair hoje. Pulá-la é o que entrega as outras treze — o run termina e
+    // o commission earning detail volta no próximo sync, em vez de o agente ficar
+    // olhando "lendo" para sempre.
+    if (recoveries >= MAX_STALL_RECOVERIES && typeof state.carrierTabId === 'number') {
+      await skipFailedStage(state.carrierTabId, stalledGridKey, 'STAGE_STALLED')
+      return
+    }
+    await writeSyncState({
+      ...state,
+      stallRecoveryGridKey: stalledGridKey,
+      stallRecoveryAttempts: recoveries + 1,
+    })
+    await createRun()
+    await navigatePendingGrid()
     return
   }
   // The server is the durable cursor. A service worker may be evicted after it

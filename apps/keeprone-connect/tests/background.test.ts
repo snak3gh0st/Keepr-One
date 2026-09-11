@@ -3584,6 +3584,272 @@ describe('background plan executor', () => {
   })
 })
 
+describe('portal mudo não trava o run', () => {
+  it('recarrega a aba e repete a etapa quando a sonda de sessão não responde', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    tabs.sendMessage.mockImplementation(async (_tabId: number, message: unknown) => {
+      const value = message as { type?: string; token?: string; correlationId?: string }
+      if (value.type === 'PROBE_AUTH') {
+        return {
+          ok: false,
+          type: 'AUTH_PROBE_FAILED',
+          token: value.token,
+          correlationId: value.correlationId,
+          code: 'AUTH_PROBE_TIMEOUT',
+        }
+      }
+      return defaultTabMessageResponse(_tabId, message)
+    })
+
+    await bootBackground()
+    await vi.waitFor(() => expect(tabs.reload).toHaveBeenCalledWith(7))
+
+    // Nem login (a sessão não foi negada) nem ERROR (o run continua de pé).
+    expect(tabs.update).not.toHaveBeenCalledWith(7, { url: `${NLG}/agent/auth/login` })
+    expect(readSync()).toMatchObject({
+      status: 'NAVIGATING', stageIndex: 0, navigationAttempts: 1,
+    })
+  })
+
+  it('recarrega a aba cujo par de content scripts sumiu', async () => {
+    // O erro real que derrubou o run de 11/09: a ponte tinha sumido da aba e a
+    // mensagem crua do Chrome virou o código de falha do run inteiro.
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'NAVIGATING',
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    tabs.sendMessage.mockImplementation(async () => {
+      throw new Error('Could not establish connection. Receiving end does not exist.')
+    })
+
+    await bootBackground()
+    // A escada de retentativa da ponte é deliberada: um receptor ausente logo
+    // depois da navegação costuma ser corrida de registro do listener, não aba
+    // morta. Só depois dela é que recarregar vira a resposta certa.
+    await vi.waitFor(() => expect(tabs.reload).toHaveBeenCalledWith(7), { timeout: 10_000 })
+
+    expect(readSync()).toMatchObject({ status: 'NAVIGATING', navigationAttempts: 1 })
+    expect(readSync().status).not.toBe('ERROR')
+  })
+
+  it('desiste da etapa em vez de recarregar para sempre', async () => {
+    storage.sync = {
+      runId: 'run-1',
+      carrierTabId: 7,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 0,
+      status: 'NAVIGATING',
+      navigationGridKey: 'NEW_BUSINESS',
+      navigationAttempts: 2,
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    tabs.sendMessage.mockImplementation(async (_tabId: number, message: unknown) => {
+      const value = message as { type?: string; token?: string; correlationId?: string }
+      if (value.type === 'PROBE_AUTH') {
+        return {
+          ok: false,
+          type: 'AUTH_PROBE_FAILED',
+          token: value.token,
+          correlationId: value.correlationId,
+          code: 'AUTH_PROBE_TIMEOUT',
+        }
+      }
+      return defaultTabMessageResponse(_tabId, message)
+    })
+    vi.mocked(signedJsonRequest).mockResolvedValue({ nextStageIndex: 1 } as never)
+
+    await bootBackground()
+
+    await vi.waitFor(() => expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs/run-1/stages/NEW_BUSINESS/fail',
+      body: expect.objectContaining({ code: 'PORTAL_BRIDGE_UNRESPONSIVE', retryable: true }),
+    })))
+    expect(readSync()).toMatchObject({ stageIndex: 1 })
+  })
+
+  it('reconcilia e recomeça a etapa que ficou muda em EXTRACTING', async () => {
+    storage.sync = {
+      runId: 'run-1',
+      carrierTabId: 7,
+      plan: COMMISSION_DETAIL_PLAN,
+      stageIndex: 1,
+      status: 'EXTRACTING',
+      commissionDetailLinks: [{ path: COMMISSION_DETAIL_PATH, statementId: 'aaa1' }],
+      commissionDetailIndex: 0,
+      commissionDetailOffset: 0,
+      commissionDetailCurrentOffset: 0,
+      commissionDetailReceivedRecords: 2402,
+      lastProgressAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${COMMISSION_DETAIL_PATH}` }])
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      runId: 'run-1',
+      schemaVersion: 2,
+      stages: COMMISSION_DETAIL_PLAN,
+      nextStageIndex: 1,
+      completedStages: 1,
+      resume: { sequence: 27, offset: 2402, recordCount: 2402 },
+    } as never)
+
+    await bootBackground()
+
+    // O cursor durável do servidor volta a valer e a etapa é reaberta em vez de
+    // seguir esperando uma extração que nunca começou.
+    await vi.waitFor(() => expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs',
+    })))
+    expect(readSync()).toMatchObject({ runId: 'run-1', stageIndex: 1 })
+    expect(readSync().status).not.toBe('EXTRACTING')
+  })
+
+  it('não deixa a própria retentativa adiar a recuperação', async () => {
+    // O laço real: o worker é despejado, o alarme acorda outro, a extração é
+    // reenviada e nenhum lote sobe. Se cada reentrada carimbasse presença, a
+    // repetição empurraria o prazo para frente a cada minuto e o run nunca
+    // recomeçaria — foi essa a etapa que ficou vinte minutos parada.
+    const stamp = new Date(Date.now() - 4 * 60_000).toISOString()
+    storage.sync = {
+      runId: 'run-1',
+      carrierTabId: 7,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 0,
+      status: 'EXTRACTING',
+      lastProgressAt: stamp,
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+
+    // Três subidas do worker, cada uma reentrando na extração.
+    await bootBackground()
+    await bootBackground()
+    await bootBackground()
+
+    await vi.waitFor(() => expect(tabs.sendMessage).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ type: 'BEGIN_GRID' }),
+    ))
+    expect(readSync()).toMatchObject({ lastProgressAt: stamp })
+  })
+
+  it('carimba presença quando um lote novo é aceito', async () => {
+    storage.sync = {
+      runId: 'run-1',
+      carrierTabId: 7,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 0,
+      status: 'EXTRACTING',
+      lastProgressAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    await vi.waitFor(() => expect(beginGridMessage()).toMatchObject({ type: 'BEGIN_GRID' }))
+    const begin = beginGridMessage() as { gridKey: string; token: string; correlationId: string }
+    const before = readSync().lastProgressAt
+
+    emit('runtime.onMessage', {
+      type: 'GRID_CHUNK',
+      gridKey: begin.gridKey,
+      token: begin.token,
+      correlationId: begin.correlationId,
+      sequence: 0,
+      sourceOffset: 0,
+      nextOffset: 1,
+      recordsTotal: 1,
+      truncated: false,
+      records: [{ PolicyNumber: 'LS1' }],
+    }, { tab: { id: 7 }, url: `${NLG}/agent/anything` }, vi.fn())
+
+    await vi.waitFor(() => expect(readSync().uploads).toBe(1))
+    expect(readSync().lastProgressAt).not.toBe(before)
+  })
+
+  it('conta a reabertura e pula a fonte quando reabrir não resolve', async () => {
+    // A recuperação que não recupera: sem limite, o watchdog reconciliaria com o
+    // servidor a cada oito minutos e a tela continuaria dizendo "lendo" — o mesmo
+    // sintoma, só que mais barulhento.
+    const stalled = () => ({
+      runId: 'run-1',
+      carrierTabId: 7,
+      plan: COMMISSION_DETAIL_PLAN,
+      stageIndex: 1,
+      status: 'EXTRACTING',
+      lastProgressAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+    })
+    storage.sync = stalled()
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${COMMISSION_DETAIL_PATH}` }])
+    vi.mocked(signedJsonRequest).mockResolvedValue({
+      runId: 'run-1', schemaVersion: 2, stages: COMMISSION_DETAIL_PLAN,
+      nextStageIndex: 1, completedStages: 1,
+      resume: { sequence: 27, offset: 2402, recordCount: 2402 },
+    } as never)
+
+    await bootBackground()
+    expect(readSync()).toMatchObject({
+      stallRecoveryGridKey: 'COMMISSIONS_EARNING_REPORT', stallRecoveryAttempts: 1,
+    })
+
+    storage.sync = { ...readSync(), ...stalled(), stallRecoveryAttempts: 2 }
+    await bootBackground()
+
+    await vi.waitFor(() => expect(signedJsonRequest).toHaveBeenCalledWith(expect.objectContaining({
+      pathname:
+        '/api/agent/integrations/national-life/local-connector/runs/run-1/stages/COMMISSIONS_EARNING_REPORT/fail',
+      body: expect.objectContaining({ code: 'STAGE_STALLED', retryable: true }),
+    })))
+  })
+
+  it('perdoa as reaberturas assim que um lote novo entra', async () => {
+    storage.sync = {
+      runId: 'run-1',
+      carrierTabId: 7,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 0,
+      status: 'EXTRACTING',
+      lastProgressAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+      stallRecoveryGridKey: 'NEW_BUSINESS',
+      stallRecoveryAttempts: 1,
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    await vi.waitFor(() => expect(beginGridMessage()).toMatchObject({ type: 'BEGIN_GRID' }))
+    const begin = beginGridMessage() as { gridKey: string; token: string; correlationId: string }
+
+    emit('runtime.onMessage', {
+      type: 'GRID_CHUNK',
+      gridKey: begin.gridKey,
+      token: begin.token,
+      correlationId: begin.correlationId,
+      sequence: 0,
+      recordsTotal: 1,
+      truncated: false,
+      records: [{ PolicyNo: 'NB-1' }],
+    }, { tab: { id: 7 }, url: `${NLG}/agent/anything` }, vi.fn())
+
+    await vi.waitFor(() => expect(readSync().uploads).toBe(1))
+    expect(readSync().stallRecoveryAttempts).toBeUndefined()
+  })
+
+  it('deixa em paz uma etapa que acabou de dar sinal de vida', async () => {
+    storage.sync = {
+      runId: 'run-1',
+      carrierTabId: 7,
+      plan: TWO_STAGE_PLAN,
+      stageIndex: 0,
+      status: 'EXTRACTING',
+      lastProgressAt: new Date().toISOString(),
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+
+    await bootBackground()
+
+    expect(signedJsonRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      pathname: '/api/agent/integrations/national-life/local-connector/runs',
+    }))
+  })
+})
+
 describe('explicit National Life sync cancellation', () => {
   it('aborts the active reader, closes the server run once and ignores stale callbacks', async () => {
     storage.sync = {

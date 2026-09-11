@@ -171,6 +171,17 @@ export function createGridExtractionRunner(
 
   return {
     async begin(message) {
+      // O aviso de início sai antes de qualquer espera, e sai também no caminho
+      // do eco: é o que a ponte aguarda para responder o ACK, e uma extração que
+      // já está rodando é exatamente a confirmação que ela quer. Sem isso, um
+      // `postMessage` perdido entre os mundos deixa o background achando que
+      // alguém está lendo o portal quando ninguém está.
+      deps.post({
+        type: 'EXTRACTION_STARTED',
+        gridKey: message.gridKey,
+        token: message.token,
+        correlationId: message.correlationId,
+      })
       // Uma segunda BEGIN com o mesmo token é eco, não trabalho novo.
       if (runningToken === message.token) return
       runningToken = message.token

@@ -194,4 +194,107 @@ describe('National Life isolated-world bridge', () => {
       detail,
     })
   })
+  it('só confirma BEGIN_GRID depois que o mundo da página começou a extrair', async () => {
+    const content = (await import('../entrypoints/nlg-bridge.content')).default as unknown as {
+      main: () => void
+    }
+    content.main()
+    const begin = {
+      type: 'BEGIN_GRID',
+      gridKey: 'COMMISSIONS_EARNING_REPORT',
+      token: 't'.repeat(32),
+      correlationId: 'c'.repeat(16),
+    }
+
+    let settled = false
+    const responsePromise = new Promise<unknown>((resolve) => {
+      expect(listener?.(begin, {}, (value) => { settled = true; resolve(value) })).toBe(true)
+    })
+    expect(postMessage).toHaveBeenCalledWith(
+      { channel: 'FYNTRA_NL_CONNECTOR_V1', payload: begin },
+      'https://www.nationallife.com',
+    )
+    // A entrega à ponte não é prova de extração: nada foi respondido ainda.
+    expect(settled).toBe(false)
+
+    windowMessageListener?.({
+      source: window,
+      origin: 'https://www.nationallife.com',
+      data: {
+        channel: 'FYNTRA_NL_CONNECTOR_V1',
+        payload: {
+          type: 'EXTRACTION_STARTED',
+          gridKey: begin.gridKey,
+          token: begin.token,
+          correlationId: begin.correlationId,
+        },
+      },
+    })
+
+    await expect(responsePromise).resolves.toEqual({
+      ok: true,
+      type: 'BEGIN_GRID_ACK',
+      gridKey: begin.gridKey,
+      token: begin.token,
+      correlationId: begin.correlationId,
+    })
+  })
+
+  it('recusa o BEGIN_GRID quando a página nunca começa, em vez de calar', async () => {
+    vi.useFakeTimers()
+    const content = (await import('../entrypoints/nlg-bridge.content')).default as unknown as {
+      main: () => void
+    }
+    content.main()
+    const begin = {
+      type: 'BEGIN_GRID',
+      gridKey: 'COMMISSIONS_EARNING_REPORT',
+      token: 't'.repeat(32),
+      correlationId: 'c'.repeat(16),
+    }
+
+    const responsePromise = new Promise<unknown>((resolve) => {
+      expect(listener?.(begin, {}, resolve)).toBe(true)
+    })
+    await vi.advanceTimersByTimeAsync(3_000)
+
+    await expect(responsePromise).resolves.toEqual({
+      ok: false,
+      type: 'BEGIN_GRID_FAILED',
+      gridKey: begin.gridKey,
+      token: begin.token,
+      correlationId: begin.correlationId,
+      code: 'EXTRACTION_NEVER_STARTED',
+    })
+    vi.useRealTimers()
+  })
+
+  it('reporta a sonda de sessão que o portal deixou pendurada', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    const content = (await import('../entrypoints/nlg-bridge.content')).default as unknown as {
+      main: () => void
+    }
+    content.main()
+
+    const responsePromise = new Promise<unknown>((resolve) => {
+      expect(listener?.({
+        type: 'PROBE_AUTH',
+        token: 't'.repeat(32),
+        correlationId: 'c'.repeat(16),
+      }, {}, resolve)).toBe(true)
+    })
+    await vi.advanceTimersByTimeAsync(20_000)
+
+    // Nunca `authenticated: false`: um portal mudo não é uma sessão encerrada, e
+    // dizer que é mandaria o agente digitar uma senha sem necessidade.
+    await expect(responsePromise).resolves.toEqual({
+      ok: false,
+      type: 'AUTH_PROBE_FAILED',
+      token: 't'.repeat(32),
+      correlationId: 'c'.repeat(16),
+      code: 'AUTH_PROBE_TIMEOUT',
+    })
+    vi.useRealTimers()
+  })
 })
