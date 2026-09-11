@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { browserClock, useBrowserClock } from '@/components/useBrowserClock'
 import { useI18n } from '@/components/i18n/LanguageProvider'
 import { KBotAvatar } from '@/components/kbot/KBotAvatar'
 import type { ReadyToSendIllustration } from './ready-to-send'
@@ -28,6 +29,8 @@ const secondary = 'inline-flex min-h-11 items-center justify-center rounded-xl b
 /// by the time it is read, the row it referred to is gone.
 type Outcome = ReadyToSendActionResult & { requestId: string; clientName: string; kind: 'SEND' | 'DISCARD' }
 
+const expiryClock = browserClock(30_000)
+
 export function ReadyToSendIllustrations({ items }: { items: ReadyToSendIllustration[] }) {
   const { copy } = useI18n()
   // Only one send runs at a time, and the row that owns it is named. A single
@@ -36,15 +39,7 @@ export function ReadyToSendIllustrations({ items }: { items: ReadyToSendIllustra
   const [busy, setBusy] = useState<string | null>(null)
   const [outcome, setOutcome] = useState<Outcome | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
-  // The clock is read after mount. Computing "expira em 2 dias" during render
-  // would make the server HTML and the first client render disagree.
-  const [now, setNow] = useState<number | null>(null)
-
-  useEffect(() => {
-    setNow(Date.now())
-    const timer = setInterval(() => setNow(Date.now()), 30_000)
-    return () => clearInterval(timer)
-  }, [])
+  const now = useBrowserClock(expiryClock)
 
   const run = async (
     item: ReadyToSendIllustration,

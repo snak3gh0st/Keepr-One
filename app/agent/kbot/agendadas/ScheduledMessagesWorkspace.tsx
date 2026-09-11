@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
+import { browserClock, useBrowserClock } from '@/components/useBrowserClock'
 import { useI18n } from '@/components/i18n/LanguageProvider'
 import { KBotAvatar } from '@/components/kbot/KBotAvatar'
 import type { SendGateBlockReason } from '@/lib/kbot-messaging/send-gate'
@@ -391,6 +392,8 @@ function CategoryEditor({ entry, label, pending, onSave, onToggle, onAutoSend }:
   </article>
 }
 
+const approvalClock = browserClock(60_000)
+
 /// The queue of messages already written, waiting for a person to say yes.
 ///
 /// It sits above everything else because it is the only part of this screen
@@ -405,16 +408,7 @@ function ApprovalQueue({ proposals, categoryLabels, pending, onApprove, onDiscar
 }) {
   const { copy, locale } = useI18n()
   const [selected, setSelected] = useState<string[]>([])
-  // Read after mount, never during render: the server and the browser would
-  // otherwise disagree on "expires in", and React would call it a hydration
-  // mismatch. Until it arrives, nothing is treated as expired — which is what
-  // the server already assumed when it built the list.
-  const [now, setNow] = useState<number | null>(null)
-  useEffect(() => {
-    setNow(Date.now())
-    const timer = setInterval(() => setNow(Date.now()), 60_000)
-    return () => clearInterval(timer)
-  }, [])
+  const now = useBrowserClock(approvalClock)
 
   const approvable = proposals.filter((proposal) => canApprove(proposal, now ?? 0))
   // Pruned against what is on screen right now. After a release the page
