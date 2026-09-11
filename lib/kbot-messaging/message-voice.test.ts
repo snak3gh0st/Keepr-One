@@ -60,4 +60,25 @@ describe('checkMessageVoice', () => {
     expect(checkMessageVoice('Oi Ana, {nome} ainda não revisou a apólice.', 'Ana', 'ANNUAL_REVIEW'))
       .toMatchObject({ ok: false, reason: 'CONTAINS_PLACEHOLDER' })
   })
+
+  it('refuses a message that asserts the policy is cancelled', () => {
+    // No digit and no other forbidden word — this would clear the validator
+    // without status vocabulary, and telling a client their policy is
+    // cancelled on the model's invented say-so is the worst case this guard
+    // exists for.
+    expect(checkMessageVoice('Oi Ana, sua apólice está cancelada. Podemos conversar?', 'Ana', 'LAPSE_RECOVERY'))
+      .toMatchObject({ ok: false, reason: 'MENTIONS_BUSINESS' })
+  })
+
+  it('refuses a message that asserts the policy is overdue', () => {
+    expect(checkMessageVoice('Oi Ana, sua apólice está em atraso. Podemos conversar?', 'Ana', 'LAPSE_RECOVERY'))
+      .toMatchObject({ ok: false, reason: 'MENTIONS_BUSINESS' })
+  })
+
+  it('still lets a plain invitation mention the policy in general terms', () => {
+    // The status guard must not make the category impossible: inviting a
+    // conversation about "a apólice" without asserting any status is exactly
+    // what these categories exist to do.
+    expect(checkMessageVoice('Oi Ana, podemos conversar sobre sua apólice?', 'Ana', 'ANNUAL_REVIEW').ok).toBe(true)
+  })
 })

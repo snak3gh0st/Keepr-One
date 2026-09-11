@@ -35,12 +35,26 @@ describe('generateScheduledMessage', () => {
     expect(state.create).not.toHaveBeenCalled()
   })
 
-  it('never sends policy identifiers or phone numbers to the provider', async () => {
+  it('sends the model only firstName, agentName, language and promptVersion — nothing else', async () => {
     state.create.mockResolvedValue({ status: 'completed', output_text: 'Oi Ana, podemos conversar sobre sua apólice?', usage: { input_tokens: 1, output_tokens: 1 } })
     await generateScheduledMessage(input)
-    const payload = JSON.stringify(state.create.mock.calls[0]![0])
-    expect(payload).not.toMatch(/\+\d{8,}/)
-    expect(payload).toContain('Ana')
-    expect(payload).toContain('Felipe')
+    const call = state.create.mock.calls[0]![0]
+    const payload = JSON.parse(call.input)
+    // A real pin: any field added later — a phone number, a policy id, an
+    // amount — fails this test regardless of what it looks like, because the
+    // key set itself is the constraint, not a guess at a leak's shape.
+    expect(Object.keys(payload).sort()).toEqual(['agentName', 'firstName', 'language', 'promptVersion'])
+    expect(payload.firstName).toBe('Ana')
+    expect(payload.agentName).toBe('Felipe')
+  })
+
+  it('delegates BIRTHDAY to the birthday prompt, not the scheduled one', async () => {
+    state.create.mockResolvedValue({ status: 'completed', output_text: 'Oi Ana, feliz aniversário! Aproveite o dia.', usage: { input_tokens: 10, output_tokens: 10 } })
+    await generateScheduledMessage({ ...input, category: 'BIRTHDAY' })
+    const call = state.create.mock.calls[0]![0]
+    const payload = JSON.parse(call.input)
+    expect(payload.promptVersion).toBe('birthday-v1')
+    expect(call.instructions).toContain('Write a short birthday message')
+    expect(call.instructions).not.toContain('policy needs attention')
   })
 })

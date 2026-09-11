@@ -1,9 +1,8 @@
 import 'server-only'
-import OpenAI from 'openai'
 import type { ScheduledCategory } from '@/lib/kbot-templates/categories'
-import { ASSUMED_ATTEMPT_TOKENS, birthdayVoiceEnabled, generateBirthdayGreeting, type BirthdayVoiceResult } from './birthday-generation'
+import { birthdayVoiceEnabled, generateBirthdayGreeting, type BirthdayVoiceResult } from './birthday-generation'
 import { checkMessageVoice } from './message-voice'
-import { MAX_LENGTH } from './birthday-voice'
+import { callVoiceModel } from './voice-model-call'
 
 export const SCHEDULED_PROMPT_VERSION = 'scheduled-v1'
 export type ScheduledVoiceResult = BirthdayVoiceResult
@@ -41,41 +40,19 @@ export async function generateScheduledMessage(input: {
     return generateBirthdayGreeting({ firstName: input.firstName, agentName: input.agentName, language: input.language })
   }
 
-  const model = process.env.KBOT_FOLLOWUP_MODEL || 'gpt-4o-mini'
-  const empty = { model, inputTokens: 0, outputTokens: 0 }
-  if (!birthdayVoiceEnabled()) return { ok: false, reason: 'UNAVAILABLE', attempted: false, ...empty }
-
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 20_000 })
-  let response
-  try {
-    response = await client.responses.create({
-      model,
-      store: false,
-      max_output_tokens: 120,
-      instructions: INSTRUCTIONS[input.category],
-      // Only the first name, the agent name and the language. No phone
-      // number, policy number, amount or history: what is not sent cannot
-      // come back.
-      input: JSON.stringify({
-        firstName: input.firstName,
-        agentName: input.agentName,
-        language: input.language === 'EN' ? 'English' : 'Portuguese',
-        promptVersion: SCHEDULED_PROMPT_VERSION,
-      }),
-    })
-  } catch {
-    return { ok: false, reason: 'UNAVAILABLE', attempted: true, model, ...ASSUMED_ATTEMPT_TOKENS }
-  }
-
-  const usage = {
-    model,
-    inputTokens: response.usage?.input_tokens ?? 0,
-    outputTokens: response.usage?.output_tokens ?? 0,
-  }
-  if (response.status !== 'completed') return { ok: false, reason: 'REFUSED', attempted: true, ...usage }
-
-  const checked = checkMessageVoice(String(response.output_text ?? '').slice(0, MAX_LENGTH * 4), input.firstName, input.category)
-  return checked.ok
-    ? { ok: true, text: checked.text, attempted: true, ...usage }
-    : { ok: false, reason: checked.reason, attempted: true, ...usage }
+  return callVoiceModel({
+    enabled: birthdayVoiceEnabled(),
+    maxOutputTokens: 120,
+    instructions: INSTRUCTIONS[input.category],
+    // Only the first name, the agent name and the language. No phone
+    // number, policy number, amount or history: what is not sent cannot
+    // come back.
+    payload: {
+      firstName: input.firstName,
+      agentName: input.agentName,
+      language: input.language === 'EN' ? 'English' : 'Portuguese',
+      promptVersion: SCHEDULED_PROMPT_VERSION,
+    },
+    check: (text) => checkMessageVoice(text, input.firstName, input.category),
+  })
 }

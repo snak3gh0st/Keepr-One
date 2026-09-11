@@ -23,9 +23,21 @@ import {
 /// invented.
 ///
 /// What not even these categories may say.
+///
+/// Status words belong here too: "sua apólice está cancelada" carries no
+/// digit and no other forbidden word, but it asserts a fact about the
+/// contract exactly like a figure or a date does — and it is the fact that
+/// does the most damage when the model invented it. The agent is who tells a
+/// client their policy's real status, in a conversation; the bot is not.
 const MONEY_AND_CONTRACT = [
   'prêmio', 'premio', 'premium', 'pagamento', 'payment', 'desconto', 'discount',
   'benefício', 'beneficio', 'benefit', 'contrato', 'contract', 'proposta', 'quote',
+  'cancelada', 'cancelado', 'cancelled', 'canceled',
+  'vencida', 'vencido', 'expired',
+  'suspensa', 'suspenso', 'suspended',
+  'em atraso', 'overdue',
+  'inadimplente', 'lapsed', 'lapse',
+  'ativa', 'ativo', 'active',
 ] as const
 
 export function checkMessageVoice(
