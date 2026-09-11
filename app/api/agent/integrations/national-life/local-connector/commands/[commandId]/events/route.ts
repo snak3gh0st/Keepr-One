@@ -25,6 +25,7 @@ import {
 } from '@/lib/national-life/local-connector/request'
 import { prisma } from '@/lib/prisma'
 import { createPrismaPolicyDetailRepository } from '@/lib/national-life/policy-detail-prisma'
+import { markIllustrationReadyForApproval } from '@/lib/kbot-illustration/approval'
 import {
   syncPolicyDetailPromotionCreditsSafely,
 } from '@/lib/national-life/promotion-credit-sync'
@@ -279,6 +280,18 @@ export async function POST(
         policyDetailRepository,
         syncPolicyDetailPromotionCreditsSafely: (input) =>
           syncPolicyDetailPromotionCreditsSafely(input, prisma),
+        // Only moves a request the K-Bot raised; an illustration the agent asked
+        // for by hand matches no row and this is a no-op. Swallowing the failure
+        // is deliberate: the carrier's numbers are already stored, and losing
+        // the whole event over a bookkeeping write would be worse than a
+        // request the sweep later expires.
+        markKBotIllustrationReadySafely: async (input) => {
+          try {
+            return await markIllustrationReadyForApproval(input)
+          } catch {
+            return { moved: 0 }
+          }
+        },
         foresightArtifactRepository,
         extractTermPremiums: extractForesightTermPremiums,
         flexLifeQuoteRepository,

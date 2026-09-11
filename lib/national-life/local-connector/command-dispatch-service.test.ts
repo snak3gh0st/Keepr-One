@@ -432,11 +432,20 @@ describe('local connector command dispatch', () => {
       }),
     }
 
+    // The moment the K-Bot's request becomes readable: the receipt matched and
+    // the figures are stored, so the agent now has numbers to approve. Without
+    // this call the request stays GENERATING until the sweep fails it, and the
+    // agent never sees it.
+    const markKBotIllustrationReadySafely = vi.fn().mockResolvedValue({ moved: 1 })
+
     await recordDeviceConnectorCommandEvent(repo, {
       agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', event, now,
-      foresightArtifactRepository,
+      foresightArtifactRepository, markKBotIllustrationReadySafely,
     })
     expect(foresightArtifactRepository.findOwnedArtifact).toHaveBeenCalledWith({
+      agentId: 'agent_1', illustrationId: 'illustration_1',
+    })
+    expect(markKBotIllustrationReadySafely).toHaveBeenCalledWith({
       agentId: 'agent_1', illustrationId: 'illustration_1',
     })
     expect(repo.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
