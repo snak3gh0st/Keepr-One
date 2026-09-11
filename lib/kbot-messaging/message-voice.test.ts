@@ -36,4 +36,28 @@ describe('checkMessageVoice', () => {
     expect(checkMessageVoice('Bom dia, podemos conversar sobre sua apólice?', 'Ana', 'ANNUAL_REVIEW'))
       .toMatchObject({ ok: false, reason: 'NAME_MISSING' })
   })
+
+  it('refuses everything when there is no name to check against', () => {
+    // `includes('')` is true for every string — an empty firstName must not
+    // turn the name guard into a pass-through for a non-birthday category.
+    expect(checkMessageVoice('Podemos conversar sobre sua apólice?', '', 'LAPSE_RECOVERY'))
+      .toMatchObject({ ok: false, reason: 'NAME_MISSING' })
+  })
+
+  it('refuses a name that only appears inside another name', () => {
+    // "Ana" is inside "Anabela" — a substring check would call this addressed,
+    // sending a message meant for Ana to someone named Anabela instead.
+    expect(checkMessageVoice('Oi Anabela, podemos conversar sobre sua apólice?', 'Ana', 'LAPSE_RECOVERY'))
+      .toMatchObject({ ok: false, reason: 'NAME_MISSING' })
+  })
+
+  it('refuses a bare domain with no scheme', () => {
+    expect(checkMessageVoice('Oi Ana, acesse exemplo.com para revisar.', 'Ana', 'ANNUAL_REVIEW'))
+      .toMatchObject({ ok: false, reason: 'CONTAINS_LINK' })
+  })
+
+  it('refuses a single-brace placeholder', () => {
+    expect(checkMessageVoice('Oi Ana, {nome} ainda não revisou a apólice.', 'Ana', 'ANNUAL_REVIEW'))
+      .toMatchObject({ ok: false, reason: 'CONTAINS_PLACEHOLDER' })
+  })
 })

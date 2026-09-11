@@ -1,5 +1,14 @@
 import type { ScheduledCategory } from '@/lib/kbot-templates/categories'
-import { checkBirthdayVoice, fold, MAX_LENGTH, MIN_LENGTH, type VoiceCheck } from './birthday-voice'
+import {
+  checkBirthdayVoice,
+  containsLink,
+  containsPlaceholder,
+  fold,
+  isAddressedTo,
+  MAX_LENGTH,
+  MIN_LENGTH,
+  type VoiceCheck,
+} from './birthday-voice'
 
 /// The same hostility as the birthday check, adjusted to what each category
 /// is allowed to say.
@@ -31,11 +40,12 @@ export function checkMessageVoice(
   if (text.length < MIN_LENGTH) return { ok: false, reason: 'TOO_SHORT' }
   if (text.length > MAX_LENGTH) return { ok: false, reason: 'TOO_LONG' }
   // Without the first name this isn't a message to someone, it's a notice.
-  if (!text.includes(firstName)) return { ok: false, reason: 'NAME_MISSING' }
+  // Same guard as birthday: word-boundary match, empty name fails outright.
+  if (!isAddressedTo(text, firstName)) return { ok: false, reason: 'NAME_MISSING' }
   // Every digit is an assertion: an amount, a date, a deadline, a policy number.
   if (/\d/u.test(text)) return { ok: false, reason: 'CONTAINS_NUMBER' }
-  if (/https?:\/\/|www\./iu.test(text)) return { ok: false, reason: 'CONTAINS_LINK' }
-  if (/\{\{|\}\}|\[|\]/u.test(text)) return { ok: false, reason: 'CONTAINS_PLACEHOLDER' }
+  if (containsLink(text)) return { ok: false, reason: 'CONTAINS_LINK' }
+  if (containsPlaceholder(text)) return { ok: false, reason: 'CONTAINS_PLACEHOLDER' }
   const lowered = fold(text)
   if (MONEY_AND_CONTRACT.some((word) => lowered.includes(fold(word)))) {
     return { ok: false, reason: 'MENTIONS_BUSINESS' }
