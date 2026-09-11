@@ -167,9 +167,26 @@ describe.skipIf(!enabled)('lapse recovery proposals end to end', () => {
   // the send window. The hour is checked again at dispatch against the wall
   // clock, so the clock is frozen here rather than left to decide the test.
   const phone = '+13055550142'
-  const now = new Date('2026-03-11T17:00:00Z')
-  const firstLapse = new Date('2026-03-01T00:00:00Z')
-  const secondLapse = new Date('2026-03-10T12:00:00Z')
+  /// Frozen, but anchored to the real date rather than to a fixed one.
+  ///
+  /// `vi.setSystemTime` fakes `Date` inside this process; it does not reach
+  /// Prisma's query engine, which stamps `@updatedAt` from its own clock. So any
+  /// row the pass touches — a SENT job that reconciliation moves to DELIVERED,
+  /// for one — comes back carrying real time no matter what date the test
+  /// claims. Frozen months away from real time, those stamps landed inside the
+  /// weekly recency window and the second lapse was skipped as RECENT_CONTACT:
+  /// a flake that only appeared when reconciliation happened to fire, which is
+  /// why adding any unrelated test file could surface it.
+  ///
+  /// Anchored here, a re-stamp lands within a day of where the test already
+  /// believes "now" is, and so falls outside every window measured from it.
+  /// The hour stays 17:00Z because it is 13:00 in America/New_York, which is
+  /// what keeps these passes clear of quiet hours.
+  const today = new Date()
+  const now = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 17, 0, 0))
+  // Same distances from `now` the fixed dates had, both well inside LAPSE_RECENCY_MS.
+  const firstLapse = new Date(now.getTime() - (10 * 86_400_000 + 17 * 3_600_000))
+  const secondLapse = new Date(now.getTime() - (86_400_000 + 5 * 3_600_000))
 
   const body = 'Olá {{primeiro_nome}}, sua apólice está em lapso. Posso ajudar a reativar?'
   const expectedText = 'Olá Ana, sua apólice está em lapso. Posso ajudar a reativar?'
