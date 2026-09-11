@@ -27,7 +27,7 @@ const row = {
     id: 'ill-1',
     productName: 'FlexLife',
     faceAmount: '250000',
-    targetPremium: '180',
+    premium: '180', targetPremium: '999',
     documentUrl: 'https://x/ill.pdf',
     documentFetchedAt: new Date('2026-03-10T17:05:00Z'),
     documentMimeType: 'application/pdf',
@@ -73,7 +73,7 @@ describe('reading the quotes waiting to be sent', () => {
       illustrationId: 'ill-1',
       productName: 'FlexLife',
       faceAmount: '250000',
-      targetPremium: '180',
+      premium: '180', targetPremium: '999',
       documentUrl: 'https://x/ill.pdf',
     }))
     expect(item.message).toContain('Ana')

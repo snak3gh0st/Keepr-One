@@ -20,6 +20,9 @@ export type ReadyToSendIllustration = {
   /// Already formatted for the agent's language, so the card and the caption
   /// cannot disagree about what a figure looks like.
   faceAmount: string | null
+  /// The carrier's own monthly figure. `targetPremium` is only what was asked
+  /// for, so the screen shows the same number the message will.
+  premium: string | null
   targetPremium: string | null
   /// The exact text that travels with the PDF.
   message: string
@@ -73,7 +76,7 @@ export async function readReadyToSendIllustrations(
         client: { select: { id: true, name: true, phone: true } },
         illustration: {
           select: {
-            id: true, productName: true, faceAmount: true, targetPremium: true,
+            id: true, productName: true, faceAmount: true, premium: true, targetPremium: true,
             // Never `documentBytes`: ~1.5 MB a row would travel into the page
             // payload to answer a yes-or-no question these two already answer.
             documentUrl: true, documentFetchedAt: true, documentMimeType: true,
@@ -106,6 +109,7 @@ export async function readReadyToSendIllustrations(
       illustrationId: request.illustration.id,
       productName: request.illustration.productName,
       faceAmount: request.illustration.faceAmount?.toString() ?? null,
+      premium: request.illustration.premium?.toString() ?? null,
       targetPremium: request.illustration.targetPremium?.toString() ?? null,
       documentUrl: request.illustration.documentUrl,
     }
@@ -114,6 +118,7 @@ export async function readReadyToSendIllustrations(
       clientName: request.client.name,
       productName: request.illustration.productName,
       faceAmount: currency(request.illustration.faceAmount, language),
+      premium: currency(request.illustration.premium, language),
       targetPremium: currency(request.illustration.targetPremium, language),
       message: illustrationMessage(envelope),
       hasDocument: Boolean(request.illustration.documentFetchedAt && request.illustration.documentMimeType),

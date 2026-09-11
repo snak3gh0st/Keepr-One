@@ -6,21 +6,21 @@ const mocks = vi.hoisted(() => ({
   assertSameOriginAction: vi.fn(),
   revalidatePath: vi.fn(),
   send: vi.fn(),
+  discard: vi.fn(),
   sendToClient: vi.fn(),
-  requestUpdateMany: vi.fn(),
 }))
 
 vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }))
 vi.mock('next/headers', () => ({ headers: mocks.headers }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 vi.mock('@/lib/security/same-origin-action', () => ({ assertSameOriginAction: mocks.assertSameOriginAction }))
-vi.mock('@/lib/kbot-illustration/delivery', () => ({ sendIllustrationRequest: mocks.send }))
+vi.mock('@/lib/kbot-illustration/delivery', () => ({
+  sendIllustrationRequest: mocks.send,
+  discardIllustrationRequest: mocks.discard,
+}))
 vi.mock('@/lib/kbot-illustration/transport', () => ({ sendIllustrationToClient: mocks.sendToClient }))
 vi.mock('@/lib/i18n/server', () => ({
   getServerI18n: async () => ({ language: 'EN', copy: (_pt: string, en: string) => en }),
-}))
-vi.mock('@/lib/prisma', () => ({
-  prisma: { kBotIllustrationRequest: { updateMany: mocks.requestUpdateMany } },
 }))
 
 import { discardReadyIllustration, sendReadyIllustration } from './ready-to-send-actions'
@@ -31,7 +31,7 @@ beforeEach(() => {
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1' })
   mocks.assertSameOriginAction.mockImplementation(() => {})
   mocks.send.mockResolvedValue({ ok: true })
-  mocks.requestUpdateMany.mockResolvedValue({ count: 1 })
+  mocks.discard.mockResolvedValue({ discarded: 1 })
 })
 
 describe('sending a ready quote', () => {
@@ -85,15 +85,15 @@ describe('sending a ready quote', () => {
 
 describe('discarding a ready quote', () => {
   it('closes only a waiting request belonging to this agent', async () => {
+    // The guard itself lives in `discardIllustrationRequest`, next to the send
+    // claim that decides the same row; this asserts the action never invents an
+    // agent id of its own.
     await expect(discardReadyIllustration({ requestId: 'req-1' })).resolves.toEqual({ ok: true })
-    expect(mocks.requestUpdateMany).toHaveBeenCalledWith({
-      where: { id: 'req-1', agentId: 'agent-1', status: 'READY_TO_SEND' },
-      data: { status: 'DISCARDED', closedAt: expect.any(Date) },
-    })
+    expect(mocks.discard).toHaveBeenCalledWith({ agentId: 'agent-1', requestId: 'req-1' })
   })
 
   it('does not claim to have discarded something that was already sent', async () => {
-    mocks.requestUpdateMany.mockResolvedValue({ count: 0 })
+    mocks.discard.mockResolvedValue({ discarded: 0 })
     const result = await discardReadyIllustration({ requestId: 'req-1' })
     expect(result).toMatchObject({ ok: false, reason: 'NOT_READY_TO_SEND' })
   })

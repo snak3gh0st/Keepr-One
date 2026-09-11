@@ -22,7 +22,7 @@ const item: ReadyToSendIllustration = {
   clientName: 'Ana Ribeiro',
   productName: 'FlexLife',
   faceAmount: 'US$ 250.000',
-  targetPremium: 'US$ 180',
+  premium: 'US$ 180', targetPremium: 'US$ 999',
   message: 'Ana, aqui está a simulação que você pediu.\nProduto: FlexLife',
   hasDocument: true,
   reachable: true,
@@ -39,6 +39,15 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('the quotes waiting to be sent', () => {
+  it('shows the carrier premium the client will be quoted, not the one requested', () => {
+    // The message quotes `premium` and falls back to `targetPremium`. A screen
+    // showing the other one would have the agent read US$ 999 and the client
+    // receive US$ 180.
+    render(<ReadyToSendIllustrations items={[item]} />)
+    expect(screen.getByText('US$ 180')).toBeTruthy()
+    expect(screen.queryByText('US$ 999')).toBeNull()
+  })
+
   it('shows the figures and the text that goes with the PDF', () => {
     render(<ReadyToSendIllustrations items={[item]} />)
     expect(screen.getByText('Ana Ribeiro')).toBeTruthy()

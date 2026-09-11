@@ -141,7 +141,10 @@ export function ReadyToSendIllustrations({ items }: { items: ReadyToSendIllustra
                 </div>
                 <div>
                   <dt className="text-xs text-ink-muted">{copy('Prêmio', 'Premium')}</dt>
-                  <dd className="text-ink">{item.targetPremium ?? '—'}</dd>
+                  {/* The carrier's answer, with the requested target only as a
+                      fallback — the same order the message uses, so the agent
+                      reads the figure the client will get. */}
+                  <dd className="text-ink">{item.premium ?? item.targetPremium ?? '—'}</dd>
                 </div>
               </dl>
 

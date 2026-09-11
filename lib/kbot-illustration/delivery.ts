@@ -2,8 +2,10 @@ import 'server-only'
 
 import { prisma } from '@/lib/prisma'
 import { normalizePhone } from '@/lib/kbot-followup/domain'
+import { IllustrationTransportError } from './transport'
 import {
   BLOCKED,
+  DISCARDED,
   READY_TO_SEND,
   SEND_WINDOW_MS,
   EXPIRED,
@@ -127,13 +129,20 @@ export async function sendIllustrationRequest(
       documentUrl: illustration.documentUrl,
     })
   } catch (error) {
+    // A missing document and a provider outage are different sentences on the
+    // screen: one is "this quote has no PDF", the other is "WhatsApp is down,
+    // try again". Collapsing them would send the agent looking for the wrong
+    // problem.
+    const reason: DeliveryRefusal = error instanceof IllustrationTransportError
+      && error.code === 'DOCUMENT_MISSING' ? 'ILLUSTRATION_MISSING' : 'TRANSPORT_FAILED'
     // Never the carrier's figures in a log line.
     console.error('KBOT_ILLUSTRATION_DELIVERY_FAILED', {
       requestId: request.id,
+      reason,
       errorName: error instanceof Error ? error.name : typeof error,
     })
-    await close(request.id, input.agentId, FAILED, 'TRANSPORT_FAILED', now)
-    return { ok: false, reason: 'TRANSPORT_FAILED' }
+    await close(request.id, input.agentId, FAILED, reason, now)
+    return { ok: false, reason }
   }
 
   await prisma.kBotIllustrationRequest.updateMany({
@@ -170,6 +179,26 @@ async function close(
     where: { id: requestId, agentId, status: DELIVERING },
     data: { status, safeErrorCode, closedAt: now },
   })
+}
+
+/// The agent decided not to send these numbers.
+///
+/// Lives next to `sendIllustrationRequest` rather than in the screen's action,
+/// because the two decide the same row and a predicate written twice is a
+/// predicate that drifts. Guarded the same way: the owning agent and the
+/// waiting state, so a stale screen discarding something already sent matches
+/// nothing.
+export async function discardIllustrationRequest(input: {
+  agentId: string
+  requestId: string
+  now?: Date
+}): Promise<{ discarded: number }> {
+  const now = input.now ?? new Date()
+  const result = await prisma.kBotIllustrationRequest.updateMany({
+    where: { id: input.requestId, agentId: input.agentId, status: READY_TO_SEND },
+    data: { status: DISCARDED, closedAt: now, safeErrorCode: 'DISCARDED_BY_AGENT' },
+  })
+  return { discarded: result.count }
 }
 
 /// Release slots whose connector run never finished.

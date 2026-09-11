@@ -5,9 +5,9 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getServerI18n } from '@/lib/i18n/server'
-import { prisma } from '@/lib/prisma'
 import { assertSameOriginAction } from '@/lib/security/same-origin-action'
-import { DISCARDED, READY_TO_SEND, type DeliveryRefusal } from '@/lib/kbot-illustration/domain'
+import { type DeliveryRefusal } from '@/lib/kbot-illustration/domain'
+import { discardIllustrationRequest } from '@/lib/kbot-illustration/delivery'
 import { sendIllustrationRequest } from '@/lib/kbot-illustration/delivery'
 import { sendIllustrationToClient } from '@/lib/kbot-illustration/transport'
 
@@ -116,23 +116,18 @@ export async function sendReadyIllustration(input: unknown): Promise<ReadyToSend
 
 /// The agent read the numbers and chose not to send them.
 ///
-/// The `updateMany` predicate is the authority, the same way the send claim is:
-/// the owning agent and the waiting state are re-checked, so discarding
-/// something already sent matches nothing and is reported as such instead of
-/// overwriting a delivery.
+/// The guard lives in `discardIllustrationRequest`, next to the send claim that
+/// decides the same row: a predicate written in two places is a predicate that
+/// drifts, and this one is what stops a discard from overwriting a delivery.
 export async function discardReadyIllustration(input: unknown): Promise<ReadyToSendActionResult> {
   const { copy } = await getServerI18n()
   const parsed = requestSchema.safeParse(input)
   if (!parsed.success) return unavailable(copy)
   try {
     const agent = await currentAgent()
-    const now = new Date()
-    const closed = await prisma.kBotIllustrationRequest.updateMany({
-      where: { id: parsed.data.requestId, agentId: agent.id, status: READY_TO_SEND },
-      data: { status: DISCARDED, closedAt: now },
-    })
+    const closed = await discardIllustrationRequest({ agentId: agent.id, requestId: parsed.data.requestId })
     revalidatePath(PATH)
-    if (closed.count === 0) {
+    if (closed.discarded === 0) {
       return { ok: false, reason: 'NOT_READY_TO_SEND', message: refusalMessage('NOT_READY_TO_SEND', copy) }
     }
     return { ok: true }
