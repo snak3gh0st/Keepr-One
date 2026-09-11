@@ -21661,3 +21661,49 @@ table {
 @media (prefers-reduced-motion: reduce) {
   .skeleton-bar { animation: none; }
 }
+
+/* Extrato esperando publicação.
+   Não é erro — o dado existe e chega sozinho — então não usa o vermelho do
+   ErrorBanner. O que o agente precisa ler primeiro é a contagem: é ela que
+   diz que nada foi perdido. */
+.commission-pending-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--color-teal);
+  border-radius: 1rem;
+  background: var(--color-teal-pale);
+  color: var(--color-ink);
+}
+
+.commission-pending-notice p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.commission-pending-notice p:first-child {
+  font-weight: 640;
+}
+
+.commission-pending-notice a {
+  align-self: flex-start;
+  margin-top: 0.25rem;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  background: var(--color-teal);
+  color: var(--color-paper);
+  font-size: 0.8rem;
+  font-weight: 660;
+  text-decoration: none;
+  transition: background-color 280ms var(--ease-standard);
+}
+
+.commission-pending-notice a:hover {
+  background: var(--color-teal-deep);
+}
