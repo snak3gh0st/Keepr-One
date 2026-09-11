@@ -41,7 +41,7 @@ export type VoiceCheck =
   | { ok: true; text: string }
   | { ok: false; reason: VoiceRejection }
 
-function fold(value: string): string {
+export function fold(value: string): string {
   return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 }
 
