@@ -3,8 +3,12 @@ import { randomUUID } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { availableCredits, fingerprint, normalizePhone, TOKEN_RESERVATION } from '@/lib/kbot-followup/domain'
 import { ACTIVE_JOB_STATES, AWAITING_APPROVAL, SENT_JOB_STATES, COOLDOWN_MS } from '@/lib/kbot-followup/domain'
-import { grantFreeCredits, lockAgent, type Tx } from '@/lib/kbot-followup/credits'
+import { grantFreeCredits, lockAgent, settleGeneration, type Tx } from '@/lib/kbot-followup/credits'
+import { renderTemplate } from '@/lib/kbot-templates/variables'
+import { templateValuesFor } from '@/lib/kbot-templates/approval-view'
+import type { ScheduledCategory } from '@/lib/kbot-templates/categories'
 import { evaluateSendGate, type SendGateBlockReason } from './send-gate'
+import { generateScheduledMessage, type ScheduledVoiceResult } from './scheduled-generation'
 import { PROPOSAL_CATEGORIES, scheduledCandidatesForDay, type ProposalCandidate } from './scheduled-triggers'
 import { LAPSE_RECENCY_MS, lapseCandidatesForPass } from './lapse-triggers'
 
@@ -25,6 +29,12 @@ export type ScheduledSkipReason =
   /// Two clients of this agent share the number, so a message naming one of
   /// them would reach the other. The manual screen refuses the same case.
   | 'CONTACT_AMBIGUOUS'
+  /// There is no text to propose. Either the K-Bot writes this category and the
+  /// model gave nothing that passed the check, or the agent's template asks for
+  /// a variable this system cannot fill. Nothing is queued: a proposal with
+  /// nothing to read is not a proposal, and inventing the text is exactly what
+  /// the check just refused.
+  | 'MESSAGE_UNAVAILABLE'
   | SendGateBlockReason
 
 export type ScheduledSkip = {
@@ -42,12 +52,15 @@ export type ScheduledPassReport = {
   skipped: ScheduledSkip[]
 }
 
-/// Agents that have at least one enabled proposal template.
+/// Who this pass needs to visit.
 ///
-/// The template is what makes the feature exist for an agent, so it is also the
-/// cheapest way to avoid walking the book of everyone who never set one up.
-/// Every proposal category counts, not only the dated ones: an agent whose only
-/// enabled template is lapse recovery would otherwise never be visited.
+/// This was "whoever wrote a text", and that made writing one a toll: an agent
+/// with no text was never visited, so never received a message, so had no
+/// reason to write one. It is now "whoever has a category switched on" — the
+/// query is the same, but `enabled` no longer implies a text exists, because
+/// the K-Bot writes the first one. Every proposal category counts, not only the
+/// dated ones: an agent whose only enabled template is lapse recovery would
+/// otherwise never be visited.
 async function agentsWithProposalTemplates(): Promise<string[]> {
   const templates = await prisma.kBotMessageTemplate.findMany({
     where: { enabled: true, category: { in: [...PROPOSAL_CATEGORIES] } },
@@ -70,16 +83,34 @@ export async function enqueueScheduledMessagesForAgent(
   if (!agent || agent.status !== 'ACTIVE' || agent.user.banned) return { queued, skipped }
 
   const language = agent.user.language
+  const agentName = agent.user.name ?? ''
+  // The allowance, read the way the preflight needs it: the free grant of the
+  // month may not exist yet, and a read that did not create it first would
+  // report an agent with credit as having none. `queueOne` grants it again,
+  // inside the lock, and stays the authority on what may be reserved.
+  let granted = false
+  const allowance = async () => {
+    if (!granted) {
+      await prisma.$transaction(async (tx: Tx) => {
+        await lockAgent(tx, agentId)
+        await grantFreeCredits(tx, agentId, now)
+      })
+      granted = true
+    }
+    const grants = await prisma.kBotCreditGrant.findMany({ where: { agentId, expiresAt: { gt: now } } })
+    return availableCredits(grants)
+  }
+
   const templates = await prisma.kBotMessageTemplate.findMany({
     where: { agentId, enabled: true, category: { in: [...PROPOSAL_CATEGORIES] } },
-    select: { category: true, language: true, autoSend: true },
+    select: { category: true, language: true, autoSend: true, body: true },
   })
-  // Keyed the same way the lookup below asks for it, carrying the one bit that
-  // decides whether the message waits for the agent or not.
+  // Two things, not one: whether the message waits for the agent, and which
+  // text it carries — null meaning "the K-Bot writes this one".
   // Typed as a plain string key: `as const` on the entry would infer a
   // template-literal key type that the `string` lookups below cannot satisfy.
-  const enabledFor = new Map<string, boolean>(templates.map((template) =>
-    [`${template.category}:${template.language}`, template.autoSend === true]))
+  const enabledFor = new Map<string, { autoSend: boolean; body: string | null }>(templates.map((template) =>
+    [`${template.category}:${template.language}`, { autoSend: template.autoSend === true, body: template.body ?? null }]))
 
   const [clients, policies, lapsed] = await Promise.all([
     prisma.client.findMany({
@@ -132,11 +163,32 @@ export async function enqueueScheduledMessagesForAgent(
     // Existence and the flag are asked separately: keying "is there a template"
     // off the flag's value would make a template whose flag is absent look like
     // no template at all.
-    if (!enabledFor.has(key)) {
+    const entry = enabledFor.get(key)
+    if (!entry) {
       skip('TEMPLATE_MISSING')
       continue
     }
-    const outcome = await queueOne(agentId, candidate, language, now, enabledFor.get(key) ?? false)
+
+    // The text is resolved here only for what will wait for the agent. The
+    // approval screen promises they read the message that actually leaves, and
+    // that is impossible if the text is born at dispatch, after they released
+    // it. A category that sends on its own is written at dispatch, where it has
+    // always been written: nobody reads it first, and writing it there is what
+    // keeps the pass from paying for messages the dispatch gate then stops —
+    // and from paying again every pass for a job quiet hours keeps putting back.
+    let content: string | null = null
+    let voice: ScheduledVoiceResult | null = null
+    if (!entry.autoSend) {
+      const resolved = await textForApproval({ agentId, candidate, language, agentName, entry, now, allowance })
+      if (!resolved.ok) {
+        skip(resolved.reason)
+        continue
+      }
+      content = resolved.text
+      voice = resolved.voice
+    }
+
+    const outcome = await queueOne(agentId, candidate, language, now, entry.autoSend, content, voice)
     if (outcome === 'QUEUED') queued += 1
     else skip(outcome)
   }
@@ -150,51 +202,16 @@ async function queueOne(
   language: string,
   now: Date,
   autoSend: boolean,
+  content: string | null,
+  voice: ScheduledVoiceResult | null,
 ): Promise<'QUEUED' | ScheduledSkipReason> {
   return prisma.$transaction(async (tx: Tx) => {
     // Same lock the manual path takes, so a pass and an agent pressing send
     // cannot both spend the last reservation.
     await lockAgent(tx, agentId)
 
-    // The deterministic key is what makes a second pass over the same event a
-    // no-op — today's date, or the lapse that has not changed since. The
-    // unique index is the real guarantee; this read is what lets the report say
-    // "already queued" instead of surfacing a constraint violation.
-    const existing = await tx.kBotFollowupJob.findFirst({
-      where: { agentId, requestKey: candidate.requestKey, candidateId: candidate.candidateId },
-      select: { id: true },
-    })
-    if (existing) return 'ALREADY_QUEUED'
-
-    // Preferences can be filed under the subject or under the number itself —
-    // a stop request arrives by phone, not by client id.
-    const preferences = await tx.kBotContactPreference.findMany({
-      where: { agentId, subjectKey: { in: [candidate.subjectKey, candidate.phone] } },
-    })
-    // Every category counts against the window, which is why this filters on
-    // the phone alone: a lapse warning sent on Tuesday silences the birthday
-    // greeting on Thursday, and vice versa.
-    const recent = await tx.kBotFollowupJob.findFirst({
-      where: { agentId, phone: candidate.phone, OR: [
-        { status: { in: ACTIVE_JOB_STATES } },
-        { status: { in: SENT_JOB_STATES }, updatedAt: { gte: new Date(now.getTime() - COOLDOWN_MS) } },
-      ] },
-      select: { id: true },
-    })
-
-    const gate = evaluateSendGate({
-      phone: candidate.phone,
-      preferences,
-      recentJobs: recent ? [{ sentAt: now }] : [],
-      now,
-      // Not here. A birthday candidate exists only on its own local date: if
-      // this pass happens to run during the recipient's quiet hours, refusing
-      // now would drop the greeting for good, because tomorrow the candidate is
-      // gone. Enqueuing is an intention, not a send — the hour is enforced at
-      // dispatch, where a refusal returns the job to PENDING for the next pass.
-      enforceQuietHours: false,
-    })
-    if (gate.reason) return gate.reason
+    const refusal = await screenCandidate(tx, agentId, candidate, now)
+    if (refusal) return refusal
 
     await grantFreeCredits(tx, agentId, now)
     const grants = await tx.kBotCreditGrant.findMany({ where: { agentId, expiresAt: { gt: now } }, orderBy: { expiresAt: 'asc' } })
@@ -221,6 +238,11 @@ async function queueOne(
       // Nothing leaves without the agent releasing it. `autoSend` is the one
       // way past this, and only the agent turns that on, per category.
       status: autoSend ? 'PENDING' : AWAITING_APPROVAL,
+      // The text a proposal waits with, and empty for what sends on its own —
+      // that one is written at dispatch. The worker reads this column as the
+      // final word: a job that carries text is sent with it, unchanged.
+      content,
+      ...(voice ? { model: voice.model } : {}),
     } })
 
     let remaining = TOKEN_RESERVATION
@@ -233,8 +255,114 @@ async function queueOne(
       remaining -= amount
       if (!remaining) break
     }
+    // The model was called before this transaction, so the reservation is spent
+    // in it. The allocations have to exist first — this charges against them —
+    // and a job created without this step would carry text nobody paid for.
+    if (voice) await settleGeneration(tx, job, voice.inputTokens, voice.outputTokens)
     return 'QUEUED'
   })
+}
+
+/// Everything that decides whether a candidate becomes a job, apart from the
+/// allowance: the event already queued, what the contact has asked for, and the
+/// window shared with every other category.
+///
+/// Takes the client to read with so the same implementation answers twice: once
+/// under the agent lock inside `queueOne`, where it is the authority, and once
+/// before the model is asked anything, where it is not.
+async function screenCandidate(
+  db: Tx,
+  agentId: string,
+  candidate: ProposalCandidate,
+  now: Date,
+): Promise<ScheduledSkipReason | null> {
+  // The deterministic key is what makes a second pass over the same event a
+  // no-op — today's date, or the lapse that has not changed since. The unique
+  // index is the real guarantee; this read is what lets the report say "already
+  // queued" instead of surfacing a constraint violation.
+  const existing = await db.kBotFollowupJob.findFirst({
+    where: { agentId, requestKey: candidate.requestKey, candidateId: candidate.candidateId },
+    select: { id: true },
+  })
+  if (existing) return 'ALREADY_QUEUED'
+
+  // Preferences can be filed under the subject or under the number itself —
+  // a stop request arrives by phone, not by client id.
+  const preferences = await db.kBotContactPreference.findMany({
+    where: { agentId, subjectKey: { in: [candidate.subjectKey, candidate.phone] } },
+  })
+  // Every category counts against the window, which is why this filters on
+  // the phone alone: a lapse warning sent on Tuesday silences the birthday
+  // greeting on Thursday, and vice versa.
+  const recent = await db.kBotFollowupJob.findFirst({
+    where: { agentId, phone: candidate.phone, OR: [
+      { status: { in: ACTIVE_JOB_STATES } },
+      { status: { in: SENT_JOB_STATES }, updatedAt: { gte: new Date(now.getTime() - COOLDOWN_MS) } },
+    ] },
+    select: { id: true },
+  })
+
+  const gate = evaluateSendGate({
+    phone: candidate.phone,
+    preferences,
+    recentJobs: recent ? [{ sentAt: now }] : [],
+    now,
+    // Not here. A birthday candidate exists only on its own local date: if
+    // this pass happens to run during the recipient's quiet hours, refusing
+    // now would drop the greeting for good, because tomorrow the candidate is
+    // gone. Enqueuing is an intention, not a send — the hour is enforced at
+    // dispatch, where a refusal returns the job to PENDING for the next pass.
+    enforceQuietHours: false,
+  })
+  return gate.reason ?? null
+}
+
+type ApprovalText =
+  | { ok: true; text: string; voice: ScheduledVoiceResult | null }
+  | { ok: false; reason: ScheduledSkipReason }
+
+/// The text a proposal will wait with, resolved before the job exists.
+async function textForApproval(input: {
+  agentId: string
+  candidate: ProposalCandidate
+  language: string
+  agentName: string
+  entry: { autoSend: boolean; body: string | null }
+  now: Date
+  allowance: () => Promise<number>
+}): Promise<ApprovalText> {
+  const { agentId, candidate, language, entry, now } = input
+  const values = templateValuesFor({ customerName: candidate.customerName, agentName: input.agentName })
+  // The agent's own words win. The model writes only what does not exist yet.
+  if (entry.body != null) {
+    const rendered = renderTemplate(entry.body, values)
+    // The save path refuses unknown variables, so reaching here means the
+    // template changed underneath. There is nothing to show and nothing to
+    // invent; the candidate comes back on the next pass.
+    return rendered.ok ? { ok: true, text: rendered.text, voice: null } : { ok: false, reason: 'MESSAGE_UNAVAILABLE' }
+  }
+
+  // Not the authority — `queueOne` makes every one of these checks again, under
+  // the agent lock, and it is the one that decides. This exists so the model is
+  // not paid for a candidate the transaction is about to refuse: a second pass
+  // over a birthday already queued, a contact who asked us to stop, an agent
+  // with no allowance left. Deleting it would not change what gets queued, only
+  // what it costs — every pass, for as long as the candidate lasts.
+  const refusal = await screenCandidate(prisma, agentId, candidate, now)
+  if (refusal) return { ok: false, reason: refusal }
+  if (await input.allowance() < TOKEN_RESERVATION) return { ok: false, reason: 'INSUFFICIENT_CREDITS' }
+
+  const written = await generateScheduledMessage({
+    firstName: values.primeiro_nome,
+    agentName: values.agente,
+    language,
+    category: candidate.category as ScheduledCategory,
+  })
+  // Refused by the check, or no model to ask: the category is skipped. There is
+  // no house text to fall back to, and writing one here would be exactly what
+  // the check just refused.
+  if (!written.ok) return { ok: false, reason: 'MESSAGE_UNAVAILABLE' }
+  return { ok: true, text: written.text, voice: written }
 }
 
 /// One enqueue pass over every agent that has a template.

@@ -95,3 +95,21 @@ describe('where a proposal is filed', () => {
     expect(bucketForJob({ status: AWAITING_APPROVAL })).toBe('AWAITING_APPROVAL')
   })
 })
+
+describe('a proposal that already carries its text', () => {
+  // A category the K-Bot writes has no template to render: the text was written
+  // when the proposal was raised, and it is what the client will read.
+  const written: ScheduledJobRow = { ...row, content: 'Ana, tudo de bom hoje!' }
+
+  it('shows the stored text, not the template', () => {
+    const proposal = toApprovalProposal(written, { ...options, templateBody: 'Feliz aniversário, {{nome}}!' })
+    expect(proposal.text).toBe('Ana, tudo de bom hoje!')
+    expect(proposal.problem).toBeNull()
+  })
+
+  it('is approvable with no template at all', () => {
+    const proposal = toApprovalProposal(written, { ...options, templateBody: null })
+    expect(proposal.text).toBe('Ana, tudo de bom hoje!')
+    expect(canApprove(proposal, new Date('2026-09-01T13:00:00.000Z').getTime())).toBe(true)
+  })
+})

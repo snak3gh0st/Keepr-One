@@ -4,9 +4,10 @@ import { prisma } from '@/lib/prisma'
 import { lockAgent, settleGeneration, settleJob, type Tx } from '@/lib/kbot-followup/credits'
 import { ACTIVE_JOB_STATES, COOLDOWN_MS, FollowupError, SENT_JOB_STATES } from '@/lib/kbot-followup/domain'
 import { hasRecentOutgoing, messagingTransport, optOutMessage } from '@/lib/kbot-followup/transport'
-import { renderTemplate } from '@/lib/kbot-templates/variables'
+import { renderTemplate, type TemplateValues } from '@/lib/kbot-templates/variables'
 import { templateValuesFor } from '@/lib/kbot-templates/approval-view'
-import { generateBirthdayGreeting } from './birthday-generation'
+import type { ScheduledCategory } from '@/lib/kbot-templates/categories'
+import { generateScheduledMessage, type ScheduledVoiceResult } from './scheduled-generation'
 import { evaluateSendGate } from './send-gate'
 import { PROPOSAL_CATEGORIES } from './scheduled-triggers'
 
@@ -19,6 +20,32 @@ const unconfirmedStates = ['DISPATCHING', 'ACCEPTED', 'UNKNOWN']
 /// different set of variable names would send `{{primeiro_nome}}` verbatim to a
 /// client while the screen showed a filled-in name — which is exactly what the
 /// validation exists to prevent.
+
+/// Where the text that goes out comes from, decided in one place.
+///
+/// `approved` is the text stored on the job when the proposal was raised — the
+/// exact text the agent read before releasing it. It wins over everything else
+/// and is used word for word: rendering the template over it, or asking the
+/// model again, would put on a client's phone something nobody released. That
+/// is the defect this whole arrangement exists to prevent, so it is a branch
+/// that returns rather than a condition someone can forget to write.
+///
+/// `model` means there is no text yet at all: the category is on and the K-Bot
+/// writes it. `unrenderable` means the agent's template asks for a variable this
+/// system cannot fill, which is a refusal to send, never a reason to improvise.
+export type DispatchText =
+  | { source: 'approved'; text: string }
+  | { source: 'template'; text: string }
+  | { source: 'model'; text: '' }
+  | { source: 'unrenderable'; text: '' }
+
+export function resolveDispatchText(stored: string | null, body: string | null, values: TemplateValues): DispatchText {
+  const approved = stored?.trim() ? stored : null
+  if (approved) return { source: 'approved', text: approved }
+  if (body == null) return { source: 'model', text: '' }
+  const rendered = renderTemplate(body, values)
+  return rendered.ok ? { source: 'template', text: rendered.text } : { source: 'unrenderable', text: '' }
+}
 
 /// Record a stop request before it scrolls out of the provider's history.
 ///
@@ -136,13 +163,13 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
     if (hasRecentOutgoing(messages)) throw new FollowupError('RECENT_CONTACT')
 
     const values = templateValuesFor({ customerName: claimed.customerName, agentName: agent.user.name ?? '' })
-    const rendered = renderTemplate(template.body, values)
+    const resolved = resolveDispatchText(claimed.content, template.body, values)
     // Total by construction: a template that cannot be filled has no text, and
     // a message with no text does not go out. The save path refuses unknown
     // variables, so reaching here means the template changed underneath.
-    if (!rendered.ok) throw new FollowupError('TEMPLATE_UNRENDERABLE')
+    if (resolved.source === 'unrenderable') throw new FollowupError('TEMPLATE_UNRENDERABLE')
 
-    let content = rendered.text
+    let content: string = resolved.text
 
     const dispatch = await prisma.$transaction(async (tx) => {
       await lockAgent(tx, claimed.agentId)
@@ -197,8 +224,10 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
       // Credit is settled after this transaction, not inside it: whether a model
       // was called is only known once the job is certain to go out, and calling
       // it before that would spend on messages the gate is about to stop.
+      // Written only when there is something to write: a category the K-Bot
+      // writes has no text until the model is asked, a few lines below.
       await tx.kBotFollowupJob.update({ where: { id: job.id }, data: {
-        status: 'DISPATCHING', content, conversationId, senderIdentity: transport.identity, leaseExpiresAt: null,
+        status: 'DISPATCHING', ...(content ? { content } : {}), conversationId, senderIdentity: transport.identity, leaseExpiresAt: null,
       } })
       return 'SEND' as const
     })
@@ -207,20 +236,24 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
 
     // Past the gate, so this message is going out: now the model may be asked.
     //
-    // A birthday is the one category where the same words every year is the
-    // problem, so the model writes it — checked, never trusted. Anything that
-    // strays, and anything the model cannot answer, falls back to the agent's
-    // template, which stays the floor.
+    // Never for text the agent already released — that is what `approved`
+    // means, and asking again there is how "approve one message, send another"
+    // would be born. What is left is a birthday, the one category where the
+    // same words every year is the problem, so the model writes it over the
+    // agent's template, which stays the floor; and a category with no text of
+    // its own, where there is no floor and nothing goes out if the model gives
+    // nothing usable.
     //
     // Deliberately after the gate rather than before it: generating first meant
     // paying for greetings the gate then stopped, and paying again on every
     // pass for a job quiet hours keeps putting back.
-    let voice: Awaited<ReturnType<typeof generateBirthdayGreeting>> | null = null
-    if (claimed.category === 'BIRTHDAY') {
-      voice = await generateBirthdayGreeting({
+    let voice: ScheduledVoiceResult | null = null
+    if (resolved.source !== 'approved' && (claimed.category === 'BIRTHDAY' || resolved.source === 'model')) {
+      voice = await generateScheduledMessage({
         firstName: values.primeiro_nome,
         agentName: values.agente,
         language: claimed.language,
+        category: claimed.category as ScheduledCategory,
       })
       if (voice.ok) {
         content = voice.text
@@ -244,6 +277,11 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
         await releaseReservation(tx, job)
       }
     })
+
+    // Nothing to send: the K-Bot writes this category and the model gave nothing
+    // that passed the check. Settled first, on purpose — what was asked of the
+    // provider is paid for even though the message never leaves.
+    if (!content) throw new FollowupError('MESSAGE_UNAVAILABLE')
 
     dispatched = true
     const receipt = await transport.send(conversationId, content, claimed.id, claimed.phone)

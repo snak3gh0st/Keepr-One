@@ -71,6 +71,14 @@ export function toApprovalProposal(
     createdAt: row.createdAt.toISOString(),
     expiresAt: new Date(row.createdAt.getTime() + options.approvalWindowMs).toISOString(),
   }
+  // The text the job already carries is the text that will be sent: it was
+  // resolved when the proposal was raised, and the worker sends it word for
+  // word. Rendering the template over it here would show the agent something
+  // other than what leaves — and for a category the K-Bot writes there is no
+  // template to render at all.
+  const stored = row.content?.trim()
+  if (stored) return { ...base, text: stored, problem: null, unknown: [] }
+
   const body = options.templateBody?.trim()
   if (!body) return { ...base, text: null, problem: 'TEMPLATE_MISSING', unknown: [] }
   const rendered = renderTemplate(body, templateValuesFor({ customerName: row.customerName, agentName: options.agentName }))

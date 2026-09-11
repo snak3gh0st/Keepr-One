@@ -20,7 +20,7 @@ vi.mock('@/lib/prisma', () => ({ prisma: {
   kBotMessageTemplate: { findUnique: mocks.template },
   $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
 } }))
-vi.mock('./birthday-generation', () => ({ generateBirthdayGreeting: mocks.greeting }))
+vi.mock('./scheduled-generation', () => ({ generateScheduledMessage: mocks.greeting }))
 vi.mock('@/lib/kbot-followup/credits', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/kbot-followup/credits')>(),
   settleGeneration: mocks.settleGeneration,
@@ -270,5 +270,103 @@ describe('releaseExpiredScheduledLeases', () => {
       where: { status: 'PREPARING', category: { in: ['BIRTHDAY', 'ANNUAL_REVIEW', 'LAPSE_RECOVERY'] }, leaseExpiresAt: { lt: now } },
       data: { status: 'PENDING', leaseExpiresAt: null },
     })
+  })
+})
+
+/// A job that already carries its text.
+///
+/// What waits for the agent is written at enqueue, so the approval screen shows
+/// the message that will actually leave. From here on that text is the message:
+/// rendering the template over it, or asking the model again, would send the
+/// client something nobody released.
+describe('a scheduled message whose text the agent already read', () => {
+  const now = new Date('2026-03-11T17:00:00Z')
+  const approved = { id: 'job1', agentId: 'a1', category: 'BIRTHDAY', language: 'PT', phone: '+13055550142',
+    customerName: 'Ana', status: 'PREPARING', creditState: 'RESERVED', grantId: 'g1',
+    content: 'Ana, que o seu dia seja leve e cheio de gente boa.',
+    leaseExpiresAt: new Date(now.getTime() + 60_000) }
+
+  beforeEach(() => {
+    vi.setSystemTime(now)
+    mocks.queryRaw.mockResolvedValue([{ id: 'job1' }])
+    mocks.update.mockResolvedValue(approved)
+    mocks.findUniqueOrThrow.mockResolvedValue(approved)
+    mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { banned: false, name: 'Paulo Loureiro' } })
+    mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{nome}}!' })
+    mocks.pref.mockResolvedValue([])
+    mocks.messages.mockResolvedValue([])
+    mocks.allocation.mockResolvedValue([{ grantId: 'g1', reservedTokens: 192 }])
+    mocks.send.mockResolvedValue({ id: '99', sourceId: null, status: null })
+  })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('sends it word for word, without rendering the template over it', async () => {
+    expect(await processNextScheduledMessage()).toEqual({ outcome: 'SENT', id: 'job1' })
+    expect(mocks.send).toHaveBeenCalledWith('10', approved.content, 'job1', '+13055550142')
+  })
+
+  it('does not ask the model again, not even for a birthday', async () => {
+    mocks.greeting.mockResolvedValue({ ok: true, text: 'Outra coisa inteiramente.', attempted: true,
+      model: 'm', inputTokens: 90, outputTokens: 30 })
+    await processNextScheduledMessage()
+    expect(mocks.greeting).not.toHaveBeenCalled()
+    expect(mocks.send).toHaveBeenCalledWith('10', approved.content, 'job1', '+13055550142')
+  })
+})
+
+/// A category with no text of its own, sending on its own.
+///
+/// Nobody reads this one first, so it is written here, after the gate — the
+/// place that has always been cheapest, because a message the gate stops is a
+/// message nobody paid for.
+describe('a scheduled message the K-Bot writes at dispatch', () => {
+  const now = new Date('2026-03-11T17:00:00Z')
+  const auto = { id: 'job1', agentId: 'a1', category: 'LAPSE_RECOVERY', language: 'PT', phone: '+13055550142',
+    customerName: 'Ana', status: 'PREPARING', creditState: 'RESERVED', grantId: 'g1', content: null,
+    leaseExpiresAt: new Date(now.getTime() + 60_000) }
+
+  beforeEach(() => {
+    vi.setSystemTime(now)
+    mocks.queryRaw.mockResolvedValue([{ id: 'job1' }])
+    mocks.update.mockResolvedValue(auto)
+    mocks.findUniqueOrThrow.mockResolvedValue(auto)
+    mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { banned: false, name: 'Paulo Loureiro' } })
+    // On, and with no text of its own: the K-Bot writes this one.
+    mocks.template.mockResolvedValue({ enabled: true, body: null })
+    mocks.pref.mockResolvedValue([])
+    mocks.messages.mockResolvedValue([])
+    mocks.allocation.mockResolvedValue([{ grantId: 'g1', reservedTokens: 192 }])
+    mocks.send.mockResolvedValue({ id: '99', sourceId: null, status: null })
+  })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('asks the model for the category it is sending, and sends what came back', async () => {
+    mocks.greeting.mockResolvedValue({ ok: true, text: 'Ana, vi algo na sua apólice e queria te ajudar.',
+      attempted: true, model: 'm', inputTokens: 90, outputTokens: 30 })
+    expect(await processNextScheduledMessage()).toEqual({ outcome: 'SENT', id: 'job1' })
+    expect(mocks.greeting).toHaveBeenCalledWith(expect.objectContaining({ category: 'LAPSE_RECOVERY', firstName: 'Ana' }))
+    expect(mocks.send).toHaveBeenCalledWith('10', 'Ana, vi algo na sua apólice e queria te ajudar.', 'job1', '+13055550142')
+  })
+
+  it('sends nothing, and still pays for the attempt, when nothing usable came back', async () => {
+    // There is no template to fall back to here, and inventing one is exactly
+    // what the check just refused.
+    mocks.greeting.mockResolvedValue({ ok: false, reason: 'CONTAINS_NUMBER', attempted: true,
+      model: 'm', inputTokens: 90, outputTokens: 30 })
+    expect(await processNextScheduledMessage()).toEqual({ outcome: 'SETTLED', id: 'job1' })
+    expect(mocks.send).not.toHaveBeenCalled()
+    expect(mocks.settleGeneration).toHaveBeenCalledWith(expect.anything(), expect.anything(), 90, 30)
+  })
+
+  it('still writes the birthday over the agent template, as it always has', async () => {
+    // The template is the floor, not a reason not to generate.
+    const birthday = { ...auto, category: 'BIRTHDAY' }
+    mocks.update.mockResolvedValue(birthday)
+    mocks.findUniqueOrThrow.mockResolvedValue(birthday)
+    mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{nome}}!' })
+    mocks.greeting.mockResolvedValue({ ok: true, text: 'Ana, tudo de bom hoje!', attempted: true,
+      model: 'm', inputTokens: 90, outputTokens: 30 })
+    await processNextScheduledMessage()
+    expect(mocks.send).toHaveBeenCalledWith('10', 'Ana, tudo de bom hoje!', 'job1', '+13055550142')
   })
 })
