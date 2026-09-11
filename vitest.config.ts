@@ -11,9 +11,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     setupFiles: ['./tests/setup.ts'],
-    // `.worktrees/` holds full checkouts of other branches. Without this, every
-    // run also executed their copies of these tests — inflating the count by
+    // `.worktrees/` and `.claude/worktrees/` hold full checkouts of other
+    // branches — the second is where delegated agents work. Without this, every
+    // run also executed their copies of these tests, inflating the count by
     // roughly half and failing on code that is not in this branch at all.
-    exclude: ['**/node_modules/**', '**/dist/**', '**/.worktrees/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.worktrees/**', '**/.claude/worktrees/**'],
   },
 })
