@@ -113,7 +113,14 @@ export async function processNextFollowup() {
     if (count >= positiveInteger(process.env.KBOT_FOLLOWUP_DAILY_GENERATIONS, 1000)) return null
     // Reservation grants also bound generation attempts, including refunded failures.
     const grant = job.grantId ? await tx.kBotCreditGrant.findUnique({ where: { id: job.grantId } }) : null
-    const attempts = await tx.kBotFollowupJob.count({ where: { grantId: job.grantId, generationStartedAt: { not: null } } })
+    // Only this path's own attempts. Scheduled messages stamp the same column —
+    // that is how the daily ceiling above sees them, and it should — but they
+    // are a different flow: letting a morning of birthdays exhaust this cap
+    // would fail an unrelated follow-up with GENERATION_LIMIT and consume the
+    // work the agent just authorized. Narrowing the counter is not a loosening.
+    // The scheduled path stays bounded by that daily ceiling, by the agent's
+    // allowance, and by the refusal charge that runs the allowance down.
+    const attempts = await tx.kBotFollowupJob.count({ where: { grantId: job.grantId, category: 'FOLLOWUP', generationStartedAt: { not: null } } })
     if (!grant || grant.expiresAt <= now || attempts >= Math.max(1, Math.ceil(grant.allowance / 128))) {
       await lockAgent(tx, job.agentId)
       await settleJob(tx, job, 'FAILED', 'GENERATION_LIMIT')
