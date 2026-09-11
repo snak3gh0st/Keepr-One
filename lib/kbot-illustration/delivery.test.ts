@@ -29,7 +29,8 @@ beforeEach(() => {
   mocks.agentFindUnique.mockResolvedValue({ user: { language: 'EN' } })
   mocks.prefUpsert.mockResolvedValue({})
   mocks.illustrationFindFirst.mockResolvedValue({
-    id: 'ill_1', productName: 'FlexLife', faceAmount: '250000', targetPremium: '180', documentUrl: 'https://x/ill.pdf',
+    id: 'ill_1', productName: 'FlexLife', faceAmount: '250000', premium: '180',
+    targetPremium: '200', documentUrl: 'https://x/ill.pdf',
   })
 })
 
@@ -143,30 +144,55 @@ describe('expireStaleIllustrationRequests', () => {
 })
 
 describe('illustrationMessage', () => {
-  it('states the facts in the order the client asked about them', () => {
-    const text = illustrationMessage({
-      requestId: 'req_1', agentId: 'a', clientId: 'c', clientName: 'Ana Ribeiro', phone: '+1305',
-      language: 'EN', illustrationId: 'i', productName: 'FlexLife', faceAmount: '250000',
-      targetPremium: '180', documentUrl: 'https://x/ill.pdf',
-    })
-    expect(text).toContain('Ana, here is the illustration you asked for.')
-    expect(text).toContain('FlexLife')
-    expect(text).toContain('$250,000')
-    // The PDF rides as the attachment, not as a link the client has to trust.
-    expect(text).toContain('attached')
-    expect(text).not.toContain('https://')
+  // `Intl` puts a non-breaking space after `US$`, which is correct on a phone
+  // and invisible in a diff. Normalised here so an assertion that fails is
+  // failing about words, not about whitespace nobody can see.
+  const said = (...args: Parameters<typeof illustrationMessage>) =>
+    illustrationMessage(...args).replace(/\u00a0/g, ' ')
+
+  const envelope = {
+    requestId: 'req_1', agentId: 'a', clientId: 'c', clientName: 'Ana Ribeiro', phone: '+1305',
+    language: 'PT', illustrationId: 'i', productName: 'FlexLife', faceAmount: '250000',
+    premium: '180', targetPremium: '999', documentUrl: null,
+  }
+
+  it('reads like the agent wrote it, not like a form', () => {
+    expect(said(envelope)).toBe(
+      'Ana, aqui está a simulação que você pediu. É um FlexLife, com US$ 250.000 de cobertura, ' +
+      'por US$ 180 por mês. O PDF completo está em anexo. Qualquer dúvida, é só me chamar.',
+    )
   })
 
-  it('leaves out a figure the carrier did not return', () => {
-    // A missing premium is a missing line, never "null" or "$0" in a client's
-    // chat.
-    const text = illustrationMessage({
-      requestId: 'r', agentId: 'a', clientId: 'c', clientName: 'Ana', phone: '+1',
-      language: 'PT', illustrationId: 'i', productName: null, faceAmount: null,
-      targetPremium: null, documentUrl: null,
+  it('quotes the carrier number, never the one that was merely asked for', () => {
+    // `targetPremium` is the input. Telling a client the figure we requested as
+    // though it were the answer would be a quote nobody can be held to.
+    expect(said(envelope)).toContain('US$ 180')
+    expect(said(envelope)).not.toContain('999')
+    // With no carrier result, the target is better than silence — but only then.
+    expect(said({ ...envelope, premium: null })).toContain('US$ 999')
+  })
+
+  it('still reads as a sentence when the carrier returned almost nothing', () => {
+    const bare = said({
+      ...envelope, productName: null, faceAmount: null, premium: null, targetPremium: null,
     })
-    expect(text).not.toMatch(/null|undefined|\$0/)
-    // Greeting and the line about the attachment; no empty figure lines.
-    expect(text.split('\n')).toHaveLength(2)
+    expect(bare).not.toMatch(/null|undefined|\$0|,\s*\./)
+    expect(bare).toBe(
+      'Ana, aqui está a simulação que você pediu. O PDF completo está em anexo. ' +
+      'Qualquer dúvida, é só me chamar.',
+    )
+  })
+
+  it('opens with the cover when there is no product name to lead with', () => {
+    const text = said({ ...envelope, productName: null })
+    expect(text).toContain('São US$ 250.000 de cobertura, por US$ 180 por mês.')
+  })
+
+  it('writes English for an agent whose account is in English', () => {
+    const text = said({ ...envelope, language: 'EN' })
+    expect(text).toBe(
+      'Ana, here is the illustration you asked for. It is a FlexLife, with $250,000 in coverage, ' +
+      'at $180 a month. The full PDF is attached. Any questions, just message me.',
+    )
   })
 })

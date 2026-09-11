@@ -104,7 +104,7 @@ export async function sendIllustrationRequest(
 
   const illustration = await prisma.illustration.findFirst({
     where: { id: request.illustrationId, agentId: input.agentId },
-    select: { id: true, productName: true, faceAmount: true, targetPremium: true, documentUrl: true },
+    select: { id: true, productName: true, faceAmount: true, premium: true, targetPremium: true, documentUrl: true },
   })
   if (!illustration) {
     await close(request.id, input.agentId, FAILED, 'ILLUSTRATION_MISSING', now)
@@ -122,6 +122,7 @@ export async function sendIllustrationRequest(
       illustrationId: illustration.id,
       productName: illustration.productName,
       faceAmount: illustration.faceAmount?.toString() ?? null,
+      premium: illustration.premium?.toString() ?? null,
       targetPremium: illustration.targetPremium?.toString() ?? null,
       documentUrl: illustration.documentUrl,
     })

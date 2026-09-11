@@ -88,6 +88,11 @@ export type IllustrationDeliveryEnvelope = {
   illustrationId: string
   productName: string | null
   faceAmount: string | null
+  /// The premium the carrier came back with, monthly. `targetPremium` is only
+  /// what was asked for, so it is the fallback and never preferred: telling a
+  /// client the number we requested as though it were the answer would be a
+  /// quote they cannot hold anyone to.
+  premium: string | null
   targetPremium: string | null
   documentUrl: string | null
 }

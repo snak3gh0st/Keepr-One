@@ -24,30 +24,49 @@ const currency = (value: string | null, language: string): string | null => {
 
 /// The words that go with the document.
 ///
-/// Facts, in the order the client asked about them: what product, how much
-/// cover, what it costs. No persuasion — the agent's own words are what sell,
-/// and a bot writing sales copy over their name is not what anyone asked for.
-/// A figure the carrier did not return is a line that is not there, never
-/// `null` or `$0` in somebody's chat.
+/// Written as a sentence, not a form. The client is reading a message from
+/// their agent, and "Produto: FlexLife / Cobertura: US$ 250.000" reads like a
+/// system printout — which is exactly what it must not feel like, because the
+/// agent is the one whose name is on it.
+///
+/// Facts only, still: what it is, how much cover, what it costs a month. No
+/// adjectives and no closing push. A figure the carrier did not return is a
+/// clause that is not there, never `null` or `$0` in somebody's chat, and the
+/// sentence has to read properly with any combination of them missing.
 export function illustrationMessage(
   envelope: IllustrationDeliveryEnvelope,
   language: string = envelope.language,
 ): string {
   const pt = language !== 'EN'
   const firstName = envelope.clientName.trim().split(/\s+/)[0] ?? envelope.clientName
-  const lines: string[] = []
-  lines.push(pt
+  // The carrier's own number first; the requested target is only a fallback.
+  const cover = currency(envelope.faceAmount, language)
+  const monthly = currency(envelope.premium ?? envelope.targetPremium, language)
+  const product = envelope.productName?.trim() || null
+
+  const opening = pt
     ? `${firstName}, aqui está a simulação que você pediu.`
-    : `${firstName}, here is the illustration you asked for.`)
-  if (envelope.productName) lines.push(pt ? `Produto: ${envelope.productName}` : `Product: ${envelope.productName}`)
-  const face = currency(envelope.faceAmount, language)
-  if (face) lines.push(pt ? `Cobertura: ${face}` : `Coverage: ${face}`)
-  const premium = currency(envelope.targetPremium, language)
-  if (premium) lines.push(pt ? `Prêmio: ${premium}` : `Premium: ${premium}`)
-  lines.push(pt
-    ? 'O PDF completo está anexado. Qualquer dúvida, é só me chamar.'
-    : 'The full PDF is attached. Any questions, just message me.')
-  return lines.join('\n')
+    : `${firstName}, here is the illustration you asked for.`
+
+  const clauses: string[] = []
+  if (product) clauses.push(pt ? `É um ${product}` : `It is a ${product}`)
+  if (cover) {
+    clauses.push(clauses.length
+      ? (pt ? `com ${cover} de cobertura` : `with ${cover} in coverage`)
+      : (pt ? `São ${cover} de cobertura` : `It covers ${cover}`))
+  }
+  if (monthly) {
+    clauses.push(clauses.length
+      ? (pt ? `por ${monthly} por mês` : `at ${monthly} a month`)
+      : (pt ? `Fica em ${monthly} por mês` : `It comes to ${monthly} a month`))
+  }
+  const detail = clauses.length ? `${clauses.join(pt ? ', ' : ', ')}.` : null
+
+  const closing = pt
+    ? 'O PDF completo está em anexo. Qualquer dúvida, é só me chamar.'
+    : 'The full PDF is attached. Any questions, just message me.'
+
+  return [opening, detail, closing].filter((part): part is string => part !== null).join(' ')
 }
 
 /// The filename the client sees when they save it. Their own name and the
