@@ -118,8 +118,11 @@ export async function processNextFollowup() {
     // are a different flow: letting a morning of birthdays exhaust this cap
     // would fail an unrelated follow-up with GENERATION_LIMIT and consume the
     // work the agent just authorized. Narrowing the counter is not a loosening.
-    // The scheduled path stays bounded by that daily ceiling, by the agent's
-    // allowance, and by the refusal charge that runs the allowance down.
+    // The scheduled path is *counted by* that daily ceiling but not stopped by
+    // it: nothing in `scheduled-queue.ts` or `scheduled-worker.ts` reads
+    // KBOT_FOLLOWUP_DAILY_GENERATIONS, so a busy morning of birthdays can
+    // exhaust the cap for manual follow-ups while itself remaining bounded only
+    // by the agent's allowance and the refusal charge that runs it down.
     const attempts = await tx.kBotFollowupJob.count({ where: { grantId: job.grantId, category: 'FOLLOWUP', generationStartedAt: { not: null } } })
     if (!grant || grant.expiresAt <= now || attempts >= Math.max(1, Math.ceil(grant.allowance / 128))) {
       await lockAgent(tx, job.agentId)

@@ -18,8 +18,10 @@ import { LAPSE_RECENCY_MS, lapseCandidatesForPass } from './lapse-triggers'
 /// these, so "nobody got a birthday message today" — or "that lapse never
 /// reached me" — always has an answer that is not "look through the logs".
 export type ScheduledSkipReason =
-  /// The agent has no enabled template for this category and language. There is
-  /// no house default to fall back to, on purpose.
+  /// The agent has no enabled row for this category and language. Not "no text"
+  /// — a row whose `body` is null is a category the K-Bot writes, and it queues.
+  /// What is missing here is the row itself, or the row is switched off, and
+  /// neither is something to fall back from: nobody asked for these messages.
   | 'TEMPLATE_MISSING'
   /// A job already exists for this event: this year's birthday, this lapse. The
   /// normal outcome of a second pass.

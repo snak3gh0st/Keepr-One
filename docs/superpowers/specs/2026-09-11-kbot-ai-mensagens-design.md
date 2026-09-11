@@ -145,3 +145,29 @@ Em ordem de dependência, e proposto como entregas separadas.
   mockup aprovado, mas não foi validado contra volume real de um livro grande.
 - Se a oferta de automático deve existir para `LAPSE_RECOVERY`, ou se lapso deve
   sempre esperar o agente por ser conversa financeira.
+
+## Gaps conhecidos ao fim da Fase 1
+
+Encontrados na revisão da branch, registrados aqui de propósito em vez de corrigidos:
+os dois saem do escopo de uma onda de correção e pedem decisão de plano.
+
+### Agentes criados depois da migration não recebem nada
+
+A migration liga as três categorias para quem já existia no deploy. Nenhum caminho de
+criação de agente escreve um `KBotMessageTemplate` — `lib/agency-invitation-finalization.ts:254`,
+`app/convites/agencia/[token]/actions.ts:508`, `app/admin/users/create-actions.ts:251` e
+`app/founders/actions.ts:236` criam o `Agent` e param aí — e o `schema.prisma` continua
+com `enabled = false` no default. Ou seja: o objetivo desta fase vale para quem estava lá
+no dia do deploy e volta silenciosamente ao problema da fila vazia para todo mundo que
+entrar depois. Corrigir exige tocar os quatro caminhos de criação (ou um gatilho único no
+lugar deles) — escopo da Fase 2.
+
+### O passe de enfileiramento não tem limite de tempo
+
+`lib/kbot-messaging/scheduled-queue.ts:406-416` percorre **todos** os agentes ativos, em
+série, com uma chamada de modelo de 20s de timeout por candidato da trilha de aprovação, e
+é chamado de uma rota HTTP sem `maxDuration`. Não existe definição de cron neste repo, então
+o timeout de quem chama em produção é desconhecido. Se um passe for truncado, o
+`distinct: ['agentId']` sem `orderBy` significa que um subconjunto arbitrário — e possivelmente
+estável — de agentes nunca é alcançado: exatamente a falha que esta fase existe para eliminar.
+**Precisa ser conferido contra o cron implantado antes de isto subir.**

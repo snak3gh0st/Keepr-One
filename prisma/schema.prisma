@@ -3050,7 +3050,7 @@ model KBotMessageTemplate {
   id        String   @id @default(cuid())
   agentId   String
   agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  /// BIRTHDAY | ANNUAL_REVIEW | POLICY_ANNIVERSARY
+  /// BIRTHDAY | ANNUAL_REVIEW | LAPSE_RECOVERY
   category  String
   language  String
   /// The text the agent approved, or null while the K-Bot still writes it.
