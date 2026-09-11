@@ -36,25 +36,34 @@ export type TriggerPolicy = {
   effectiveDate: Date | null
 }
 
-export type ScheduledCandidate = {
-  category: ScheduledCategory
+/// What any trigger — a date, a status change — has to produce for the queue.
+///
+/// Shared on purpose: the enqueue path takes this shape and nothing else, so a
+/// new trigger cannot quietly grow its own gate, its own reservation or its own
+/// idea of what a request key is.
+export type ProposalCandidate = {
+  category: ProposalCategory
   clientId: string
   customerName: string
   phone: string
-  /// Deterministic for the recipient's local year. Running the engine twice on
-  /// the same day yields the same key, and `@@unique([agentId, requestKey,
-  /// candidateId])` turns the second write into a no-op instead of a second
-  /// message. Both halves must be stable — a fresh id here would satisfy the
-  /// constraint and send twice.
+  /// Deterministic for the event it names. Running a pass twice yields the same
+  /// key, and `@@unique([agentId, requestKey, candidateId])` turns the second
+  /// write into a no-op instead of a second message. Both halves must be stable
+  /// — a fresh id here would satisfy the constraint and send twice.
   requestKey: string
   candidateId: string
   /// The key preferences are stored under, same shape the manual path uses.
   subjectKey: string
   sourceHref: string
-  /// The recipient's local year the key was built from, and the zone it was
-  /// read in, so a report can say why a date counted as today.
-  localYear: number
+  /// The zone the date and the hour are both judged in, so a report can say why
+  /// something counted as due.
   timeZone: string
+}
+
+export type ScheduledCandidate = ProposalCandidate & {
+  category: ScheduledCategory
+  /// The recipient's local year the key was built from.
+  localYear: number
 }
 
 type CivilDate = { year: number; month: number; day: number }
