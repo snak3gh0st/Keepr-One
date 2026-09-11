@@ -4,7 +4,7 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getServerI18n } from '@/lib/i18n/server'
 import { prisma } from '@/lib/prisma'
 import { APPROVAL_WINDOW_MS, AWAITING_APPROVAL } from '@/lib/kbot-followup/domain'
-import { SCHEDULED_CATEGORIES, TEMPLATE_LANGUAGES } from '@/lib/kbot-templates/categories'
+import { canSendUnread, SCHEDULED_CATEGORIES, TEMPLATE_LANGUAGES } from '@/lib/kbot-templates/categories'
 import { toApprovalProposal } from '@/lib/kbot-templates/approval-view'
 import { toScheduledEntry } from '@/lib/kbot-templates/schedule-view'
 import { ScheduledMessagesWorkspace, type ScheduledMessagesView } from './ScheduledMessagesWorkspace'
@@ -74,6 +74,11 @@ export default async function KBotScheduledMessagesPage() {
       // Same reading as `enabled`: the switch is about the category, so one
       // language row left behind must not report the category as unattended.
       autoSend: templates.some((template) => template.category === category && template.autoSend),
+      // Whether the agent is even allowed to ask for automatic sending. Read
+      // from the saved rows, never from what is in the textarea: automatic
+      // means the approved text goes out, and text nobody saved was approved by
+      // nobody. The server action asks the same question of the same rows.
+      canAutoSend: canSendUnread(templates.filter((template) => template.category === category)),
       languages: TEMPLATE_LANGUAGES.map((language) => {
         const template = templates.find((row) => row.category === category && row.language === language)
         return {

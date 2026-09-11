@@ -9,7 +9,7 @@ import { getServerI18n } from '@/lib/i18n/server'
 import { prisma } from '@/lib/prisma'
 import { assertSameOriginAction } from '@/lib/security/same-origin-action'
 import { approveScheduledMessages, discardScheduledMessages } from '@/lib/kbot-messaging/approval'
-import { SCHEDULED_CATEGORIES, sampleValues, TEMPLATE_LANGUAGES } from '@/lib/kbot-templates/categories'
+import { canSendUnread, SCHEDULED_CATEGORIES, sampleValues, TEMPLATE_LANGUAGES } from '@/lib/kbot-templates/categories'
 import {
   TEMPLATE_BODY_MAX_LENGTH,
   validateTemplateBody,
@@ -220,6 +220,14 @@ export async function setContactConsent(input: unknown): Promise<ScheduledAction
 /// on the template row, but nobody means "send birthdays unattended in English
 /// only" — so every language row moves together, under the same lock the other
 /// two writers take.
+///
+/// Turning it on requires text in every row of the category. Automatic sending
+/// is the promotion of a message the agent approved, never the model writing
+/// where nobody reads: a row whose `body` is null tells the dispatch path to
+/// write the text itself, and the engine reads the row for the agent's own
+/// language, so a single blank row is enough for free-form text about someone's
+/// policy to reach them unread. Turning it *off* is never gated — nobody has to
+/// justify wanting to read their own messages again.
 export async function setScheduledCategoryAutoSend(input: unknown): Promise<ScheduledActionResult> {
   const { copy } = await getServerI18n()
   const parsed = autoSendSchema.safeParse(input)
@@ -227,22 +235,35 @@ export async function setScheduledCategoryAutoSend(input: unknown): Promise<Sche
   const { category, autoSend } = parsed.data
   try {
     const agent = await currentAgent()
-    const written = await prisma.$transaction(async (tx) => {
+    const outcome = await prisma.$transaction(async (tx) => {
       await lockAgent(tx, agent.id)
-      const existing = await tx.kBotMessageTemplate.count({ where: { agentId: agent.id, category } })
-      if (!existing) return 0
-      const result = await tx.kBotMessageTemplate.updateMany({
+      const rows = await tx.kBotMessageTemplate.findMany({
+        where: { agentId: agent.id, category },
+        select: { body: true },
+      })
+      if (!rows.length) return 'NO_CATEGORY' as const
+      if (autoSend && !canSendUnread(rows)) return 'NO_TEXT' as const
+      await tx.kBotMessageTemplate.updateMany({
         where: { agentId: agent.id, category },
         data: { autoSend },
       })
-      return result.count
+      return 'WRITTEN' as const
     })
-    if (!written) {
+    if (outcome === 'NO_CATEGORY') {
       return {
         ok: false,
         message: copy(
           'Escreva e salve a mensagem desta categoria antes de mudar o envio.',
           'Write and save this category message before changing how it is sent.',
+        ),
+      }
+    }
+    if (outcome === 'NO_TEXT') {
+      return {
+        ok: false,
+        message: copy(
+          'O envio automático manda o texto que você aprovou. Salve a mensagem desta categoria em cada idioma antes de ligar.',
+          'Automatic sending delivers the text you approved. Save this category message in each language before turning it on.',
         ),
       }
     }
