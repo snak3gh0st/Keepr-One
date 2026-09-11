@@ -71,7 +71,7 @@ function toCommissionRecords(
 }
 
 export default async function CommissionsPage() {
-  const { copy } = await getServerI18n()
+  const { copy, language } = await getServerI18n()
   const agent = await getCurrentAgent()
   const [user, scopeAgentIds] = await Promise.all([
     prisma.user.findUnique({ where: { id: agent.userId } }),
@@ -79,6 +79,14 @@ export default async function CommissionsPage() {
   ])
   let records: Record_[] = []
   let loadError = false
+  /// Lançamentos que a operadora já entregou e que ainda não foram publicados.
+  ///
+  /// Só é lido quando não há nada a mostrar, porque só aí a pergunta existe: uma
+  /// lista vazia pode significar "não há comissão" ou "há, e a publicação não
+  /// rodou", e as duas rendiam a mesma tela em branco. Em produção isso
+  /// transformou um sync pendente em "as comissões sumiram" — 27.036 linhas
+  /// coletadas, nenhuma visível, e nenhum aviso.
+  let awaitingPublication = 0
   let auditRejectedCount = 0
   let auditDuplicateCount = 0
 
@@ -162,6 +170,19 @@ export default async function CommissionsPage() {
     records = (localConnectorEnabled ? carrierRecords : stored).sort((left, right) =>
       right.period.localeCompare(left.period),
     )
+
+    // A landing guarda o que o conector coletou; a tabela publicada é o que esta
+    // tela lê. Quando a segunda está vazia e a primeira não, o extrato não está
+    // vazio — está esperando uma sincronização terminar.
+    if (localConnectorEnabled && records.length === 0) {
+      awaitingPublication = await prisma.nationalLifeReportRow.count({
+        where: {
+          agentId: { in: scopeAgentIds },
+          deploymentScope: LOCAL_CONNECTOR_DEPLOYMENT_SCOPE,
+          gridKey: { in: [...COMMISSION_EARNING_GRID_KEYS] },
+        },
+      })
+    }
   } catch (error) {
     console.error('Commissions query error', error)
     loadError = true
@@ -195,6 +216,26 @@ export default async function CommissionsPage() {
         <ErrorBanner>
           {copy("Não foi possível carregar seu extrato agora. Tente atualizar a página.", "We couldn't load your statement right now. Try refreshing the page.")}
         </ErrorBanner>
+      )}
+      {!loadError && awaitingPublication > 0 && (
+        <div role="status" className="commission-pending-notice">
+          <p>
+            {copy(
+              '{count} lançamentos já foram coletados da National Life e ainda não entraram no seu extrato.',
+              '{count} entries were already collected from National Life and have not reached your statement yet.',
+              { count: new Intl.NumberFormat(language === 'EN' ? 'en-US' : 'pt-BR').format(awaitingPublication) },
+            )}
+          </p>
+          <p>
+            {copy(
+              'Nada foi perdido: eles entram assim que uma sincronização terminar por completo.',
+              'Nothing was lost: they appear as soon as a sync finishes end to end.',
+            )}
+          </p>
+          <Link href="/agent/integrations/national-life">
+            {copy('Sincronizar agora', 'Sync now')}
+          </Link>
+        </div>
       )}
       {!loadError && (
         <CommissionsList
