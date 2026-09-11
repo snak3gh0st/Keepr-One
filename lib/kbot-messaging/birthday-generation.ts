@@ -11,9 +11,20 @@ import { checkBirthdayVoice, MAX_LENGTH, type VoiceRejection } from './birthday-
 
 export const BIRTHDAY_PROMPT_VERSION = 'birthday-v1'
 
+/// `attempted` says a request reached the provider, whatever came back.
+///
+/// It matters for billing: a timeout returns no usage, but the other side may
+/// well have processed the request. Treating that as "no model was called"
+/// would make a retry loop free, so an attempt is charged at a conservative
+/// estimate rather than at zero.
 export type BirthdayVoiceResult =
-  | { ok: true; text: string; model: string; inputTokens: number; outputTokens: number }
-  | { ok: false; reason: VoiceRejection | 'UNAVAILABLE' | 'REFUSED'; model: string; inputTokens: number; outputTokens: number }
+  | { ok: true; text: string; attempted: true; model: string; inputTokens: number; outputTokens: number }
+  | { ok: false; reason: VoiceRejection | 'UNAVAILABLE' | 'REFUSED'; attempted: boolean; model: string; inputTokens: number; outputTokens: number }
+
+/// What an attempt is assumed to have cost when the provider never told us.
+/// The instructions are fixed and the output is capped, so a real call sits
+/// near this; it is an estimate chosen to be closer to over- than under-stating.
+export const ASSUMED_ATTEMPT_TOKENS = { inputTokens: 160, outputTokens: 60 }
 
 export function birthdayVoiceEnabled(): boolean {
   return process.env.KBOT_FOLLOWUP_AI_ENABLED === 'true' && !!process.env.OPENAI_API_KEY
@@ -26,7 +37,8 @@ export async function generateBirthdayGreeting(input: {
 }): Promise<BirthdayVoiceResult> {
   const model = process.env.KBOT_FOLLOWUP_MODEL || 'gpt-4o-mini'
   const empty = { model, inputTokens: 0, outputTokens: 0 }
-  if (!birthdayVoiceEnabled()) return { ok: false, reason: 'UNAVAILABLE', ...empty }
+  // Nothing was asked of anyone, so nothing is owed.
+  if (!birthdayVoiceEnabled()) return { ok: false, reason: 'UNAVAILABLE', attempted: false, ...empty }
 
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 20_000 })
   let response
@@ -53,7 +65,9 @@ export async function generateBirthdayGreeting(input: {
       }),
     })
   } catch {
-    return { ok: false, reason: 'UNAVAILABLE', ...empty }
+    // A timeout or a transport error: the request may have been processed on
+    // the other side, and we will never know. Charged as an attempt.
+    return { ok: false, reason: 'UNAVAILABLE', attempted: true, model, ...ASSUMED_ATTEMPT_TOKENS }
   }
 
   const usage = {
@@ -61,11 +75,13 @@ export async function generateBirthdayGreeting(input: {
     inputTokens: response.usage?.input_tokens ?? 0,
     outputTokens: response.usage?.output_tokens ?? 0,
   }
-  if (response.status !== 'completed') return { ok: false, reason: 'REFUSED', ...usage }
+  if (response.status !== 'completed') return { ok: false, reason: 'REFUSED', attempted: true, ...usage }
 
   // Checked, not trusted. A greeting that strays is discarded and the agent's
   // own template goes out, so the worst case is a less varied message rather
   // than one nobody approved.
   const checked = checkBirthdayVoice(String(response.output_text ?? '').slice(0, MAX_LENGTH * 4), input.firstName)
-  return checked.ok ? { ok: true, text: checked.text, ...usage } : { ok: false, reason: checked.reason, ...usage }
+  return checked.ok
+    ? { ok: true, text: checked.text, attempted: true, ...usage }
+    : { ok: false, reason: checked.reason, attempted: true, ...usage }
 }

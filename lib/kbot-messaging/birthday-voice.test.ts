@@ -35,9 +35,26 @@ describe('checkBirthdayVoice', () => {
       .toEqual({ ok: false, reason: 'MENTIONS_BUSINESS' })
   })
 
+  it('refuses a name that only appears inside another word', () => {
+    // `Ana` is inside `Banana`. A substring check would call this addressed.
+    expect(ok('Banana é o que eu vou comer no seu aniversário! Parabéns.'))
+      .toEqual({ ok: false, reason: 'NAME_MISSING' })
+  })
+
+  it('refuses everything when there is no name to check against', () => {
+    // `includes('')` is true for every string, so an empty name would have
+    // turned the whole check into a pass-through.
+    expect(checkBirthdayVoice('Feliz aniversário! Um ótimo dia.', '')).toEqual({ ok: false, reason: 'NAME_MISSING' })
+    expect(checkBirthdayVoice('Feliz aniversário! Um ótimo dia.', '   ')).toEqual({ ok: false, reason: 'NAME_MISSING' })
+  })
+
   it('refuses links and leftover placeholders', () => {
     expect(ok('Ana, parabéns! Veja em https://exemplo.com')).toEqual({ ok: false, reason: 'CONTAINS_LINK' })
     expect(ok('Ana, parabéns! {{nome}}')).toEqual({ ok: false, reason: 'CONTAINS_PLACEHOLDER' })
+    // A bare domain is a link to whoever reads it, scheme or no scheme.
+    expect(ok('Ana, parabéns! Veja em exemplo.com hoje.')).toEqual({ ok: false, reason: 'CONTAINS_LINK' })
+    // And a single brace is as wrong as a double one.
+    expect(ok('Ana, parabéns! {nome}')).toEqual({ ok: false, reason: 'CONTAINS_PLACEHOLDER' })
   })
 
   it('refuses a greeting too long for a message bubble', () => {

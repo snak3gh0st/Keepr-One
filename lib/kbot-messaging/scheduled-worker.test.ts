@@ -42,7 +42,7 @@ beforeEach(() => {
   // Nothing else reached this recipient recently; the tests that care set it.
   mocks.findFirst.mockResolvedValue(null)
   // The model is unavailable by default; the tests about it say otherwise.
-  mocks.greeting.mockResolvedValue({ ok: false, reason: 'UNAVAILABLE', model: 'm', inputTokens: 0, outputTokens: 0 })
+  mocks.greeting.mockResolvedValue({ ok: false, reason: 'UNAVAILABLE', attempted: false, model: 'm', inputTokens: 0, outputTokens: 0 })
   // No agent behind the job: the claim still has to happen and the job still
   // has to be settled, which is the path these tests walk.
   mocks.agent.mockResolvedValue(null)
@@ -63,7 +63,7 @@ describe('scheduled queue claiming', () => {
   // Nothing else reached this recipient recently; the tests that care set it.
   mocks.findFirst.mockResolvedValue(null)
   // The model is unavailable by default; the tests about it say otherwise.
-  mocks.greeting.mockResolvedValue({ ok: false, reason: 'UNAVAILABLE', model: 'm', inputTokens: 0, outputTokens: 0 })
+  mocks.greeting.mockResolvedValue({ ok: false, reason: 'UNAVAILABLE', attempted: false, model: 'm', inputTokens: 0, outputTokens: 0 })
     await processNextScheduledMessage(['job1', 'job2'])
     expect(mocks.queryRaw.mock.calls[0][0].join('?')).toContain('NOT ("id" = ANY(')
     // Tagged template: the interpolated values follow the strings array.
@@ -131,7 +131,7 @@ describe('sending a scheduled message', () => {
     mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{nome}}!' })
     mocks.greeting.mockResolvedValue({
       ok: true, text: 'Ana, tudo de bom hoje! Aproveite o seu dia com quem você gosta.',
-      model: 'm', inputTokens: 90, outputTokens: 30,
+      attempted: true, model: 'm', inputTokens: 90, outputTokens: 30,
     })
     await processNextScheduledMessage()
     expect(mocks.send).toHaveBeenCalledWith('10', 'Ana, tudo de bom hoje! Aproveite o seu dia com quem você gosta.', 'job1', '+13055550142')
@@ -142,7 +142,7 @@ describe('sending a scheduled message', () => {
     // something nobody read.
     mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{nome}}!' })
     mocks.greeting.mockResolvedValue({
-      ok: false, reason: 'MENTIONS_BUSINESS', model: 'm', inputTokens: 90, outputTokens: 30,
+      ok: false, reason: 'MENTIONS_BUSINESS', attempted: true, model: 'm', inputTokens: 90, outputTokens: 30,
     })
     await processNextScheduledMessage()
     expect(mocks.send).toHaveBeenCalledWith('10', 'Feliz aniversário, Ana!', 'job1', '+13055550142')
@@ -154,13 +154,35 @@ describe('sending a scheduled message', () => {
     mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{nome}}!' })
     mocks.greeting.mockResolvedValue({
       ok: true, text: 'Ana, um ótimo dia para você hoje! Aproveite bastante.',
-      model: 'm', inputTokens: 90, outputTokens: 30,
+      attempted: true, model: 'm', inputTokens: 90, outputTokens: 30,
     })
     await processNextScheduledMessage()
     expect(mocks.settleGeneration).toHaveBeenCalledWith(expect.anything(), expect.anything(), 90, 30)
     expect(mocks.grantUpdate).not.toHaveBeenCalledWith(
       expect.objectContaining({ data: { reserved: { decrement: 192 } } }),
     )
+  })
+
+  it('does not ask the model before the gate has let the message through', async () => {
+    // Generating first meant paying for greetings the gate then stopped, and
+    // paying again on every pass for a job quiet hours keeps putting back.
+    const pacific = { ...job, phone: '+14155550142' }
+    mocks.update.mockResolvedValue(pacific)
+    mocks.findUniqueOrThrow.mockResolvedValue(pacific)
+    vi.setSystemTime(new Date('2026-03-11T13:00:00Z'))
+    expect(await processNextScheduledMessage()).toEqual({ outcome: 'DEFERRED', id: 'job1' })
+    expect(mocks.greeting).not.toHaveBeenCalled()
+    vi.setSystemTime(now)
+  })
+
+  it('charges an attempt whose usage the provider never reported', async () => {
+    // A timeout may well have been processed on the other side. Treating that
+    // as "no model was called" would make a retry loop free.
+    mocks.greeting.mockResolvedValue({
+      ok: false, reason: 'UNAVAILABLE', attempted: true, model: 'm', inputTokens: 160, outputTokens: 60,
+    })
+    await processNextScheduledMessage()
+    expect(mocks.settleGeneration).toHaveBeenCalledWith(expect.anything(), expect.anything(), 160, 60)
   })
 
   it('does not ask the model for anything but a birthday', async () => {
