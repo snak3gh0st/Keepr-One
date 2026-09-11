@@ -11,8 +11,6 @@ CREATE TABLE "KBotIllustrationRequest" (
     "status" TEXT NOT NULL DEFAULT 'GENERATING',
     "illustrationId" TEXT,
     "commandId" TEXT,
-    "approvedAt" TIMESTAMP(3),
-    "approvedByUserId" TEXT,
     "deliveredAt" TIMESTAMP(3),
     "closedAt" TIMESTAMP(3),
     "safeErrorCode" TEXT,

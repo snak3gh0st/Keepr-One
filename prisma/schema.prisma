@@ -3092,14 +3092,16 @@ model KBotIllustrationRequest {
   /// excerpt. Held so the agent reviewing the numbers can see what prompted
   /// them, and so an intent detector can later be audited against outcomes.
   signal           Json
-  /// GENERATING, AWAITING_APPROVAL, APPROVED, DELIVERING, DELIVERED,
-  /// DISCARDED, EXPIRED, FAILED. Nothing reaches the client before APPROVED.
+  /// GENERATING, DELIVERING, DELIVERED, BLOCKED, FAILED.
+  ///
+  /// The bot answers a question the client asked, so there is no approval step:
+  /// the numbers go back as soon as the carrier produces them. BLOCKED is the
+  /// one refusal that survives — a client who asked not to be contacted is not
+  /// messaged, whatever they asked for before.
   status           String        @default("GENERATING")
   illustrationId   String?       @unique
   illustration     Illustration? @relation(fields: [illustrationId], references: [id])
   commandId        String?
-  approvedAt       DateTime?
-  approvedByUserId String?
   deliveredAt      DateTime?
   closedAt         DateTime?
   safeErrorCode    String?

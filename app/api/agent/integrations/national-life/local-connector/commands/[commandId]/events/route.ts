@@ -25,7 +25,8 @@ import {
 } from '@/lib/national-life/local-connector/request'
 import { prisma } from '@/lib/prisma'
 import { createPrismaPolicyDetailRepository } from '@/lib/national-life/policy-detail-prisma'
-import { markIllustrationReadyForApproval } from '@/lib/kbot-illustration/approval'
+import { deliverGeneratedIllustration } from '@/lib/kbot-illustration/delivery'
+import { sendIllustrationToClient } from '@/lib/kbot-illustration/transport'
 import {
   syncPolicyDetailPromotionCreditsSafely,
 } from '@/lib/national-life/promotion-credit-sync'
@@ -280,16 +281,16 @@ export async function POST(
         policyDetailRepository,
         syncPolicyDetailPromotionCreditsSafely: (input) =>
           syncPolicyDetailPromotionCreditsSafely(input, prisma),
-        // Only moves a request the K-Bot raised; an illustration the agent asked
-        // for by hand matches no row and this is a no-op. Swallowing the failure
+        // Only delivers a request the K-Bot raised; an illustration the agent
+        // ran by hand matches no row and this is a no-op. Swallowing the failure
         // is deliberate: the carrier's numbers are already stored, and losing
-        // the whole event over a bookkeeping write would be worse than a
-        // request the sweep later expires.
-        markKBotIllustrationReadySafely: async (input) => {
+        // the whole event over a delivery problem would be worse than a request
+        // the sweep later closes.
+        deliverKBotIllustrationSafely: async (input) => {
           try {
-            return await markIllustrationReadyForApproval(input)
+            return await deliverGeneratedIllustration(input, sendIllustrationToClient)
           } catch {
-            return { moved: 0 }
+            return { ok: false as const, reason: 'TRANSPORT_FAILED' as const }
           }
         },
         foresightArtifactRepository,

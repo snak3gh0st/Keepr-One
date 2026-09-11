@@ -13,9 +13,6 @@ import {
 import { isNationalLifeLocalConnectorEnabled } from '@/lib/national-life/local-connector/config'
 import { dispatchForesightIllustration } from '@/lib/national-life/foresight-illustration-dispatch'
 import {
-  APPROVAL_WINDOW_MS,
-  AWAITING_APPROVAL,
-  APPROVED,
   DELIVERING,
   FAILED,
   GENERATING,
@@ -26,10 +23,10 @@ import {
 /// Raising an illustration from a conversation.
 ///
 /// The K-Bot notices that a client asked what a policy would cost and starts
-/// the carrier run. What it does *not* do is answer them: the request lands in
-/// GENERATING and, once the connector reports numbers, in AWAITING_APPROVAL,
-/// where the agent reads the face amount and the premium before anyone else
-/// does. See `approval.ts` for the gate.
+/// the carrier run. The request lands in GENERATING, and once the connector
+/// reports numbers `delivery.ts` sends them straight back to the client — the
+/// bot is answering a question that was just asked, so there is nobody to wait
+/// for. The one refusal that still applies there is consent.
 
 /// The interest that prompted this. Detection is a separate problem — today an
 /// agent marks the conversation, tomorrow an intent model does — so the signal
@@ -155,12 +152,11 @@ export async function requestIllustrationForSignal(input: {
         OR: [
           // A generation that outlived the connector command's own expiry is
           // not in flight any more; it is stale, and it must not block the
-          // agent from asking again.
+          // client from asking again.
           { status: GENERATING, createdAt: { gte: new Date(now.getTime() - GENERATION_WINDOW_MS) } },
-          {
-            status: { in: [AWAITING_APPROVAL, APPROVED, DELIVERING] },
-            createdAt: { gte: new Date(now.getTime() - APPROVAL_WINDOW_MS) },
-          },
+          // A delivery in progress is measured in seconds, so it needs no
+          // window of its own: if it is still DELIVERING, it is happening now.
+          { status: DELIVERING },
         ],
       },
       orderBy: { createdAt: 'desc' },
