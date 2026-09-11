@@ -284,6 +284,29 @@ describe('automatic sending', () => {
     expect(screen.getAllByRole('button', { name: 'Mandar sem me perguntar' })[1]).toBeDisabled()
   })
 
+  // A forma comum depois da migration: idioma do agente com texto salvo, o outro
+  // sem linha nenhuma, automático ligado. A frase promete que a mensagem espera
+  // leitura — e com o automático ligado ela não espera, ela sai.
+  it('never promises the message waits for a category that sends on its own', () => {
+    const auto = {
+      ...view,
+      categories: view.categories.map((c, index) => index === 0 ? { ...c, enabled: true, autoSend: true } : c),
+    }
+    render(<ScheduledMessagesWorkspace view={auto} />)
+
+    expect(screen.queryByText(/espera você ler antes de sair/)).toBeNull()
+  })
+
+  it('still says who writes the text while the category waits for the agent', () => {
+    const waiting = {
+      ...view,
+      categories: view.categories.map((c, index) => index === 0 ? { ...c, enabled: true } : c),
+    }
+    render(<ScheduledMessagesWorkspace view={waiting} />)
+
+    expect(screen.getByText(/espera você ler antes de sair/)).toBeInTheDocument()
+  })
+
   it('turns off without a second question', async () => {
     const on = { ...view, categories: view.categories.map((c, index) => index === 0 ? { ...c, autoSend: true } : c) }
     render(<ScheduledMessagesWorkspace view={on} />)

@@ -363,8 +363,13 @@ function CategoryEditor({ entry, label, pending, onSave, onToggle, onAutoSend }:
     {/* A category can be on with no text of its own. That used to mean nobody
         was messaged; it now means the K-Bot writes each message and the agent
         reads it before it goes. Saying "these clients receive nothing" would be
-        telling every agent, on their first day, that the feature is broken. */}
-    {entry.enabled && entry.languages.some((row) => !bodies[row.language]?.trim()) && <p className="mt-2 text-sm text-ink-muted">{copy(
+        telling every agent, on their first day, that the feature is broken.
+        `!autoSend` is load-bearing, not defensive: this sentence promises the
+        message waits, and with automatic sending on it does not. A category
+        whose rows all carry text can still leave a language slot blank here —
+        that is the ordinary shape after the migration — so without the guard
+        the promise is made exactly where it is false. */}
+    {entry.enabled && !entry.autoSend && entry.languages.some((row) => !bodies[row.language]?.trim()) && <p className="mt-2 text-sm text-ink-muted">{copy(
       'Sem texto salvo, o K-Bot escreve cada mensagem e ela espera você ler antes de sair.',
       'With no saved text, the K-Bot writes each message and it waits for you to read it before it goes.',
     )}</p>}
