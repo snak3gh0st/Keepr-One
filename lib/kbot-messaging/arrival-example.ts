@@ -14,14 +14,30 @@ export function toArrivalExample(input: {
   )
   if (withDate.length === 0) return null
 
-  const dayOfYear = (date: Date) => date.getUTCMonth() * 31 + date.getUTCDate()
-  const today = dayOfYear(input.now)
-  const next = [...withDate].sort((left, right) => {
-    const distance = (candidate: { dateOfBirth: Date }) => {
-      const value = dayOfYear(candidate.dateOfBirth) - today
-      return value < 0 ? value + 372 : value
+  // Calcula os dias até o próximo aniversário de cada contato, usando datas
+  // reais do calendário em vez de uma aproximação (mês * 31). Isto evita
+  // erros de 7-10 dias quando lidando com meses que têm menos de 31 dias
+  // ou próximo ao fim do ano, garantindo que a chegada mostra o contato
+  // realmente mais próximo do aniversário.
+  const daysToNextBirthday = (candidate: { dateOfBirth: Date }): number => {
+    const nowYear = input.now.getUTCFullYear()
+    const birthMonth = candidate.dateOfBirth.getUTCMonth()
+    const birthDay = candidate.dateOfBirth.getUTCDate()
+
+    // Tenta este ano primeiro
+    const thisYearBday = new Date(Date.UTC(nowYear, birthMonth, birthDay))
+    if (thisYearBday >= input.now) {
+      // Aniversário ainda não passou este ano
+      return Math.floor((thisYearBday.getTime() - input.now.getTime()) / (1000 * 60 * 60 * 24))
     }
-    return distance(left) - distance(right)
+
+    // Aniversário já passou, usa o do próximo ano
+    const nextYearBday = new Date(Date.UTC(nowYear + 1, birthMonth, birthDay))
+    return Math.floor((nextYearBday.getTime() - input.now.getTime()) / (1000 * 60 * 60 * 24))
+  }
+
+  const next = [...withDate].sort((left, right) => {
+    return daysToNextBirthday(left) - daysToNextBirthday(right)
   })[0]!
 
   const day = String(next.dateOfBirth.getUTCDate()).padStart(2, '0')

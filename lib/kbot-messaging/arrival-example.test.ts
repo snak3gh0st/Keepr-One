@@ -34,4 +34,26 @@ describe('toArrivalExample', () => {
 
     expect(example!.text).toBe('Oi Ana!')
   })
+
+  it('com calendário honesto: late December com aniversários em 02/01 e 20/12', () => {
+    // A chegada aparece no fim do ano: contatos com aniversário em janeiro
+    // estão mais pertos do que contatos com aniversário em dezembro que já
+    // passou. A aproximação (mês * 31) pode ser off por até 7-10 dias neste
+    // caso; a implementação honesta usa datas reais do calendário.
+    const lateDecember = new Date('2026-12-31T12:00:00.000Z')
+    const example = toArrivalExample({
+      now: lateDecember,
+      templateBody: '{nome}, feliz aniversário!',
+      candidates: [
+        { name: 'João Silva', dateOfBirth: new Date('1990-12-20T00:00:00.000Z') },
+        { name: 'Maria Santos', dateOfBirth: new Date('1995-01-02T00:00:00.000Z') },
+      ],
+    })
+
+    // Jan 2 (próximo ano) está apenas 2 dias away; Dec 20 (já passou) está 354 dias
+    // até o próximo — Maria deve ser escolhida mesmo com ambas no mesmo intervalo
+    // de mês na aproximação do plano que foi rejeitada.
+    expect(example!.name).toBe('Maria Santos')
+    expect(example!.when).toBe('02/01')
+  })
 })
