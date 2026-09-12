@@ -28,7 +28,7 @@ vi.mock('@/lib/prisma', () => ({
     client: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
     kBotMessageTemplate: { findMany: vi.fn().mockResolvedValue([]) },
     kBotFollowupJob: { findMany: vi.fn().mockResolvedValue([]) },
-    kBotContactPreference: { findMany: vi.fn().mockResolvedValue([]) },
+    kBotContactPreference: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
   },
 }))
 vi.mock('@/lib/messaging/chatwoot-config', () => ({ chatwootConfigFromEnv: mocks.chatwootConfig }))

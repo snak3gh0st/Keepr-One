@@ -45,7 +45,12 @@ export function KBotMessageCenter({
 }: {
   proposals: readonly KBotMessageCenterProposal[]
   contacts: readonly KBotContactRow[]
-  reach: { total: number; withPhone: number }
+  /// `enabledCount` conta o agente inteiro (`kBotContactPreference` com
+  /// `kbotEnabledAt` preenchido), não as linhas da página atual — o convite
+  /// abaixo depende disso ser verdade para o agente, não para as 25 linhas
+  /// que aconteceram de carregar. Opcional (default 0) só para o teste do
+  /// bloco, que não constrói esse agregado.
+  reach: { total: number; withPhone: number; enabledCount?: number }
   /// Busca e paginação vêm prontas do servidor: com 17.733 contatos por
   /// agente e a lista sem virtualização, mandar a página inteira de uma vez
   /// seria pior do que não ter tela nenhuma. Opcionais para o teste do bloco,
@@ -102,7 +107,9 @@ export function KBotMessageCenter({
     })
   }
 
-  const nothingOn = contacts.every((row) => row.state !== 'ON') && reach.withPhone > 0
+  // Agent-wide, not page-wide: as 25 linhas em tela não dizem se algum dos
+  // outros 17 mil contatos já está ligado.
+  const nothingOn = (reach.enabledCount ?? 0) === 0 && reach.withPhone > 0
 
   return <section className="my-4 rounded-2xl border border-border-steel bg-panel p-4 sm:p-6" aria-label={copy('K-Bot em Mensagens', 'K-Bot in Messages')}>
     {error && <p role="alert" className="mb-4 rounded-xl bg-danger/10 p-3 text-sm text-danger">{error}</p>}

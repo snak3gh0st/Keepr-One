@@ -85,7 +85,7 @@ export default async function MensagensPage({
     status: true, errorCode: true, content: true, createdAt: true, updatedAt: true,
   } as const
 
-  const [templates, jobs, contactsTotal, contactsWithPhone, contactRows, contactsMatched] = await Promise.all([
+  const [templates, jobs, contactsTotal, contactsWithPhone, enabledCount, contactRows, contactsMatched] = await Promise.all([
     prisma.kBotMessageTemplate.findMany({
       where: { agentId: agent.id, category: { in: [...SCHEDULED_CATEGORIES] } },
       select: { category: true, language: true, body: true, enabled: true },
@@ -100,6 +100,12 @@ export default async function MensagensPage({
     }),
     prisma.client.count({ where: { assignedAgentId: agent.id } }),
     prisma.client.count({ where: { assignedAgentId: agent.id, phone: { not: null } } }),
+    // Conta o agente inteiro, não a página em tela: o convite "ligar para
+    // todos" é a mitigação de contatos nascerem desligados por padrão, e uma
+    // resposta baseada só nas 25 linhas visíveis convidaria um agente que já
+    // ligou milhares de contatos a "ligar todos" de novo, ou esconderia o
+    // convite de quem não ligou nenhum só porque a página 1 não mostra isso.
+    prisma.kBotContactPreference.count({ where: { agentId: agent.id, kbotEnabledAt: { not: null } } }),
     prisma.client.findMany({
       where: contactWhere,
       orderBy: { name: 'asc' },
@@ -156,7 +162,7 @@ export default async function MensagensPage({
       <KBotMessageCenter
         proposals={proposals}
         contacts={contactRowsView}
-        reach={{ total: contactsTotal, withPhone: contactsWithPhone }}
+        reach={{ total: contactsTotal, withPhone: contactsWithPhone, enabledCount }}
         contactsQuery={contactsQuery}
         contactsPage={contactsPage}
         contactsTotalPages={contactsTotalPages}
