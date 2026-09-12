@@ -27,9 +27,10 @@ describe('mensagens contact list stays paginated', () => {
 
     // No `client.findMany` anywhere in the file may skip the bound — one
     // unbounded contacts query is exactly the failure this test exists to
-    // catch.
+    // catch. Each query must use either CONTACTS_PAGE_SIZE or another
+    // explicitly named constant (e.g. ARRIVAL_EXAMPLE_CANDIDATES).
     for (const call of findManyCalls) {
-      expect(call).toContain('take: CONTACTS_PAGE_SIZE')
+      expect(call).toMatch(/take: (CONTACTS_PAGE_SIZE|ARRIVAL_EXAMPLE_CANDIDATES)/)
     }
   })
 })

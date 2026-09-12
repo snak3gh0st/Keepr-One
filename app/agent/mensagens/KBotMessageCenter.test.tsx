@@ -104,3 +104,17 @@ describe('KBotMessageCenter — a contagem depois de ligar para todos é honesta
     expect(screen.getByText(/2 que pediram para não receber/)).toBeInTheDocument()
   })
 })
+
+describe('KBotMessageCenter — o exemplo mostra valor antes da decisão', () => {
+  it('mostra o que sairia, com nome e data reais, antes de qualquer decisão', () => {
+    render(<KBotMessageCenter
+      proposals={[]}
+      contacts={[]}
+      reach={{ total: 17733, withPhone: 4184 }}
+      example={{ name: 'Ana Souza', when: '18/09', text: 'Ana Souza, feliz aniversário!' }}
+    />)
+
+    expect(screen.getByText(/Ana Souza, feliz aniversário!/)).toBeInTheDocument()
+    expect(screen.getByText(/18\/09/)).toBeInTheDocument()
+  })
+})

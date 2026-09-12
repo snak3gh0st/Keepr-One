@@ -15,12 +15,17 @@ import { APPROVAL_WINDOW_MS, AWAITING_APPROVAL } from '@/lib/kbot-followup/domai
 import { SCHEDULED_CATEGORIES, type ScheduledCategory, type TemplateLanguage } from '@/lib/kbot-templates/categories'
 import { toApprovalProposal } from '@/lib/kbot-templates/approval-view'
 import { toKBotContactRows } from '@/lib/kbot-messaging/contact-list'
+import { toArrivalExample } from '@/lib/kbot-messaging/arrival-example'
+import { getServerLanguage } from '@/lib/i18n/server'
 
 export const dynamic = 'force-dynamic'
 
 /// Sem isto, a página tentaria carregar 17.733 contatos de uma vez — pior do
 /// que não ter tela nenhuma, já que `KBotContactList` não tem virtualização.
 const CONTACTS_PAGE_SIZE = 25
+/// Quantos contatos com data de nascimento carregar para encontrar um exemplo
+/// de chegada (o que o K-Bot mandaria quando nada está ligado ainda).
+const ARRIVAL_EXAMPLE_CANDIDATES = CONTACTS_PAGE_SIZE * 2
 
 export default async function MensagensPage({
   searchParams,
@@ -33,6 +38,7 @@ export default async function MensagensPage({
   const contactsQuery = (params.contactsQuery ?? '').trim().slice(0, 100)
   const contactsPage = Math.max(1, Number.parseInt(params.contactsPage ?? '1', 10) || 1)
   const { copy } = await getServerI18n()
+  const language = await getServerLanguage()
   const [agent, session] = await Promise.all([getCurrentAgent(), getCurrentSession()])
   const readOnly = isReadOnlySupportPreview(session)
   const [user, existingMessagingAccount] = await Promise.all([
@@ -85,7 +91,7 @@ export default async function MensagensPage({
     status: true, errorCode: true, content: true, createdAt: true, updatedAt: true,
   } as const
 
-  const [templates, jobs, contactsTotal, contactsWithPhone, enabledCount, contactRows, contactsMatched] = await Promise.all([
+  const [templates, jobs, contactsTotal, contactsWithPhone, enabledCount, contactRows, contactsMatched, exampleCandidates] = await Promise.all([
     prisma.kBotMessageTemplate.findMany({
       where: { agentId: agent.id, category: { in: [...SCHEDULED_CATEGORIES] } },
       select: { category: true, language: true, body: true, enabled: true },
@@ -114,6 +120,13 @@ export default async function MensagensPage({
       select: { id: true, name: true, phone: true },
     }),
     prisma.client.count({ where: contactWhere }),
+    // Contatos com data de nascimento para escolher um para o exemplo
+    // do que a chegada mostraria quando nada está ligado ainda.
+    prisma.client.findMany({
+      where: { assignedAgentId: agent.id, dateOfBirth: { not: null } },
+      take: ARRIVAL_EXAMPLE_CANDIDATES,
+      select: { name: true, dateOfBirth: true },
+    }),
   ])
 
   const preferences = await prisma.kBotContactPreference.findMany({
@@ -132,6 +145,17 @@ export default async function MensagensPage({
   // O mesmo texto que `toApprovalProposal` já calcula para `/agent/kbot/agendadas`
   // — só reembalado no formato que a Central de Mensagens usa.
   const templateByKey = new Map(templates.map((template) => [`${template.category}:${template.language}`, template]))
+
+  // O exemplo que mostra valor antes de qualquer decisão: o que a chegada
+  // teria mandado para um contato real quando nada está ligado ainda.
+  const birthdayTemplate = templateByKey.get(`BIRTHDAY:${language}`)
+  const example = birthdayTemplate?.body
+    ? toArrivalExample({
+        now: new Date(),
+        templateBody: birthdayTemplate.body,
+        candidates: exampleCandidates,
+      })
+    : null
   const proposals: KBotMessageCenterProposal[] = jobs.map((row) => {
     const template = templateByKey.get(`${row.category}:${row.language}`)
     const proposal = toApprovalProposal(row, {
@@ -167,6 +191,7 @@ export default async function MensagensPage({
         contactsPage={contactsPage}
         contactsTotalPages={contactsTotalPages}
         conversationId={initialConversationId}
+        example={example}
       />
       {messagingReady ? (
         <MessagingWorkspace

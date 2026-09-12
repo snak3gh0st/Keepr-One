@@ -17,6 +17,7 @@ vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }
 vi.mock('@/lib/i18n/server', () => ({
   getCurrentSession: mocks.getCurrentSession,
   getServerI18n: async () => ({ copy: (portuguese: string) => portuguese }),
+  getServerLanguage: async () => 'PT',
 }))
 vi.mock('@/lib/prisma', () => ({
   prisma: {

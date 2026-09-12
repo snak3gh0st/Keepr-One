@@ -43,6 +43,7 @@ export function KBotMessageCenter({
   contactsPage = 1,
   contactsTotalPages = 1,
   conversationId,
+  example,
 }: {
   proposals: readonly KBotMessageCenterProposal[]
   contacts: readonly KBotContactRow[]
@@ -62,6 +63,10 @@ export function KBotMessageCenter({
   /// A conversa aberta no `MessagingWorkspace` ao lado. Paginar contatos não
   /// pode fechá-la — as duas coisas coexistem na mesma tela de propósito.
   conversationId?: string
+  /// O exemplo do que sairia quando nada está ligado ainda, mostrando valor
+  /// antes de qualquer decisão. Opcional — se não houver contato com
+  /// aniversário, o campo fica vazio.
+  example?: { name: string; when: string; text: string } | null
 }) {
   const { copy } = useI18n()
   const [notice, setNotice] = useState('')
@@ -167,6 +172,10 @@ export function KBotMessageCenter({
         `De ${reach.total.toLocaleString('pt-BR')} contatos, ${reach.withPhone.toLocaleString('pt-BR')} têm telefone e podem receber mensagens do K-Bot.`,
         `Of ${reach.total.toLocaleString('pt-BR')} contacts, ${reach.withPhone.toLocaleString('pt-BR')} have a phone and can receive K-Bot messages.`,
       )}</p>
+      {example && <div className="mt-3 rounded-xl bg-white/60 p-3">
+        <p className="text-xs font-medium text-ink-muted uppercase">{copy('Exemplo', 'Example')}: {example.name}, {example.when}</p>
+        <p className="mt-1 text-sm text-ink">{example.text}</p>
+      </div>}
       <button
         type="button"
         disabled={pending}
