@@ -59,6 +59,9 @@ export async function getFollowupCandidates(agentId: string, now = new Date()): 
     const gate = evaluateSendGate({
       phone: input.phone, preferences: prefs, now, enforceQuietHours: false,
       recentJobs: input.phone && contactedPhones.has(input.phone) ? [{ sentAt: now }] : [],
+      // Esta lista é para o agente escolher e enviar à mão; a habilitação do
+      // K-Bot não decide o que aparece aqui.
+      requireEnabled: false,
     })
     // Reported ahead of the gate's reasons: "it is already waiting for you" is
     // an instruction the agent can act on, where "recent contact" would send

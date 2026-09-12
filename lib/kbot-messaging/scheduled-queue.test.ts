@@ -41,6 +41,10 @@ const phone = '+13055550142'
 /// reservation, not about who wrote the message, so they carry a body and stay
 /// on the path where the model is never asked.
 const body = 'Oi {{primeiro_nome}}, aqui é {{agente}}.'
+/// O padrão agora é desligado: sem esta data, o gate recusaria toda a
+/// suíte com NOT_ENABLED. Os testes abaixo são sobre outra coisa, então o
+/// contato já chega ligado pelo agente.
+const enabledAt = new Date('2026-01-01T00:00:00Z')
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -54,7 +58,7 @@ beforeEach(() => {
   mocks.allocationFindMany.mockResolvedValue([{ id: 'al1', grantId: 'g1', reservedTokens: 192 }])
   mocks.generate.mockResolvedValue({ ok: true, text: 'Ana, tudo de bom hoje!', attempted: true,
     model: 'test-model', inputTokens: 120, outputTokens: 30 })
-  mocks.pref.mockResolvedValue([])
+  mocks.pref.mockResolvedValue([{ subjectKey: phone, kbotEnabledAt: enabledAt }])
   mocks.grantFindMany.mockResolvedValue([{ id: 'g1', allowance: 1000, reserved: 0, spent: 0 }])
 })
 
@@ -126,7 +130,7 @@ describe('enqueueScheduledMessagesForAgent', () => {
       mocks.client.mockResolvedValue([{ id: 'c1', name: 'Ana', phone, dateOfBirth: new Date('1980-03-11T00:00:00Z') }])
       mocks.policy.mockResolvedValue([])
       mocks.jobFindFirst.mockResolvedValue(null)
-      mocks.pref.mockResolvedValue([{ subjectKey: phone, ...preference }])
+      mocks.pref.mockResolvedValue([{ subjectKey: phone, kbotEnabledAt: enabledAt, ...preference }])
       const result = await enqueueScheduledMessagesForAgent('a1', now)
       expect(result.skipped).toEqual([expect.objectContaining({ reason: expected })])
       expect(mocks.jobCreate).not.toHaveBeenCalled()
@@ -251,7 +255,7 @@ describe('enqueueScheduledMessagesForAgent, lapse recovery', () => {
   })
 
   it('passes a lapse through the same gate and the same reservation', async () => {
-    mocks.pref.mockResolvedValue([{ subjectKey: phone, optedOut: true }])
+    mocks.pref.mockResolvedValue([{ subjectKey: phone, kbotEnabledAt: enabledAt, optedOut: true }])
     lapsePolicies([lapsed])
     expect((await enqueueScheduledMessagesForAgent('a1', now)).skipped)
       .toEqual([expect.objectContaining({ reason: 'OPTED_OUT' })])
@@ -267,7 +271,7 @@ describe('enqueueScheduledMessagesForAgent, lapse recovery', () => {
   mocks.allocationFindMany.mockResolvedValue([{ id: 'al1', grantId: 'g1', reservedTokens: 192 }])
   mocks.generate.mockResolvedValue({ ok: true, text: 'Ana, tudo de bom hoje!', attempted: true,
     model: 'test-model', inputTokens: 120, outputTokens: 30 })
-    mocks.pref.mockResolvedValue([])
+    mocks.pref.mockResolvedValue([{ subjectKey: phone, kbotEnabledAt: enabledAt }])
     mocks.grantFindMany.mockResolvedValue([{ id: 'g1', allowance: 1000, reserved: 0, spent: 0 }])
     lapsePolicies([lapsed])
     await enqueueScheduledMessagesForAgent('a1', now)
@@ -430,7 +434,7 @@ describe('enqueueScheduledMessagesForAgent, a category the K-Bot writes', () => 
     // model call every time the cron runs.
     for (const arrange of [
       () => mocks.jobFindFirst.mockResolvedValue({ id: 'existing' }),
-      () => mocks.pref.mockResolvedValue([{ subjectKey: phone, optedOut: true }]),
+      () => mocks.pref.mockResolvedValue([{ subjectKey: phone, kbotEnabledAt: enabledAt, optedOut: true }]),
       () => mocks.grantFindMany.mockResolvedValue([{ id: 'g1', allowance: 100, reserved: 0, spent: 0 }]),
     ]) {
       vi.clearAllMocks()
@@ -439,7 +443,7 @@ describe('enqueueScheduledMessagesForAgent, a category the K-Bot writes', () => 
       mocks.client.mockResolvedValue([{ id: 'c1', name: 'Ana', phone, dateOfBirth: new Date('1980-03-11T00:00:00Z') }])
       mocks.policy.mockResolvedValue([])
       mocks.jobFindFirst.mockResolvedValue(null)
-      mocks.pref.mockResolvedValue([])
+      mocks.pref.mockResolvedValue([{ subjectKey: phone, kbotEnabledAt: enabledAt }])
       mocks.grantFindMany.mockResolvedValue([{ id: 'g1', allowance: 1000, reserved: 0, spent: 0 }])
       arrange()
       const result = await enqueueScheduledMessagesForAgent('a1', now)

@@ -80,12 +80,14 @@ export function ScheduledMessagesWorkspace({ view }: { view: ScheduledMessagesVi
     SNOOZED: copy('Adiado por você', 'Snoozed by you'),
     RECENT_CONTACT: copy('Já teve contato nos últimos 7 dias', 'Already contacted in the last 7 days'),
     QUIET_HOURS: copy('Fora do horário do cliente', 'Outside the client’s hours'),
+    NOT_ENABLED: copy('K-Bot não habilitado para este contato', 'K-Bot not enabled for this contact'),
   }
   const blockDetails: Record<SendGateBlockReason, string> = {
     OPTED_OUT: copy('O cliente está marcado para não receber mensagens. Só volta a receber se você reativar.', 'This client is marked as opted out. They only receive messages again if you restore them.'),
     SNOOZED: copy('O contato está adiado até a data registrada.', 'This contact is snoozed until the recorded date.'),
     RECENT_CONTACT: copy('Uma mensagem de qualquer categoria — ou um contato manual seu — aconteceu dentro da janela de 7 dias.', 'A message of any category — or a manual contact of yours — happened inside the 7-day window.'),
     QUIET_HOURS: copy('Era madrugada ou noite no fuso do cliente. A mensagem volta para a fila e sai na próxima passagem dentro do horário dele.', 'It was night in the client’s time zone. The message goes back in the queue and leaves on the next pass, within their hours.'),
+    NOT_ENABLED: copy('Você ainda não ligou o K-Bot para este contato. Sem habilitação, o robô não escreve para ele.', 'You have not turned K-Bot on for this contact yet. Without enablement, the bot will not write to them.'),
   }
   const bucketLabels: Record<ScheduledBucket, string> = {
     AWAITING_APPROVAL: copy('Esperando você', 'Waiting for you'),

@@ -14,6 +14,9 @@ function gate(overrides: Partial<Parameters<typeof evaluateSendGate>[0]> = {}) {
     recentJobs: [],
     now,
     enforceQuietHours: true,
+    // Estes testes antigos não são sobre habilitação; mantêm o comportamento
+    // anterior à mudança de padrão.
+    requireEnabled: false,
     ...overrides,
   })
 }
@@ -69,6 +72,7 @@ describe('evaluateSendGate', () => {
       recentJobs: [],
       now: new Date('2026-07-15T14:00:00Z'),
       enforceQuietHours: true,
+      requireEnabled: false,
     })
     expect(decision).toMatchObject({ reason: 'QUIET_HOURS' })
     expect(decision.quietHours).toMatchObject({ timeZone: 'America/Los_Angeles', derived: true })
@@ -81,11 +85,50 @@ describe('evaluateSendGate', () => {
       recentJobs: [],
       now: new Date('2026-07-15T14:00:00Z'),
       enforceQuietHours: false,
+      requireEnabled: false,
     })
     expect(decision).toMatchObject({ allowed: true, quietHours: null })
   })
 
   it('still refuses an opted-out contact when the hour is not enforced', () => {
     expect(gate({ preferences: [{ optedOut: true }], enforceQuietHours: false })).toMatchObject({ reason: 'OPTED_OUT' })
+  })
+})
+
+describe('habilitação por contato', () => {
+  const base = { phone: '+5511999990000', recentJobs: [], now: new Date('2026-09-12T15:00:00.000Z') }
+
+  it('barra o envio automático de quem nunca foi ligado', () => {
+    const decision = evaluateSendGate({ ...base, preferences: [], requireEnabled: true, enforceQuietHours: false })
+
+    expect(decision).toMatchObject({ allowed: false, reason: 'NOT_ENABLED' })
+  })
+
+  it('libera quem o agente ligou', () => {
+    const decision = evaluateSendGate({
+      ...base,
+      preferences: [{ kbotEnabledAt: new Date('2026-09-10T00:00:00.000Z') }],
+      requireEnabled: true,
+      enforceQuietHours: false,
+    })
+
+    expect(decision).toMatchObject({ allowed: true, reason: null })
+  })
+
+  it('o pedido do cliente vence a habilitação do agente', () => {
+    const decision = evaluateSendGate({
+      ...base,
+      preferences: [{ optedOut: true, kbotEnabledAt: new Date('2026-09-10T00:00:00.000Z') }],
+      requireEnabled: true,
+      enforceQuietHours: false,
+    })
+
+    expect(decision).toMatchObject({ allowed: false, reason: 'OPTED_OUT' })
+  })
+
+  it('não barra o envio manual do agente por falta de habilitação', () => {
+    const decision = evaluateSendGate({ ...base, preferences: [], requireEnabled: false, enforceQuietHours: false })
+
+    expect(decision).toMatchObject({ allowed: true, reason: null })
   })
 })

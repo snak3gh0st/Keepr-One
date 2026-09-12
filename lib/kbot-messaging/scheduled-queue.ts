@@ -327,6 +327,8 @@ async function screenCandidate(
     // gone. Enqueuing is an intention, not a send — the hour is enforced at
     // dispatch, where a refusal returns the job to PENDING for the next pass.
     enforceQuietHours: false,
+    // O K-Bot age sozinho aqui: sem habilitação do agente, não existe proposta.
+    requireEnabled: true,
   })
   return gate.reason ?? null
 }

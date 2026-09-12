@@ -104,7 +104,7 @@ describe('sending a scheduled message', () => {
     mocks.findUniqueOrThrow.mockResolvedValue(job)
     mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { banned: false, name: 'Paulo Loureiro' } })
     mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{nome}}!' })
-    mocks.pref.mockResolvedValue([])
+    mocks.pref.mockResolvedValue([{ subjectKey: '+13055550142', kbotEnabledAt: new Date('2026-01-01T00:00:00Z') }])
     mocks.messages.mockResolvedValue([])
     mocks.allocation.mockResolvedValue([{ grantId: 'g1', reservedTokens: 192 }])
     mocks.send.mockResolvedValue({ id: '99', sourceId: null, status: null })
@@ -250,7 +250,7 @@ describe('sending a scheduled message', () => {
     const keyedJob = { ...job, subjectKey: 'client:c1' }
     mocks.update.mockResolvedValue(keyedJob)
     mocks.findUniqueOrThrow.mockResolvedValue(keyedJob)
-    mocks.pref.mockResolvedValue([{ subjectKey: 'client:c1', optedOut: true }])
+    mocks.pref.mockResolvedValue([{ subjectKey: 'client:c1', kbotEnabledAt: new Date('2026-01-01T00:00:00Z'), optedOut: true }])
     expect(await processNextScheduledMessage()).toEqual({ outcome: 'SETTLED', id: 'job1' })
     expect(mocks.send).not.toHaveBeenCalled()
     expect(mocks.pref).toHaveBeenCalledWith(expect.objectContaining({
@@ -293,7 +293,7 @@ describe('a scheduled message whose text the agent already read', () => {
     mocks.findUniqueOrThrow.mockResolvedValue(approved)
     mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { banned: false, name: 'Paulo Loureiro' } })
     mocks.template.mockResolvedValue({ enabled: true, body: 'Feliz aniversário, {{nome}}!' })
-    mocks.pref.mockResolvedValue([])
+    mocks.pref.mockResolvedValue([{ subjectKey: '+13055550142', kbotEnabledAt: new Date('2026-01-01T00:00:00Z') }])
     mocks.messages.mockResolvedValue([])
     mocks.allocation.mockResolvedValue([{ grantId: 'g1', reservedTokens: 192 }])
     mocks.send.mockResolvedValue({ id: '99', sourceId: null, status: null })
@@ -333,7 +333,7 @@ describe('a scheduled message the K-Bot writes at dispatch', () => {
     mocks.agent.mockResolvedValue({ id: 'a1', status: 'ACTIVE', user: { banned: false, name: 'Paulo Loureiro' } })
     // On, and with no text of its own: the K-Bot writes this one.
     mocks.template.mockResolvedValue({ enabled: true, body: null })
-    mocks.pref.mockResolvedValue([])
+    mocks.pref.mockResolvedValue([{ subjectKey: '+13055550142', kbotEnabledAt: new Date('2026-01-01T00:00:00Z') }])
     mocks.messages.mockResolvedValue([])
     mocks.allocation.mockResolvedValue([{ grantId: 'g1', reservedTokens: 192 }])
     mocks.send.mockResolvedValue({ id: '99', sourceId: null, status: null })

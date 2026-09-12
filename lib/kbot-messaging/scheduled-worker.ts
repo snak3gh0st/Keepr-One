@@ -209,6 +209,9 @@ export async function processNextScheduledMessage(skipIds: readonly string[] = [
         recentJobs: recent ? [{ sentAt: new Date() }] : [],
         now: new Date(),
         enforceQuietHours: true,
+        // O K-Bot está despachando por conta própria: sem habilitação, o envio
+        // é cancelado aqui, não apenas adiado.
+        requireEnabled: true,
       })
       if (gate.reason) {
         // Quiet hours are a "not yet", not a "never": leave it PENDING for the

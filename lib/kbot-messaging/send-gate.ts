@@ -20,11 +20,17 @@ export type SendGateBlockReason =
   | 'RECENT_CONTACT'
   /// It is the wrong hour where the recipient is.
   | 'QUIET_HOURS'
+  /// O agente nunca ligou o K-Bot para esta pessoa. Padrão desligado: ausência
+  /// de habilitação é uma resposta, não um estado indefinido.
+  | 'NOT_ENABLED'
 
 export type ContactPreference = {
   optedOut?: boolean
   snoozedUntil?: Date | null
   lastManualAt?: Date | null
+  /// Quando o agente ligou o K-Bot para este contato. Nulo ou ausente significa
+  /// desligado — e a data existe para que "quem ligou e quando" seja auditável.
+  kbotEnabledAt?: Date | null
 }
 
 export type RecentJob = {
@@ -43,6 +49,9 @@ export type SendGateInput = {
   /// Scheduled sends must respect the recipient's clock. An agent pressing send
   /// is already choosing the moment, so that path passes `false`.
   enforceQuietHours: boolean
+  /// Verdadeiro no que o K-Bot faz sozinho; falso quando o agente aperta enviar.
+  /// O interruptor governa o robô, não as mãos do agente.
+  requireEnabled: boolean
 }
 
 export type SendGateDecision = {
@@ -59,6 +68,10 @@ export function evaluateSendGate(input: SendGateInput): SendGateDecision {
   }
   if (preferences.some((preference) => preference.snoozedUntil && preference.snoozedUntil > now)) {
     return { allowed: false, reason: 'SNOOZED', quietHours: null }
+  }
+
+  if (input.requireEnabled && !preferences.some((preference) => preference.kbotEnabledAt)) {
+    return { allowed: false, reason: 'NOT_ENABLED', quietHours: null }
   }
 
   const cutoff = now.getTime() - RECENCY_WINDOW_MS
