@@ -12,6 +12,8 @@ import { AnnualReviewCard } from './AnnualReviewCard'
 import { NationalLifeDocumentButton } from './NationalLifeDocumentButton'
 import { PolicyUploadForm } from './PolicyUploadForm'
 import { NationalLifePolicyDetailCard } from './NationalLifePolicyDetailCard'
+import { NationalLifeBookCard } from './NationalLifeBookCard'
+import { toPolicyBookSummary, type PolicyBookSummary } from '@/lib/national-life/policy-book-summary'
 import { Shell } from '@/components/Shell'
 import { PageHeader } from '@/components/PageHeader'
 import { policyStatusLabel } from '@/components/StatusPill'
@@ -89,6 +91,10 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   }> = []
   let serviceEvents: ClientServiceEvent[] = []
   let serviceSourceUpdatedAt: Date | null = null
+  // A linha do book, que chega em todo sync para a apólice inteira. A tela lia
+  // apenas o snapshot de detalhe — captura página a página, que hoje cobre duas
+  // apólices de dez mil — e mostrava "—" para todo o resto.
+  let bookSummary: PolicyBookSummary | null = null
 
   // Every policy in the book is National Life today, so this reads as a
   // formality. It is not: the carrier rows are matched on policy number alone,
@@ -99,7 +105,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   const localConnector = getNationalLifeLocalConnectorConfig()
   if (localConnector.enabled && isCarrierNationalLife && policy.policyNumber) {
     const scopeId = LOCAL_CONNECTOR_DEPLOYMENT_SCOPE
-    const [commissionRows, documentRows, serviceRows] = await Promise.all([
+    const [commissionRows, documentRows, serviceRows, bookRow] = await Promise.all([
       readNationalLifeReports(prisma, {
           agentId: policy.agentId,
           OR: [
@@ -141,7 +147,19 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         },
         select: { id: true, raw: true, fetchedAt: true },
       }),
+      // O número da apólice se repete entre contas de agente, então o dono local
+      // entra na autoridade da consulta, não numa filtragem depois — a mesma
+      // regra das três acima.
+      prisma.nationalLifeInforcePolicy.findFirst({
+        where: {
+          agentId: policy.agentId,
+          deploymentScope: scopeId,
+          policyNumber: policy.policyNumber,
+        },
+        orderBy: { fetchedAt: 'desc' },
+      }),
     ])
+    bookSummary = toPolicyBookSummary(bookRow)
 
     carrierCommissions = toCarrierCommissionRecords(
       preferCanonicalCarrierCommissionRows(commissionRows, scopeId),
@@ -423,6 +441,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               sources. Only the latter proves coverage/payment values, so the
               screen shows its own freshness instead of making a carrier-wide
               claim from an empty bulk column. */}
+          {isCarrierNationalLife && <NationalLifeBookCard summary={bookSummary} />}
           {isCarrierNationalLife && (
             <NationalLifePolicyDetailCard
               detail={carrierDetail}
