@@ -3008,6 +3008,10 @@ model KBotContactPreference {
   agent        Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
   subjectKey   String
   optedOut     Boolean   @default(false)
+  /// Quando o agente ligou o K-Bot para este contato. Nulo é desligado — o
+  /// padrão. Deliberadamente não é a inversão de `optedOut`: aquele campo é o
+  /// pedido do cliente e continua significando só isso.
+  kbotEnabledAt DateTime?
   snoozedUntil DateTime?
   lastManualAt DateTime?
   updatedAt    DateTime  @updatedAt

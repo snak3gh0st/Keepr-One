@@ -8,8 +8,6 @@ const mocks = vi.hoisted(() => ({
   toggle: vi.fn(),
   autoSend: vi.fn(),
   consent: vi.fn(),
-  approve: vi.fn(),
-  discard: vi.fn(),
 }))
 
 vi.mock('./actions', () => ({
@@ -17,8 +15,6 @@ vi.mock('./actions', () => ({
   setScheduledCategoryEnabled: mocks.toggle,
   setScheduledCategoryAutoSend: mocks.autoSend,
   setContactConsent: mocks.consent,
-  approveScheduledProposals: mocks.approve,
-  discardScheduledProposals: mocks.discard,
 }))
 
 import { ScheduledMessagesWorkspace, type ScheduledMessagesView } from './ScheduledMessagesWorkspace'
@@ -30,8 +26,6 @@ beforeEach(() => {
   mocks.toggle.mockResolvedValue({ ok: true })
   mocks.consent.mockResolvedValue({ ok: true })
   mocks.autoSend.mockResolvedValue({ ok: true })
-  mocks.approve.mockResolvedValue({ ok: true, released: 1 })
-  mocks.discard.mockResolvedValue({ ok: true, released: 1 })
 })
 
 const view: ScheduledMessagesView = {
@@ -53,7 +47,6 @@ const view: ScheduledMessagesView = {
       status: 'SENT', bucket: 'SENT', blockedReason: null, content: 'Feliz aniversário, João!',
       createdAt: '2026-09-01T12:00:00.000Z', updatedAt: '2026-09-01T12:00:00.000Z' },
   ],
-  proposals: [],
   contacts: [{ subjectKey: '+14075550100', optedOut: true, snoozedUntil: null }],
   consent: [
     { id: 'e1', subjectKey: '+14075550100', action: 'OPT_OUT', source: 'WHATSAPP_REPLY',
@@ -130,99 +123,22 @@ describe('consent history', () => {
   })
 })
 
-const proposal = (over: Partial<ScheduledMessagesView['proposals'][number]> = {}): ScheduledMessagesView['proposals'][number] => ({
-  id: 'p1',
-  category: 'BIRTHDAY',
-  customerName: 'Ana Ribeiro',
-  phone: '+14075550100',
-  language: 'PT',
-  // Deliberately not the sample preview text: the template editor on the same
-  // screen renders that one, and a test that cannot tell them apart proves
-  // nothing about the queue.
-  text: 'Parabéns, Ana! Que o ano seja bom. — Paulo Loureiro',
-  problem: null,
-  unknown: [],
-  createdAt: '2026-09-01T12:00:00.000Z',
-  expiresAt: '2999-01-01T00:00:00.000Z',
-  ...over,
-})
-
-describe('the queue waiting for the agent', () => {
-  it('shows the exact text that will go out, with the client behind it', () => {
-    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal()] }} />)
-
-    expect(screen.getByText('Parabéns, Ana! Que o ano seja bom. — Paulo Loureiro')).toBeInTheDocument()
-    expect(screen.getByText(/\+14075550100/)).toBeInTheDocument()
-    expect(screen.getByText('Esperando você liberar')).toBeInTheDocument()
-  })
-
-  it('releases only what was selected, and says how many actually went', async () => {
-    mocks.approve.mockResolvedValue({ ok: true, released: 1 })
-    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal(), proposal({ id: 'p2', customerName: 'João Silva' })] }} />)
-
-    await userEvent.click(screen.getAllByRole('checkbox')[1])
-    await userEvent.click(screen.getByRole('button', { name: /Enviar selecionadas/ }))
-
-    expect(mocks.approve).toHaveBeenCalledWith({ jobIds: ['p2'] })
-    expect(await screen.findByText(/1 mensagem\(ns\) liberada\(s\)/)).toBeInTheDocument()
-  })
-
-  it('discards what the agent chose not to send', async () => {
-    mocks.discard.mockResolvedValue({ ok: true, released: 1 })
-    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal()] }} />)
-
-    await userEvent.click(screen.getAllByRole('checkbox')[0])
-    await userEvent.click(screen.getByRole('button', { name: /Descartar selecionadas/ }))
-
-    expect(mocks.discard).toHaveBeenCalledWith({ jobIds: ['p1'] })
-  })
-
-  it('says how long is left, because a proposal that vanishes reads as a bug', async () => {
-    const expiresAt = new Date(Date.now() + 3 * 3_600_000 + 30 * 60_000).toISOString()
-    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal({ expiresAt })] }} />)
-
-    expect(await screen.findByText(/Expira em 3h(29|30)/)).toBeInTheDocument()
-  })
-
-  it('says a closed window is closed instead of letting the row look alive', async () => {
-    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal({ expiresAt: '2020-01-01T00:00:00.000Z' })] }} />)
-
-    expect(await screen.findByText(/Expirou/)).toBeInTheDocument()
-    await userEvent.click(screen.getAllByRole('checkbox')[0])
-    expect(screen.getByRole('button', { name: /Enviar selecionadas/ })).toBeDisabled()
-  })
-
-  it('never prints a raw variable, and will not let the agent release it', async () => {
-    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal({ text: null, problem: 'UNRENDERABLE', unknown: ['apelido'] })] }} />)
-
-    expect(screen.queryByText(/\{\{ *apelido *\}\}/)).toBeNull()
-    expect(screen.getByRole('alert')).toHaveTextContent('apelido')
-    // Selecting it still offers the one decision that remains available.
-    await userEvent.click(screen.getAllByRole('checkbox')[0])
-    expect(screen.getByRole('button', { name: /Enviar selecionadas/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /Descartar selecionadas/ })).toBeEnabled()
-  })
-
-  it('leaves a proposal whose template was switched off unreleasable', async () => {
-    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal({ text: null, problem: 'TEMPLATE_MISSING' })] }} />)
-
-    expect(screen.getByRole('alert')).toHaveTextContent('desligado')
-    await userEvent.click(screen.getAllByRole('checkbox')[0])
-    expect(screen.getByRole('button', { name: /Enviar selecionadas/ })).toBeDisabled()
-  })
-
-  it('selects only what can actually be sent', async () => {
-    render(<ScheduledMessagesWorkspace view={{ ...view, proposals: [proposal(), proposal({ id: 'p2', text: null, problem: 'TEMPLATE_MISSING' })] }} />)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Selecionar todas' }))
-    await userEvent.click(screen.getByRole('button', { name: /Enviar selecionadas/ }))
-
-    expect(mocks.approve).toHaveBeenCalledWith({ jobIds: ['p1'] })
-  })
-
-  it('stays out of the way when there is nothing to approve', () => {
+// A fila de aprovação mudou de casa (agora vive em /agent/mensagens), então
+// este componente nunca mais renderiza "Esperando você liberar". O que fica
+// aqui é configuração: Modelos, Envios e Consentimento continuam alcançáveis.
+describe('a configuração continua alcançável depois que a fila saiu daqui', () => {
+  it('nunca renderiza a fila de aprovação', () => {
     render(<ScheduledMessagesWorkspace view={view} />)
     expect(screen.queryByText('Esperando você liberar')).toBeNull()
+  })
+
+  it('mantém as três áreas de configuração navegáveis', async () => {
+    render(<ScheduledMessagesWorkspace view={view} />)
+    expect(screen.getByRole('button', { name: 'Modelos' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Envios' }))
+    expect(screen.getByText('Por que estes clientes não receberam')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Consentimento' }))
+    expect(screen.getByText('+14075550100')).toBeInTheDocument()
   })
 })
 

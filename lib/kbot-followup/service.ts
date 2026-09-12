@@ -15,6 +15,9 @@ const MANUAL_GATE_ERRORS: Record<SendGateBlockReason, string> = {
   SNOOZED: 'CONTACT_UNAVAILABLE',
   RECENT_CONTACT: 'RECENT_CONTACT',
   QUIET_HOURS: 'RECENT_CONTACT',
+  // Inalcançável aqui: este caminho chama o gate com `requireEnabled: false`.
+  // O mapa continua total só para que um novo motivo do gate seja erro de tipo.
+  NOT_ENABLED: 'CONTACT_UNAVAILABLE',
 }
 import { getFollowupCandidates } from './candidates'
 import { grantFreeCredits, lockAgent, settleJob } from './credits'
@@ -53,7 +56,9 @@ export async function startFollowups(agentId: string, input: { requestKey: strin
         { status: { in: ACTIVE_JOB_STATES } }, { status: { in: SENT_JOB_STATES }, updatedAt: { gte: new Date(now.getTime() - COOLDOWN_MS) } },
       ] } })
       const gate = evaluateSendGate({ phone: c.phone, preferences: pref ? [pref] : [],
-        recentJobs: recent ? [{ sentAt: now }] : [], now, enforceQuietHours: false })
+        recentJobs: recent ? [{ sentAt: now }] : [], now, enforceQuietHours: false,
+        // O agente está apertando enviar aqui: a habilitação não barra a mão dele.
+        requireEnabled: false })
       if (gate.reason) throw new FollowupError(MANUAL_GATE_ERRORS[gate.reason])
     }
     await grantFreeCredits(tx, agentId, now)

@@ -3,9 +3,8 @@ import { Shell } from '@/components/Shell'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getServerI18n } from '@/lib/i18n/server'
 import { prisma } from '@/lib/prisma'
-import { APPROVAL_WINDOW_MS, AWAITING_APPROVAL } from '@/lib/kbot-followup/domain'
+import { AWAITING_APPROVAL } from '@/lib/kbot-followup/domain'
 import { canSendUnread, SCHEDULED_CATEGORIES, TEMPLATE_LANGUAGES } from '@/lib/kbot-templates/categories'
-import { toApprovalProposal } from '@/lib/kbot-templates/approval-view'
 import { toScheduledEntry } from '@/lib/kbot-templates/schedule-view'
 import { ScheduledMessagesWorkspace, type ScheduledMessagesView } from './ScheduledMessagesWorkspace'
 
@@ -19,23 +18,14 @@ export default async function KBotScheduledMessagesPage() {
     id: true, category: true, customerName: true, phone: true, language: true,
     status: true, errorCode: true, content: true, createdAt: true, updatedAt: true,
   } as const
-  const [user, templates, proposals, jobs, consent] = await Promise.all([
+  const [user, templates, jobs, consent] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { id: agent.userId }, select: { name: true } }),
     prisma.kBotMessageTemplate.findMany({
       where: { agentId: agent.id, category: { in: [...SCHEDULED_CATEGORIES] } },
       select: { category: true, language: true, body: true, enabled: true, autoSend: true, updatedAt: true },
     }),
-    // Oldest first: those are the ones closest to expiring, and expiry is the
-    // only thing on this list that happens without the agent.
-    prisma.kBotFollowupJob.findMany({
-      where: { agentId: agent.id, category: { in: [...SCHEDULED_CATEGORIES] }, status: AWAITING_APPROVAL },
-      orderBy: { createdAt: 'asc' },
-      take: 100,
-      select: jobFields,
-    }),
-    // Deliveries are what already happened. Proposals are excluded here rather
-    // than filtered afterwards: with one query, a pile of pending proposals
-    // would crowd real deliveries out of the 200 entirely.
+    // The queue of proposals waiting for approval now lives in
+    // `/agent/mensagens` — this screen only reads what already happened.
     prisma.kBotFollowupJob.findMany({
       where: { agentId: agent.id, category: { in: [...SCHEDULED_CATEGORIES] }, status: { not: AWAITING_APPROVAL } },
       orderBy: { updatedAt: 'desc' },
@@ -55,15 +45,10 @@ export default async function KBotScheduledMessagesPage() {
   // preference. Reading the button label off the event log would show "opted
   // out" as available for exactly the people who already asked to stop.
   const preferences = await prisma.kBotContactPreference.findMany({
-    where: { agentId: agent.id, subjectKey: { in: Array.from(new Set([...jobs, ...proposals].map((job) => job.phone))) } },
+    where: { agentId: agent.id, subjectKey: { in: Array.from(new Set(jobs.map((job) => job.phone))) } },
     select: { subjectKey: true, optedOut: true, snoozedUntil: true },
   })
   const { copy } = await getServerI18n()
-
-  // The template a proposal will actually be sent with, keyed the way the
-  // worker looks it up. A row that is missing or switched off renders as no
-  // body at all, which is what makes the card say so instead of guessing.
-  const templateByKey = new Map(templates.map((template) => [`${template.category}:${template.language}`, template]))
 
   const view: ScheduledMessagesView = {
     categories: SCHEDULED_CATEGORIES.map((category) => ({
@@ -88,18 +73,6 @@ export default async function KBotScheduledMessagesPage() {
         }
       }),
     })),
-    proposals: proposals.map((row) => {
-      const template = templateByKey.get(`${row.category}:${row.language}`)
-      return toApprovalProposal(row, {
-        agentName: user.name,
-        // Told apart, not folded together: a category that is on with no text
-        // of its own is a K-Bot-written one, and its proposal carries the text
-        // already. Only "switched off" makes a proposal unreleasable.
-        templateBody: template?.body ?? null,
-        templateEnabled: template?.enabled === true,
-        approvalWindowMs: APPROVAL_WINDOW_MS,
-      })
-    }),
     entries: jobs.map(toScheduledEntry),
     contacts: preferences.map((preference) => ({
       subjectKey: preference.subjectKey,

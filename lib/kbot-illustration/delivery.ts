@@ -2,6 +2,7 @@ import 'server-only'
 
 import { prisma } from '@/lib/prisma'
 import { normalizePhone } from '@/lib/kbot-followup/domain'
+import { subjectKeyForClient } from '@/lib/kbot-messaging/subject-key'
 import { IllustrationTransportError } from './transport'
 import {
   BLOCKED,
@@ -97,7 +98,7 @@ export async function sendIllustrationRequest(
   // week and asked to be left alone since; the second instruction is the
   // current one, and it is read here rather than when the screen was drawn.
   const preferences = await prisma.kBotContactPreference.findMany({
-    where: { agentId: input.agentId, subjectKey: { in: [phone, `client:${client.id}`] } },
+    where: { agentId: input.agentId, subjectKey: { in: [phone, subjectKeyForClient(client.id)] } },
     select: { optedOut: true },
   })
   if (preferences.some((preference) => preference.optedOut)) {
