@@ -15,6 +15,7 @@ import { APPROVAL_WINDOW_MS, AWAITING_APPROVAL } from '@/lib/kbot-followup/domai
 import { SCHEDULED_CATEGORIES, type ScheduledCategory, type TemplateLanguage } from '@/lib/kbot-templates/categories'
 import { toApprovalProposal } from '@/lib/kbot-templates/approval-view'
 import { toKBotContactRows } from '@/lib/kbot-messaging/contact-list'
+import { subjectKeyForClient } from '@/lib/kbot-messaging/subject-key'
 import { toArrivalExample } from '@/lib/kbot-messaging/arrival-example'
 import { getServerLanguage } from '@/lib/i18n/server'
 
@@ -120,10 +121,20 @@ export default async function MensagensPage({
       select: { id: true, name: true, phone: true },
     }),
     prisma.client.count({ where: contactWhere }),
-    // Contatos com data de nascimento para escolher um para o exemplo
-    // do que a chegada mostraria quando nada está ligado ainda.
+    // Contatos com data de nascimento e telefone para escolher um para o
+    // exemplo do que a chegada mostraria quando nada está ligado ainda — sem
+    // o filtro de telefone a amostra incluiria os 13.549 contatos que o
+    // K-Bot nunca poderia alcançar (só 4.184 dos 17.733 têm telefone), e a
+    // tela feita para vender o K-Bot ilustraria, na maioria das vezes, uma
+    // mensagem para alguém inalcançável. `orderBy` é explícito e estável
+    // (por id) para que a amostra dos "primeiros N" seja a mesma a cada
+    // carga — sem isto, "o aniversário mais próximo" seria só o mais
+    // próximo dentre 50 contatos escolhidos ao acaso, que muda a cada
+    // recarga. Isto é só um exemplo do que uma mensagem parece — não é uma
+    // fila nem uma previsão de quem será contatado a seguir.
     prisma.client.findMany({
-      where: { assignedAgentId: agent.id, dateOfBirth: { not: null } },
+      where: { assignedAgentId: agent.id, dateOfBirth: { not: null }, phone: { not: null } },
+      orderBy: { id: 'asc' },
       take: ARRIVAL_EXAMPLE_CANDIDATES,
       select: { name: true, dateOfBirth: true },
     }),
@@ -134,7 +145,7 @@ export default async function MensagensPage({
       agentId: agent.id,
       subjectKey: {
         in: Array.from(new Set([
-          ...contactRows.flatMap((client) => [client.id, client.phone].filter((value): value is string => Boolean(value))),
+          ...contactRows.flatMap((client) => [subjectKeyForClient(client.id), client.phone].filter((value): value is string => Boolean(value))),
           ...jobs.map((job) => job.phone),
         ])),
       },
@@ -153,6 +164,7 @@ export default async function MensagensPage({
     ? toArrivalExample({
         now: new Date(),
         templateBody: birthdayTemplate.body,
+        agentName: user?.name ?? '',
         candidates: exampleCandidates,
       })
     : null
