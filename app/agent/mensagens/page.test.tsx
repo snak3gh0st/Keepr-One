@@ -22,6 +22,13 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     user: { findUnique: mocks.findUser },
     agentMessagingAccount: { findUnique: mocks.findMessagingAccount },
+    // O K-Bot na Central de Mensagens lê contatos, templates e propostas
+    // independentemente do WhatsApp estar pronto — estes testes não olham
+    // para esse bloco, então os mocks só precisam devolver algo vazio.
+    client: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+    kBotMessageTemplate: { findMany: vi.fn().mockResolvedValue([]) },
+    kBotFollowupJob: { findMany: vi.fn().mockResolvedValue([]) },
+    kBotContactPreference: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }))
 vi.mock('@/lib/messaging/chatwoot-config', () => ({ chatwootConfigFromEnv: mocks.chatwootConfig }))
