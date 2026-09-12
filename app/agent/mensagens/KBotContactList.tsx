@@ -8,7 +8,7 @@ export function KBotContactList({
   onToggle,
 }: {
   rows: readonly KBotContactRow[]
-  onToggle: (input: { subjectKey: string; enabled: boolean }) => void
+  onToggle: (input: { clientId: string; enabled: boolean }) => void
 }) {
   const { copy } = useI18n()
   return (
@@ -34,7 +34,7 @@ export function KBotContactList({
               role="switch"
               aria-checked={row.state === 'ON'}
               aria-label={row.name}
-              onClick={() => onToggle({ subjectKey: row.id, enabled: row.state === 'OFF' })}
+              onClick={() => onToggle({ clientId: row.id, enabled: row.state === 'OFF' })}
               className="rounded-full border border-border-steel px-3 py-1 text-xs text-ink"
             >
               {row.state === 'ON' ? copy('Ligado', 'On') : copy('Desligado', 'Off')}

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { enableAllAgentContacts, setContactEnabled } from './contact-enablement'
+import { subjectKeyForClient } from './subject-key'
+import { evaluateSendGate } from './send-gate'
 
 const now = new Date('2026-09-12T15:00:00.000Z')
 
@@ -17,13 +19,13 @@ function db(contacts: Array<{ id: string; phone: string | null }>, optedOut: str
 }
 
 describe('setContactEnabled', () => {
-  it('liga gravando a data, sem tocar no pedido do cliente', async () => {
+  it('liga gravando a data sob a chave client:<id>, sem tocar no pedido do cliente', async () => {
     const deps = db([])
 
-    await setContactEnabled(deps as never, { agentId: 'a1', subjectKey: 'c1', enabled: true, now })
+    await setContactEnabled(deps as never, { agentId: 'a1', clientId: 'c1', enabled: true, now })
 
     expect(deps.kBotContactPreference.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({ agentId: 'a1', subjectKey: 'c1', kbotEnabledAt: now }),
+      create: expect.objectContaining({ agentId: 'a1', subjectKey: 'client:c1', kbotEnabledAt: now }),
       update: { kbotEnabledAt: now },
     }))
   })
@@ -31,12 +33,47 @@ describe('setContactEnabled', () => {
   it('desliga limpando a data, e também sem tocar no pedido do cliente', async () => {
     const deps = db([])
 
-    await setContactEnabled(deps as never, { agentId: 'a1', subjectKey: 'c1', enabled: false, now })
+    await setContactEnabled(deps as never, { agentId: 'a1', clientId: 'c1', enabled: false, now })
 
     expect(deps.kBotContactPreference.upsert).toHaveBeenCalledWith(expect.objectContaining({
       update: { kbotEnabledAt: null },
     }))
     expect(JSON.stringify(deps.kBotContactPreference.upsert.mock.calls)).not.toContain('optedOut')
+  })
+
+  it('grava sob a MESMA chave que o gate de envio lê para este cliente — a chave não pode divergir entre ligar e checar', async () => {
+    // Este é o teste que importa: um teste de unidade em `setContactEnabled`
+    // sozinho não pegaria as chaves divergirem, porque ele afirmaria qualquer
+    // forma que o código decidisse escrever. Este teste prova que a chave
+    // escrita aqui é a mesma que `evaluateSendGate` recebe quando o caminho
+    // de enfileiramento busca preferências para o MESMO cliente.
+    const deps = db([])
+    const clientId = 'c1'
+    const phone = '+5511999990001'
+
+    await setContactEnabled(deps as never, { agentId: 'a1', clientId, enabled: true, now })
+
+    expect(deps.kBotContactPreference.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ subjectKey: subjectKeyForClient(clientId) }),
+    }))
+
+    // A mesma preferência, lida sob a chave que o caminho de enfileiramento
+    // usa — `subjectKeyForClient`, exatamente como `scheduled-triggers.ts`
+    // cunha e como o gate de envio lê nos dois pontos de disparo.
+    const preferences = [{ subjectKey: subjectKeyForClient(clientId), optedOut: false, kbotEnabledAt: now }]
+    const gateLookupKey = subjectKeyForClient(clientId)
+    const matched = preferences.filter((preference) => preference.subjectKey === gateLookupKey)
+
+    const gate = evaluateSendGate({
+      phone,
+      preferences: matched,
+      recentJobs: [],
+      now,
+      enforceQuietHours: false,
+      requireEnabled: true,
+    })
+
+    expect(gate.allowed).toBe(true)
   })
 })
 
@@ -58,7 +95,7 @@ describe('enableAllAgentContacts', () => {
   it('nunca inclui quem pediu para parar', async () => {
     const deps = db(
       [{ id: 'c1', phone: '+5511999990001' }, { id: 'c2', phone: '+5511999990002' }],
-      ['c2'],
+      [subjectKeyForClient('c2')],
     )
 
     const result = await enableAllAgentContacts(deps as never, { agentId: 'a1', now })

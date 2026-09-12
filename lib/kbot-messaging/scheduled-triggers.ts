@@ -5,6 +5,7 @@
 /// message is right — *whose* today is it, and *have we already sent this year*
 /// — are answered by code a test can drive across a leap year in one line.
 import { FALLBACK_ZONE, timeZoneForPhone } from './quiet-hours'
+import { subjectKeyForClient } from './subject-key'
 
 /// Categories with a date trigger. `KBotMessageTemplate.category` and
 /// `KBotFollowupJob.category` carry the same strings.
@@ -161,7 +162,7 @@ export function scheduledCandidatesForDay(input: ScheduledTriggerInput): Schedul
       phone: client.phone,
       requestKey: `${keyPrefix}:${keySubject}:${today.year}`,
       candidateId,
-      subjectKey: `client:${client.id}`,
+      subjectKey: subjectKeyForClient(client.id),
       sourceHref,
       localYear: today.year,
       timeZone,

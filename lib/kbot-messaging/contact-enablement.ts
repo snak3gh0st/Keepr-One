@@ -4,6 +4,13 @@
 /// toca no pedido do cliente, e a ação em massa não inclui quem pediu para
 /// parar. A segunda é redundante com o gate de propósito — o gate barra de todo
 /// jeito, e a contagem que o agente vê antes de confirmar precisa ser honesta.
+///
+/// A chave de assunto é sempre `client:<id>` — a mesma forma que
+/// `scheduled-triggers.ts` cunha e que o gate (`scheduled-queue.ts`,
+/// `scheduled-worker.ts`, `kbot-illustration/delivery.ts`) lê. Escrever a
+/// chave errada aqui deixaria a habilitação muda: o agente veria "Ligado" mas
+/// o gate nunca encontraria a preferência.
+import { subjectKeyForClient } from './subject-key'
 
 export type ContactEnablementDb = {
   client: {
@@ -19,12 +26,13 @@ export type ContactEnablementDb = {
 
 export async function setContactEnabled(
   db: ContactEnablementDb,
-  input: { agentId: string; subjectKey: string; enabled: boolean; now: Date },
+  input: { agentId: string; clientId: string; enabled: boolean; now: Date },
 ): Promise<{ enabled: boolean }> {
+  const subjectKey = subjectKeyForClient(input.clientId)
   const kbotEnabledAt = input.enabled ? input.now : null
   await db.kBotContactPreference.upsert({
-    where: { agentId_subjectKey: { agentId: input.agentId, subjectKey: input.subjectKey } },
-    create: { agentId: input.agentId, subjectKey: input.subjectKey, kbotEnabledAt },
+    where: { agentId_subjectKey: { agentId: input.agentId, subjectKey } },
+    create: { agentId: input.agentId, subjectKey, kbotEnabledAt },
     update: { kbotEnabledAt },
   })
   return { enabled: input.enabled }
@@ -63,12 +71,13 @@ export async function enableAllAgentContacts(
 
   for (const contact of contacts) {
     if (!contact.phone) { withoutPhone += 1; continue }
-    if (stopped.has(contact.id) || stopped.has(contact.phone)) { optedOut += 1; continue }
+    const subjectKey = subjectKeyForClient(contact.id)
+    if (stopped.has(subjectKey) || stopped.has(contact.phone)) { optedOut += 1; continue }
 
-    if (existing.has(contact.id)) {
-      toUpdate.push(contact.id)
+    if (existing.has(subjectKey)) {
+      toUpdate.push(subjectKey)
     } else {
-      toCreate.push(contact.id)
+      toCreate.push(subjectKey)
     }
     enabled += 1
   }

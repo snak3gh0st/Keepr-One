@@ -1,8 +1,10 @@
 /// A lista de contatos da central, com o único dado que o agente precisa ver
 /// por linha: se o K-Bot pode cuidar desta pessoa, e quando não pode, por quê.
 ///
-/// A preferência pode estar gravada sob o id do contato ou sob o próprio
+/// A preferência pode estar gravada sob `client:<id>` (a chave que
+/// `subjectKeyForClient` cunha e que o gate de envio lê) ou sob o próprio
 /// número: um pedido de parada chega por telefone, não por id de cliente.
+import { subjectKeyForClient } from './subject-key'
 
 export type KBotContactState = 'ON' | 'OFF' | 'NO_PHONE' | 'STOPPED'
 
@@ -19,7 +21,7 @@ export function toKBotContactRows(input: {
 }): KBotContactRow[] {
   const byKey = new Map(input.preferences.map((preference) => [preference.subjectKey, preference]))
   return input.contacts.map((contact) => {
-    const matches = [byKey.get(contact.id), contact.phone ? byKey.get(contact.phone) : undefined]
+    const matches = [byKey.get(subjectKeyForClient(contact.id)), contact.phone ? byKey.get(contact.phone) : undefined]
       .filter((value): value is NonNullable<typeof value> => Boolean(value))
     // O pedido do cliente é a primeira pergunta, sempre.
     if (matches.some((preference) => preference.optedOut)) {

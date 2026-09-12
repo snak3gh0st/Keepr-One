@@ -26,7 +26,7 @@ export type KBotEnableAllResult =
 const PATH = '/agent/mensagens'
 
 const toggleSchema = z.strictObject({
-  subjectKey: z.string().min(1).max(64),
+  clientId: z.string().min(1).max(64),
   enabled: z.boolean(),
 })
 
@@ -54,9 +54,19 @@ export async function toggleKBotContact(input: unknown): Promise<KBotContactActi
   if (!parsed.success) return { ok: false, message: unavailable(copy) }
   try {
     const agent = await currentAgent()
+    // O alvo tem de pertencer à carteira deste agente. `agentId` vem da
+    // sessão e a chave é única por agente, então não há escrita cruzando
+    // agentes de todo jeito — mas sem esta checagem um `clientId` forjado de
+    // fora da carteira ainda plantaria uma preferência visível ao gate para
+    // alguém que este agente nunca deveria poder tocar.
+    const client = await prisma.client.findFirst({
+      where: { id: parsed.data.clientId, assignedAgentId: agent.id },
+      select: { id: true },
+    })
+    if (!client) return { ok: false, message: unavailable(copy) }
     await setContactEnabled(prisma, {
       agentId: agent.id,
-      subjectKey: parsed.data.subjectKey,
+      clientId: client.id,
       enabled: parsed.data.enabled,
       now: new Date(),
     })

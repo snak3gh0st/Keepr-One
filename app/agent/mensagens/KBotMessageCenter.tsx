@@ -202,8 +202,8 @@ export function KBotMessageCenter({
 
       <KBotContactList
         rows={contacts}
-        onToggle={({ subjectKey, enabled }) => run(
-          () => toggleKBotContact({ subjectKey, enabled }),
+        onToggle={({ clientId, enabled }) => run(
+          () => toggleKBotContact({ clientId, enabled }),
           enabled
             ? copy('K-Bot ligado para este contato.', 'K-Bot turned on for this contact.')
             : copy('K-Bot desligado para este contato.', 'K-Bot turned off for this contact.'),

@@ -42,6 +42,6 @@ describe('KBotContactList', () => {
 
     screen.getByRole('switch', { name: /Davi Melo/ }).click()
 
-    expect(onToggle).toHaveBeenCalledWith({ subjectKey: 'c4', enabled: true })
+    expect(onToggle).toHaveBeenCalledWith({ clientId: 'c4', enabled: true })
   })
 })

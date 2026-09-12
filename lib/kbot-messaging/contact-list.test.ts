@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { toKBotContactRows } from './contact-list'
+import { subjectKeyForClient } from './subject-key'
 
 const now = new Date('2026-09-12T15:00:00.000Z')
 
@@ -13,8 +14,8 @@ describe('toKBotContactRows', () => {
         { id: 'c4', name: 'Davi Melo', phone: '+5511999990004' },
       ],
       preferences: [
-        { subjectKey: 'c1', optedOut: false, kbotEnabledAt: now },
-        { subjectKey: 'c3', optedOut: true, kbotEnabledAt: now },
+        { subjectKey: subjectKeyForClient('c1'), optedOut: false, kbotEnabledAt: now },
+        { subjectKey: subjectKeyForClient('c3'), optedOut: true, kbotEnabledAt: now },
       ],
     })
 
