@@ -2027,6 +2027,69 @@ describe('local connector runs', () => {
     })
   })
 
+  it('fecha uma grade de descoberta, que não tem linha normalizada para podar', async () => {
+    // Regressão de 04/09: a poda passou a ser chamada para todo alvo que não é
+    // REPORT_ROW e a cair num `throw` final. As catorze grades de descoberta viram
+    // RAW_PAGE_ONLY — a página crua é a evidência, não há linha a remover — e cada
+    // uma delas passou a derrubar o run inteiro no fechamento.
+    const runUpdate = vi.fn().mockResolvedValue({})
+    const tx = {
+      nationalLifeSyncRun: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'run-1',
+          plannedGridKeys: ['PENDING_GROSS_COMMISSIONS'],
+        }),
+        update: runUpdate,
+      },
+      nationalLifeConnectorStageReceipt: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'receipt-0', sequence: 0, recordCount: 229,
+            writtenCount: 229, duplicateCount: 0, rejectedCount: 0,
+          },
+        ]),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      nationalLifeConnectorStageCompletion: {
+        upsert: vi.fn(async ({ create }) => ({ id: 'completion-1', ...create })),
+        findMany: vi.fn().mockResolvedValue([{ gridKey: 'PENDING_GROSS_COMMISSIONS' }]),
+      },
+      nationalLifeConnectorStageFailure: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      nationalLifeCaseSnapshot: { deleteMany: vi.fn() },
+      nationalLifeInforcePolicy: { deleteMany: vi.fn() },
+      nationalLifeReportRow: { deleteMany: vi.fn() },
+      nationalLifePublishedReportRow: { deleteMany: vi.fn(), createMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]) },
+      nationalLifeRawGridPage: {
+        upsert: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            sequence: 0,
+            recordCount: 229,
+            records: Array.from({ length: 229 }, (_, index) => ({ PolicyNumber: `P${index}` })),
+          },
+        ]),
+        findFirst: vi.fn().mockResolvedValue({ observedAt: now }),
+        deleteMany: vi.fn(),
+      },
+    }
+    const db = { $transaction: (callback: (value: typeof tx) => unknown) => callback(tx) } as never
+
+    await expect(completeLocalConnectorStage(db, {
+      agentId: 'agent-1', deviceId: 'device-1', runId: 'run-1',
+      gridKey: 'PENDING_GROSS_COMMISSIONS',
+      expectedRecordCount: 229, finalSequence: 0, truncated: false, now,
+    })).resolves.toMatchObject({ receivedRecordCount: 229 })
+
+    // Nada é podado: a evidência de uma grade de descoberta é a própria página crua,
+    // e ela pertence ao run.
+    expect(tx.nationalLifeCaseSnapshot.deleteMany).not.toHaveBeenCalled()
+    expect(tx.nationalLifeInforcePolicy.deleteMany).not.toHaveBeenCalled()
+  })
+
   it('does not complete a run canceled while its final marker is reconciling', async () => {
     const canceled = Object.assign(new Error('Record to update not found'), { code: 'P2025' })
     const runUpdate = vi.fn().mockRejectedValue(canceled)

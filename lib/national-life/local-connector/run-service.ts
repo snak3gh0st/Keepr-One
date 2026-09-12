@@ -960,6 +960,15 @@ async function pruneRowsMissingFromVerifiedSnapshot(
     })
   }
 
+  // Uma grade de descoberta não tem linha normalizada: a página crua é a própria
+  // evidência, e ela pertence ao run que a leu. Não há o que podar, e tratar isso
+  // como alvo desconhecido é o que fazia cada uma das catorze derrubar o run
+  // inteiro no fechamento — o `throw` abaixo existe para um alvo não roteado, não
+  // para este, que é roteado e legítimo.
+  if (target === 'RAW_PAGE_ONLY') {
+    return { count: 0 }
+  }
+
   const firstPage = await tx.nationalLifeRawGridPage.findFirst({
     where: { runId: input.runId, gridKey: input.gridKey },
     orderBy: { observedAt: 'asc' },
