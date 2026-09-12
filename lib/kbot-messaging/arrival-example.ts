@@ -3,10 +3,19 @@
 /// Sai do texto de modelo já aprovado com o nome de um contato real — nunca de
 /// uma chamada ao modelo. Gastar token do agente para ilustrar uma tela que ele
 /// não pediu seria cobrar por uma demonstração.
+///
+/// A sintaxe de placeholder (`{{...}}`) e a renderização têm um único dono —
+/// `lib/kbot-templates/variables.ts` — e este módulo reusa `renderTemplate` /
+/// `templateValuesFor` em vez de fazer sua própria substituição. Uma segunda
+/// implementação de substituição aqui divergiria da sintaxe real cedo ou
+/// tarde, e o exemplo mostraria chaves cruas que o cliente nunca veria.
+import { renderTemplate } from '@/lib/kbot-templates/variables'
+import { templateValuesFor } from '@/lib/kbot-templates/approval-view'
 
 export function toArrivalExample(input: {
   now: Date
   templateBody: string
+  agentName: string
   candidates: ReadonlyArray<{ name: string; dateOfBirth: Date | null }>
 }): { name: string; when: string; text: string } | null {
   const withDate = input.candidates.filter(
@@ -42,9 +51,15 @@ export function toArrivalExample(input: {
 
   const day = String(next.dateOfBirth.getUTCDate()).padStart(2, '0')
   const month = String(next.dateOfBirth.getUTCMonth() + 1).padStart(2, '0')
+  const values = templateValuesFor({ customerName: next.name, agentName: input.agentName })
+  const rendered = renderTemplate(input.templateBody, values)
+  // Um modelo salvo já passou por validação na hora de salvar — chegar aqui
+  // não renderizável significa que o modelo mudou por baixo. Melhor nenhum
+  // exemplo que um com chaves cruas.
+  if (!rendered.ok) return null
   return {
     name: next.name,
     when: `${day}/${month}`,
-    text: input.templateBody.replaceAll('{nome}', next.name),
+    text: rendered.text,
   }
 }
