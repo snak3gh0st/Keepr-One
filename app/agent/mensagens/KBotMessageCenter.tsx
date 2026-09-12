@@ -42,6 +42,7 @@ export function KBotMessageCenter({
   contactsQuery = '',
   contactsPage = 1,
   contactsTotalPages = 1,
+  conversationId,
 }: {
   proposals: readonly KBotMessageCenterProposal[]
   contacts: readonly KBotContactRow[]
@@ -58,6 +59,9 @@ export function KBotMessageCenter({
   contactsQuery?: string
   contactsPage?: number
   contactsTotalPages?: number
+  /// A conversa aberta no `MessagingWorkspace` ao lado. Paginar contatos não
+  /// pode fechá-la — as duas coisas coexistem na mesma tela de propósito.
+  conversationId?: string
 }) {
   const { copy } = useI18n()
   const [notice, setNotice] = useState('')
@@ -107,9 +111,37 @@ export function KBotMessageCenter({
     })
   }
 
+  /// Liga todos os contatos alcançáveis e mostra a contagem real — quantos
+  /// foram ligados, quantos não têm telefone e quantos pediram para não
+  /// receber e ficaram de fora. "Todos" nunca significou literalmente todos,
+  /// e o aviso depois do clique precisa ser tão honesto quanto a tela era
+  /// antes dele.
+  function runEnableAll() {
+    setError('')
+    setNotice('')
+    startTransition(async () => {
+      const result = await enableAllKBotContacts({})
+      if (!result.ok) { setError(result.message ?? unavailable); return }
+      setNotice(copy(
+        `${result.enabled} contato(s) ligado(s). ${result.withoutPhone} sem telefone e ${result.optedOut} que pediram para não receber ficaram de fora.`,
+        `${result.enabled} contact(s) turned on. ${result.withoutPhone} with no phone and ${result.optedOut} who asked not to be contacted were left out.`,
+      ))
+    })
+  }
+
   // Agent-wide, not page-wide: as 25 linhas em tela não dizem se algum dos
   // outros 17 mil contatos já está ligado.
   const nothingOn = (reach.enabledCount ?? 0) === 0 && reach.withPhone > 0
+
+  // Preserva a conversa aberta ao lado ao trocar de página de contatos — as
+  // duas coisas coexistem na mesma tela, e paginar não pode fechar o chat.
+  function contactsHref(page: number) {
+    const params = new URLSearchParams()
+    if (contactsQuery) params.set('contactsQuery', contactsQuery)
+    params.set('contactsPage', String(page))
+    if (conversationId) params.set('conversation', conversationId)
+    return `?${params.toString()}`
+  }
 
   return <section className="my-4 rounded-2xl border border-border-steel bg-panel p-4 sm:p-6" aria-label={copy('K-Bot em Mensagens', 'K-Bot in Messages')}>
     {error && <p role="alert" className="mb-4 rounded-xl bg-danger/10 p-3 text-sm text-danger">{error}</p>}
@@ -139,13 +171,7 @@ export function KBotMessageCenter({
         type="button"
         disabled={pending}
         className="mt-3 inline-flex min-h-11 items-center justify-center rounded-xl bg-teal px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-deep disabled:opacity-40"
-        onClick={() => run(
-          async () => {
-            const outcome = await enableAllKBotContacts({})
-            return outcome
-          },
-          copy('K-Bot ligado para todos os contatos que podem receber.', 'K-Bot turned on for every contact that can receive it.'),
-        )}
+        onClick={runEnableAll}
       >{copy('Ligar o K-Bot para todos', 'Turn K-Bot on for everyone')}</button>
     </div>}
 
@@ -179,13 +205,13 @@ export function KBotMessageCenter({
         <a
           aria-disabled={contactsPage <= 1}
           className={contactsPage <= 1 ? 'pointer-events-none text-sm text-ink-muted opacity-40' : 'text-sm text-teal-deep'}
-          href={`?contactsQuery=${encodeURIComponent(contactsQuery)}&contactsPage=${contactsPage - 1}`}
+          href={contactsHref(contactsPage - 1)}
         >{copy('Anterior', 'Previous')}</a>
         <span className="text-xs text-ink-muted">{copy(`Página ${contactsPage} de ${contactsTotalPages}`, `Page ${contactsPage} of ${contactsTotalPages}`)}</span>
         <a
           aria-disabled={contactsPage >= contactsTotalPages}
           className={contactsPage >= contactsTotalPages ? 'pointer-events-none text-sm text-ink-muted opacity-40' : 'text-sm text-teal-deep'}
-          href={`?contactsQuery=${encodeURIComponent(contactsQuery)}&contactsPage=${contactsPage + 1}`}
+          href={contactsHref(contactsPage + 1)}
         >{copy('Próxima', 'Next')}</a>
       </nav>}
     </div>

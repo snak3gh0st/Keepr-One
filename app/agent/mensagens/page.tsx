@@ -166,6 +166,7 @@ export default async function MensagensPage({
         contactsQuery={contactsQuery}
         contactsPage={contactsPage}
         contactsTotalPages={contactsTotalPages}
+        conversationId={initialConversationId}
       />
       {messagingReady ? (
         <MessagingWorkspace
