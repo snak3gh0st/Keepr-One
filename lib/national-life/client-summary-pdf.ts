@@ -16,7 +16,7 @@ import 'server-only'
 
 import path from 'node:path'
 import { GlobalFonts, PDFDocument, Path2D } from '@napi-rs/canvas'
-import { CLIENT_SUMMARY_DISCLAIMER } from './quote-disclaimer'
+import { CLIENT_SUMMARY_DISCLAIMER, CLIENT_SUMMARY_TERM_DISCLAIMER } from './quote-disclaimer'
 import { clientSummaryCopy, type ClientSummaryLanguage } from './client-summary-copy'
 import type { ClientSummary, ClientSummaryPoint, ClientSummaryTermSchedule } from './client-summary'
 
@@ -46,6 +46,10 @@ const INK_MUTED = '#5a635b'
 const TEAL = '#005526'
 const TEAL_DEEP = '#003617'
 const GOLD = '#be7200'
+/// Reserved for the one thing on the page the client must not skim past: the
+/// year the carrier says a guaranteed-assumptions policy ends. Nothing else
+/// uses it, so its appearance means exactly that.
+const ALERT = '#a33a1f'
 const BORDER = '#d6ddd6'
 const PANEL = '#f7f7f1'
 const PAPER = '#fdfcf9'
@@ -325,6 +329,8 @@ function sectionTitle(ctx: Ctx, title: string, baseline: number, note?: string):
 
 function coverageChart(
   ctx: Ctx, points: ClientSummaryPoint[], copy: Copy, top: number, height: number,
+  guaranteed: ClientSummaryPoint[] = [],
+  guaranteedLapse: { policyYear: number; age: number } | null = null,
 ): number {
   const width = PAGE_WIDTH - MARGIN * 2
   const plotLeft = MARGIN + 54
@@ -335,7 +341,10 @@ function coverageChart(
   // The qualifier sits on the chart, not in the footer. A clean rising curve is
   // exactly the thing a reader remembers as a promise, and the footer is
   // exactly the thing they do not read.
-  sectionTitle(ctx, copy.coverageOverTime, top + 14, copy.notGuaranteed)
+  // With both halves drawn, "not guaranteed" is no longer the whole truth
+  // about the chart — one of the two curves is exactly the guaranteed one.
+  sectionTitle(ctx, copy.coverageOverTime, top + 14,
+    guaranteed.length > 0 ? copy.currentAndGuaranteed : copy.notGuaranteed)
 
   const cashPoints = points.filter(
     (point): point is ClientSummaryPoint & { cashSurrenderValue: number } =>
@@ -346,9 +355,17 @@ function coverageChart(
   const ceiling = niceCeiling(Math.max(
     ...points.map((point) => point.netDeathBenefit),
     ...cashPoints.map((point) => point.cashSurrenderValue),
+    ...guaranteed.map((point) => point.netDeathBenefit),
   ))
-  const firstAge = points[0]!.age
-  const lastAge = points[points.length - 1]!.age
+  // The axis spans both halves. Clipping the guaranteed curve at the current
+  // one's last age would hide the years where the two differ most.
+  const allAges = [
+    ...points.map((point) => point.age),
+    ...guaranteed.map((point) => point.age),
+    ...(guaranteedLapse ? [guaranteedLapse.age] : []),
+  ]
+  const firstAge = Math.min(...allAges)
+  const lastAge = Math.max(...allAges)
   const ageSpan = Math.max(lastAge - firstAge, 1)
   const xFor = (age: number) => plotLeft + ((age - firstAge) / ageSpan) * (plotRight - plotLeft)
   const yFor = (value: number) => plotBottom - (value / ceiling) * (plotBottom - plotTop)
@@ -392,6 +409,25 @@ function coverageChart(
     ctx.stroke()
   }
 
+  // Dashed, thinner and behind the current curve: the same policy under the
+  // carrier's worst permitted case. Drawn before the solid line so that where
+  // the two coincide, the promise is what stays legible.
+  if (guaranteed.length > 0) {
+    ctx.save()
+    ctx.setLineDash([4, 3])
+    ctx.strokeStyle = TEAL_DEEP
+    ctx.lineWidth = 1.7
+    ctx.beginPath()
+    guaranteed.forEach((point, index) => {
+      const x = xFor(point.age)
+      const y = yFor(point.netDeathBenefit)
+      if (index === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    })
+    ctx.stroke()
+    ctx.restore()
+  }
+
   ctx.strokeStyle = TEAL
   ctx.lineWidth = 2.6
   ctx.beginPath()
@@ -403,6 +439,28 @@ function coverageChart(
   })
   ctx.stroke()
 
+  // Where the guaranteed policy ends. A curve that simply stops reads as a
+  // chart that ran out of data; this says the carrier means it stops.
+  if (guaranteedLapse) {
+    const x = xFor(guaranteedLapse.age)
+    ctx.save()
+    ctx.setLineDash([2, 3])
+    ctx.strokeStyle = ALERT
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(x + 0.5, plotTop)
+    ctx.lineTo(x + 0.5, plotBottom)
+    ctx.stroke()
+    ctx.restore()
+    ctx.fillStyle = ALERT
+    ctx.font = font(8, 700)
+    const label = copy.lapsesAt(guaranteedLapse.age)
+    const labelWidth = ctx.measureText(label).width
+    // Flips to the inside of the plot when the marker sits near the right edge.
+    const labelX = x + 4 + labelWidth > plotRight ? x - 4 - labelWidth : x + 4
+    ctx.fillText(label, labelX, plotTop + 9)
+  }
+
   ctx.fillStyle = INK_MUTED
   ctx.font = font(8)
   const first = points[0]!
@@ -411,10 +469,20 @@ function coverageChart(
   right(ctx, copy.age(last.age), xFor(last.age), plotBottom + 14)
 
   let legendX = plotLeft
-  for (const [colour, label] of [[TEAL, copy.deathBenefit], [GOLD, copy.cashValue]] as const) {
-    if (colour === GOLD && cashPoints.length === 0) continue
+  const legend: Array<[string, string, boolean]> = [
+    [TEAL, copy.deathBenefit, false],
+    [GOLD, copy.cashValue, cashPoints.length === 0],
+    [TEAL_DEEP, copy.guaranteedDeathBenefit, guaranteed.length === 0],
+  ]
+  for (const [colour, label, skip] of legend) {
+    if (skip) continue
     ctx.fillStyle = colour
-    ctx.fillRect(legendX, plotBottom + 22, 14, 3)
+    // The guaranteed swatch is dashed, because the line it stands for is.
+    if (colour === TEAL_DEEP) {
+      for (const offset of [0, 6, 12]) ctx.fillRect(legendX + offset, plotBottom + 22, 4, 3)
+    } else {
+      ctx.fillRect(legendX, plotBottom + 22, 14, 3)
+    }
     ctx.fillStyle = INK_MUTED
     ctx.font = font(8, 500)
     ctx.fillText(label, legendX + 19, plotBottom + 26)
@@ -634,7 +702,12 @@ function footer(
 
   ctx.fillStyle = INK_MUTED
   ctx.font = font(7.6)
-  const afterDisclaimer = paragraph(ctx, CLIENT_SUMMARY_DISCLAIMER, MARGIN, top, width, 10)
+  // Term credits no interest, so the permanent-policy condition would describe
+  // an assumption its contract does not contain.
+  const disclaimer = summary.kind === 'LEVEL_TERM'
+    ? CLIENT_SUMMARY_TERM_DISCLAIMER
+    : CLIENT_SUMMARY_DISCLAIMER
+  const afterDisclaimer = paragraph(ctx, disclaimer, MARGIN, top, width, 10)
 
   ctx.fillStyle = INK
   ctx.font = font(7.6, 700)
@@ -652,13 +725,30 @@ function quickPage(
   let contentBottom: number
   if (summary.kind === 'PROJECTED') {
     const afterFigures = headlineFigures(ctx, summary, copy, BAND_HEIGHT + 30)
-    const afterChart = coverageChart(ctx, summary.coverage, copy, afterFigures + 26, 200)
+    // The chart gives up height when there is a lapse sentence to fit under the
+    // table. A curve twenty points shorter still reads; a sentence pushed into
+    // the footer does not.
+    const chartHeight = summary.guaranteedLapse === null ? 200 : 176
+    const afterChart = coverageChart(ctx, summary.coverage, copy, afterFigures + 26, chartHeight,
+      summary.guaranteed, summary.guaranteedLapse)
     contentBottom = projectionTable(ctx, summary.milestones, [
       { x: MARGIN + 14, heading: copy.policyYearColumn, value: (p) => copy.year(p.policyYear) },
       { x: MARGIN + 150, heading: copy.ageColumn, value: (p) => String(p.age) },
       { x: MARGIN + 250, heading: copy.deathBenefitColumn, value: (p) => amount(p.netDeathBenefit) },
       { x: MARGIN + 400, heading: copy.cashValueColumn, value: (p) => amount(p.cashSurrenderValue) },
-    ], afterChart + 28, 28)
+    ], afterChart + 22, 26)
+    // The marker on the chart is three words in eight-point type. Left alone it
+    // is a red mark a client can read as decoration; this is the sentence that
+    // says what it means. The full presentation states it on the outlook page —
+    // the one-pager has no later page to defer to, so it says it here.
+    if (summary.guaranteedLapse !== null) {
+      ctx.fillStyle = ALERT
+      ctx.font = font(10, 500)
+      contentBottom = paragraph(
+        ctx,
+        copy.guaranteedLapseNote(summary.guaranteedLapse.policyYear, summary.guaranteedLapse.age),
+        MARGIN, contentBottom + 20, PAGE_WIDTH - MARGIN * 2, 13)
+    }
   } else {
     const afterFigures = headlineFigures(ctx, summary, copy, BAND_HEIGHT + 38)
     contentBottom = summary.schedule
@@ -707,6 +797,12 @@ function outlookPage(
   const notes = [
     summary.lapseYear !== null ? copy.lapseNote(summary.lapseYear) : null,
     summary.mecYear !== null ? copy.mecNote(summary.mecYear) : null,
+    // Stated in words as well as drawn. The marker on the chart is a label a
+    // reader can pass over; this is the sentence that says what it means, and
+    // it is the one thing a current-values-only page could never tell them.
+    summary.guaranteedLapse !== null
+      ? copy.guaranteedLapseNote(summary.guaranteedLapse.policyYear, summary.guaranteedLapse.age)
+      : null,
   ].filter((note): note is string => note !== null)
   if (notes.length > 0) {
     ctx.fillStyle = INK
@@ -747,7 +843,8 @@ function fullPages(
   const plan = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
   pageChrome(plan, summary, copy.yourPlan, 2)
   const afterFigures = headlineFigures(plan, summary, copy, MARGIN + 60)
-  coverageChart(plan, summary.coverage, copy, afterFigures + 40, 380)
+  coverageChart(plan, summary.coverage, copy, afterFigures + 40, 380,
+    summary.guaranteed, summary.guaranteedLapse)
   document.endPage()
 
   const table = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)

@@ -110,13 +110,18 @@ describe('client summary route', () => {
     expect(response.headers.get('Content-Type')).toBe('application/pdf')
   })
 
-  // A FlexLife illustration runs to well over a megabyte and has no ledger
-  // worth reading. Fetching its bytes anyway would move that megabyte out of
-  // Postgres on every download in order to throw it away.
-  it('does not go looking for the PDF bytes of an illustration that has no ledger', async () => {
+  // An illustration PDF runs to well over a megabyte. Keeping it out of the
+  // query that answers "may this person read this, and is it verified" means
+  // the permission path never carries a megabyte it has no use for.
+  it('never carries the PDF bytes in the query that answers the permission check', async () => {
     await GET(request, { params })
-    expect(mocks.findUnique).toHaveBeenCalledTimes(1)
     expect(mocks.findUnique.mock.calls[0]?.[0]?.select).not.toHaveProperty('documentBytes')
+  })
+
+  it('reads the stored PDF for a permanent policy, where the guaranteed half lives', async () => {
+    await GET(request, { params })
+    expect(mocks.findUnique).toHaveBeenCalledTimes(2)
+    expect(mocks.findUnique.mock.calls[1]?.[0]?.select).toEqual({ documentBytes: true })
   })
 
   it('reads the stored PDF for Term, where the premium schedule lives', async () => {

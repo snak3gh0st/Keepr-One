@@ -154,6 +154,39 @@ describe('client summary contents', () => {
   })
 })
 
+// The Quick View returns only current values. The guaranteed half — the lowest
+// rate National Life credits and the highest charges it may take — lives in the
+// official PDF, and without it the client document could only ever show the
+// optimistic scenario.
+describe('the guaranteed half of a permanent illustration', () => {
+  const guaranteedLedger = {
+    rows: Array.from({ length: 24 }, (unused, index) => ({
+      policyYear: index + 1,
+      age: 40 + index,
+      premiumOutlay: 3_600,
+      accumulatedValue: Math.max(0, 40_000 - index * 2_000),
+      cashSurrenderValue: Math.max(0, 40_000 - index * 2_000),
+      netDeathBenefit: 500_000 - index * 4_000,
+    })),
+    lapse: { policyYear: 25, age: 63 },
+  }
+
+  it('carries the guaranteed curve and the year the carrier says it ends', () => {
+    const summary = buildClientSummary({ ...verifiedIllustration, guaranteedLedger })
+    expect(summary?.kind === 'PROJECTED' && summary.guaranteed).toHaveLength(24)
+    expect(summary?.kind === 'PROJECTED' && summary.guaranteedLapse)
+      .toEqual({ policyYear: 25, age: 63 })
+  })
+
+  // The document that shipped before this existed must still be producible:
+  // current values alone, marked as not guaranteed.
+  it('produces the same summary as before when the PDF could not be read', () => {
+    const summary = buildClientSummary(verifiedIllustration)
+    expect(summary?.kind === 'PROJECTED' && summary.guaranteed).toEqual([])
+    expect(summary?.kind === 'PROJECTED' && summary.guaranteedLapse).toBeNull()
+  })
+})
+
 describe('Term summaries', () => {
   function termIllustration(confirmedTermDuration: string, requested = confirmedTermDuration) {
     return {

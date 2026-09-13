@@ -23,6 +23,10 @@ type Copy = {
   yourPremium: string
   coverageOverTime: string
   notGuaranteed: string
+  currentAndGuaranteed: string
+  guaranteedDeathBenefit: string
+  lapsesAt: (age: number) => string
+  guaranteedLapseNote: (year: number, age: number) => string
   deathBenefit: string
   cashValue: string
   age: (value: number) => string
@@ -65,6 +69,13 @@ const EN: Copy = {
   yourPremium: 'Your premium',
   coverageOverTime: 'Coverage over time',
   notGuaranteed: 'Not guaranteed · current assumptions',
+  currentAndGuaranteed: 'Current vs. guaranteed assumptions',
+  guaranteedDeathBenefit: 'Guaranteed',
+  lapsesAt: (age) => `Ends at ${age}`,
+  guaranteedLapseNote: (year, age) =>
+    `On guaranteed assumptions — the lowest rate National Life credits and the highest ` +
+    `charges it may take — this policy would end in year ${year}, at age ${age}, unless a ` +
+    `higher premium is paid.`,
   deathBenefit: 'Death benefit',
   cashValue: 'Cash value',
   age: (value) => `Age ${value}`,
@@ -114,6 +125,13 @@ const PT: Copy = {
   yourPremium: 'Seu prêmio',
   coverageOverTime: 'Cobertura ao longo do tempo',
   notGuaranteed: 'Não garantido · premissas atuais',
+  currentAndGuaranteed: 'Premissas atuais vs. garantidas',
+  guaranteedDeathBenefit: 'Garantido',
+  lapsesAt: (age) => `Encerra aos ${age}`,
+  guaranteedLapseNote: (year, age) =>
+    `Nas premissas garantidas — a menor taxa que a National Life credita e os maiores ` +
+    `encargos que ela pode cobrar — esta apólice se encerraria no ano ${year}, aos ${age} ` +
+    `anos, a menos que se pague um prêmio maior.`,
   deathBenefit: 'Benefício por morte',
   cashValue: 'Valor de resgate',
   age: (value) => `Idade ${value}`,

@@ -15,6 +15,7 @@
 
 import { flexLifeProductLabel } from './flex-life'
 import type { ForesightTermLedger, ForesightTermLedgerRow } from './foresight-term-ledger'
+import type { ForesightGuaranteedLedger } from './foresight-guaranteed-ledger'
 import { foresightQuickReview, verifiedForesightResult } from './illustration-verified-result'
 
 /// Years worth calling out beside the curve. 5 and 10 are the near horizon a
@@ -85,6 +86,16 @@ export type ClientSummary =
       outlook: ClientSummaryOutlook | null
       lapseYear: number | null
       mecYear: number | null
+      /// The same policy on guaranteed assumptions — the minimum rate the
+      /// carrier credits and the maximum charges it may take. Empty when the
+      /// official PDF could not be read, which keeps the document that shipped
+      /// before this existed: current values alone, marked as not guaranteed.
+      guaranteed: ClientSummaryPoint[]
+      /// Where the carrier says the policy ends on those assumptions. This is
+      /// the fact a current-values-only page cannot state and the one a client
+      /// most needs, so it is carried separately from the curve that leads to
+      /// it — a chart can be skipped; a sentence is read.
+      guaranteedLapse: { policyYear: number; age: number } | null
     })
   | (ClientSummaryBase & {
       kind: 'LEVEL_TERM'
@@ -126,6 +137,8 @@ export type IllustrationForClientSummary = {
   /// it. Optional because the agent's own screen builds this summary only to
   /// ask whether a document exists, and has no reason to parse a PDF for that.
   termLedger?: ForesightTermLedger | null
+  /// The guaranteed ledger read from the official PDF, on the same terms.
+  guaranteedLedger?: ForesightGuaranteedLedger | null
   /// The agent this goes out under. Optional because the summary is complete
   /// without it — the page simply omits the advisor block rather than printing
   /// a placeholder where a person's name belongs.
@@ -181,7 +194,21 @@ export function buildClientSummary(illustration: IllustrationForClientSummary): 
     outlook: outlookFrom(coverage),
     lapseYear: quickReview.summary.lapseYear,
     mecYear: quickReview.summary.mecYear,
+    guaranteed: guaranteedCoverage(illustration.guaranteedLedger ?? null),
+    guaranteedLapse: illustration.guaranteedLedger?.lapse ?? null,
   }
+}
+
+function guaranteedCoverage(ledger: ForesightGuaranteedLedger | null): ClientSummaryPoint[] {
+  if (!ledger) return []
+  return ledger.rows.map((row) => ({
+    policyYear: row.policyYear,
+    age: row.age,
+    netDeathBenefit: row.netDeathBenefit,
+    cashSurrenderValue: row.cashSurrenderValue,
+    premiumOutlay: row.premiumOutlay,
+    accumulatedValue: row.accumulatedValue,
+  }))
 }
 
 function pickMilestones(coverage: ClientSummaryPoint[], years: number[]): ClientSummaryPoint[] {

@@ -28,6 +28,23 @@ const summary: ClientSummary = {
   outlook: { age: 65, policyYear: 26, totalContributions: 93_600, accumulatedValue: 130_000, growth: 36_400 },
   lapseYear: null,
   mecYear: null,
+  guaranteed: [],
+  guaranteedLapse: null,
+}
+
+/// The same policy with the guaranteed half of its illustration read in: the
+/// carrier's values fall away and the policy lapses in year 25.
+const withGuarantee: ClientSummary = {
+  ...summary,
+  guaranteed: Array.from({ length: 24 }, (unused, index) => ({
+    policyYear: index + 1,
+    age: 40 + index,
+    netDeathBenefit: 500_000 - index * 4_000,
+    cashSurrenderValue: Math.max(0, 40_000 - index * 2_000),
+    premiumOutlay: 3_600,
+    accumulatedValue: Math.max(0, 40_000 - index * 2_000),
+  })),
+  guaranteedLapse: { policyYear: 25, age: 63 },
 }
 
 async function extractText(bytes: Uint8Array): Promise<string> {
@@ -98,6 +115,42 @@ describe('client summary PDF', () => {
     expect(text).toContain('—')
   })
 
+  // A page that draws only the current curve, marked "not guaranteed", is the
+  // shape the regulation on illustrations exists to prevent. With both halves
+  // drawn, the qualifier changes to say which is which.
+  it('names both scenarios on the chart once the guaranteed half is drawn', async () => {
+    const text = await extractText(await renderClientSummaryPdf(withGuarantee))
+    expect(text).toContain('Current vs. guaranteed assumptions')
+    expect(text).toContain('Guaranteed')
+    expect(text).not.toContain('Not guaranteed · current assumptions')
+  })
+
+  // The marker on the chart is three words in eight-point type. The sentence is
+  // the thing a client actually reads, and it is the one fact a current-values
+  // page could never tell them.
+  it('says in words that the policy ends on guaranteed assumptions', async () => {
+    const text = await extractText(await renderClientSummaryPdf(withGuarantee))
+    expect(text).toContain('Ends at 63')
+    expect(text).toContain('would end in year 25, at age 63')
+    expect(text).toContain('unless a higher premium is paid')
+  })
+
+  it('keeps the one-pager clear of the footer when the lapse sentence is on it', async () => {
+    const bytes = await renderClientSummaryPdf(withGuarantee)
+    const text = await extractText(bytes)
+    // Both the last thing above the footer and the first thing in it survive,
+    // which they would not if the two had been drawn over each other.
+    expect(text).toContain('unless a higher premium is paid')
+    expect(text).toContain('Prepared by Keepr One')
+    expect(text).toContain('Source: National Life illustration')
+  })
+
+  it('draws no guaranteed curve when the PDF could not be read', async () => {
+    const text = await extractText(await renderClientSummaryPdf(summary))
+    expect(text).toContain('Not guaranteed · current assumptions')
+    expect(text).not.toContain('would end in year')
+  })
+
   it('names the file after the insured and the day it was issued', () => {
     expect(clientSummaryFilename(summary)).toBe('Maria-Silva-proposal-summary-2026-09-01.pdf')
   })
@@ -155,9 +208,17 @@ describe('Term summary PDF', () => {
     expect(text).not.toContain('Not guaranteed')
   })
 
-  it('still carries the client-facing disclaimer and the carrier attribution', async () => {
+  // A term policy credits no interest, so the permanent-policy condition would
+  // describe an assumption the contract does not contain — and would invite the
+  // client to discount contractual maximums as speculation.
+  it('carries the term condition, not the one about interest rates', async () => {
     const text = await extractText(await renderClientSummaryPdf(term))
-    expect(text).toContain('non-guaranteed interest rates')
+    expect(text).not.toContain('non-guaranteed interest rates')
+    expect(text).toContain('credits no interest')
+    expect(text).toContain('guaranteed maximums set by the contract')
+    // What underwriting can still move, and the parts both conditions share.
+    expect(text).toContain('rate class')
+    expect(text).toContain('only authoritative document')
     expect(text).toContain('National Life illustration issued September 1, 2026')
   })
 

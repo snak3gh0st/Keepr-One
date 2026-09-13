@@ -5,6 +5,7 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentScopeIds } from '@/lib/agent-access'
 import { buildClientSummary } from '@/lib/national-life/client-summary'
 import { extractForesightTermLedger } from '@/lib/national-life/foresight-term-ledger'
+import { extractForesightGuaranteedLedger } from '@/lib/national-life/foresight-guaranteed-ledger'
 import {
   clientSummaryFilename,
   renderClientSummaryPdf,
@@ -64,17 +65,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
   if (!allowed) return new NextResponse('Forbidden', { status: 403 })
 
-  // Term's year-by-year premium comes from the carrier's own Ledger pages, and
-  // the only copy of them Keepr One holds is the stored PDF — so it is read
-  // here, on the way to the document that needs it, rather than kept in a
-  // column that could drift from the file it was derived from.
+  // Both products keep something in the official PDF that exists nowhere else
+  // in Keepr One: Term's year-by-year premium, and FlexLife's guaranteed half.
+  // They are read here, on the way to the document that needs them, rather than
+  // kept in a column that could drift from the file it was derived from.
   //
-  // The bytes are fetched in a query of their own, and only for Term: a
-  // FlexLife illustration runs to well over a megabyte and has no ledger worth
-  // reading, so loading it would be a megabyte moved to be thrown away. A PDF
-  // that will not parse costs the schedule, not the document — the summary
-  // falls back to the shape it had before the ledger existed.
-  const termLedger = await readTermLedger(id, illustration.rawPayload)
+  // The bytes are fetched in a query of their own so the common path — a
+  // permission check, a screen that only asks whether a document exists — never
+  // carries a megabyte of PDF it has no use for. A PDF that will not parse
+  // costs the extra half, not the document: the summary falls back to the shape
+  // it had before this existed.
+  const { termLedger, guaranteedLedger } = await readLedgers(id, illustration.rawPayload)
 
   // The advisor named on the document is the agent who owns the illustration,
   // not whoever is downloading it: an admin pulling a copy must not put their
@@ -83,6 +84,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     ...illustration,
     advisorName: illustration.agent?.user?.name ?? null,
     termLedger,
+    guaranteedLedger,
   })
   // No document exists for an illustration National Life has not confirmed.
   // This is the same gate the agent's screen applies before it offers the
@@ -109,16 +111,21 @@ function isTermIllustration(rawPayload: unknown): boolean {
     'foresightTermResult' in rawPayload
 }
 
-async function readTermLedger(id: string, rawPayload: unknown) {
-  if (!isTermIllustration(rawPayload)) return null
+async function readLedgers(id: string, rawPayload: unknown) {
+  const empty = { termLedger: null, guaranteedLedger: null }
   const stored = await prisma.illustration.findUnique({
     where: { id },
     select: { documentBytes: true },
   })
-  if (!stored?.documentBytes) return null
+  if (!stored?.documentBytes) return empty
+  const bytes = new Uint8Array(stored.documentBytes)
   try {
-    return await extractForesightTermLedger(new Uint8Array(stored.documentBytes))
+    // The two ledgers never coexist in one document, so which one to look for
+    // is settled by the product rather than by trying both and seeing.
+    return isTermIllustration(rawPayload)
+      ? { ...empty, termLedger: await extractForesightTermLedger(bytes) }
+      : { ...empty, guaranteedLedger: await extractForesightGuaranteedLedger(bytes) }
   } catch {
-    return null
+    return empty
   }
 }
