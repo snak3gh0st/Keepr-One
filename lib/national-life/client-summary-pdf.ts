@@ -794,22 +794,23 @@ function outlookPage(
 
   // The carrier's own warnings, when it issued any. They belong on the page
   // that talks about the money, not buried beside the disclaimer.
-  const notes = [
-    summary.lapseYear !== null ? copy.lapseNote(summary.lapseYear) : null,
-    summary.mecYear !== null ? copy.mecNote(summary.mecYear) : null,
+  const notes: Array<[string, string]> = [
+    summary.lapseYear !== null ? [INK, copy.lapseNote(summary.lapseYear)] : null,
+    summary.mecYear !== null ? [INK, copy.mecNote(summary.mecYear)] : null,
     // Stated in words as well as drawn. The marker on the chart is a label a
     // reader can pass over; this is the sentence that says what it means, and
     // it is the one thing a current-values-only page could never tell them.
+    // In the same colour it carries on the one-pager, so a client holding both
+    // does not meet the same sentence twice with two different weights.
     summary.guaranteedLapse !== null
-      ? copy.guaranteedLapseNote(summary.guaranteedLapse.policyYear, summary.guaranteedLapse.age)
+      ? [ALERT, copy.guaranteedLapseNote(
+        summary.guaranteedLapse.policyYear, summary.guaranteedLapse.age)]
       : null,
-  ].filter((note): note is string => note !== null)
-  if (notes.length > 0) {
-    ctx.fillStyle = INK
+  ].filter((note): note is [string, string] => note !== null)
+  for (const [colour, note] of notes) {
+    ctx.fillStyle = colour
     ctx.font = font(10, 500)
-    for (const note of notes) {
-      bottom = paragraph(ctx, note, MARGIN, bottom + 26, PAGE_WIDTH - MARGIN * 2, 15)
-    }
+    bottom = paragraph(ctx, note, MARGIN, bottom + 26, PAGE_WIDTH - MARGIN * 2, 15)
   }
 
   ctx.fillStyle = INK

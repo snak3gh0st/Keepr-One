@@ -252,6 +252,35 @@ describe('Term summary PDF', () => {
     expect(text).not.toContain('Not guaranteed')
   })
 
+  // Three page shapes now feed one footer that follows its content: Term bare,
+  // Term with the schedule, and the projected one-pager with a lapse sentence.
+  // The schedule is the tallest of them, and both times this page grew, the
+  // footer landed on top of the content. The check that generalizes is that the
+  // last thing above the footer and the first thing in it both survive.
+  it('keeps the Term schedule clear of the footer', async () => {
+    const text = await extractText(await renderClientSummaryPdf({
+      ...term,
+      schedule: {
+        levelPeriodYears: 20,
+        levelAnnualPremium: 755.04,
+        levelMonthlyPremium: 62.92,
+        deathBenefit: 500_000,
+        finalPolicyYear: 58,
+        finalAge: 95,
+        firstIncrease: { policyYear: 21, age: 57, annualPremium: 6_262.08, monthlyPremium: 521.84 },
+        rows: Array.from({ length: 6 }, (unused, index) => ({
+          policyYear: index + 1,
+          age: 37 + index,
+          guaranteedAnnualPremium: 755.04 + index,
+          guaranteedDeathBenefit: 500_000,
+        })),
+      },
+    }))
+    expect(text).toContain('The death benefit stays at $500,000')
+    expect(text).toContain('Prepared by Keepr One')
+    expect(text).toContain('Source: National Life illustration')
+  })
+
   it('says plainly when the premium is the kind that rises', async () => {
     const text = await extractText(await renderClientSummaryPdf({ ...term, termDuration: 'ART' }))
     expect(text).toContain('the premium increases each year')
@@ -276,6 +305,25 @@ async function pageTexts(bytes: Uint8Array): Promise<string[]> {
 }
 
 describe('the full presentation', () => {
+  // The normal FlexLife row carries all three: a current-assumptions lapse
+  // year, a MEC year, and now a guaranteed lapse year. Three stacked notes on
+  // the outlook page is the one combination that can push the document to a
+  // fifth page, and it is the combination production data produces.
+  it('stays four pages with every note the carrier can issue at once', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(
+      { ...withGuarantee, lapseYear: 47, mecYear: 12 },
+      { variant: 'FULL' },
+    ))
+    expect(pages).toHaveLength(4)
+    const outlook = pages[3]!
+    expect(outlook).toContain('would lapse in year 47')
+    expect(outlook).toContain('Modified Endowment Contract in year 12')
+    expect(outlook).toContain('would end in year 25, at age 63')
+    // The last note and the first line of the footer both survive, which they
+    // would not if the two had been drawn over each other.
+    expect(outlook).toContain('Prepared by Keepr One')
+  })
+
   it('runs to four pages: cover, plan with the curve, table, outlook', async () => {
     const pages = await pageTexts(await renderClientSummaryPdf(summary, { variant: 'FULL' }))
     expect(pages).toHaveLength(4)
