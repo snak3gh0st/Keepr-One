@@ -369,7 +369,9 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
           <dl className="grid gap-px bg-border-steel sm:grid-cols-2 lg:grid-cols-4">
             {[
               [copy('Capital inicial', 'Initial face amount'), currency(quickReview.summary.initialFaceAmount, locale)],
-              ['Target Premium', premiumCurrency(quickReview.summary.targetPremium, locale)],
+              // Um traço, não um zero: a seguradora não imprime prêmio-alvo
+              // num caso resolvido pelo capital, e zero diria outra coisa.
+              ['Target Premium', quickReview.summary.targetPremium === null ? '—' : premiumCurrency(quickReview.summary.targetPremium, locale)],
               [copy('Prêmio modal', 'Modal premium'), quickReview.summary.modalPremium === null ? '—' : premiumCurrency(quickReview.summary.modalPremium, locale)],
               [copy('MEC Premium', 'MEC premium'), quickReview.summary.mecPremium === null ? '—' : premiumCurrency(quickReview.summary.mecPremium, locale)],
             ].map(([label, value]) => (
@@ -572,7 +574,9 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                       ? premiumCurrency(foresightSnapshot.solve.amount, locale)
                       : currency(foresightSnapshot.solve.amount, locale)}
                   />
-                  {quickReview && <Fact label="Target Premium" value={premiumCurrency(quickReview.summary.targetPremium, locale)} />}
+                  {quickReview?.summary.targetPremium != null && (
+                    <Fact label="Target Premium" value={premiumCurrency(quickReview.summary.targetPremium, locale)} />
+                  )}
                 </>
               ) : (
                 <>

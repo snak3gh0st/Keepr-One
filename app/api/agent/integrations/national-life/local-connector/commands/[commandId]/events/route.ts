@@ -100,7 +100,11 @@ const foresightArtifactRepository = {
               : {}),
           },
         },
-        ...(input.quickReview
+        // Only when the carrier actually printed one. A case solved from the
+        // face amount has no target premium, and writing null under a source
+        // that names the Quick View would be the row claiming the carrier
+        // reported a figure it never showed.
+        ...(input.quickReview?.summary.targetPremium != null
           ? {
               targetPremium: input.quickReview.summary.targetPremium,
               targetPremiumSource: 'FORESIGHT_QUICK_VIEW',

@@ -216,6 +216,41 @@ it('picks the projection table over a narrower table that shares its headings', 
   expect(review.annualProjection[0]!.netDeathBenefit).toBe(1_316_188.19)
 })
 
+// Medido em produção: num solve guiado pelo capital, a National Life imprime
+// Initial Face Amount, Lapse Year, MEC Year, Modal Premium e Premium Mode — e
+// nenhum Target Premium, que é figura de solve por prêmio. O leitor exigia essa
+// coluna para sequer localizar a tabela, e descartava o Quick View inteiro à
+// espera de algo que nunca viria.
+it('lê o resumo de um caso resolvido pelo capital, sem prêmio-alvo', () => {
+  const review = parseForesightQuickReview([
+    ['Initial Face Amount', 'Lapse Year', 'MEC Year', 'Modal Premium', 'Premium Mode'],
+    ['$500,000.00', '', '', '$288.00', 'Monthly'],
+    ['Policy Year', 'Age', 'Premium Outlay', 'Weighted Average Interest Rate', 'Accumulated Value', 'Cash Surrender Value', 'Net Death Benefit'],
+    ['1', '36', '3456', '6.1', '1200', '0', '500000'],
+  ])!
+
+  expect(review.summary.initialFaceAmount).toBe(500_000)
+  expect(review.summary.modalPremium).toBe(288)
+  expect(review.summary.targetPremium).toBeNull()
+  expect(review.annualProjection[0]).toMatchObject({
+    policyYear: 1, age: 36, netDeathBenefit: 500_000, loan: null, annualIncome: null,
+  })
+  // O que ainda amarra a projeção ao caso que o ledger acabou de confirmar.
+  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 288 })).toBe(true)
+  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 289 })).toBe(false)
+})
+
+// O capital e o prêmio modal são o que amarram a tabela ao caso; sem eles não
+// há como saber que a projeção é deste cenário.
+it('ainda recusa um resumo sem capital ou sem prêmio modal', () => {
+  expect(parseForesightQuickReview([
+    ['Initial Face Amount', 'Lapse Year'],
+    ['$500,000.00', ''],
+    ['Policy Year', 'Age', 'Net Death Benefit'],
+    ['1', '36', '500000'],
+  ])).toBeNull()
+})
+
 it('accepts a carrier-confirmed adjustment after the approved input was written', () => {
   const snapshot = {
     schemaVersion: 2, illustrationId: 'ill_premium_123', caseId: null,

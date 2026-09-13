@@ -526,6 +526,14 @@ function quickViewNumber(value: string, allowZero = true): number | null {
   return Number.isFinite(amount) && (allowZero ? amount >= 0 : amount > 0) ? amount : null
 }
 
+/// Every column Quick View may render in the summary table. Used only to score
+/// header candidates — an unknown column is ignored, not rejected.
+const QUICK_VIEW_SUMMARY_COLUMNS = [
+  'Initial Face Amount', 'Lapse Year', 'MEC Year', 'Modal Premium', 'Premium Mode',
+  'Minimum Premium', 'Death Benefit Protection Premium', 'Target Premium',
+  'MEC Premium', 'Guideline Level Premium', 'Guideline Single Premium',
+]
+
 /// Every column Quick View may render in the annual projection. Used only to
 /// score header candidates — an unknown column is ignored, not rejected.
 const QUICK_VIEW_ANNUAL_COLUMNS = [
@@ -537,9 +545,20 @@ const QUICK_VIEW_ANNUAL_COLUMNS = [
 export function parseForesightQuickReview(
   rows: ReadonlyArray<ReadonlyArray<string>>,
 ): ForesightQuickReview | null {
-  const summaryHeaderIndex = rows.findIndex((row) =>
-    row.some((cell) => quickViewLabel(cell) === 'Initial Face Amount') &&
-    row.some((cell) => quickViewLabel(cell) === 'Target Premium'))
+  // Located by the one column the summary always carries. It used to require a
+  // target premium beside it, and a case solved from the face amount does not
+  // have one — the carrier does not print it, so the table was never found and
+  // the whole Quick View was discarded for a column that was never coming.
+  // Among the candidates the richest wins, so a narrower table that happens to
+  // name a face amount cannot displace the summary.
+  const summaryHeaderIndex = rows
+    .map((row, index) => ({ index, row }))
+    .filter(({ row }) => row.some((cell) => quickViewLabel(cell) === 'Initial Face Amount'))
+    .map(({ index, row }) => ({
+      index,
+      known: row.filter((cell) => QUICK_VIEW_SUMMARY_COLUMNS.includes(quickViewLabel(cell))).length,
+    }))
+    .sort((left, right) => right.known - left.known)[0]?.index ?? -1
   const summaryHeaders = rows[summaryHeaderIndex] ?? []
   const summaryValues = rows[summaryHeaderIndex + 1] ?? []
   const summaryValue = (label: string, allowZero = true) => {
@@ -549,7 +568,10 @@ export function parseForesightQuickReview(
   const initialFaceAmount = summaryValue('Initial Face Amount', false)
   const modalPremium = summaryValue('Modal Premium', false)
   const targetPremium = summaryValue('Target Premium', false)
-  if (initialFaceAmount === null || modalPremium === null || targetPremium === null) return null
+  // The face amount and the modal premium are what tie this table to the case
+  // the ledger just confirmed, so both are still required. The target premium
+  // is reported when the carrier prints it and null when it does not.
+  if (initialFaceAmount === null || modalPremium === null) return null
 
   // Which columns Quick View renders depends on the product and on what the
   // illustration was solved for: a case with no loan and no income leaves those

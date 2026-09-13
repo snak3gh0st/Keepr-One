@@ -98,7 +98,10 @@ export type ForesightQuickReview = {
     modalPremium: number
     minimumPremium: number | null
     deathBenefitProtectionPremium: number | null
-    targetPremium: number
+    /// Null on a case solved from the face amount: the target premium is a
+    /// premium-solve figure and the carrier does not print it. Requiring it
+    /// discarded the whole Quick View for those cases.
+    targetPremium: number | null
     mecPremium: number | null
     guidelineLevelPremium: number | null
     guidelineSinglePremium: number | null
@@ -256,9 +259,8 @@ export function isForesightQuickReview(value: unknown): value is ForesightQuickR
     'guidelineLevelPremium', 'guidelineSinglePremium',
   ]) || !positiveCarrierAmount(summary.initialFaceAmount) ||
     !positiveCarrierAmount(summary.modalPremium) ||
-    !positiveCarrierAmount(summary.targetPremium) ||
     !['lapseYear', 'mecYear', 'minimumPremium', 'deathBenefitProtectionPremium',
-      'mecPremium', 'guidelineLevelPremium', 'guidelineSinglePremium']
+      'targetPremium', 'mecPremium', 'guidelineLevelPremium', 'guidelineSinglePremium']
       .every((key) => nullableNonNegativeAmount(summary[key]))) return false
   return value.annualProjection.every((row) => {
     if (!isObject(row) || !exactKeys(row, [
