@@ -23,6 +23,7 @@ import type {
   ForesightExecutionDocument,
   ForesightExecutionReceipt,
   ForesightQuickReview,
+  ForesightQuickReviewUnavailable,
   ForesightSolvedExecutionReceipt,
 } from './foresight-messages'
 import type { ForesightProgressPhase } from './foresight-progress'
@@ -623,19 +624,51 @@ export function parseForesightQuickReview(
   }
 }
 
-function readQuickView(doc: Document): ForesightQuickReview | null {
-  if (doc.location.pathname !== '/NWI/IUL2025/quickview.aspx') return null
+/// Either the Quick View, or why it could not be read.
+///
+/// The failure used to be a bare null, and a bare null is what made this
+/// undiagnosable: the generation carried on without a projection and nothing
+/// recorded which column the reader had been waiting for.
+export type QuickViewReading =
+  | { review: ForesightQuickReview }
+  | { unavailable: ForesightQuickReviewUnavailable }
+
+/// The labels of a header row, so a reader can see what the carrier rendered.
+/// Labels only — the value rows underneath belong to the insured.
+function headerLabels(
+  rows: ReadonlyArray<ReadonlyArray<string>>, anchor: string,
+): string[] {
+  const row = rows.find((candidate) => candidate.some((cell) => quickViewLabel(cell) === anchor))
+  return (row ?? []).map((cell) => quickViewLabel(cell).slice(0, 64)).filter((cell) => cell !== '')
+    .slice(0, 24)
+}
+
+function readQuickView(doc: Document): QuickViewReading {
+  if (doc.location.pathname !== '/NWI/IUL2025/quickview.aspx') {
+    return { unavailable: { reason: 'NOT_ON_PAGE', summaryLabels: [], projectionLabels: [] } }
+  }
   const rows = [...doc.querySelectorAll('tr')].map((row) =>
     [...row.querySelectorAll('th, td')].map((cell) => cell.textContent?.trim() ?? ''))
   const review = parseForesightQuickReview(rows)
-  return review ? {
-    ...review,
-    evidence: {
-      source: 'FORESIGHT_QUICK_VIEW',
-      observedAt: new Date().toISOString(),
-      sourceRows: rows.slice(0, 150).map((row) => row.slice(0, 20).map((cell) => cell.slice(0, 256))),
+  if (!review) {
+    return {
+      unavailable: {
+        reason: 'UNREADABLE',
+        summaryLabels: headerLabels(rows, 'Initial Face Amount'),
+        projectionLabels: headerLabels(rows, 'Policy Year'),
+      },
+    }
+  }
+  return {
+    review: {
+      ...review,
+      evidence: {
+        source: 'FORESIGHT_QUICK_VIEW',
+        observedAt: new Date().toISOString(),
+        sourceRows: rows.slice(0, 150).map((row) => row.slice(0, 20).map((cell) => cell.slice(0, 256))),
+      },
     },
-  } : null
+  }
 }
 
 export function quickReviewMatchesLedger(
@@ -698,7 +731,8 @@ async function fillSolvedLedger(
     if (observed.faceAmount !== null) return { ...observed, faceAmount: observed.faceAmount }
     if (snapshot.solve.basis !== 'PREMIUM') fail('FORESIGHT_SOLVE_READBACK_MISMATCH')
     const quickView = await navigate('/NWI/IUL2025/quickview.aspx', MENU_IDS.quickView)
-    const faceAmount = readQuickView(quickView)?.summary.initialFaceAmount ?? null
+    const reading = readQuickView(quickView)
+    const faceAmount = 'review' in reading ? reading.review.summary.initialFaceAmount : null
     if (faceAmount === null) fail('FORESIGHT_SOLVE_READBACK_MISMATCH')
     return { ...observed, faceAmount }
   } catch (error) {
@@ -875,7 +909,7 @@ async function executeForesightSolvedIllustration(input: {
   // requires one. Refusing that case threw away the PDF, the confirmed
   // amounts, and the illustration itself for the sake of a projection that
   // enriches the client document rather than verifying anything.
-  if (quickReview && !quickReviewMatchesLedger(quickReview, ledger)) {
+  if ('review' in quickReview && !quickReviewMatchesLedger(quickReview.review, ledger)) {
     fail('FORESIGHT_QUICK_VIEW_READBACK_MISMATCH')
   }
   const ridersDoc = await navigate('/NWI/IUL2025/product.aspx', MENU_IDS.riders)
@@ -908,8 +942,11 @@ async function executeForesightSolvedIllustration(input: {
     monthlyPremium: ledger.monthlyPremium,
     annualPremium: ledger.annualPremium,
     // Omitted rather than set undefined: the receipt validator compares the key
-    // set exactly, and a key holding undefined is still a key.
-    ...(quickReview ? { quickReview } : {}),
+    // set exactly, and a key holding undefined is still a key. Exactly one of
+    // the two is written — the projection, or the reason there is none.
+    ...('review' in quickReview
+      ? { quickReview: quickReview.review }
+      : { quickReviewUnavailable: quickReview.unavailable }),
     release,
     reportCode: 'NAIC_ILLUSTRATION',
     documentSha256: await sha256Hex(pdf),

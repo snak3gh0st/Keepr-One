@@ -216,6 +216,71 @@ describe('server-owned Foresight illustration snapshot', () => {
     expect(parseForesightSolvedIllustrationReceipt(receipt)).toEqual(receipt)
   })
 
+  // The generation no longer fails when the Quick View cannot be read, which
+  // left nobody able to say why an illustration came back without a
+  // projection. The reason rides on the receipt instead.
+  it('accepts a receipt that records why there is no Quick Review', () => {
+    const receipt = {
+      inputHash: 'a'.repeat(64),
+      caseFingerprint: `case_${'b'.repeat(64)}`,
+      carrierCaseName: 'KEEPRONE-20260913-CM123ILLUSTRATION',
+      productCode: '956',
+      solveBasis: 'DEATH_BENEFIT',
+      faceAmount: 500_000,
+      monthlyPremium: 565.5,
+      annualPremium: 6_786,
+      release: '5.3.65.31',
+      reportCode: 'NAIC_ILLUSTRATION',
+      documentSha256: 'c'.repeat(64),
+      documentBytes: 1_500_000,
+      saved: true,
+      quickReviewUnavailable: {
+        reason: 'UNREADABLE',
+        summaryLabels: ['Initial Face Amount', 'Modal Premium'],
+        projectionLabels: ['Policy Year', 'Age', 'Net Death Benefit'],
+      },
+    } as const
+    expect(parseForesightSolvedIllustrationReceipt(receipt)).toEqual(receipt)
+
+    // Labels only. A value that slipped into the label list is the one thing
+    // this record must never carry, so the shape is closed rather than loose.
+    expect(parseForesightSolvedIllustrationReceipt({
+      ...receipt,
+      quickReviewUnavailable: { ...receipt.quickReviewUnavailable, values: ['500000'] },
+    })).toBeNull()
+    expect(parseForesightSolvedIllustrationReceipt({
+      ...receipt, quickReviewUnavailable: { ...receipt.quickReviewUnavailable, reason: 'BECAUSE' },
+    })).toBeNull()
+    expect(parseForesightSolvedIllustrationReceipt({
+      ...receipt,
+      quickReviewUnavailable: {
+        ...receipt.quickReviewUnavailable,
+        summaryLabels: Array.from({ length: 25 }, () => 'x'),
+      },
+    })).toBeNull()
+
+    // Carrying both would be the receipt claiming a projection it also says it
+    // could not read.
+    expect(parseForesightSolvedIllustrationReceipt({
+      ...receipt,
+      quickReview: {
+        evidence: {
+          source: 'FORESIGHT_QUICK_VIEW', observedAt: '2026-09-13T12:00:00.000Z', sourceRows: [],
+        },
+        summary: {
+          initialFaceAmount: 500_000, lapseYear: null, mecYear: null, modalPremium: 565.5,
+          minimumPremium: null, deathBenefitProtectionPremium: null, targetPremium: 6_786,
+          mecPremium: null, guidelineLevelPremium: null, guidelineSinglePremium: null,
+        },
+        annualProjection: [{
+          policyYear: 1, age: 36, premiumOutlay: 6_786, weightedAverageInterestRate: 6.1,
+          loan: null, annualIncome: null, accumulatedValue: 1_000,
+          cashSurrenderValue: 0, netDeathBenefit: 500_000,
+        }],
+      },
+    })).toBeNull()
+  })
+
   it('accepts only a bounded annual Quick Review table from Foresight', () => {
     const receipt = {
       inputHash: 'a'.repeat(64), caseFingerprint: `case_${'b'.repeat(64)}`,

@@ -37,11 +37,13 @@ it('refuses a Quick Review that contradicts the ledger, not one it could not rea
   )
 
   expect(workflow).toContain(
-    "if (quickReview && !quickReviewMatchesLedger(quickReview, ledger)) {")
+    "if ('review' in quickReview && !quickReviewMatchesLedger(quickReview.review, ledger)) {")
   expect(workflow).not.toContain('if (!quickReview ||')
-  // The receipt names the Quick View only when it has one: the contract
-  // compares the key set exactly, so an undefined value would invalidate it.
-  expect(workflow).toContain('...(quickReview ? { quickReview } : {})')
+  // The receipt names the Quick View only when it has one, and otherwise says
+  // why it has none: the contract compares the key set exactly, so an undefined
+  // value would invalidate it.
+  expect(workflow).toContain("'review' in quickReview")
+  expect(workflow).toContain('quickReviewUnavailable: quickReview.unavailable')
 })
 
 it('accepts the US birth date read back from the solved Foresight client form', () => {
