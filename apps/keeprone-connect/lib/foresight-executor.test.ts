@@ -36,14 +36,18 @@ it('refuses a Quick Review that contradicts the ledger, not one it could not rea
     source.indexOf('export async function executeForesightIllustration'),
   )
 
-  expect(workflow).toContain(
-    "if ('review' in quickReview && !quickReviewMatchesLedger(quickReview.review, ledger)) {")
+  // Nenhum dos três caminhos derruba a geração: a página errada, a tabela
+  // ilegível e a tabela que discorda do ledger custam a projeção, não o PDF.
+  expect(workflow).not.toContain("fail('FORESIGHT_QUICK_VIEW_READBACK_MISMATCH')")
   expect(workflow).not.toContain('if (!quickReview ||')
+  expect(workflow).toContain("reason: 'CONTRADICTS_LEDGER'")
+  expect(workflow).toContain('quickViewModalPremium: quickReview.review.summary.modalPremium')
+  expect(workflow).toContain('ledgerMonthlyPremium: ledger.monthlyPremium')
   // The receipt names the Quick View only when it has one, and otherwise says
   // why it has none: the contract compares the key set exactly, so an undefined
   // value would invalidate it.
-  expect(workflow).toContain("'review' in quickReview")
-  expect(workflow).toContain('quickReviewUnavailable: quickReview.unavailable')
+  expect(workflow).toContain("'review' in quickViewOutcome")
+  expect(workflow).toContain('quickReviewUnavailable: quickViewOutcome.unavailable')
 })
 
 it('accepts the US birth date read back from the solved Foresight client form', () => {

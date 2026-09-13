@@ -68,9 +68,18 @@ export type ForesightSolvedExecutionReceipt = {
 /// Column labels only, never values — the labels identify the column the reader
 /// was waiting for and carry nothing about the insured.
 export type ForesightQuickReviewUnavailable = {
-  reason: 'NOT_ON_PAGE' | 'UNREADABLE'
+  reason: 'NOT_ON_PAGE' | 'UNREADABLE' | 'CONTRADICTS_LEDGER'
   summaryLabels: string[]
   projectionLabels: string[]
+  /// Os dois pares que a conferência comparou, presentes só quando o motivo é
+  /// uma contradição. São valores que a própria linha já guarda — não é
+  /// exposição nova — e sem eles uma contradição é indiagnosticável.
+  comparison: {
+    quickViewFaceAmount: number | null
+    ledgerFaceAmount: number | null
+    quickViewModalPremium: number | null
+    ledgerMonthlyPremium: number | null
+  } | null
 }
 
 export function isForesightQuickReviewUnavailable(
@@ -78,8 +87,17 @@ export function isForesightQuickReviewUnavailable(
 ): value is ForesightQuickReviewUnavailable {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Record<string, unknown>
-  if (!exactKeys(candidate, ['projectionLabels', 'reason', 'summaryLabels'])) return false
-  if (candidate.reason !== 'NOT_ON_PAGE' && candidate.reason !== 'UNREADABLE') return false
+  if (!exactKeys(candidate, ['comparison', 'projectionLabels', 'reason', 'summaryLabels'])) return false
+  if (!['NOT_ON_PAGE', 'UNREADABLE', 'CONTRADICTS_LEDGER'].includes(String(candidate.reason))) return false
+  const cmp = candidate.comparison
+  if (cmp !== null) {
+    if (!isObject(cmp) || !exactKeys(cmp, [
+      'ledgerFaceAmount', 'ledgerMonthlyPremium', 'quickViewFaceAmount', 'quickViewModalPremium',
+    ])) return false
+    if (!Object.values(cmp).every((v) => v === null || (typeof v === 'number' && Number.isFinite(v)))) {
+      return false
+    }
+  }
   const labels = (list: unknown) => Array.isArray(list) && list.length <= 24 &&
     list.every((label) => typeof label === 'string' && label.length <= 64)
   return labels(candidate.summaryLabels) && labels(candidate.projectionLabels)
