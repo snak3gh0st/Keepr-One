@@ -25,6 +25,7 @@ import {
   parseForesightSolvedIllustrationReceipt,
   type ForesightIllustrationSnapshot,
   type ForesightQuickReview,
+  type ForesightQuickReviewUnavailable,
   type ForesightSolvedIllustrationReceipt,
 } from '../foresight-illustration-contract'
 import {
@@ -131,6 +132,7 @@ export type ForesightArtifactRepository = {
     monthlyPremium: number
     annualPremium: number
     quickReview?: ForesightQuickReview
+    quickReviewUnavailable?: ForesightQuickReviewUnavailable
   }) => Promise<void>
   persistTermResult?: (input: {
     agentId: string
@@ -449,7 +451,14 @@ export async function recordDeviceConnectorCommandEvent(
         faceAmount: receipt.faceAmount,
         monthlyPremium: receipt.monthlyPremium,
         annualPremium: receipt.annualPremium,
+        // The projection when the carrier's Quick View could be read, and
+        // otherwise the reason it could not. Dropping the second one here is
+        // what made an illustration with no projection unexplainable: the
+        // executor recorded why and the record died on the way to the row.
         ...(receipt.quickReview ? { quickReview: receipt.quickReview } : {}),
+        ...(receipt.quickReviewUnavailable
+          ? { quickReviewUnavailable: receipt.quickReviewUnavailable }
+          : {}),
       })
     } else if (isForesightTermIllustrationReceipt(receipt)) {
       if (!input.extractTermPremiums || !input.foresightArtifactRepository.persistTermResult) {

@@ -23,6 +23,29 @@ it('primes a new solved illustration allocation before asking Foresight to calcu
   )
 })
 
+// Two different things used to fail as one here, and it cost a whole
+// generation: the carrier contradicting itself, and a second opinion that
+// simply did not arrive. Which columns Quick View renders depends on how the
+// case was solved, so a face-amount solve can legitimately produce nothing this
+// reader accepts — while the ledger read back clean and the official PDF, the
+// only authoritative document, was still ahead.
+it('refuses a Quick Review that contradicts the ledger, not one it could not read', () => {
+  const source = readFileSync(new URL('./foresight-executor.ts', import.meta.url), 'utf8')
+  const workflow = source.slice(
+    source.indexOf('async function executeForesightSolvedIllustration'),
+    source.indexOf('export async function executeForesightIllustration'),
+  )
+
+  expect(workflow).toContain(
+    "if ('review' in quickReview && !quickReviewMatchesLedger(quickReview.review, ledger)) {")
+  expect(workflow).not.toContain('if (!quickReview ||')
+  // The receipt names the Quick View only when it has one, and otherwise says
+  // why it has none: the contract compares the key set exactly, so an undefined
+  // value would invalidate it.
+  expect(workflow).toContain("'review' in quickReview")
+  expect(workflow).toContain('quickReviewUnavailable: quickReview.unavailable')
+})
+
 it('accepts the US birth date read back from the solved Foresight client form', () => {
   const snapshot = {
     schemaVersion: 2,
@@ -139,6 +162,58 @@ it('rejects a Quick Review without the carrier modal premium', () => {
     ['Policy Year', 'Age', 'Premium Outlay', 'Weighted Average Interest Rate', 'Loan', 'Annual Income', 'Accumulated Value', 'Cash Surrender Value', 'Net Death Benefit'],
     ['1', '31', '24000', '5.89', '0', '0', '16088.19', '6088.19', '1316188.19'],
   ])).toBeNull()
+})
+
+// Which columns Quick View renders depends on the product and on what the case
+// was solved for. Demanding all nine meant one absent column threw away the
+// eight that were right there — and, because the caller reads a null as a
+// read-back mismatch, failed the whole generation over it.
+it('keeps the columns the carrier did render when one is missing', () => {
+  const review = parseForesightQuickReview([
+    ['Initial Face Amount', 'Target Premium', 'Modal Premium'],
+    ['$1,300,000.00', '$18,501.60', '$2,000.00'],
+    ['Policy Year', 'Age', 'Premium Outlay', 'Accumulated Value', 'Cash Surrender Value', 'Net Death Benefit'],
+    ['1', '31', '24000', '16088.19', '6088.19', '1316188.19'],
+  ])!
+
+  expect(review.annualProjection[0]).toEqual({
+    policyYear: 1, age: 31, premiumOutlay: 24_000,
+    weightedAverageInterestRate: null, loan: null, annualIncome: null,
+    accumulatedValue: 16_088.19, cashSurrenderValue: 6_088.19, netDeathBenefit: 1_316_188.19,
+  })
+})
+
+// A row that cannot say which year it is is not a row.
+it('rejects a projection table with no policy year or no age', () => {
+  const header = ['Initial Face Amount', 'Target Premium', 'Modal Premium']
+  const values = ['$1,300,000.00', '$18,501.60', '$2,000.00']
+  expect(parseForesightQuickReview([
+    header, values,
+    ['Policy Year', 'Accumulated Value', 'Cash Surrender Value', 'Net Death Benefit'],
+    ['1', '16088.19', '6088.19', '1316188.19'],
+  ])).toBeNull()
+  expect(parseForesightQuickReview([
+    header, values,
+    ['Age', 'Accumulated Value', 'Cash Surrender Value', 'Net Death Benefit'],
+    ['31', '16088.19', '6088.19', '1316188.19'],
+  ])).toBeNull()
+})
+
+// A summary table elsewhere on the page may carry a "Policy Year" cell. The
+// projection is the candidate with the most columns Quick View is known to
+// render, so a two-column aside cannot displace it.
+it('picks the projection table over a narrower table that shares its headings', () => {
+  const review = parseForesightQuickReview([
+    ['Initial Face Amount', 'Target Premium', 'Modal Premium'],
+    ['$1,300,000.00', '$18,501.60', '$2,000.00'],
+    ['Policy Year', 'Age'],
+    ['99', '99'],
+    ['Policy Year', 'Age', 'Premium Outlay', 'Weighted Average Interest Rate', 'Loan', 'Annual Income', 'Accumulated Value', 'Cash Surrender Value', 'Net Death Benefit'],
+    ['1', '31', '24000', '5.89', '0', '0', '16088.19', '6088.19', '1316188.19'],
+  ])!
+
+  expect(review.annualProjection).toHaveLength(1)
+  expect(review.annualProjection[0]!.netDeathBenefit).toBe(1_316_188.19)
 })
 
 it('accepts a carrier-confirmed adjustment after the approved input was written', () => {

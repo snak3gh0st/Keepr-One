@@ -23,6 +23,7 @@ import type {
   ForesightExecutionDocument,
   ForesightExecutionReceipt,
   ForesightQuickReview,
+  ForesightQuickReviewUnavailable,
   ForesightSolvedExecutionReceipt,
 } from './foresight-messages'
 import type { ForesightProgressPhase } from './foresight-progress'
@@ -525,6 +526,14 @@ function quickViewNumber(value: string, allowZero = true): number | null {
   return Number.isFinite(amount) && (allowZero ? amount >= 0 : amount > 0) ? amount : null
 }
 
+/// Every column Quick View may render in the annual projection. Used only to
+/// score header candidates — an unknown column is ignored, not rejected.
+const QUICK_VIEW_ANNUAL_COLUMNS = [
+  'Policy Year', 'Age', 'Premium Outlay', 'Weighted Average Interest Rate',
+  'Loan', 'Annual Income', 'Accumulated Value', 'Cash Surrender Value',
+  'Net Death Benefit',
+]
+
 export function parseForesightQuickReview(
   rows: ReadonlyArray<ReadonlyArray<string>>,
 ): ForesightQuickReview | null {
@@ -542,10 +551,31 @@ export function parseForesightQuickReview(
   const targetPremium = summaryValue('Target Premium', false)
   if (initialFaceAmount === null || modalPremium === null || targetPremium === null) return null
 
-  const annualHeaderIndex = rows.findIndex((row) =>
-    row.some((cell) => quickViewLabel(cell) === 'Policy Year') &&
-    row.some((cell) => quickViewLabel(cell) === 'Cash Surrender Value') &&
-    row.some((cell) => quickViewLabel(cell) === 'Net Death Benefit'))
+  // Which columns Quick View renders depends on the product and on what the
+  // illustration was solved for: a case with no loan and no income leaves those
+  // columns out of the table entirely. Demanding all nine meant one absent
+  // column discarded the whole projection — and because the caller treats a
+  // null read-back as a mismatch, the generation failed rather than returning
+  // the eight columns that were right there.
+  //
+  // So the year and the age are required, because a row that cannot say which
+  // year it is is not a row, and every other column is optional and arrives as
+  // null when the carrier did not render it. The header row is still located by
+  // the columns it must have, and among the candidates the richest one wins, so
+  // a stray table that happens to carry a "Policy Year" cell cannot displace
+  // the projection.
+  const annualHeaderCandidates = rows
+    .map((row, index) => ({ index, row }))
+    .filter(({ row }) =>
+      row.some((cell) => quickViewLabel(cell) === 'Policy Year') &&
+      row.some((cell) => quickViewLabel(cell) === 'Age'))
+    .map(({ index, row }) => ({
+      index,
+      known: row.filter((cell) => QUICK_VIEW_ANNUAL_COLUMNS.includes(quickViewLabel(cell))).length,
+    }))
+    .sort((left, right) => right.known - left.known)
+  const annualHeaderIndex = annualHeaderCandidates[0]?.index ?? -1
+  if (annualHeaderIndex < 0) return null
   const annualHeaders = rows[annualHeaderIndex] ?? []
   const annualIndex = (label: string) => annualHeaders.findIndex((cell) => quickViewLabel(cell) === label)
   const indexes = {
@@ -559,7 +589,7 @@ export function parseForesightQuickReview(
     cashSurrenderValue: annualIndex('Cash Surrender Value'),
     netDeathBenefit: annualIndex('Net Death Benefit'),
   }
-  if (Object.values(indexes).some((index) => index < 0)) return null
+  if (indexes.policyYear < 0 || indexes.age < 0) return null
   const annualProjection = rows.slice(annualHeaderIndex + 1, annualHeaderIndex + 122).flatMap((row) => {
     const policyYear = quickViewNumber(row[indexes.policyYear] ?? '')
     const age = quickViewNumber(row[indexes.age] ?? '')
@@ -594,19 +624,51 @@ export function parseForesightQuickReview(
   }
 }
 
-function readQuickView(doc: Document): ForesightQuickReview | null {
-  if (doc.location.pathname !== '/NWI/IUL2025/quickview.aspx') return null
+/// Either the Quick View, or why it could not be read.
+///
+/// The failure used to be a bare null, and a bare null is what made this
+/// undiagnosable: the generation carried on without a projection and nothing
+/// recorded which column the reader had been waiting for.
+export type QuickViewReading =
+  | { review: ForesightQuickReview }
+  | { unavailable: ForesightQuickReviewUnavailable }
+
+/// The labels of a header row, so a reader can see what the carrier rendered.
+/// Labels only — the value rows underneath belong to the insured.
+function headerLabels(
+  rows: ReadonlyArray<ReadonlyArray<string>>, anchor: string,
+): string[] {
+  const row = rows.find((candidate) => candidate.some((cell) => quickViewLabel(cell) === anchor))
+  return (row ?? []).map((cell) => quickViewLabel(cell).slice(0, 64)).filter((cell) => cell !== '')
+    .slice(0, 24)
+}
+
+function readQuickView(doc: Document): QuickViewReading {
+  if (doc.location.pathname !== '/NWI/IUL2025/quickview.aspx') {
+    return { unavailable: { reason: 'NOT_ON_PAGE', summaryLabels: [], projectionLabels: [] } }
+  }
   const rows = [...doc.querySelectorAll('tr')].map((row) =>
     [...row.querySelectorAll('th, td')].map((cell) => cell.textContent?.trim() ?? ''))
   const review = parseForesightQuickReview(rows)
-  return review ? {
-    ...review,
-    evidence: {
-      source: 'FORESIGHT_QUICK_VIEW',
-      observedAt: new Date().toISOString(),
-      sourceRows: rows.slice(0, 150).map((row) => row.slice(0, 20).map((cell) => cell.slice(0, 256))),
+  if (!review) {
+    return {
+      unavailable: {
+        reason: 'UNREADABLE',
+        summaryLabels: headerLabels(rows, 'Initial Face Amount'),
+        projectionLabels: headerLabels(rows, 'Policy Year'),
+      },
+    }
+  }
+  return {
+    review: {
+      ...review,
+      evidence: {
+        source: 'FORESIGHT_QUICK_VIEW',
+        observedAt: new Date().toISOString(),
+        sourceRows: rows.slice(0, 150).map((row) => row.slice(0, 20).map((cell) => cell.slice(0, 256))),
+      },
     },
-  } : null
+  }
 }
 
 export function quickReviewMatchesLedger(
@@ -669,7 +731,8 @@ async function fillSolvedLedger(
     if (observed.faceAmount !== null) return { ...observed, faceAmount: observed.faceAmount }
     if (snapshot.solve.basis !== 'PREMIUM') fail('FORESIGHT_SOLVE_READBACK_MISMATCH')
     const quickView = await navigate('/NWI/IUL2025/quickview.aspx', MENU_IDS.quickView)
-    const faceAmount = readQuickView(quickView)?.summary.initialFaceAmount ?? null
+    const reading = readQuickView(quickView)
+    const faceAmount = 'review' in reading ? reading.review.summary.initialFaceAmount : null
     if (faceAmount === null) fail('FORESIGHT_SOLVE_READBACK_MISMATCH')
     return { ...observed, faceAmount }
   } catch (error) {
@@ -832,7 +895,21 @@ async function executeForesightSolvedIllustration(input: {
   const quickReview = readQuickView(
     await navigate('/NWI/IUL2025/quickview.aspx', MENU_IDS.quickView),
   )
-  if (!quickReview || !quickReviewMatchesLedger(quickReview, ledger)) {
+  // Two different things used to fail here as one, and conflating them cost a
+  // whole generation.
+  //
+  // A Quick View that *contradicts* the ledger is the carrier disagreeing with
+  // itself about the case it just calculated. Nothing may be issued on that.
+  //
+  // A Quick View that could not be *read* is only a second opinion that did not
+  // arrive. The ledger already read back clean, and the official PDF — the
+  // document that is actually authoritative — is still ahead. Which columns
+  // Quick View renders depends on how the case was solved: a solve driven by
+  // face amount need not print a target premium at all, and the summary reader
+  // requires one. Refusing that case threw away the PDF, the confirmed
+  // amounts, and the illustration itself for the sake of a projection that
+  // enriches the client document rather than verifying anything.
+  if ('review' in quickReview && !quickReviewMatchesLedger(quickReview.review, ledger)) {
     fail('FORESIGHT_QUICK_VIEW_READBACK_MISMATCH')
   }
   const ridersDoc = await navigate('/NWI/IUL2025/product.aspx', MENU_IDS.riders)
@@ -864,7 +941,12 @@ async function executeForesightSolvedIllustration(input: {
     faceAmount: ledger.faceAmount,
     monthlyPremium: ledger.monthlyPremium,
     annualPremium: ledger.annualPremium,
-    quickReview,
+    // Omitted rather than set undefined: the receipt validator compares the key
+    // set exactly, and a key holding undefined is still a key. Exactly one of
+    // the two is written — the projection, or the reason there is none.
+    ...('review' in quickReview
+      ? { quickReview: quickReview.review }
+      : { quickReviewUnavailable: quickReview.unavailable }),
     release,
     reportCode: 'NAIC_ILLUSTRATION',
     documentSha256: await sha256Hex(pdf),

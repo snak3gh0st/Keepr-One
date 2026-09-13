@@ -53,11 +53,36 @@ export type ForesightSolvedExecutionReceipt = {
   monthlyPremium: number
   annualPremium: number
   quickReview?: ForesightQuickReview
+  quickReviewUnavailable?: ForesightQuickReviewUnavailable
   release: string
   reportCode: 'NAIC_ILLUSTRATION'
   documentSha256: string
   documentBytes: number
   saved: true
+}
+
+/// Why the carrier's Quick View could not be read. Mirrors the server's copy in
+/// `lib/national-life/foresight-illustration-contract.ts`: both ends validate
+/// the receipt, so both must agree on its shape.
+///
+/// Column labels only, never values — the labels identify the column the reader
+/// was waiting for and carry nothing about the insured.
+export type ForesightQuickReviewUnavailable = {
+  reason: 'NOT_ON_PAGE' | 'UNREADABLE'
+  summaryLabels: string[]
+  projectionLabels: string[]
+}
+
+export function isForesightQuickReviewUnavailable(
+  value: unknown,
+): value is ForesightQuickReviewUnavailable {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Record<string, unknown>
+  if (!exactKeys(candidate, ['projectionLabels', 'reason', 'summaryLabels'])) return false
+  if (candidate.reason !== 'NOT_ON_PAGE' && candidate.reason !== 'UNREADABLE') return false
+  const labels = (list: unknown) => Array.isArray(list) && list.length <= 24 &&
+    list.every((label) => typeof label === 'string' && label.length <= 64)
+  return labels(candidate.summaryLabels) && labels(candidate.projectionLabels)
 }
 
 export type ForesightQuickReview = {
@@ -176,11 +201,18 @@ function validReceipt(
         'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'solveBasis', 'faceAmount',
         'monthlyPremium', 'annualPremium', 'release', 'reportCode', 'documentSha256', 'documentBytes', 'saved',
       ]
-      const allowedShape = exactKeys(receipt, keys) || exactKeys(receipt, [...keys, 'quickReview'])
+      // At most one of the two: the projection, or the reason there is none.
+      // Both at once would be the receipt claiming a Quick View it also says it
+      // could not read.
+      const allowedShape = exactKeys(receipt, keys) ||
+        exactKeys(receipt, [...keys, 'quickReview']) ||
+        exactKeys(receipt, [...keys, 'quickReviewUnavailable'])
       return allowedShape && receipt.productCode === '956' && receipt.solveBasis === expected.snapshot.solve.basis &&
         positiveCarrierAmount(receipt.faceAmount) && positiveCarrierAmount(receipt.monthlyPremium) &&
         positiveCarrierAmount(receipt.annualPremium) &&
-        (!Object.hasOwn(receipt, 'quickReview') || isForesightQuickReview(receipt.quickReview))
+        (!Object.hasOwn(receipt, 'quickReview') || isForesightQuickReview(receipt.quickReview)) &&
+        (!Object.hasOwn(receipt, 'quickReviewUnavailable') ||
+          isForesightQuickReviewUnavailable(receipt.quickReviewUnavailable))
     }
     return exactKeys(receipt, [
       'inputHash', 'caseFingerprint', 'carrierCaseName', 'productCode', 'release', 'reportCode',

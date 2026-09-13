@@ -346,3 +346,103 @@ describe('Illustration detail page', () => {
     expect(screen.queryByText('Gerando a ilustração oficial')).toBeNull()
   })
 })
+
+describe('Client summary offer on the detail page', () => {
+  const quickReview = {
+    summary: {
+      initialFaceAmount: 2_000_000, lapseYear: null, mecYear: null, modalPremium: 105,
+      minimumPremium: null, deathBenefitProtectionPremium: null, targetPremium: 4_200,
+      mecPremium: null, guidelineLevelPremium: null, guidelineSinglePremium: null,
+    },
+    annualProjection: [1, 5, 10, 20].map((policyYear) => ({
+      policyYear, age: 27 + policyYear,
+      premiumOutlay: 1_260, weightedAverageInterestRate: 6.1, loan: null, annualIncome: null,
+      accumulatedValue: policyYear * 12_000,
+      cashSurrenderValue: policyYear * 10_000,
+      netDeathBenefit: 2_000_000 + policyYear * 1_000,
+    })),
+  }
+
+  const verified = {
+    id: 'illustration-verified', createdAt: new Date('2026-08-27T12:00:00.000Z'),
+    insuredName: 'Ale Teste', insuredDateOfBirth: new Date('1998-03-12T00:00:00.000Z'),
+    productName: 'FlexLife', faceAmount: 2_000_000, premium: 105, targetPremium: 100,
+    targetPremiumSource: 'AGENT_INPUT_FOR_FORESIGHT',
+    documentFetchedAt: new Date('2026-08-27T12:02:00.000Z'), documentMimeType: 'application/pdf',
+    caseId: null,
+    rawPayload: {
+      foresightResult: {
+        solveBasis: 'PREMIUM', requestedAmount: 100, confirmedFaceAmount: 2_000_000,
+        confirmedMonthlyPremium: 105, confirmedAnnualPremium: 1_260,
+        quickReview,
+      },
+    },
+  }
+
+  it('offers the client summary once National Life has confirmed the numbers', async () => {
+    mocks.findFirstIllustration.mockResolvedValue(verified)
+
+    render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-verified' }) }))
+
+    const quick = screen.getByRole('link', { name: 'Resumo de uma página' })
+    expect(quick.getAttribute('href'))
+      .toBe('/api/illustrations/illustration-verified/client-summary?variant=quick&lang=pt')
+    // A projection behind it, so the five-page presentation is on offer too.
+    expect(screen.getByRole('link', { name: 'Apresentação completa' })).toBeTruthy()
+  })
+
+  // The offer and the route share one gate. If the page's `select` ever stops
+  // carrying a field the summary is built from, this is what fails — rather
+  // than the button quietly vanishing from a working feature.
+  it('does not offer it before the official PDF has been verified', async () => {
+    mocks.findFirstIllustration.mockResolvedValue({
+      ...verified, documentFetchedAt: null, documentMimeType: null,
+    })
+
+    render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-verified' }) }))
+
+    expect(screen.queryByRole('link', { name: 'Resumo de uma página' })).toBeNull()
+  })
+
+  it('offers it for Term once the carrier has confirmed the duration', async () => {
+    mocks.findFirstIllustration.mockResolvedValue({
+      ...verified,
+      productName: 'NL Term',
+      rawPayload: {
+        foresightTermResult: {
+          source: 'OFFICIAL_PDF', premiumMode: 'Monthly',
+          confirmedFaceAmount: 500_000,
+          confirmedMonthlyPremium: 62.92,
+          confirmedAnnualPremium: 755.04,
+          requestedTermDuration: '20-G',
+          confirmedTermDuration: '20-G',
+        },
+      },
+    })
+
+    render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-verified' }) }))
+
+    expect(screen.getByRole('link', { name: 'Resumo de uma página' })).toBeTruthy()
+    // Term has no projection, so there is no presentation to offer.
+    expect(screen.queryByRole('link', { name: 'Apresentação completa' })).toBeNull()
+  })
+
+  it('does not offer it for a Term result with no confirmed duration to state', async () => {
+    mocks.findFirstIllustration.mockResolvedValue({
+      ...verified,
+      productName: 'NL Term',
+      rawPayload: {
+        foresightTermResult: {
+          source: 'OFFICIAL_PDF', premiumMode: 'Monthly',
+          confirmedFaceAmount: 500_000,
+          confirmedMonthlyPremium: 62.92,
+          confirmedAnnualPremium: 755.04,
+        },
+      },
+    })
+
+    render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-verified' }) }))
+
+    expect(screen.queryByRole('link', { name: 'Resumo de uma página' })).toBeNull()
+  })
+})

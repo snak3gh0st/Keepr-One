@@ -375,11 +375,46 @@ export type ForesightSolvedIllustrationReceipt = {
   monthlyPremium: number
   annualPremium: number
   quickReview?: ForesightQuickReview
+  quickReviewUnavailable?: ForesightQuickReviewUnavailable
   release: string
   reportCode: 'NAIC_ILLUSTRATION'
   documentSha256: string
   documentBytes: number
   saved: true
+}
+
+/// Why the carrier's Quick View could not be read, recorded on the illustration
+/// instead of thrown away.
+///
+/// A Quick View that cannot be parsed no longer fails the generation — the
+/// official PDF is the authority and the ledger already read back clean — but
+/// silently producing an illustration with no projection left nobody able to
+/// say why. Diagnosing it once meant reading the executor's source against a
+/// carrier page nobody could revisit.
+///
+/// Column labels only, never values: the labels are what identify the column
+/// the reader was waiting for, and they carry nothing about the insured.
+export type ForesightQuickReviewUnavailable = {
+  reason: 'NOT_ON_PAGE' | 'UNREADABLE'
+  summaryLabels: string[]
+  projectionLabels: string[]
+}
+
+const MAX_QUICK_VIEW_LABELS = 24
+const MAX_QUICK_VIEW_LABEL_LENGTH = 64
+
+export function isForesightQuickReviewUnavailable(
+  value: unknown,
+): value is ForesightQuickReviewUnavailable {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Record<string, unknown>
+  const keys = Object.keys(candidate).sort()
+  if (keys.length !== 3 || keys[0] !== 'projectionLabels' || keys[1] !== 'reason' ||
+    keys[2] !== 'summaryLabels') return false
+  if (candidate.reason !== 'NOT_ON_PAGE' && candidate.reason !== 'UNREADABLE') return false
+  const labels = (list: unknown) => Array.isArray(list) && list.length <= MAX_QUICK_VIEW_LABELS &&
+    list.every((label) => typeof label === 'string' && label.length <= MAX_QUICK_VIEW_LABEL_LENGTH)
+  return labels(candidate.summaryLabels) && labels(candidate.projectionLabels)
 }
 
 export type ForesightQuickReview = {
@@ -492,10 +527,14 @@ export function parseForesightSolvedIllustrationReceipt(value: unknown): Foresig
     'monthlyPremium', 'annualPremium', 'release', 'reportCode', 'documentSha256', 'documentBytes', 'saved',
   ].sort()
   const keys = Object.keys(receipt).sort()
-  const expectedWithQuickReview = [...expected, 'quickReview'].sort()
-  const hasExpectedKeys = (candidate: string[]) => keys.length === candidate.length &&
-    keys.every((key, index) => key === candidate[index])
-  if ((!hasExpectedKeys(expected) && !hasExpectedKeys(expectedWithQuickReview)) ||
+  // Exactly the required keys, plus at most one of the two that describe the
+  // Quick View. Carrying both would be the receipt claiming a projection it
+  // also says it could not read.
+  const optional = ['quickReview', 'quickReviewUnavailable']
+  const extra = keys.filter((key) => !expected.includes(key))
+  const hasExpectedKeys = expected.every((key) => keys.includes(key)) &&
+    extra.length <= 1 && extra.every((key) => optional.includes(key))
+  if (!hasExpectedKeys ||
     typeof receipt.inputHash !== 'string' || !/^[a-f0-9]{64}$/.test(receipt.inputHash) ||
     typeof receipt.caseFingerprint !== 'string' || !/^case_[a-f0-9]{64}$/.test(receipt.caseFingerprint) ||
     typeof receipt.carrierCaseName !== 'string' || !/^[A-Z0-9][A-Z0-9_-]{5,79}$/.test(receipt.carrierCaseName) ||
@@ -509,7 +548,9 @@ export function parseForesightSolvedIllustrationReceipt(value: unknown): Foresig
     receipt.reportCode !== 'NAIC_ILLUSTRATION' || typeof receipt.documentSha256 !== 'string' ||
     !/^[a-f0-9]{64}$/.test(receipt.documentSha256) || !Number.isSafeInteger(receipt.documentBytes) ||
     (receipt.documentBytes as number) < 5 || (receipt.documentBytes as number) > 25 * 1024 * 1024 ||
-    receipt.saved !== true || (Object.hasOwn(receipt, 'quickReview') &&
-      !isForesightQuickReview(receipt.quickReview))) return null
+    receipt.saved !== true ||
+    (Object.hasOwn(receipt, 'quickReview') && !isForesightQuickReview(receipt.quickReview)) ||
+    (Object.hasOwn(receipt, 'quickReviewUnavailable') &&
+      !isForesightQuickReviewUnavailable(receipt.quickReviewUnavailable))) return null
   return receipt as ForesightSolvedIllustrationReceipt
 }

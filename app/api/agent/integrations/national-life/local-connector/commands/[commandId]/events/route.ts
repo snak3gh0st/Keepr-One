@@ -33,7 +33,10 @@ import { createFlexLifeQuoteResultRepository } from '@/lib/national-life/flexlif
 import { extractForesightTermPremiums } from '@/lib/national-life/foresight-term-pdf'
 import type { IgoApplicationDraftReceipt } from '@/lib/application-addon/igo-receipt'
 import { createHash } from 'node:crypto'
-import type { ForesightQuickReview } from '@/lib/national-life/foresight-illustration-contract'
+import type {
+  ForesightQuickReview,
+  ForesightQuickReviewUnavailable,
+} from '@/lib/national-life/foresight-illustration-contract'
 
 const MAX_BODY_BYTES = 64 * 1024
 const NO_STORE = { 'Cache-Control': 'no-store' }
@@ -59,6 +62,7 @@ const foresightArtifactRepository = {
     monthlyPremium: number
     annualPremium: number
     quickReview?: ForesightQuickReview
+    quickReviewUnavailable?: ForesightQuickReviewUnavailable
   }) {
     const existing = await prisma.illustration.findFirst({
       where: { id: input.illustrationId, agentId: input.agentId, productName: 'FlexLife' },
@@ -87,6 +91,13 @@ const foresightArtifactRepository = {
             confirmedMonthlyPremium: input.monthlyPremium,
             confirmedAnnualPremium: input.annualPremium,
             ...(input.quickReview ? { quickReview: input.quickReview } : {}),
+            // Why there is no projection, when there is none. An illustration
+            // that simply arrives without one is not a thing anybody can
+            // explain later, and the carrier page it came from cannot be
+            // revisited.
+            ...(input.quickReviewUnavailable
+              ? { quickReviewUnavailable: input.quickReviewUnavailable }
+              : {}),
           },
         },
         ...(input.quickReview
