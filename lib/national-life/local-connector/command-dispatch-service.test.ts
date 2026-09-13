@@ -551,6 +551,7 @@ describe('local connector command dispatch', () => {
         reason: 'UNREADABLE',
         summaryLabels: ['Initial Face Amount', 'Modal Premium'],
         projectionLabels: ['Policy Year', 'Age', 'Net Death Benefit'],
+        comparison: null,
       },
       release: '5.3.65.31',
       reportCode: 'NAIC_ILLUSTRATION',

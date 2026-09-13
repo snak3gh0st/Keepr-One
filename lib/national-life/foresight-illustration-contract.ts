@@ -395,13 +395,34 @@ export type ForesightSolvedIllustrationReceipt = {
 /// Column labels only, never values: the labels are what identify the column
 /// the reader was waiting for, and they carry nothing about the insured.
 export type ForesightQuickReviewUnavailable = {
-  reason: 'NOT_ON_PAGE' | 'UNREADABLE'
+  reason: 'NOT_ON_PAGE' | 'UNREADABLE' | 'CONTRADICTS_LEDGER'
   summaryLabels: string[]
   projectionLabels: string[]
+  /// Os dois pares que a conferência comparou, presentes só quando o motivo é
+  /// uma contradição. São valores que a própria linha já guarda — não é
+  /// exposição nova — e sem eles uma contradição é indiagnosticável.
+  comparison: {
+    quickViewFaceAmount: number | null
+    ledgerFaceAmount: number | null
+    quickViewModalPremium: number | null
+    ledgerMonthlyPremium: number | null
+  } | null
 }
 
 const MAX_QUICK_VIEW_LABELS = 24
 const MAX_QUICK_VIEW_LABEL_LENGTH = 64
+
+function isQuickViewComparison(value: unknown): boolean {
+  if (value === null) return true
+  if (typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Record<string, unknown>
+  const keys = [
+    'ledgerFaceAmount', 'ledgerMonthlyPremium', 'quickViewFaceAmount', 'quickViewModalPremium',
+  ]
+  if (Object.keys(candidate).sort().join(',') !== keys.join(',')) return false
+  return keys.every((key) => candidate[key] === null ||
+    (typeof candidate[key] === 'number' && Number.isFinite(candidate[key])))
+}
 
 export function isForesightQuickReviewUnavailable(
   value: unknown,
@@ -409,9 +430,10 @@ export function isForesightQuickReviewUnavailable(
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Record<string, unknown>
   const keys = Object.keys(candidate).sort()
-  if (keys.length !== 3 || keys[0] !== 'projectionLabels' || keys[1] !== 'reason' ||
-    keys[2] !== 'summaryLabels') return false
-  if (candidate.reason !== 'NOT_ON_PAGE' && candidate.reason !== 'UNREADABLE') return false
+  if (keys.length !== 4 || keys[0] !== 'comparison' || keys[1] !== 'projectionLabels' ||
+    keys[2] !== 'reason' || keys[3] !== 'summaryLabels') return false
+  if (!['NOT_ON_PAGE', 'UNREADABLE', 'CONTRADICTS_LEDGER'].includes(String(candidate.reason))) return false
+  if (!isQuickViewComparison(candidate.comparison)) return false
   const labels = (list: unknown) => Array.isArray(list) && list.length <= MAX_QUICK_VIEW_LABELS &&
     list.every((label) => typeof label === 'string' && label.length <= MAX_QUICK_VIEW_LABEL_LENGTH)
   return labels(candidate.summaryLabels) && labels(candidate.projectionLabels)

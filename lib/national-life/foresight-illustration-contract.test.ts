@@ -238,9 +238,35 @@ describe('server-owned Foresight illustration snapshot', () => {
         reason: 'UNREADABLE',
         summaryLabels: ['Initial Face Amount', 'Modal Premium'],
         projectionLabels: ['Policy Year', 'Age', 'Net Death Benefit'],
+        comparison: null,
       },
     } as const
     expect(parseForesightSolvedIllustrationReceipt(receipt)).toEqual(receipt)
+
+    // Uma contradição desqualifica o Quick View, não a ilustração — e sem os
+    // dois pares comparados ela é indiagnosticável.
+    const contradicted = {
+      ...receipt,
+      quickReviewUnavailable: {
+        reason: 'CONTRADICTS_LEDGER',
+        summaryLabels: [],
+        projectionLabels: [],
+        comparison: {
+          quickViewFaceAmount: 500_000,
+          ledgerFaceAmount: 500_000,
+          quickViewModalPremium: 3_456,
+          ledgerMonthlyPremium: 288,
+        },
+      },
+    } as const
+    expect(parseForesightSolvedIllustrationReceipt(contradicted)).toEqual(contradicted)
+    expect(parseForesightSolvedIllustrationReceipt({
+      ...contradicted,
+      quickReviewUnavailable: {
+        ...contradicted.quickReviewUnavailable,
+        comparison: { quickViewFaceAmount: 500_000 },
+      },
+    })).toBeNull()
 
     // Labels only. A value that slipped into the label list is the one thing
     // this record must never carry, so the shape is closed rather than loose.

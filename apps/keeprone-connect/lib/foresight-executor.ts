@@ -667,7 +667,11 @@ function headerLabels(
 
 function readQuickView(doc: Document): QuickViewReading {
   if (doc.location.pathname !== '/NWI/IUL2025/quickview.aspx') {
-    return { unavailable: { reason: 'NOT_ON_PAGE', summaryLabels: [], projectionLabels: [] } }
+    return {
+      unavailable: {
+        reason: 'NOT_ON_PAGE', summaryLabels: [], projectionLabels: [], comparison: null,
+      },
+    }
   }
   const rows = [...doc.querySelectorAll('tr')].map((row) =>
     [...row.querySelectorAll('th, td')].map((cell) => cell.textContent?.trim() ?? ''))
@@ -678,6 +682,7 @@ function readQuickView(doc: Document): QuickViewReading {
         reason: 'UNREADABLE',
         summaryLabels: headerLabels(rows, 'Initial Face Amount'),
         projectionLabels: headerLabels(rows, 'Policy Year'),
+        comparison: null,
       },
     }
   }
@@ -931,9 +936,33 @@ async function executeForesightSolvedIllustration(input: {
   // requires one. Refusing that case threw away the PDF, the confirmed
   // amounts, and the illustration itself for the sake of a projection that
   // enriches the client document rather than verifying anything.
-  if ('review' in quickReview && !quickReviewMatchesLedger(quickReview.review, ledger)) {
-    fail('FORESIGHT_QUICK_VIEW_READBACK_MISMATCH')
-  }
+  // Uma terceira coisa, que também já custou uma geração inteira: o Quick View
+  // foi lido e discorda do ledger que a seguradora acabou de calcular.
+  //
+  // Isso desqualifica o Quick View, não a ilustração. Quem verifica são o
+  // ledger — já conferido contra o pedido aprovado — e o PDF oficial, que é o
+  // documento autoritativo. O Quick View entra para enriquecer o documento do
+  // cliente com uma projeção; uma tela secundária discordante é motivo para
+  // descartar a projeção e dizer por quê, não para destruir um PDF válido.
+  //
+  // Os dois pares comparados ficam registrados, porque sem eles uma
+  // contradição é indiagnosticável e a próxima pessoa repete esta investigação.
+  const quickViewOutcome: QuickViewReading =
+    'review' in quickReview && !quickReviewMatchesLedger(quickReview.review, ledger)
+      ? {
+          unavailable: {
+            reason: 'CONTRADICTS_LEDGER',
+            summaryLabels: [],
+            projectionLabels: [],
+            comparison: {
+              quickViewFaceAmount: quickReview.review.summary.initialFaceAmount,
+              ledgerFaceAmount: ledger.faceAmount,
+              quickViewModalPremium: quickReview.review.summary.modalPremium,
+              ledgerMonthlyPremium: ledger.monthlyPremium,
+            },
+          },
+        }
+      : quickReview
   const ridersDoc = await navigate('/NWI/IUL2025/product.aspx', MENU_IDS.riders)
   const riders = verifyRiders(ridersDoc)
   const allocations = primedAllocations ?? readAllocation(
@@ -966,9 +995,9 @@ async function executeForesightSolvedIllustration(input: {
     // Omitted rather than set undefined: the receipt validator compares the key
     // set exactly, and a key holding undefined is still a key. Exactly one of
     // the two is written — the projection, or the reason there is none.
-    ...('review' in quickReview
-      ? { quickReview: quickReview.review }
-      : { quickReviewUnavailable: quickReview.unavailable }),
+    ...('review' in quickViewOutcome
+      ? { quickReview: quickViewOutcome.review }
+      : { quickReviewUnavailable: quickViewOutcome.unavailable }),
     release,
     reportCode: 'NAIC_ILLUSTRATION',
     documentSha256: await sha256Hex(pdf),
