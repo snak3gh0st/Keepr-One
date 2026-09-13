@@ -523,6 +523,67 @@ describe('local connector command dispatch', () => {
     }))
   })
 
+  // An illustration that simply arrives without a projection is not something
+  // anybody can explain afterwards — the carrier page it came from cannot be
+  // revisited. The reason has to survive the trip to the row.
+  it('carries the reason to the row when there was no Quick Review to read', async () => {
+    const bytes = new TextEncoder().encode('%PDF-1.7\nsolved')
+    const inputHash = 'a'.repeat(64)
+    const carrierCaseName = 'KEEPRONE-20260913-ILLSOLVED999'
+    const repo = repository(candidate({
+      capability: 'GENERATE_ILLUSTRATION',
+      target: { kind: 'ILLUSTRATION', id: 'illustration_solved_9' },
+      params: { illustrationId: 'illustration_solved_9', inputHash },
+      requiresConfirmation: true,
+      confirmationState: 'APPROVED',
+      events: [{ sequence: 0 }, { sequence: 1 }],
+    }))
+    const receipt = {
+      inputHash,
+      caseFingerprint: `case_${'b'.repeat(64)}`,
+      carrierCaseName,
+      productCode: '956',
+      solveBasis: 'DEATH_BENEFIT',
+      faceAmount: 500_000,
+      monthlyPremium: 565.5,
+      annualPremium: 6_786,
+      quickReviewUnavailable: {
+        reason: 'UNREADABLE',
+        summaryLabels: ['Initial Face Amount', 'Modal Premium'],
+        projectionLabels: ['Policy Year', 'Age', 'Net Death Benefit'],
+      },
+      release: '5.3.65.31',
+      reportCode: 'NAIC_ILLUSTRATION',
+      documentSha256: createHash('sha256').update(bytes).digest('hex'),
+      documentBytes: bytes.byteLength,
+      saved: true,
+    }
+    const foresightArtifactRepository = {
+      findOwnedArtifact: vi.fn().mockResolvedValue({
+        provider: 'NATIONAL_LIFE_FORESIGHT', externalId: `agent_1:${carrierCaseName}`,
+        productName: 'FlexLife', documentBytes: bytes, documentMimeType: 'application/pdf',
+      }),
+      persistSolvedResult: vi.fn().mockResolvedValue(undefined),
+    }
+
+    await recordDeviceConnectorCommandEvent(repo, {
+      agentId: 'agent_1', deviceId: 'device_1', commandId: 'cmd_1', now,
+      event: {
+        protocolVersion: 1, eventId: 'event_solved_9', commandId: 'cmd_1', runId: 'run_1',
+        sequence: 2, type: 'DATA_BATCH', emittedAt: now.toISOString(),
+        payload: { illustration: receipt }, error: null,
+      },
+      foresightArtifactRepository,
+    })
+
+    expect(foresightArtifactRepository.persistSolvedResult).toHaveBeenCalledWith({
+      agentId: 'agent_1', illustrationId: 'illustration_solved_9',
+      solveBasis: 'DEATH_BENEFIT', faceAmount: 500_000, monthlyPremium: 565.5,
+      annualPremium: 6_786,
+      quickReviewUnavailable: receipt.quickReviewUnavailable,
+    })
+  })
+
   it('accepts a Term PDF receipt only after the same named carrier artifact is stored', async () => {
     const bytes = new TextEncoder().encode('%PDF-1.7\nterm')
     const inputHash = 'a'.repeat(64)
