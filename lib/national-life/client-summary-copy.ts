@@ -45,6 +45,13 @@ type Copy = {
   nextStepBody: string
   sourceLine: (date: string) => string
   termDuration: Record<TermDuration, string>
+  premiumSchedule: string
+  guaranteed: string
+  levelThrough: (year: number, age: number) => string
+  afterLevel: (year: number, age: number) => string
+  perMonth: string
+  premiumColumn: string
+  scheduleNote: (face: string, age: number) => string
 }
 
 const EN: Copy = {
@@ -86,6 +93,14 @@ const EN: Copy = {
     '30-G': 'Level premium guaranteed for 30 years',
     ART: 'Annually renewable — the premium increases each year',
   },
+  premiumSchedule: 'What you pay, year by year',
+  guaranteed: 'Guaranteed by contract',
+  levelThrough: (year, age) => `Through year ${year} — age ${age}`,
+  afterLevel: (year, age) => `From year ${year} — age ${age}`,
+  perMonth: 'per month',
+  premiumColumn: 'YOU PAY PER YEAR',
+  scheduleNote: (face, age) =>
+    `The death benefit stays at ${face} for as long as the premium is paid, through age ${age}.`,
 }
 
 const PT: Copy = {
@@ -127,6 +142,14 @@ const PT: Copy = {
     '30-G': 'Prêmio nivelado garantido por 30 anos',
     ART: 'Renovável anualmente — o prêmio aumenta a cada ano',
   },
+  premiumSchedule: 'O que você paga, ano a ano',
+  guaranteed: 'Garantido em contrato',
+  levelThrough: (year, age) => `Até o ano ${year} — idade ${age}`,
+  afterLevel: (year, age) => `A partir do ano ${year} — idade ${age}`,
+  perMonth: 'por mês',
+  premiumColumn: 'VOCÊ PAGA POR ANO',
+  scheduleNote: (face, age) =>
+    `O benefício por morte permanece em ${face} enquanto o prêmio for pago, até os ${age} anos.`,
 }
 
 export function clientSummaryCopy(language: ClientSummaryLanguage): Copy {

@@ -201,6 +201,41 @@ describe('Term summaries', () => {
     expect(summary?.kind === 'LEVEL_TERM' && summary.termDuration).toBe('ART')
   })
 
+  // The ledger is the carrier's own guaranteed schedule. What the summary must
+  // do with it is keep the two years on either side of the guarantee, because
+  // the difference between them is the whole point of showing it at all.
+  it('keeps the years on either side of the guarantee when the ledger is read', () => {
+    const rows = Array.from({ length: 40 }, (unused, index) => ({
+      policyYear: index + 1,
+      age: 37 + index,
+      guaranteedAnnualPremium: index < 20 ? 755.04 : 6_262.08 + index * 100,
+      guaranteedDeathBenefit: 500_000,
+    }))
+    const summary = buildClientSummary({
+      ...termIllustration('20-G'),
+      termLedger: {
+        rows,
+        levelPeriodYears: 20,
+        levelAnnualPremium: 755.04,
+        firstIncrease: { policyYear: 21, age: 57, annualPremium: 8_262.08 },
+      },
+    })
+    const schedule = summary?.kind === 'LEVEL_TERM' ? summary.schedule : null
+    expect(schedule?.levelPeriodYears).toBe(20)
+    // Divided back at the mode the carrier annualized, which is how the ledger
+    // and the policy's own cover page agree on the monthly figure.
+    expect(schedule?.levelMonthlyPremium).toBeCloseTo(62.92, 2)
+    expect(schedule?.rows.map((row) => row.policyYear)).toContain(20)
+    expect(schedule?.rows.map((row) => row.policyYear)).toContain(21)
+    expect(schedule?.rows.at(-1)?.policyYear).toBe(40)
+    expect(schedule?.rows.length).toBeLessThanOrEqual(6)
+  })
+
+  it('states the duration without a schedule when the PDF could not be read', () => {
+    const summary = buildClientSummary(termIllustration('20-G'))
+    expect(summary?.kind === 'LEVEL_TERM' && summary.schedule).toBeNull()
+  })
+
   it('carries no projection to draw', () => {
     expect(buildClientSummary(termIllustration('30-G'))).not.toHaveProperty('coverage')
   })

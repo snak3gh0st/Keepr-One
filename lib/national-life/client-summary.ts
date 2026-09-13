@@ -14,6 +14,7 @@
 /// renderer, so the same facts can be presented in either language.
 
 import { flexLifeProductLabel } from './flex-life'
+import type { ForesightTermLedger, ForesightTermLedgerRow } from './foresight-term-ledger'
 import { foresightQuickReview, verifiedForesightResult } from './illustration-verified-result'
 
 /// Years worth calling out beside the curve. 5 and 10 are the near horizon a
@@ -28,6 +29,10 @@ const FULL_MILESTONE_YEARS = [1, 5, 10, 15, 20, 25, 30]
 /// it, the outlook is reported there; otherwise at the last year the carrier
 /// projected, which is the only other age this illustration actually speaks to.
 const OUTLOOK_AGE = 65
+
+/// How many rungs of the Term premium schedule the one-pager prints. Enough to
+/// show the shape of the climb; few enough that the page stays a letter.
+const TERM_SCHEDULE_ROWS = 6
 
 /// Two points make a line. One makes a claim with nothing to read it against,
 /// so a projection that short produces no summary at all.
@@ -84,7 +89,32 @@ export type ClientSummary =
   | (ClientSummaryBase & {
       kind: 'LEVEL_TERM'
       termDuration: TermDuration
+      /// The guaranteed premium schedule, when the official PDF could be read.
+      /// Null keeps the document that shipped before this existed: duration
+      /// stated, schedule omitted. Present, it is the carrier's own ledger.
+      schedule: ClientSummaryTermSchedule | null
     })
+
+/// What the Term ledger says, reduced to what a client is deciding about.
+///
+/// The level period is counted from the ledger, not taken from the product
+/// name, so a policy whose premium behaves differently from its label reports
+/// what it actually does.
+export type ClientSummaryTermSchedule = {
+  levelPeriodYears: number
+  levelAnnualPremium: number
+  levelMonthlyPremium: number
+  deathBenefit: number
+  finalPolicyYear: number
+  finalAge: number
+  firstIncrease: {
+    policyYear: number
+    age: number
+    annualPremium: number
+    monthlyPremium: number
+  } | null
+  rows: ForesightTermLedgerRow[]
+}
 
 export type IllustrationForClientSummary = {
   insuredName: string | null
@@ -92,6 +122,10 @@ export type IllustrationForClientSummary = {
   documentFetchedAt: Date | null
   documentMimeType: string | null
   rawPayload: unknown
+  /// The Term ledger read from the official PDF, when the caller went and read
+  /// it. Optional because the agent's own screen builds this summary only to
+  /// ask whether a document exists, and has no reason to parse a PDF for that.
+  termLedger?: ForesightTermLedger | null
   /// The agent this goes out under. Optional because the summary is complete
   /// without it — the page simply omits the advisor block rather than printing
   /// a placeholder where a person's name belongs.
@@ -207,7 +241,57 @@ function termSummary(
     payload?.foresightTermDraft?.termDuration
   if (!isTermDuration(duration)) return null
 
-  return { ...base, kind: 'LEVEL_TERM', termDuration: duration }
+  return {
+    ...base,
+    kind: 'LEVEL_TERM',
+    termDuration: duration,
+    schedule: termSchedule(illustration.termLedger ?? null),
+  }
+}
+
+/// The carrier annualizes the guaranteed premium at the mode that was quoted,
+/// which is why a monthly-mode Term ledger divides back to the exact monthly
+/// figure printed on its own cover. Dividing is restating the carrier's own
+/// relationship between the two, not converting between modes.
+const MONTHS_PER_YEAR = 12
+
+function termSchedule(ledger: ForesightTermLedger | null): ClientSummaryTermSchedule | null {
+  if (!ledger) return null
+  const last = ledger.rows[ledger.rows.length - 1]!
+  const increase = ledger.firstIncrease
+  return {
+    levelPeriodYears: ledger.levelPeriodYears,
+    levelAnnualPremium: ledger.levelAnnualPremium,
+    levelMonthlyPremium: ledger.levelAnnualPremium / MONTHS_PER_YEAR,
+    deathBenefit: ledger.rows[0]!.guaranteedDeathBenefit,
+    finalPolicyYear: last.policyYear,
+    finalAge: last.age,
+    firstIncrease: increase === null ? null : {
+      ...increase,
+      monthlyPremium: increase.annualPremium / MONTHS_PER_YEAR,
+    },
+    rows: termScheduleRows(ledger),
+  }
+}
+
+/// The rungs worth printing: where the level premium starts, where it ends,
+/// what it becomes the year after, and then a widening walk to the end of the
+/// contract. The two years on either side of the guarantee are the point of
+/// the table, so they are chosen first and the rest fills in around them.
+function termScheduleRows(ledger: ForesightTermLedger): ForesightTermLedgerRow[] {
+  const last = ledger.rows[ledger.rows.length - 1]!
+  const anchors = [1, ledger.levelPeriodYears, ledger.levelPeriodYears + 1]
+  const walk: number[] = []
+  for (let year = ledger.levelPeriodYears + 6; year < last.policyYear; year += 5) walk.push(year)
+  const years = [...new Set([...anchors, ...walk, last.policyYear])]
+    .filter((year) => year >= 1 && year <= last.policyYear)
+    .sort((a, b) => a - b)
+  // When the contract runs long there are more rungs than fit. Thinning from
+  // the far end keeps the years the client is actually deciding about.
+  while (years.length > TERM_SCHEDULE_ROWS) years.splice(years.length - 2, 1)
+  return years
+    .map((year) => ledger.rows.find((row) => row.policyYear === year))
+    .filter((row): row is ForesightTermLedgerRow => row !== undefined)
 }
 
 function isTermDuration(value: unknown): value is TermDuration {

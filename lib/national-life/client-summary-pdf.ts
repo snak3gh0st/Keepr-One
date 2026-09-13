@@ -18,7 +18,7 @@ import path from 'node:path'
 import { GlobalFonts, PDFDocument, Path2D } from '@napi-rs/canvas'
 import { CLIENT_SUMMARY_DISCLAIMER } from './quote-disclaimer'
 import { clientSummaryCopy, type ClientSummaryLanguage } from './client-summary-copy'
-import type { ClientSummary, ClientSummaryPoint } from './client-summary'
+import type { ClientSummary, ClientSummaryPoint, ClientSummaryTermSchedule } from './client-summary'
 
 type Ctx = ReturnType<PDFDocument['beginPage']>
 type Copy = ReturnType<typeof clientSummaryCopy>
@@ -488,6 +488,129 @@ function termPeriod(ctx: Ctx, label: string, copy: Copy, top: number): number {
   return top + height
 }
 
+/// The Term premium schedule, straight out of the carrier's Ledger.
+///
+/// This is the part the document used to leave out. Stating the guarantee and
+/// stopping is accurate for as long as the guarantee lasts and silent about the
+/// year after it, where the contractual premium can be several times larger.
+/// The two cards put those two numbers side by side, because the comparison
+/// between them is the decision the client is actually making; the table under
+/// them shows the climb continuing, so the second card reads as the start of a
+/// trend rather than as a one-off step.
+///
+/// Every figure here is guaranteed — a contractual maximum the carrier has
+/// committed to — which is why it carries none of the hedging the projected
+/// summary needs.
+function termSchedule(
+  ctx: Ctx, schedule: ClientSummaryTermSchedule, durationLabel: string,
+  copy: Copy, top: number,
+): number {
+  sectionTitle(ctx, copy.premiumSchedule, top, copy.guaranteed.toUpperCase())
+  // The duration used to have a panel of its own. Beside the two cards below —
+  // which name the same two periods and price them — that panel was the page
+  // saying the same thing twice and taking a sixth of the sheet to do it.
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(11)
+  ctx.fillText(durationLabel, MARGIN, top + 18)
+
+  const gap = 11
+  const width = (PAGE_WIDTH - MARGIN * 2 - gap) / 2
+  const height = 86
+  const cardsTop = top + 30
+  const cards: Array<{ label: string; annual: number; monthly: number; lead: boolean }> = [
+    {
+      label: copy.levelThrough(schedule.levelPeriodYears,
+        schedule.rows[0]!.age + schedule.levelPeriodYears - 1),
+      annual: schedule.levelAnnualPremium,
+      monthly: schedule.levelMonthlyPremium,
+      lead: true,
+    },
+  ]
+  if (schedule.firstIncrease) {
+    cards.push({
+      label: copy.afterLevel(schedule.firstIncrease.policyYear, schedule.firstIncrease.age),
+      annual: schedule.firstIncrease.annualPremium,
+      monthly: schedule.firstIncrease.monthlyPremium,
+      lead: false,
+    })
+  }
+
+  cards.forEach((card, index) => {
+    const x = MARGIN + index * (width + gap)
+    const full = cards.length === 1 ? PAGE_WIDTH - MARGIN * 2 : width
+    ctx.fillStyle = card.lead ? PANEL : PAPER
+    ctx.fillRect(x, cardsTop, full, height)
+    ctx.strokeStyle = card.lead ? BORDER : GOLD
+    ctx.lineWidth = 1
+    ctx.strokeRect(x + 0.5, cardsTop + 0.5, full - 1, height - 1)
+    ctx.fillStyle = card.lead ? TEAL : GOLD
+    ctx.fillRect(x, cardsTop, 4, height)
+
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(9, 700)
+    ctx.fillText(card.label.toUpperCase(), x + 18, cardsTop + 26)
+
+    ctx.fillStyle = card.lead ? TEAL_DEEP : INK
+    ctx.font = font(22, 700)
+    ctx.fillText(cents.format(card.monthly), x + 18, cardsTop + 56)
+
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(10)
+    ctx.fillText(`${copy.perMonth} · ${cents.format(card.annual)} ${copy.perYear.toLowerCase()}`,
+      x + 18, cardsTop + 74)
+  })
+
+  const tableTop = cardsTop + height + 16
+  const tableWidth = PAGE_WIDTH - MARGIN * 2
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(9, 700)
+  ctx.fillText(copy.policyYearColumn, MARGIN + 14, tableTop + 12)
+  ctx.fillText(copy.ageColumn, MARGIN + 150, tableTop + 12)
+  ctx.fillText(copy.premiumColumn, MARGIN + 250, tableTop + 12)
+  ctx.fillText(copy.deathBenefitColumn, MARGIN + 400, tableTop + 12)
+  ctx.strokeStyle = BORDER
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(MARGIN, tableTop + 20.5)
+  ctx.lineTo(MARGIN + tableWidth, tableTop + 20.5)
+  ctx.stroke()
+
+  const rowHeight = 26
+  schedule.rows.forEach((row, index) => {
+    const rowTop = tableTop + 20 + index * rowHeight
+    const baseline = rowTop + rowHeight - 8
+    if (index % 2 === 0) {
+      ctx.fillStyle = PANEL
+      ctx.fillRect(MARGIN, rowTop + 1, tableWidth, rowHeight - 1)
+    }
+    // The year the premium first moves is the one the client came for, so it
+    // is the one the eye should land on without being told where to look.
+    const isIncrease = schedule.firstIncrease !== null &&
+      row.policyYear === schedule.firstIncrease.policyYear
+    ctx.fillStyle = INK
+    ctx.font = font(11, 700)
+    ctx.fillText(copy.year(row.policyYear), MARGIN + 14, baseline)
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(11)
+    ctx.fillText(String(row.age), MARGIN + 150, baseline)
+    ctx.fillStyle = isIncrease ? GOLD : INK
+    ctx.font = font(11, 700)
+    ctx.fillText(cents.format(row.guaranteedAnnualPremium), MARGIN + 250, baseline)
+    ctx.fillStyle = INK
+    ctx.font = font(11, 500)
+    ctx.fillText(whole.format(row.guaranteedDeathBenefit), MARGIN + 400, baseline)
+  })
+
+  const afterTable = tableTop + 20 + schedule.rows.length * rowHeight
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(10)
+  return paragraph(
+    ctx,
+    copy.scheduleNote(whole.format(schedule.deathBenefit), schedule.finalAge),
+    MARGIN, afterTable + 16, tableWidth, 14,
+  )
+}
+
 /// Closes the page under whatever content there was.
 ///
 /// The projected summary fills the sheet, so its footer sits at the bottom
@@ -538,7 +661,10 @@ function quickPage(
     ], afterChart + 28, 28)
   } else {
     const afterFigures = headlineFigures(ctx, summary, copy, BAND_HEIGHT + 38)
-    contentBottom = termPeriod(ctx, copy.termDuration[summary.termDuration], copy, afterFigures + 30)
+    contentBottom = summary.schedule
+      ? termSchedule(ctx, summary.schedule, copy.termDuration[summary.termDuration],
+        copy, afterFigures + 30)
+      : termPeriod(ctx, copy.termDuration[summary.termDuration], copy, afterFigures + 30)
   }
 
   footer(ctx, summary, copy, language, contentBottom)

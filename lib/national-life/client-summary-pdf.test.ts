@@ -132,7 +132,7 @@ describe('Term summary PDF', () => {
     annualPremium: 755.04,
     issuedOn: new Date('2026-09-01T12:00:00Z'),
     advisorName: null,
-    termDuration: '20-G',
+    termDuration: '20-G', schedule: null,
   }
 
   it('states the confirmed numbers and how long the premium holds', async () => {
@@ -159,6 +159,36 @@ describe('Term summary PDF', () => {
     const text = await extractText(await renderClientSummaryPdf(term))
     expect(text).toContain('non-guaranteed interest rates')
     expect(text).toContain('National Life illustration issued September 1, 2026')
+  })
+
+  // The document used to state the guarantee and stop, which is accurate for
+  // twenty years and silent about the twenty-first, where the contractual
+  // premium is eight times larger. The carrier's own Ledger says so.
+  it('prints what the premium becomes after the guarantee ends', async () => {
+    const text = await extractText(await renderClientSummaryPdf({
+      ...term,
+      schedule: {
+        levelPeriodYears: 20,
+        levelAnnualPremium: 755.04,
+        levelMonthlyPremium: 62.92,
+        deathBenefit: 500_000,
+        finalPolicyYear: 58,
+        finalAge: 95,
+        firstIncrease: { policyYear: 21, age: 57, annualPremium: 6_262.08, monthlyPremium: 521.84 },
+        rows: [
+          { policyYear: 1, age: 37, guaranteedAnnualPremium: 755.04, guaranteedDeathBenefit: 500_000 },
+          { policyYear: 20, age: 56, guaranteedAnnualPremium: 755.04, guaranteedDeathBenefit: 500_000 },
+          { policyYear: 21, age: 57, guaranteedAnnualPremium: 6_262.08, guaranteedDeathBenefit: 500_000 },
+        ],
+      },
+    }))
+    expect(text).toContain('$6,262.08')
+    expect(text).toContain('$521.84')
+    expect(text).toContain('THROUGH YEAR 20 — AGE 56')
+    expect(text).toContain('FROM YEAR 21 — AGE 57')
+    // Guaranteed figures, so the page must not borrow the projection's hedge.
+    expect(text).toContain('GUARANTEED BY CONTRACT')
+    expect(text).not.toContain('Not guaranteed')
   })
 
   it('says plainly when the premium is the kind that rises', async () => {
@@ -235,7 +265,7 @@ describe('the full presentation', () => {
     const pages = await pageTexts(await renderClientSummaryPdf({
       kind: 'LEVEL_TERM', insuredName: 'Ale Teste', productLabel: 'NL Term',
       faceAmount: 500_000, monthlyPremium: 62.92, annualPremium: 755.04,
-      issuedOn: new Date('2026-09-01T12:00:00Z'), advisorName: null, termDuration: '20-G',
+      issuedOn: new Date('2026-09-01T12:00:00Z'), advisorName: null, termDuration: '20-G', schedule: null,
     }, { variant: 'FULL' }))
     expect(pages).toHaveLength(1)
   })
@@ -262,7 +292,7 @@ describe('language', () => {
     const text = (await pageTexts(await renderClientSummaryPdf({
       kind: 'LEVEL_TERM', insuredName: 'Ale Teste', productLabel: 'NL Term',
       faceAmount: 500_000, monthlyPremium: 62.92, annualPremium: 755.04,
-      issuedOn: new Date('2026-09-01T12:00:00Z'), advisorName: null, termDuration: 'ART',
+      issuedOn: new Date('2026-09-01T12:00:00Z'), advisorName: null, termDuration: 'ART', schedule: null,
     }, { language: 'PT' })))[0]!
     expect(text).toContain('o prêmio aumenta a cada ano')
   })
