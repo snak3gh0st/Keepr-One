@@ -206,13 +206,36 @@ describe('Term summaries', () => {
     expect(buildClientSummary(termIllustration('30-G'))).not.toHaveProperty('coverage')
   })
 
-  it('produces nothing for a Term result written before durations were confirmed', () => {
+  // `resolveForesightTermDurationResult` — the canonical reader — treats a
+  // pre-reconciliation Term result as confirming the duration that was asked
+  // for, and the agent's own screen prints it as "Prazo confirmado". Refusing
+  // here made this module stricter than the rest of the app about the same row.
+  it('falls back to the requested duration on a pre-reconciliation Term result', () => {
     const illustration = termIllustration('20-G')
-    const { confirmedTermDuration, ...withoutDuration } = illustration.rawPayload.foresightTermResult
+    const { confirmedTermDuration, requestedTermDuration, ...legacy } =
+      illustration.rawPayload.foresightTermResult
     void confirmedTermDuration
+    void requestedTermDuration
+    const summary = buildClientSummary({
+      ...illustration,
+      rawPayload: { ...illustration.rawPayload, foresightTermResult: legacy },
+    })
+    expect(summary?.kind === 'LEVEL_TERM' && summary.durationLabel)
+      .toBe('Level premium guaranteed for 20 years')
+  })
+
+  it('produces nothing when neither the result nor the request names a duration', () => {
+    const illustration = termIllustration('20-G')
+    const { confirmedTermDuration, requestedTermDuration, ...legacy } =
+      illustration.rawPayload.foresightTermResult
+    void confirmedTermDuration
+    void requestedTermDuration
     expect(buildClientSummary({
       ...illustration,
-      rawPayload: { ...illustration.rawPayload, foresightTermResult: withoutDuration },
+      rawPayload: {
+        foresightTermDraft: { ...illustration.rawPayload.foresightTermDraft, termDuration: 'X' },
+        foresightTermResult: legacy,
+      },
     })).toBeNull()
   })
 

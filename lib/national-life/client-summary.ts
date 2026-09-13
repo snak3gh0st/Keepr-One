@@ -136,12 +136,21 @@ function termSummary(
   // id it has no other use for. What a client is owed is what the carrier
   // confirmed, which lives in the same object, behind the same `OFFICIAL_PDF`
   // guard, as the premiums already trusted above.
-  const payload = illustration.rawPayload as { foresightTermResult?: { confirmedTermDuration?: unknown } }
-  const confirmed = payload?.foresightTermResult?.confirmedTermDuration
+  const payload = illustration.rawPayload as {
+    foresightTermDraft?: { termDuration?: unknown }
+    foresightTermResult?: { confirmedTermDuration?: unknown }
+  }
   // Term results written before duration reconciliation existed carry no
-  // confirmed duration. They stay valid illustrations; they just cannot say
-  // how long this cover lasts, and this page will not guess on their behalf.
-  const durationLabel = typeof confirmed === 'string' ? TERM_DURATION_COPY[confirmed] : undefined
+  // confirmed duration. `resolveForesightTermDurationResult` — the canonical
+  // reader — treats those rows as confirming the duration that was requested,
+  // because back then the carrier had no way to return a different one; the
+  // agent's own screen prints it as the confirmed term. Refusing them here made
+  // this module stricter than the rest of the app about the same illustration,
+  // which showed up in production as a verified Term policy that could be
+  // opened but not summarised, with nothing on screen explaining why.
+  const duration = payload?.foresightTermResult?.confirmedTermDuration ??
+    payload?.foresightTermDraft?.termDuration
+  const durationLabel = typeof duration === 'string' ? TERM_DURATION_COPY[duration] : undefined
   if (!durationLabel) return null
 
   return { ...base, kind: 'LEVEL_TERM', durationLabel }
