@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { renderClientSummaryPdf, clientSummaryFilename, niceCeiling } from './client-summary-pdf'
 import type { ClientSummary } from './client-summary'
 
+function point(policyYear: number) {
+  return {
+    policyYear,
+    age: 39 + policyYear,
+    netDeathBenefit: 500_000 + policyYear * 1_000,
+    cashSurrenderValue: policyYear * 10_000,
+    premiumOutlay: 3_600,
+    accumulatedValue: policyYear * 12_000,
+  }
+}
+
 const summary: ClientSummary = {
   kind: 'PROJECTED',
   insuredName: 'Maria Silva',
@@ -10,18 +21,13 @@ const summary: ClientSummary = {
   monthlyPremium: 300,
   annualPremium: 3_600,
   issuedOn: new Date('2026-09-01T12:00:00Z'),
-  coverage: [1, 5, 10, 20, 30].map((policyYear) => ({
-    policyYear,
-    age: 39 + policyYear,
-    netDeathBenefit: 500_000 + policyYear * 1_000,
-    cashSurrenderValue: policyYear * 10_000,
-  })),
-  milestones: [5, 10, 20, 30].map((policyYear) => ({
-    policyYear,
-    age: 39 + policyYear,
-    netDeathBenefit: 500_000 + policyYear * 1_000,
-    cashSurrenderValue: policyYear * 10_000,
-  })),
+  advisorName: 'Ana Corretora',
+  coverage: [1, 5, 10, 20, 30].map(point),
+  milestones: [5, 10, 20, 30].map(point),
+  fullMilestones: [1, 5, 10, 20, 30].map(point),
+  outlook: { age: 65, policyYear: 26, totalContributions: 93_600, accumulatedValue: 130_000, growth: 36_400 },
+  lapseYear: null,
+  mecYear: null,
 }
 
 async function extractText(bytes: Uint8Array): Promise<string> {
@@ -125,7 +131,8 @@ describe('Term summary PDF', () => {
     monthlyPremium: 62.92,
     annualPremium: 755.04,
     issuedOn: new Date('2026-09-01T12:00:00Z'),
-    durationLabel: 'Level premium guaranteed for 20 years',
+    advisorName: null,
+    termDuration: '20-G',
   }
 
   it('states the confirmed numbers and how long the premium holds', async () => {
@@ -155,9 +162,116 @@ describe('Term summary PDF', () => {
   })
 
   it('says plainly when the premium is the kind that rises', async () => {
-    const text = await extractText(await renderClientSummaryPdf({
-      ...term, durationLabel: 'Annually renewable — the premium increases each year',
-    }))
+    const text = await extractText(await renderClientSummaryPdf({ ...term, termDuration: 'ART' }))
     expect(text).toContain('the premium increases each year')
+  })
+})
+
+async function pageTexts(bytes: Uint8Array): Promise<string[]> {
+  const canvas = await import('@napi-rs/canvas')
+  const runtime = globalThis as unknown as Record<string, unknown>
+  runtime.DOMMatrix ??= canvas.DOMMatrix
+  runtime.Path2D ??= canvas.Path2D
+  const worker = await import('pdfjs-dist/legacy/build/pdf.worker.mjs')
+  runtime.pdfjsWorker ??= { WorkerMessageHandler: worker.WorkerMessageHandler }
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const document = await getDocument({ data: Uint8Array.from(bytes), useSystemFonts: true }).promise
+  const pages: string[] = []
+  for (let index = 1; index <= document.numPages; index += 1) {
+    const content = await (await document.getPage(index)).getTextContent()
+    pages.push(content.items.map((item) => ('str' in item ? item.str : '')).join(' ').replace(/\s+/g, ' '))
+  }
+  return pages
+}
+
+describe('the full presentation', () => {
+  it('runs to four pages: cover, plan with the curve, table, outlook', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(summary, { variant: 'FULL' }))
+    expect(pages).toHaveLength(4)
+    expect(pages[0]).toContain('PERSONAL PLAN')
+    expect(pages[1]).toContain('YOUR PLAN')
+    expect(pages[1]).toContain('Coverage over time')
+    expect(pages[2]).toContain('YEAR BY YEAR')
+    expect(pages[3]).toContain('Next step')
+  })
+
+  it('shows what was paid in against what it became', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(summary, { variant: 'FULL' }))
+    expect(pages[3]).toContain('$93,600')
+    expect(pages[3]).toContain('$130,000')
+    expect(pages[3]).toContain('$36,400')
+    expect(pages[3]).toContain('ACCUMULATED VALUE AT AGE 65')
+  })
+
+  it('qualifies the outlook figures too, not only the chart', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(summary, { variant: 'FULL' }))
+    expect(pages[3]).toContain('Not guaranteed')
+  })
+
+  it('omits the outlook block when the projection could not be honestly totalled', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(
+      { ...summary, outlook: null }, { variant: 'FULL' }))
+    expect(pages[3]).not.toContain('Total paid in')
+    expect(pages[3]).toContain('Next step')
+  })
+
+  it('passes the carrier’s lapse and MEC warnings through to the client', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(
+      { ...summary, lapseYear: 41, mecYear: 7 }, { variant: 'FULL' }))
+    expect(pages[3]).toContain('lapse in year 41')
+    expect(pages[3]).toContain('Modified Endowment Contract in year 7')
+  })
+
+  it('names the advisor on the cover and at the close', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(summary, { variant: 'FULL' }))
+    expect(pages[0]).toContain('ANA CORRETORA')
+    expect(pages[3]).toContain('Ana Corretora')
+  })
+
+  // Term carries four numbers and a duration. Five pages of that would be
+  // padding, so the full variant falls back to the one-pager rather than
+  // inventing pages to fill.
+  it('falls back to one page for Term, which has no projection', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf({
+      kind: 'LEVEL_TERM', insuredName: 'Ale Teste', productLabel: 'NL Term',
+      faceAmount: 500_000, monthlyPremium: 62.92, annualPremium: 755.04,
+      issuedOn: new Date('2026-09-01T12:00:00Z'), advisorName: null, termDuration: '20-G',
+    }, { variant: 'FULL' }))
+    expect(pages).toHaveLength(1)
+  })
+
+  it('names the file so the agent can tell the two apart', () => {
+    expect(clientSummaryFilename(summary, 'FULL'))
+      .toBe('Maria-Silva-proposal-presentation-2026-09-01.pdf')
+  })
+})
+
+describe('language', () => {
+  it('prints the whole page in Portuguese when asked', async () => {
+    const text = (await pageTexts(await renderClientSummaryPdf(summary, { language: 'PT' })))[0]!
+    expect(text).toContain('SUA COBERTURA')
+    expect(text).toContain('PAGAMENTO MENSAL')
+    expect(text).toContain('Cobertura ao longo do tempo')
+    expect(text).toContain('Não garantido')
+    expect(text).toContain('Benefício por morte')
+    expect(text).toContain('Ano 5')
+    expect(text).not.toContain('Your coverage')
+  })
+
+  it('states a Portuguese Term duration in Portuguese', async () => {
+    const text = (await pageTexts(await renderClientSummaryPdf({
+      kind: 'LEVEL_TERM', insuredName: 'Ale Teste', productLabel: 'NL Term',
+      faceAmount: 500_000, monthlyPremium: 62.92, annualPremium: 755.04,
+      issuedOn: new Date('2026-09-01T12:00:00Z'), advisorName: null, termDuration: 'ART',
+    }, { language: 'PT' })))[0]!
+    expect(text).toContain('o prêmio aumenta a cada ano')
+  })
+
+  // Transcribed US insurance compliance language. `quote-disclaimer.ts` states
+  // it may not be translated, so a Portuguese page carries it in English.
+  it('keeps the regulated disclaimer in English on a Portuguese page', async () => {
+    const text = (await pageTexts(await renderClientSummaryPdf(summary, { language: 'PT' })))[0]!
+    expect(text).toContain('only authoritative document')
+    expect(text).toContain('Fonte: ilustração da National Life')
   })
 })

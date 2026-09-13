@@ -124,10 +124,10 @@ describe('client summary contents', () => {
   it('picks years 5, 10 and 20 plus the last projected year as the milestones', () => {
     const summary = buildClientSummary(verifiedIllustration)
     expect(summary?.kind === 'PROJECTED' && summary.milestones).toEqual([
-      { policyYear: 5, age: 44, netDeathBenefit: 505_000, cashSurrenderValue: 50_000 },
-      { policyYear: 10, age: 49, netDeathBenefit: 510_000, cashSurrenderValue: 100_000 },
-      { policyYear: 20, age: 59, netDeathBenefit: 520_000, cashSurrenderValue: 200_000 },
-      { policyYear: 30, age: 69, netDeathBenefit: 530_000, cashSurrenderValue: 300_000 },
+      { policyYear: 5, age: 44, netDeathBenefit: 505_000, cashSurrenderValue: 50_000, premiumOutlay: 3_600, accumulatedValue: 60_000 },
+      { policyYear: 10, age: 49, netDeathBenefit: 510_000, cashSurrenderValue: 100_000, premiumOutlay: 3_600, accumulatedValue: 120_000 },
+      { policyYear: 20, age: 59, netDeathBenefit: 520_000, cashSurrenderValue: 200_000, premiumOutlay: 3_600, accumulatedValue: 240_000 },
+      { policyYear: 30, age: 69, netDeathBenefit: 530_000, cashSurrenderValue: 300_000, premiumOutlay: 3_600, accumulatedValue: 360_000 },
     ])
   })
 
@@ -190,7 +190,7 @@ describe('Term summaries', () => {
       faceAmount: 500_000,
       monthlyPremium: 62.92,
       annualPremium: 755.04,
-      durationLabel: 'Level premium guaranteed for 20 years',
+      termDuration: '20-G',
     })
   })
 
@@ -198,8 +198,7 @@ describe('Term summaries', () => {
   // reason a level coverage band is never drawn for Term.
   it('says plainly that an annually renewable premium rises each year', () => {
     const summary = buildClientSummary(termIllustration('ART'))
-    expect(summary?.kind === 'LEVEL_TERM' && summary.durationLabel)
-      .toBe('Annually renewable — the premium increases each year')
+    expect(summary?.kind === 'LEVEL_TERM' && summary.termDuration).toBe('ART')
   })
 
   it('carries no projection to draw', () => {
@@ -220,8 +219,7 @@ describe('Term summaries', () => {
       ...illustration,
       rawPayload: { ...illustration.rawPayload, foresightTermResult: legacy },
     })
-    expect(summary?.kind === 'LEVEL_TERM' && summary.durationLabel)
-      .toBe('Level premium guaranteed for 20 years')
+    expect(summary?.kind === 'LEVEL_TERM' && summary.termDuration).toBe('20-G')
   })
 
   it('produces nothing when neither the result nor the request names a duration', () => {
@@ -243,5 +241,84 @@ describe('Term summaries', () => {
     expect(buildClientSummary({
       ...termIllustration('20-G'), documentFetchedAt: null,
     })).toBeNull()
+  })
+})
+
+describe('the full presentation figures', () => {
+  function withProjection(rows: Array<Record<string, number | null>>) {
+    return buildClientSummary({
+      ...verifiedIllustration,
+      rawPayload: {
+        foresightResult: {
+          ...verifiedIllustration.rawPayload.foresightResult,
+          quickReview: { ...quickReview, annualProjection: rows },
+        },
+      },
+    })
+  }
+
+  const everyYear = Array.from({ length: 30 }, (_, index) => projectionRow({
+    policyYear: index + 1,
+    age: 40 + index,
+    premiumOutlay: 3_600,
+    accumulatedValue: (index + 1) * 5_000,
+    cashSurrenderValue: (index + 1) * 4_000,
+    netDeathBenefit: 500_000,
+  }))
+
+  it('adds up what the client actually pays in, from the carrier’s own outlay column', () => {
+    const summary = withProjection(everyYear)
+    expect(summary?.kind === 'PROJECTED' && summary.outlook).toMatchObject({
+      age: 65,
+      policyYear: 26,
+      totalContributions: 93_600,
+      accumulatedValue: 130_000,
+      growth: 36_400,
+    })
+  })
+
+  // A Quick View that samples years rather than listing them cannot be summed:
+  // adding five sampled rows would report a fraction of what was really paid,
+  // stated as a total. Better to show nothing than a number that is wrong.
+  it('refuses to total a projection that skips years', () => {
+    const summary = withProjection([1, 5, 10, 20, 30].map((policyYear) => projectionRow({
+      policyYear, age: 39 + policyYear, premiumOutlay: 3_600,
+    })))
+    expect(summary?.kind === 'PROJECTED' && summary.outlook).toBeNull()
+  })
+
+  it('refuses to total a projection with an outlay missing from any year', () => {
+    const rows = everyYear.map((row, index) =>
+      index === 7 ? { ...row, premiumOutlay: null } : row)
+    expect(withProjection(rows)?.kind === 'PROJECTED' &&
+      (withProjection(rows) as { outlook: unknown }).outlook).toBeNull()
+  })
+
+  it('reports the outlook at 65 when the projection reaches it', () => {
+    const toSeventy = Array.from({ length: 31 }, (_, index) => projectionRow({
+      policyYear: index + 1, age: 40 + index,
+      premiumOutlay: 1_200, accumulatedValue: (index + 1) * 1_000,
+    }))
+    const summary = withProjection(toSeventy)
+    expect(summary?.kind === 'PROJECTED' && summary.outlook?.age).toBe(65)
+  })
+
+  it('carries the carrier’s lapse and MEC years through untouched', () => {
+    const summary = buildClientSummary({
+      ...verifiedIllustration,
+      rawPayload: {
+        foresightResult: {
+          ...verifiedIllustration.rawPayload.foresightResult,
+          quickReview: { ...quickReview, summary: { ...quickReview.summary, lapseYear: 41, mecYear: 7 } },
+        },
+      },
+    })
+    expect(summary?.kind === 'PROJECTED' && summary.lapseYear).toBe(41)
+    expect(summary?.kind === 'PROJECTED' && summary.mecYear).toBe(7)
+  })
+
+  it('carries the advisor through when the caller knows who it is', () => {
+    expect(buildClientSummary({ ...verifiedIllustration, advisorName: 'Ana Corretora' })?.advisorName)
+      .toBe('Ana Corretora')
   })
 })

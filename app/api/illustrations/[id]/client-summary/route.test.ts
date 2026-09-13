@@ -22,17 +22,18 @@ const quickReview = {
     minimumPremium: null, deathBenefitProtectionPremium: null, targetPremium: 4_200,
     mecPremium: null, guidelineLevelPremium: null, guidelineSinglePremium: null,
   },
-  annualProjection: [1, 5, 10, 20].map((policyYear) => ({
-    policyYear, age: 39 + policyYear,
+  annualProjection: Array.from({ length: 30 }, (_, index) => ({
+    policyYear: index + 1, age: 40 + index,
     premiumOutlay: 3_600, weightedAverageInterestRate: 6.1, loan: null, annualIncome: null,
-    accumulatedValue: policyYear * 12_000,
-    cashSurrenderValue: policyYear * 10_000,
-    netDeathBenefit: 500_000 + policyYear * 1_000,
+    accumulatedValue: (index + 1) * 12_000,
+    cashSurrenderValue: (index + 1) * 10_000,
+    netDeathBenefit: 500_000 + (index + 1) * 1_000,
   })),
 }
 
 const verified = {
   agentId: 'agent-1',
+  agent: { user: { name: 'Ana Corretora' } },
   insuredName: 'Maria Silva',
   productName: '956',
   documentFetchedAt: new Date('2026-09-01T12:00:00Z'),
@@ -146,5 +147,39 @@ describe('client summary route', () => {
   it('is a 404, not a crash, for an illustration that does not exist', async () => {
     mocks.findUnique.mockResolvedValue(null)
     expect((await GET(request, { params })).status).toBe(404)
+  })
+})
+
+describe('variant and language', () => {
+  it('serves the five-page presentation when asked for the full variant', async () => {
+    const response = await GET(
+      new Request('http://localhost/x?variant=full'), { params })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Content-Disposition'))
+      .toContain('Maria-Silva-proposal-presentation-2026-09-01.pdf')
+  })
+
+  // A stale link or a hand-typed URL should hand the agent the safe, shorter
+  // document rather than an error page in front of a client.
+  it('falls back to the one-pager for an unknown variant', async () => {
+    const response = await GET(
+      new Request('http://localhost/x?variant=deluxe'), { params })
+    expect(response.headers.get('Content-Disposition')).toContain('proposal-summary')
+  })
+
+  it('renders in Portuguese when asked', async () => {
+    const response = await GET(new Request('http://localhost/x?lang=pt'), { params })
+    expect(response.status).toBe(200)
+    expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(1024)
+  })
+
+  // An admin pulling a copy must not put their own name on a client's plan.
+  it('names the owning agent as the advisor, whoever downloads it', async () => {
+    mocks.requireRole.mockResolvedValue({ user: { role: 'ADMIN' } })
+    const response = await GET(
+      new Request('http://localhost/x?variant=full'), { params })
+    expect(response.status).toBe(200)
+    const selected = mocks.findUnique.mock.calls[0]?.[0]?.select
+    expect(selected?.agent).toBeTruthy()
   })
 })

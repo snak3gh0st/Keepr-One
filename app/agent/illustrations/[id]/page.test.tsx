@@ -384,8 +384,11 @@ describe('Client summary offer on the detail page', () => {
 
     render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-verified' }) }))
 
-    const link = screen.getByRole('link', { name: 'Baixar resumo para o cliente' })
-    expect(link.getAttribute('href')).toBe('/api/illustrations/illustration-verified/client-summary')
+    const quick = screen.getByRole('link', { name: 'Resumo de uma página' })
+    expect(quick.getAttribute('href'))
+      .toBe('/api/illustrations/illustration-verified/client-summary?variant=quick&lang=pt')
+    // A projection behind it, so the five-page presentation is on offer too.
+    expect(screen.getByRole('link', { name: 'Apresentação completa' })).toBeTruthy()
   })
 
   // The offer and the route share one gate. If the page's `select` ever stops
@@ -398,7 +401,7 @@ describe('Client summary offer on the detail page', () => {
 
     render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-verified' }) }))
 
-    expect(screen.queryByRole('link', { name: 'Baixar resumo para o cliente' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Resumo de uma página' })).toBeNull()
   })
 
   it('offers it for Term once the carrier has confirmed the duration', async () => {
@@ -419,7 +422,9 @@ describe('Client summary offer on the detail page', () => {
 
     render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-verified' }) }))
 
-    expect(screen.getByRole('link', { name: 'Baixar resumo para o cliente' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Resumo de uma página' })).toBeTruthy()
+    // Term has no projection, so there is no presentation to offer.
+    expect(screen.queryByRole('link', { name: 'Apresentação completa' })).toBeNull()
   })
 
   it('does not offer it for a Term result with no confirmed duration to state', async () => {
@@ -438,6 +443,6 @@ describe('Client summary offer on the detail page', () => {
 
     render(await IllustrationDetailPage({ params: Promise.resolve({ id: 'illustration-verified' }) }))
 
-    expect(screen.queryByRole('link', { name: 'Baixar resumo para o cliente' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Resumo de uma página' })).toBeNull()
   })
 })

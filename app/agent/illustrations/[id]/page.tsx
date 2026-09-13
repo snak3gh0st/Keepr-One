@@ -26,6 +26,7 @@ import { getServerI18n } from '@/lib/i18n/server'
 import { localeFor } from '@/lib/i18n/config'
 import { StartApplicationFromIllustrationButton } from '../StartApplicationFromIllustrationButton'
 import { TermPdfReconciliationButton } from '../TermPdfReconciliationButton'
+import { ClientDocumentPicker } from '../ClientDocumentPicker'
 
 const currency = (value: number, locale: string) =>
   new Intl.NumberFormat(locale, {
@@ -167,10 +168,10 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
     }
   })() : null
   const resultVerified = Boolean(documentReady && foresightResult)
-  // Offered only when a summary can actually be built. Term has no
-  // projection to summarise, so the button simply does not appear rather
-  // than leading to a 404 the agent has to interpret mid-call.
-  const clientSummaryAvailable = buildClientSummary(illustration) !== null
+  // Built here, not merely tested for: its `kind` is what decides whether the
+  // five-page presentation is offered at all. Term has no projection behind it,
+  // so it gets the one-pager and nothing else.
+  const clientSummary = buildClientSummary(illustration)
   const needsTermReconciliation = Boolean(isTermProduct && documentReady && !foresightResult)
   const hasCarrierPremium = Boolean(foresightResult && illustration.premium)
   const premiumValue = hasCarrierPremium ? illustration.premium : illustration.targetPremium
@@ -300,13 +301,11 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                   ? copy('Abrir PDF oficial', 'Open official PDF')
                   : copy('Abrir PDF recebido', 'Open received PDF')}
               </a>
-              {clientSummaryAvailable ? (
-                <a
-                  href={`/api/illustrations/${illustration.id}/client-summary`}
-                  className="inline-flex min-h-11 items-center justify-center rounded-md border border-teal bg-teal px-5 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-teal-deep"
-                >
-                  {copy('Baixar resumo para o cliente', 'Download client summary')}
-                </a>
+              {clientSummary ? (
+                <ClientDocumentPicker
+                  illustrationId={illustration.id}
+                  presentationAvailable={clientSummary.kind === 'PROJECTED'}
+                />
               ) : null}
               {needsTermReconciliation ? (
                 <TermPdfReconciliationButton illustrationId={illustration.id} />

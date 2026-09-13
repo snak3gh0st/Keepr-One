@@ -1,6 +1,7 @@
 import 'server-only'
 
-/// Draws the one page the client receives.
+/// Draws what the client receives: a one-page summary, or a four-page
+/// presentation of the same verified facts.
 ///
 /// Vector PDF straight from Skia via `@napi-rs/canvas`, which the server image
 /// already carries for reading carrier PDFs. That is the whole reason this is a
@@ -10,16 +11,28 @@ import 'server-only'
 ///
 /// This module only draws. Every value it receives has already been verified
 /// against the carrier's official illustration by `buildClientSummary`; nothing
-/// here computes, rounds into, or infers a number.
+/// here computes, rounds into, or infers a number. Every word it prints comes
+/// from `client-summary-copy.ts`.
 
 import path from 'node:path'
 import { GlobalFonts, PDFDocument, Path2D } from '@napi-rs/canvas'
 import { CLIENT_SUMMARY_DISCLAIMER } from './quote-disclaimer'
+import { clientSummaryCopy, type ClientSummaryLanguage } from './client-summary-copy'
 import type { ClientSummary, ClientSummaryPoint } from './client-summary'
 
 type Ctx = ReturnType<PDFDocument['beginPage']>
+type Copy = ReturnType<typeof clientSummaryCopy>
+
+export type ClientSummaryVariant = 'QUICK' | 'FULL'
+
+export type ClientSummaryOptions = {
+  variant?: ClientSummaryVariant
+  language?: ClientSummaryLanguage
+}
 
 // US Letter at 72dpi, the size a US client prints without thinking about it.
+// Portrait rather than the landscape of a deck: this is opened on a phone in a
+// WhatsApp thread, where portrait fills the screen and landscape does not.
 const PAGE_WIDTH = 612
 const PAGE_HEIGHT = 792
 const MARGIN = 46
@@ -80,10 +93,18 @@ const whole = new Intl.NumberFormat('en-US', {
 const cents = new Intl.NumberFormat('en-US', {
   style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
 })
-const day = new Intl.DateTimeFormat('en-US', { dateStyle: 'long', timeZone: 'UTC' })
 const compact = new Intl.NumberFormat('en-US', {
   style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1,
 })
+
+// Amounts stay in US dollars in both languages — the policy is a US contract
+// and the carrier's own document states them that way. Only the date follows
+// the reader's language.
+function dayFor(language: ClientSummaryLanguage) {
+  return new Intl.DateTimeFormat(language === 'PT' ? 'pt-BR' : 'en-US', {
+    dateStyle: 'long', timeZone: 'UTC',
+  })
+}
 
 /// Rounds an axis up to a number a person would have chosen. Scaling the axis
 /// to the tallest data point put `$1,568,000` on the gridline — a number that
@@ -106,7 +127,7 @@ function font(size: number, weight: 400 | 500 | 700 = 400): string {
 }
 
 /// Lays text into a column, returning where the next line would start. Used for
-/// the disclaimer, which is the only run long enough to wrap and the one run
+/// the disclaimer and body copy — the runs long enough to wrap, and the ones
 /// that must never be silently clipped.
 function paragraph(
   ctx: Ctx, text: string, x: number, y: number, width: number, lineHeight: number,
@@ -130,6 +151,10 @@ function paragraph(
   return cursor
 }
 
+function right(ctx: Ctx, text: string, rightEdge: number, y: number): void {
+  ctx.fillText(text, rightEdge - ctx.measureText(text).width, y)
+}
+
 function drawLogoMark(ctx: Ctx, x: number, y: number, size: number): void {
   ctx.save()
   ctx.translate(x, y)
@@ -146,22 +171,24 @@ function drawLogoMark(ctx: Ctx, x: number, y: number, size: number): void {
 /// and `one` in the brand green, tight together on one baseline.
 function drawLogo(ctx: Ctx, x: number, baseline: number, size: number): void {
   drawLogoMark(ctx, x, baseline - size + 2, size)
-  const textX = x + size + 9
-  ctx.font = font(19, 700)
+  const textX = x + size + size * 0.41
+  const type = size * 0.86
+  ctx.font = font(type, 700)
   ctx.fillStyle = ON_BAND
   ctx.fillText('keepr', textX, baseline)
   const keeprWidth = ctx.measureText('keepr').width
-  ctx.font = font(19, 500)
+  ctx.font = font(type, 500)
   ctx.fillStyle = BRAND_GREEN
-  ctx.fillText('one', textX + keeprWidth + 5, baseline)
+  ctx.fillText('one', textX + keeprWidth + type * 0.26, baseline)
 }
 
-/// The masthead: the brand, who this is for, and whose numbers these are.
+/// The masthead of the one-page summary: the brand, who this is for, and whose
+/// numbers these are.
 ///
 /// A full-bleed dark band rather than a logo floating on white. On a page the
 /// client will screenshot and forward, the first thing that has to survive
 /// being seen at thumbnail size is who sent it.
-function banner(ctx: Ctx, summary: ClientSummary): void {
+function banner(ctx: Ctx, summary: ClientSummary, copy: Copy, language: ClientSummaryLanguage): void {
   ctx.fillStyle = INK
   ctx.fillRect(0, 0, PAGE_WIDTH, BAND_HEIGHT)
   ctx.fillStyle = BRAND_GREEN
@@ -171,8 +198,8 @@ function banner(ctx: Ctx, summary: ClientSummary): void {
 
   ctx.fillStyle = ON_BAND_MUTED
   ctx.font = font(9, 500)
-  const issued = `ISSUED ${day.format(summary.issuedOn).toUpperCase()}`
-  ctx.fillText(issued, PAGE_WIDTH - MARGIN - ctx.measureText(issued).width, 42)
+  right(ctx, `${copy.issued} ${dayFor(language).format(summary.issuedOn).toUpperCase()}`,
+    PAGE_WIDTH - MARGIN, 42)
 
   ctx.fillStyle = ON_BAND
   ctx.font = font(28, 700)
@@ -183,13 +210,79 @@ function banner(ctx: Ctx, summary: ClientSummary): void {
   ctx.fillText(`${summary.productLabel.toUpperCase()}  ·  NATIONAL LIFE`, MARGIN, 112)
 }
 
+/// The full presentation's cover: one dark page carrying only the name.
+function cover(ctx: Ctx, summary: ClientSummary, copy: Copy, language: ClientSummaryLanguage): void {
+  ctx.fillStyle = INK
+  ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT)
+
+  drawLogo(ctx, MARGIN, 62, 26)
+
+  const centre = PAGE_WIDTH / 2
+  ctx.textAlign = 'center'
+
+  ctx.fillStyle = BRAND_GREEN
+  ctx.font = font(10, 700)
+  ctx.fillText(copy.planLabel, centre, 300)
+
+  ctx.fillStyle = ON_BAND
+  ctx.font = font(42, 700)
+  ctx.fillText(summary.insuredName, centre, 362)
+
+  ctx.fillStyle = BRAND_GREEN
+  ctx.fillRect(centre - 30, 388, 60, 2)
+
+  ctx.fillStyle = ON_BAND_MUTED
+  ctx.font = font(13, 500)
+  ctx.fillText(`${summary.productLabel} · National Life`, centre, 420)
+
+  ctx.font = font(9, 500)
+  ctx.fillText(`${copy.issued} ${dayFor(language).format(summary.issuedOn).toUpperCase()}`,
+    centre, PAGE_HEIGHT - 128)
+  if (summary.advisorName) {
+    ctx.fillStyle = ON_BAND
+    ctx.font = font(9, 700)
+    ctx.fillText(`${copy.advisor}: ${summary.advisorName.toUpperCase()}`, centre, PAGE_HEIGHT - 110)
+  }
+
+  ctx.textAlign = 'left'
+}
+
+/// The running header and footer on every page of the full presentation. Quiet
+/// on purpose: the cover already introduced the document.
+function pageChrome(
+  ctx: Ctx, summary: ClientSummary, title: string, pageNumber: number,
+): void {
+  ctx.fillStyle = PAPER
+  ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT)
+
+  ctx.fillStyle = GOLD
+  ctx.font = font(9, 700)
+  ctx.fillText(title.toUpperCase(), MARGIN, MARGIN + 10)
+
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(9, 500)
+  right(ctx, summary.insuredName.toUpperCase(), PAGE_WIDTH - MARGIN, MARGIN + 10)
+
+  ctx.strokeStyle = BORDER
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(MARGIN, MARGIN + 22.5)
+  ctx.lineTo(PAGE_WIDTH - MARGIN, MARGIN + 22.5)
+  ctx.stroke()
+
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(8, 500)
+  ctx.fillText(`${summary.productLabel} · National Life`, MARGIN, PAGE_HEIGHT - MARGIN)
+  right(ctx, String(pageNumber).padStart(2, '0'), PAGE_WIDTH - MARGIN, PAGE_HEIGHT - MARGIN)
+}
+
 /// The three numbers the client is actually deciding on, given the whole width
 /// of the page so they are read before anything else.
-function headlineFigures(ctx: Ctx, summary: ClientSummary, top: number): number {
+function headlineFigures(ctx: Ctx, summary: ClientSummary, copy: Copy, top: number): number {
   const figures: Array<[string, string]> = [
-    ['Your coverage', whole.format(summary.faceAmount)],
-    ['Monthly payment', cents.format(summary.monthlyPremium)],
-    ['Per year', cents.format(summary.annualPremium)],
+    [copy.yourCoverage, whole.format(summary.faceAmount)],
+    [copy.monthlyPayment, cents.format(summary.monthlyPremium)],
+    [copy.perYear, cents.format(summary.annualPremium)],
   ]
   const height = 84
   const gap = 11
@@ -226,12 +319,13 @@ function sectionTitle(ctx: Ctx, title: string, baseline: number, note?: string):
   if (note) {
     ctx.fillStyle = GOLD
     ctx.font = font(9, 700)
-    ctx.fillText(note, PAGE_WIDTH - MARGIN - ctx.measureText(note).width, baseline)
+    right(ctx, note, PAGE_WIDTH - MARGIN, baseline)
   }
 }
 
-function coverageChart(ctx: Ctx, points: ClientSummaryPoint[], top: number): number {
-  const height = 200
+function coverageChart(
+  ctx: Ctx, points: ClientSummaryPoint[], copy: Copy, top: number, height: number,
+): number {
   const width = PAGE_WIDTH - MARGIN * 2
   const plotLeft = MARGIN + 54
   const plotRight = MARGIN + width
@@ -241,7 +335,7 @@ function coverageChart(ctx: Ctx, points: ClientSummaryPoint[], top: number): num
   // The qualifier sits on the chart, not in the footer. A clean rising curve is
   // exactly the thing a reader remembers as a promise, and the footer is
   // exactly the thing they do not read.
-  sectionTitle(ctx, 'Coverage over time', top + 14, 'Not guaranteed · current assumptions')
+  sectionTitle(ctx, copy.coverageOverTime, top + 14, copy.notGuaranteed)
 
   const cashPoints = points.filter(
     (point): point is ClientSummaryPoint & { cashSurrenderValue: number } =>
@@ -313,12 +407,11 @@ function coverageChart(ctx: Ctx, points: ClientSummaryPoint[], top: number): num
   ctx.font = font(8)
   const first = points[0]!
   const last = points[points.length - 1]!
-  ctx.fillText(`Age ${first.age}`, xFor(first.age), plotBottom + 14)
-  const lastLabel = `Age ${last.age}`
-  ctx.fillText(lastLabel, xFor(last.age) - ctx.measureText(lastLabel).width, plotBottom + 14)
+  ctx.fillText(copy.age(first.age), xFor(first.age), plotBottom + 14)
+  right(ctx, copy.age(last.age), xFor(last.age), plotBottom + 14)
 
   let legendX = plotLeft
-  for (const [colour, label] of [[TEAL, 'Death benefit'], [GOLD, 'Cash value']] as const) {
+  for (const [colour, label] of [[TEAL, copy.deathBenefit], [GOLD, copy.cashValue]] as const) {
     if (colour === GOLD && cashPoints.length === 0) continue
     ctx.fillStyle = colour
     ctx.fillRect(legendX, plotBottom + 22, 14, 3)
@@ -331,17 +424,16 @@ function coverageChart(ctx: Ctx, points: ClientSummaryPoint[], top: number): num
   return top + height
 }
 
-function milestoneTable(ctx: Ctx, milestones: ClientSummaryPoint[], top: number): number {
+type Column = { x: number; heading: string; value: (point: ClientSummaryPoint) => string }
+
+function projectionTable(
+  ctx: Ctx, rows: ClientSummaryPoint[], columns: Column[], top: number, rowHeight: number,
+): number {
   const width = PAGE_WIDTH - MARGIN * 2
-  const columns = [MARGIN + 14, MARGIN + 130, MARGIN + 250, MARGIN + 400]
-  const rowHeight = 28
 
   ctx.fillStyle = INK_MUTED
   ctx.font = font(9, 700)
-  const headings = ['POLICY YEAR', 'AGE', 'DEATH BENEFIT', 'CASH VALUE']
-  headings.forEach((heading, index) => {
-    ctx.fillText(heading, columns[index]!, top + 12)
-  })
+  for (const column of columns) ctx.fillText(column.heading, column.x, top + 12)
   ctx.strokeStyle = BORDER
   ctx.lineWidth = 1
   ctx.beginPath()
@@ -349,38 +441,34 @@ function milestoneTable(ctx: Ctx, milestones: ClientSummaryPoint[], top: number)
   ctx.lineTo(MARGIN + width, top + 20.5)
   ctx.stroke()
 
-  milestones.forEach((milestone, index) => {
+  rows.forEach((point, index) => {
     const rowTop = top + 20 + index * rowHeight
     const baseline = rowTop + rowHeight - 9
     if (index % 2 === 0) {
       ctx.fillStyle = PANEL
       ctx.fillRect(MARGIN, rowTop + 1, width, rowHeight - 1)
     }
-    ctx.fillStyle = INK
-    ctx.font = font(11, 700)
-    ctx.fillText(`Year ${milestone.policyYear}`, columns[0]!, baseline)
-    ctx.fillStyle = INK_MUTED
-    ctx.font = font(11)
-    ctx.fillText(String(milestone.age), columns[1]!, baseline)
-    ctx.fillStyle = INK
-    ctx.font = font(11, 500)
-    ctx.fillText(whole.format(milestone.netDeathBenefit), columns[2]!, baseline)
-    // An em dash where the carrier gave nothing. Inventing a zero here would
-    // read as "your policy is worth nothing in year 20".
-    ctx.fillText(
-      milestone.cashSurrenderValue === null ? '—' : whole.format(milestone.cashSurrenderValue),
-      columns[3]!, baseline,
-    )
+    columns.forEach((column, columnIndex) => {
+      ctx.fillStyle = columnIndex === 1 ? INK_MUTED : INK
+      ctx.font = font(11, columnIndex === 0 ? 700 : columnIndex === 1 ? 400 : 500)
+      ctx.fillText(column.value(point), column.x, baseline)
+    })
   })
 
-  return top + 20 + milestones.length * rowHeight
+  return top + 20 + rows.length * rowHeight
+}
+
+/// An em dash where the carrier gave nothing. Inventing a zero here would read
+/// as "your policy is worth nothing in year 20".
+function amount(value: number | null): string {
+  return value === null ? '—' : whole.format(value)
 }
 
 /// Term's whole middle. Four numbers came back from the carrier, and one of
 /// them is a duration — so the page states the duration and stops. There is no
 /// projection behind a Term result, and a drawn coverage bar would be this page
 /// asserting an end date the carrier never sent.
-function termPeriod(ctx: Ctx, durationLabel: string, top: number): number {
+function termPeriod(ctx: Ctx, label: string, copy: Copy, top: number): number {
   const width = PAGE_WIDTH - MARGIN * 2
   const height = 98
 
@@ -391,11 +479,11 @@ function termPeriod(ctx: Ctx, durationLabel: string, top: number): number {
 
   ctx.fillStyle = INK_MUTED
   ctx.font = font(9, 700)
-  ctx.fillText('YOUR PREMIUM', MARGIN + 26, top + 32)
+  ctx.fillText(copy.yourPremium.toUpperCase(), MARGIN + 26, top + 32)
 
   ctx.fillStyle = TEAL_DEEP
   ctx.font = font(17, 700)
-  paragraph(ctx, durationLabel, MARGIN + 26, top + 62, width - 52, 23)
+  paragraph(ctx, label, MARGIN + 26, top + 62, width - 52, 23)
 
   return top + height
 }
@@ -407,7 +495,10 @@ function termPeriod(ctx: Ctx, durationLabel: string, top: number): number {
 /// bottom left a hole in the middle of the page that read as a document that
 /// failed to finish rendering. Letting the close follow the content instead
 /// gives a short letter's shape — text, sign-off, then blank paper.
-function footer(ctx: Ctx, summary: ClientSummary, contentBottom: number): void {
+function footer(
+  ctx: Ctx, summary: ClientSummary, copy: Copy, language: ClientSummaryLanguage,
+  contentBottom: number,
+): void {
   const width = PAGE_WIDTH - MARGIN * 2
   const top = Math.min(Math.max(contentBottom + 46, 0), PAGE_HEIGHT - MARGIN - 74)
 
@@ -424,52 +515,168 @@ function footer(ctx: Ctx, summary: ClientSummary, contentBottom: number): void {
 
   ctx.fillStyle = INK
   ctx.font = font(7.6, 700)
-  ctx.fillText(
-    `Source: National Life illustration issued ${day.format(summary.issuedOn)}. ` +
-      'Ask your agent for the full illustration.',
-    MARGIN, afterDisclaimer + 4,
-  )
+  ctx.fillText(copy.sourceLine(dayFor(language).format(summary.issuedOn)), MARGIN, afterDisclaimer + 4)
 }
 
-export async function renderClientSummaryPdf(summary: ClientSummary): Promise<Uint8Array> {
+function quickPage(
+  document: PDFDocument, summary: ClientSummary, copy: Copy, language: ClientSummaryLanguage,
+): void {
+  const ctx = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
+  ctx.fillStyle = PAPER
+  ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT)
+  banner(ctx, summary, copy, language)
+
+  let contentBottom: number
+  if (summary.kind === 'PROJECTED') {
+    const afterFigures = headlineFigures(ctx, summary, copy, BAND_HEIGHT + 30)
+    const afterChart = coverageChart(ctx, summary.coverage, copy, afterFigures + 26, 200)
+    contentBottom = projectionTable(ctx, summary.milestones, [
+      { x: MARGIN + 14, heading: copy.policyYearColumn, value: (p) => copy.year(p.policyYear) },
+      { x: MARGIN + 150, heading: copy.ageColumn, value: (p) => String(p.age) },
+      { x: MARGIN + 250, heading: copy.deathBenefitColumn, value: (p) => amount(p.netDeathBenefit) },
+      { x: MARGIN + 400, heading: copy.cashValueColumn, value: (p) => amount(p.cashSurrenderValue) },
+    ], afterChart + 28, 28)
+  } else {
+    const afterFigures = headlineFigures(ctx, summary, copy, BAND_HEIGHT + 38)
+    contentBottom = termPeriod(ctx, copy.termDuration[summary.termDuration], copy, afterFigures + 30)
+  }
+
+  footer(ctx, summary, copy, language, contentBottom)
+  document.endPage()
+}
+
+function outlookPage(
+  ctx: Ctx, summary: ClientSummary & { kind: 'PROJECTED' }, copy: Copy,
+  language: ClientSummaryLanguage,
+): void {
+  pageChrome(ctx, summary, copy.whatYouPutIn, 4)
+  let bottom = MARGIN + 46
+
+  if (summary.outlook) {
+    const figures: Array<[string, string, boolean]> = [
+      [copy.totalContributions, whole.format(summary.outlook.totalContributions), false],
+      [copy.accumulatedAt(summary.outlook.age), whole.format(summary.outlook.accumulatedValue), true],
+      [copy.growth, whole.format(summary.outlook.growth), false],
+    ]
+    figures.forEach(([label, value, lead], index) => {
+      const top = bottom + index * 92
+      ctx.fillStyle = lead ? TEAL : PANEL
+      ctx.fillRect(MARGIN, top, PAGE_WIDTH - MARGIN * 2, 78)
+      ctx.fillStyle = lead ? 'rgba(255, 255, 255, 0.74)' : INK_MUTED
+      ctx.font = font(9, 700)
+      ctx.fillText(label.toUpperCase(), MARGIN + 20, top + 27)
+      ctx.fillStyle = lead ? PAPER : INK
+      ctx.font = font(28, 700)
+      ctx.fillText(value, MARGIN + 20, top + 62)
+    })
+    bottom += figures.length * 92 - 14
+    ctx.fillStyle = GOLD
+    ctx.font = font(9, 700)
+    ctx.fillText(copy.notGuaranteed, MARGIN, bottom + 6)
+    bottom += 6
+  }
+
+  // The carrier's own warnings, when it issued any. They belong on the page
+  // that talks about the money, not buried beside the disclaimer.
+  const notes = [
+    summary.lapseYear !== null ? copy.lapseNote(summary.lapseYear) : null,
+    summary.mecYear !== null ? copy.mecNote(summary.mecYear) : null,
+  ].filter((note): note is string => note !== null)
+  if (notes.length > 0) {
+    ctx.fillStyle = INK
+    ctx.font = font(10, 500)
+    for (const note of notes) {
+      bottom = paragraph(ctx, note, MARGIN, bottom + 26, PAGE_WIDTH - MARGIN * 2, 15)
+    }
+  }
+
+  ctx.fillStyle = INK
+  ctx.font = font(13, 700)
+  ctx.fillText(copy.nextStep, MARGIN, bottom + 40)
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(10)
+  bottom = paragraph(ctx, copy.nextStepBody, MARGIN, bottom + 62, PAGE_WIDTH - MARGIN * 2, 15)
+  if (summary.advisorName) {
+    ctx.fillStyle = INK
+    ctx.font = font(10, 700)
+    ctx.fillText(`${copy.advisor}: ${summary.advisorName}`, MARGIN, bottom + 14)
+    bottom += 14
+  }
+
+  footer(ctx, summary, copy, language, bottom)
+}
+
+function fullPages(
+  document: PDFDocument, summary: ClientSummary & { kind: 'PROJECTED' }, copy: Copy,
+  language: ClientSummaryLanguage,
+): void {
+  cover(document.beginPage(PAGE_WIDTH, PAGE_HEIGHT), summary, copy, language)
+  document.endPage()
+
+  // The three figures and the curve share a page. Given one each, the figures
+  // page came out 85% empty — a sheet that reads as a document which failed to
+  // finish rendering rather than one with room to breathe. There is honest
+  // material here for four pages, not five, and padding the fifth would be the
+  // one thing this document may not do.
+  const plan = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
+  pageChrome(plan, summary, copy.yourPlan, 2)
+  const afterFigures = headlineFigures(plan, summary, copy, MARGIN + 60)
+  coverageChart(plan, summary.coverage, copy, afterFigures + 40, 380)
+  document.endPage()
+
+  const table = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
+  pageChrome(table, summary, copy.yearByYear, 3)
+  projectionTable(table, summary.fullMilestones, [
+    { x: MARGIN + 12, heading: copy.policyYearColumn, value: (p) => copy.year(p.policyYear) },
+    { x: MARGIN + 110, heading: copy.ageColumn, value: (p) => String(p.age) },
+    { x: MARGIN + 160, heading: copy.outlayColumn, value: (p) => amount(p.premiumOutlay) },
+    { x: MARGIN + 250, heading: copy.deathBenefitColumn, value: (p) => amount(p.netDeathBenefit) },
+    { x: MARGIN + 390, heading: copy.accumulatedColumn, value: (p) => amount(p.accumulatedValue) },
+    { x: MARGIN + 465, heading: copy.cashValueColumn, value: (p) => amount(p.cashSurrenderValue) },
+  ], MARGIN + 66, 30)
+  document.endPage()
+
+  outlookPage(document.beginPage(PAGE_WIDTH, PAGE_HEIGHT), summary, copy, language)
+  document.endPage()
+}
+
+export async function renderClientSummaryPdf(
+  summary: ClientSummary, options: ClientSummaryOptions = {},
+): Promise<Uint8Array> {
   registerBrandFonts()
+  const language = options.language ?? 'EN'
+  const copy = clientSummaryCopy(language)
   const document = new PDFDocument({
-    title: `${summary.insuredName} — proposal summary`,
+    title: `${summary.insuredName} — ${summary.productLabel}`,
     author: 'Keepr One',
     subject: `${summary.productLabel} · National Life`,
     creator: 'Keepr One',
   })
-  const ctx = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
 
-  ctx.fillStyle = PAPER
-  ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT)
-
-  banner(ctx, summary)
-
-  let contentBottom: number
-  if (summary.kind === 'PROJECTED') {
-    const afterFigures = headlineFigures(ctx, summary, BAND_HEIGHT + 30)
-    const afterChart = coverageChart(ctx, summary.coverage, afterFigures + 26)
-    contentBottom = milestoneTable(ctx, summary.milestones, afterChart + 28)
+  // A Term result has no projection, so there is no multi-page presentation to
+  // make from it — the extra pages would be padding, which is the one thing
+  // this document may not be. It renders the one-pager instead, and the
+  // interface does not offer the full variant for Term at all.
+  if (options.variant === 'FULL' && summary.kind === 'PROJECTED') {
+    fullPages(document, summary, copy, language)
   } else {
-    const afterFigures = headlineFigures(ctx, summary, BAND_HEIGHT + 38)
-    contentBottom = termPeriod(ctx, summary.durationLabel, afterFigures + 30)
+    quickPage(document, summary, copy, language)
   }
 
-  footer(ctx, summary, contentBottom)
-
-  document.endPage()
   return new Uint8Array(document.close())
 }
 
 /// What the agent sees in the share sheet before it goes out. The insured's own
 /// name is what makes the right file easy to pick in a WhatsApp thread.
-export function clientSummaryFilename(summary: ClientSummary): string {
+export function clientSummaryFilename(
+  summary: ClientSummary, variant: ClientSummaryVariant = 'QUICK',
+): string {
   const who = summary.insuredName
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .replace(/[^A-Za-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 40)
-  return `${who || 'proposal'}-proposal-summary-${summary.issuedOn.toISOString().slice(0, 10)}.pdf`
+  const kind = variant === 'FULL' ? 'proposal-presentation' : 'proposal-summary'
+  return `${who || 'proposal'}-${kind}-${summary.issuedOn.toISOString().slice(0, 10)}.pdf`
 }
