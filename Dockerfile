@@ -8,6 +8,12 @@ RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
 WORKDIR /app
+# O type check do Next é o pico de memória do build inteiro: sozinho ele chega a
+# 3,3 GB de residente neste repositório, e o padrão do Node parava em ~2 GB —
+# o build morria com "Reached heap limit" depois de compilar tudo, sem que
+# nenhum erro de código estivesse envolvido. O teto acompanha o repositório em
+# vez de o repositório acompanhar o teto.
+ENV NODE_OPTIONS=--max-old-space-size=4096
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN corepack enable && corepack prepare pnpm@latest --activate
