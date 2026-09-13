@@ -110,6 +110,35 @@ describe('client summary route', () => {
     expect(response.headers.get('Content-Type')).toBe('application/pdf')
   })
 
+  // A FlexLife illustration runs to well over a megabyte and has no ledger
+  // worth reading. Fetching its bytes anyway would move that megabyte out of
+  // Postgres on every download in order to throw it away.
+  it('does not go looking for the PDF bytes of an illustration that has no ledger', async () => {
+    await GET(request, { params })
+    expect(mocks.findUnique).toHaveBeenCalledTimes(1)
+    expect(mocks.findUnique.mock.calls[0]?.[0]?.select).not.toHaveProperty('documentBytes')
+  })
+
+  it('reads the stored PDF for Term, where the premium schedule lives', async () => {
+    mocks.findUnique.mockResolvedValue({
+      ...verified,
+      productName: 'NL Term',
+      rawPayload: {
+        foresightTermResult: {
+          source: 'OFFICIAL_PDF', premiumMode: 'Monthly',
+          confirmedFaceAmount: 500_000,
+          confirmedMonthlyPremium: 62.92,
+          confirmedAnnualPremium: 755.04,
+          confirmedTermDuration: '20-G',
+        },
+      },
+    })
+    const response = await GET(request, { params })
+    expect(response.status).toBe(200)
+    expect(mocks.findUnique).toHaveBeenCalledTimes(2)
+    expect(mocks.findUnique.mock.calls[1]?.[0]?.select).toEqual({ documentBytes: true })
+  })
+
   it('refuses a Term result that never recorded the confirmed duration', async () => {
     mocks.findUnique.mockResolvedValue({
       ...verified,

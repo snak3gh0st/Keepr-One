@@ -525,6 +525,14 @@ function quickViewNumber(value: string, allowZero = true): number | null {
   return Number.isFinite(amount) && (allowZero ? amount >= 0 : amount > 0) ? amount : null
 }
 
+/// Every column Quick View may render in the annual projection. Used only to
+/// score header candidates — an unknown column is ignored, not rejected.
+const QUICK_VIEW_ANNUAL_COLUMNS = [
+  'Policy Year', 'Age', 'Premium Outlay', 'Weighted Average Interest Rate',
+  'Loan', 'Annual Income', 'Accumulated Value', 'Cash Surrender Value',
+  'Net Death Benefit',
+]
+
 export function parseForesightQuickReview(
   rows: ReadonlyArray<ReadonlyArray<string>>,
 ): ForesightQuickReview | null {
@@ -542,10 +550,31 @@ export function parseForesightQuickReview(
   const targetPremium = summaryValue('Target Premium', false)
   if (initialFaceAmount === null || modalPremium === null || targetPremium === null) return null
 
-  const annualHeaderIndex = rows.findIndex((row) =>
-    row.some((cell) => quickViewLabel(cell) === 'Policy Year') &&
-    row.some((cell) => quickViewLabel(cell) === 'Cash Surrender Value') &&
-    row.some((cell) => quickViewLabel(cell) === 'Net Death Benefit'))
+  // Which columns Quick View renders depends on the product and on what the
+  // illustration was solved for: a case with no loan and no income leaves those
+  // columns out of the table entirely. Demanding all nine meant one absent
+  // column discarded the whole projection — and because the caller treats a
+  // null read-back as a mismatch, the generation failed rather than returning
+  // the eight columns that were right there.
+  //
+  // So the year and the age are required, because a row that cannot say which
+  // year it is is not a row, and every other column is optional and arrives as
+  // null when the carrier did not render it. The header row is still located by
+  // the columns it must have, and among the candidates the richest one wins, so
+  // a stray table that happens to carry a "Policy Year" cell cannot displace
+  // the projection.
+  const annualHeaderCandidates = rows
+    .map((row, index) => ({ index, row }))
+    .filter(({ row }) =>
+      row.some((cell) => quickViewLabel(cell) === 'Policy Year') &&
+      row.some((cell) => quickViewLabel(cell) === 'Age'))
+    .map(({ index, row }) => ({
+      index,
+      known: row.filter((cell) => QUICK_VIEW_ANNUAL_COLUMNS.includes(quickViewLabel(cell))).length,
+    }))
+    .sort((left, right) => right.known - left.known)
+  const annualHeaderIndex = annualHeaderCandidates[0]?.index ?? -1
+  if (annualHeaderIndex < 0) return null
   const annualHeaders = rows[annualHeaderIndex] ?? []
   const annualIndex = (label: string) => annualHeaders.findIndex((cell) => quickViewLabel(cell) === label)
   const indexes = {
@@ -559,7 +588,7 @@ export function parseForesightQuickReview(
     cashSurrenderValue: annualIndex('Cash Surrender Value'),
     netDeathBenefit: annualIndex('Net Death Benefit'),
   }
-  if (Object.values(indexes).some((index) => index < 0)) return null
+  if (indexes.policyYear < 0 || indexes.age < 0) return null
   const annualProjection = rows.slice(annualHeaderIndex + 1, annualHeaderIndex + 122).flatMap((row) => {
     const policyYear = quickViewNumber(row[indexes.policyYear] ?? '')
     const age = quickViewNumber(row[indexes.age] ?? '')
