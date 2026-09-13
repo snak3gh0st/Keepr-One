@@ -5,12 +5,13 @@ import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { flexLifeProductLabel } from '@/lib/national-life/flex-life'
-import {
-  buildForesightIllustrationSnapshot,
-  isForesightQuickReview,
-  type ForesightQuickReview,
-} from '@/lib/national-life/foresight-illustration-contract'
+import { buildForesightIllustrationSnapshot } from '@/lib/national-life/foresight-illustration-contract'
 import { resolveForesightTermDurationResult } from '@/lib/national-life/foresight-term-contract'
+import { buildClientSummary } from '@/lib/national-life/client-summary'
+import {
+  foresightQuickReview,
+  verifiedForesightResult,
+} from '@/lib/national-life/illustration-verified-result'
 import { IllustrationPdfButton } from '../IllustrationPdfButton'
 import { getNationalLifeLocalConnectorConfig } from '@/lib/national-life/local-connector/config'
 import { getIllustrationCommandStatuses } from '@/lib/national-life/illustration-command-status'
@@ -35,54 +36,6 @@ const premiumCurrency = (value: number, locale: string) =>
   new Intl.NumberFormat(locale, {
     style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(value)
-
-type ForesightResult = {
-  solveBasis: 'DEATH_BENEFIT' | 'PREMIUM'
-  requestedAmount: number
-  confirmedFaceAmount: number
-  confirmedMonthlyPremium: number
-  confirmedAnnualPremium: number
-}
-
-function foresightResultFrom(rawPayload: unknown): ForesightResult | null {
-  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return null
-  if ('foresightTermResult' in rawPayload) {
-    const result = rawPayload.foresightTermResult
-    if (!result || typeof result !== 'object' || Array.isArray(result)) return null
-    const candidate = result as Record<string, unknown>
-    if (candidate.source !== 'OFFICIAL_PDF' || candidate.premiumMode !== 'Monthly' ||
-      !['confirmedFaceAmount', 'confirmedMonthlyPremium', 'confirmedAnnualPremium']
-        .every((key) => typeof candidate[key] === 'number' && Number.isFinite(candidate[key]) && Number(candidate[key]) > 0)) {
-      return null
-    }
-    return {
-      solveBasis: 'DEATH_BENEFIT',
-      requestedAmount: candidate.confirmedFaceAmount as number,
-      confirmedFaceAmount: candidate.confirmedFaceAmount as number,
-      confirmedMonthlyPremium: candidate.confirmedMonthlyPremium as number,
-      confirmedAnnualPremium: candidate.confirmedAnnualPremium as number,
-    }
-  }
-  if (!('foresightResult' in rawPayload)) return null
-  const result = rawPayload.foresightResult
-  if (!result || typeof result !== 'object' || Array.isArray(result)) return null
-  const candidate = result as Record<string, unknown>
-  if (!['DEATH_BENEFIT', 'PREMIUM'].includes(String(candidate.solveBasis)) ||
-    !['requestedAmount', 'confirmedFaceAmount', 'confirmedMonthlyPremium', 'confirmedAnnualPremium']
-      .every((key) => typeof candidate[key] === 'number' && Number.isFinite(candidate[key]) && Number(candidate[key]) > 0)) {
-    return null
-  }
-  return candidate as ForesightResult
-}
-
-function quickReviewFrom(rawPayload: unknown): ForesightQuickReview | null {
-  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload) ||
-    !('foresightResult' in rawPayload)) return null
-  const result = rawPayload.foresightResult
-  if (!result || typeof result !== 'object' || Array.isArray(result) ||
-    !('quickReview' in result)) return null
-  return isForesightQuickReview(result.quickReview) ? result.quickReview : null
-}
 
 function strategyLabel(method: string, copy: (pt: string, en: string) => string): string {
   const labels: Record<string, string> = {
@@ -203,8 +156,8 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
   })()
   const commandStatus = (await getIllustrationCommandStatuses(agent.id, [illustration.id])).get(illustration.id)
   const documentReady = illustration.documentFetchedAt && illustration.documentMimeType === 'application/pdf'
-  const foresightResult = documentReady ? foresightResultFrom(illustration.rawPayload) : null
-  const quickReview = quickReviewFrom(illustration.rawPayload)
+  const foresightResult = documentReady ? verifiedForesightResult(illustration.rawPayload) : null
+  const quickReview = foresightQuickReview(illustration.rawPayload)
   const isTermProduct = illustration.productName === 'NL Term' || illustration.productName === 'LSW Term'
   const termDurationResult = isTermProduct ? (() => {
     try {
@@ -214,6 +167,10 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
     }
   })() : null
   const resultVerified = Boolean(documentReady && foresightResult)
+  // Offered only when a summary can actually be built. Term has no
+  // projection to summarise, so the button simply does not appear rather
+  // than leading to a 404 the agent has to interpret mid-call.
+  const clientSummaryAvailable = buildClientSummary(illustration) !== null
   const needsTermReconciliation = Boolean(isTermProduct && documentReady && !foresightResult)
   const hasCarrierPremium = Boolean(foresightResult && illustration.premium)
   const premiumValue = hasCarrierPremium ? illustration.premium : illustration.targetPremium
@@ -343,6 +300,14 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
                   ? copy('Abrir PDF oficial', 'Open official PDF')
                   : copy('Abrir PDF recebido', 'Open received PDF')}
               </a>
+              {clientSummaryAvailable ? (
+                <a
+                  href={`/api/illustrations/${illustration.id}/client-summary`}
+                  className="inline-flex min-h-11 items-center justify-center rounded-md border border-teal bg-teal px-5 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-teal-deep"
+                >
+                  {copy('Baixar resumo para o cliente', 'Download client summary')}
+                </a>
+              ) : null}
               {needsTermReconciliation ? (
                 <TermPdfReconciliationButton illustrationId={illustration.id} />
               ) : null}
