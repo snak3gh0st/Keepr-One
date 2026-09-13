@@ -23,6 +23,27 @@ it('primes a new solved illustration allocation before asking Foresight to calcu
   )
 })
 
+// Two different things used to fail as one here, and it cost a whole
+// generation: the carrier contradicting itself, and a second opinion that
+// simply did not arrive. Which columns Quick View renders depends on how the
+// case was solved, so a face-amount solve can legitimately produce nothing this
+// reader accepts — while the ledger read back clean and the official PDF, the
+// only authoritative document, was still ahead.
+it('refuses a Quick Review that contradicts the ledger, not one it could not read', () => {
+  const source = readFileSync(new URL('./foresight-executor.ts', import.meta.url), 'utf8')
+  const workflow = source.slice(
+    source.indexOf('async function executeForesightSolvedIllustration'),
+    source.indexOf('export async function executeForesightIllustration'),
+  )
+
+  expect(workflow).toContain(
+    "if (quickReview && !quickReviewMatchesLedger(quickReview, ledger)) {")
+  expect(workflow).not.toContain('if (!quickReview ||')
+  // The receipt names the Quick View only when it has one: the contract
+  // compares the key set exactly, so an undefined value would invalidate it.
+  expect(workflow).toContain('...(quickReview ? { quickReview } : {})')
+})
+
 it('accepts the US birth date read back from the solved Foresight client form', () => {
   const snapshot = {
     schemaVersion: 2,

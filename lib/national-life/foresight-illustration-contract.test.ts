@@ -191,6 +191,31 @@ describe('server-owned Foresight illustration snapshot', () => {
     expect(parseForesightSolvedIllustrationReceipt({ ...receipt, annualPremium: 0 })).toBeNull()
   })
 
+  // The key set is compared exactly, and a key holding undefined is still a
+  // key. A caller that writes `quickReview` unconditionally therefore invents
+  // an invalid receipt out of a case that simply had no Quick View to read —
+  // the absence has to be an absent key, not an empty one.
+  it('rejects a receipt that names a Quick Review it does not carry', () => {
+    const receipt = {
+      inputHash: 'a'.repeat(64),
+      caseFingerprint: `case_${'b'.repeat(64)}`,
+      carrierCaseName: 'KEEPRONE-20260827-CM123ILLUSTRATION',
+      productCode: '956',
+      solveBasis: 'DEATH_BENEFIT',
+      faceAmount: 250_000,
+      monthlyPremium: 350,
+      annualPremium: 4_200,
+      release: '5.3.65.31',
+      reportCode: 'NAIC_ILLUSTRATION',
+      documentSha256: 'c'.repeat(64),
+      documentBytes: 1_500_000,
+      saved: true,
+    } as const
+    expect(parseForesightSolvedIllustrationReceipt({ ...receipt, quickReview: undefined })).toBeNull()
+    expect(parseForesightSolvedIllustrationReceipt({ ...receipt, quickReview: null })).toBeNull()
+    expect(parseForesightSolvedIllustrationReceipt(receipt)).toEqual(receipt)
+  })
+
   it('accepts only a bounded annual Quick Review table from Foresight', () => {
     const receipt = {
       inputHash: 'a'.repeat(64), caseFingerprint: `case_${'b'.repeat(64)}`,

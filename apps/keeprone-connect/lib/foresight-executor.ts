@@ -861,7 +861,21 @@ async function executeForesightSolvedIllustration(input: {
   const quickReview = readQuickView(
     await navigate('/NWI/IUL2025/quickview.aspx', MENU_IDS.quickView),
   )
-  if (!quickReview || !quickReviewMatchesLedger(quickReview, ledger)) {
+  // Two different things used to fail here as one, and conflating them cost a
+  // whole generation.
+  //
+  // A Quick View that *contradicts* the ledger is the carrier disagreeing with
+  // itself about the case it just calculated. Nothing may be issued on that.
+  //
+  // A Quick View that could not be *read* is only a second opinion that did not
+  // arrive. The ledger already read back clean, and the official PDF — the
+  // document that is actually authoritative — is still ahead. Which columns
+  // Quick View renders depends on how the case was solved: a solve driven by
+  // face amount need not print a target premium at all, and the summary reader
+  // requires one. Refusing that case threw away the PDF, the confirmed
+  // amounts, and the illustration itself for the sake of a projection that
+  // enriches the client document rather than verifying anything.
+  if (quickReview && !quickReviewMatchesLedger(quickReview, ledger)) {
     fail('FORESIGHT_QUICK_VIEW_READBACK_MISMATCH')
   }
   const ridersDoc = await navigate('/NWI/IUL2025/product.aspx', MENU_IDS.riders)
@@ -893,7 +907,9 @@ async function executeForesightSolvedIllustration(input: {
     faceAmount: ledger.faceAmount,
     monthlyPremium: ledger.monthlyPremium,
     annualPremium: ledger.annualPremium,
-    quickReview,
+    // Omitted rather than set undefined: the receipt validator compares the key
+    // set exactly, and a key holding undefined is still a key.
+    ...(quickReview ? { quickReview } : {}),
     release,
     reportCode: 'NAIC_ILLUSTRATION',
     documentSha256: await sha256Hex(pdf),
