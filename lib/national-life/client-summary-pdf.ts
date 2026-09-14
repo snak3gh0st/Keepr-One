@@ -18,7 +18,7 @@ import path from 'node:path'
 import { GlobalFonts, PDFDocument, Path2D } from '@napi-rs/canvas'
 import { CLIENT_SUMMARY_DISCLAIMER, CLIENT_SUMMARY_TERM_DISCLAIMER } from './quote-disclaimer'
 import { clientSummaryCopy, type ClientSummaryLanguage } from './client-summary-copy'
-import type { ClientSummary, ClientSummaryPoint, ClientSummaryTermSchedule } from './client-summary'
+import type { ClientSummary, ClientSummaryPoint, ClientSummaryScenarios, ClientSummaryTermSchedule } from './client-summary'
 
 type Ctx = ReturnType<PDFDocument['beginPage']>
 type Copy = ReturnType<typeof clientSummaryCopy>
@@ -679,6 +679,204 @@ function termSchedule(
   )
 }
 
+/// Os dois cenários da seguradora, desenhados e escritos com os mesmos números.
+///
+/// A National Life não publica gráfico nenhum de valores — a ilustração inteira
+/// é ledger, e a página Summary of Values é onde ela põe garantido e corrente
+/// lado a lado nos mesmos anos. Então o gráfico aqui não é um desenho nosso por
+/// cima de uma projeção nossa: é essa tabela plotada, e a tabela vem logo
+/// abaixo para que o cliente possa conferir cada ponto.
+///
+/// Cada curva termina onde o cenário dela termina. O corrente também encerra —
+/// trinta anos depois do garantido, no caso real que motivou isto — e desenhar
+/// qualquer um dos dois além do próprio encerramento seria a página mostrando
+/// uma apólice que já não existe.
+function scenarioChart(
+  ctx: Ctx, scenarios: ClientSummaryScenarios, copy: Copy, top: number, height: number,
+): number {
+  const width = PAGE_WIDTH - MARGIN * 2
+  const plotLeft = MARGIN + 54
+  const plotRight = MARGIN + width
+  const plotTop = top + 34
+  const plotBottom = top + height - 26
+
+  sectionTitle(ctx, copy.coverageOverTime, top + 14, copy.currentAndGuaranteed)
+
+  const ceiling = niceCeiling(Math.max(
+    ...scenarios.rows.map((row) => row.current.netDeathBenefit),
+    ...scenarios.rows.map((row) => row.guaranteed.netDeathBenefit),
+  ))
+  const ages = [
+    ...scenarios.rows.map((row) => row.age),
+    ...(scenarios.lapseAge.guaranteed === null ? [] : [scenarios.lapseAge.guaranteed]),
+    ...(scenarios.lapseAge.current === null ? [] : [scenarios.lapseAge.current]),
+  ]
+  const firstAge = Math.min(...ages)
+  const lastAge = Math.max(...ages)
+  const span = Math.max(lastAge - firstAge, 1)
+  const xFor = (age: number) => plotLeft + ((age - firstAge) / span) * (plotRight - plotLeft)
+  const yFor = (value: number) => plotBottom - (value / ceiling) * (plotBottom - plotTop)
+
+  ctx.lineWidth = 1
+  ctx.font = font(8)
+  for (const fraction of [0, 0.5, 1]) {
+    const y = plotBottom - fraction * (plotBottom - plotTop)
+    ctx.strokeStyle = BORDER
+    ctx.beginPath()
+    ctx.moveTo(plotLeft, y + 0.5)
+    ctx.lineTo(plotRight, y + 0.5)
+    ctx.stroke()
+    ctx.fillStyle = INK_MUTED
+    ctx.fillText(fraction === 0 ? '$0' : compact.format(ceiling * fraction), MARGIN, y + 3)
+  }
+
+  const series = (
+    pick: (row: ClientSummaryScenarios['rows'][number]) => number,
+    colour: string, dashed: boolean, lapseAge: number | null,
+  ) => {
+    ctx.save()
+    if (dashed) ctx.setLineDash([4, 3])
+    ctx.strokeStyle = colour
+    ctx.lineWidth = dashed ? 1.7 : 2.4
+    ctx.beginPath()
+    scenarios.rows.forEach((row, index) => {
+      const x = xFor(row.age)
+      const y = yFor(pick(row))
+      if (index === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    })
+    // A curva para no último valor que a seguradora publicou. Entre ele e o
+    // encerramento ela não diz nada, e prolongar a linha reta até lá seria
+    // afirmar que o valor fica parado — que é tão inventado quanto desenhar uma
+    // queda. O vazio até o marcador é a informação correta: não sabemos.
+    ctx.stroke()
+    ctx.restore()
+
+    if (lapseAge !== null) {
+      const x = xFor(lapseAge)
+      ctx.save()
+      ctx.setLineDash([2, 3])
+      ctx.strokeStyle = ALERT
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(x + 0.5, plotTop)
+      ctx.lineTo(x + 0.5, plotBottom)
+      ctx.stroke()
+      ctx.restore()
+      ctx.fillStyle = ALERT
+      ctx.font = font(8, 700)
+      const label = copy.lapsesAt(lapseAge)
+      const labelWidth = ctx.measureText(label).width
+      const labelX = x + 4 + labelWidth > plotRight ? x - 4 - labelWidth : x + 4
+      ctx.fillText(label, labelX, plotTop + 9)
+    }
+  }
+
+  series((row) => row.guaranteed.netDeathBenefit, TEAL_DEEP, true, scenarios.lapseAge.guaranteed)
+  series((row) => row.current.netDeathBenefit, TEAL, false, scenarios.lapseAge.current)
+  series((row) => row.guaranteed.cashSurrenderValue, GOLD, true, null)
+  series((row) => row.current.cashSurrenderValue, GOLD, false, null)
+
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(8)
+  ctx.fillText(copy.age(firstAge), plotLeft, plotBottom + 14)
+  right(ctx, copy.age(lastAge), plotRight, plotBottom + 14)
+
+  let legendX = plotLeft
+  const legend: Array<[string, boolean, string]> = [
+    [TEAL, false, `${copy.deathBenefit} · ${copy.scenarioCurrent}`],
+    [TEAL_DEEP, true, `${copy.deathBenefit} · ${copy.scenarioGuaranteed}`],
+    [GOLD, false, `${copy.cashValue} · ${copy.scenarioCurrent}`],
+    [GOLD, true, `${copy.cashValue} · ${copy.scenarioGuaranteed}`],
+  ]
+  legend.forEach(([colour, dashed, label], index) => {
+    const row = index < 2 ? 0 : 1
+    if (index === 2) legendX = plotLeft
+    const y = plotBottom + 22 + row * 12
+    ctx.fillStyle = colour
+    if (dashed) for (const offset of [0, 6, 12]) ctx.fillRect(legendX + offset, y, 4, 3)
+    else ctx.fillRect(legendX, y, 14, 3)
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(7, 500)
+    ctx.fillText(label, legendX + 19, y + 4)
+    legendX += 19 + ctx.measureText(label).width + 16
+  })
+
+  return top + height
+}
+
+/// A tabela que o gráfico desenha, para o cliente poder conferir cada ponto.
+///
+/// Duas colunas por cenário — o que ele recebe se morrer e o que consegue se
+/// resgatar — porque são as duas perguntas que um cliente faz olhando um plano,
+/// e porque é assim que a página da seguradora as põe.
+function scenarioTable(
+  ctx: Ctx, scenarios: ClientSummaryScenarios, copy: Copy, top: number,
+): number {
+  const width = PAGE_WIDTH - MARGIN * 2
+  const columns = [MARGIN + 12, MARGIN + 92, MARGIN + 170, MARGIN + 280, MARGIN + 390]
+
+  // O cabeçalho tem dois andares: o cenário em cima, a grandeza embaixo. Uma
+  // linha só teria de repetir "garantido" em cada coluna para não ficar ambígua.
+  ctx.fillStyle = TEAL_DEEP
+  ctx.font = font(8, 700)
+  ctx.fillText(copy.scenarioGuaranteed, columns[1]!, top + 10)
+  ctx.fillStyle = GOLD
+  ctx.fillText(copy.scenarioCurrent, columns[3]!, top + 10)
+
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(8, 700)
+  const headings = [
+    copy.policyYearColumn, copy.cashValueColumnShort, copy.deathBenefitColumnShort,
+    copy.cashValueColumnShort, copy.deathBenefitColumnShort,
+  ]
+  headings.forEach((heading, index) => ctx.fillText(heading, columns[index]!, top + 24))
+  ctx.strokeStyle = BORDER
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(MARGIN, top + 31.5)
+  ctx.lineTo(MARGIN + width, top + 31.5)
+  ctx.stroke()
+
+  const rowHeight = 24
+  scenarios.rows.forEach((row, index) => {
+    const rowTop = top + 31 + index * rowHeight
+    const baseline = rowTop + rowHeight - 8
+    if (index % 2 === 0) {
+      ctx.fillStyle = PANEL
+      ctx.fillRect(MARGIN, rowTop + 1, width, rowHeight - 1)
+    }
+    ctx.fillStyle = INK
+    ctx.font = font(10, 700)
+    ctx.fillText(`${copy.year(row.policyYear)} · ${row.age}`, columns[0]!, baseline)
+    const cells: Array<[number, string]> = [
+      [columns[1]!, whole.format(row.guaranteed.cashSurrenderValue)],
+      [columns[2]!, whole.format(row.guaranteed.netDeathBenefit)],
+      [columns[3]!, whole.format(row.current.cashSurrenderValue)],
+      [columns[4]!, whole.format(row.current.netDeathBenefit)],
+    ]
+    cells.forEach(([x, value], cell) => {
+      ctx.fillStyle = cell < 2 ? INK_MUTED : INK
+      ctx.font = font(10, cell < 2 ? 400 : 500)
+      ctx.fillText(value, x, baseline)
+    })
+  })
+
+  // A última linha é o que cada cenário faz no fim, que é a pergunta que a
+  // tabela deixa no ar e que só a página da seguradora responde.
+  const endTop = top + 31 + scenarios.rows.length * rowHeight
+  ctx.fillStyle = ALERT
+  ctx.font = font(9, 700)
+  const ending = (year: number | null, age: number | null) =>
+    year === null || age === null ? copy.neverEnds : copy.endsInYear(year, age)
+  ctx.fillText(ending(scenarios.lapseYear.guaranteed, scenarios.lapseAge.guaranteed),
+    columns[1]!, endTop + 14)
+  ctx.fillText(ending(scenarios.lapseYear.current, scenarios.lapseAge.current),
+    columns[3]!, endTop + 14)
+
+  return endTop + 20
+}
+
 /// Closes the page under whatever content there was.
 ///
 /// The projected summary fills the sheet, so its footer sits at the bottom
@@ -725,6 +923,19 @@ function quickPage(
   let contentBottom: number
   if (summary.kind === 'PROJECTED') {
     const afterFigures = headlineFigures(ctx, summary, copy, BAND_HEIGHT + 30)
+    if (summary.scenarios) {
+      // Os números da seguradora, desenhados e escritos. Nada aqui é projeção
+      // nossa, e é por isso que este caminho tem precedência sobre o outro.
+      const afterChart = scenarioChart(ctx, summary.scenarios, copy, afterFigures + 24, 186)
+      const afterTable = scenarioTable(ctx, summary.scenarios, copy, afterChart + 22)
+      ctx.fillStyle = INK_MUTED
+      ctx.font = font(8)
+      contentBottom = paragraph(
+        ctx, copy.scenarioNote, MARGIN, afterTable + 12, PAGE_WIDTH - MARGIN * 2, 11)
+      footer(ctx, summary, copy, language, contentBottom)
+      document.endPage()
+      return
+    }
     // The chart gives up height when there is a lapse sentence to fit under the
     // table. A curve twenty points shorter still reads; a sentence pushed into
     // the footer does not.

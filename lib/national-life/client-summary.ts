@@ -16,6 +16,7 @@
 import { flexLifeProductLabel } from './flex-life'
 import type { ForesightTermLedger, ForesightTermLedgerRow } from './foresight-term-ledger'
 import type { ForesightGuaranteedLedger } from './foresight-guaranteed-ledger'
+import type { ForesightSummaryOfValues } from './foresight-summary-of-values'
 import { foresightQuickReview, verifiedForesightResult } from './illustration-verified-result'
 
 /// Years worth calling out beside the curve. 5 and 10 are the near horizon a
@@ -96,7 +97,13 @@ export type ClientSummary =
       /// most needs, so it is carried separately from the curve that leads to
       /// it — a chart can be skipped; a sentence is read.
       guaranteedLapse: { policyYear: number; age: number } | null
+      /// Os dois cenários lado a lado, exatamente como a página Summary of
+      /// Values da ilustração oficial os apresenta. Quando existe, é daqui que
+      /// saem tanto a tabela quanto o gráfico — os mesmos números, desenhados e
+      /// escritos, em vez de um desenho que o leitor não consegue conferir.
+      scenarios: ClientSummaryScenarios | null
     })
+
   | (ClientSummaryBase & {
       kind: 'LEVEL_TERM'
       termDuration: TermDuration
@@ -105,6 +112,28 @@ export type ClientSummary =
       /// stated, schedule omitted. Present, it is the carrier's own ledger.
       schedule: ClientSummaryTermSchedule | null
     })
+
+export type ClientSummaryScenarioPoint = {
+  policyYear: number
+  age: number
+  cashSurrenderValue: number
+  netDeathBenefit: number
+}
+
+export type ClientSummaryScenarios = {
+  rows: Array<{
+    policyYear: number
+    age: number
+    guaranteed: { cashSurrenderValue: number; netDeathBenefit: number }
+    current: { cashSurrenderValue: number; netDeathBenefit: number }
+  }>
+  /// O ano em que a apólice se encerra em cada cenário. O corrente também
+  /// encerra, e é o número que uma peça só-corrente nunca conta.
+  lapseYear: { guaranteed: number | null; current: number | null }
+  /// A idade correspondente a cada encerramento, para o gráfico saber onde
+  /// parar cada curva.
+  lapseAge: { guaranteed: number | null; current: number | null }
+}
 
 /// What the Term ledger says, reduced to what a client is deciding about.
 ///
@@ -139,6 +168,8 @@ export type IllustrationForClientSummary = {
   termLedger?: ForesightTermLedger | null
   /// The guaranteed ledger read from the official PDF, on the same terms.
   guaranteedLedger?: ForesightGuaranteedLedger | null
+  /// A página Summary of Values do PDF oficial, quando pôde ser lida.
+  summaryOfValues?: ForesightSummaryOfValues | null
   /// The agent this goes out under. Optional because the summary is complete
   /// without it — the page simply omits the advisor block rather than printing
   /// a placeholder where a person's name belongs.
@@ -196,6 +227,35 @@ export function buildClientSummary(illustration: IllustrationForClientSummary): 
     mecYear: quickReview.summary.mecYear,
     guaranteed: guaranteedCoverage(illustration.guaranteedLedger ?? null),
     guaranteedLapse: illustration.guaranteedLedger?.lapse ?? null,
+    scenarios: scenariosFrom(illustration.summaryOfValues ?? null),
+  }
+}
+
+/// A idade de emissão é a mesma em todas as linhas da página, então a idade de
+/// um ano qualquer — inclusive um ano de encerramento que não aparece como
+/// linha — sai de somá-la ao ano.
+function scenariosFrom(summary: ForesightSummaryOfValues | null): ClientSummaryScenarios | null {
+  if (!summary || summary.rows.length === 0) return null
+  const issueAge = summary.rows[0]!.age - summary.rows[0]!.policyYear
+  const ageFor = (year: number | null) => year === null ? null : issueAge + year
+  return {
+    rows: summary.rows.map((row) => ({
+      policyYear: row.policyYear,
+      age: row.age,
+      guaranteed: {
+        cashSurrenderValue: row.guaranteed.cashSurrenderValue,
+        netDeathBenefit: row.guaranteed.netDeathBenefit,
+      },
+      current: {
+        cashSurrenderValue: row.current.cashSurrenderValue,
+        netDeathBenefit: row.current.netDeathBenefit,
+      },
+    })),
+    lapseYear: summary.lapseYear,
+    lapseAge: {
+      guaranteed: ageFor(summary.lapseYear.guaranteed),
+      current: ageFor(summary.lapseYear.current),
+    },
   }
 }
 

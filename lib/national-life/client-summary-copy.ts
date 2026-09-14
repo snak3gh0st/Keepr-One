@@ -24,6 +24,13 @@ type Copy = {
   coverageOverTime: string
   notGuaranteed: string
   currentAndGuaranteed: string
+  scenarioGuaranteed: string
+  scenarioCurrent: string
+  scenarioNote: string
+  cashValueColumnShort: string
+  deathBenefitColumnShort: string
+  endsInYear: (year: number, age: number) => string
+  neverEnds: string
   guaranteedDeathBenefit: string
   lapsesAt: (age: number) => string
   guaranteedLapseNote: (year: number, age: number) => string
@@ -70,6 +77,13 @@ const EN: Copy = {
   coverageOverTime: 'Coverage over time',
   notGuaranteed: 'Not guaranteed · current assumptions',
   currentAndGuaranteed: 'Current vs. guaranteed assumptions',
+  scenarioGuaranteed: 'GUARANTEED',
+  scenarioCurrent: 'CURRENT · NOT GUARANTEED',
+  scenarioNote: 'Both columns are National Life’s own, from the Summary of Values page of your illustration. Guaranteed assumes the lowest rate it credits and the highest charges it may take; current assumes today’s illustrated rates, which are not guaranteed and will change.',
+  cashValueColumnShort: 'CASH VALUE',
+  deathBenefitColumnShort: 'DEATH BENEFIT',
+  endsInYear: (year, age) => `Ends in year ${year}, at age ${age}`,
+  neverEnds: 'Runs to the end of the illustration',
   guaranteedDeathBenefit: 'Guaranteed',
   lapsesAt: (age) => `Ends at ${age}`,
   guaranteedLapseNote: (year, age) =>
@@ -126,6 +140,13 @@ const PT: Copy = {
   coverageOverTime: 'Cobertura ao longo do tempo',
   notGuaranteed: 'Não garantido · premissas atuais',
   currentAndGuaranteed: 'Premissas atuais vs. garantidas',
+  scenarioGuaranteed: 'GARANTIDO',
+  scenarioCurrent: 'ATUAL · NÃO GARANTIDO',
+  scenarioNote: 'As duas colunas são da própria National Life, da página Summary of Values da sua ilustração. O garantido assume a menor taxa que ela credita e os maiores encargos que pode cobrar; o atual assume as taxas de hoje, que não são garantidas e vão mudar.',
+  cashValueColumnShort: 'VALOR DE RESGATE',
+  deathBenefitColumnShort: 'BENEFÍCIO POR MORTE',
+  endsInYear: (year, age) => `Encerra no ano ${year}, aos ${age} anos`,
+  neverEnds: 'Vai até o fim da ilustração',
   guaranteedDeathBenefit: 'Garantido',
   lapsesAt: (age) => `Encerra aos ${age}`,
   guaranteedLapseNote: (year, age) =>

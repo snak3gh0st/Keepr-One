@@ -30,6 +30,7 @@ const summary: ClientSummary = {
   mecYear: null,
   guaranteed: [],
   guaranteedLapse: null,
+  scenarios: null,
 }
 
 /// The same policy with the guaranteed half of its illustration read in: the
@@ -46,6 +47,10 @@ const withGuarantee: ClientSummary = {
   })),
   guaranteedLapse: { policyYear: 25, age: 63 },
 }
+
+const whole = (value: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+    .format(value)
 
 async function extractText(bytes: Uint8Array): Promise<string> {
   const canvas = await import('@napi-rs/canvas')
@@ -296,6 +301,60 @@ describe('Term summary PDF', () => {
   it('says plainly when the premium is the kind that rises', async () => {
     const text = await extractText(await renderClientSummaryPdf({ ...term, termDuration: 'ART' }))
     expect(text).toContain('the premium increases each year')
+  })
+})
+
+// Os números reais da página Summary of Values de uma ilustração FlexLife.
+const scenarios = {
+  rows: [
+    { policyYear: 5, age: 42,
+      guaranteed: { cashSurrenderValue: 38_141, netDeathBenefit: 1_749_928 },
+      current: { cashSurrenderValue: 62_214, netDeathBenefit: 1_774_001 } },
+    { policyYear: 20, age: 57,
+      guaranteed: { cashSurrenderValue: 254_292, netDeathBenefit: 1_940_632 },
+      current: { cashSurrenderValue: 663_875, netDeathBenefit: 2_350_215 } },
+    { policyYear: 33, age: 70,
+      guaranteed: { cashSurrenderValue: 291_752, netDeathBenefit: 1_978_092 },
+      current: { cashSurrenderValue: 1_859_888, netDeathBenefit: 3_546_228 } },
+  ],
+  lapseYear: { guaranteed: 42, current: 72 },
+  lapseAge: { guaranteed: 79, current: 109 },
+}
+
+describe('a peça montada sobre a página da seguradora', () => {
+  const withScenarios: ClientSummary = { ...summary, scenarios }
+
+  // A National Life não publica gráfico nenhum de valores. O que ela publica é
+  // esta tabela, então é ela que a peça mostra — e o gráfico é ela plotada, não
+  // um desenho por cima de números que o cliente não consegue conferir.
+  it('escreve os mesmos números que desenha', async () => {
+    const text = await extractText(await renderClientSummaryPdf(withScenarios))
+    for (const row of scenarios.rows) {
+      expect(text).toContain(whole(row.guaranteed.cashSurrenderValue))
+      expect(text).toContain(whole(row.current.netDeathBenefit))
+    }
+    expect(text).toContain('GUARANTEED')
+    expect(text).toContain('CURRENT · NOT GUARANTEED')
+  })
+
+  // O cenário corrente também encerra, trinta anos depois do garantido, e é o
+  // número que uma peça só-corrente nunca conta.
+  it('diz onde cada cenário termina, não só o garantido', async () => {
+    const text = await extractText(await renderClientSummaryPdf(withScenarios))
+    expect(text).toContain('Ends in year 42, at age 79')
+    expect(text).toContain('Ends in year 72, at age 109')
+  })
+
+  it('atribui as duas colunas à seguradora, e não a nós', async () => {
+    const text = await extractText(await renderClientSummaryPdf(withScenarios))
+    expect(text).toContain('National Life’s own')
+    expect(text).toContain('Summary of Values')
+  })
+
+  it('não deixa a nota cair em cima do rodapé', async () => {
+    const text = await extractText(await renderClientSummaryPdf(withScenarios))
+    expect(text).toContain('not guaranteed and will change')
+    expect(text).toContain('Prepared by Keepr One')
   })
 })
 
