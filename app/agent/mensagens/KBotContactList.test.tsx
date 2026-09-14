@@ -29,6 +29,32 @@ describe('KBotContactList', () => {
     expect(screen.getByText(/sem telefone/i)).toBeInTheDocument()
   })
 
+  // A orientação por linha é o que o agente vai agir. Um número sem código de
+  // país pede quatro caracteres; um número quebrado pede correção; nenhum dos
+  // dois pede que ele procure um telefone que já está na ficha.
+  it('manda adicionar o código do país quando é só isso que falta', () => {
+    render(<KBotContactList
+      rows={[{ id: 'c5', name: 'Elena Rocha', phone: '(555) 123-4567', state: 'COUNTRY_REQUIRED' as const }]}
+      onToggle={vi.fn()}
+    />)
+
+    expect(screen.queryByRole('switch', { name: /Elena Rocha/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/código do país/i)).toBeInTheDocument()
+    // O erro que esta linha existe para não cometer.
+    expect(screen.queryByText(/sem telefone/i)).not.toBeInTheDocument()
+  })
+
+  it('manda corrigir o número quando ele não é um telefone', () => {
+    render(<KBotContactList
+      rows={[{ id: 'c6', name: 'Felipe Nunes', phone: 'liga no escritório', state: 'INVALID_PHONE' as const }]}
+      onToggle={vi.fn()}
+    />)
+
+    expect(screen.queryByRole('switch', { name: /Felipe Nunes/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/inválido/i)).toBeInTheDocument()
+    expect(screen.queryByText(/sem telefone/i)).not.toBeInTheDocument()
+  })
+
   it('não oferece interruptor a quem pediu para parar', () => {
     render(<KBotContactList rows={rows} onToggle={vi.fn()} />)
 

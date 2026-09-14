@@ -15,6 +15,7 @@ import { APPROVAL_WINDOW_MS, AWAITING_APPROVAL } from '@/lib/kbot-followup/domai
 import { SCHEDULED_CATEGORIES, type ScheduledCategory, type TemplateLanguage } from '@/lib/kbot-templates/categories'
 import { toApprovalProposal } from '@/lib/kbot-templates/approval-view'
 import { toKBotContactRows } from '@/lib/kbot-messaging/contact-list'
+import { NO_CONTACT_REACH, tallyContactReach } from '@/lib/kbot-messaging/contact-reach'
 import { subjectKeyForClient } from '@/lib/kbot-messaging/subject-key'
 import { toArrivalExample } from '@/lib/kbot-messaging/arrival-example'
 import { getServerLanguage } from '@/lib/i18n/server'
@@ -95,7 +96,7 @@ export default async function MensagensPage({
     status: true, errorCode: true, content: true, createdAt: true, updatedAt: true,
   } as const
 
-  const [templates, jobs, contactsTotal, contactsWithPhone, enabledCount, contactRows, exampleCandidates] = await Promise.all([
+  const [templates, jobs, enabledCount, contactRows, exampleCandidates] = await Promise.all([
     prisma.kBotMessageTemplate.findMany({
       where: { agentId: agent.id, category: { in: [...SCHEDULED_CATEGORIES] } },
       select: { category: true, language: true, body: true, enabled: true },
@@ -108,8 +109,6 @@ export default async function MensagensPage({
       take: 100,
       select: jobFields,
     }),
-    prisma.client.count({ where: { assignedAgentId: agent.id } }),
-    prisma.client.count({ where: { assignedAgentId: agent.id, phone: { not: null } } }),
     // Conta o agente inteiro, não a página em tela: o convite "ligar para
     // todos" é a mitigação de contatos nascerem desligados por padrão, e uma
     // resposta baseada só nas 25 linhas visíveis convidaria um agente que já
@@ -193,12 +192,30 @@ export default async function MensagensPage({
   })
 
   const contactRowsView = toKBotContactRows({ contacts: contactRows, preferences })
+  // A varredura dos telefones do agente inteiro existe para um único cartão: o
+  // convite de chegada, que só aparece para quem ainda não ligou ninguém.
+  //
+  // Ela não pode ser uma contagem do banco. `phone IS NOT NULL` responde "há
+  // algo gravado", que não é a pergunta que a tela faz — um `(555) 123-4567`
+  // conta como telefone para o SQL e não conta para o gate de envio, e era
+  // exatamente essa diferença que fazia o número antes do clique e o aviso
+  // depois dele não fecharem. Classificar exige ler a coluna.
+  //
+  // Mas ler a coluna inteira em todo render pagaria para sempre por números
+  // que ninguém mais vê depois do primeiro contato ligado. Então a leitura
+  // acontece só no estado que a consome. Em regime, a página não a faz.
+  const reachTally = enabledCount === 0
+    ? tallyContactReach(
+        (await prisma.client.findMany({ where: { assignedAgentId: agent.id }, select: { phone: true } }))
+          .map((client) => client.phone),
+      )
+    : NO_CONTACT_REACH
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <KBotMessageCenter
         proposals={proposals}
         contacts={contactRowsView}
-        reach={{ total: contactsTotal, withPhone: contactsWithPhone, enabledCount }}
+        reach={{ ...reachTally, enabledCount }}
         contactsQuery={contactsQuery}
         contactsPage={contactsPage}
         contactsTotalPages={contactsTotalPages}

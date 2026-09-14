@@ -52,7 +52,14 @@ export function KBotMessageCenter({
   /// abaixo depende disso ser verdade para o agente, não para as 25 linhas
   /// que aconteceram de carregar. Opcional (default 0) só para o teste do
   /// bloco, que não constrói esse agregado.
-  reach: { total: number; withPhone: number; enabledCount?: number }
+  reach: {
+    total: number
+    reachable: number
+    missingPhone: number
+    countryRequired: number
+    invalidPhone: number
+    enabledCount?: number
+  }
   /// Busca e paginação vêm prontas do servidor: com 17.733 contatos por
   /// agente e a lista sem virtualização, mandar a página inteira de uma vez
   /// seria pior do que não ter tela nenhuma. Opcionais para o teste do bloco,
@@ -116,11 +123,12 @@ export function KBotMessageCenter({
     })
   }
 
-  /// Liga todos os contatos alcançáveis e mostra a contagem real — quantos
-  /// foram ligados, quantos não têm telefone e quantos pediram para não
-  /// receber e ficaram de fora. "Todos" nunca significou literalmente todos,
-  /// e o aviso depois do clique precisa ser tão honesto quanto a tela era
-  /// antes dele.
+  /// Liga todos os contatos alcançáveis e mostra a contagem real, balde a
+  /// balde. "Todos" nunca significou literalmente todos, e o aviso depois do
+  /// clique precisa ser tão honesto quanto a tela era antes dele — o que
+  /// inclui não chamar de "sem telefone" quem só não tem o código do país.
+  /// Os cinco números somam a população inteira do agente, e é isso que deixa
+  /// o agente reconciliar este aviso com o que a chegada dizia.
   function runEnableAll() {
     setError('')
     setNotice('')
@@ -128,15 +136,15 @@ export function KBotMessageCenter({
       const result = await enableAllKBotContacts({})
       if (!result.ok) { setError(result.message ?? unavailable); return }
       setNotice(copy(
-        `${result.enabled} contato(s) ligado(s). ${result.withoutPhone} sem telefone e ${result.optedOut} que pediram para não receber ficaram de fora.`,
-        `${result.enabled} contact(s) turned on. ${result.withoutPhone} with no phone and ${result.optedOut} who asked not to be contacted were left out.`,
+        `${result.enabled} contato(s) ligado(s). Ficaram de fora: ${result.missingPhone} sem telefone, ${result.countryRequired} sem o código do país, ${result.invalidPhone} com número inválido e ${result.optedOut} que pediram para não receber.`,
+        `${result.enabled} contact(s) turned on. Left out: ${result.missingPhone} with no phone, ${result.countryRequired} missing a country code, ${result.invalidPhone} with an invalid number, and ${result.optedOut} who asked not to be contacted.`,
       ))
     })
   }
 
   // Agent-wide, not page-wide: as 25 linhas em tela não dizem se algum dos
   // outros 17 mil contatos já está ligado.
-  const nothingOn = (reach.enabledCount ?? 0) === 0 && reach.withPhone > 0
+  const nothingOn = (reach.enabledCount ?? 0) === 0 && reach.reachable > 0
 
   // Preserva a conversa aberta ao lado ao trocar de página de contatos — as
   // duas coisas coexistem na mesma tela, e paginar não pode fechar o chat.
@@ -169,9 +177,16 @@ export function KBotMessageCenter({
     {nothingOn && <div className="mt-4 rounded-2xl border border-teal bg-teal-pale/40 p-4">
       <h3 className="text-lg font-semibold text-ink">{copy('Nenhum contato com o K-Bot ligado', 'No contact has K-Bot turned on')}</h3>
       <p className="mt-1 max-w-2xl text-sm text-ink-muted">{copy(
-        `De ${reach.total.toLocaleString('pt-BR')} contatos, ${reach.withPhone.toLocaleString('pt-BR')} têm telefone cadastrado. Números inválidos serão ignorados ao ligar.`,
-        `Of ${reach.total.toLocaleString('pt-BR')} contacts, ${reach.withPhone.toLocaleString('pt-BR')} have a phone on file. Invalid numbers will be skipped when turning K-Bot on.`,
+        `De ${reach.total.toLocaleString('pt-BR')} contatos, ${reach.reachable.toLocaleString('pt-BR')} podem receber mensagens do K-Bot agora.`,
+        `Of ${reach.total.toLocaleString('pt-BR')} contacts, ${reach.reachable.toLocaleString('pt-BR')} can receive K-Bot messages right now.`,
       )}</p>
+      {/* O número que o agente pode mudar hoje. Um telefone sem código de país
+          é a diferença entre um contato alcançável e um contato invisível, e
+          some dentro de "sem telefone" se ninguém o nomear. */}
+      {reach.countryRequired > 0 && <p className="mt-1 max-w-2xl text-sm text-ink-muted">{copy(
+        `Outros ${reach.countryRequired.toLocaleString('pt-BR')} têm telefone, mas falta o código do país — adicione o código para que possam receber.`,
+        `Another ${reach.countryRequired.toLocaleString('pt-BR')} have a phone but no country code — add the code so they can receive messages.`,
+      )}</p>}
       {example && <div className="mt-3 rounded-xl bg-white/60 p-3">
         <p className="text-xs font-medium text-ink-muted uppercase">{copy('Exemplo', 'Example')}: {example.name}, {example.when}</p>
         <p className="mt-1 text-sm text-ink">{example.text}</p>

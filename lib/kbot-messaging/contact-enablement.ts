@@ -11,7 +11,18 @@
 /// chave errada aqui deixaria a habilitação muda: o agente veria "Ligado" mas
 /// o gate nunca encontraria a preferência.
 import { subjectKeyForClient } from './subject-key'
-import { normalizePhone } from '@/lib/kbot-followup/domain'
+import { contactReach } from './contact-reach'
+
+/// Os cinco destinos possíveis de um contato na ação em massa. Somados, dão a
+/// população inteira do agente — é isso que deixa a tela antes do clique e o
+/// aviso depois dele reconciliarem.
+export type EnableAllTally = {
+  enabled: number
+  missingPhone: number
+  countryRequired: number
+  invalidPhone: number
+  optedOut: number
+}
 
 export type ContactEnablementDb = {
   client: {
@@ -42,7 +53,7 @@ export async function setContactEnabled(
 export async function enableAllAgentContacts(
   db: ContactEnablementDb,
   input: { agentId: string; now: Date },
-): Promise<{ enabled: number; withoutPhone: number; optedOut: number }> {
+): Promise<EnableAllTally> {
   // Lê todos os contatos e preferências uma única vez.
   const contacts = await db.client.findMany({
     where: { assignedAgentId: input.agentId },
@@ -65,16 +76,26 @@ export async function enableAllAgentContacts(
 
   // Processa cada contato e agrupa para batch operations.
   let enabled = 0
-  let withoutPhone = 0
+  let missingPhone = 0
+  let countryRequired = 0
+  let invalidPhone = 0
   let optedOut = 0
   const toCreate: string[] = []
   const toUpdate: string[] = []
 
   for (const contact of contacts) {
-    const phone = normalizePhone(contact.phone)
-    if (!phone) { withoutPhone += 1; continue }
+    // Quem ficou de fora fica de fora por um motivo nomeado: "sem telefone"
+    // dito sobre um número que só não tem código de país esconde do agente a
+    // correção de quatro caracteres que traria essa pessoa de volta.
+    const reach = contactReach(contact.phone)
+    if (!reach.ok) {
+      if (reach.issue === 'MISSING') missingPhone += 1
+      else if (reach.issue === 'COUNTRY_REQUIRED') countryRequired += 1
+      else invalidPhone += 1
+      continue
+    }
     const subjectKey = subjectKeyForClient(contact.id)
-    if (stopped.has(subjectKey) || stopped.has(phone)) { optedOut += 1; continue }
+    if (stopped.has(subjectKey) || stopped.has(reach.phone)) { optedOut += 1; continue }
 
     if (existing.has(subjectKey)) {
       toUpdate.push(subjectKey)
@@ -106,5 +127,5 @@ export async function enableAllAgentContacts(
     })
   }
 
-  return { enabled, withoutPhone, optedOut }
+  return { enabled, missingPhone, countryRequired, invalidPhone, optedOut }
 }
