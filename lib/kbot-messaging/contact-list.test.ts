@@ -36,4 +36,43 @@ describe('toKBotContactRows', () => {
 
     expect(rows[0]!.state).toBe('STOPPED')
   })
+
+  it('casa o telefone formatado com o opt-out normalizado', () => {
+    const rows = toKBotContactRows({
+      contacts: [{ id: 'c1', name: 'Ana', phone: '+55 (11) 99999-0001' }],
+      preferences: [{ subjectKey: '+5511999990001', optedOut: true, kbotEnabledAt: null }],
+    })
+
+    expect(rows[0]!.state).toBe('STOPPED')
+  })
+
+  // A linha é onde o agente age, então ela diz o que fazer: um número sem
+  // código de país pede quatro caracteres, não um telefone novo.
+  it('distingue sem telefone, sem código de país e número inválido', () => {
+    const rows = toKBotContactRows({
+      contacts: [
+        { id: 'c1', name: 'Ana', phone: null },
+        { id: 'c2', name: 'Bruno', phone: '(555) 123-4567' },
+        { id: 'c3', name: 'Carla', phone: 'liga no escritório' },
+      ],
+      preferences: [],
+    })
+
+    expect(rows.map((row) => [row.name, row.state])).toEqual([
+      ['Ana', 'NO_PHONE'],
+      ['Bruno', 'COUNTRY_REQUIRED'],
+      ['Carla', 'INVALID_PHONE'],
+    ])
+  })
+
+  // O número continua na linha mesmo quando não serve: é o que o agente
+  // precisa ver para corrigi-lo.
+  it('preserva o número na ficha mesmo quando não é alcançável', () => {
+    const rows = toKBotContactRows({
+      contacts: [{ id: 'c1', name: 'Ana', phone: '(555) 123-4567' }],
+      preferences: [],
+    })
+
+    expect(rows[0]!.phone).toBe('(555) 123-4567')
+  })
 })

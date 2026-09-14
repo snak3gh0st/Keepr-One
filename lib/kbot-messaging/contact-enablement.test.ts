@@ -13,7 +13,7 @@ function db(contacts: Array<{ id: string; phone: string | null }>, optedOut: str
       upsert: vi.fn(async () => ({})),
       update: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({})),
-      createMany: vi.fn(async () => ({})),
+      createMany: vi.fn(async (_args: { data: unknown[] }) => ({})),
     },
   }
 }
@@ -87,7 +87,7 @@ describe('enableAllAgentContacts', () => {
 
     const result = await enableAllAgentContacts(deps as never, { agentId: 'a1', now })
 
-    expect(result).toEqual({ enabled: 2, withoutPhone: 1, optedOut: 0 })
+    expect(result).toEqual({ enabled: 2, missingPhone: 1, countryRequired: 0, invalidPhone: 0, optedOut: 0 })
     // Deve usar batch operations, não upsert por contato
     expect(deps.kBotContactPreference.createMany).toHaveBeenCalled()
   })
@@ -100,9 +100,55 @@ describe('enableAllAgentContacts', () => {
 
     const result = await enableAllAgentContacts(deps as never, { agentId: 'a1', now })
 
-    expect(result).toEqual({ enabled: 1, withoutPhone: 0, optedOut: 1 })
+    expect(result).toEqual({ enabled: 1, missingPhone: 0, countryRequired: 0, invalidPhone: 0, optedOut: 1 })
     // c2 nunca deve aparecer nas operações de batch
     expect(JSON.stringify(deps.kBotContactPreference.createMany.mock.calls)).not.toContain('c2')
+  })
+
+  it('normaliza o telefone antes de respeitar um pedido de parada', async () => {
+    const deps = db(
+      [{ id: 'c1', phone: '+55 (11) 99999-0001' }],
+      ['+5511999990001'],
+    )
+
+    const result = await enableAllAgentContacts(deps as never, { agentId: 'a1', now })
+
+    expect(result).toEqual({ enabled: 0, missingPhone: 0, countryRequired: 0, invalidPhone: 0, optedOut: 1 })
+    expect(deps.kBotContactPreference.createMany).not.toHaveBeenCalled()
+  })
+
+  // Os três motivos de não alcançar são contados à parte. Somá-los num único
+  // "sem telefone" diria a um agente que tem o número da pessoa na ficha para
+  // ir procurar um número que ele já tem.
+  it('separa sem telefone, sem código de país e número inválido', async () => {
+    const deps = db([
+      { id: 'c1', phone: null },
+      { id: 'c2', phone: '(555) 123-4567' },
+      { id: 'c3', phone: 'liga no escritório' },
+      { id: 'c4', phone: '+5511999990004' },
+    ])
+
+    const result = await enableAllAgentContacts(deps as never, { agentId: 'a1', now })
+
+    expect(result).toEqual({ enabled: 1, missingPhone: 1, countryRequired: 1, invalidPhone: 1, optedOut: 0 })
+  })
+
+  it('fecha a conta: os cinco baldes somam a população do agente', async () => {
+    const deps = db(
+      [
+        { id: 'c1', phone: '+5511999990001' },
+        { id: 'c2', phone: null },
+        { id: 'c3', phone: '(555) 123-4567' },
+        { id: 'c4', phone: 'nao tem' },
+        { id: 'c5', phone: '+5511999990005' },
+      ],
+      [subjectKeyForClient('c5')],
+    )
+
+    const result = await enableAllAgentContacts(deps as never, { agentId: 'a1', now })
+
+    const total = result.enabled + result.missingPhone + result.countryRequired + result.invalidPhone + result.optedOut
+    expect(total).toBe(5)
   })
 
   it('com 5 contatos elegíveis não faz upsert por contato, usa batch operations', async () => {
@@ -116,7 +162,7 @@ describe('enableAllAgentContacts', () => {
 
     const result = await enableAllAgentContacts(deps as never, { agentId: 'a1', now })
 
-    expect(result).toEqual({ enabled: 5, withoutPhone: 0, optedOut: 0 })
+    expect(result).toEqual({ enabled: 5, missingPhone: 0, countryRequired: 0, invalidPhone: 0, optedOut: 0 })
     // Não deve chamar upsert por contato
     expect(deps.kBotContactPreference.upsert).not.toHaveBeenCalled()
     // Deve chamar updateMany e/ou createMany
@@ -133,14 +179,12 @@ describe('enableAllAgentContacts', () => {
 
     const result = await enableAllAgentContacts(deps as never, { agentId: 'a1', now })
 
-    expect(result).toEqual({ enabled: 2500, withoutPhone: 0, optedOut: 0 })
+    expect(result).toEqual({ enabled: 2500, missingPhone: 0, countryRequired: 0, invalidPhone: 0, optedOut: 0 })
     // createMany deve ser chamado mais de uma vez (pelo menos 3 vezes: 1000 + 1000 + 500)
     expect(deps.kBotContactPreference.createMany).toHaveBeenCalledTimes(3)
     // Nenhuma chamada deve ter mais de 1000 entradas
-    const createManyCalls = (deps.kBotContactPreference.createMany as any).mock.calls
-    for (const call of createManyCalls) {
-      const dataLength = call[0].data.length
-      expect(dataLength).toBeLessThanOrEqual(1000)
+    for (const [args] of deps.kBotContactPreference.createMany.mock.calls) {
+      expect(args.data.length).toBeLessThanOrEqual(1000)
     }
   })
 })

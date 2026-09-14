@@ -20,7 +20,7 @@ afterEach(() => cleanup())
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.toggle.mockResolvedValue({ ok: true })
-  mocks.enableAll.mockResolvedValue({ ok: true, enabled: 3, withoutPhone: 1, optedOut: 0 })
+  mocks.enableAll.mockResolvedValue({ ok: true, enabled: 3, missingPhone: 1, countryRequired: 0, invalidPhone: 0, optedOut: 0 })
 })
 
 const proposal = {
@@ -35,14 +35,14 @@ const proposal = {
 
 describe('KBotMessageCenter', () => {
   it('mostra a mensagem escrita esperando decisão', () => {
-    render(<KBotMessageCenter proposals={[proposal]} contacts={[]} reach={{ total: 0, withPhone: 0 }} />)
+    render(<KBotMessageCenter proposals={[proposal]} contacts={[]} reach={{ total: 0, reachable: 0, missingPhone: 0, countryRequired: 0, invalidPhone: 0 }} />)
 
     expect(screen.getByText('Ana, feliz aniversário!')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /enviar/i })).toBeInTheDocument()
   })
 
   it('com nada ligado, convida a ligar e diz quantos podem receber', () => {
-    render(<KBotMessageCenter proposals={[]} contacts={[]} reach={{ total: 17733, withPhone: 4184 }} />)
+    render(<KBotMessageCenter proposals={[]} contacts={[]} reach={{ total: 17733, reachable: 4184, missingPhone: 13000, countryRequired: 549, invalidPhone: 0 }} />)
 
     expect(screen.getByRole('button', { name: /ligar o k-bot para todos/i })).toBeInTheDocument()
     expect(screen.getByText(/4\.184/)).toBeInTheDocument()
@@ -63,7 +63,7 @@ describe('KBotMessageCenter — o convite olha o agente inteiro, não a página'
     render(<KBotMessageCenter
       proposals={[]}
       contacts={someContacts}
-      reach={{ total: 100, withPhone: 50, enabledCount: 0 }}
+      reach={{ total: 100, reachable: 50, missingPhone: 50, countryRequired: 0, invalidPhone: 0, enabledCount: 0 }}
     />)
 
     expect(screen.getByRole('button', { name: /ligar o k-bot para todos/i })).toBeInTheDocument()
@@ -76,32 +76,60 @@ describe('KBotMessageCenter — o convite olha o agente inteiro, não a página'
     render(<KBotMessageCenter
       proposals={[]}
       contacts={someContacts}
-      reach={{ total: 100, withPhone: 50, enabledCount: 12 }}
+      reach={{ total: 100, reachable: 50, missingPhone: 50, countryRequired: 0, invalidPhone: 0, enabledCount: 12 }}
     />)
 
     expect(screen.queryByRole('button', { name: /ligar o k-bot para todos/i })).not.toBeInTheDocument()
   })
 })
 
-// A contagem que a tela mostrava antes do clique ("X têm telefone e podem
-// receber") também precisa ser honesta depois: quantos foram de fato
-// ligados, quantos não tinham telefone e quantos pediram para não receber
-// e ficaram de fora. Uma frase fixa depois do clique jogaria fora
-// exatamente a informação que `enableAllKBotContacts` calculou para isso.
+// A contagem que a tela mostrava antes do clique ("X podem receber") também
+// precisa ser honesta depois: quantos foram de fato ligados e, um a um, os
+// motivos de quem ficou de fora. Uma frase fixa depois do clique jogaria fora
+// exatamente a informação que `enableAllKBotContacts` calculou para isso — e
+// um único balde "sem telefone" jogaria fora a diferença entre um contato sem
+// número e um contato a quem falta o código do país.
 describe('KBotMessageCenter — a contagem depois de ligar para todos é honesta', () => {
   it('mostra os números reais devolvidos pela ação, não uma frase fixa', async () => {
-    mocks.enableAll.mockResolvedValue({ ok: true, enabled: 3, withoutPhone: 1, optedOut: 2 })
+    mocks.enableAll.mockResolvedValue({ ok: true, enabled: 3, missingPhone: 1, countryRequired: 4, invalidPhone: 5, optedOut: 2 })
     render(<KBotMessageCenter
       proposals={[]}
       contacts={someContacts}
-      reach={{ total: 100, withPhone: 50, enabledCount: 0 }}
+      reach={{ total: 100, reachable: 50, missingPhone: 50, countryRequired: 0, invalidPhone: 0, enabledCount: 0 }}
     />)
 
     await userEvent.click(screen.getByRole('button', { name: /ligar o k-bot para todos/i }))
 
     expect(await screen.findByText(/3 contato\(s\) ligado\(s\)/)).toBeInTheDocument()
     expect(screen.getByText(/1 sem telefone/)).toBeInTheDocument()
+    expect(screen.getByText(/4 sem o código do país/)).toBeInTheDocument()
+    expect(screen.getByText(/5 com número inválido/)).toBeInTheDocument()
     expect(screen.getByText(/2 que pediram para não receber/)).toBeInTheDocument()
+  })
+})
+
+// Um telefone sem código de país é a correção mais barata que o agente pode
+// fazer, e desaparece se a tela o contar como "sem telefone".
+describe('KBotMessageCenter — o que tem conserto é nomeado', () => {
+  it('conta à parte os contatos a quem só falta o código do país', () => {
+    render(<KBotMessageCenter
+      proposals={[]}
+      contacts={[]}
+      reach={{ total: 17733, reachable: 4184, missingPhone: 13000, countryRequired: 549, invalidPhone: 0 }}
+    />)
+
+    expect(screen.getByText(/549/)).toBeInTheDocument()
+    expect(screen.getByText(/código do país/)).toBeInTheDocument()
+  })
+
+  it('não inventa a linha quando não há ninguém nesse estado', () => {
+    render(<KBotMessageCenter
+      proposals={[]}
+      contacts={[]}
+      reach={{ total: 100, reachable: 50, missingPhone: 50, countryRequired: 0, invalidPhone: 0 }}
+    />)
+
+    expect(screen.queryByText(/código do país/)).not.toBeInTheDocument()
   })
 })
 
@@ -110,7 +138,7 @@ describe('KBotMessageCenter — o exemplo mostra valor antes da decisão', () =>
     render(<KBotMessageCenter
       proposals={[]}
       contacts={[]}
-      reach={{ total: 17733, withPhone: 4184 }}
+      reach={{ total: 17733, reachable: 4184, missingPhone: 13000, countryRequired: 549, invalidPhone: 0 }}
       example={{ name: 'Ana Souza', when: '18/09', text: 'Ana Souza, feliz aniversário!' }}
     />)
 

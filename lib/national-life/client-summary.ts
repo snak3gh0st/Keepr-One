@@ -33,6 +33,12 @@ const FULL_MILESTONE_YEARS = [1, 5, 10, 15, 20, 25, 30]
 /// projected, which is the only other age this illustration actually speaks to.
 const OUTLOOK_AGE = 65
 
+/// A tabela densa da apresentação de Term. Mesmo raciocínio de
+/// `FULL_MILESTONE_YEARS`: mais degraus, dimensionados para uma folha inteira.
+/// O ledger de um Term até os 95 tem dezenas de linhas, e imprimir todas faria
+/// a página transbordar em silêncio — o que seria pior que resumir.
+const TERM_FULL_SCHEDULE_ROWS = 18
+
 /// How many rungs of the Term premium schedule the one-pager prints. Enough to
 /// show the shape of the climb; few enough that the page stays a letter.
 const TERM_SCHEDULE_ROWS = 6
@@ -166,6 +172,10 @@ export type ClientSummaryTermSchedule = {
     monthlyPremium: number
   } | null
   rows: ForesightTermLedgerRow[]
+  /// Os mesmos degraus, mais densos, para a apresentação de várias páginas.
+  /// O par de `fullMilestones` no lado projetado, pela mesma razão: o resumo
+  /// cabe numa folha, a apresentação tem uma página inteira para a tabela.
+  fullRows: ForesightTermLedgerRow[]
 }
 
 export type IllustrationForClientSummary = {
@@ -455,6 +465,7 @@ function termSchedule(ledger: ForesightTermLedger | null): ClientSummaryTermSche
       monthlyPremium: increase.annualPremium / MONTHS_PER_YEAR,
     },
     rows: termScheduleRows(ledger),
+    fullRows: termScheduleRows(ledger, TERM_FULL_SCHEDULE_ROWS),
   }
 }
 
@@ -462,17 +473,24 @@ function termSchedule(ledger: ForesightTermLedger | null): ClientSummaryTermSche
 /// what it becomes the year after, and then a widening walk to the end of the
 /// contract. The two years on either side of the guarantee are the point of
 /// the table, so they are chosen first and the rest fills in around them.
-function termScheduleRows(ledger: ForesightTermLedger): ForesightTermLedgerRow[] {
+function termScheduleRows(
+  ledger: ForesightTermLedger, limit: number = TERM_SCHEDULE_ROWS,
+): ForesightTermLedgerRow[] {
   const last = ledger.rows[ledger.rows.length - 1]!
   const anchors = [1, ledger.levelPeriodYears, ledger.levelPeriodYears + 1]
   const walk: number[] = []
-  for (let year = ledger.levelPeriodYears + 6; year < last.policyYear; year += 5) walk.push(year)
+  // A caminhada adensa junto com o limite: a apresentação tem espaço para um
+  // degrau a cada dois anos onde o resumo só cabe um a cada cinco.
+  const stride = limit > TERM_SCHEDULE_ROWS ? 2 : 5
+  for (let year = ledger.levelPeriodYears + stride + 1; year < last.policyYear; year += stride) {
+    walk.push(year)
+  }
   const years = [...new Set([...anchors, ...walk, last.policyYear])]
     .filter((year) => year >= 1 && year <= last.policyYear)
     .sort((a, b) => a - b)
   // When the contract runs long there are more rungs than fit. Thinning from
   // the far end keeps the years the client is actually deciding about.
-  while (years.length > TERM_SCHEDULE_ROWS) years.splice(years.length - 2, 1)
+  while (years.length > limit) years.splice(years.length - 2, 1)
   return years
     .map((year) => ledger.rows.find((row) => row.policyYear === year))
     .filter((row): row is ForesightTermLedgerRow => row !== undefined)

@@ -5120,6 +5120,16 @@ table {
   border-bottom: 0;
 }
 
+/* `nowrap` está certo para célula de dado curto — data, valor, status — e
+   errado para uma célula que hospeda um parágrafo. Como o shell rola no eixo x,
+   o texto não era cortado: era empurrado para fora, atrás de um scroll
+   horizontal que ninguém procura dentro de uma linha de tabela. Especificidade
+   dobrada de propósito, para vencer `.module-table-cell` sem depender da ordem
+   em que as folhas entram. */
+.module-table-cell.module-table-cell-wrap {
+  white-space: normal;
+}
+
 .module-empty-state {
   display: grid;
   min-height: 220px;

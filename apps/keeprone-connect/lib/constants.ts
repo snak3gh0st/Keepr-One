@@ -143,6 +143,24 @@ export function isAuthPath(pathname: string): boolean {
   )
 }
 
+/// Um *callback* de autenticação é a seguradora devolvendo o navegador depois
+/// que o login ou o MFA completou — o `?code=...&state=...` que o Auth0 anexa.
+///
+/// Ele mora sob o mesmo `/agent/auth/` das páginas que *pedem* autenticação, e
+/// essa semelhança é uma armadilha com dois lados opostos: `isAuthPath` precisa
+/// continuar dizendo "sim" para ele, porque o content script não pode
+/// instrumentar a página enquanto a troca do código acontece; e o state machine
+/// precisa saber que aqui a autenticação **terminou**, e não começou. Ler a
+/// prova de sucesso como pedido de autenticação era o que deixava o agente
+/// olhando uma página em branco depois de digitar o MFA.
+///
+/// Igualdade exata, nunca `includes`: `/agent/auth/mfacallback` contém `/mfa`,
+/// e foi exatamente esse substring que classificava a conclusão como pedido.
+export function isCarrierAuthCallbackPath(pathname: string): boolean {
+  const normalized = pathname.toLowerCase().replace(/\/+$/, '')
+  return normalized === '/agent/auth/mfacallback' || normalized === '/agent/auth/logincallback'
+}
+
 /// Content scripts are declared for the whole `/agent/*` tree because Chrome
 /// match patterns cannot express exclusions. Authentication callbacks live in
 /// that same tree, though, and must remain untouched: replacing fetch/XHR while

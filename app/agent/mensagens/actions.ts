@@ -7,7 +7,7 @@ import { getCurrentAgent } from '@/lib/agent-context'
 import { getServerI18n } from '@/lib/i18n/server'
 import { prisma } from '@/lib/prisma'
 import { assertSameOriginAction } from '@/lib/security/same-origin-action'
-import { setContactEnabled, enableAllAgentContacts } from '@/lib/kbot-messaging/contact-enablement'
+import { setContactEnabled, enableAllAgentContacts, type EnableAllTally } from '@/lib/kbot-messaging/contact-enablement'
 
 /// As ações de habilitação do K-Bot dentro da Central de Mensagens — mesmo
 /// formato de `app/agent/kbot/agendadas/actions.ts`: origem verificada, agente
@@ -20,7 +20,7 @@ export type KBotContactActionResult =
   | { ok: false; message: string }
 
 export type KBotEnableAllResult =
-  | { ok: true; enabled: number; withoutPhone: number; optedOut: number }
+  | ({ ok: true } & EnableAllTally)
   | { ok: false; message: string }
 
 const PATH = '/agent/mensagens'
@@ -77,10 +77,12 @@ export async function toggleKBotContact(input: unknown): Promise<KBotContactActi
   }
 }
 
-/// Liga o K-Bot para todos os contatos deste agente que podem receber —
-/// pulando quem não tem telefone e quem já pediu para não receber. A
-/// contagem honesta que este retorno carrega é o que a tela mostra depois do
-/// clique, em vez de fingir que "todos" significa literalmente todos.
+/// Liga o K-Bot para todos os contatos deste agente que podem receber. Quem
+/// fica de fora fica por um motivo nomeado — sem telefone, sem código de país,
+/// número inválido, ou pedido de parada — porque cada um desses pede uma coisa
+/// diferente do agente, e três deles têm conserto. A contagem honesta que este
+/// retorno carrega é o que a tela mostra depois do clique, em vez de fingir
+/// que "todos" significa literalmente todos.
 export async function enableAllKBotContacts(input: unknown): Promise<KBotEnableAllResult> {
   const { copy } = await getServerI18n()
   const parsed = z.strictObject({}).safeParse(input)

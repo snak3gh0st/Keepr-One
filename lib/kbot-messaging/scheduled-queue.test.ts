@@ -452,4 +452,22 @@ describe('enqueueScheduledMessagesForAgent, a category the K-Bot writes', () => 
       expect(mocks.jobCreate).not.toHaveBeenCalled()
     }
   })
+
+  it('charges a provider call when another pass wins before job creation', async () => {
+    mocks.template.mockResolvedValue([{ category: 'BIRTHDAY', language: 'PT', body: null }])
+    mocks.jobFindFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'job-from-other-pass' })
+
+    const result = await enqueueScheduledMessagesForAgent('a1', now)
+
+    expect(mocks.generate).toHaveBeenCalledTimes(1)
+    expect(mocks.jobCreate).not.toHaveBeenCalled()
+    expect(result.skipped).toEqual([expect.objectContaining({ reason: 'ALREADY_QUEUED' })])
+    expect(mocks.grantUpdate).toHaveBeenCalledWith({
+      where: { id: 'g1' },
+      data: { spent: { increment: 150 } },
+    })
+  })
 })

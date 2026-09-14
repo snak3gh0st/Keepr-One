@@ -19,6 +19,7 @@ describe('mensagens contact list stays paginated', () => {
     const constant = source.match(/const CONTACTS_PAGE_SIZE = (\d+)/)
     expect(constant).not.toBeNull()
     expect(Number(constant![1])).toBe(25)
+    expect(source).toContain('Math.min(requestedContactsPage, contactsTotalPages)')
 
     // Every `client.findMany(...)` call block, matched non-greedily up to its
     // closing `})` at the same call depth this codebase's formatting uses.

@@ -234,6 +234,7 @@ describe('releasing proposals', () => {
     expect(mocks.approve).toHaveBeenCalledWith('agent-1', ['j1', 'j2'])
     expect(result).toEqual({ ok: true, released: 2 })
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/kbot/agendadas')
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/mensagens')
   })
 
   it('refuses a payload that tries to name its own agent', async () => {
@@ -257,6 +258,7 @@ describe('releasing proposals', () => {
 
     expect(mocks.discard).toHaveBeenCalledWith('agent-1', ['j1', 'j2'])
     expect(result).toEqual({ ok: true, released: 2 })
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/mensagens')
   })
 
   it('refuses an empty selection instead of reporting a no-op as done', async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   canonicalNationalLifeNavigatePath,
+  isCarrierAuthCallbackPath,
   matchesNationalLifeStagePath,
   shouldInstrumentNationalLifePath,
 } from './constants'
@@ -16,6 +17,24 @@ describe('National Life content-script boundary', () => {
     ]) {
       expect(shouldInstrumentNationalLifePath(pathname)).toBe(false)
     }
+  })
+
+  // Os dois lados da armadilha, fixados juntos: o callback continua fora do
+  // alcance do content script (a troca do código não pode ser instrumentada) e,
+  // ao mesmo tempo, é reconhecido como conclusão pelo state machine.
+  it('reconhece os callbacks de autenticação sem deixar de protegê-los', () => {
+    for (const pathname of ['/agent/auth/mfacallback', '/agent/auth/logincallback']) {
+      expect(isCarrierAuthCallbackPath(pathname)).toBe(true)
+      expect(shouldInstrumentNationalLifePath(pathname)).toBe(false)
+    }
+    expect(isCarrierAuthCallbackPath('/agent/auth/MFACallback/')).toBe(true)
+  })
+
+  // `/agent/auth/mfacallback` contém `/mfa`. Casar por substring era o bug.
+  it('não confunde a página que pede MFA com a que prova que ele terminou', () => {
+    expect(isCarrierAuthCallbackPath('/agent/auth/mfa')).toBe(false)
+    expect(isCarrierAuthCallbackPath('/agent/auth/login')).toBe(false)
+    expect(isCarrierAuthCallbackPath('/agent/auth/challenge')).toBe(false)
   })
 
   it('instruments authenticated agent pages', () => {
