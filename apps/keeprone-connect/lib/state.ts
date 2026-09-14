@@ -33,6 +33,15 @@ export type CredentialAttempt = {
 
 export type SyncState = {
   runId?: string
+  /// Quem pediu esta corrida. Fechar a aba significa coisas opostas nos dois
+  /// casos: quem clicou em Sincronizar e fecha está mandando parar; quem nunca
+  /// pediu nada está arrumando uma aba que apareceu sozinha. Ausente em estado
+  /// gravado por versão anterior, e aí vale a leitura conservadora — parar.
+  startedBy?: 'AGENT' | 'SCHEDULE'
+  /// Quantas vezes a aba já foi reaberta nesta corrida. Reabrir sem limite
+  /// transformaria "não quero isto agora" numa aba que volta toda vez que o
+  /// agente a fecha, que é a mesma falta de consentimento pelo avesso.
+  tabReopenAttempts?: number
   /// Id da aba criada e mantida pelo conector. Nunca é inferido de uma aba do
   /// usuário: sem este vínculo, um retry pode sequestrar o portal que o agente
   /// está usando.

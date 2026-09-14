@@ -819,7 +819,7 @@ async function ensureCredentialEncryptionKeyRegistered() {
 async function startScheduledSyncIfDue() {
   const [device, sync] = await Promise.all([readDeviceState(), readSyncState()])
   if (!scheduledSyncIsDue(device, sync)) return
-  await startNewSync()
+  await startNewSync(false, 'SCHEDULE')
 }
 
 async function ensureCommandPollAlarm() {
@@ -2463,7 +2463,9 @@ async function cancelNationalLifeSync() {
   return operation
 }
 
-async function createRun(forceRefresh = false) {
+async function createRun(
+  forceRefresh = false, startedBy: 'AGENT' | 'SCHEDULE' = 'AGENT',
+) {
   const cancellationVersion = syncCancellationVersion
   const previous = await readSyncState()
   const device = await readDeviceState()
@@ -2486,7 +2488,14 @@ async function createRun(forceRefresh = false) {
   if (cancellationVersion !== syncCancellationVersion) {
     throw new Error('SYNC_CANCELLED')
   }
-  await writeSyncState({ ...previous, status: 'STARTING', errorCode: undefined })
+  // O carimbo entra na mesma escrita que abre a corrida. Gravá-lo à parte,
+  // entre `createRun` e a navegação, insere um tique no qual o resume de
+  // inicialização e o watchdog se intercalam — e a corrida passava a sondar
+  // sessão onde deveria começar a extração.
+  await writeSyncState({
+    ...previous, status: 'STARTING', errorCode: undefined, startedBy,
+    tabReopenAttempts: undefined,
+  })
   if (cancellationVersion !== syncCancellationVersion) {
     throw new Error('SYNC_CANCELLED')
   }
@@ -2783,7 +2792,11 @@ async function navigatePendingGrid(options?: { foreground?: boolean }) {
   })
 }
 
-async function startNewSync(forceRefresh = false) {
+const MAX_SCHEDULED_TAB_REOPENS = 1
+
+async function startNewSync(
+  forceRefresh = false, startedBy: 'AGENT' | 'SCHEDULE' = 'AGENT',
+) {
   if (documentFetchLock || activeDocuments.size > 0) {
     return { ok: false as const, error: 'DOCUMENT_FETCH_IN_PROGRESS' }
   }
@@ -2800,7 +2813,7 @@ async function startNewSync(forceRefresh = false) {
         // Re-enter the signed start endpoint. It reuses a live run, but first
         // expires a dead one; the response handling above preserves the cursor
         // for the live case and starts at stage zero for a reclaimed run.
-        await createRun(forceRefresh)
+        await createRun(forceRefresh, startedBy)
         await navigatePendingGrid()
         const after = await readSyncState()
         if (after.status === 'AUTH_REQUIRED') {
@@ -2808,7 +2821,7 @@ async function startNewSync(forceRefresh = false) {
         }
         return { ok: true as const, status: after.status }
       }
-      await createRun(forceRefresh)
+      await createRun(forceRefresh, startedBy)
       await navigatePendingGrid()
       return { ok: true as const, status: 'NAVIGATING' as const }
     } catch (error) {
@@ -4339,17 +4352,35 @@ export default defineBackground(() => {
     carrierAuthenticationQueues.delete(tabId)
     tabReadyLocks.delete(tabId)
     // A visible Chrome tab is not a disposable implementation detail. The agent
-    // closing it is an explicit stop signal, not permission to keep reopening
-    // National Life behind their back. End this run cleanly; a later Sync starts
-    // a new, inactive carrier tab only when the agent asks for it.
+    // closing one they asked for is an explicit stop signal, not permission to
+    // keep reopening National Life behind their back.
+    //
+    // Mas uma corrida agendada nunca foi pedida: a aba apareceu sozinha, e
+    // fechá-la é arrumar a mesa, não mandar parar. Tratar os dois casos como
+    // parada era o que fazia a atualização em background morrer sem ninguém
+    // decidir isso — e a evidência estava nos runs que terminavam em
+    // CONNECTOR_TAB_CLOSED sem que o agente soubesse que havia um sync.
+    //
+    // Uma reabertura, nunca mais: insistir seria a falta de consentimento pelo
+    // avesso, uma aba que volta toda vez que o agente a fecha.
     void (async () => {
       const state = await readSyncState()
       if (state.carrierTabId !== tabId) return
       if (isTerminalSyncStatus(state.status) || !state.runId || !currentStage(state)) {
         return
       }
-      await writeSyncState({ ...state, carrierTabId: undefined })
-      await failSync('CONNECTOR_TAB_CLOSED')
+      const reopens = state.tabReopenAttempts ?? 0
+      // Sem carimbo não há como saber quem pediu, e a leitura conservadora é a
+      // que respeita o agente: parar.
+      if (state.startedBy !== 'SCHEDULE' || reopens >= MAX_SCHEDULED_TAB_REOPENS) {
+        await writeSyncState({ ...state, carrierTabId: undefined })
+        await failSync('CONNECTOR_TAB_CLOSED')
+        return
+      }
+      await writeSyncState({
+        ...state, carrierTabId: undefined, tabReopenAttempts: reopens + 1,
+      })
+      await navigatePendingGrid()
     })().catch(() => failSync('CONNECTOR_TAB_CLOSED'))
   })
 

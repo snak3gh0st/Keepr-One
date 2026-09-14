@@ -3426,6 +3426,66 @@ describe('background plan executor', () => {
     expect(readSync()).toMatchObject({ runId: 'run-1', stageIndex: 0, status: 'ERROR', errorCode: 'CONNECTOR_TAB_CLOSED' })
   })
 
+  // Fechar a aba é sinal de parada quando o agente a pediu. Quando foi o
+  // alarme que abriu, o agente está arrumando uma aba que apareceu sozinha —
+  // e tratar isso como "pare o sync" é o que fazia a atualização em background
+  // morrer sem ninguém pedir.
+  it('reabre e retoma quando a aba de um sync agendado é fechada', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'EXTRACTING', startedBy: 'SCHEDULE',
+    }
+    tabs.query.mockResolvedValueOnce([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    // O resume de inicialização também abre aba; só interessa o que o
+    // fechamento provoca.
+    tabs.create.mockClear()
+    tabs.query.mockResolvedValue([])
+
+    emit('tabs.onRemoved', 7)
+    await flush()
+
+    expect(tabs.create).toHaveBeenCalledWith(expect.objectContaining({
+      active: false, url: `${NLG}${NEW_BUSINESS_PATH}`,
+    }))
+    expect(readSync()).not.toMatchObject({ errorCode: 'CONNECTOR_TAB_CLOSED' })
+  })
+
+  it('continua parando quando o próprio agente pediu o sync', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'EXTRACTING', startedBy: 'AGENT',
+    }
+    tabs.query.mockResolvedValueOnce([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    tabs.create.mockClear()
+
+    emit('tabs.onRemoved', 7)
+    await flush()
+
+    expect(tabs.create).not.toHaveBeenCalled()
+    expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'CONNECTOR_TAB_CLOSED' })
+  })
+
+  // Reabrir sem limite transformaria "não quero isto agora" numa aba que
+  // volta toda vez que o agente a fecha. Uma reabertura, e a próxima é parada.
+  it('reabre uma vez só: fechar de novo encerra a corrida', async () => {
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'EXTRACTING', startedBy: 'SCHEDULE', tabReopenAttempts: 1,
+    }
+    tabs.query.mockResolvedValueOnce([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
+    await bootBackground()
+    tabs.create.mockClear()
+    tabs.query.mockResolvedValue([])
+
+    emit('tabs.onRemoved', 7)
+    await flush()
+
+    expect(tabs.create).not.toHaveBeenCalled()
+    expect(readSync()).toMatchObject({ status: 'ERROR', errorCode: 'CONNECTOR_TAB_CLOSED' })
+  })
+
   it('does not re-navigate the connector when an unrelated tab closes', async () => {
     storage.sync = { runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0, status: 'EXTRACTING' }
     tabs.query.mockResolvedValue([{ id: 7, active: false, url: `${NLG}${NEW_BUSINESS_PATH}` }])
