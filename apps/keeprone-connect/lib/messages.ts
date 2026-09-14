@@ -24,6 +24,10 @@ export type PairConnectorMessage = {
 export type StartSyncMessage = {
   type: 'START_NATIONAL_LIFE_SYNC'
   forceRefresh?: true
+  /// Pareamento: não herde um plano falho do dispositivo anterior, mas
+  /// reaproveite um resultado completo e fresco. `forceRefresh` faz as duas
+  /// coisas; quem acabou de parear só precisa da primeira.
+  discardFailedPlans?: true
 }
 
 export type CancelSyncMessage = {
@@ -345,8 +349,13 @@ export function parseExternalMessage(value: unknown): ExternalMessage | null {
   if (!isObject(value) || typeof value.type !== 'string') return null
   if (value.type === 'START_NATIONAL_LIFE_SYNC') {
     if (hasExactKeys(value, ['type'])) return { type: value.type }
-    return hasExactKeys(value, ['type', 'forceRefresh']) && value.forceRefresh === true
-      ? { type: value.type, forceRefresh: true }
+    if (hasExactKeys(value, ['type', 'forceRefresh'])) {
+      return value.forceRefresh === true ? { type: value.type, forceRefresh: true } : null
+    }
+    // As duas intenções são exclusivas: uma quer dado novo, a outra quer plano
+    // limpo. Aceitar as duas juntas seria aceitar um pedido sem significado.
+    return hasExactKeys(value, ['type', 'discardFailedPlans']) && value.discardFailedPlans === true
+      ? { type: value.type, discardFailedPlans: true }
       : null
   }
   if (

@@ -257,6 +257,73 @@ describe('local connector runs', () => {
     expect(create).toHaveBeenCalledOnce()
   })
 
+  // Parear um dispositivo forçava releitura completa. O comentário que
+  // justificava isso fala em não herdar um plano *falho* — e `forceRefresh`
+  // descartava também o completo. Medido em produção: um pareamento às
+  // 15:41:54 jogou fora um run COMPLETED de 15:16:06, com plano idêntico, e
+  // releu as catorze fontes por dezoito minutos.
+  it('no pareamento, descarta plano falho mas reaproveita o completo e fresco', async () => {
+    const create = vi.fn()
+    const gridKeys = ['NEW_BUSINESS', 'INFORCE_CLIENTS'] as const
+    const findFirst = vi.fn()
+      // running
+      .mockResolvedValueOnce(null)
+      // failed — é o que o pareamento precisa ignorar
+      .mockResolvedValueOnce({
+        id: 'run-failed', state: 'FAILED',
+        plannedGridKeys: [...gridKeys], completedStages: 1,
+        completedAt: null, updatedAt: new Date(now.getTime() - 60_000),
+      })
+      // completed com o mesmo plano, fresco
+      .mockResolvedValueOnce({
+        id: 'run-completo', state: 'COMPLETED',
+        plannedGridKeys: [...gridKeys], completedStages: gridKeys.length,
+        completedAt: new Date(now.getTime() - 25 * 60_000),
+        updatedAt: new Date(now.getTime() - 25 * 60_000),
+      })
+    const db = {
+      nationalLifeSyncRun: {
+        create,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst,
+      },
+    } as never
+
+    const run = await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: [...gridKeys], discardFailedPlans: true },
+    )
+
+    expect(run).toMatchObject({ runId: 'run-completo', duplicate: true })
+    // Nenhuma corrida nova: o portal não é reaberto.
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  // O botão de atualização completa continua significando o que promete.
+  it('a atualização completa descarta também o completo', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'run-novo' })
+    const gridKeys = ['NEW_BUSINESS', 'INFORCE_CLIENTS'] as const
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+    const db = {
+      nationalLifeSyncRun: {
+        create,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst,
+      },
+    } as never
+
+    await startLocalConnectorRun(
+      db,
+      { agentId: 'agent-1', deviceId: 'device-1', now },
+      { gridKeys: [...gridKeys], forceRefresh: true },
+    )
+
+    expect(create).toHaveBeenCalledOnce()
+  })
+
   it('resumes a recent failed run even when its first stage was interrupted', async () => {
     const create = vi.fn()
     const updateMany = vi

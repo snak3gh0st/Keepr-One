@@ -238,7 +238,24 @@ export async function expireStaleLocalConnectorRuns(
 export async function startLocalConnectorRun(
   db: LocalConnectorDb,
   input: { agentId: string; deviceId: string; now?: Date },
-  options?: { gridKeys?: readonly NationalLifeGridKey[]; forceRefresh?: boolean; exportEnabled?: boolean },
+  options?: {
+    gridKeys?: readonly NationalLifeGridKey[]
+    forceRefresh?: boolean
+    exportEnabled?: boolean
+    /// Pareamento: ignore um plano falho do dispositivo anterior, mas não jogue
+    /// fora um resultado completo e fresco.
+    ///
+    /// `forceRefresh` fazia as duas coisas de uma vez, e o comentário que o
+    /// justificava no pareamento fala só da primeira. Medido em produção: um
+    /// pareamento às 15:41:54 descartou um run COMPLETED de 15:16:06, com plano
+    /// idêntico, e releu as catorze fontes durante dezoito minutos — portal
+    /// reaberto para reconfirmar o que já estava confirmado meia hora antes.
+    ///
+    /// A distinção importa porque as duas intenções são diferentes: o botão de
+    /// atualização completa quer dado novo; quem acabou de parear quer plano
+    /// limpo. Só a segunda pode reaproveitar.
+    discardFailedPlans?: boolean
+  },
 ): Promise<{
   runId: string
   schemaVersion: typeof LOCAL_CONNECTOR_SCHEMA_VERSION
@@ -357,11 +374,14 @@ export async function startLocalConnectorRun(
   // it owns the carrier tab and its durable checkpoint.
   const terminalRunTimestamp = (run: { completedAt: Date | null; updatedAt: Date } | null) =>
     run ? Math.max(run.completedAt?.getTime() ?? 0, run.updatedAt.getTime()) : 0
-  const latestTerminal = failed && reusableCompleted
-    ? terminalRunTimestamp(failed) > terminalRunTimestamp(reusableCompleted)
-      ? failed
+  // Um plano falho do dispositivo anterior não se herda; um resultado completo
+  // e de plano idêntico não é do dispositivo, é do agente, e vale para os dois.
+  const resumableFailed = options?.discardFailedPlans ? null : failed
+  const latestTerminal = resumableFailed && reusableCompleted
+    ? terminalRunTimestamp(resumableFailed) > terminalRunTimestamp(reusableCompleted)
+      ? resumableFailed
       : reusableCompleted
-    : failed ?? reusableCompleted
+    : resumableFailed ?? reusableCompleted
   const active = running ?? (options?.forceRefresh ? null : latestTerminal)
   if (active) {
     const storedPlan = plannedGridKeys(active)

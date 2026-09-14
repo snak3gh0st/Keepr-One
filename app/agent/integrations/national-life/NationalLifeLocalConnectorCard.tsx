@@ -586,16 +586,20 @@ export function NationalLifeLocalConnectorCard({
     if (!paired.ok) throw new Error(paired.error ?? 'PAIRING_FAILED')
     if (typeof paired.deviceId === 'string') setPairedDeviceId(paired.deviceId)
     // A newly paired device must never inherit a failed plan from a previous
-    // device. Starting with forceRefresh creates the current priority plan
-    // (9 structured sources, or 13 when READ_PAGE is enabled) from scratch.
-    await startSync(true)
+    // device — mas herdar um resultado *completo* é justamente o que evita
+    // reabrir o portal para reconfirmar o que já está confirmado. Medido em
+    // produção: um pareamento descartou um sync completo de 25 minutos antes e
+    // releu as catorze fontes por dezoito minutos.
+    await startSync({ discardFailedPlans: true })
   }
 
-  async function startSync(forceRefresh = false): Promise<void> {
+  async function startSync(
+    intent: { forceRefresh?: true; discardFailedPlans?: true } = {},
+  ): Promise<void> {
     const result = await sendConnectorMessage(extensionId, {
       type: 'START_NATIONAL_LIFE_SYNC',
-      ...(forceRefresh ? { forceRefresh: true as const } : {}),
-    })
+      ...intent,
+    } as never)
     if (!result.ok) {
       if (result.error === 'CONNECTOR_NOT_PAIRED') {
         await createPairingAndStart()
@@ -614,7 +618,7 @@ export function NationalLifeLocalConnectorCard({
   async function handleFullRefresh(): Promise<void> {
     beginAttempt('checking')
     try {
-      await startSync(true)
+      await startSync({ forceRefresh: true })
     } catch (error) {
       fail(error instanceof Error ? error.message : null)
     }
