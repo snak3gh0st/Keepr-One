@@ -187,6 +187,63 @@ describe('the guaranteed half of a permanent illustration', () => {
   })
 })
 
+// Enquanto a projeção era obrigatória, uma apólice com PDF verificado no banco
+// não produzia documento nenhum para o cliente se a tela do Foresight não
+// tivesse sido capturada — e metade das gerações não capturava.
+describe('a peça nascida só do PDF oficial', () => {
+  const summaryOfValues = {
+    rows: [
+      { policyYear: 5, age: 42,
+        guaranteed: { annualCashFlow: -24_000, cashSurrenderValue: 38_141, netDeathBenefit: 1_749_928 },
+        current: { annualCashFlow: -24_000, cashSurrenderValue: 62_214, netDeathBenefit: 1_774_001 } },
+      { policyYear: 20, age: 57,
+        guaranteed: { annualCashFlow: -24_000, cashSurrenderValue: 254_292, netDeathBenefit: 1_940_632 },
+        current: { annualCashFlow: -24_000, cashSurrenderValue: 663_875, netDeathBenefit: 2_350_215 } },
+    ],
+    lapseYear: { guaranteed: 42, current: 72 },
+  }
+  const currentLedger = {
+    rows: Array.from({ length: 30 }, (unused, index) => ({
+      policyYear: index + 1, age: 38 + index, premiumOutlay: 24_000,
+      weightedAverageInterestRate: 6.84,
+      accumulatedValue: 15_816 + index * 40_000,
+      cashSurrenderValue: index * 38_000,
+      netDeathBenefit: 1_702_156 + index * 40_000,
+    })),
+    lapse: null,
+  }
+
+  it('produz o documento sem a tela do Foresight', () => {
+    const { rawPayload, ...rest } = verifiedIllustration
+    const { quickReview: unused, ...result } = rawPayload.foresightResult
+    void unused
+    const summary = buildClientSummary({
+      ...rest,
+      rawPayload: { foresightResult: result },
+      summaryOfValues,
+      currentLedger,
+    })
+    expect(summary?.kind).toBe('PROJECTED')
+    if (summary?.kind !== 'PROJECTED') return
+    // O encerramento do cenário corrente vem da página da seguradora, e é o
+    // número que uma peça só-corrente nunca contava.
+    expect(summary.lapseYear).toBe(72)
+    expect(summary.scenarios?.lapseAge).toEqual({ guaranteed: 79, current: 109 })
+    // A curva é o ledger inteiro, não os dois marcos da página de resumo.
+    expect(summary.scenarios?.deathBenefit.current).toHaveLength(30)
+    // Nenhuma destas páginas declara ano de MEC, e um campo vazio é a resposta
+    // honesta para uma pergunta que o documento não responde.
+    expect(summary.mecYear).toBeNull()
+  })
+
+  it('continua sem documento quando nem o PDF nem a tela trazem valores', () => {
+    const { rawPayload, ...rest } = verifiedIllustration
+    const { quickReview: unused, ...result } = rawPayload.foresightResult
+    void unused
+    expect(buildClientSummary({ ...rest, rawPayload: { foresightResult: result } })).toBeNull()
+  })
+})
+
 describe('Term summaries', () => {
   function termIllustration(confirmedTermDuration: string, requested = confirmedTermDuration) {
     return {

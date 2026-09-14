@@ -17,6 +17,7 @@ import { flexLifeProductLabel } from './flex-life'
 import type { ForesightTermLedger, ForesightTermLedgerRow } from './foresight-term-ledger'
 import type { ForesightGuaranteedLedger } from './foresight-guaranteed-ledger'
 import type { ForesightSummaryOfValues } from './foresight-summary-of-values'
+import type { ForesightCurrentLedger } from './foresight-current-ledger'
 import { foresightQuickReview, verifiedForesightResult } from './illustration-verified-result'
 
 /// Years worth calling out beside the curve. 5 and 10 are the near horizon a
@@ -133,7 +134,18 @@ export type ClientSummaryScenarios = {
   /// A idade correspondente a cada encerramento, para o gráfico saber onde
   /// parar cada curva.
   lapseAge: { guaranteed: number | null; current: number | null }
+  /// O benefício por morte ano a ano, nos dois cenários, quando os ledgers
+  /// completos puderam ser lidos.
+  ///
+  /// A tabela acima traz quatro marcos, que é o que a seguradora resume numa
+  /// folha. Quatro pontos desenham quatro retas ligando anos distantes, e foi
+  /// isso que tornou o gráfico ilegível: o cliente não conseguia ler a forma da
+  /// apólice nem conferir o que estava vendo. Com o ledger inteiro, a curva é a
+  /// apólice.
+  deathBenefit: { guaranteed: ClientSummaryCurvePoint[]; current: ClientSummaryCurvePoint[] }
 }
+
+export type ClientSummaryCurvePoint = { age: number; value: number }
 
 /// What the Term ledger says, reduced to what a client is deciding about.
 ///
@@ -170,6 +182,8 @@ export type IllustrationForClientSummary = {
   guaranteedLedger?: ForesightGuaranteedLedger | null
   /// A página Summary of Values do PDF oficial, quando pôde ser lida.
   summaryOfValues?: ForesightSummaryOfValues | null
+  /// O ledger corrente ano a ano do PDF oficial, quando pôde ser lido.
+  currentLedger?: ForesightCurrentLedger | null
   /// The agent this goes out under. Optional because the summary is complete
   /// without it — the page simply omits the advisor block rather than printing
   /// a placeholder where a person's name belongs.
@@ -199,7 +213,21 @@ export function buildClientSummary(illustration: IllustrationForClientSummary): 
   }
 
   const quickReview = foresightQuickReview(illustration.rawPayload)
-  if (!quickReview) return termSummary(illustration, base)
+  const scenarios = scenariosFrom(
+    illustration.summaryOfValues ?? null,
+    illustration.guaranteedLedger ?? null,
+    illustration.currentLedger ?? null,
+  )
+  // O PDF oficial basta. A projeção vinha de uma tela do Foresight que metade
+  // das gerações não capturava, e enquanto ela era obrigatória uma apólice com
+  // PDF verificado no banco não produzia documento nenhum para o cliente. O
+  // documento que a seguradora assina traz os mesmos valores, e mais: traz
+  // também a metade garantida, que aquela tela nunca teve.
+  if (!quickReview) {
+    return scenarios
+      ? pdfSummary(base, scenarios, illustration)
+      : termSummary(illustration, base)
+  }
 
   const coverage = quickReview.annualProjection
     .filter((row): row is typeof row & { netDeathBenefit: number } => row.netDeathBenefit !== null)
@@ -227,14 +255,18 @@ export function buildClientSummary(illustration: IllustrationForClientSummary): 
     mecYear: quickReview.summary.mecYear,
     guaranteed: guaranteedCoverage(illustration.guaranteedLedger ?? null),
     guaranteedLapse: illustration.guaranteedLedger?.lapse ?? null,
-    scenarios: scenariosFrom(illustration.summaryOfValues ?? null),
+    scenarios,
   }
 }
 
 /// A idade de emissão é a mesma em todas as linhas da página, então a idade de
 /// um ano qualquer — inclusive um ano de encerramento que não aparece como
 /// linha — sai de somá-la ao ano.
-function scenariosFrom(summary: ForesightSummaryOfValues | null): ClientSummaryScenarios | null {
+function scenariosFrom(
+  summary: ForesightSummaryOfValues | null,
+  guaranteedLedger: ForesightGuaranteedLedger | null,
+  currentLedger: ForesightCurrentLedger | null,
+): ClientSummaryScenarios | null {
   if (!summary || summary.rows.length === 0) return null
   const issueAge = summary.rows[0]!.age - summary.rows[0]!.policyYear
   const ageFor = (year: number | null) => year === null ? null : issueAge + year
@@ -256,7 +288,72 @@ function scenariosFrom(summary: ForesightSummaryOfValues | null): ClientSummaryS
       guaranteed: ageFor(summary.lapseYear.guaranteed),
       current: ageFor(summary.lapseYear.current),
     },
+    deathBenefit: {
+      guaranteed: curve(guaranteedLedger?.rows ?? null, summary, (row) => row.guaranteed.netDeathBenefit),
+      current: curve(currentLedger?.rows ?? null, summary, (row) => row.current.netDeathBenefit),
+    },
   }
+}
+
+/// A peça montada só com o que a seguradora assinou.
+///
+/// Os marcos e a perspectiva saem do ledger corrente quando ele pôde ser lido,
+/// e da própria página de resumo quando não. O ano de MEC fica nulo porque
+/// nenhuma destas páginas o declara — e um campo vazio é a resposta honesta
+/// para uma pergunta que este documento não responde.
+function pdfSummary(
+  base: ClientSummaryBase,
+  scenarios: ClientSummaryScenarios,
+  illustration: IllustrationForClientSummary,
+): ClientSummary {
+  const ledger = illustration.currentLedger?.rows ?? []
+  const coverage: ClientSummaryPoint[] = ledger.length >= MINIMUM_COVERAGE_POINTS
+    ? ledger.map((row) => ({
+        policyYear: row.policyYear,
+        age: row.age,
+        netDeathBenefit: row.netDeathBenefit,
+        cashSurrenderValue: row.cashSurrenderValue,
+        premiumOutlay: row.premiumOutlay,
+        accumulatedValue: row.accumulatedValue,
+      }))
+    : scenarios.rows.map((row) => ({
+        policyYear: row.policyYear,
+        age: row.age,
+        netDeathBenefit: row.current.netDeathBenefit,
+        cashSurrenderValue: row.current.cashSurrenderValue,
+        premiumOutlay: null,
+        accumulatedValue: null,
+      }))
+  const lastYear = coverage[coverage.length - 1]!.policyYear
+  return {
+    ...base,
+    kind: 'PROJECTED',
+    coverage,
+    milestones: pickMilestones(coverage, [...MILESTONE_YEARS, lastYear]),
+    fullMilestones: pickMilestones(coverage, [...FULL_MILESTONE_YEARS, lastYear]),
+    outlook: outlookFrom(coverage),
+    lapseYear: scenarios.lapseYear.current,
+    mecYear: null,
+    guaranteed: guaranteedCoverage(illustration.guaranteedLedger ?? null),
+    guaranteedLapse: illustration.guaranteedLedger?.lapse ?? null,
+    scenarios,
+  }
+}
+
+/// O ledger inteiro quando existe, e os marcos da seguradora quando não.
+///
+/// A peça não fica sem curva porque uma página do PDF não pôde ser lida: ela
+/// fica com a curva grossa que a Summary of Values permite, que é pior de ler
+/// mas continua sendo número da seguradora.
+function curve(
+  rows: ReadonlyArray<{ age: number; netDeathBenefit: number }> | null,
+  summary: ForesightSummaryOfValues,
+  fallback: (row: ForesightSummaryOfValues['rows'][number]) => number,
+): ClientSummaryCurvePoint[] {
+  if (rows && rows.length >= MINIMUM_COVERAGE_POINTS) {
+    return rows.map((row) => ({ age: row.age, value: row.netDeathBenefit }))
+  }
+  return summary.rows.map((row) => ({ age: row.age, value: fallback(row) }))
 }
 
 function guaranteedCoverage(ledger: ForesightGuaranteedLedger | null): ClientSummaryPoint[] {

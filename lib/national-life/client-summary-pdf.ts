@@ -702,17 +702,14 @@ function scenarioChart(
 
   sectionTitle(ctx, copy.coverageOverTime, top + 14, copy.currentAndGuaranteed)
 
-  const ceiling = niceCeiling(Math.max(
-    ...scenarios.rows.map((row) => row.current.netDeathBenefit),
-    ...scenarios.rows.map((row) => row.guaranteed.netDeathBenefit),
-  ))
-  const ages = [
-    ...scenarios.rows.map((row) => row.age),
-    ...(scenarios.lapseAge.guaranteed === null ? [] : [scenarios.lapseAge.guaranteed]),
-    ...(scenarios.lapseAge.current === null ? [] : [scenarios.lapseAge.current]),
-  ]
-  const firstAge = Math.min(...ages)
-  const lastAge = Math.max(...ages)
+  const drawn = [...scenarios.deathBenefit.guaranteed, ...scenarios.deathBenefit.current]
+  const ceiling = niceCeiling(Math.max(...drawn.map((point) => point.value)))
+  // O eixo cobre o que a seguradora publicou, e nada além. Esticá-lo até um
+  // encerramento que fica depois da última linha do ledger deixava um terço do
+  // gráfico vazio, e a tabela logo abaixo já diz em texto onde cada cenário
+  // acaba — inclusive o que acaba fora do desenho.
+  const firstAge = Math.min(...drawn.map((point) => point.age))
+  const lastAge = Math.max(...drawn.map((point) => point.age))
   const span = Math.max(lastAge - firstAge, 1)
   const xFor = (age: number) => plotLeft + ((age - firstAge) / span) * (plotRight - plotLeft)
   const yFor = (value: number) => plotBottom - (value / ceiling) * (plotBottom - plotTop)
@@ -731,7 +728,7 @@ function scenarioChart(
   }
 
   const series = (
-    pick: (row: ClientSummaryScenarios['rows'][number]) => number,
+    points: ReadonlyArray<{ age: number; value: number }>,
     colour: string, dashed: boolean, lapseAge: number | null,
   ) => {
     ctx.save()
@@ -739,20 +736,22 @@ function scenarioChart(
     ctx.strokeStyle = colour
     ctx.lineWidth = dashed ? 1.7 : 2.4
     ctx.beginPath()
-    scenarios.rows.forEach((row, index) => {
-      const x = xFor(row.age)
-      const y = yFor(pick(row))
+    points.forEach((point, index) => {
+      const x = xFor(point.age)
+      const y = yFor(point.value)
       if (index === 0) ctx.moveTo(x, y)
       else ctx.lineTo(x, y)
     })
     // A curva para no último valor que a seguradora publicou. Entre ele e o
     // encerramento ela não diz nada, e prolongar a linha reta até lá seria
-    // afirmar que o valor fica parado — que é tão inventado quanto desenhar uma
+    // afirmar que o valor fica parado — tão inventado quanto desenhar uma
     // queda. O vazio até o marcador é a informação correta: não sabemos.
     ctx.stroke()
     ctx.restore()
 
-    if (lapseAge !== null) {
+    // Só quando o encerramento cabe no eixo. Fora dele o marcador mentiria
+    // sobre onde está.
+    if (lapseAge !== null && lapseAge <= lastAge) {
       const x = xFor(lapseAge)
       ctx.save()
       ctx.setLineDash([2, 3])
@@ -772,10 +771,11 @@ function scenarioChart(
     }
   }
 
-  series((row) => row.guaranteed.netDeathBenefit, TEAL_DEEP, true, scenarios.lapseAge.guaranteed)
-  series((row) => row.current.netDeathBenefit, TEAL, false, scenarios.lapseAge.current)
-  series((row) => row.guaranteed.cashSurrenderValue, GOLD, true, null)
-  series((row) => row.current.cashSurrenderValue, GOLD, false, null)
+  // Só o benefício por morte. O valor de resgate garantido fica colado no zero
+  // enquanto os benefícios andam na casa dos milhões, e as quatro curvas numa
+  // escala só apagavam metade delas — o resgate está na tabela, em número.
+  series(scenarios.deathBenefit.guaranteed, TEAL_DEEP, true, scenarios.lapseAge.guaranteed)
+  series(scenarios.deathBenefit.current, TEAL, false, scenarios.lapseAge.current)
 
   ctx.fillStyle = INK_MUTED
   ctx.font = font(8)
@@ -786,21 +786,17 @@ function scenarioChart(
   const legend: Array<[string, boolean, string]> = [
     [TEAL, false, `${copy.deathBenefit} · ${copy.scenarioCurrent}`],
     [TEAL_DEEP, true, `${copy.deathBenefit} · ${copy.scenarioGuaranteed}`],
-    [GOLD, false, `${copy.cashValue} · ${copy.scenarioCurrent}`],
-    [GOLD, true, `${copy.cashValue} · ${copy.scenarioGuaranteed}`],
   ]
-  legend.forEach(([colour, dashed, label], index) => {
-    const row = index < 2 ? 0 : 1
-    if (index === 2) legendX = plotLeft
-    const y = plotBottom + 22 + row * 12
+  for (const [colour, dashed, label] of legend) {
+    const y = plotBottom + 22
     ctx.fillStyle = colour
     if (dashed) for (const offset of [0, 6, 12]) ctx.fillRect(legendX + offset, y, 4, 3)
     else ctx.fillRect(legendX, y, 14, 3)
     ctx.fillStyle = INK_MUTED
-    ctx.font = font(7, 500)
+    ctx.font = font(8, 500)
     ctx.fillText(label, legendX + 19, y + 4)
-    legendX += 19 + ctx.measureText(label).width + 16
-  })
+    legendX += 19 + ctx.measureText(label).width + 18
+  }
 
   return top + height
 }
