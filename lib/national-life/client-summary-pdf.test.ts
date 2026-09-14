@@ -258,6 +258,11 @@ describe('Term summary PDF', () => {
           { policyYear: 20, age: 56, guaranteedAnnualPremium: 755.04, guaranteedDeathBenefit: 500_000 },
           { policyYear: 21, age: 57, guaranteedAnnualPremium: 6_262.08, guaranteedDeathBenefit: 500_000 },
         ],
+        fullRows: [
+          { policyYear: 1, age: 37, guaranteedAnnualPremium: 755.04, guaranteedDeathBenefit: 500_000 },
+          { policyYear: 20, age: 56, guaranteedAnnualPremium: 755.04, guaranteedDeathBenefit: 500_000 },
+          { policyYear: 21, age: 57, guaranteedAnnualPremium: 6_262.08, guaranteedDeathBenefit: 500_000 },
+        ],
       },
     }))
     expect(text).toContain('$6,262.08')
@@ -291,6 +296,12 @@ describe('Term summary PDF', () => {
           guaranteedAnnualPremium: 755.04 + index,
           guaranteedDeathBenefit: 500_000,
         })),
+        fullRows: Array.from({ length: 18 }, (unused, index) => ({
+          policyYear: index + 1,
+          age: 37 + index,
+          guaranteedAnnualPremium: 755.04 + index,
+          guaranteedDeathBenefit: 500_000,
+        })),
       },
     }))
     expect(text).toContain('The death benefit stays at $500,000')
@@ -307,6 +318,17 @@ describe('Term summary PDF', () => {
 // Os números reais da página Summary of Values de uma ilustração FlexLife.
 const scenarios = {
   rows: [
+    { policyYear: 5, age: 42,
+      guaranteed: { cashSurrenderValue: 38_141, netDeathBenefit: 1_749_928 },
+      current: { cashSurrenderValue: 62_214, netDeathBenefit: 1_774_001 } },
+    { policyYear: 20, age: 57,
+      guaranteed: { cashSurrenderValue: 254_292, netDeathBenefit: 1_940_632 },
+      current: { cashSurrenderValue: 663_875, netDeathBenefit: 2_350_215 } },
+    { policyYear: 33, age: 70,
+      guaranteed: { cashSurrenderValue: 291_752, netDeathBenefit: 1_978_092 },
+      current: { cashSurrenderValue: 1_859_888, netDeathBenefit: 3_546_228 } },
+  ],
+  fullRows: [
     { policyYear: 5, age: 42,
       guaranteed: { cashSurrenderValue: 38_141, netDeathBenefit: 1_749_928 },
       current: { cashSurrenderValue: 62_214, netDeathBenefit: 1_774_001 } },
@@ -518,5 +540,79 @@ describe('language', () => {
     const text = (await pageTexts(await renderClientSummaryPdf(summary, { language: 'PT' })))[0]!
     expect(text).toContain('only authoritative document')
     expect(text).toContain('Fonte: ilustração da National Life')
+  })
+})
+
+// O Term não tinha apresentação nenhuma: o raciocínio era que sem projeção não
+// há material, e as folhas extras seriam preenchimento. Mas o Term tem ledger,
+// e a folha única o espreme em seis degraus. A tabela de página inteira é a
+// razão desta variante existir.
+describe('apresentação completa de Term', () => {
+  const term: ClientSummary = {
+    kind: 'LEVEL_TERM',
+    insuredName: 'Ale Teste',
+    productLabel: 'NL Term',
+    faceAmount: 500_000,
+    monthlyPremium: 62.92,
+    annualPremium: 755.04,
+    issuedOn: new Date('2026-09-01T12:00:00Z'),
+    advisorName: null,
+    termDuration: '20-G',
+    schedule: null,
+  }
+  const withSchedule: ClientSummary = { ...term,       schedule: {
+        levelPeriodYears: 20,
+        levelAnnualPremium: 755.04,
+        levelMonthlyPremium: 62.92,
+        deathBenefit: 500_000,
+        finalPolicyYear: 58,
+        finalAge: 95,
+        firstIncrease: { policyYear: 21, age: 57, annualPremium: 6_262.08, monthlyPremium: 521.84 },
+        rows: Array.from({ length: 6 }, (unused, index) => ({
+          policyYear: index + 1,
+          age: 37 + index,
+          guaranteedAnnualPremium: 755.04 + index,
+          guaranteedDeathBenefit: 500_000,
+        })),
+        fullRows: Array.from({ length: 18 }, (unused, index) => ({
+          policyYear: index + 1,
+          age: 37 + index,
+          guaranteedAnnualPremium: 755.04 + index,
+          guaranteedDeathBenefit: 500_000,
+        })),
+      }, }
+
+  it('rende três páginas, e não a folha única', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(withSchedule, { variant: 'FULL' }))
+
+    expect(pages).toHaveLength(3)
+  })
+
+  // A razão de existir: mais degraus do que a folha única cabe.
+  it('imprime a tabela densa, não os seis degraus do resumo', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(withSchedule, { variant: 'FULL' }))
+    const quick = await pageTexts(await renderClientSummaryPdf(withSchedule))
+
+    const yearByYear = pages[2]!
+    expect(yearByYear).toContain('18')
+    expect(quick[0]).not.toContain('18')
+  })
+
+  // Nenhuma quarta folha: não há perspectiva a dar sobre número que a
+  // seguradora já garantiu por contrato. A página de perspectiva do lado
+  // projetado responde "no que isto se torna", e aqui não se torna nada — é o
+  // que é, do primeiro ano ao último.
+  it('não inventa página de perspectiva', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(withSchedule, { variant: 'FULL' }))
+
+    expect(pages.join(' ')).not.toContain('What you pay in, what it becomes')
+  })
+
+  // Sem ledger sobram a duração e três números, que já são a folha única.
+  it('volta à folha única quando não há ledger', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(
+      { ...term, schedule: null }, { variant: 'FULL' }))
+
+    expect(pages).toHaveLength(1)
   })
 })

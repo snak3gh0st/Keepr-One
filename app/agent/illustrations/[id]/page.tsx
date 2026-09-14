@@ -290,7 +290,12 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
             <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">{delivery.detail}</p>
           </div>
           {documentReady ? (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+              {/* `items-start`, não `items-center`: o seletor de idioma do
+                  documento do cliente faz aquele bloco ter duas linhas, e
+                  centrar deixava os botões vizinhos flutuando no meio dele em
+                  vez de dividirem a mesma borda de cima. Alinhar pelo topo põe
+                  os três botões na mesma linha e deixa o seletor sob o seu. */}
               <a
                 href={`/api/illustrations/${illustration.id}/document`}
                 target="_blank"
@@ -304,7 +309,12 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
               {clientSummary ? (
                 <ClientDocumentPicker
                   illustrationId={illustration.id}
-                  presentationAvailable={clientSummary.kind === 'PROJECTED'}
+                  // Term passou a ter apresentação porque tem ledger: a folha
+                  // única espreme o climb em seis degraus, e a tabela de uma
+                  // página inteira é o que ela não cabe. Sem ledger continua
+                  // sendo só a duração e três números — que já são a folha.
+                  presentationAvailable={clientSummary.kind === 'PROJECTED' ||
+                    (clientSummary.kind === 'LEVEL_TERM' && clientSummary.schedule !== null)}
                 />
               ) : null}
               {needsTermReconciliation ? (

@@ -19,6 +19,7 @@ import { GlobalFonts, PDFDocument, Path2D } from '@napi-rs/canvas'
 import { CLIENT_SUMMARY_DISCLAIMER, CLIENT_SUMMARY_TERM_DISCLAIMER } from './quote-disclaimer'
 import { clientSummaryCopy, type ClientSummaryLanguage } from './client-summary-copy'
 import type { ClientSummary, ClientSummaryPoint, ClientSummaryScenarios, ClientSummaryTermSchedule } from './client-summary'
+import type { ForesightTermLedgerRow } from './foresight-term-ledger'
 
 type Ctx = ReturnType<PDFDocument['beginPage']>
 type Copy = ReturnType<typeof clientSummaryCopy>
@@ -1044,6 +1045,99 @@ function outlookPage(
   footer(ctx, summary, copy, language, bottom)
 }
 
+/// A tabela ano a ano do Term, no molde da `projectionTable` do lado projetado.
+///
+/// Não reusa aquela função porque as linhas são de outro tipo: um degrau de
+/// Term é prêmio garantido e benefício por morte garantido, não valor
+/// acumulado e valor de resgate. Forçar os dois no mesmo tipo pediria campos
+/// opcionais que cada lado teria de ignorar, e um `—` num deles seria a página
+/// dizendo que o dado falta quando ele nunca existiu.
+function termYearTable(
+  ctx: Ctx, rows: ForesightTermLedgerRow[], firstIncreaseYear: number | null,
+  copy: Copy, top: number, rowHeight: number,
+): number {
+  const width = PAGE_WIDTH - MARGIN * 2
+  const columns: Array<[string, number]> = [
+    [copy.policyYearColumn, MARGIN + 14],
+    [copy.ageColumn, MARGIN + 150],
+    [copy.premiumColumn, MARGIN + 250],
+    [copy.deathBenefitColumn, MARGIN + 400],
+  ]
+
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(9, 700)
+  for (const [heading, x] of columns) ctx.fillText(heading, x, top + 12)
+  ctx.strokeStyle = BORDER
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(MARGIN, top + 20.5)
+  ctx.lineTo(MARGIN + width, top + 20.5)
+  ctx.stroke()
+
+  rows.forEach((row, index) => {
+    const rowTop = top + 20 + index * rowHeight
+    const baseline = rowTop + rowHeight - 9
+    if (index % 2 === 0) {
+      ctx.fillStyle = PANEL
+      ctx.fillRect(MARGIN, rowTop + 1, width, rowHeight - 1)
+    }
+    // O mesmo destaque da folha única: o ano em que o prêmio se mexe é o que o
+    // cliente veio ver, e continua sendo o que o olho deve achar sozinho.
+    const isIncrease = firstIncreaseYear !== null && row.policyYear === firstIncreaseYear
+    ctx.fillStyle = INK
+    ctx.font = font(11, 700)
+    ctx.fillText(copy.year(row.policyYear), MARGIN + 14, baseline)
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(11)
+    ctx.fillText(String(row.age), MARGIN + 150, baseline)
+    ctx.fillStyle = isIncrease ? GOLD : INK
+    ctx.font = font(11, 700)
+    ctx.fillText(cents.format(row.guaranteedAnnualPremium), MARGIN + 250, baseline)
+    ctx.fillStyle = INK
+    ctx.font = font(11, 500)
+    ctx.fillText(whole.format(row.guaranteedDeathBenefit), MARGIN + 400, baseline)
+  })
+
+  return top + 20 + rows.length * rowHeight
+}
+
+/// A apresentação de várias páginas do Term.
+///
+/// Três páginas, não quatro: não há página de perspectiva porque não há
+/// projeção — todo número aqui é um máximo contratual que a seguradora já
+/// assumiu. Inventar a quarta folha seria o preenchimento que este documento
+/// justamente não pode fazer, e foi por isso que o Term não tinha apresentação
+/// nenhuma até agora. O que ele tem, e que a folha única espreme, é o ledger:
+/// a página inteira da tabela é a razão desta variante existir.
+function termFullPages(
+  document: PDFDocument, summary: ClientSummary & { kind: 'LEVEL_TERM' },
+  schedule: ClientSummaryTermSchedule, copy: Copy, language: ClientSummaryLanguage,
+): void {
+  cover(document.beginPage(PAGE_WIDTH, PAGE_HEIGHT), summary, copy, language)
+  document.endPage()
+
+  const plan = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
+  pageChrome(plan, summary, copy.yourPlan, 2)
+  const afterFigures = headlineFigures(plan, summary, copy, MARGIN + 60)
+  termSchedule(plan, schedule, copy.termDuration[summary.termDuration], copy, afterFigures + 36)
+  document.endPage()
+
+  const table = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
+  pageChrome(table, summary, copy.yearByYear, 3)
+  const afterTable = termYearTable(
+    table, schedule.fullRows, schedule.firstIncrease?.policyYear ?? null,
+    copy, MARGIN + 66, 30,
+  )
+  table.fillStyle = INK_MUTED
+  table.font = font(10)
+  paragraph(
+    table,
+    copy.scheduleNote(whole.format(schedule.deathBenefit), schedule.finalAge),
+    MARGIN, afterTable + 18, PAGE_WIDTH - MARGIN * 2, 14,
+  )
+  document.endPage()
+}
+
 function fullPages(
   document: PDFDocument, summary: ClientSummary & { kind: 'PROJECTED' }, copy: Copy,
   language: ClientSummaryLanguage,
@@ -1104,12 +1198,14 @@ export async function renderClientSummaryPdf(
     creator: 'Keepr One',
   })
 
-  // A Term result has no projection, so there is no multi-page presentation to
-  // make from it — the extra pages would be padding, which is the one thing
-  // this document may not be. It renders the one-pager instead, and the
-  // interface does not offer the full variant for Term at all.
+  // O Term não tem projeção, e por isso não tem a página de perspectiva. Tem
+  // ledger, que é o que a folha única espreme em seis degraus — e uma página
+  // inteira de tabela é material honesto, não preenchimento. Sem ledger não há
+  // apresentação: sobram a duração e três números, que já são a folha única.
   if (options.variant === 'FULL' && summary.kind === 'PROJECTED') {
     fullPages(document, summary, copy, language)
+  } else if (options.variant === 'FULL' && summary.kind === 'LEVEL_TERM' && summary.schedule) {
+    termFullPages(document, summary, summary.schedule, copy, language)
   } else {
     quickPage(document, summary, copy, language)
   }

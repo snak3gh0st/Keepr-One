@@ -272,7 +272,10 @@ export default async function IllustrationsPage({
                           : null}
                   </span>
                 </TdNum>
-                <Td>
+                {/* A célula que hospeda o painel do K-Bot é a única desta
+                    tabela com parágrafo dentro: as outras são data, valor e
+                    status, para as quais `nowrap` está certo. */}
+                <Td className="module-table-cell-wrap">
                   {illustration.documentFetchedAt ? (
                     // A condição do carrier vale igual aqui: é o PDF que o
                     // agente lê, não o que ele entrega ao cliente.
