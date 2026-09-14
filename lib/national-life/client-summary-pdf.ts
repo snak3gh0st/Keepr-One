@@ -775,8 +775,17 @@ function scenarioChart(
   // Só o benefício por morte. O valor de resgate garantido fica colado no zero
   // enquanto os benefícios andam na casa dos milhões, e as quatro curvas numa
   // escala só apagavam metade delas — o resgate está na tabela, em número.
-  series(scenarios.deathBenefit.guaranteed, TEAL_DEEP, true, scenarios.lapseAge.guaranteed)
+  // A garantida é desenhada por último, por cima. Num benefício nivelado as
+  // duas séries são a mesma reta, e a de baixo desaparecia inteira sob o traço
+  // sólido e mais largo da atual — inclusive nos vãos do tracejado. Sumia com
+  // ela o único fato que o desenho tinha a dar: a curva garantida termina antes
+  // da atual, no último ano que a seguradora publicou antes do encerramento.
+  //
+  // O leitor via a legenda prometer duas séries, via o marcador apontar
+  // "encerra aos 62", e via uma única linha seguir reta até o fim. Não era um
+  // desenho incompleto; era um desenho que se contradizia.
   series(scenarios.deathBenefit.current, TEAL, false, scenarios.lapseAge.current)
+  series(scenarios.deathBenefit.guaranteed, TEAL_DEEP, true, scenarios.lapseAge.guaranteed)
 
   ctx.fillStyle = INK_MUTED
   ctx.font = font(8)
