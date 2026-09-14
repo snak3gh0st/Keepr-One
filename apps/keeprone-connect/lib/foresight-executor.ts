@@ -698,13 +698,30 @@ function readQuickView(doc: Document): QuickViewReading {
   }
 }
 
+/// Quanto os dois prêmios mensais podem diferir e ainda serem o mesmo caso.
+///
+/// Eles não são a mesma grandeza. O do ledger é a Keepr One dividindo o anual
+/// que a seguradora informou — `monthlyPremiumFromAnnual` arredonda 3456/12 em
+/// 288,00. O do Quick View é o prêmio modal que a própria seguradora reporta,
+/// 287,96, que multiplicado por doze nem volta ao anual. São dois
+/// arredondamentos do mesmo prêmio, e exigir igualdade exata entre um número
+/// que calculamos e outro que a National reporta reprovava um caso legítimo por
+/// quatro centavos.
+///
+/// Meio dólar fica muito acima de qualquer arredondamento entre telas e muito
+/// abaixo de qualquer diferença que signifique outro cenário — que é o que esta
+/// conferência existe para pegar.
+const MODAL_PREMIUM_TOLERANCE = 0.5
+
 export function quickReviewMatchesLedger(
   review: ForesightQuickReview,
   ledger: Pick<ForesightSolvedLedgerReadback, 'faceAmount' | 'monthlyPremium'>,
 ): boolean {
   if (ledger.faceAmount === null) return false
+  // O capital continua exato: é um valor inteiro que as duas telas mostram
+  // igual, e nele uma diferença é sempre outro cenário.
   return carrierAmountEquals(review.summary.initialFaceAmount, ledger.faceAmount) &&
-    carrierAmountEquals(review.summary.modalPremium, ledger.monthlyPremium)
+    Math.abs(review.summary.modalPremium - ledger.monthlyPremium) <= MODAL_PREMIUM_TOLERANCE
 }
 
 export function solvedLedgerMatches(

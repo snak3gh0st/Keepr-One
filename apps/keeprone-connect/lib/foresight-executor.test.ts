@@ -255,6 +255,24 @@ it('ainda recusa um resumo sem capital ou sem prêmio modal', () => {
   ])).toBeNull()
 })
 
+// Medido em produção (ill_9a08eb2b): o ledger informa 288,00 — que é a Keepr
+// One dividindo o anual de 3456 — e o Quick View informa 287,96, o prêmio modal
+// da própria seguradora. Quatro centavos entre duas grandezas que nunca foram a
+// mesma coisa reprovavam um caso legítimo.
+it('aceita o arredondamento da seguradora entre as duas telas', () => {
+  const review = parseForesightQuickReview([
+    ['Initial Face Amount', 'Lapse Year', 'MEC Year', 'Modal Premium', 'Premium Mode'],
+    ['$500,000.00', '', '', '$287.96', 'Monthly'],
+    ['Policy Year', 'Age', 'Net Death Benefit'],
+    ['1', '36', '500000'],
+  ])!
+
+  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 288 })).toBe(true)
+  // E continua pegando o que a conferência existe para pegar: outro cenário.
+  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 350 })).toBe(false)
+  expect(quickReviewMatchesLedger(review, { faceAmount: 250_000, monthlyPremium: 288 })).toBe(false)
+})
+
 it('accepts a carrier-confirmed adjustment after the approved input was written', () => {
   const snapshot = {
     schemaVersion: 2, illustrationId: 'ill_premium_123', caseId: null,
