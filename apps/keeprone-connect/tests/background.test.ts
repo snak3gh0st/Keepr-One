@@ -604,6 +604,65 @@ describe('automatic carrier login recovery', () => {
     expect(authStateCalls.map((request) => request.body)).toEqual([{ state: 'RETRY_REQUIRED' }])
   })
 
+  // O agente terminou o MFA. O Auth0 devolve o navegador para
+  // `/agent/auth/mfacallback?code=...&state=...`, que é a *prova* de que a
+  // autenticação completou — e a extensão lia essa prova como pedido de
+  // autenticação, empurrava a corrida de volta para AUTH_REQUIRED e parava.
+  // Como a página de callback da seguradora pode não navegar sozinha, nada
+  // mais acontecia: o agente ficava olhando uma página em branco para sempre.
+  it('retoma a etapa pendente quando o callback de MFA prova que a autenticação completou', async () => {
+    await bootBackground()
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}/agent/auth/mfacallback?code=abc&state=xyz` }])
+
+    emit('tabs.onUpdated', 7, { status: 'complete' }, {
+      id: 7, active: true, url: `${NLG}/agent/auth/mfacallback?code=abc&state=xyz`,
+    })
+    await flush()
+
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
+  })
+
+  // O mesmo vale para o callback de login comum, pelo mesmo motivo.
+  it('retoma a etapa pendente no callback de login', async () => {
+    await bootBackground()
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'AUTH_REQUIRED', authRenewalPending: true,
+    }
+    tabs.query.mockResolvedValue([{ id: 7, active: true, url: `${NLG}/agent/auth/logincallback?code=abc` }])
+
+    emit('tabs.onUpdated', 7, { status: 'complete' }, {
+      id: 7, active: true, url: `${NLG}/agent/auth/logincallback?code=abc`,
+    })
+    await flush()
+
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: `${NLG}${NEW_BUSINESS_PATH}` })
+  })
+
+  // A página que de fato *pede* MFA continua parando a corrida e chamando o
+  // agente. Distinguir o pedido da conclusão é a correção inteira; confundir
+  // os dois no outro sentido seria pior, porque submeteria a corrida a um
+  // portal que ainda não autenticou.
+  it('ainda para e chama o agente na página que pede MFA', async () => {
+    await bootBackground()
+    storage.sync = {
+      runId: 'run-1', carrierTabId: 7, plan: TWO_STAGE_PLAN, stageIndex: 0,
+      status: 'NAVIGATING',
+    }
+
+    emit('tabs.onUpdated', 7, { status: 'complete' }, {
+      id: 7, active: false, url: `${NLG}/agent/auth/mfa`,
+    })
+    await flush()
+
+    expect(storage.sync).toMatchObject({ status: 'AUTH_REQUIRED' })
+    expect(tabs.update).toHaveBeenCalledWith(7, { active: true })
+  })
+
   it('reloads an already-open Auth0 page once, then leases when the content script is ready', async () => {
     await bootBackground()
     storage.sync = {

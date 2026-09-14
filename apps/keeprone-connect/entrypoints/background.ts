@@ -21,6 +21,7 @@ import {
   allowedKeeprOrigins,
   canonicalNationalLifeNavigatePath,
   isAuthPath,
+  isCarrierAuthCallbackPath,
   matchesNationalLifeStagePath,
   requireAllowedBaseUrl,
 } from '../lib/constants'
@@ -2698,7 +2699,11 @@ async function navigatePendingGrid(options?: { foreground?: boolean }) {
             await handleCarrierAuthenticationPage(existing.id, existingUrl)
             return
           }
-          if (isAuthPath(existingUrl.pathname)) {
+          // Mesmo engano, segundo sítio: um callback é conclusão, não pedido.
+          // Parar aqui deixava a aba presa na própria página que provava que a
+          // autenticação deu certo. Deixar cair adiante navega para a etapa —
+          // que é exatamente o que tirar a aba de uma página morta exige.
+          if (isAuthPath(existingUrl.pathname) && !isCarrierAuthCallbackPath(existingUrl.pathname)) {
             const requirement = authRequirementForPath(existingUrl.pathname)
             const beforeAuth = await readSyncState()
             if (beforeAuth.status === 'CANCELLED' || beforeAuth.runId !== state.runId) return
@@ -3018,6 +3023,20 @@ async function handleTabReadyInternal(tabId: number, urlValue?: string) {
   }
   if (url.origin !== NLG_ORIGIN) return
   if (isAuthPath(url.pathname)) {
+    // Um callback é a prova de que a autenticação terminou, não um pedido dela.
+    // Tratá-lo como pedido devolvia a corrida para AUTH_REQUIRED e ainda roubava
+    // o foco da aba — e, como a página de callback da seguradora pode ficar
+    // parada sem navegar sozinha, nada voltava a acontecer: o agente digitava o
+    // MFA e ficava olhando uma página em branco até desistir.
+    //
+    // Navegar para a etapa pendente é a retomada e a verificação ao mesmo tempo.
+    // Se a sessão está boa, a grade carrega e a corrida segue. Se não está, o
+    // portal devolve o login e a corrida volta a parar aqui — pelo ramo de
+    // baixo, que é onde parar está certo.
+    if (isCarrierAuthCallbackPath(url.pathname)) {
+      await navigatePendingGrid()
+      return
+    }
     await requireCarrierAuthentication(state)
     await focusCarrierTabForAuthRequirement(tabId, authRequirementForPath(url.pathname), undefined)
     return
