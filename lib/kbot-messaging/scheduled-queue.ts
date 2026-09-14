@@ -191,6 +191,20 @@ export async function enqueueScheduledMessagesForAgent(
     }
 
     const outcome = await queueOne(agentId, candidate, language, now, entry.autoSend, content, voice)
+    // Another pass can win after the preflight but before this pass enters the
+    // authoritative transaction. The provider call still happened, so account
+    // for it even though there is no job on which to settle the generation.
+    if (outcome !== 'QUEUED' && voice && (voice.attempted || voice.ok)) {
+      await prisma.$transaction(async (tx: Tx) => {
+        await lockAgent(tx, agentId)
+        await spendWithoutJob(
+          tx,
+          agentId,
+          Math.min(TOKEN_RESERVATION, voice.inputTokens + voice.outputTokens),
+          now,
+        )
+      })
+    }
     if (outcome === 'QUEUED') queued += 1
     else skip(outcome)
   }

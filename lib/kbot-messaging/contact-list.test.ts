@@ -36,4 +36,22 @@ describe('toKBotContactRows', () => {
 
     expect(rows[0]!.state).toBe('STOPPED')
   })
+
+  it('casa o telefone formatado com o opt-out normalizado', () => {
+    const rows = toKBotContactRows({
+      contacts: [{ id: 'c1', name: 'Ana', phone: '+55 (11) 99999-0001' }],
+      preferences: [{ subjectKey: '+5511999990001', optedOut: true, kbotEnabledAt: null }],
+    })
+
+    expect(rows[0]!.state).toBe('STOPPED')
+  })
+
+  it('não oferece o interruptor para um telefone inválido', () => {
+    const rows = toKBotContactRows({
+      contacts: [{ id: 'c1', name: 'Ana', phone: '123' }],
+      preferences: [],
+    })
+
+    expect(rows[0]!.state).toBe('NO_PHONE')
+  })
 })

@@ -37,7 +37,7 @@ export default async function MensagensPage({
   const selected = params.conversation
   const initialConversationId = selected && /^\d{1,32}$/.test(selected) ? selected : undefined
   const contactsQuery = (params.contactsQuery ?? '').trim().slice(0, 100)
-  const contactsPage = Math.max(1, Number.parseInt(params.contactsPage ?? '1', 10) || 1)
+  const requestedContactsPage = Math.max(1, Number.parseInt(params.contactsPage ?? '1', 10) || 1)
   const { copy } = await getServerI18n()
   const language = await getServerLanguage()
   const [agent, session] = await Promise.all([getCurrentAgent(), getCurrentSession()])
@@ -87,12 +87,15 @@ export default async function MensagensPage({
         ] }
       : {}),
   }
+  const contactsMatched = await prisma.client.count({ where: contactWhere })
+  const contactsTotalPages = Math.max(1, Math.ceil(contactsMatched / CONTACTS_PAGE_SIZE))
+  const contactsPage = Math.min(requestedContactsPage, contactsTotalPages)
   const jobFields = {
     id: true, category: true, customerName: true, phone: true, language: true,
     status: true, errorCode: true, content: true, createdAt: true, updatedAt: true,
   } as const
 
-  const [templates, jobs, contactsTotal, contactsWithPhone, enabledCount, contactRows, contactsMatched, exampleCandidates] = await Promise.all([
+  const [templates, jobs, contactsTotal, contactsWithPhone, enabledCount, contactRows, exampleCandidates] = await Promise.all([
     prisma.kBotMessageTemplate.findMany({
       where: { agentId: agent.id, category: { in: [...SCHEDULED_CATEGORIES] } },
       select: { category: true, language: true, body: true, enabled: true },
@@ -120,7 +123,6 @@ export default async function MensagensPage({
       take: CONTACTS_PAGE_SIZE,
       select: { id: true, name: true, phone: true },
     }),
-    prisma.client.count({ where: contactWhere }),
     // Contatos com data de nascimento e telefone para escolher um para o
     // exemplo do que a chegada mostraria quando nada está ligado ainda — sem
     // o filtro de telefone a amostra incluiria os 13.549 contatos que o
@@ -191,8 +193,6 @@ export default async function MensagensPage({
   })
 
   const contactRowsView = toKBotContactRows({ contacts: contactRows, preferences })
-  const contactsTotalPages = Math.max(1, Math.ceil(contactsMatched / CONTACTS_PAGE_SIZE))
-
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
       <KBotMessageCenter

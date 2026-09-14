@@ -169,8 +169,8 @@ export function KBotMessageCenter({
     {nothingOn && <div className="mt-4 rounded-2xl border border-teal bg-teal-pale/40 p-4">
       <h3 className="text-lg font-semibold text-ink">{copy('Nenhum contato com o K-Bot ligado', 'No contact has K-Bot turned on')}</h3>
       <p className="mt-1 max-w-2xl text-sm text-ink-muted">{copy(
-        `De ${reach.total.toLocaleString('pt-BR')} contatos, ${reach.withPhone.toLocaleString('pt-BR')} têm telefone e podem receber mensagens do K-Bot.`,
-        `Of ${reach.total.toLocaleString('pt-BR')} contacts, ${reach.withPhone.toLocaleString('pt-BR')} have a phone and can receive K-Bot messages.`,
+        `De ${reach.total.toLocaleString('pt-BR')} contatos, ${reach.withPhone.toLocaleString('pt-BR')} têm telefone cadastrado. Números inválidos serão ignorados ao ligar.`,
+        `Of ${reach.total.toLocaleString('pt-BR')} contacts, ${reach.withPhone.toLocaleString('pt-BR')} have a phone on file. Invalid numbers will be skipped when turning K-Bot on.`,
       )}</p>
       {example && <div className="mt-3 rounded-xl bg-white/60 p-3">
         <p className="text-xs font-medium text-ink-muted uppercase">{copy('Exemplo', 'Example')}: {example.name}, {example.when}</p>

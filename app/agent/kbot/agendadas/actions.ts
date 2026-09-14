@@ -286,6 +286,7 @@ export async function approveScheduledProposals(input: unknown): Promise<Schedul
     const agent = await currentAgent()
     const { released } = await approveScheduledMessages(agent.id, parsed.data.jobIds)
     revalidatePath(PATH)
+    revalidatePath('/agent/mensagens')
     return { ok: true, released }
   } catch {
     return { ok: false, message: unavailable(copy) }
@@ -303,6 +304,7 @@ export async function discardScheduledProposals(input: unknown): Promise<Schedul
     const agent = await currentAgent()
     const { released } = await discardScheduledMessages(agent.id, parsed.data.jobIds)
     revalidatePath(PATH)
+    revalidatePath('/agent/mensagens')
     return { ok: true, released }
   } catch {
     return { ok: false, message: unavailable(copy) }

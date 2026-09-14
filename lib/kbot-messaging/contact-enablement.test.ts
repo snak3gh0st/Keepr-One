@@ -105,6 +105,26 @@ describe('enableAllAgentContacts', () => {
     expect(JSON.stringify(deps.kBotContactPreference.createMany.mock.calls)).not.toContain('c2')
   })
 
+  it('normaliza o telefone antes de respeitar um pedido de parada', async () => {
+    const deps = db(
+      [{ id: 'c1', phone: '+55 (11) 99999-0001' }],
+      ['+5511999990001'],
+    )
+
+    const result = await enableAllAgentContacts(deps as never, { agentId: 'a1', now })
+
+    expect(result).toEqual({ enabled: 0, withoutPhone: 0, optedOut: 1 })
+    expect(deps.kBotContactPreference.createMany).not.toHaveBeenCalled()
+  })
+
+  it('não conta um telefone inválido como alcançável', async () => {
+    const deps = db([{ id: 'c1', phone: '123' }])
+
+    const result = await enableAllAgentContacts(deps as never, { agentId: 'a1', now })
+
+    expect(result).toEqual({ enabled: 0, withoutPhone: 1, optedOut: 0 })
+  })
+
   it('com 5 contatos elegíveis não faz upsert por contato, usa batch operations', async () => {
     const deps = db([
       { id: 'c1', phone: '+5511999990001' },

@@ -11,6 +11,7 @@
 /// chave errada aqui deixaria a habilitação muda: o agente veria "Ligado" mas
 /// o gate nunca encontraria a preferência.
 import { subjectKeyForClient } from './subject-key'
+import { normalizePhone } from '@/lib/kbot-followup/domain'
 
 export type ContactEnablementDb = {
   client: {
@@ -70,9 +71,10 @@ export async function enableAllAgentContacts(
   const toUpdate: string[] = []
 
   for (const contact of contacts) {
-    if (!contact.phone) { withoutPhone += 1; continue }
+    const phone = normalizePhone(contact.phone)
+    if (!phone) { withoutPhone += 1; continue }
     const subjectKey = subjectKeyForClient(contact.id)
-    if (stopped.has(subjectKey) || stopped.has(contact.phone)) { optedOut += 1; continue }
+    if (stopped.has(subjectKey) || stopped.has(phone)) { optedOut += 1; continue }
 
     if (existing.has(subjectKey)) {
       toUpdate.push(subjectKey)
