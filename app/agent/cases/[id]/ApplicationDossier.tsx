@@ -78,7 +78,10 @@ export function ApplicationDossier({
   illustrations,
 }: {
   application: ApplicationView;
-  addon: { entitled: boolean; status: string | null; canAutomate: boolean; extensionTarget?: string | null; preparationEnabled?: boolean };
+  // `entitled` is billing, `offered` is whether the add-on is open for sale at
+  // all. They are separate: a paying agent keeps `entitled` while the feature
+  // is closed, and nobody is asked to pay for a feature that is closed.
+  addon: { entitled: boolean; status: string | null; canAutomate: boolean; extensionTarget?: string | null; preparationEnabled?: boolean; offered?: boolean };
   prospect: ProspectDefaults;
   illustrations: IllustrationOption[];
 }) {
@@ -260,11 +263,17 @@ export function ApplicationDossier({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
           <div>
             <p>{copy("Você pode organizar o dossiê agora. O add-on Application permite autorizar a preparação do rascunho no iGO quando a extensão for compatível. Anexos no iGO e submissão final ainda não estão disponíveis.", "You can organize the dossier now. The Application add-on lets you authorize draft preparation in iGO with a compatible extension. iGO attachments and final submission are not available yet.")}</p>
-            <p className="mt-1 text-xs text-amber-800">{copy("US$ 12,99/mês por agente · primeiros 14 dias grátis.", "US$12.99/month per agent · first 14 days free.")}</p>
+            {addon.offered === true ? (
+              <p className="mt-1 text-xs text-amber-800">{copy("US$ 12,99/mês por agente · primeiros 14 dias grátis.", "US$12.99/month per agent · first 14 days free.")}</p>
+            ) : (
+              <p className="mt-1 text-xs text-amber-800">{copy("O add-on não está sendo oferecido no momento. Nada a pagar por enquanto.", "The add-on is not being offered right now. Nothing to pay for now.")}</p>
+            )}
           </div>
-          <form action="/api/billing/application-addon/checkout" method="post">
-            <Button type="submit" variant="secondary">{copy("Ativar Application", "Activate Application")}</Button>
-          </form>
+          {addon.offered === true ? (
+            <form action="/api/billing/application-addon/checkout" method="post">
+              <Button type="submit" variant="secondary">{copy("Ativar Application", "Activate Application")}</Button>
+            </form>
+          ) : null}
         </div>
       ) : null}
 
