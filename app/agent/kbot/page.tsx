@@ -17,6 +17,12 @@ export default async function KBotPage() {
         <p className="mt-2 text-sm text-ink-muted">{copy('Priorize os contatos, resolva bloqueios e acompanhe os resultados.', 'Prioritize contacts, resolve blockers and track results.')}</p>
       </div>
       <div className="flex flex-wrap gap-3">
+        {/* A central é onde a conversa acontece, e daqui saíam só os dois
+            caminhos laterais — a fila de agendadas e a conexão com a
+            seguradora. Quem chegava pelo K-Bot para responder alguém tinha de
+            voltar ao menu lateral para achar o caminho, e a tela que fala de
+            contatos era justamente a que não levava até eles. */}
+        <Link href="/agent/mensagens" className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-semibold text-teal-deep">{copy('Central de mensagens', 'Message center')}</Link>
         <Link href="/agent/kbot/agendadas" className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-semibold text-teal-deep">{copy('Mensagens agendadas', 'Scheduled messages')}</Link>
         <Link href="/agent/integrations/national-life" className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-semibold text-teal-deep">{copy('Conexão National Life', 'National Life connection')}</Link>
       </div>
