@@ -665,6 +665,34 @@ function headerLabels(
     .slice(0, 24)
 }
 
+/// Quantas vezes voltar ao Quick View antes de desistir dele.
+///
+/// A tela não acompanha o caso na hora. Duas gerações seguidas leram dali o
+/// mesmo prêmio modal — 287,96 — enquanto o ledger dizia 288,00 e depois
+/// 113,08: era o caso anterior ainda na tela. Ler uma vez só e concluir que a
+/// seguradora se contradiz é confundir atraso com contradição.
+const QUICK_VIEW_ATTEMPTS = 4
+const QUICK_VIEW_RETRY_MS = 1_500
+
+/// Volta ao Quick View até ele falar do caso que o ledger acabou de confirmar.
+///
+/// Insistir só pode transformar uma projeção ausente em presente, nunca o
+/// contrário: a conferência de identidade continua estrita, e o que sai daqui
+/// ou é o Quick View deste cenário ou é o motivo de não haver um.
+async function readQuickViewForCase(
+  ledger: Pick<ForesightSolvedLedgerReadback, 'faceAmount' | 'monthlyPremium'>,
+): Promise<QuickViewReading> {
+  let last: QuickViewReading = {
+    unavailable: { reason: 'NOT_ON_PAGE', summaryLabels: [], projectionLabels: [], comparison: null },
+  }
+  for (let attempt = 0; attempt < QUICK_VIEW_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, QUICK_VIEW_RETRY_MS))
+    last = readQuickView(await navigate('/NWI/IUL2025/quickview.aspx', MENU_IDS.quickView))
+    if ('review' in last && quickReviewMatchesLedger(last.review, ledger)) return last
+  }
+  return last
+}
+
 function readQuickView(doc: Document): QuickViewReading {
   if (doc.location.pathname !== '/NWI/IUL2025/quickview.aspx') {
     return {
@@ -698,6 +726,18 @@ function readQuickView(doc: Document): QuickViewReading {
   }
 }
 
+/// A conferência é de identidade, não de valor aproximado.
+///
+/// Houve uma tentativa de afrouxar isto: numa geração o ledger dizia 288,00 e o
+/// Quick View 287,96, e quatro centavos pareciam arredondamento entre duas
+/// telas da seguradora. Não eram. A geração seguinte, com o mesmo cenário
+/// pedido, trouxe ledger 113,08 e Quick View 287,96 de novo — o mesmo valor da
+/// vez anterior. O Quick View estava exibindo o caso antigo, e a proximidade
+/// com 288 foi coincidência.
+///
+/// Uma tolerância de meio dólar teria aceitado aquele 287,96 obsoleto e
+/// anexado à ilustração a projeção de outro cenário, que é precisamente o que
+/// esta função existe para impedir. Igualdade exata fica.
 export function quickReviewMatchesLedger(
   review: ForesightQuickReview,
   ledger: Pick<ForesightSolvedLedgerReadback, 'faceAmount' | 'monthlyPremium'>,
@@ -919,9 +959,7 @@ async function executeForesightSolvedIllustration(input: {
     fail(hasCarrierCalculationError(ledgerDoc) ? 'FORESIGHT_CALCULATION_UNAVAILABLE' : 'FORESIGHT_SOLVE_READBACK_MISMATCH')
   }
   input.onProgress?.('READING_QUICK_REVIEW')
-  const quickReview = readQuickView(
-    await navigate('/NWI/IUL2025/quickview.aspx', MENU_IDS.quickView),
-  )
+  const quickReview = await readQuickViewForCase(ledger)
   // Two different things used to fail here as one, and conflating them cost a
   // whole generation.
   //

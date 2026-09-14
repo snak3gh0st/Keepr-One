@@ -122,7 +122,10 @@ describe('client summary PDF', () => {
     const text = await extractText(await renderClientSummaryPdf(withGuarantee))
     expect(text).toContain('Current vs. guaranteed assumptions')
     expect(text).toContain('Guaranteed')
-    expect(text).not.toContain('Not guaranteed · current assumptions')
+    // A ressalva de "não garantido" saiu do gráfico, que agora desenha as duas
+    // metades, e passou para a tabela, que continua sendo só a corrente.
+    expect(text.indexOf('Not guaranteed · current assumptions'))
+      .toBeGreaterThan(text.indexOf('Current vs. guaranteed assumptions'))
   })
 
   // The marker on the chart is three words in eight-point type. The sentence is
@@ -133,6 +136,15 @@ describe('client summary PDF', () => {
     expect(text).toContain('Ends at 63')
     expect(text).toContain('would end in year 25, at age 63')
     expect(text).toContain('unless a higher premium is paid')
+  })
+
+  // A tabela é de premissas atuais e a frase do encerramento é das garantidas.
+  // Sem dizer de quem é cada uma, o cliente lê um valor de resgate aos 90 anos
+  // ao lado de uma apólice que se encerra aos 79 e não tem como reconciliar.
+  it('diz a que cenário a tabela pertence, ao lado da frase do encerramento', async () => {
+    const text = await extractText(await renderClientSummaryPdf(withGuarantee))
+    expect(text).toContain('Not guaranteed · current assumptions')
+    expect(text).toContain('would end in year 25, at age 63')
   })
 
   it('keeps the one-pager clear of the footer when the lapse sentence is on it', async () => {

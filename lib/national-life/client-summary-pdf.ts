@@ -728,15 +728,23 @@ function quickPage(
     // The chart gives up height when there is a lapse sentence to fit under the
     // table. A curve twenty points shorter still reads; a sentence pushed into
     // the footer does not.
-    const chartHeight = summary.guaranteedLapse === null ? 200 : 176
+    const chartHeight = summary.guaranteedLapse === null ? 200 : 168
     const afterChart = coverageChart(ctx, summary.coverage, copy, afterFigures + 26, chartHeight,
       summary.guaranteed, summary.guaranteedLapse)
+    // A tabela é de premissas atuais, e a frase sobre o encerramento logo
+    // abaixo é das garantidas. Sem dizer isso, o cliente lê um valor de resgate
+    // aos 90 anos ao lado de uma apólice que se encerra aos 79 e não tem como
+    // reconciliar os dois — a mesma razão pela qual o gráfico carrega a
+    // ressalva em cima, e não no rodapé.
+    ctx.fillStyle = GOLD
+    ctx.font = font(9, 700)
+    right(ctx, copy.notGuaranteed, PAGE_WIDTH - MARGIN, afterChart + 20)
     contentBottom = projectionTable(ctx, summary.milestones, [
       { x: MARGIN + 14, heading: copy.policyYearColumn, value: (p) => copy.year(p.policyYear) },
       { x: MARGIN + 150, heading: copy.ageColumn, value: (p) => String(p.age) },
       { x: MARGIN + 250, heading: copy.deathBenefitColumn, value: (p) => amount(p.netDeathBenefit) },
       { x: MARGIN + 400, heading: copy.cashValueColumn, value: (p) => amount(p.cashSurrenderValue) },
-    ], afterChart + 22, 26)
+    ], afterChart + 30, 26)
     // The marker on the chart is three words in eight-point type. Left alone it
     // is a red mark a client can read as decoration; this is the sentence that
     // says what it means. The full presentation states it on the outlook page —
