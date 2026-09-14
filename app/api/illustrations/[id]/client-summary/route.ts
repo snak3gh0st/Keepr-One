@@ -7,6 +7,7 @@ import { buildClientSummary } from '@/lib/national-life/client-summary'
 import { extractForesightTermLedger } from '@/lib/national-life/foresight-term-ledger'
 import { extractForesightGuaranteedLedger } from '@/lib/national-life/foresight-guaranteed-ledger'
 import { extractForesightSummaryOfValues } from '@/lib/national-life/foresight-summary-of-values'
+import { extractForesightCurrentLedger } from '@/lib/national-life/foresight-current-ledger'
 import {
   clientSummaryFilename,
   renderClientSummaryPdf,
@@ -76,7 +77,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // carries a megabyte of PDF it has no use for. A PDF that will not parse
   // costs the extra half, not the document: the summary falls back to the shape
   // it had before this existed.
-  const { termLedger, guaranteedLedger, summaryOfValues } =
+  const { termLedger, guaranteedLedger, summaryOfValues, currentLedger } =
     await readLedgers(id, illustration.rawPayload)
 
   // The advisor named on the document is the agent who owns the illustration,
@@ -88,6 +89,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     termLedger,
     guaranteedLedger,
     summaryOfValues,
+    currentLedger,
   })
   // No document exists for an illustration National Life has not confirmed.
   // This is the same gate the agent's screen applies before it offers the
@@ -115,7 +117,9 @@ function isTermIllustration(rawPayload: unknown): boolean {
 }
 
 async function readLedgers(id: string, rawPayload: unknown) {
-  const empty = { termLedger: null, guaranteedLedger: null, summaryOfValues: null }
+  const empty = {
+    termLedger: null, guaranteedLedger: null, summaryOfValues: null, currentLedger: null,
+  }
   const stored = await prisma.illustration.findUnique({
     where: { id },
     select: { documentBytes: true },
@@ -132,11 +136,12 @@ async function readLedgers(id: string, rawPayload: unknown) {
     // a página que põe garantido e corrente lado a lado. Uma pode faltar sem
     // levar a outra — são páginas diferentes do mesmo documento, e a peça usa o
     // que houver.
-    const [guaranteedLedger, summaryOfValues] = await Promise.all([
+    const [guaranteedLedger, summaryOfValues, currentLedger] = await Promise.all([
       extractForesightGuaranteedLedger(bytes).catch(() => null),
       extractForesightSummaryOfValues(bytes).catch(() => null),
+      extractForesightCurrentLedger(bytes).catch(() => null),
     ])
-    return { ...empty, guaranteedLedger, summaryOfValues }
+    return { ...empty, guaranteedLedger, summaryOfValues, currentLedger }
   } catch {
     return empty
   }

@@ -319,6 +319,16 @@ const scenarios = {
   ],
   lapseYear: { guaranteed: 42, current: 72 },
   lapseAge: { guaranteed: 79, current: 109 },
+  // Ano a ano, como o ledger do PDF entrega. Quatro marcos desenhavam quatro
+  // retas ligando anos distantes, e era isso que tornava o gráfico ilegível.
+  deathBenefit: {
+    guaranteed: Array.from({ length: 41 }, (unused, index) => ({
+      age: 38 + index, value: 1_699_157 + index * 6_100,
+    })),
+    current: Array.from({ length: 53 }, (unused, index) => ({
+      age: 38 + index, value: 1_702_156 + index * 100_000,
+    })),
+  },
 }
 
 describe('a peça montada sobre a página da seguradora', () => {
@@ -349,6 +359,17 @@ describe('a peça montada sobre a página da seguradora', () => {
     const text = await extractText(await renderClientSummaryPdf(withScenarios))
     expect(text).toContain('National Life’s own')
     expect(text).toContain('Summary of Values')
+  })
+
+  // O eixo cobre o que a seguradora publicou e nada além: esticá-lo até um
+  // encerramento posterior à última linha do ledger deixava um terço do gráfico
+  // vazio. O encerramento que cai fora continua dito na tabela, em texto.
+  it('não estica o eixo até um encerramento que a seguradora não desenhou', async () => {
+    const text = await extractText(await renderClientSummaryPdf(withScenarios))
+    expect(text).toContain('Age 90')
+    expect(text).not.toContain('Age 109')
+    expect(text).toContain('Ends at 79')
+    expect(text).toContain('Ends in year 72, at age 109')
   })
 
   it('não deixa a nota cair em cima do rodapé', async () => {
