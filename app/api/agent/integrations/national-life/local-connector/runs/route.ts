@@ -38,7 +38,13 @@ const NO_STORE = { 'Cache-Control': 'no-store' }
 /// ainda para um loop antes de ele custar uma sessão inteira do carrier.
 const RUN_START_MAX = 10
 const RUN_START_WINDOW_SECONDS = 600
-const bodySchema = z.strictObject({ forceRefresh: z.literal(true).optional() })
+// As duas intenções são exclusivas: atualização completa quer dado novo,
+// pareamento quer plano limpo. Aceitar as duas juntas seria aceitar um pedido
+// sem significado, então o esquema as separa.
+const bodySchema = z.union([
+  z.strictObject({ forceRefresh: z.literal(true).optional() }),
+  z.strictObject({ discardFailedPlans: z.literal(true) }),
+])
 const PAGE_DISCOVERY_KEYS = new Set<string>(NATIONAL_LIFE_DISCOVERY_PAGE_KEYS)
 
 function priorityGridKeys(pageDiscoveryEnabled: boolean) {
@@ -93,7 +99,10 @@ export async function POST(request: Request) {
     )
     const runOptions = {
       gridKeys: permittedGridKeys,
-      ...(payload.forceRefresh === true ? { forceRefresh: true } : {}),
+      ...('forceRefresh' in payload && payload.forceRefresh === true ? { forceRefresh: true } : {}),
+      ...('discardFailedPlans' in payload && payload.discardFailedPlans === true
+        ? { discardFailedPlans: true }
+        : {}),
       ...(exportEnabled ? { exportEnabled: true } : {}),
     }
     const run = await startLocalConnectorRun(prisma, device, runOptions)

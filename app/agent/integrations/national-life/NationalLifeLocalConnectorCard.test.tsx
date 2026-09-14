@@ -296,11 +296,14 @@ describe('NationalLifeLocalConnectorCard', () => {
       new Response(JSON.stringify({ code: 'NL-super-secret-pairing-code' }), { status: 201 }),
     )
     const messages: string[] = []
-    const refreshModes: Array<true | undefined> = []
+    // A intenção inteira, não só o `forceRefresh`: parear e pedir atualização
+    // completa passaram a ser coisas diferentes, e o teste precisa distinguir.
+    const intents: Array<Record<string, unknown>> = []
     installChromeMock((message, callback) => {
       messages.push(message.type)
       if (message.type === 'START_NATIONAL_LIFE_SYNC') {
-        refreshModes.push(message.forceRefresh)
+        const { type: unused, ...intent } = message as Record<string, unknown>
+        intents.push(intent)
       }
       if (message.type === 'GET_CONNECTOR_STATUS') {
         callback({
@@ -328,7 +331,10 @@ describe('NationalLifeLocalConnectorCard', () => {
       ),
     )
     expect(document.body).not.toHaveTextContent('NL-super-secret-pairing-code')
-    expect(refreshModes).toEqual([true])
+    // Parear descarta o plano falho do dispositivo anterior — e só isso. Pedir
+    // `forceRefresh` aqui jogava fora um sync completo e fresco do agente e
+    // relia o portal inteiro para reconfirmá-lo.
+    expect(intents).toEqual([{ discardFailedPlans: true }])
     expect(window.location.search).toBe('')
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalled())
   })

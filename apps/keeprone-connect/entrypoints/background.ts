@@ -819,7 +819,7 @@ async function ensureCredentialEncryptionKeyRegistered() {
 async function startScheduledSyncIfDue() {
   const [device, sync] = await Promise.all([readDeviceState(), readSyncState()])
   if (!scheduledSyncIsDue(device, sync)) return
-  await startNewSync(false, 'SCHEDULE')
+  await startNewSync({}, 'SCHEDULE')
 }
 
 async function ensureCommandPollAlarm() {
@@ -2463,8 +2463,16 @@ async function cancelNationalLifeSync() {
   return operation
 }
 
+/// O que o chamador quer de uma corrida nova.
+///
+/// `forceRefresh` é o botão de atualização completa: quer fotografia nova, e
+/// descarta tudo que havia. `discardFailedPlans` é o pareamento: quer plano
+/// limpo, e reaproveita um resultado completo e fresco em vez de reler o portal
+/// inteiro para reconfirmar o que já estava confirmado.
+type SyncStartIntent = { forceRefresh?: true; discardFailedPlans?: true }
+
 async function createRun(
-  forceRefresh = false, startedBy: 'AGENT' | 'SCHEDULE' = 'AGENT',
+  intent: SyncStartIntent = {}, startedBy: 'AGENT' | 'SCHEDULE' = 'AGENT',
 ) {
   const cancellationVersion = syncCancellationVersion
   const previous = await readSyncState()
@@ -2511,7 +2519,9 @@ async function createRun(
     deviceId: device.deviceId,
     method: 'POST',
     pathname: '/api/agent/integrations/national-life/local-connector/runs',
-    body: forceRefresh ? { forceRefresh: true } : {},
+    body: intent.forceRefresh
+      ? { forceRefresh: true }
+      : intent.discardFailedPlans ? { discardFailedPlans: true } : {},
   })
   if (typeof response.runId !== 'string' || response.runId.length === 0) {
     throw new Error('INVALID_RUN_RESPONSE')
@@ -2795,7 +2805,7 @@ async function navigatePendingGrid(options?: { foreground?: boolean }) {
 const MAX_SCHEDULED_TAB_REOPENS = 1
 
 async function startNewSync(
-  forceRefresh = false, startedBy: 'AGENT' | 'SCHEDULE' = 'AGENT',
+  intent: SyncStartIntent = {}, startedBy: 'AGENT' | 'SCHEDULE' = 'AGENT',
 ) {
   if (documentFetchLock || activeDocuments.size > 0) {
     return { ok: false as const, error: 'DOCUMENT_FETCH_IN_PROGRESS' }
@@ -2813,7 +2823,7 @@ async function startNewSync(
         // Re-enter the signed start endpoint. It reuses a live run, but first
         // expires a dead one; the response handling above preserves the cursor
         // for the live case and starts at stage zero for a reclaimed run.
-        await createRun(forceRefresh, startedBy)
+        await createRun(intent, startedBy)
         await navigatePendingGrid()
         const after = await readSyncState()
         if (after.status === 'AUTH_REQUIRED') {
@@ -2821,7 +2831,7 @@ async function startNewSync(
         }
         return { ok: true as const, status: after.status }
       }
-      await createRun(forceRefresh, startedBy)
+      await createRun(intent, startedBy)
       await navigatePendingGrid()
       return { ok: true as const, status: 'NAVIGATING' as const }
     } catch (error) {
@@ -4191,7 +4201,11 @@ export default defineBackground(() => {
       )
       return true
     }
-    respond(sendResponse, startNewSync(message.forceRefresh === true))
+    respond(sendResponse, startNewSync(
+      message.forceRefresh === true
+        ? { forceRefresh: true }
+        : message.discardFailedPlans === true ? { discardFailedPlans: true } : {},
+    ))
     return true
   })
 
