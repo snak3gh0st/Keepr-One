@@ -726,25 +726,32 @@ function readQuickView(doc: Document): QuickViewReading {
   }
 }
 
-/// A conferência é de identidade, não de valor aproximado.
+/// Quanto os dois prêmios mensais podem diferir e ainda serem o mesmo caso.
 ///
-/// Houve uma tentativa de afrouxar isto: numa geração o ledger dizia 288,00 e o
-/// Quick View 287,96, e quatro centavos pareciam arredondamento entre duas
-/// telas da seguradora. Não eram. A geração seguinte, com o mesmo cenário
-/// pedido, trouxe ledger 113,08 e Quick View 287,96 de novo — o mesmo valor da
-/// vez anterior. O Quick View estava exibindo o caso antigo, e a proximidade
-/// com 288 foi coincidência.
+/// Eles não são a mesma grandeza, e a diferença é derivável. A seguradora
+/// publica o anual arredondado ao dólar e o modal ao centavo; nós dividimos o
+/// anual por doze. Num caso real: modal 287,96, que vezes doze dá 3.455,52,
+/// que ela publica como 3.456, que dividido por doze nos dá 288,00. Os quatro
+/// centavos são exatamente 0,48/12 — o arredondamento do anual espalhado pelos
+/// meses. O teto de cinco centavos é esse limite, não um número escolhido para
+/// caber.
 ///
-/// Uma tolerância de meio dólar teria aceitado aquele 287,96 obsoleto e
-/// anexado à ilustração a projeção de outro cenário, que é precisamente o que
-/// esta função existe para impedir. Igualdade exata fica.
+/// Houve uma tentativa de meio dólar, revertida, e esta é a correção dela. Na
+/// época eu tinha uma geração com quatro centavos e outra com cento e setenta e
+/// cinco dólares, e li as duas como o mesmo fenômeno. Uma terceira geração
+/// reproduziu os quatro centavos no mesmo cenário: é sistemático. A de cento e
+/// setenta e cinco era outro caso, e um teto de centavos a recusa igual.
+const MODAL_PREMIUM_TOLERANCE = 0.05
+
 export function quickReviewMatchesLedger(
   review: ForesightQuickReview,
   ledger: Pick<ForesightSolvedLedgerReadback, 'faceAmount' | 'monthlyPremium'>,
 ): boolean {
   if (ledger.faceAmount === null) return false
+  // O capital continua exato: é inteiro, as duas telas mostram igual, e ali
+  // uma diferença é sempre outro cenário.
   return carrierAmountEquals(review.summary.initialFaceAmount, ledger.faceAmount) &&
-    carrierAmountEquals(review.summary.modalPremium, ledger.monthlyPremium)
+    Math.abs(review.summary.modalPremium - ledger.monthlyPremium) <= MODAL_PREMIUM_TOLERANCE
 }
 
 export function solvedLedgerMatches(

@@ -259,12 +259,12 @@ it('ainda recusa um resumo sem capital ou sem prêmio modal', () => {
   ])).toBeNull()
 })
 
-// Duas gerações seguidas provaram que esta conferência é de identidade, não de
-// valor aproximado: ledger 288,00 com Quick View 287,96, e depois ledger 113,08
-// com Quick View 287,96 outra vez. O Quick View exibia o caso anterior, e os
-// quatro centavos da primeira vez eram coincidência. Uma tolerância teria
-// anexado a projeção de outro cenário à ilustração.
-it('recusa um Quick View que ficou no caso anterior, mesmo por centavos', () => {
+// Medido três vezes em produção. Duas gerações do mesmo cenário deram ledger
+// 288,00 contra Quick View 287,96 — quatro centavos, idênticos, que são
+// exatamente o arredondamento do anual espalhado pelos meses. Uma terceira, de
+// outro cenário, deu 113,08 contra 287,96: cento e setenta e cinco dólares.
+// O teto de centavos aceita o primeiro e recusa o segundo, que é o trabalho.
+it('aceita o arredondamento do anual e recusa outro cenário', () => {
   const review = parseForesightQuickReview([
     ['Initial Face Amount', 'Lapse Year', 'MEC Year', 'Modal Premium', 'Premium Mode'],
     ['$500,000.00', '', '', '$287.96', 'Monthly'],
@@ -272,9 +272,11 @@ it('recusa um Quick View que ficou no caso anterior, mesmo por centavos', () => 
     ['1', '36', '500000'],
   ])!
 
-  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 288 })).toBe(false)
+  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 288 })).toBe(true)
   expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 113.08 })).toBe(false)
-  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 287.96 })).toBe(true)
+  // Um dólar já é mais do que qualquer arredondamento entre as duas telas.
+  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 289 })).toBe(false)
+  expect(quickReviewMatchesLedger(review, { faceAmount: 250_000, monthlyPremium: 288 })).toBe(false)
 })
 
 it('accepts a carrier-confirmed adjustment after the approved input was written', () => {
