@@ -546,9 +546,9 @@ export function parseForesightQuickReview(
   rows: ReadonlyArray<ReadonlyArray<string>>,
 ): ForesightQuickReview | null {
   // Located by the one column the summary always carries. It used to require a
-  // target premium beside it, and a case solved from the face amount does not
-  // have one — the carrier does not print it, so the table was never found and
-  // the whole Quick View was discarded for a column that was never coming.
+  // target premium beside it, and the table was never found when that column
+  // was not in the same row — so the whole Quick View was discarded. A captura
+  // de produção mostra por quê: o target premium existe, num bloco seguinte.
   // Among the candidates the richest wins, so a narrower table that happens to
   // name a face amount cannot displace the summary.
   const summaryHeaderIndex = rows
@@ -559,11 +559,40 @@ export function parseForesightQuickReview(
       known: row.filter((cell) => QUICK_VIEW_SUMMARY_COLUMNS.includes(quickViewLabel(cell))).length,
     }))
     .sort((left, right) => right.known - left.known)[0]?.index ?? -1
-  const summaryHeaders = rows[summaryHeaderIndex] ?? []
-  const summaryValues = rows[summaryHeaderIndex + 1] ?? []
+
+  // O resumo não é um cabeçalho com uma linha de valores embaixo: são vários
+  // pares empilhados. Medido em produção, um FlexLife resolvido pelo capital
+  // rende três — face/lapse/MEC/modal/modo, depois MMP/MGP/target/MEC
+  // premium/guideline level, e por fim guideline single sozinho.
+  //
+  // Ler só o par ancorado em `Initial Face Amount` deixava seis campos para
+  // trás, entre eles o Target Premium — que a página imprime, ao contrário do
+  // que este arquivo afirmava. A tela mostrava um traço onde havia US$ 6.786.
+  //
+  // Cada rótulo conhecido é procurado em todos os pares, e o primeiro que o
+  // traz responde. Um rótulo que não aparece em par nenhum continua nulo, que
+  // é o caso legítimo de coluna que a seguradora não renderiza.
+  const summaryPairs: Array<{ headers: ReadonlyArray<string>; values: ReadonlyArray<string> }> = []
+  for (let index = 0; index < rows.length - 1; index += 1) {
+    const row = rows[index] ?? []
+    if (!row.some((cell) => QUICK_VIEW_SUMMARY_COLUMNS.includes(quickViewLabel(cell)))) continue
+    // Um cabeçalho nomeia colunas; a linha seguinte carrega os valores delas.
+    // Sem esta guarda, a própria linha de valores viraria candidata a cabeçalho
+    // do par seguinte quando dois blocos se encostam.
+    if (index > 0) {
+      const previous = rows[index - 1] ?? []
+      if (previous.some((cell) => QUICK_VIEW_SUMMARY_COLUMNS.includes(quickViewLabel(cell)))) continue
+    }
+    summaryPairs.push({ headers: row, values: rows[index + 1] ?? [] })
+  }
   const summaryValue = (label: string, allowZero = true) => {
-    const index = summaryHeaders.findIndex((cell) => quickViewLabel(cell) === label)
-    return index < 0 ? null : quickViewNumber(summaryValues[index] ?? '', allowZero)
+    for (const pair of summaryPairs) {
+      const index = pair.headers.findIndex((cell) => quickViewLabel(cell) === label)
+      if (index < 0) continue
+      const value = quickViewNumber(pair.values[index] ?? '', allowZero)
+      if (value !== null) return value
+    }
+    return null
   }
   const initialFaceAmount = summaryValue('Initial Face Amount', false)
   const modalPremium = summaryValue('Modal Premium', false)
