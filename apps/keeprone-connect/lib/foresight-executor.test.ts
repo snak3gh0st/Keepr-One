@@ -41,6 +41,10 @@ it('refuses a Quick Review that contradicts the ledger, not one it could not rea
   expect(workflow).not.toContain("fail('FORESIGHT_QUICK_VIEW_READBACK_MISMATCH')")
   expect(workflow).not.toContain('if (!quickReview ||')
   expect(workflow).toContain("reason: 'CONTRADICTS_LEDGER'")
+  // A tela do Quick View não acompanha o caso na hora, então ela é relida até
+  // falar do cenário que o ledger confirmou. Insistir só pode transformar uma
+  // projeção ausente em presente, nunca o contrário.
+  expect(workflow).toContain('readQuickViewForCase(ledger)')
   expect(workflow).toContain('quickViewModalPremium: quickReview.review.summary.modalPremium')
   expect(workflow).toContain('ledgerMonthlyPremium: ledger.monthlyPremium')
   // The receipt names the Quick View only when it has one, and otherwise says
@@ -255,11 +259,12 @@ it('ainda recusa um resumo sem capital ou sem prêmio modal', () => {
   ])).toBeNull()
 })
 
-// Medido em produção (ill_9a08eb2b): o ledger informa 288,00 — que é a Keepr
-// One dividindo o anual de 3456 — e o Quick View informa 287,96, o prêmio modal
-// da própria seguradora. Quatro centavos entre duas grandezas que nunca foram a
-// mesma coisa reprovavam um caso legítimo.
-it('aceita o arredondamento da seguradora entre as duas telas', () => {
+// Duas gerações seguidas provaram que esta conferência é de identidade, não de
+// valor aproximado: ledger 288,00 com Quick View 287,96, e depois ledger 113,08
+// com Quick View 287,96 outra vez. O Quick View exibia o caso anterior, e os
+// quatro centavos da primeira vez eram coincidência. Uma tolerância teria
+// anexado a projeção de outro cenário à ilustração.
+it('recusa um Quick View que ficou no caso anterior, mesmo por centavos', () => {
   const review = parseForesightQuickReview([
     ['Initial Face Amount', 'Lapse Year', 'MEC Year', 'Modal Premium', 'Premium Mode'],
     ['$500,000.00', '', '', '$287.96', 'Monthly'],
@@ -267,10 +272,9 @@ it('aceita o arredondamento da seguradora entre as duas telas', () => {
     ['1', '36', '500000'],
   ])!
 
-  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 288 })).toBe(true)
-  // E continua pegando o que a conferência existe para pegar: outro cenário.
-  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 350 })).toBe(false)
-  expect(quickReviewMatchesLedger(review, { faceAmount: 250_000, monthlyPremium: 288 })).toBe(false)
+  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 288 })).toBe(false)
+  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 113.08 })).toBe(false)
+  expect(quickReviewMatchesLedger(review, { faceAmount: 500_000, monthlyPremium: 287.96 })).toBe(true)
 })
 
 it('accepts a carrier-confirmed adjustment after the approved input was written', () => {
