@@ -1117,6 +1117,49 @@ describe('automatic carrier login recovery', () => {
     }))
   })
 
+  // O mesmo engano do sync, na máquina de estado dos commands: a aba parada no
+  // callback de MFA precisa ser levada ao alvo do command, não tratada como
+  // pedido de autenticação. Antes, sondar a sessão ali era impossível por
+  // construção — a ponte não roda em página de autenticação — e a sonda muda
+  // virava "não autenticado".
+  it('tira o command da página de callback do MFA em vez de parar nela', async () => {
+    const command = {
+      protocolVersion: 1,
+      commandId: 'cmd-igo-callback',
+      runId: 'run-igo-callback',
+      capability: 'PREPARE_APPLICATION_DRAFT',
+      target: { kind: 'APPLICATION', id: 'app-callback' },
+      params: { applicationId: 'app-callback', payloadHash: 'd'.repeat(64) },
+      idempotencyKey: 'igo:app-callback',
+      issuedAt: '2026-09-01T21:00:00.000Z',
+      expiresAt: '2026-09-01T22:00:00.000Z',
+      requiresConfirmation: true,
+    }
+    storage.command = {
+      commandId: command.commandId, runId: command.runId, carrierTabId: 17,
+      nextEventSequence: 3, status: 'AUTH_REQUIRED', phase: 'OPENING_IGO',
+    }
+    tabs.query.mockResolvedValue([{
+      id: 17,
+      active: false,
+      url: `${NLG}/agent/auth/mfacallback?code=abc&state=xyz`,
+    }])
+    vi.mocked(signedJsonRequest).mockImplementation(async (request) => {
+      if (request.pathname.endsWith('/commands/next')) return {
+        command, state: 'AUTH_REQUIRED', nextEventSequence: 3, lastEventType: 'AUTH_REQUIRED',
+      } as never
+      return {} as never
+    })
+    await bootBackground()
+
+    emit('alarms.onAlarm', { name: 'keeprone-national-life-command-poll' })
+    await flush()
+
+    expect(tabs.update).toHaveBeenCalledWith(17, {
+      url: `${NLG}/agent/tools/business-tools/national-life-tools`,
+    })
+  })
+
   it('settles login when an iGO worker wakes on the authenticated National Life tools page', async () => {
     const command = {
       protocolVersion: 1,

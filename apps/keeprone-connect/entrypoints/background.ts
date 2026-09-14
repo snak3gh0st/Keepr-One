@@ -295,6 +295,17 @@ async function focusCarrierTabForAuthRequirement(
   }
 }
 
+/// "Esta página está *pedindo* autenticação?"
+///
+/// Pergunta diferente da que `isAuthPath` responde ("o content script pode
+/// tocar nesta página?"), e um callback responde sim àquela e não a esta: ele é
+/// a seguradora devolvendo o navegador porque o login ou o MFA terminou. Todo
+/// sítio que parava a corrida usava `isAuthPath` para perguntar isto, e por isso
+/// lia a prova de sucesso como pedido de autenticação.
+function isCarrierAuthPromptPath(pathname: string): boolean {
+  return isAuthPath(pathname) && !isCarrierAuthCallbackPath(pathname)
+}
+
 function authRequirementForPath(pathname: string): 'AUTH_REQUIRED' | 'MFA_REQUIRED' {
   return pathname.includes('/mfa') || pathname.includes('/challenge')
     ? 'MFA_REQUIRED'
@@ -974,7 +985,7 @@ async function executePolicyDetailCommand(
     await updateTab(tab.id, { url: targetUrl })
     return
   }
-  if (currentUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(currentUrl.pathname)) {
+  if (currentUrl.origin === NLG_AUTH0_ORIGIN || isCarrierAuthPromptPath(currentUrl.pathname)) {
     const requirement = authRequirementForPath(currentUrl.pathname)
     if (dispatch.lastEventType !== requirement) {
       sequence = await postCommandEvent({
@@ -1184,7 +1195,7 @@ async function executeIgoApplicationDraftCommand(
     return
   }
   if (currentUrl.origin === NLG_AUTH0_ORIGIN ||
-    (currentUrl.origin === NLG_ORIGIN && isAuthPath(currentUrl.pathname))) {
+    (currentUrl.origin === NLG_ORIGIN && isCarrierAuthPromptPath(currentUrl.pathname))) {
     const requirement = authRequirementForPath(currentUrl.pathname)
     if (dispatch.lastEventType !== requirement) {
       sequence = await postCommandEvent({
@@ -1381,7 +1392,7 @@ async function executeFlexLifeQuoteCommand(
     await updateTab(tab.id, { url: targetUrl })
     return
   }
-  if (currentUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(currentUrl.pathname)) {
+  if (currentUrl.origin === NLG_AUTH0_ORIGIN || isCarrierAuthPromptPath(currentUrl.pathname)) {
     const requirement = authRequirementForPath(currentUrl.pathname)
     if (dispatch.lastEventType !== requirement) {
       sequence = await postCommandEvent({
@@ -1619,7 +1630,7 @@ async function executeForesightCommand(
     await updateTab(tab.id, { url: targetUrl })
     return
   }
-  if (currentUrl.origin === NLG_AUTH0_ORIGIN || isAuthPath(currentUrl.pathname) ||
+  if (currentUrl.origin === NLG_AUTH0_ORIGIN || isCarrierAuthPromptPath(currentUrl.pathname) ||
     currentUrl.pathname.startsWith('/NWI/Unsecure/')) {
     const requirement = authRequirementForPath(currentUrl.pathname)
     if (dispatch.lastEventType !== requirement) {
@@ -2233,7 +2244,14 @@ async function resolveCommandCredentialIfAuthenticated(tabId: number, rawUrl?: s
   } catch {
     return
   }
-  const authenticatedPortal = url.origin === NLG_ORIGIN && url.pathname.startsWith('/agent/')
+  // `/agent/auth/...` também começa com `/agent/`, mas sondar ali é impossível
+  // por construção: a ponte não roda em página de autenticação, de propósito.
+  // Chamar isso de portal autenticado fazia a sonda falhar por ausência de
+  // listener, e a falha era lida como "sessão não autenticada" — o command
+  // ficava parado na própria página que provava que o login tinha dado certo.
+  // Aqui `isAuthPath` é a pergunta certa: ela é que sabe onde há ponte.
+  const authenticatedPortal =
+    url.origin === NLG_ORIGIN && url.pathname.startsWith('/agent/') && !isAuthPath(url.pathname)
   const foresightSessionToken = url.searchParams.get('SessionTokenId')
   const authenticatedForesight =
     url.origin === NLG_ORIGIN &&
@@ -2703,7 +2721,7 @@ async function navigatePendingGrid(options?: { foreground?: boolean }) {
           // Parar aqui deixava a aba presa na própria página que provava que a
           // autenticação deu certo. Deixar cair adiante navega para a etapa —
           // que é exatamente o que tirar a aba de uma página morta exige.
-          if (isAuthPath(existingUrl.pathname) && !isCarrierAuthCallbackPath(existingUrl.pathname)) {
+          if (isCarrierAuthPromptPath(existingUrl.pathname)) {
             const requirement = authRequirementForPath(existingUrl.pathname)
             const beforeAuth = await readSyncState()
             if (beforeAuth.status === 'CANCELLED' || beforeAuth.runId !== state.runId) return
@@ -3965,7 +3983,7 @@ async function resumePending(options?: { reconcileWithServer?: boolean }) {
         await handleCarrierAuthenticationPage(authTab.id, authUrl)
         return
       }
-      if (isAuthPath(authUrl.pathname)) return
+      if (isCarrierAuthPromptPath(authUrl.pathname)) return
     } catch {
       return
     }
