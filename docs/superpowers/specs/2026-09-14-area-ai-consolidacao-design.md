@@ -78,9 +78,15 @@ está hoje. Esta etapa não muda quem pode ver o quê.
 
 ## Hub e menu lateral
 
-O hub passa a conter uma parte gated. Quando o módulo `MESSAGES` está
-desligado, `/agent/ai` não mostra a seção da central nem oferece caminho para
-ela — mostrar uma porta que o gate vai fechar é pior que não mostrar porta.
+O hub ganha uma entrada visível para a central. Isto é o mínimo que responde à
+queixa que originou o trabalho: mover a URL torna a central um filho de
+`/agent/ai`, mas quem abre a tela continua sem ver caminho até ela. A entrada é
+um link no cabeçalho, no mesmo padrão que `/agent/kbot` já usa hoje para
+"Central de mensagens" — não é seção nova nem redesenho.
+
+Quando o módulo `MESSAGES` está desligado, essa entrada não aparece, e o link
+"Abrir conversa" das linhas de atividade também não: mostrar uma porta que o
+gate vai fechar é pior que não mostrar porta.
 
 No menu lateral, "Mensagens" **permanece como entrada própria**, apontando para
 `/agent/ai/mensagens` e mantendo `module: "MESSAGES"`. A central é uso diário;
@@ -112,11 +118,14 @@ não alcançaria as sessões que o Stripe já criou.
 - Um teste de ordem em `MODULE_ROUTES`, para o `.find()` não ser quebrado depois.
 - Um teste de navegação no padrão de `page.navigation.test.ts`, que já existe e
   já cobre a ideia de "esta tela leva à central".
-- Um teste do hub com `MESSAGES` desligado, provando que não há porta para a
-  central.
+- Um teste do hub com `MESSAGES` ligado, provando que existe caminho visível
+  para a central — a queixa que originou o trabalho.
+- Um teste do hub com `MESSAGES` desligado, provando que nenhuma porta aparece,
+  nem o link do cabeçalho nem "Abrir conversa".
 - Os testes atuais de `Shell`, `mensagens` e `kbot` acompanham os caminhos novos.
 
 ## Fora de escopo
 
-Redesenhar o hub, fundir as três telas numa só, mexer no conteúdo da central,
-introduzir menu aninhado, ou alterar quem pode ver o quê.
+Redesenhar o hub além do link de entrada descrito acima, fundir as três telas
+numa só, mexer no conteúdo da central, introduzir menu aninhado, ou alterar
+quem pode ver o quê.
