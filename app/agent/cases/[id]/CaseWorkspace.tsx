@@ -104,6 +104,7 @@ type CaseData = {
     canAutomate: boolean;
     extensionTarget?: string | null;
     preparationEnabled?: boolean;
+    offered?: boolean;
   };
   policies: { id: string; policyNumber: string; carrier: string; product: string; status: string }[];
   timeline: {

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentAgent } from '@/lib/agent-context'
+import { isKBotApplicationEnabled } from '@/lib/application-addon/config'
 import { prisma } from '@/lib/prisma'
 import { getStripeClient } from '@/lib/stripe/client'
 import {
@@ -17,6 +18,10 @@ function appOrigin(request: Request): string {
 
 export async function POST(request: Request) {
   try {
+    // Selling a feature that is switched off would take money for something
+    // nobody can use. This runs before Stripe, before the local row, and
+    // before the agent lookup, so a closed feature reserves nothing.
+    if (!isKBotApplicationEnabled()) throw new Error('K_BOT_APPLICATION_DISABLED')
     const agent = await getCurrentAgent()
     const user = await prisma.user.findUnique({
       where: { id: agent.userId },
@@ -107,6 +112,11 @@ export async function POST(request: Request) {
     const code = error instanceof Error ? error.message : 'UNKNOWN'
     if (code === 'ADDON_ALREADY_LINKED') {
       return NextResponse.json({ error: code }, { status: 409 })
+    }
+    // Not an incident: the feature is deliberately closed. Report it as itself
+    // rather than as a generic Checkout outage.
+    if (code === 'K_BOT_APPLICATION_DISABLED') {
+      return NextResponse.json({ error: code }, { status: 503 })
     }
     console.error('K-Bot Application checkout creation failed', { code })
     return NextResponse.json({ error: 'CHECKOUT_UNAVAILABLE' }, { status: 503 })

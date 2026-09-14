@@ -55,7 +55,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   const ownsCase = c.assignedAgentId === agent.id
   const applicationAddon = ownsCase
     ? await getKBotApplicationEntitlement(agent.id)
-    : { entitled: false, available: false, unavailableReason: null, subscriptionId: null, status: null }
+    : { entitled: false, available: false, unavailableReason: null, featureEnabled: false, subscriptionId: null, status: null }
   let calendarConnectionDomain = null
   let calendarEventDomains: Awaited<ReturnType<typeof getCalendarEventsForCase>> = []
   // CRM hierarchy grants access to the lead, never to another agent's private
@@ -156,6 +156,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             entitled: applicationAddon.entitled,
             status: applicationAddon.status,
             canAutomate: ownsCase && applicationAddon.available,
+            offered: ownsCase && applicationAddon.featureEnabled,
             extensionTarget: connector.enabled ? connector.extensionTarget : null,
             preparationEnabled: connector.enabled && remote.syncEnabled && !remote.disabledCapabilities.includes('PREPARE_APPLICATION_DRAFT'),
           },

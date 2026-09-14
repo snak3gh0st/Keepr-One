@@ -11,6 +11,12 @@ export type KBotApplicationEntitlement = {
   available: boolean
   /** Why `available` is false while `entitled` is true. */
   unavailableReason: 'FEATURE_DISABLED' | null
+  /**
+   * The feature is open at all. Independent of this agent's billing, and the
+   * only honest basis for offering the add-on for sale: a closed feature must
+   * never be sold, to an entitled agent or anyone else.
+   */
+  featureEnabled: boolean
   subscriptionId: string | null
   status: string | null
 }
@@ -37,6 +43,7 @@ export async function getKBotApplicationEntitlement(
   return {
     entitled,
     available: entitled && enabled,
+    featureEnabled: enabled,
     // Only report the switch to someone who would otherwise be allowed in;
     // an agent without a subscription is simply not entitled.
     unavailableReason: entitled && !enabled ? 'FEATURE_DISABLED' : null,

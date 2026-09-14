@@ -47,7 +47,12 @@ vi.mock('@/lib/stripe/application-addon-catalog', () => ({
 
 import { POST } from './route'
 
+const originalSwitch = process.env.KBOT_IGO_APPLICATION_ENABLED
+
 beforeEach(() => {
+  // The add-on is only purchasable while the feature is open. Every case below
+  // that expects a Checkout has to say so explicitly.
+  process.env.KBOT_IGO_APPLICATION_ENABLED = 'true'
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-09-04T12:05:00.000Z'))
   vi.clearAllMocks()
@@ -61,6 +66,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  if (originalSwitch === undefined) delete process.env.KBOT_IGO_APPLICATION_ENABLED
+  else process.env.KBOT_IGO_APPLICATION_ENABLED = originalSwitch
   vi.useRealTimers()
 })
 
@@ -113,6 +120,23 @@ describe('K-Bot Application checkout', () => {
       },
     })
     expect(params).not.toHaveProperty('payment_method_types')
+  })
+
+  it('refuses to sell the add-on while the feature is switched off', async () => {
+    delete process.env.KBOT_IGO_APPLICATION_ENABLED
+
+    const response = await POST(new Request(
+      'https://app.keeprone.com/api/billing/application-addon/checkout',
+      { method: 'POST' },
+    ))
+
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({ error: 'K_BOT_APPLICATION_DISABLED' })
+    // Nothing is charged, reserved or written before Stripe is ever reached.
+    expect(mocks.createCheckout).not.toHaveBeenCalled()
+    expect(mocks.retrievePrice).not.toHaveBeenCalled()
+    expect(mocks.createAddon).not.toHaveBeenCalled()
+    expect(mocks.updateAddon).not.toHaveBeenCalled()
   })
 
   it('refuses a second Checkout after the add-on is linked', async () => {
