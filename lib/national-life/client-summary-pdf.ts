@@ -1059,8 +1059,20 @@ function fullPages(
   const plan = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
   pageChrome(plan, summary, copy.yourPlan, 2)
   const afterFigures = headlineFigures(plan, summary, copy, MARGIN + 60)
-  coverageChart(plan, summary.coverage, copy, afterFigures + 40, 380,
-    summary.guaranteed, summary.guaranteedLapse)
+  // A mesma curva da folha única, na altura que uma página inteira permite — e
+  // com a tabela da seguradora logo abaixo, que na folha única fica espremida.
+  // Uma apresentação que desenhasse uma curva diferente da do resumo seria duas
+  // versões da mesma apólice saindo da mesma casa.
+  if (summary.scenarios) {
+    const afterChart = scenarioChart(plan, summary.scenarios, copy, afterFigures + 36, 268)
+    const afterTable = scenarioTable(plan, summary.scenarios, copy, afterChart + 34)
+    plan.fillStyle = INK_MUTED
+    plan.font = font(9)
+    paragraph(plan, copy.scenarioNote, MARGIN, afterTable + 18, PAGE_WIDTH - MARGIN * 2, 12)
+  } else {
+    coverageChart(plan, summary.coverage, copy, afterFigures + 40, 380,
+      summary.guaranteed, summary.guaranteedLapse)
+  }
   document.endPage()
 
   const table = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)

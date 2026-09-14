@@ -372,6 +372,20 @@ describe('a peça montada sobre a página da seguradora', () => {
     expect(text).toContain('Ends in year 72, at age 109')
   })
 
+  // Uma apresentação que desenhasse uma curva diferente da do resumo seria
+  // duas versões da mesma apólice saindo da mesma casa.
+  it('desenha a mesma curva nas duas peças', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(withScenarios, { variant: 'FULL' }))
+    expect(pages).toHaveLength(4)
+    const plan = pages[1]!
+    expect(plan).toContain('CURRENT · NOT GUARANTEED')
+    expect(plan).toContain('Ends in year 42, at age 79')
+    expect(plan).toContain('Ends in year 72, at age 109')
+    expect(plan).toContain('National Life’s own')
+    // O rodapé da página sobrevive à nota que vem logo acima dele.
+    expect(plan).toContain('FlexLife · National Life')
+  })
+
   it('não deixa a nota cair em cima do rodapé', async () => {
     const text = await extractText(await renderClientSummaryPdf(withScenarios))
     expect(text).toContain('not guaranteed and will change')
