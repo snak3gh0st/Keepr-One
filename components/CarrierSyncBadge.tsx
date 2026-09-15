@@ -63,11 +63,6 @@ export function CarrierSyncBadge({
       badge: 'PDF',
       label: copy('Criar ilustração', 'Create Illustration'),
       detail: copy('Prepare uma ilustração oficial de Term ou IUL', 'Prepare a Term or IUL official illustration'),
-    }, {
-      href: '/agent/illustrations?intent=application',
-      badge: 'iGO',
-      label: copy('Criar aplicação no iGO', 'Create Application in iGO'),
-      detail: copy('Escolha a ilustração oficial que iniciará a aplicação', 'Choose the official illustration that will start the Application'),
     }] : []),
   ], [canAccessIllustrations, canAccessNationalLife, copy])
   const [state, setState] = useState<CarrierSyncState | null>(null)

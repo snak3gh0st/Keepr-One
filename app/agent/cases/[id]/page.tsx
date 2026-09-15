@@ -156,7 +156,10 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             entitled: applicationAddon.entitled,
             status: applicationAddon.status,
             canAutomate: ownsCase && applicationAddon.available,
-            offered: ownsCase && applicationAddon.featureEnabled,
+            // Application remains implemented for a later release, but this
+            // release is Illustration-only even if an old environment still
+            // has the feature flag enabled.
+            offered: false,
             extensionTarget: connector.enabled ? connector.extensionTarget : null,
             preparationEnabled: connector.enabled && remote.syncEnabled && !remote.disabledCapabilities.includes('PREPARE_APPLICATION_DRAFT'),
           },
