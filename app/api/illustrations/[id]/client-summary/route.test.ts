@@ -5,6 +5,11 @@ const mocks = vi.hoisted(() => ({
   getCurrentAgent: vi.fn(),
   getAgentScopeIds: vi.fn(),
   findUnique: vi.fn(),
+  extractTermLedger: vi.fn(),
+  extractGuaranteedLedger: vi.fn(),
+  extractSummaryOfValues: vi.fn(),
+  extractCurrentLedger: vi.fn(),
+  interpretSummary: vi.fn(),
 }))
 
 vi.mock('@/lib/require-role', () => ({ requireRole: mocks.requireRole }))
@@ -12,6 +17,21 @@ vi.mock('@/lib/agent-context', () => ({ getCurrentAgent: mocks.getCurrentAgent }
 vi.mock('@/lib/agent-access', () => ({ getAgentScopeIds: mocks.getAgentScopeIds }))
 vi.mock('@/lib/prisma', () => ({
   prisma: { illustration: { findUnique: mocks.findUnique } },
+}))
+vi.mock('@/lib/national-life/foresight-term-ledger', () => ({
+  extractForesightTermLedger: mocks.extractTermLedger,
+}))
+vi.mock('@/lib/national-life/foresight-guaranteed-ledger', () => ({
+  extractForesightGuaranteedLedger: mocks.extractGuaranteedLedger,
+}))
+vi.mock('@/lib/national-life/foresight-summary-of-values', () => ({
+  extractForesightSummaryOfValues: mocks.extractSummaryOfValues,
+}))
+vi.mock('@/lib/national-life/foresight-current-ledger', () => ({
+  extractForesightCurrentLedger: mocks.extractCurrentLedger,
+}))
+vi.mock('@/lib/national-life/client-summary-ai', () => ({
+  interpretClientSummary: mocks.interpretSummary,
 }))
 
 import { GET } from './route'
@@ -57,7 +77,44 @@ beforeEach(() => {
   mocks.requireRole.mockResolvedValue({ user: { role: 'AGENT' } })
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1' })
   mocks.getAgentScopeIds.mockResolvedValue(['agent-1'])
-  mocks.findUnique.mockResolvedValue(verified)
+  mocks.findUnique.mockImplementation(async ({ select }: { select: Record<string, unknown> }) =>
+    select.documentBytes
+      ? { documentBytes: new TextEncoder().encode('%PDF-1.7\ncarrier') }
+      : verified)
+  mocks.extractTermLedger.mockRejectedValue(new Error('not term'))
+  mocks.extractGuaranteedLedger.mockRejectedValue(new Error('not available'))
+  mocks.extractSummaryOfValues.mockResolvedValue({
+    rows: [5, 10, 20, 30].map((policyYear) => ({
+      policyYear,
+      age: 39 + policyYear,
+      guaranteed: {
+        annualCashFlow: -3_600,
+        cashSurrenderValue: policyYear * 8_000,
+        netDeathBenefit: 500_000,
+      },
+      current: {
+        annualCashFlow: -3_600,
+        cashSurrenderValue: policyYear * 10_000,
+        netDeathBenefit: 500_000 + policyYear * 1_000,
+      },
+    })),
+    lapseYear: { guaranteed: null, current: null },
+  })
+  mocks.extractCurrentLedger.mockResolvedValue({
+    rows: Array.from({ length: 30 }, (_, index) => ({
+      policyYear: index + 1,
+      age: 40 + index,
+      premiumOutlay: 3_600,
+      weightedAverageInterestRate: 6.1,
+      accumulatedValue: (index + 1) * 12_000,
+      cashSurrenderValue: (index + 1) * 10_000,
+      netDeathBenefit: 500_000 + (index + 1) * 1_000,
+    })),
+    lapse: null,
+  })
+  mocks.interpretSummary.mockResolvedValue({
+    focus: 'BALANCED', highlightYears: [5, 10, 20, 30], source: 'RULES',
+  })
 })
 
 describe('client summary route', () => {
@@ -124,6 +181,24 @@ describe('client summary route', () => {
     expect(mocks.findUnique.mock.calls[1]?.[0]?.select).toEqual({ documentBytes: true })
   })
 
+  it('refuses a permanent-policy PDF when its official pages disagree', async () => {
+    mocks.extractCurrentLedger.mockResolvedValueOnce({
+      rows: Array.from({ length: 30 }, (_, index) => ({
+        policyYear: index + 1,
+        age: 40 + index,
+        premiumOutlay: 3_600,
+        weightedAverageInterestRate: 6.1,
+        accumulatedValue: (index + 1) * 12_000,
+        cashSurrenderValue: (index + 1) * 10_000,
+        netDeathBenefit: 999_999,
+      })),
+      lapse: null,
+    })
+    const response = await GET(request, { params })
+    expect(response.status).toBe(422)
+    expect(response.headers.get('Content-Type')).not.toBe('application/pdf')
+  })
+
   it('reads the stored PDF for Term, where the premium schedule lives', async () => {
     mocks.findUnique.mockResolvedValue({
       ...verified,
@@ -185,12 +260,13 @@ describe('client summary route', () => {
 })
 
 describe('variant and language', () => {
-  it('serves the five-page presentation when asked for the full variant', async () => {
+  it('serves the interpreted presentation when asked for the full variant', async () => {
     const response = await GET(
       new Request('http://localhost/x?variant=full'), { params })
     expect(response.status).toBe(200)
     expect(response.headers.get('Content-Disposition'))
       .toContain('Maria-Silva-proposal-presentation-2026-09-01.pdf')
+    expect(mocks.interpretSummary).toHaveBeenCalledOnce()
   })
 
   // A stale link or a hand-typed URL should hand the agent the safe, shorter

@@ -149,9 +149,13 @@ export type ClientSummaryScenarios = {
   /// apólice nem conferir o que estava vendo. Com o ledger inteiro, a curva é a
   /// apólice.
   deathBenefit: { guaranteed: ClientSummaryCurvePoint[]; current: ClientSummaryCurvePoint[] }
+  /// O valor disponível se a apólice for encerrada, em uma escala própria.
+  /// Misturá-lo com o benefício por morte no mesmo eixo achata esta série e
+  /// faz um valor real do PDF parecer zero.
+  cashValue: { guaranteed: ClientSummaryCurvePoint[]; current: ClientSummaryCurvePoint[] }
 }
 
-export type ClientSummaryCurvePoint = { age: number; value: number }
+export type ClientSummaryCurvePoint = { policyYear: number; age: number; value: number }
 
 /// What the Term ledger says, reduced to what a client is deciding about.
 ///
@@ -278,6 +282,10 @@ function scenariosFrom(
   currentLedger: ForesightCurrentLedger | null,
 ): ClientSummaryScenarios | null {
   if (!summary || summary.rows.length === 0) return null
+  // The summary and detailed ledgers describe the same policy twice. Use that
+  // redundancy as an integrity check: once a ledger was parsed, every summary
+  // row and lapse marker must agree before any of those values become a graph.
+  if (!scenarioLedgersAgree(summary, guaranteedLedger, currentLedger)) return null
   const issueAge = summary.rows[0]!.age - summary.rows[0]!.policyYear
   const ageFor = (year: number | null) => year === null ? null : issueAge + year
   return {
@@ -302,7 +310,33 @@ function scenariosFrom(
       guaranteed: curve(guaranteedLedger?.rows ?? null, summary, (row) => row.guaranteed.netDeathBenefit),
       current: curve(currentLedger?.rows ?? null, summary, (row) => row.current.netDeathBenefit),
     },
+    cashValue: {
+      guaranteed: curve(guaranteedLedger?.rows ?? null, summary, (row) => row.guaranteed.cashSurrenderValue, 'cashSurrenderValue'),
+      current: curve(currentLedger?.rows ?? null, summary, (row) => row.current.cashSurrenderValue, 'cashSurrenderValue'),
+    },
   }
+}
+
+function scenarioLedgersAgree(
+  summary: ForesightSummaryOfValues,
+  guaranteedLedger: ForesightGuaranteedLedger | null,
+  currentLedger: ForesightCurrentLedger | null,
+): boolean {
+  const agrees = (
+    ledger: ForesightGuaranteedLedger | ForesightCurrentLedger | null,
+    side: 'guaranteed' | 'current',
+  ) => {
+    if (!ledger) return true
+    if ((ledger.lapse?.policyYear ?? null) !== summary.lapseYear[side]) return false
+    return summary.rows.every((summaryRow) => {
+      const ledgerRow = ledger.rows.find((row) => row.policyYear === summaryRow.policyYear)
+      return ledgerRow !== undefined &&
+        ledgerRow.age === summaryRow.age &&
+        ledgerRow.cashSurrenderValue === summaryRow[side].cashSurrenderValue &&
+        ledgerRow.netDeathBenefit === summaryRow[side].netDeathBenefit
+    })
+  }
+  return agrees(guaranteedLedger, 'guaranteed') && agrees(currentLedger, 'current')
 }
 
 /// A peça montada só com o que a seguradora assinou.
@@ -356,14 +390,24 @@ function pdfSummary(
 /// fica com a curva grossa que a Summary of Values permite, que é pior de ler
 /// mas continua sendo número da seguradora.
 function curve(
-  rows: ReadonlyArray<{ age: number; netDeathBenefit: number }> | null,
+  rows: ReadonlyArray<{
+    policyYear: number
+    age: number
+    netDeathBenefit: number
+    cashSurrenderValue: number
+  }> | null,
   summary: ForesightSummaryOfValues,
   fallback: (row: ForesightSummaryOfValues['rows'][number]) => number,
+  field: 'netDeathBenefit' | 'cashSurrenderValue' = 'netDeathBenefit',
 ): ClientSummaryCurvePoint[] {
   if (rows && rows.length >= MINIMUM_COVERAGE_POINTS) {
-    return rows.map((row) => ({ age: row.age, value: row.netDeathBenefit }))
+    return rows.map((row) => ({ policyYear: row.policyYear, age: row.age, value: row[field] }))
   }
-  return summary.rows.map((row) => ({ age: row.age, value: fallback(row) }))
+  return summary.rows.map((row) => ({
+    policyYear: row.policyYear,
+    age: row.age,
+    value: fallback(row),
+  }))
 }
 
 function guaranteedCoverage(ledger: ForesightGuaranteedLedger | null): ClientSummaryPoint[] {

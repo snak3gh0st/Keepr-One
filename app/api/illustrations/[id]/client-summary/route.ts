@@ -4,6 +4,7 @@ import { requireRole } from '@/lib/require-role'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getAgentScopeIds } from '@/lib/agent-access'
 import { buildClientSummary } from '@/lib/national-life/client-summary'
+import { interpretClientSummary } from '@/lib/national-life/client-summary-ai'
 import { extractForesightTermLedger } from '@/lib/national-life/foresight-term-ledger'
 import { extractForesightGuaranteedLedger } from '@/lib/national-life/foresight-guaranteed-ledger'
 import { extractForesightSummaryOfValues } from '@/lib/national-life/foresight-summary-of-values'
@@ -96,9 +97,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // download, so reaching it here means a stale page or a hand-typed URL —
   // neither of which may produce a client-facing document out of unverified
   // numbers.
+  // A permanent-policy document is made from the carrier's Summary of Values.
+  // If that page was absent or disagreed with a detailed ledger, returning a
+  // polished PDF would hide the failed verification behind good typography.
   if (!summary) return new NextResponse('Not found', { status: 404 })
+  if (summary.kind === 'PROJECTED' && summary.scenarios === null) {
+    return new NextResponse('Official PDF values could not be verified', { status: 422 })
+  }
 
-  const bytes = await renderClientSummaryPdf(summary, { variant, language })
+  const interpretation = variant === 'FULL' && summary.kind === 'PROJECTED'
+    ? await interpretClientSummary(summary)
+    : undefined
+  const bytes = await renderClientSummaryPdf(summary, { variant, language, interpretation })
   return new NextResponse(new Uint8Array(bytes), {
     headers: {
       'Content-Type': 'application/pdf',
