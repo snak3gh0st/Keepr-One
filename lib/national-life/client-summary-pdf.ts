@@ -19,6 +19,8 @@ import { GlobalFonts, PDFDocument, Path2D } from '@napi-rs/canvas'
 import { CLIENT_SUMMARY_DISCLAIMER, CLIENT_SUMMARY_TERM_DISCLAIMER } from './quote-disclaimer'
 import { clientSummaryCopy, type ClientSummaryLanguage } from './client-summary-copy'
 import type { ClientSummary, ClientSummaryPoint, ClientSummaryScenarios, ClientSummaryTermSchedule } from './client-summary'
+import { analyzeClientPolicy, type ClientPolicyInsights } from './client-summary-insights'
+import type { ClientSummaryInterpretation } from './client-summary-ai'
 import type { ForesightTermLedgerRow } from './foresight-term-ledger'
 
 type Ctx = ReturnType<PDFDocument['beginPage']>
@@ -29,6 +31,7 @@ export type ClientSummaryVariant = 'QUICK' | 'FULL'
 export type ClientSummaryOptions = {
   variant?: ClientSummaryVariant
   language?: ClientSummaryLanguage
+  interpretation?: ClientSummaryInterpretation
 }
 
 // US Letter at 72dpi, the size a US client prints without thinking about it.
@@ -38,6 +41,9 @@ const PAGE_WIDTH = 612
 const PAGE_HEIGHT = 792
 const MARGIN = 46
 const BAND_HEIGHT = 132
+const REPORT_WIDTH = 792
+const REPORT_HEIGHT = 612
+const REPORT_MARGIN = 42
 
 // Keepr One's palette, converted once from the oklch tokens in `globals.css`.
 // Canvas has no oklch, so these are the sRGB values of those same tokens; if
@@ -83,7 +89,7 @@ const LOGO_VIEWBOX = { x: 8, y: 6, size: 86 }
 let fontsReady = false
 function registerBrandFonts(): void {
   if (fontsReady) return
-  for (const weight of ['400', '500', '700']) {
+  for (const weight of ['300', '400', '500', '700']) {
     GlobalFonts.registerFromPath(
       path.join(process.cwd(), 'public', 'fonts', `satoshi-${weight}.woff2`),
       BRAND,
@@ -127,7 +133,7 @@ export function niceCeiling(value: number): number {
   return step * magnitude
 }
 
-function font(size: number, weight: 400 | 500 | 700 = 400): string {
+function font(size: number, weight: 300 | 400 | 500 | 700 = 400): string {
   return `${weight} ${size}px ${BRAND}`
 }
 
@@ -248,6 +254,11 @@ function cover(ctx: Ctx, summary: ClientSummary, copy: Copy, language: ClientSum
     ctx.font = font(9, 700)
     ctx.fillText(`${copy.advisor}: ${summary.advisorName.toUpperCase()}`, centre, PAGE_HEIGHT - 110)
   }
+  if (summary.kind === 'PROJECTED') {
+    ctx.fillStyle = ON_BAND_MUTED
+    ctx.font = font(8, 500)
+    ctx.fillText(copy.currentValuesOnly, centre, PAGE_HEIGHT - 76)
+  }
 
   ctx.textAlign = 'left'
 }
@@ -255,7 +266,7 @@ function cover(ctx: Ctx, summary: ClientSummary, copy: Copy, language: ClientSum
 /// The running header and footer on every page of the full presentation. Quiet
 /// on purpose: the cover already introduced the document.
 function pageChrome(
-  ctx: Ctx, summary: ClientSummary, title: string, pageNumber: number,
+  ctx: Ctx, summary: ClientSummary, title: string, pageNumber: number, pageNote?: string,
 ): void {
   ctx.fillStyle = PAPER
   ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT)
@@ -278,6 +289,11 @@ function pageChrome(
   ctx.fillStyle = INK_MUTED
   ctx.font = font(8, 500)
   ctx.fillText(`${summary.productLabel} · National Life`, MARGIN, PAGE_HEIGHT - MARGIN)
+  if (pageNote) {
+    ctx.textAlign = 'center'
+    ctx.fillText(pageNote, PAGE_WIDTH / 2, PAGE_HEIGHT - MARGIN)
+    ctx.textAlign = 'left'
+  }
   right(ctx, String(pageNumber).padStart(2, '0'), PAGE_WIDTH - MARGIN, PAGE_HEIGHT - MARGIN)
 }
 
@@ -680,207 +696,208 @@ function termSchedule(
   )
 }
 
-/// Os dois cenários da seguradora, desenhados e escritos com os mesmos números.
-///
-/// A National Life não publica gráfico nenhum de valores — a ilustração inteira
-/// é ledger, e a página Summary of Values é onde ela põe garantido e corrente
-/// lado a lado nos mesmos anos. Então o gráfico aqui não é um desenho nosso por
-/// cima de uma projeção nossa: é essa tabela plotada, e a tabela vem logo
-/// abaixo para que o cliente possa conferir cada ponto.
-///
-/// Cada curva termina onde o cenário dela termina. O corrente também encerra —
-/// trinta anos depois do garantido, no caso real que motivou isto — e desenhar
-/// qualquer um dos dois além do próprio encerramento seria a página mostrando
-/// uma apólice que já não existe.
-function scenarioChart(
-  ctx: Ctx, scenarios: ClientSummaryScenarios, copy: Copy, top: number, height: number,
+/// Um gráfico por página, com espaço suficiente para ler eixo, cenário e ponto.
+/// Cada vértice é um registro publicado; não há spline, média ou extrapolação.
+function policyMetricChart(
+  ctx: Ctx,
+  copy: Copy,
+  values: ClientSummaryScenarios['deathBenefit'],
+  labelYears: number[],
+  top: number,
+  currentLapse: { year: number | null; age: number | null },
+  insight: { label: string; value: string } | null = null,
 ): number {
-  const width = PAGE_WIDTH - MARGIN * 2
-  const plotLeft = MARGIN + 54
-  const plotRight = MARGIN + width
-  const plotTop = top + 34
-  const plotBottom = top + height - 26
-
-  sectionTitle(ctx, copy.coverageOverTime, top + 14, copy.currentAndGuaranteed)
-
-  const drawn = [...scenarios.deathBenefit.guaranteed, ...scenarios.deathBenefit.current]
+  const drawn = values.current
+  const firstYear = Math.min(...drawn.map((point) => point.policyYear))
+  const lastYear = Math.max(...drawn.map((point) => point.policyYear))
+  const yearSpan = Math.max(lastYear - firstYear, 1)
   const ceiling = niceCeiling(Math.max(...drawn.map((point) => point.value)))
-  // O eixo cobre o que a seguradora publicou, e nada além. Esticá-lo até um
-  // encerramento que fica depois da última linha do ledger deixava um terço do
-  // gráfico vazio, e a tabela logo abaixo já diz em texto onde cada cenário
-  // acaba — inclusive o que acaba fora do desenho.
-  const firstAge = Math.min(...drawn.map((point) => point.age))
-  const lastAge = Math.max(...drawn.map((point) => point.age))
-  const span = Math.max(lastAge - firstAge, 1)
-  const xFor = (age: number) => plotLeft + ((age - firstAge) / span) * (plotRight - plotLeft)
+  const plotLeft = MARGIN + 62
+  const plotRight = PAGE_WIDTH - MARGIN
+  const plotTop = top + 92
+  const plotBottom = top + 430
+  const xFor = (year: number) => plotLeft + ((year - firstYear) / yearSpan) * (plotRight - plotLeft)
   const yFor = (value: number) => plotBottom - (value / ceiling) * (plotBottom - plotTop)
 
-  ctx.lineWidth = 1
+  // The customer-facing story follows the current illustration. Guaranteed
+  // assumptions remain in the disclosure, but they no longer compete with the
+  // question this page answers.
+  ctx.fillStyle = GOLD
+  ctx.fillRect(MARGIN, top + 16, 24, 3)
+  ctx.fillStyle = INK
+  ctx.font = font(10, 700)
+  ctx.fillText(copy.currentValuesOnly.toUpperCase(), MARGIN + 34, top + 21)
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(9)
+  ctx.fillText(copy.scenarioCurrentBody, MARGIN + 34, top + 37)
+
   ctx.font = font(8)
-  for (const fraction of [0, 0.5, 1]) {
+  for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
     const y = plotBottom - fraction * (plotBottom - plotTop)
-    ctx.strokeStyle = BORDER
+    ctx.strokeStyle = fraction === 0 ? INK_MUTED : BORDER
+    ctx.lineWidth = fraction === 0 ? 1.2 : 0.8
     ctx.beginPath()
     ctx.moveTo(plotLeft, y + 0.5)
     ctx.lineTo(plotRight, y + 0.5)
     ctx.stroke()
     ctx.fillStyle = INK_MUTED
-    ctx.fillText(fraction === 0 ? '$0' : compact.format(ceiling * fraction), MARGIN, y + 3)
+    right(ctx, fraction === 0 ? '$0' : compact.format(ceiling * fraction), plotLeft - 10, y + 3)
   }
 
+  const ageForYear = (year: number) =>
+    drawn.find((point) => point.policyYear === year)?.age ?? null
+  const axisYears = [...new Set([
+    firstYear,
+    ...labelYears,
+    lastYear,
+  ])].filter((year) => year >= firstYear && year <= lastYear).sort((a, b) => a - b)
+
+  axisYears.forEach((year) => {
+    const x = xFor(year)
+    ctx.strokeStyle = BORDER
+    ctx.lineWidth = 0.8
+    ctx.beginPath()
+    ctx.moveTo(x + 0.5, plotBottom)
+    ctx.lineTo(x + 0.5, plotBottom + 6)
+    ctx.stroke()
+    ctx.fillStyle = INK
+    ctx.font = font(8, 700)
+    const yearLabel = String(year)
+    ctx.fillText(yearLabel, x - ctx.measureText(yearLabel).width / 2, plotBottom + 19)
+    const age = ageForYear(year)
+    if (age !== null) {
+      ctx.fillStyle = INK_MUTED
+      ctx.font = font(7.5)
+      const ageLabel = copy.age(age)
+      ctx.fillText(ageLabel, x - ctx.measureText(ageLabel).width / 2, plotBottom + 32)
+    }
+  })
+
   const series = (
-    points: ReadonlyArray<{ age: number; value: number }>,
-    colour: string, dashed: boolean, lapseAge: number | null,
+    points: ClientSummaryScenarios['deathBenefit']['current'],
+    colour: string,
+    dashed: boolean,
   ) => {
     ctx.save()
-    if (dashed) ctx.setLineDash([4, 3])
+    if (dashed) ctx.setLineDash([7, 5])
     ctx.strokeStyle = colour
-    ctx.lineWidth = dashed ? 1.7 : 2.4
+    ctx.lineWidth = dashed ? 2.2 : 3
+    ctx.lineJoin = 'round'
     ctx.beginPath()
     points.forEach((point, index) => {
-      const x = xFor(point.age)
+      const x = xFor(point.policyYear)
       const y = yFor(point.value)
       if (index === 0) ctx.moveTo(x, y)
       else ctx.lineTo(x, y)
     })
-    // A curva para no último valor que a seguradora publicou. Entre ele e o
-    // encerramento ela não diz nada, e prolongar a linha reta até lá seria
-    // afirmar que o valor fica parado — tão inventado quanto desenhar uma
-    // queda. O vazio até o marcador é a informação correta: não sabemos.
     ctx.stroke()
     ctx.restore()
 
-    // Só quando o encerramento cabe no eixo. Fora dele o marcador mentiria
-    // sobre onde está.
-    if (lapseAge !== null && lapseAge <= lastAge) {
-      const x = xFor(lapseAge)
-      ctx.save()
-      ctx.setLineDash([2, 3])
-      ctx.strokeStyle = ALERT
-      ctx.lineWidth = 1
+    points.forEach((point) => {
+      ctx.fillStyle = PAPER
+      ctx.strokeStyle = colour
+      ctx.lineWidth = 1.8
       ctx.beginPath()
-      ctx.moveTo(x + 0.5, plotTop)
-      ctx.lineTo(x + 0.5, plotBottom)
+      ctx.arc(xFor(point.policyYear), yFor(point.value), 3.2, 0, Math.PI * 2)
+      ctx.fill()
       ctx.stroke()
-      ctx.restore()
-      ctx.fillStyle = ALERT
-      ctx.font = font(8, 700)
-      const label = copy.lapsesAt(lapseAge)
-      const labelWidth = ctx.measureText(label).width
-      const labelX = x + 4 + labelWidth > plotRight ? x - 4 - labelWidth : x + 4
-      ctx.fillText(label, labelX, plotTop + 9)
-    }
+    })
   }
 
-  // Só o benefício por morte. O valor de resgate garantido fica colado no zero
-  // enquanto os benefícios andam na casa dos milhões, e as quatro curvas numa
-  // escala só apagavam metade delas — o resgate está na tabela, em número.
-  // A garantida é desenhada por último, por cima. Num benefício nivelado as
-  // duas séries são a mesma reta, e a de baixo desaparecia inteira sob o traço
-  // sólido e mais largo da atual — inclusive nos vãos do tracejado. Sumia com
-  // ela o único fato que o desenho tinha a dar: a curva garantida termina antes
-  // da atual, no último ano que a seguradora publicou antes do encerramento.
-  //
-  // O leitor via a legenda prometer duas séries, via o marcador apontar
-  // "encerra aos 62", e via uma única linha seguir reta até o fim. Não era um
-  // desenho incompleto; era um desenho que se contradizia.
-  series(scenarios.deathBenefit.current, TEAL, false, scenarios.lapseAge.current)
-  series(scenarios.deathBenefit.guaranteed, TEAL_DEEP, true, scenarios.lapseAge.guaranteed)
+  series(values.current, GOLD, false)
 
   ctx.fillStyle = INK_MUTED
   ctx.font = font(8)
-  ctx.fillText(copy.age(firstAge), plotLeft, plotBottom + 14)
-  right(ctx, copy.age(lastAge), plotRight, plotBottom + 14)
+  ctx.fillText(copy.chartAxisNote, plotLeft, plotBottom + 54)
+  ctx.font = font(9)
+  const afterNote = paragraph(
+    ctx, copy.publishedPointsNote, MARGIN, plotBottom + 78, PAGE_WIDTH - MARGIN * 2, 13)
 
-  let legendX = plotLeft
-  const legend: Array<[string, boolean, string]> = [
-    [TEAL, false, `${copy.deathBenefit} · ${copy.scenarioCurrent}`],
-    [TEAL_DEEP, true, `${copy.deathBenefit} · ${copy.scenarioGuaranteed}`],
-  ]
-  for (const [colour, dashed, label] of legend) {
-    const y = plotBottom + 22
-    ctx.fillStyle = colour
-    if (dashed) for (const offset of [0, 6, 12]) ctx.fillRect(legendX + offset, y, 4, 3)
-    else ctx.fillRect(legendX, y, 14, 3)
-    ctx.fillStyle = INK_MUTED
-    ctx.font = font(8, 500)
-    ctx.fillText(label, legendX + 19, y + 4)
-    legendX += 19 + ctx.measureText(label).width + 18
-  }
-
-  return top + height
-}
-
-/// A tabela que o gráfico desenha, para o cliente poder conferir cada ponto.
-///
-/// Duas colunas por cenário — o que ele recebe se morrer e o que consegue se
-/// resgatar — porque são as duas perguntas que um cliente faz olhando um plano,
-/// e porque é assim que a página da seguradora as põe.
-function scenarioTable(
-  ctx: Ctx, scenarios: ClientSummaryScenarios, copy: Copy, top: number,
-): number {
-  const width = PAGE_WIDTH - MARGIN * 2
-  const columns = [MARGIN + 12, MARGIN + 92, MARGIN + 170, MARGIN + 280, MARGIN + 390]
-
-  // O cabeçalho tem dois andares: o cenário em cima, a grandeza embaixo. Uma
-  // linha só teria de repetir "garantido" em cada coluna para não ficar ambígua.
-  ctx.fillStyle = TEAL_DEEP
-  ctx.font = font(8, 700)
-  ctx.fillText(copy.scenarioGuaranteed, columns[1]!, top + 10)
-  ctx.fillStyle = GOLD
-  ctx.fillText(copy.scenarioCurrent, columns[3]!, top + 10)
-
+  ctx.strokeStyle = BORDER
+  ctx.beginPath()
+  ctx.moveTo(MARGIN, afterNote + 18.5)
+  ctx.lineTo(PAGE_WIDTH - MARGIN, afterNote + 18.5)
+  ctx.stroke()
   ctx.fillStyle = INK_MUTED
   ctx.font = font(8, 700)
+  ctx.fillText(copy.chartCurrentEnding.toUpperCase(), MARGIN, afterNote + 38)
+  ctx.fillStyle = currentLapse.year === null ? INK : ALERT
+  ctx.font = font(10, 700)
+  ctx.fillText(
+    currentLapse.year === null || currentLapse.age === null
+      ? copy.neverEnds
+      : copy.endsInYear(currentLapse.year, currentLapse.age),
+    MARGIN, afterNote + 55,
+  )
+  if (insight) {
+    const x = MARGIN + 270
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(8, 700)
+    ctx.fillText(insight.label.toUpperCase(), x, afterNote + 38)
+    ctx.fillStyle = TEAL_DEEP
+    ctx.font = font(10, 700)
+    ctx.fillText(insight.value, x, afterNote + 55)
+  }
+  return afterNote + 55
+}
+
+function surrenderAnalysis(
+  ctx: Ctx, insights: ClientPolicyInsights | null, copy: Copy, top: number,
+): number {
+  sectionTitle(ctx, copy.firstBreakEven, top, copy.currentValuesOnly)
+  ctx.fillStyle = insights?.breakEven ? TEAL_DEEP : INK_MUTED
+  ctx.font = font(insights?.breakEven ? 24 : 11, insights?.breakEven ? 700 : 500)
+  const finding = insights?.breakEvenWindow
+    ? copy.breakEvenWindow(insights.breakEvenWindow.afterYear, insights.breakEvenWindow.byYear)
+    : insights?.breakEven
+      ? copy.breakEvenAt(insights.breakEven.policyYear, insights.breakEven.age)
+      : insights && insights.contributionBasis !== 'UNAVAILABLE'
+        ? copy.noBreakEven : copy.breakEvenUnavailable
+  const afterFinding = paragraph(
+    ctx, finding, MARGIN, top + 32, PAGE_WIDTH - MARGIN * 2, insights?.breakEven ? 28 : 16)
+
+  const rows = insights?.checkpoints ?? []
+  const tableTop = afterFinding + 38
+  const columns = [MARGIN + 12, MARGIN + 105, MARGIN + 170, MARGIN + 285, MARGIN + 405]
   const headings = [
-    copy.policyYearColumn, copy.cashValueColumnShort, copy.deathBenefitColumnShort,
-    copy.cashValueColumnShort, copy.deathBenefitColumnShort,
+    copy.policyYearColumn, copy.ageColumn, copy.totalPaidColumn,
+    copy.cashValueColumnShort, copy.differenceColumn,
   ]
-  headings.forEach((heading, index) => ctx.fillText(heading, columns[index]!, top + 24))
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(8, 700)
+  headings.forEach((heading, index) => ctx.fillText(heading, columns[index]!, tableTop + 12))
   ctx.strokeStyle = BORDER
-  ctx.lineWidth = 1
   ctx.beginPath()
-  ctx.moveTo(MARGIN, top + 31.5)
-  ctx.lineTo(MARGIN + width, top + 31.5)
+  ctx.moveTo(MARGIN, tableTop + 20.5)
+  ctx.lineTo(PAGE_WIDTH - MARGIN, tableTop + 20.5)
   ctx.stroke()
 
-  const rowHeight = 24
-  scenarios.rows.forEach((row, index) => {
-    const rowTop = top + 31 + index * rowHeight
-    const baseline = rowTop + rowHeight - 8
+  rows.forEach((row, index) => {
+    const rowTop = tableTop + 21 + index * 42
     if (index % 2 === 0) {
       ctx.fillStyle = PANEL
-      ctx.fillRect(MARGIN, rowTop + 1, width, rowHeight - 1)
+      ctx.fillRect(MARGIN, rowTop, PAGE_WIDTH - MARGIN * 2, 41)
     }
+    const baseline = rowTop + 26
     ctx.fillStyle = INK
     ctx.font = font(10, 700)
-    ctx.fillText(`${copy.year(row.policyYear)} · ${row.age}`, columns[0]!, baseline)
-    const cells: Array<[number, string]> = [
-      [columns[1]!, whole.format(row.guaranteed.cashSurrenderValue)],
-      [columns[2]!, whole.format(row.guaranteed.netDeathBenefit)],
-      [columns[3]!, whole.format(row.current.cashSurrenderValue)],
-      [columns[4]!, whole.format(row.current.netDeathBenefit)],
-    ]
-    cells.forEach(([x, value], cell) => {
-      ctx.fillStyle = cell < 2 ? INK_MUTED : INK
-      ctx.font = font(10, cell < 2 ? 400 : 500)
-      ctx.fillText(value, x, baseline)
-    })
+    ctx.fillText(copy.year(row.policyYear), columns[0]!, baseline)
+    ctx.font = font(10)
+    ctx.fillText(String(row.age), columns[1]!, baseline)
+    ctx.fillText(row.totalPaid === null ? '—' : whole.format(row.totalPaid), columns[2]!, baseline)
+    ctx.font = font(10, 700)
+    ctx.fillText(whole.format(row.cashSurrenderValue), columns[3]!, baseline)
+    const difference = row.surrenderDifference
+    ctx.fillStyle = difference !== null && difference >= 0 ? TEAL_DEEP : INK_MUTED
+    ctx.fillText(difference === null ? '—' : `${difference >= 0 ? '+' : '−'}${whole.format(Math.abs(difference))}`,
+      columns[4]!, baseline)
   })
 
-  // A última linha é o que cada cenário faz no fim, que é a pergunta que a
-  // tabela deixa no ar e que só a página da seguradora responde.
-  const endTop = top + 31 + scenarios.rows.length * rowHeight
-  ctx.fillStyle = ALERT
-  ctx.font = font(9, 700)
-  const ending = (year: number | null, age: number | null) =>
-    year === null || age === null ? copy.neverEnds : copy.endsInYear(year, age)
-  ctx.fillText(ending(scenarios.lapseYear.guaranteed, scenarios.lapseAge.guaranteed),
-    columns[1]!, endTop + 14)
-  ctx.fillText(ending(scenarios.lapseYear.current, scenarios.lapseAge.current),
-    columns[3]!, endTop + 14)
-
-  return endTop + 20
+  const afterTable = tableTop + 21 + rows.length * 42
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(9.5)
+  return paragraph(ctx, copy.notSurrenderAdvice, MARGIN, afterTable + 28,
+    PAGE_WIDTH - MARGIN * 2, 14)
 }
 
 /// Closes the page under whatever content there was.
@@ -930,14 +947,33 @@ function quickPage(
   if (summary.kind === 'PROJECTED') {
     const afterFigures = headlineFigures(ctx, summary, copy, BAND_HEIGHT + 30)
     if (summary.scenarios) {
-      // Os números da seguradora, desenhados e escritos. Nada aqui é projeção
-      // nossa, e é por isso que este caminho tem precedência sobre o outro.
-      const afterChart = scenarioChart(ctx, summary.scenarios, copy, afterFigures + 24, 186)
-      const afterTable = scenarioTable(ctx, summary.scenarios, copy, afterChart + 22)
+      sectionTitle(ctx, copy.yearByYear, afterFigures + 34, copy.currentValuesOnly)
+      const points = summary.scenarios.rows.map((row) => ({
+        policyYear: row.policyYear, age: row.age,
+        netDeathBenefit: row.current.netDeathBenefit,
+        cashSurrenderValue: row.current.cashSurrenderValue,
+        premiumOutlay: null, accumulatedValue: null,
+      }))
+      const afterTable = projectionTable(ctx, points, [
+        { x: MARGIN + 14, heading: copy.policyYearColumn, value: (p) => copy.year(p.policyYear) },
+        { x: MARGIN + 150, heading: copy.ageColumn, value: (p) => String(p.age) },
+        { x: MARGIN + 250, heading: copy.deathBenefitColumn, value: (p) => amount(p.netDeathBenefit) },
+        { x: MARGIN + 400, heading: copy.cashValueColumn, value: (p) => amount(p.cashSurrenderValue) },
+      ], afterFigures + 55, 29)
       ctx.fillStyle = INK_MUTED
-      ctx.font = font(8)
-      contentBottom = paragraph(
-        ctx, copy.scenarioNote, MARGIN, afterTable + 12, PAGE_WIDTH - MARGIN * 2, 11)
+      ctx.font = font(8.5)
+      const afterNote = paragraph(
+        ctx, copy.scenarioCurrentBody, MARGIN, afterTable + 14, PAGE_WIDTH - MARGIN * 2, 12)
+      const currentEnd = summary.scenarios.lapseYear.current !== null &&
+        summary.scenarios.lapseAge.current !== null
+        ? copy.endsInYear(summary.scenarios.lapseYear.current, summary.scenarios.lapseAge.current)
+        : null
+      if (currentEnd) {
+        ctx.fillStyle = ALERT
+        ctx.font = font(9, 700)
+        ctx.fillText(currentEnd, MARGIN, afterNote + 18)
+      }
+      contentBottom = currentEnd ? afterNote + 18 : afterNote
       footer(ctx, summary, copy, language, contentBottom)
       document.endPage()
       return
@@ -988,9 +1024,9 @@ function quickPage(
 
 function outlookPage(
   ctx: Ctx, summary: ClientSummary & { kind: 'PROJECTED' }, copy: Copy,
-  language: ClientSummaryLanguage,
+  language: ClientSummaryLanguage, pageNumber = 4,
 ): void {
-  pageChrome(ctx, summary, copy.whatYouPutIn, 4)
+  pageChrome(ctx, summary, summary.outlook ? copy.whatYouPutIn : copy.importantInformation, pageNumber)
   let bottom = MARGIN + 46
 
   if (summary.outlook) {
@@ -1015,6 +1051,22 @@ function outlookPage(
     ctx.font = font(9, 700)
     ctx.fillText(copy.notGuaranteed, MARGIN, bottom + 6)
     bottom += 6
+  } else {
+    sectionTitle(ctx, copy.currentValuesOnly, bottom + 14)
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(10.5)
+    bottom = paragraph(ctx, copy.scenarioCurrentBody, MARGIN, bottom + 42,
+      PAGE_WIDTH - MARGIN * 2, 16)
+    ctx.strokeStyle = BORDER
+    ctx.beginPath()
+    ctx.moveTo(MARGIN, bottom + 28.5)
+    ctx.lineTo(PAGE_WIDTH - MARGIN, bottom + 28.5)
+    ctx.stroke()
+    sectionTitle(ctx, copy.scenarioGuaranteed, bottom + 64)
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(10.5)
+    bottom = paragraph(ctx, copy.scenarioGuaranteedBody, MARGIN, bottom + 92,
+      PAGE_WIDTH - MARGIN * 2, 16)
   }
 
   // The carrier's own warnings, when it issued any. They belong on the page
@@ -1147,47 +1199,471 @@ function termFullPages(
   document.endPage()
 }
 
+function reportChrome(
+  ctx: Ctx, summary: ClientSummary & { kind: 'PROJECTED' }, copy: Copy,
+  section: string, pageNumber: number,
+): void {
+  ctx.fillStyle = PAPER
+  ctx.fillRect(0, 0, REPORT_WIDTH, REPORT_HEIGHT)
+  ctx.strokeStyle = '#c9a33a'
+  ctx.lineWidth = 0.7
+  ctx.strokeRect(24.5, 24.5, REPORT_WIDTH - 49, REPORT_HEIGHT - 49)
+  ctx.fillStyle = GOLD
+  ctx.font = font(8, 700)
+  ctx.fillText(section.toUpperCase(), REPORT_MARGIN, REPORT_MARGIN + 4)
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(7.5, 500)
+  ctx.fillText(`${summary.insuredName.toUpperCase()} · ${summary.productLabel.toUpperCase()}`,
+    REPORT_MARGIN, REPORT_HEIGHT - 36)
+  ctx.textAlign = 'center'
+  ctx.fillText(copy.currentValuesOnly, REPORT_WIDTH / 2, REPORT_HEIGHT - 36)
+  ctx.textAlign = 'right'
+  ctx.fillText(String(pageNumber).padStart(2, '0'), REPORT_WIDTH - REPORT_MARGIN, REPORT_HEIGHT - 36)
+  ctx.textAlign = 'left'
+}
+
+function reportCover(
+  ctx: Ctx, summary: ClientSummary & { kind: 'PROJECTED' }, copy: Copy,
+  language: ClientSummaryLanguage,
+): void {
+  ctx.fillStyle = '#08130d'
+  ctx.fillRect(0, 0, REPORT_WIDTH, REPORT_HEIGHT)
+  ctx.strokeStyle = GOLD
+  ctx.lineWidth = 0.8
+  ctx.strokeRect(24.5, 24.5, REPORT_WIDTH - 49, REPORT_HEIGHT - 49)
+  drawLogoMark(ctx, REPORT_MARGIN, REPORT_MARGIN, 31)
+  ctx.fillStyle = ON_BAND
+  ctx.font = font(18, 700)
+  ctx.fillText('keepr', REPORT_MARGIN + 40, REPORT_MARGIN + 23)
+  ctx.fillStyle = BRAND_GREEN
+  ctx.fillText('one', REPORT_MARGIN + 90, REPORT_MARGIN + 23)
+
+  ctx.fillStyle = BRAND_GREEN
+  ctx.font = font(9, 700)
+  ctx.textAlign = 'center'
+  ctx.fillText(copy.reportTitle.toUpperCase(), REPORT_WIDTH / 2, 216)
+  ctx.fillStyle = ON_BAND
+  ctx.font = font(43, 300)
+  ctx.fillText(summary.insuredName, REPORT_WIDTH / 2, 274)
+  ctx.strokeStyle = BRAND_GREEN
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(REPORT_WIDTH / 2 - 42, 302)
+  ctx.lineTo(REPORT_WIDTH / 2 + 42, 302)
+  ctx.stroke()
+  ctx.fillStyle = ON_BAND_MUTED
+  ctx.font = font(14, 400)
+  paragraph(ctx, copy.reportSubtitle, REPORT_WIDTH / 2, 337, 500, 20)
+
+  ctx.fillStyle = ON_BAND_MUTED
+  ctx.font = font(8, 500)
+  ctx.fillText(`${copy.issued} ${dayFor(language).format(summary.issuedOn).toUpperCase()}`,
+    REPORT_WIDTH / 2, REPORT_HEIGHT - 106)
+  if (summary.advisorName) {
+    ctx.fillStyle = ON_BAND
+    ctx.font = font(8, 700)
+    ctx.fillText(`${copy.advisor}: ${summary.advisorName.toUpperCase()}`,
+      REPORT_WIDTH / 2, REPORT_HEIGHT - 86)
+  }
+  ctx.fillStyle = ON_BAND_MUTED
+  ctx.font = font(7.5, 500)
+  ctx.fillText(copy.currentValuesOnly, REPORT_WIDTH / 2, REPORT_HEIGHT - 55)
+  ctx.textAlign = 'left'
+}
+
+function reportExecutivePage(
+  ctx: Ctx, summary: ClientSummary & { kind: 'PROJECTED' }, copy: Copy,
+): void {
+  reportChrome(ctx, summary, copy, copy.reportTitle, 2)
+  ctx.fillStyle = INK
+  ctx.font = font(34, 300)
+  paragraph(ctx, copy.executiveReading, REPORT_MARGIN, 92, 420, 38)
+  ctx.strokeStyle = BORDER
+  ctx.beginPath()
+  ctx.moveTo(REPORT_MARGIN, 150.5)
+  ctx.lineTo(REPORT_WIDTH - REPORT_MARGIN, 150.5)
+  ctx.stroke()
+
+  const facts: Array<[string, string]> = [
+    [copy.yourCoverage, whole.format(summary.faceAmount)],
+    [copy.monthlyPayment, cents.format(summary.monthlyPremium)],
+    [copy.perYear, cents.format(summary.annualPremium)],
+  ]
+  facts.forEach(([label, value], index) => {
+    const y = 202 + index * 82
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(8, 700)
+    ctx.fillText(label.toUpperCase(), REPORT_MARGIN, y)
+    ctx.fillStyle = index === 0 ? TEAL_DEEP : INK
+    ctx.font = font(index === 0 ? 26 : 22, 700)
+    ctx.fillText(value, REPORT_MARGIN, y + 31)
+  })
+
+  const panelX = 460
+  ctx.fillStyle = '#08130d'
+  ctx.fillRect(panelX, 174, 290, 310)
+  ctx.fillStyle = BRAND_GREEN
+  ctx.font = font(8, 700)
+  paragraph(ctx, copy.verifiedSource.toUpperCase(), panelX + 24, 207, 240, 11)
+  const questions = [copy.protectionQuestion, copy.cashQuestion, copy.surrenderQuestion]
+  questions.forEach((question, index) => {
+    const y = 246 + index * 72
+    ctx.fillStyle = index === 0 ? GOLD : BRAND_GREEN
+    ctx.font = font(18, 700)
+    ctx.fillText(String(index + 1).padStart(2, '0'), panelX + 24, y)
+    ctx.fillStyle = ON_BAND
+    ctx.font = font(11, 500)
+    paragraph(ctx, question, panelX + 64, y - 3, 198, 15)
+  })
+}
+
+function reportMetricPage(
+  ctx: Ctx, summary: ClientSummary & { kind: 'PROJECTED' }, copy: Copy,
+  pageNumber: number, title: string, question: string,
+  points: ClientSummaryScenarios['deathBenefit']['current'],
+  highlightYears: number[],
+): void {
+  reportChrome(ctx, summary, copy, title, pageNumber)
+  ctx.textAlign = 'left'
+  ctx.fillStyle = INK
+  ctx.font = font(31, 300)
+  paragraph(ctx, question, REPORT_MARGIN, 88, 650, 35)
+  ctx.strokeStyle = BORDER
+  ctx.beginPath()
+  ctx.moveTo(REPORT_MARGIN, 151.5)
+  ctx.lineTo(REPORT_WIDTH - REPORT_MARGIN, 151.5)
+  ctx.stroke()
+
+  const plotLeft = REPORT_MARGIN + 58
+  const plotRight = 530
+  const plotTop = 190
+  const plotBottom = 468
+  const firstYear = Math.min(...points.map((point) => point.policyYear))
+  const lastYear = Math.max(...points.map((point) => point.policyYear))
+  const ceiling = niceCeiling(Math.max(...points.map((point) => point.value)))
+  const xFor = (year: number) => plotLeft + ((year - firstYear) / Math.max(lastYear - firstYear, 1)) * (plotRight - plotLeft)
+  const yFor = (value: number) => plotBottom - (value / ceiling) * (plotBottom - plotTop)
+  for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+    const y = plotBottom - fraction * (plotBottom - plotTop)
+    ctx.strokeStyle = BORDER
+    ctx.lineWidth = 0.7
+    ctx.beginPath()
+    ctx.moveTo(plotLeft, y + 0.5)
+    ctx.lineTo(plotRight, y + 0.5)
+    ctx.stroke()
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(7.5)
+    right(ctx, fraction === 0 ? '$0' : compact.format(ceiling * fraction), plotLeft - 10, y + 3)
+  }
+  ctx.strokeStyle = GOLD
+  ctx.lineWidth = 3
+  ctx.lineJoin = 'round'
+  ctx.beginPath()
+  points.forEach((point, index) => {
+    if (index === 0) ctx.moveTo(xFor(point.policyYear), yFor(point.value))
+    else ctx.lineTo(xFor(point.policyYear), yFor(point.value))
+  })
+  ctx.stroke()
+  points.forEach((point) => {
+    ctx.fillStyle = PAPER
+    ctx.strokeStyle = GOLD
+    ctx.lineWidth = 1.7
+    ctx.beginPath()
+    ctx.arc(xFor(point.policyYear), yFor(point.value), 3, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+  })
+
+  const labeled = [...new Set([firstYear, ...highlightYears, lastYear])]
+    .filter((year) => points.some((point) => point.policyYear === year))
+    .sort((a, b) => a - b)
+  labeled.forEach((year) => {
+    const point = points.find((candidate) => candidate.policyYear === year)!
+    const x = xFor(year)
+    ctx.fillStyle = INK
+    ctx.font = font(8, 700)
+    ctx.textAlign = 'center'
+    ctx.fillText(String(year), x, plotBottom + 18)
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(7)
+    ctx.fillText(copy.age(point.age), x, plotBottom + 31)
+  })
+  ctx.textAlign = 'left'
+
+  const sideX = 575
+  ctx.fillStyle = INK
+  ctx.font = font(15, 700)
+  ctx.fillText(copy.selectedMilestones, sideX, 190)
+  const milestones = labeled.slice(-4)
+  milestones.forEach((year, index) => {
+    const point = points.find((candidate) => candidate.policyYear === year)!
+    const y = 229 + index * 66
+    ctx.strokeStyle = BORDER
+    ctx.beginPath()
+    ctx.moveTo(sideX, y - 15.5)
+    ctx.lineTo(REPORT_WIDTH - REPORT_MARGIN, y - 15.5)
+    ctx.stroke()
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(8, 700)
+    ctx.fillText(`${copy.year(year)} · ${copy.age(point.age)}`.toUpperCase(), sideX, y)
+    ctx.fillStyle = index === milestones.length - 1 ? TEAL_DEEP : INK
+    ctx.font = font(16, 700)
+    ctx.fillText(whole.format(point.value), sideX, y + 24)
+  })
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(8)
+  paragraph(ctx, copy.publishedPointsNote, sideX, 500, REPORT_WIDTH - REPORT_MARGIN - sideX, 11)
+}
+
+function reportSurrenderPage(
+  ctx: Ctx, summary: ClientSummary & { kind: 'PROJECTED' }, copy: Copy,
+  insights: ClientPolicyInsights | null,
+): void {
+  reportChrome(ctx, summary, copy, copy.surrenderTiming, 5)
+  ctx.textAlign = 'left'
+  ctx.fillStyle = INK
+  ctx.font = font(31, 300)
+  paragraph(ctx, copy.surrenderQuestion, REPORT_MARGIN, 88, 650, 35)
+  ctx.strokeStyle = BORDER
+  ctx.beginPath()
+  ctx.moveTo(REPORT_MARGIN, 151.5)
+  ctx.lineTo(REPORT_WIDTH - REPORT_MARGIN, 151.5)
+  ctx.stroke()
+
+  const finding = insights?.breakEvenWindow
+    ? copy.breakEvenWindow(insights.breakEvenWindow.afterYear, insights.breakEvenWindow.byYear)
+    : insights?.breakEven
+      ? copy.breakEvenAt(insights.breakEven.policyYear, insights.breakEven.age)
+      : insights && insights.contributionBasis !== 'UNAVAILABLE'
+        ? copy.noBreakEven : copy.breakEvenUnavailable
+  const hasBreakEvenFinding = Boolean(insights?.breakEven || insights?.breakEvenWindow)
+  ctx.fillStyle = hasBreakEvenFinding ? TEAL_DEEP : INK_MUTED
+  ctx.font = font(hasBreakEvenFinding ? 17 : 11, hasBreakEvenFinding ? 700 : 500)
+  paragraph(ctx, finding, REPORT_MARGIN, 188, 690, hasBreakEvenFinding ? 21 : 16)
+
+  const rows = insights?.checkpoints.slice(0, 6) ?? []
+  const top = 270
+  const columns = [REPORT_MARGIN + 10, 120, 154, 246, 350, 470, 610]
+  const columnWidths = [58, 28, 82, 94, 108, 128, 136]
+  const headings = [copy.policyYearColumn, copy.ageColumn, copy.premiumColumn,
+    copy.totalPaidColumn, copy.cashValueColumnShort, copy.differenceColumn,
+    copy.deathBenefitColumnShort]
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(6.8, 700)
+  headings.forEach((heading, index) => {
+    paragraph(ctx, heading, columns[index]!, top, columnWidths[index]!, 8)
+  })
+  rows.forEach((row, index) => {
+    const y = top + 34 + index * 39
+    if (index % 2 === 0) {
+      ctx.fillStyle = PANEL
+      ctx.fillRect(REPORT_MARGIN, y - 18, REPORT_WIDTH - REPORT_MARGIN * 2, 34)
+    }
+    const values = [copy.year(row.policyYear), String(row.age),
+      row.premiumOutlay === null ? '—' : whole.format(row.premiumOutlay),
+      row.totalPaid === null ? '—' : whole.format(row.totalPaid),
+      whole.format(row.cashSurrenderValue),
+      row.surrenderDifference === null ? '—' : `${row.surrenderDifference >= 0 ? '+' : '−'}${whole.format(Math.abs(row.surrenderDifference))}`,
+      whole.format(row.netDeathBenefit)]
+    values.forEach((value, cell) => {
+      ctx.fillStyle = cell === 4 ? TEAL_DEEP : INK
+      ctx.font = font(8.5, cell === 0 || cell === 4 ? 700 : 500)
+      ctx.fillText(value, columns[cell]!, y)
+    })
+  })
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(8.5)
+  paragraph(ctx, copy.notSurrenderAdvice, REPORT_MARGIN, 510,
+    REPORT_WIDTH - REPORT_MARGIN * 2, 12)
+}
+
+function reportDetailsPage(
+  ctx: Ctx, summary: ClientSummary & { kind: 'PROJECTED' }, copy: Copy,
+  language: ClientSummaryLanguage,
+): void {
+  reportChrome(ctx, summary, copy, copy.reportTitle, 6)
+  ctx.textAlign = 'left'
+  ctx.fillStyle = INK
+  ctx.font = font(31, 300)
+  ctx.fillText(copy.importantInformation, REPORT_MARGIN, 110)
+  ctx.strokeStyle = BORDER
+  ctx.beginPath()
+  ctx.moveTo(REPORT_MARGIN, 136.5)
+  ctx.lineTo(REPORT_WIDTH - REPORT_MARGIN, 136.5)
+  ctx.stroke()
+
+  const sections: Array<[string, string]> = [
+    [copy.currentValuesOnly, copy.scenarioCurrentBody],
+    [copy.scenarioGuaranteed, copy.scenarioGuaranteedBody],
+    [copy.nextStep, copy.reportClose],
+  ]
+  sections.forEach(([title, body], index) => {
+    const y = 180 + index * 96
+    ctx.fillStyle = index === 0 ? GOLD : INK
+    ctx.font = font(13, 700)
+    ctx.fillText(title, REPORT_MARGIN, y)
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(10)
+    paragraph(ctx, body, REPORT_MARGIN, y + 25, 520, 15)
+  })
+  const currentEnding = summary.scenarios === null ? null : {
+    year: summary.scenarios.lapseYear.current,
+    age: summary.scenarios.lapseAge.current,
+  }
+  if (currentEnding !== null && currentEnding.year !== null && currentEnding.age !== null) {
+    ctx.fillStyle = INK_MUTED
+    ctx.font = font(7.5, 700)
+    ctx.fillText(copy.chartCurrentEnding.toUpperCase(), REPORT_MARGIN, 458)
+    ctx.fillStyle = ALERT
+    ctx.font = font(10, 700)
+    ctx.fillText(copy.endsInYear(currentEnding.year, currentEnding.age), REPORT_MARGIN, 478)
+  } else if (summary.lapseYear !== null) {
+    ctx.fillStyle = ALERT
+    ctx.font = font(10, 700)
+    ctx.fillText(copy.lapseNote(summary.lapseYear), REPORT_MARGIN, 478)
+  }
+  if (summary.advisorName) {
+    ctx.fillStyle = '#08130d'
+    ctx.fillRect(585, 174, 165, 206)
+    ctx.fillStyle = BRAND_GREEN
+    ctx.font = font(8, 700)
+    ctx.fillText(copy.advisor.toUpperCase(), 605, 207)
+    ctx.fillStyle = ON_BAND
+    ctx.font = font(16, 700)
+    paragraph(ctx, summary.advisorName, 605, 238, 125, 20)
+  }
+  ctx.fillStyle = INK_MUTED
+  ctx.font = font(6.8)
+  paragraph(ctx, CLIENT_SUMMARY_DISCLAIMER, REPORT_MARGIN, 508,
+    REPORT_WIDTH - REPORT_MARGIN * 2, 9)
+  ctx.fillStyle = INK
+  ctx.font = font(7, 700)
+  ctx.fillText(copy.sourceLine(dayFor(language).format(summary.issuedOn)), REPORT_MARGIN, 560)
+}
+
+function clientReportPages(
+  document: PDFDocument, summary: ClientSummary & { kind: 'PROJECTED'; scenarios: ClientSummaryScenarios },
+  copy: Copy, language: ClientSummaryLanguage, interpretation?: ClientSummaryInterpretation,
+): void {
+  const highlights = interpretation?.highlightYears.length
+    ? interpretation.highlightYears
+    : summary.scenarios.rows.map((row) => row.policyYear)
+  const insights = analyzeClientPolicy(summary)
+
+  reportCover(document.beginPage(REPORT_WIDTH, REPORT_HEIGHT), summary, copy, language)
+  document.endPage()
+  reportExecutivePage(document.beginPage(REPORT_WIDTH, REPORT_HEIGHT), summary, copy)
+  document.endPage()
+  reportMetricPage(document.beginPage(REPORT_WIDTH, REPORT_HEIGHT), summary, copy, 3,
+    copy.protectionOverTime, copy.protectionQuestion, summary.scenarios.deathBenefit.current, highlights)
+  document.endPage()
+  reportMetricPage(document.beginPage(REPORT_WIDTH, REPORT_HEIGHT), summary, copy, 4,
+    copy.cashAvailableOverTime, copy.cashQuestion, summary.scenarios.cashValue.current, highlights)
+  document.endPage()
+  reportSurrenderPage(document.beginPage(REPORT_WIDTH, REPORT_HEIGHT), summary, copy, insights)
+  document.endPage()
+  reportDetailsPage(document.beginPage(REPORT_WIDTH, REPORT_HEIGHT), summary, copy, language)
+  document.endPage()
+}
+
 function fullPages(
   document: PDFDocument, summary: ClientSummary & { kind: 'PROJECTED' }, copy: Copy,
-  language: ClientSummaryLanguage,
+  language: ClientSummaryLanguage, interpretation?: ClientSummaryInterpretation,
 ): void {
   cover(document.beginPage(PAGE_WIDTH, PAGE_HEIGHT), summary, copy, language)
   document.endPage()
 
-  // The three figures and the curve share a page. Given one each, the figures
-  // page came out 85% empty — a sheet that reads as a document which failed to
-  // finish rendering rather than one with room to breathe. There is honest
-  // material here for four pages, not five, and padding the fifth would be the
-  // one thing this document may not do.
   const plan = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
-  pageChrome(plan, summary, copy.yourPlan, 2)
+  pageChrome(plan, summary, copy.yourPlan, 2,
+    summary.scenarios ? copy.currentValuesOnly : undefined)
   const afterFigures = headlineFigures(plan, summary, copy, MARGIN + 60)
-  // A mesma curva da folha única, na altura que uma página inteira permite — e
-  // com a tabela da seguradora logo abaixo, que na folha única fica espremida.
-  // Uma apresentação que desenhasse uma curva diferente da do resumo seria duas
-  // versões da mesma apólice saindo da mesma casa.
   if (summary.scenarios) {
-    const afterChart = scenarioChart(plan, summary.scenarios, copy, afterFigures + 36, 268)
-    const afterTable = scenarioTable(plan, summary.scenarios, copy, afterChart + 34)
+    sectionTitle(plan, copy.decisionGuide, afterFigures + 44, copy.currentValuesOnly)
+    plan.fillStyle = INK
+    plan.font = font(12)
+    const afterGuide = paragraph(
+      plan, copy.decisionGuideBody, MARGIN, afterFigures + 70, PAGE_WIDTH - MARGIN * 2, 18)
+    plan.strokeStyle = BORDER
+    plan.beginPath()
+    plan.moveTo(MARGIN, afterGuide + 28.5)
+    plan.lineTo(PAGE_WIDTH - MARGIN, afterGuide + 28.5)
+    plan.stroke()
+    sectionTitle(plan, copy.protectionOverTime, afterGuide + 64)
+    plan.fillStyle = INK
+    plan.font = font(11)
+    const afterProtection = paragraph(
+      plan, copy.deathBenefit, MARGIN, afterGuide + 90, PAGE_WIDTH - MARGIN * 2, 16)
+    sectionTitle(plan, copy.cashAvailableOverTime, afterProtection + 40)
+    plan.fillStyle = INK
+    plan.font = font(11)
+    const afterCash = paragraph(
+      plan, copy.cashValue, MARGIN, afterProtection + 66, PAGE_WIDTH - MARGIN * 2, 16)
+    sectionTitle(plan, copy.surrenderTiming, afterCash + 40)
     plan.fillStyle = INK_MUTED
-    plan.font = font(9)
-    paragraph(plan, copy.scenarioNote, MARGIN, afterTable + 18, PAGE_WIDTH - MARGIN * 2, 12)
+    plan.font = font(10)
+    paragraph(plan, copy.surrenderTimingSubtitle, MARGIN, afterCash + 66,
+      PAGE_WIDTH - MARGIN * 2, 15)
   } else {
     coverageChart(plan, summary.coverage, copy, afterFigures + 40, 380,
       summary.guaranteed, summary.guaranteedLapse)
   }
   document.endPage()
 
+  if (summary.scenarios) {
+    const insights = analyzeClientPolicy(summary)
+    const highlightYears = interpretation?.highlightYears.length
+      ? interpretation.highlightYears
+      : insights?.checkpoints.map((point) => point.policyYear) ?? []
+    const currentLapse = {
+      year: summary.scenarios.lapseYear.current,
+      age: summary.scenarios.lapseAge.current,
+    }
+    const death = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
+    pageChrome(death, summary, copy.protectionOverTime, 3, copy.currentValuesOnly)
+    policyMetricChart(death, copy, summary.scenarios.deathBenefit,
+      highlightYears, MARGIN + 54, currentLapse)
+    document.endPage()
+
+    const cash = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
+    pageChrome(cash, summary, copy.cashAvailableOverTime, 4, copy.currentValuesOnly)
+    policyMetricChart(cash, copy, summary.scenarios.cashValue,
+      highlightYears, MARGIN + 54, currentLapse,
+      insights?.breakEven ? {
+        label: copy.firstBreakEven,
+        value: copy.breakEvenAt(insights.breakEven.policyYear, insights.breakEven.age),
+      } : null)
+    document.endPage()
+
+    const table = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
+    pageChrome(table, summary, copy.surrenderTiming, 5, copy.currentValuesOnly)
+    surrenderAnalysis(table, insights, copy, MARGIN + 76)
+    document.endPage()
+
+    outlookPage(document.beginPage(PAGE_WIDTH, PAGE_HEIGHT), summary, copy, language, 6)
+    document.endPage()
+    return
+  }
+
   const table = document.beginPage(PAGE_WIDTH, PAGE_HEIGHT)
   pageChrome(table, summary, copy.yearByYear, 3)
-  projectionTable(table, summary.fullMilestones, [
-    { x: MARGIN + 12, heading: copy.policyYearColumn, value: (p) => copy.year(p.policyYear) },
-    { x: MARGIN + 110, heading: copy.ageColumn, value: (p) => String(p.age) },
-    { x: MARGIN + 160, heading: copy.outlayColumn, value: (p) => amount(p.premiumOutlay) },
-    { x: MARGIN + 250, heading: copy.deathBenefitColumn, value: (p) => amount(p.netDeathBenefit) },
-    { x: MARGIN + 390, heading: copy.accumulatedColumn, value: (p) => amount(p.accumulatedValue) },
-    { x: MARGIN + 465, heading: copy.cashValueColumn, value: (p) => amount(p.cashSurrenderValue) },
-  ], MARGIN + 66, 30)
+  const hasAccumulatedValue = summary.fullMilestones.some((point) => point.accumulatedValue !== null)
+  const columns: Column[] = hasAccumulatedValue
+    ? [
+        { x: MARGIN + 12, heading: copy.policyYearColumn, value: (p) => copy.year(p.policyYear) },
+        { x: MARGIN + 110, heading: copy.ageColumn, value: (p) => String(p.age) },
+        { x: MARGIN + 160, heading: copy.outlayColumn, value: (p) => amount(p.premiumOutlay) },
+        { x: MARGIN + 250, heading: copy.deathBenefitColumn, value: (p) => amount(p.netDeathBenefit) },
+        { x: MARGIN + 390, heading: copy.accumulatedColumn, value: (p) => amount(p.accumulatedValue) },
+        { x: MARGIN + 465, heading: copy.cashValueColumn, value: (p) => amount(p.cashSurrenderValue) },
+      ]
+    : [
+        { x: MARGIN + 12, heading: copy.policyYearColumn, value: (p) => copy.year(p.policyYear) },
+        { x: MARGIN + 120, heading: copy.ageColumn, value: (p) => String(p.age) },
+        { x: MARGIN + 185, heading: copy.outlayColumn, value: (p) => amount(p.premiumOutlay) },
+        { x: MARGIN + 290, heading: copy.deathBenefitColumn, value: (p) => amount(p.netDeathBenefit) },
+        { x: MARGIN + 430, heading: copy.cashValueColumn, value: (p) => amount(p.cashSurrenderValue) },
+      ]
+  projectionTable(table, summary.fullMilestones, columns, MARGIN + 66, 30)
   document.endPage()
 
   outlookPage(document.beginPage(PAGE_WIDTH, PAGE_HEIGHT), summary, copy, language)
@@ -1211,8 +1687,11 @@ export async function renderClientSummaryPdf(
   // ledger, que é o que a folha única espreme em seis degraus — e uma página
   // inteira de tabela é material honesto, não preenchimento. Sem ledger não há
   // apresentação: sobram a duração e três números, que já são a folha única.
-  if (options.variant === 'FULL' && summary.kind === 'PROJECTED') {
-    fullPages(document, summary, copy, language)
+  if (options.variant === 'FULL' && summary.kind === 'PROJECTED' && summary.scenarios) {
+    clientReportPages(document, { ...summary, scenarios: summary.scenarios }, copy, language,
+      options.interpretation)
+  } else if (options.variant === 'FULL' && summary.kind === 'PROJECTED') {
+    fullPages(document, summary, copy, language, options.interpretation)
   } else if (options.variant === 'FULL' && summary.kind === 'LEVEL_TERM' && summary.schedule) {
     termFullPages(document, summary, summary.schedule, copy, language)
   } else {

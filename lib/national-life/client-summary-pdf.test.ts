@@ -345,10 +345,18 @@ const scenarios = {
   // retas ligando anos distantes, e era isso que tornava o gráfico ilegível.
   deathBenefit: {
     guaranteed: Array.from({ length: 41 }, (unused, index) => ({
-      age: 38 + index, value: 1_699_157 + index * 6_100,
+      policyYear: index + 1, age: 38 + index, value: 1_699_157 + index * 6_100,
     })),
     current: Array.from({ length: 53 }, (unused, index) => ({
-      age: 38 + index, value: 1_702_156 + index * 100_000,
+      policyYear: index + 1, age: 38 + index, value: 1_702_156 + index * 100_000,
+    })),
+  },
+  cashValue: {
+    guaranteed: Array.from({ length: 41 }, (unused, index) => ({
+      policyYear: index + 1, age: 38 + index, value: Math.max(0, 38_141 + index * 6_000),
+    })),
+    current: Array.from({ length: 53 }, (unused, index) => ({
+      policyYear: index + 1, age: 38 + index, value: 62_214 + index * 55_000,
     })),
   },
 }
@@ -356,61 +364,74 @@ const scenarios = {
 describe('a peça montada sobre a página da seguradora', () => {
   const withScenarios: ClientSummary = { ...summary, scenarios }
 
-  // A National Life não publica gráfico nenhum de valores. O que ela publica é
-  // esta tabela, então é ela que a peça mostra — e o gráfico é ela plotada, não
-  // um desenho por cima de números que o cliente não consegue conferir.
-  it('escreve os mesmos números que desenha', async () => {
+  it('mostra ao cliente os valores correntes publicados pela seguradora', async () => {
     const text = await extractText(await renderClientSummaryPdf(withScenarios))
     for (const row of scenarios.rows) {
-      expect(text).toContain(whole(row.guaranteed.cashSurrenderValue))
       expect(text).toContain(whole(row.current.netDeathBenefit))
+      expect(text).toContain(whole(row.current.cashSurrenderValue))
     }
-    expect(text).toContain('GUARANTEED')
-    expect(text).toContain('CURRENT · NOT GUARANTEED')
+    expect(text).toContain('DEATH BENEFIT')
+    expect(text).toContain('CASH VALUE')
   })
 
-  // O cenário corrente também encerra, trinta anos depois do garantido, e é o
-  // número que uma peça só-corrente nunca conta.
-  it('diz onde cada cenário termina, não só o garantido', async () => {
+  it('diz onde termina a projeção corrente apresentada ao cliente', async () => {
     const text = await extractText(await renderClientSummaryPdf(withScenarios))
-    expect(text).toContain('Ends in year 42, at age 79')
     expect(text).toContain('Ends in year 72, at age 109')
   })
 
-  it('atribui as duas colunas à seguradora, e não a nós', async () => {
+  it('atribui a projeção corrente à National Life', async () => {
     const text = await extractText(await renderClientSummaryPdf(withScenarios))
-    expect(text).toContain('National Life’s own')
-    expect(text).toContain('Summary of Values')
+    expect(text).toContain('currently illustrated by National Life')
   })
 
-  // O eixo cobre o que a seguradora publicou e nada além: esticá-lo até um
-  // encerramento posterior à última linha do ledger deixava um terço do gráfico
-  // vazio. O encerramento que cai fora continua dito na tabela, em texto.
-  it('não estica o eixo até um encerramento que a seguradora não desenhou', async () => {
+  // O resumo não tenta comprimir um gráfico no espaço da tabela. Ele entrega os
+  // pontos verificáveis e os encerramentos dos dois cenários em texto.
+  it('mantém a folha única focada nos pontos publicados, sem eixo comprimido', async () => {
     const text = await extractText(await renderClientSummaryPdf(withScenarios))
-    expect(text).toContain('Age 90')
-    expect(text).not.toContain('Age 109')
-    expect(text).toContain('Ends at 79')
+    expect(text).not.toContain('Policy year along the bottom')
+    expect(text).toContain('Year 33')
+    expect(text).toContain('$3,546,228')
     expect(text).toContain('Ends in year 72, at age 109')
   })
 
-  // Uma apresentação que desenhasse uma curva diferente da do resumo seria
-  // duas versões da mesma apólice saindo da mesma casa.
-  it('desenha a mesma curva nas duas peças', async () => {
-    const pages = await pageTexts(await renderClientSummaryPdf(withScenarios, { variant: 'FULL' }))
-    expect(pages).toHaveLength(4)
-    const plan = pages[1]!
-    expect(plan).toContain('CURRENT · NOT GUARANTEED')
-    expect(plan).toContain('Ends in year 42, at age 79')
-    expect(plan).toContain('Ends in year 72, at age 109')
-    expect(plan).toContain('National Life’s own')
-    // O rodapé da página sobrevive à nota que vem logo acima dele.
-    expect(plan).toContain('FlexLife · National Life')
+  it('dá uma página inteira a cada métrica na apresentação', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(
+      { ...withScenarios, outlook: null }, { variant: 'FULL' }))
+    expect(pages).toHaveLength(6)
+    expect(pages[2]).toContain('PROTECTION OVER TIME')
+    expect(pages[3]).toContain('CASH AVAILABLE OVER TIME')
+    expect(pages[2]).toContain('Every marker is a value published')
+    expect(pages[5]).toContain('Ends in year 72, at age 109')
+    expect(pages[4]).toContain('UNDERSTANDING SURRENDER TIMING')
+  })
+
+  it('mantém a inteligência no backend e apresenta somente a análise ao cliente', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(
+      { ...withScenarios, outlook: null },
+      {
+        variant: 'FULL',
+        language: 'PT',
+        interpretation: {
+          focus: 'CASH_VALUE', highlightYears: [5, 10, 20, 33], source: 'AI',
+        },
+      },
+    ))
+    const text = pages.join(' ')
+    expect(text).toContain('ANÁLISE BASEADA EXCLUSIVAMENTE NOS VALORES DA NATIONAL LIFE')
+    expect(text).not.toMatch(/\bAI\b|\bIA\b|INTELIGENTE|OPENAI/i)
+  })
+
+  it('explica os dois cenários quando não há perspectiva acumulada', async () => {
+    const pages = await pageTexts(await renderClientSummaryPdf(
+      { ...withScenarios, outlook: null }, { variant: 'FULL' }))
+    expect(pages[5]).toContain('Important information')
+    expect(pages[5]).toContain('rates and charges currently illustrated by National Life')
+    expect(pages[5]).toContain('lowest credited rate and highest contract charges')
   })
 
   it('não deixa a nota cair em cima do rodapé', async () => {
     const text = await extractText(await renderClientSummaryPdf(withScenarios))
-    expect(text).toContain('not guaranteed and will change')
+    expect(text).toContain('can change and are not guaranteed')
     expect(text).toContain('Prepared by Keepr One')
   })
 })
@@ -458,7 +479,7 @@ describe('the full presentation', () => {
     expect(pages[0]).toContain('PERSONAL PLAN')
     expect(pages[1]).toContain('YOUR PLAN')
     expect(pages[1]).toContain('Coverage over time')
-    expect(pages[2]).toContain('YEAR BY YEAR')
+    expect(pages[2]).toContain('SELECTED POLICY YEARS')
     expect(pages[3]).toContain('Next step')
   })
 

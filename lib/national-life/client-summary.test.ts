@@ -207,10 +207,10 @@ describe('a peça nascida só do PDF oficial', () => {
       policyYear: index + 1, age: 38 + index, premiumOutlay: 24_000,
       weightedAverageInterestRate: 6.84,
       accumulatedValue: 15_816 + index * 40_000,
-      cashSurrenderValue: index * 38_000,
-      netDeathBenefit: 1_702_156 + index * 40_000,
+      cashSurrenderValue: index === 4 ? 62_214 : index === 19 ? 663_875 : index * 38_000,
+      netDeathBenefit: index === 4 ? 1_774_001 : index === 19 ? 2_350_215 : 1_702_156 + index * 40_000,
     })),
-    lapse: null,
+    lapse: { policyYear: 72, age: 109 },
   }
 
   it('produz o documento sem a tela do Foresight', () => {
@@ -231,6 +231,8 @@ describe('a peça nascida só do PDF oficial', () => {
     expect(summary.scenarios?.lapseAge).toEqual({ guaranteed: 79, current: 109 })
     // A curva é o ledger inteiro, não os dois marcos da página de resumo.
     expect(summary.scenarios?.deathBenefit.current).toHaveLength(30)
+    expect(summary.scenarios?.cashValue.current).toHaveLength(30)
+    expect(summary.scenarios?.cashValue.current[19]).toEqual({ policyYear: 20, age: 57, value: 663_875 })
     // Nenhuma destas páginas declara ano de MEC, e um campo vazio é a resposta
     // honesta para uma pergunta que o documento não responde.
     expect(summary.mecYear).toBeNull()
@@ -241,6 +243,24 @@ describe('a peça nascida só do PDF oficial', () => {
     const { quickReview: unused, ...result } = rawPayload.foresightResult
     void unused
     expect(buildClientSummary({ ...rest, rawPayload: { foresightResult: result } })).toBeNull()
+  })
+
+  it('recusa combinar a página de resumo com um ledger divergente', () => {
+    const { rawPayload, ...rest } = verifiedIllustration
+    const { quickReview: unused, ...result } = rawPayload.foresightResult
+    void unused
+    const summary = buildClientSummary({
+      ...rest,
+      rawPayload: { foresightResult: result },
+      summaryOfValues,
+      currentLedger: {
+        ...currentLedger,
+        rows: currentLedger.rows.map((row) => row.policyYear === 20
+          ? { ...row, netDeathBenefit: row.netDeathBenefit + 1 }
+          : row),
+      },
+    })
+    expect(summary).toBeNull()
   })
 })
 

@@ -77,36 +77,29 @@ const leveled = {
   guaranteed: [], guaranteedLapse: null,
   scenarios: {
     deathBenefit: {
-      guaranteed: Array.from({ length: 25 }, (unused, i) => ({ age: 37 + i, value: 500_000 })),
-      current: Array.from({ length: 43 }, (unused, i) => ({ age: 37 + i, value: 500_000 })),
+      guaranteed: Array.from({ length: 25 }, (unused, i) => ({ policyYear: i + 1, age: 37 + i, value: 500_000 })),
+      current: Array.from({ length: 43 }, (unused, i) => ({ policyYear: i + 1, age: 37 + i, value: 500_000 })),
     },
-    cashValue: { guaranteed: [], current: [] },
+    cashValue: {
+      guaranteed: Array.from({ length: 25 }, (unused, i) => ({ policyYear: i + 1, age: 37 + i, value: i * 1_000 })),
+      current: Array.from({ length: 43 }, (unused, i) => ({ policyYear: i + 1, age: 37 + i, value: i * 2_000 })),
+    },
     rows: [],
     lapseAge: { guaranteed: 62, current: null },
     lapseYear: { guaranteed: 26, current: null },
   },
 }
 
-describe('o gráfico desenha as duas séries de forma visível', () => {
-  it('põe a garantida por cima, e ela termina antes da atual', async () => {
+describe('os gráficos respondem às perguntas do cliente', () => {
+  it('desenha uma curva corrente para proteção e outra para valor de resgate', async () => {
     strokes.length = 0
 
     await renderClientSummaryPdf(leveled as never, { variant: 'FULL' })
 
-    // Só curvas. Duas, e exatamente duas: a garantida e a atual.
+    // Uma série por página: proteção e valor disponível.
     const curvas = strokes.filter((stroke) => stroke.points > 10)
     expect(curvas).toHaveLength(2)
-
-    const garantida = curvas.find((curva) => curva.dashed)
-    const atual = curvas.find((curva) => !curva.dashed)
-    expect(garantida).toBeDefined()
-    expect(atual).toBeDefined()
-
-    // A garantida acaba antes — é o único fato que o desenho tem a dar.
-    expect(garantida!.lastX).toBeLessThan(atual!.lastX)
-
-    // E é desenhada depois da atual. Antes dela, some sob o traço sólido e mais
-    // largo, e o desenho passa a contradizer a própria legenda.
-    expect(curvas.indexOf(garantida!)).toBeGreaterThan(curvas.indexOf(atual!))
+    expect(curvas.every((curva) => !curva.dashed)).toBe(true)
+    expect(curvas[0]!.lastX).toBe(curvas[1]!.lastX)
   })
 })
