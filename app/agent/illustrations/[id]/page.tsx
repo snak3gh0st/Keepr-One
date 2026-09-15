@@ -24,7 +24,6 @@ import { PageHeader } from '@/components/PageHeader'
 import { ForesightActivityIndicator } from '../ForesightActivityIndicator'
 import { getServerI18n } from '@/lib/i18n/server'
 import { localeFor } from '@/lib/i18n/config'
-import { StartApplicationFromIllustrationButton } from '../StartApplicationFromIllustrationButton'
 import { TermPdfReconciliationButton } from '../TermPdfReconciliationButton'
 import { ClientDocumentPicker } from '../ClientDocumentPicker'
 
@@ -319,9 +318,6 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
               ) : null}
               {needsTermReconciliation ? (
                 <TermPdfReconciliationButton illustrationId={illustration.id} />
-              ) : null}
-              {foresightResult ? (
-                <StartApplicationFromIllustrationButton illustrationId={illustration.id} />
               ) : null}
             </div>
           ) : (

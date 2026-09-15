@@ -508,12 +508,14 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
                   "No Application has been started. The Application must originate from an Illustration with an official PDF and values confirmed by National Life.",
                 )}
               </Empty>
-              <Link
-                href="/agent/illustrations?intent=application"
-                className="inline-flex min-h-11 items-center justify-center rounded-md bg-teal-deep px-4 py-2 text-sm font-semibold text-paper transition-colors hover:bg-teal"
-              >
-                {copy("Escolher Illustration oficial", "Choose official Illustration")}
-              </Link>
+              {c.applicationAddon.offered ? (
+                <Link
+                  href="/agent/illustrations?intent=application"
+                  className="inline-flex min-h-11 items-center justify-center rounded-md bg-teal-deep px-4 py-2 text-sm font-semibold text-paper transition-colors hover:bg-teal"
+                >
+                  {copy("Escolher Illustration oficial", "Choose official Illustration")}
+                </Link>
+              ) : null}
             </div>
           ) : (
             <div className="space-y-4">
