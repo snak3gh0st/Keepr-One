@@ -201,7 +201,7 @@ describe('Illustration detail page', () => {
     expect(screen.getByText('Prêmio anual confirmado')).toBeTruthy()
     expect(screen.getByText(/US\$\s*4\.200,00$/)).toBeTruthy()
     expect(screen.getByText('Confirmado no Foresight com o PDF oficial')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Application de illustration-solved-iul' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Application de illustration-solved-iul' })).toBeNull()
     expect(screen.getByText('Aporte mensal informado')).toBeTruthy()
     expect(screen.getByText('Target Premium')).toBeTruthy()
     expect(screen.getByText('Pedido do agente')).toBeTruthy()
@@ -251,9 +251,10 @@ describe('Illustration detail page', () => {
     expect(screen.getAllByText('20-G').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Prazo confirmado pela National Life').length).toBeGreaterThan(0)
     expect(screen.getAllByText('15-G').length).toBeGreaterThan(0)
-    expect(screen.getByText(/este é o prazo usado no PDF oficial e na Application/)).toBeTruthy()
+    expect(screen.getByText(/este é o prazo usado no PDF oficial/)).toBeTruthy()
+    expect(screen.queryByText(/usado no PDF oficial e na Application/)).toBeNull()
     expect(screen.queryByText('Prêmio mensal informado')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Application de illustration-term-result' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Application de illustration-term-result' })).toBeNull()
   })
 
   it('does not label an uploaded Term PDF as verified until its premiums are reconciled', async () => {

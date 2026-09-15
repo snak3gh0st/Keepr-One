@@ -86,55 +86,17 @@ beforeEach(() => {
 })
 
 describe('startApplicationFromIllustration', () => {
-  it('creates and seeds the Application directly from an official Illustration', async () => {
-    mocks.tx.illustration.findFirst.mockResolvedValue({
-      id: 'illustration-1',
-      caseId: null,
-      clientId: null,
-      createdAt: new Date('2026-08-31T12:00:00.000Z'),
-      productName: 'FlexLife',
-      faceAmount: 250_000,
-      premium: 350,
-      documentFetchedAt: new Date('2026-08-31T12:05:00.000Z'),
-      documentMimeType: 'application/pdf',
-      documentBytes: new Uint8Array([1, 2, 3]),
-      rawPayload: {
-        foresightDraft: {
-          schemaVersion: 2,
-          firstName: 'Ana', lastName: 'Teste', dateOfBirth: '1990-01-01', issueState: 'FL',
-          gender: 'Female', rateClass: 'Standard_NT', solveBasis: 'PREMIUM',
-          targetMonthlyPremium: 300, deathBenefitOption: 'A_Level',
-          strategy: 'SP500PointToPointCapFocus',
-        },
-        foresightResult: {
-          solveBasis: 'PREMIUM', requestedAmount: 300, confirmedFaceAmount: 250_000,
-          confirmedMonthlyPremium: 350, confirmedAnnualPremium: 4_200,
-        },
-      },
-    })
-
+  it('keeps Application creation closed until the later release', async () => {
     const result = await startApplicationFromIllustration('illustration-1')
 
-    expect(mocks.requireAgentModule).toHaveBeenCalledWith('CRM')
-    expect(result).toMatchObject({ ok: true, applicationId: 'application-1' })
-    expect(mocks.tx.illustration.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'illustration-1', agentId: 'agent-1', caseId: null },
-    }))
-    expect(mocks.tx.application.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        createdByUserId: 'user-1',
-        intakeVersion: 2,
-        dossier: expect.objectContaining({
-          coverage: expect.objectContaining({
-            family: 'IUL', illustrationId: 'illustration-1',
-            faceAmount: 250_000, plannedPremium: 350,
-          }),
-        }),
-      }),
-    }))
-    expect(mocks.advanceCaseCrmToSystemStage).toHaveBeenCalledWith(
-      mocks.tx,
-      expect.objectContaining({ systemKey: 'APPLICATION' }),
-    )
+    expect(result).toEqual({
+      ok: false,
+      message: 'Application estará disponível em uma versão futura.',
+    })
+    expect(mocks.getCurrentAgent).not.toHaveBeenCalled()
+    expect(mocks.requireAgentModule).not.toHaveBeenCalled()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(mocks.tx.illustration.updateMany).not.toHaveBeenCalled()
+    expect(mocks.tx.application.create).not.toHaveBeenCalled()
   })
 })

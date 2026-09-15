@@ -540,8 +540,8 @@ export default async function IllustrationDetailPage({ params }: { params: Promi
           {termDurationResult?.adjusted && (
             <p className="mt-4 rounded-xl border border-gold/35 bg-gold/10 px-4 py-3 text-xs leading-5 text-ink">
               {copy(
-                'Você solicitou {requested}. A National Life confirmou {confirmed}; este é o prazo usado no PDF oficial e na Application.',
-                'You requested {requested}. National Life confirmed {confirmed}; this is the duration used in the official PDF and the application.',
+                'Você solicitou {requested}. A National Life confirmou {confirmed}; este é o prazo usado no PDF oficial.',
+                'You requested {requested}. National Life confirmed {confirmed}; this is the duration used in the official PDF.',
                 {
                   requested: termDurationResult.requestedTermDuration,
                   confirmed: termDurationResult.confirmedTermDuration,

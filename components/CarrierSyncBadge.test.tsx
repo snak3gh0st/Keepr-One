@@ -323,17 +323,17 @@ describe('CarrierSyncBadge', () => {
     expect(presence).not.toHaveTextContent('Your data is not complete yet')
   })
 
-  it('starts Application selection from official Illustrations, not unrelated cases', async () => {
+  it('keeps the future Application shortcut out of K-Bot actions', async () => {
     answerWith({ kind: 'IN_SYNC' })
     render(<CarrierSyncBadge />)
     await screen.findByText('Up to date')
 
     await userEvent.click(screen.getByRole('button', { name: 'View K-Bot activity' }))
 
-    expect(screen.getByRole('link', { name: /Create Application in iGO/i })).toHaveAttribute(
-      'href',
-      '/agent/illustrations?intent=application',
+    expect(screen.getByRole('link', { name: /Create Illustration/i })).toHaveAttribute(
+      'href', '/agent/illustrations/new',
     )
+    expect(screen.queryByRole('link', { name: /Create Application in iGO/i })).toBeNull()
   })
 
   it('does not offer Illustration or iGO shortcuts without the module grant', async () => {
