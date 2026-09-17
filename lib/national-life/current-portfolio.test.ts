@@ -43,6 +43,36 @@ describe('current completed National portfolio', () => {
       rows: [row('p1', '100'), row('p1', '200')], stored: [], observedAt,
     })).toThrow('NATIONAL_PORTFOLIO_SNAPSHOT_CONFLICT')
   })
+  it('rejects a duplicate that disagrees about status, whatever the amounts say', () => {
+    expect(() => currentPortfolioFromSnapshot({
+      rows: [row('p1', '100'), row('p1', '100', 'Lapsed')], stored: [], observedAt,
+    })).toThrow('NATIONAL_PORTFOLIO_SNAPSHOT_CONFLICT')
+  })
+  it.each([
+    ['amount first', ['100', null]],
+    ['blank first', [null, '100']],
+  ])('treats a blank premium as unknown rather than a contradiction (%s)', (_label, premiums) => {
+    // The carrier repeats a policy with the premium column empty. "100" and
+    // "unknown" do not disagree, and reconcileInforceRows already keeps the
+    // amount — rejecting the snapshot here took down the whole portfolio.
+    const result = currentPortfolioFromSnapshot({
+      rows: [row('p1', premiums[0]), row('p1', premiums[1])], stored: [], observedAt,
+    })
+    expect(result.rows).toHaveLength(1)
+    expect(result.rows[0].premium).toBe(100)
+  })
+  it('still rejects a real disagreement hiding among blank duplicates', () => {
+    expect(() => currentPortfolioFromSnapshot({
+      rows: [row('p1', '100'), row('p1', null), row('p1', '250')], stored: [], observedAt,
+    })).toThrow('NATIONAL_PORTFOLIO_SNAPSHOT_CONFLICT')
+  })
+  it('keeps a policy whose premium is unknown in every duplicate', () => {
+    const result = currentPortfolioFromSnapshot({
+      rows: [row('p1', null), row('p1', null)], stored: [], observedAt,
+    })
+    expect(result.rows).toHaveLength(1)
+    expect(result.rows[0].premium).toBeNull()
+  })
   it('does not count export footers as policies', () => {
     expect(currentPortfolioFromSnapshot({ rows: [row('Exported On: today', null)], stored: [], observedAt }).rows).toEqual([])
   })

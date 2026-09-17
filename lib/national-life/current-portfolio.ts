@@ -36,7 +36,13 @@ export function currentPortfolioFromSnapshot(input: {
   const membership = new Set(policies.map((row) => row.policyNumber))
   // A repeated policy may represent multiple agents in the export. Count its
   // AAP once, but do not silently choose between conflicting financial rows.
-  const values = new Map<string, string>()
+  //
+  // A missing premium is the absence of information, not a competing claim: the
+  // carrier repeats a policy with the premium column blank often enough that
+  // treating it as a contradiction takes down the whole portfolio. "290" and
+  // "unknown" do not disagree — "290" and "350" do, and that still throws.
+  type Claim = { status: string; sourceStatus: string | null; premium: number | null }
+  const claims = new Map<string, Claim>()
   const premiumEvolutionRows: PremiumEvolutionRow[] = []
   for (const row of input.rows) {
     const parsed = reconcileInforceRows([row]).policies[0]
@@ -44,12 +50,31 @@ export function currentPortfolioFromSnapshot(input: {
     premiumEvolutionRows.push({ policyNumber: parsed.policyNumber,
       issueDate: parsed.issueDate?.toISOString() ?? null, premium: parsed.premium,
       product: parsed.productName ?? 'Unknown' })
-    const value = JSON.stringify([parsed.status, parsed.sourceStatus, parsed.premium])
-    const previous = values.get(parsed.policyNumber)
-    if (previous !== undefined && previous !== value) {
-      throw new Error('NATIONAL_PORTFOLIO_SNAPSHOT_CONFLICT')
+    const claim: Claim = {
+      status: parsed.status,
+      sourceStatus: parsed.sourceStatus,
+      premium: parsed.premium,
     }
-    values.set(parsed.policyNumber, value)
+    const previous = claims.get(parsed.policyNumber)
+    if (previous) {
+      if (previous.status !== claim.status || previous.sourceStatus !== claim.sourceStatus) {
+        throw new Error('NATIONAL_PORTFOLIO_SNAPSHOT_CONFLICT')
+      }
+      if (
+        previous.premium !== null
+        && claim.premium !== null
+        && previous.premium !== claim.premium
+      ) {
+        throw new Error('NATIONAL_PORTFOLIO_SNAPSHOT_CONFLICT')
+      }
+      // Keep whichever row actually carried an amount.
+      claims.set(parsed.policyNumber, {
+        ...claim,
+        premium: previous.premium ?? claim.premium,
+      })
+      continue
+    }
+    claims.set(parsed.policyNumber, claim)
   }
   return {
     rows: policies.map((row): CurrentPortfolioRow => ({
