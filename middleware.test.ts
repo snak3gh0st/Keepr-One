@@ -113,6 +113,22 @@ describe('middleware administrative user preview boundary', () => {
     expect(response.headers.get('location')).toBe(location)
   })
 
+  it('sends an administrator viewing a user to the product, not to an error page', async () => {
+    // During a support preview the session carries the TARGET user's role, by
+    // design — app/api/admin/user-preview/stop/route.ts depends on exactly that.
+    // Reaching /admin while previewing was already refused by requireRole();
+    // the proxy now turns that thrown error into the product redirect.
+    mocks.getSession.mockResolvedValue({
+      user: { id: 'agent-1', role: 'AGENT' },
+      session: { id: 'preview-session', impersonatedBy: 'admin-1' },
+    })
+
+    const response = await proxy(request('/admin/users/agent-1'))
+
+    expect(response.status).toBe(307)
+    expect(response.headers.get('location')).toBe('http://localhost:3000/agent')
+  })
+
   it('still lets an administrator through to the administrative pages', async () => {
     mocks.getSession.mockResolvedValue({
       user: { id: 'admin-1', role: 'ADMIN' },
