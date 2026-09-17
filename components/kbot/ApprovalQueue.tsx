@@ -5,7 +5,7 @@ import { browserClock, useBrowserClock } from '@/components/useBrowserClock'
 import { useI18n } from '@/components/i18n/LanguageProvider'
 import { approvalTimeLeft, canApprove, type ApprovalProposal } from '@/lib/kbot-templates/approval-view'
 
-/// Moved out of `app/agent/kbot/agendadas/` so both that screen's actions and
+/// Moved out of `app/agent/ai/agendadas/` so both that screen's actions and
 /// the Central de Mensagens can render the same queue instead of each keeping
 /// its own copy. The send gate stays the only decision point — this component
 /// only shows what a person already wrote and asks the agent to say yes or no.

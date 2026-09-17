@@ -8,6 +8,7 @@ import { prismaProvisionDeps } from '@/lib/messaging/provision-prisma'
 import { provisionAgentInbox } from '@/lib/messaging/provision-agent-inbox'
 import { whatsappChannelModeFromEnv } from '@/lib/messaging/channel-mode'
 import { MessagingWorkspace } from './MessagingWorkspace'
+import { AiAreaTabs } from '@/components/kbot/AiAreaTabs'
 import { KBotMessageCenter, type KBotMessageCenterProposal } from './KBotMessageCenter'
 import { getCurrentSession, getServerI18n } from '@/lib/i18n/server'
 import { isReadOnlySupportPreview } from '@/lib/support-preview'
@@ -154,7 +155,7 @@ export default async function MensagensPage({
     select: { subjectKey: true, optedOut: true, kbotEnabledAt: true },
   })
 
-  // O mesmo texto que `toApprovalProposal` já calcula para `/agent/kbot/agendadas`
+  // O mesmo texto que `toApprovalProposal` já calcula para `/agent/ai/agendadas`
   // — só reembalado no formato que a Central de Mensagens usa.
   const templateByKey = new Map(templates.map((template) => [`${template.category}:${template.language}`, template]))
 
@@ -212,6 +213,7 @@ export default async function MensagensPage({
     : NO_CONTACT_REACH
   return (
     <Shell role="AGENT" userName={user?.name ?? ''}>
+      <AiAreaTabs />
       <KBotMessageCenter
         proposals={proposals}
         contacts={contactRowsView}

@@ -33,7 +33,7 @@ describe('manual and AI follow-up experience', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Atividades' }))
     expect(screen.getByText(/7 créditos utilizados/)).toBeInTheDocument()
     expect(screen.getByText('Envio não confirmado')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Abrir conversa' })).toHaveAttribute('href', '/agent/mensagens?conversation=9')
+    expect(screen.getByRole('link', { name: 'Abrir conversa' })).toHaveAttribute('href', '/agent/ai/mensagens?conversation=9')
   })
   it('manual opening does not invoke start or generation', async () => {
     const fetch = vi.fn(async (_url: unknown, options?: RequestInit) => Response.json(options?.method === 'POST' ? { ok: true } : view))

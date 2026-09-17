@@ -64,6 +64,8 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
   AGENT: [
     { href: "/agent", labelKey: "nav.today", icon: "grid", groupKey: "nav.group.operations", module: "TODAY" },
     { href: "/agent/calendar", labelKey: "nav.calendar", icon: "calendar", groupKey: "nav.group.operations", module: "CALENDAR" },
+    // Messages, AI follow-up and scheduled sends live as tabs inside K-Bot AI.
+    // `/agent/ai` has two segments, so its sub-routes keep this item active.
     { href: "/agent/ai", labelKey: "nav.ai", icon: "ai", groupKey: "nav.group.operations" },
     {
       href: "/agent/cases",
@@ -72,13 +74,6 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
       groupKey: "nav.group.operations",
       matches: ["/agent/cases", "/agent/clients", "/agent/activities"],
       module: "CRM",
-    },
-    {
-      href: "/agent/mensagens",
-      labelKey: "nav.messages",
-      icon: "chat",
-      groupKey: "nav.group.operations",
-      module: "MESSAGES",
     },
     { href: "/agent/policies", labelKey: "nav.policies", icon: "document", groupKey: "nav.group.portfolio", module: "POLICIES" },
     // The quotes were being written to the database and shown nowhere: the
@@ -125,7 +120,9 @@ const PAGE_NAMES: Record<string, MessageKey> = {
   "/agent/hierarchy": "page.team",
   "/agent/agency": "page.agency",
   "/agent/clients": "page.crmClients",
-  "/agent/mensagens": "page.messages",
+  "/agent/ai/mensagens": "page.messages",
+  "/agent/ai/acoes": "nav.ai",
+  "/agent/ai/agendadas": "nav.ai",
   "/agent/policies": "page.policies",
   "/agent/policies/new": "page.aboutPolicies",
   "/agent/commissions": "page.commissions",
@@ -593,6 +590,7 @@ export function Shell({
                         welcome={kbotWelcome}
                         canAccessNationalLife={hasModule("INTEGRATIONS")}
                         canAccessIllustrations={hasModule("ILLUSTRATIONS")}
+                        canAccessMessages={hasModule("MESSAGES")}
                       />
                     )}
                   </div>
@@ -613,6 +611,7 @@ export function Shell({
                       welcome={kbotWelcome}
                       canAccessNationalLife={hasModule("INTEGRATIONS")}
                       canAccessIllustrations={hasModule("ILLUSTRATIONS")}
+                      canAccessMessages={hasModule("MESSAGES")}
                     />
                   )}
                 </div>

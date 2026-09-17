@@ -96,7 +96,7 @@ export function KBotActivityCenter({ jobs, busy, onCancel, initialCarrier, resul
       const { operation, job } = row
       const status = operation?.status ?? job!.status
       const title = operation ? operationNames[operation.kind] : job!.customerName
-      const href = operation?.href ?? (job?.conversationId ? `/agent/mensagens?conversation=${job.conversationId}` : null)
+      const href = operation?.href ?? (job?.conversationId ? `/agent/ai/mensagens?conversation=${job.conversationId}` : null)
       const isReserved = job?.creditState === 'RESERVED'
       const credits = job ? formatCredits(isReserved ? job.reservedTokens : job.billedTokens, locale, isReserved) : null
       const statusLabel = job?.status === 'UNKNOWN' ? copy('Envio não confirmado', 'Send unconfirmed') : labels[status] ?? copy('Confira os detalhes', 'Check details')

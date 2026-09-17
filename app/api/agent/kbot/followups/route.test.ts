@@ -7,7 +7,7 @@ import { POST } from './route'
 const request = (body: unknown, origin = 'https://keepr.test') => new Request('https://keepr.test/api/agent/kbot/followups', {
   method: 'POST', headers: { 'content-type': 'application/json', host: 'keepr.test', origin }, body: JSON.stringify(body),
 })
-beforeEach(() => { vi.clearAllMocks(); mocks.agent.mockResolvedValue({ id: 'owner' }); mocks.phone.mockResolvedValue({ ok: true }); mocks.open.mockResolvedValue({ href: '/agent/mensagens?conversation=1' }) })
+beforeEach(() => { vi.clearAllMocks(); mocks.agent.mockResolvedValue({ id: 'owner' }); mocks.phone.mockResolvedValue({ ok: true }); mocks.open.mockResolvedValue({ href: '/agent/ai/mensagens?conversation=1' }) })
 describe('follow-up authorization route', () => {
   it('routes phone repairs through the session owner without dispatching a message', async () => {
     const body = { action: 'phone', candidateId: 'policy:1', fingerprint: 'f'.repeat(64), phone: '+14075550100' }

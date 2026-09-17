@@ -136,7 +136,7 @@ export async function openManualConversation(agentId: string, candidateId: strin
   const transport = await messagingTransport(agentId, false)
   const conversationId = await transport.conversation(candidate.phone, candidate.customerName)
   await transport.verifyConversation(conversationId, candidate.phone)
-  return { href: `/agent/mensagens?conversation=${conversationId}` }
+  return { href: `/agent/ai/mensagens?conversation=${conversationId}` }
 }
 
 /** Repair only a missing/invalid contact number on a currently owned candidate. */

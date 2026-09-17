@@ -76,7 +76,7 @@ export const ONBOARDING_MODULE_CATALOG: Record<
     key: "MESSAGES",
     title: { PT: "Mensagens", EN: "Messages" },
     shortTitle: { PT: "Mensagens", EN: "Messages" },
-    href: "/agent/mensagens",
+    href: "/agent/ai/mensagens",
     description: {
       PT: "Conversas com clientes podem viver em uma caixa conectada ao restante da operação.",
       EN: "Client conversations can live in an inbox connected to the rest of your operations.",

@@ -30,7 +30,10 @@ describe('getPlatformModuleForPath', () => {
     ['/agent/cases/new?source=quick-action', 'CRM'],
     ['/agent/clients/client-1', 'CRM'],
     ['/agent/activities/', 'CRM'],
-    ['/agent/mensagens', 'MESSAGES'],
+    // `.find()` means first match wins. This row goes red if anyone ever maps
+    // `/agent/ai` above `/agent/ai/mensagens` and the parent swallows the gate.
+    ['/agent/ai/mensagens', 'MESSAGES'],
+    ['/agent/ai/mensagens?conversation=9', 'MESSAGES'],
     ['/agent/policies/policy-1', 'POLICIES'],
     ['/agent/illustrations/new', 'ILLUSTRATIONS'],
     ['/agent/commissions', 'COMMISSIONS'],
@@ -51,6 +54,9 @@ describe('getPlatformModuleForPath', () => {
 
   it.each([
     '/agent/settings',
+    '/agent/ai',
+    '/agent/ai/acoes',
+    '/agent/ai/agendadas',
     '/api/billing/checkout',
     '/api/auth/sign-out',
     '/onboarding',

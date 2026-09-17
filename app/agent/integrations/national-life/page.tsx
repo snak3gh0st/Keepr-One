@@ -43,7 +43,7 @@ export default async function NationalLifeConnectionPage() {
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink">{copy('Conexão e atualizações', 'Connection and updates')}</h1>
           <p className="mt-2 text-sm text-ink-muted">{copy('Confira este computador, inicie uma atualização e acompanhe o resultado.', 'Check this computer, start an update and track the result.')}</p>
         </div>
-        <Link href={role === 'AGENT' ? '/agent/kbot?view=activities' : backHref} className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-semibold text-teal-deep">{copy('Ver atividades', 'View activities')}</Link>
+        <Link href={role === 'AGENT' ? '/agent/ai/acoes?view=activities' : backHref} className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-semibold text-teal-deep">{copy('Ver atividades', 'View activities')}</Link>
       </header>
 
       {localConfig.enabled ? (

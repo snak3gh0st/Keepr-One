@@ -7,7 +7,7 @@ import type { ApprovalProblem, ApprovalProposal } from '@/lib/kbot-templates/app
 import type { ScheduledCategory } from '@/lib/kbot-templates/categories'
 import type { KBotContactRow } from '@/lib/kbot-messaging/contact-list'
 import { KBotContactList } from './KBotContactList'
-import { approveScheduledProposals, discardScheduledProposals } from '@/app/agent/kbot/agendadas/actions'
+import { approveScheduledProposals, discardScheduledProposals } from '@/app/agent/ai/agendadas/actions'
 import { enableAllKBotContacts, toggleKBotContact } from './actions'
 
 /// A proposta já escrita, esperando o agente dizer sim ou não. `jobIds` carrega

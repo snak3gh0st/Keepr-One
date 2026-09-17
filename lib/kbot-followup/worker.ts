@@ -219,7 +219,7 @@ export async function maintainFollowups() {
   // would post a separate "Resultado do follow-up" notification per birthday —
   // twenty greetings, twenty notifications, all mislabelled and all pointing at
   // the wrong screen. What was sent and what was held back is exactly what
-  // /agent/kbot/agendadas shows.
+  // /agent/ai/agendadas shows.
   const jobs = await prisma.kBotFollowupJob.findMany({ where: { category: 'FOLLOWUP', notifiedAt: null, status: { in: ['SENT', 'DELIVERED', 'READ', 'FAILED', 'CANCELLED', 'UNKNOWN'] } }, take: 50,
     select: { batchId: true, agentId: true } })
   for (const batch of new Map(jobs.map(j => [j.batchId, j])).values()) {
@@ -238,7 +238,7 @@ export async function maintainFollowups() {
       await tx.notification.upsert({ where: { dedupeKey: `kbot-followup:${batch.batchId}` }, create: {
         recipientUserId: agent.userId, type: 'KBOT_FOLLOWUP_RESULT', title: pt ? 'Resultado do follow-up' : 'Follow-up result',
         message,
-        href: '/agent/kbot', dedupeKey: `kbot-followup:${batch.batchId}`,
+        href: '/agent/ai/acoes', dedupeKey: `kbot-followup:${batch.batchId}`,
       }, update: { message } })
       await tx.kBotFollowupJob.updateMany({ where: batch, data: { notifiedAt: new Date() } })
     })

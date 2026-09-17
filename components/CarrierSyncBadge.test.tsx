@@ -73,7 +73,7 @@ describe('CarrierSyncBadge', () => {
     await waitFor(() => expect(screen.getByLabelText('K-Bot status')).toHaveAttribute('data-state', 'working'))
     expect(screen.getByLabelText('K-Bot status')).toHaveTextContent('I am handling your follow-ups')
     await userEvent.click(screen.getByRole('button', { name: 'View K-Bot activity' }))
-    expect(screen.getByRole('link', { name: 'View activities' })).toHaveAttribute('href', '/agent/kbot?view=activities')
+    expect(screen.getByRole('link', { name: 'View activities' })).toHaveAttribute('href', '/agent/ai/acoes?view=activities')
   })
   it('preserves active work after a failed refresh without announcing completion', async () => {
     const fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ state: { kind: 'IN_SYNC' }, sync: { runId: 'run', state: 'RUNNING', completed: 2, total: 6, shouldPoll: true } }) }).mockResolvedValue({ ok: false })
@@ -346,6 +346,23 @@ describe('CarrierSyncBadge', () => {
     expect(screen.queryByRole('link', { name: /Create Illustration/i })).toBeNull()
     expect(screen.queryByRole('link', { name: /Create Application in iGO/i })).toBeNull()
     expect(screen.getByRole('link', { name: /Sync National Life/i })).toBeInTheDocument()
+  })
+
+  it('offers the message center from K-Bot actions only with the module grant', async () => {
+    answerWith({ kind: 'IN_SYNC' })
+    const view = render(<CarrierSyncBadge />)
+    await screen.findByText('Up to date')
+    await userEvent.click(screen.getByRole('button', { name: 'View K-Bot activity' }))
+
+    expect(screen.getByRole('link', { name: /Messages/i })).toHaveAttribute('href', '/agent/ai/mensagens')
+
+    view.unmount()
+    answerWith({ kind: 'IN_SYNC' })
+    render(<CarrierSyncBadge canAccessMessages={false} />)
+    await screen.findByText('Up to date')
+    await userEvent.click(screen.getByRole('button', { name: 'View K-Bot activity' }))
+
+    expect(screen.queryByRole('link', { name: /Messages/i })).toBeNull()
   })
 
   it('keeps K-Bot visible and sad on every page when this browser is disconnected', async () => {

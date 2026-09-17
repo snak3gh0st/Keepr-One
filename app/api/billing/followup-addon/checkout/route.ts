@@ -51,7 +51,7 @@ export async function POST(request: Request) {
       ...(local.stripeCustomerId ? { customer: local.stripeCustomerId } : { customer_email: user.email }),
       client_reference_id: local.id, line_items: [{ price: catalog.priceId, quantity: 1 }],
       metadata, subscription_data: { metadata }, expires_at: Math.floor(local.checkoutExpiresAt!.getTime() / 1000),
-      success_url: `${origin.replace(/\/$/, '')}/agent/kbot?checkout=complete`, cancel_url: `${origin.replace(/\/$/, '')}/agent/kbot`,
+      success_url: `${origin.replace(/\/$/, '')}/agent/ai/acoes?checkout=complete`, cancel_url: `${origin.replace(/\/$/, '')}/agent/ai/acoes`,
     }, { idempotencyKey: `kbot-followup-checkout:${local.id}:${local.checkoutExpiresAt!.getTime()}` })
     if (!session.url) throw new Error('CHECKOUT_URL_MISSING')
     await prisma.platformAddonSubscription.updateMany({ where: { id: local.id, checkoutExpiresAt: local.checkoutExpiresAt }, data: { stripeCheckoutSessionId: session.id } })

@@ -129,3 +129,26 @@ não alcançaria as sessões que o Stripe já criou.
 Redesenhar o hub além do link de entrada descrito acima, fundir as três telas
 numa só, mexer no conteúdo da central, introduzir menu aninhado, ou alterar
 quem pode ver o quê.
+
+## Revisão (2026-09-17): área única com abas
+
+Esta seção substitui as decisões de **Hub e menu lateral** e o item "fundir as
+três telas numa só" de **Fora de escopo**.
+
+Depois de usar a área, a decisão foi que K-Bot AI precisa ser um lugar só:
+
+- O menu lateral tem **uma** entrada, "K-Bot AI". "Mensagens" deixa de ser
+  entrada própria. `/agent/ai` tem dois segmentos, então a entrada fica ativa em
+  todas as subrotas.
+- As quatro telas continuam rotas reais, ligadas por uma barra de abas comum
+  (`components/kbot/AiAreaTabs.tsx`): Visão geral · Mensagens · Follow-up com
+  AI · Agendadas. Não viram estado de cliente numa página só: a central lê
+  Chatwoot e banco no servidor, e só uma rota própria mantém o gate de
+  `MESSAGES` barrando no servidor.
+- A aba Mensagens some quando `MESSAGES` está desligado, e o menu de tarefas do
+  K-Bot ganha a entrada "Mensagens" com a mesma regra.
+- Endereços, redirects 308 e gate de módulos seguem exatamente como descrito
+  acima.
+
+A etapa seguinte, fora deste documento, é selecionar conversas da central para
+o AI redigir a resposta.
