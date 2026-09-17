@@ -17,6 +17,25 @@ function subscriptionId(value: unknown): string | null {
   return null
 }
 
+/** The coupon Stripe ended up applying, or a marker when it cannot be read. */
+async function appliedCouponId(stripeSubscriptionId: string): Promise<string> {
+  try {
+    const subscription = await getStripeClient().subscriptions.retrieve(stripeSubscriptionId, {
+      expand: ['discounts'],
+    })
+    const discounts = (subscription as unknown as { discounts?: unknown[] }).discounts ?? []
+    for (const entry of discounts) {
+      const coupon = (entry as { coupon?: { id?: unknown } } | string | null)
+      if (coupon && typeof coupon === 'object' && typeof coupon.coupon?.id === 'string') {
+        return coupon.coupon.id
+      }
+    }
+  } catch (error) {
+    console.error('Could not read the applied coupon back from Stripe', error)
+  }
+  return 'UNREADABLE'
+}
+
 function grantedOfferReason(checkout: { metadata?: Record<string, string> | null }): RetentionOfferReason | null {
   const value = checkout.metadata?.keeprOneRetentionOfferReason
   return value === 'TRIAL_CONVERSION' || value === 'CANCEL_RETENTION' ? value : null
@@ -63,7 +82,9 @@ export async function GET(request: Request) {
           userId: session.user.id,
           platformSubscriptionId: access.subscription.id,
           reason: offerReason,
-          couponId: process.env.STRIPE_RETENTION_COUPON_ID?.trim() ?? 'UNKNOWN',
+          // Read back from the subscription rather than from configuration, so
+          // the audit row records the coupon Stripe actually applied.
+          couponId: await appliedCouponId(stripeSubscriptionId),
           discountedAmountCents: discount,
         })
       } catch (auditError) {

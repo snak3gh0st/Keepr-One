@@ -1,34 +1,53 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { RetentionOfferView } from "@/lib/billing/retention-offer-view";
 import { useI18n } from "@/components/i18n/LanguageProvider";
 
 const DISMISS_KEY = "keepr-one:retention-offer-dismissed";
 
 /**
- * The trial-conversion offer, shown in-product while the trial is still running.
+ * Mount detection without an effect. The modal must not be server-rendered,
+ * because whether it was already dismissed lives in sessionStorage and is
+ * unknowable on the server — rendering it there would flash it at an agent who
+ * already closed it.
+ */
+const NO_OP_SUBSCRIBE = () => () => {};
+
+function readDismissed(): boolean {
+  try {
+    return window.sessionStorage.getItem(DISMISS_KEY) === "1";
+  } catch {
+    // Private browsing and blocked site data must not suppress the offer.
+    return false;
+  }
+}
+
+/**
+ * The discount offer, shown in-product while the agent still has access:
+ * near the end of the trial, or once a cancellation has been scheduled.
  *
- * It is deliberately dismissible and remembered for the session: once the trial
- * actually expires the agent is redirected to /founders/expired, which is the
- * hard gate. This modal is the warning before that wall, not a second wall — an
- * agent still inside a paid-for trial must be able to keep working.
+ * It is deliberately dismissible and remembered for the session. Neither moment
+ * is a wall — the trial one precedes the real gate at /founders/expired, and an
+ * agent who scheduled a cancellation keeps working until the period ends. A
+ * modal that could not be closed would block paid access.
  */
 export function RetentionOfferModal({ offer }: { offer: RetentionOfferView }) {
   const { language } = useI18n();
-  const [open, setOpen] = useState(false);
+  const mounted = useSyncExternalStore(NO_OP_SUBSCRIBE, () => true, () => false);
+  const [dismissedNow, setDismissedNow] = useState(false);
   const dialog = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    let dismissed = false;
+  const open = mounted && !dismissedNow && !readDismissed();
+
+  const dismiss = useCallback(() => {
+    setDismissedNow(true);
     try {
-      dismissed = window.sessionStorage.getItem(DISMISS_KEY) === "1";
+      window.sessionStorage.setItem(DISMISS_KEY, "1");
     } catch {
-      // Private browsing and blocked site data must not suppress the offer.
-      dismissed = false;
+      // Losing the dismissal only means the offer returns on the next page.
     }
-    if (!dismissed) setOpen(true);
   }, []);
 
   useEffect(() => {
@@ -40,22 +59,14 @@ export function RetentionOfferModal({ offer }: { offer: RetentionOfferView }) {
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  function dismiss() {
-    setOpen(false);
-    try {
-      window.sessionStorage.setItem(DISMISS_KEY, "1");
-    } catch {
-      // Losing the dismissal only means the offer returns on the next page.
-    }
-  }
+  }, [open, dismiss]);
 
   if (!open) return null;
 
   const copy = (portuguese: string, english: string) =>
     language === "PT" ? portuguese : english;
+
+  const isCancellation = offer.reason === "CANCEL_RETENTION";
 
   const durationNote = offer.durationInMonths
     ? copy(
@@ -86,13 +97,17 @@ export function RetentionOfferModal({ offer }: { offer: RetentionOfferView }) {
           <div className="flex items-start justify-between gap-4">
             <div>
               <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-teal">
-                {copy("Seu teste está terminando", "Your trial is ending")}
+                {isCancellation
+                  ? copy("Sua assinatura será encerrada", "Your subscription is ending")
+                  : copy("Seu teste está terminando", "Your trial is ending")}
               </span>
               <h2
                 id="retention-modal-title"
                 className="mt-1.5 text-xl font-semibold tracking-[-0.025em] text-ink"
               >
-                {copy("Continue com 50% de desconto", "Continue with 50% off")}
+                {isCancellation
+                  ? copy("Antes de ir: fique com 50% de desconto", "Before you go: stay with 50% off")
+                  : copy("Continue com 50% de desconto", "Continue with 50% off")}
               </h2>
             </div>
             <button
@@ -107,10 +122,15 @@ export function RetentionOfferModal({ offer }: { offer: RetentionOfferView }) {
           </div>
 
           <p className="mt-3 text-sm leading-6 text-ink-muted">
-            {copy(
-              "Sua carteira, seus clientes e seu histórico continuam exatamente como estão.",
-              "Your book, your clients, and your history stay exactly as they are.",
-            )}
+            {isCancellation
+              ? copy(
+                  "O cancelamento é desfeito e sua carteira, seus clientes e seu histórico seguem exatamente como estão.",
+                  "The cancellation is undone and your book, clients, and history stay exactly as they are.",
+                )
+              : copy(
+                  "Sua carteira, seus clientes e seu histórico continuam exatamente como estão.",
+                  "Your book, your clients, and your history stay exactly as they are.",
+                )}
           </p>
 
           <p className="mt-4 flex flex-wrap items-baseline gap-2">
@@ -128,10 +148,15 @@ export function RetentionOfferModal({ offer }: { offer: RetentionOfferView }) {
               type="submit"
               className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-mint px-5 text-sm font-semibold text-rail-strong transition-colors hover:bg-mint/85 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
             >
-              {copy(
-                `Assinar por ${offer.discountedPriceLabel}/mês`,
-                `Subscribe for ${offer.discountedPriceLabel}/month`,
-              )}
+              {isCancellation
+                ? copy(
+                    `Continuar por ${offer.discountedPriceLabel}/mês`,
+                    `Continue for ${offer.discountedPriceLabel}/month`,
+                  )
+                : copy(
+                    `Assinar por ${offer.discountedPriceLabel}/mês`,
+                    `Subscribe for ${offer.discountedPriceLabel}/month`,
+                  )}
               <span aria-hidden>↗</span>
             </button>
           </form>

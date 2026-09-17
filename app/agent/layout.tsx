@@ -52,13 +52,19 @@ export default async function AgentLayout({
   // longer gated behind a module entitlement.
   const promotion = await getAgentPromotionSnapshot(agent.id);
   const trial = buildTrialCountdownView(platformAccess, now);
-  // Only while the trial is genuinely running. Once it expires, requireRole()
-  // sends the agent to /founders/expired, which carries its own offer — showing
-  // a modal here too would put a second wall in front of the same decision.
-  const retentionOffer = trial
+  // Two reachable moments, both while the agent still has access:
+  //
+  // - the trial is running and near its end (the offer precedes the wall at
+  //   /founders/expired, which requireRole() enforces once it actually expires);
+  // - a cancellation is scheduled. That agent keeps access until the period
+  //   ends, so they never reach /founders/expired — in-product is the only
+  //   place the retention offer can meet them.
+  const offerPlan = trial?.plan ?? platformAccess.requiredPlan;
+  const cancellationScheduled = platformAccess.subscription?.cancelAtPeriodEnd === true;
+  const retentionOffer = offerPlan && (trial || cancellationScheduled)
     ? await resolveRetentionOfferView(
         platformAccess,
-        trial.plan,
+        offerPlan,
         localeFor((await getServerI18n()).language),
         now,
       )

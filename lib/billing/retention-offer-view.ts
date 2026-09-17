@@ -39,10 +39,13 @@ export async function resolveRetentionOfferView(
   if (!getConfiguredRetentionCouponId()) return null
   if (!access.subscription) return null
 
-  const alreadyGranted = await hasAlreadyReceivedRetentionOffer(
-    prisma,
-    access.subscription.id,
-  )
+  const [alreadyGranted, local] = await Promise.all([
+    hasAlreadyReceivedRetentionOffer(prisma, access.subscription.id),
+    prisma.platformSubscription.findUnique({
+      where: { id: access.subscription.id },
+      select: { stripeSubscriptionId: true },
+    }),
+  ])
   const eligibility = resolveRetentionEligibility(access, { alreadyGranted, now })
   if (!eligibility.eligible) return null
 
@@ -55,6 +58,10 @@ export async function resolveRetentionOfferView(
     durationInMonths: RETENTION_OFFER_DURATION_MONTHS,
     fullPriceLabel: formatPlanPrice(fullCents, locale),
     discountedPriceLabel: formatPlanPrice(discountedCents, locale),
-    checkoutPath: '/api/billing/checkout?offer=retention',
+    // A subscription that already exists in Stripe cannot be re-bought through
+    // Checkout; the coupon is applied to it directly instead.
+    checkoutPath: local?.stripeSubscriptionId
+      ? '/api/billing/retention/accept'
+      : '/api/billing/checkout?offer=retention',
   }
 }
