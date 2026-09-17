@@ -110,6 +110,16 @@ export async function proxy(request: NextRequest) {
     return privateLoginRedirect(request, '/login')
   }
 
+  // requireRole('ADMIN') remains the authorization boundary inside every
+  // administrative surface. This is defense in depth: the session is already
+  // resolved above, so refusing a non-ADMIN role here costs nothing, turns a
+  // thrown authorization error into a clean redirect, and keeps a future
+  // administrative route that forgets requireRole() from leaking staff data.
+  if (session && requiresAdminSession && session.user.role !== 'ADMIN') {
+    const destination = new URL(session.user.role === 'CLIENT' ? '/client' : '/agent', request.url)
+    return NextResponse.redirect(destination)
+  }
+
   if (mustCheckPreview) {
     if (isReadOnlySupportPreview(session)) {
       return NextResponse.json(
