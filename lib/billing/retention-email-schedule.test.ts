@@ -3,6 +3,7 @@ import {
   decideRetentionEmail,
   LAPSED_REMINDER_INTERVAL_DAYS,
   LAPSED_REMINDER_MAX_SENDS,
+  LAPSED_WINDOW_MAX_DAYS,
   type RetentionEmailState,
 } from './retention-email-schedule'
 
@@ -103,11 +104,38 @@ describe('decideRetentionEmail', () => {
     })
   })
 
+  it('does not cold-mail an account that lapsed long ago', () => {
+    // The first run of a newly enabled cron must not reach a backlog of old
+    // churn. Never contacted, never exhausted — and still refused.
+    const ancient = state({
+      accessEndsAt: new Date(NOW.getTime() - (LAPSED_WINDOW_MAX_DAYS + 1) * DAY_MS),
+      lapsedSends: 0,
+      lastSentAt: null,
+    })
+    expect(decideRetentionEmail(ancient, NOW)).toEqual({
+      send: false,
+      reason: 'LAPSED_TOO_LONG_AGO',
+    })
+  })
+
+  it('still reaches an account that lapsed inside the window', () => {
+    const recent = state({
+      accessEndsAt: new Date(NOW.getTime() - (LAPSED_WINDOW_MAX_DAYS - 1) * DAY_MS),
+      lapsedSends: 0,
+      lastSentAt: null,
+    })
+    expect(decideRetentionEmail(recent, NOW)).toEqual({
+      send: true,
+      step: 'ACCESS_LAPSED',
+      sequenceNumber: 1,
+    })
+  })
+
   it('eventually stops writing to an address that never converts', () => {
     const exhausted = state({
-      accessEndsAt: new Date(NOW.getTime() - 200 * DAY_MS),
+      accessEndsAt: new Date(NOW.getTime() - 30 * DAY_MS),
       lapsedSends: LAPSED_REMINDER_MAX_SENDS,
-      lastSentAt: new Date(NOW.getTime() - 60 * DAY_MS),
+      lastSentAt: new Date(NOW.getTime() - 10 * DAY_MS),
     })
     expect(decideRetentionEmail(exhausted, NOW)).toEqual({
       send: false,

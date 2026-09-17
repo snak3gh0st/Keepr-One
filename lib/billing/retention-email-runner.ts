@@ -94,19 +94,44 @@ export async function runRetentionEmailPass(now = new Date()): Promise<Retention
         { status: { in: ['TRIALING', 'PAST_DUE', 'CANCELED', 'EXPIRED'] } },
         { cancelAtPeriodEnd: true },
       ],
-      agentId: { not: null },
     },
-    select: { id: true, agentId: true },
+    select: {
+      id: true,
+      agentId: true,
+      // A subscription is not always owned by an agent directly. Most of them
+      // belong to an agency, and the person who decides whether to keep paying
+      // is its current owner — filtering on agentId alone silently excluded
+      // almost every paying account from the sequence.
+      agency: {
+        select: {
+          memberships: {
+            where: { role: 'OWNER', endedAt: null },
+            orderBy: { joinedAt: 'asc' },
+            take: 1,
+            select: { agentId: true },
+          },
+        },
+      },
+      agencyMembership: { select: { agentId: true, endedAt: true } },
+    },
     take: MAX_PER_PASS,
   })
 
   for (const candidate of candidates) {
-    if (!candidate.agentId) continue
+    const agentId = candidate.agentId
+      ?? candidate.agency?.memberships[0]?.agentId
+      ?? (candidate.agencyMembership?.endedAt === null
+        ? candidate.agencyMembership.agentId
+        : null)
+    if (!agentId) {
+      skip('NO_ADDRESSEE')
+      continue
+    }
     report.considered += 1
 
     try {
       const agent = await prisma.agent.findUnique({
-        where: { id: candidate.agentId },
+        where: { id: agentId },
         select: { user: { select: { id: true, email: true, name: true, language: true } } },
       })
       const user = agent?.user
@@ -115,7 +140,7 @@ export async function runRetentionEmailPass(now = new Date()): Promise<Retention
         continue
       }
 
-      const access = await resolveFounderAccessForAgent(candidate.agentId)
+      const access = await resolveFounderAccessForAgent(agentId)
       if (access.state === 'LEGACY') {
         skip('LEGACY_ACCESS')
         continue
