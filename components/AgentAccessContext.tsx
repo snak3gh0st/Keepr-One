@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from "react";
 import type { TrialCountdownView } from "@/lib/trial-countdown";
+import type { RetentionOfferView } from "@/lib/billing/retention-offer-view";
 import type { PlatformModuleName } from "@/lib/platform-modules";
 
 export type AgentAccessView = {
@@ -14,6 +15,7 @@ export type AgentAccessView = {
   canViewAgencyNationalLife: boolean;
   enabledModules: PlatformModuleName[] | null;
   trial?: TrialCountdownView | null;
+  retentionOffer?: RetentionOfferView | null;
 };
 
 const AgentAccessContext = createContext<AgentAccessView | null>(null);

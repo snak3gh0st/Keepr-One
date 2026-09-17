@@ -20,6 +20,7 @@ import { NavIcon, type NavIconName } from "@/components/NavIcon";
 import { CarrierSyncBadge } from "@/components/CarrierSyncBadge";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { TrialCountdown } from "@/components/trial";
+import { RetentionOfferModal } from "@/components/billing/RetentionOfferModal";
 import { LanguageSwitcher } from "@/components/i18n/LanguageSwitcher";
 import { useI18n } from "@/components/i18n/LanguageProvider";
 import { useImpersonation } from "@/components/admin/ImpersonationContext";
@@ -228,6 +229,7 @@ export function Shell({
     ? `premium-v2:${achievementTone}:${rankTitle}`
     : null;
   const trial = role === "AGENT" ? agentAccess?.trial ?? null : null;
+  const retentionOffer = role === "AGENT" ? agentAccess?.retentionOffer ?? null : null;
   // The Integrations grant controls navigation and route access, but the
   // global K-Bot also carries account-level guidance (including the durable
   // National Life reminder after onboarding is skipped). Keep that presence
@@ -656,6 +658,7 @@ export function Shell({
 
         <div className="shell-canvas keepr-grid min-h-[calc(100vh-72px)] px-4 py-7 sm:px-6 md:px-9 md:py-10 lg:px-12">
           <div className="mx-auto max-w-[1500px]">
+            {retentionOffer ? <RetentionOfferModal offer={retentionOffer} /> : null}
             {trial ? (
               <div className="mb-6" data-trial-countdown-slot>
                 <TrialCountdown

@@ -8,8 +8,10 @@ import {
   FounderAccessRequiredError,
   resolveFounderAccessForAgent,
 } from "@/lib/founder-access";
-import { getCurrentSession } from "@/lib/i18n/server";
+import { getCurrentSession, getServerI18n } from "@/lib/i18n/server";
 import { buildTrialCountdownView } from "@/lib/trial-countdown";
+import { resolveRetentionOfferView } from "@/lib/billing/retention-offer-view";
+import { localeFor } from "@/lib/i18n/config";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +52,17 @@ export default async function AgentLayout({
   // longer gated behind a module entitlement.
   const promotion = await getAgentPromotionSnapshot(agent.id);
   const trial = buildTrialCountdownView(platformAccess, now);
+  // Only while the trial is genuinely running. Once it expires, requireRole()
+  // sends the agent to /founders/expired, which carries its own offer — showing
+  // a modal here too would put a second wall in front of the same decision.
+  const retentionOffer = trial
+    ? await resolveRetentionOfferView(
+        platformAccess,
+        trial.plan,
+        localeFor((await getServerI18n()).language),
+        now,
+      )
+    : null;
 
   return (
     <AgentAccessProvider
@@ -63,6 +76,7 @@ export default async function AgentLayout({
         canViewAgencyNationalLife: access.canViewAgencyNationalLife,
         enabledModules: access.enabledModules,
         trial,
+        retentionOffer,
       }}
     >
       <AgentPromotionProvider initialIdentity={promotion?.identity ?? null}>
