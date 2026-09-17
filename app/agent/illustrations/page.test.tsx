@@ -28,12 +28,12 @@ vi.mock('./IllustrationPdfButton', () => ({ IllustrationPdfButton: () => <button
 vi.mock('./StartApplicationFromIllustrationButton', () => ({ StartApplicationFromIllustrationButton: () => <button>Application</button> }))
 vi.mock('@/components/kbot/KBotAvatar', () => ({ KBotAvatar: () => <div>KBot</div> }))
 // The ready-to-send section is its own island with its own tests; this page
-// only has to place it, and in application-picking mode not place it at all.
+// only has to place it.
 vi.mock('./ready-to-send', () => ({ readReadyToSendIllustrations: async () => [] }))
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
-it('renders the later illustration page, scopes command feedback to it, and preserves application intent in pagination', async () => {
+it('ignores retired application intent while preserving illustration pagination', async () => {
   const filters = { query: '', document: null, sort: 'recent', page: 5 }
   state.parse.mockReturnValue(filters)
   state.read.mockResolvedValue({
@@ -62,11 +62,13 @@ it('renders the later illustration page, scopes command feedback to it, and pres
 
   expect(screen.getByRole('link', { name: 'Record 101' })).toHaveAttribute(
     'href',
-    '/agent/illustrations/illustration-101?intent=application',
+    '/agent/illustrations/illustration-101',
   )
   expect(screen.getByRole('link', { name: 'Anterior' })).toHaveAttribute(
     'href',
-    '/agent/illustrations?intent=application&page=4',
+    '/agent/illustrations?page=4',
   )
+  expect(screen.queryByRole('columnheader', { name: /Proposta|Application/i })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Application' })).toBeNull()
   expect(state.statuses).toHaveBeenCalledWith('agent-1', ['illustration-101'])
 })

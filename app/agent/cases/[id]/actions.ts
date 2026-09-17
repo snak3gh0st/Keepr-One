@@ -189,8 +189,18 @@ type LockedInsuranceCase = {
 export async function startApplicationFromIllustration(
   illustrationId: string,
 ): Promise<StartApplicationFromIllustrationResult> {
-  const agent = await getCurrentAgent()
+  // Application remains implemented for a later release. Keep the server
+  // boundary closed too, so a stale browser or bookmarked page cannot create
+  // one while the current product is Illustration-only.
+  const applicationReleased = false
+  if (!applicationReleased) {
+    return actionError(
+      'Application estará disponível em uma versão futura.',
+      'Application will be available in a future release.',
+    )
+  }
 
+  const agent = await getCurrentAgent()
   try {
     const result = await prisma.$transaction(async (tx): Promise<StartApplicationFromIllustrationResult> => {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`application-from-illustration:${illustrationId}`}, 0))::text AS lock_result`

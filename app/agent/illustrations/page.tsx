@@ -13,8 +13,6 @@ import { PageHeader } from '@/components/PageHeader'
 import { Table, Thead, Th, Tr, Td, TdNum, EmptyState } from '@/components/Table'
 import { getServerI18n } from '@/lib/i18n/server'
 import { localeFor } from '@/lib/i18n/config'
-import { KBotAvatar } from '@/components/kbot/KBotAvatar'
-import { StartApplicationFromIllustrationButton } from './StartApplicationFromIllustrationButton'
 import { ReadyToSendIllustrations } from './ReadyToSendIllustrations'
 import { readReadyToSendIllustrations } from './ready-to-send'
 import {
@@ -32,11 +30,10 @@ const currency = (value: number, locale: string) =>
 
 function illustrationHref(
   filters: IllustrationDirectoryFilters,
-  intent: string | undefined,
+  _intent: string | undefined,
   page = filters.page,
 ) {
   const params = new URLSearchParams()
-  if (intent === 'application') params.set('intent', 'application')
   if (filters.query) params.set('q', filters.query)
   if (filters.document) params.set('document', filters.document)
   if (filters.sort !== 'recent') params.set('sort', filters.sort)
@@ -54,7 +51,10 @@ export default async function IllustrationsPage({
   const locale = localeFor(language)
   const params = await searchParams
   const intent = Array.isArray(params.intent) ? params.intent[0] : params.intent
-  const applicationIntent = intent === 'application'
+  // Application ships in a later release. Keep accepting the old query
+  // parameter as a normal Illustration directory instead of exposing a
+  // half-finished application picker through a bookmarked URL.
+  const applicationIntent = false
   const agent = await getCurrentAgent()
   const localConnector = getNationalLifeLocalConnectorConfig()
   const filters = parseIllustrationDirectoryFilters(params)
@@ -144,31 +144,7 @@ export default async function IllustrationsPage({
         </Link>
       </PageHeader>
 
-      {applicationIntent ? (
-        <section className="mb-5 flex flex-col gap-4 rounded-xl border border-border-steel bg-paper p-4 sm:flex-row sm:items-center">
-          <KBotAvatar state="idle" size="sm" />
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">K-Bot · iGO Application</p>
-            <h2 className="mt-1 text-base font-semibold text-ink">
-              {copy('Escolha a ilustração que originará a proposta.', 'Choose the illustration that will start the application.')}
-            </h2>
-            <p className="mt-1 max-w-3xl text-sm leading-5 text-ink-muted">
-              {copy(
-                'Use uma ilustração com PDF oficial. Produto, prazo, capital e prêmio confirmados serão vinculados automaticamente ao novo dossiê.',
-                'Use an illustration with an official PDF. The confirmed product, duration, face amount, and premium will be linked to the new case automatically.',
-              )}
-            </p>
-          </div>
-          <Link
-            href="/agent/illustrations/new"
-            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md border border-border-steel bg-paper px-4 py-2 text-sm font-semibold text-teal-deep transition-colors hover:border-teal hover:bg-teal-pale"
-          >
-            {copy('Nova ilustração', 'New illustration')}
-          </Link>
-        </section>
-      ) : null}
-
-      {applicationIntent ? null : <ReadyToSendIllustrations items={readyToSend} />}
+      <ReadyToSendIllustrations items={readyToSend} />
 
       <section className="mb-5 rounded-xl border border-border-steel bg-paper p-4" aria-label={copy('Filtros de ilustrações', 'Illustration filters')}>
         <form action="/agent/illustrations" method="get" className="grid gap-3 md:grid-cols-4">
@@ -213,7 +189,6 @@ export default async function IllustrationsPage({
               <Th className="text-right">{copy("Capital segurado", "Face amount")}</Th>
               <Th className="text-right">{copy("Prêmio mensal", "Monthly premium")}</Th>
               <Th>{copy("Documento", "Document")}</Th>
-              <Th>{copy('Proposta', 'Application')}</Th>
             </tr>
           </Thead>
           <tbody>
@@ -221,12 +196,6 @@ export default async function IllustrationsPage({
               const status = pdfStatus.get(illustration.id)
               const hasCarrierPremium = Boolean(illustration.documentFetchedAt && illustration.premium)
               const premium = hasCarrierPremium ? illustration.premium : illustration.targetPremium
-              const canStartApplication = Boolean(
-                illustration.documentFetchedAt &&
-                illustration.documentMimeType === 'application/pdf' &&
-                illustration.faceAmount &&
-                illustration.premium,
-              )
               return (
               <Tr key={illustration.id}>
                 <Td>{instant(illustration.createdAt)}</Td>
@@ -309,15 +278,6 @@ export default async function IllustrationsPage({
                         </p>
                       )}
                     </>
-                  )}
-                </Td>
-                <Td>
-                  {canStartApplication ? (
-                    <StartApplicationFromIllustrationButton illustrationId={illustration.id} compact />
-                  ) : (
-                    <span className="text-xs leading-5 text-ink-muted">
-                      {copy('Disponível após o PDF oficial', 'Available after the official PDF')}
-                    </span>
                   )}
                 </Td>
               </Tr>
