@@ -72,7 +72,7 @@ vi.mock("@/app/agent/integrations/national-life/NationalLifeLocalConnectorCard",
     return <div data-testid="national-life-connector">Conector National Life</div>;
   },
 }));
-vi.mock("@/app/agent/mensagens/ConnectWhatsapp", () => ({
+vi.mock("@/app/agent/ai/mensagens/ConnectWhatsapp", () => ({
   ConnectWhatsapp: (props: { onConnectionChange?: (connected: boolean) => void }) => {
     integrationMocks.evolutionRender(props);
     return (
@@ -82,7 +82,7 @@ vi.mock("@/app/agent/mensagens/ConnectWhatsapp", () => ({
     );
   },
 }));
-vi.mock("@/app/agent/mensagens/ConnectOfficialWhatsapp", () => ({
+vi.mock("@/app/agent/ai/mensagens/ConnectOfficialWhatsapp", () => ({
   ConnectOfficialWhatsapp: (props: { onConnectionChange?: (connected: boolean) => void }) => {
     integrationMocks.officialRender(props);
     return (

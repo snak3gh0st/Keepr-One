@@ -126,7 +126,7 @@ export function FollowupWorkspace({ compact = false, initialData }: { compact?: 
           </div>
         </div>
         <Link
-          href="/agent/mensagens"
+          href="/agent/ai/mensagens"
           className="inline-flex min-h-12 shrink-0 items-center justify-center gap-3 self-stretch rounded-xl bg-rail-strong px-5 text-sm font-semibold text-paper transition-colors hover:bg-teal-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal sm:self-start lg:self-center"
         >
           {copy('Abrir Mensagens', 'Open Messages')}
@@ -186,7 +186,7 @@ export function FollowupWorkspace({ compact = false, initialData }: { compact?: 
     </div>
     {error && <p role="alert" className="mt-4 rounded-xl bg-danger/10 p-3 text-sm text-danger">{error}</p>}
     {notice && <p role="status" className="mt-4 rounded-xl bg-teal-pale p-3 text-sm text-teal-deep">{notice}</p>}
-    {compact ? <Link className={`${button} mt-4`} href="/agent/kbot">{copy('Ver ações e atividades', 'View actions and activities')}</Link> : <>
+    {compact ? <Link className={`${button} mt-4`} href="/agent/ai/acoes">{copy('Ver ações e atividades', 'View actions and activities')}</Link> : <>
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-y border-border-steel py-3">
         <nav className="flex gap-2" aria-label={copy('Áreas do K-Bot', 'K-Bot areas')}>
           <button className={section === 'queue' ? button : secondary} aria-pressed={section === 'queue'} onClick={() => setSection('queue')}>{copy('Contatos', 'Contacts')}</button>
@@ -229,7 +229,7 @@ export function FollowupWorkspace({ compact = false, initialData }: { compact?: 
           {selectionChanged && <p role="alert" className="mt-2 text-sm text-danger">{copy('Um contato selecionado mudou ou ficou indisponível. Limpe a seleção e confira os dados atualizados.', 'A selected contact changed or became unavailable. Clear the selection and review the updated data.')}</p>}
           {!selectionAffordable && <p role="alert" className="mt-2 text-sm text-danger">{messages.INSUFFICIENT_CREDITS}</p>}
           {!capacity && <p className="mt-2 text-sm text-ink-muted">{messages.INSUFFICIENT_CREDITS}</p>}
-          {!data.aiAvailable && <p className="mt-2 text-sm text-ink-muted">{copy('IA indisponível no momento. O contato manual continua disponível.', 'AI is currently unavailable. Manual contact remains available.')} <Link className="underline" href="/agent/mensagens">{copy('Ver conexão do WhatsApp', 'View WhatsApp connection')}</Link></p>}
+          {!data.aiAvailable && <p className="mt-2 text-sm text-ink-muted">{copy('IA indisponível no momento. O contato manual continua disponível.', 'AI is currently unavailable. Manual contact remains available.')} <Link className="underline" href="/agent/ai/mensagens">{copy('Ver conexão do WhatsApp', 'View WhatsApp connection')}</Link></p>}
         </div>
         <div className="mt-4 divide-y divide-border-steel">
           {!visible.length && <div className="py-8 text-center"><h3 className="font-semibold text-ink">{copy('Nenhum contato nesta lista', 'No contacts in this list')}</h3><p className="mt-2 text-sm text-ink-muted">{copy('Confira os outros filtros ou ajuste a busca. Cadastros bloqueados continuam disponíveis para revisão.', 'Check other filters or adjust your search. Blocked contacts remain available for review.')}</p></div>}

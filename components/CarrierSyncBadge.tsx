@@ -39,19 +39,27 @@ export function CarrierSyncBadge({
   welcome = false,
   canAccessNationalLife = true,
   canAccessIllustrations = true,
+  canAccessMessages = true,
 }: {
   separated?: boolean
   welcome?: boolean
   canAccessNationalLife?: boolean
   canAccessIllustrations?: boolean
+  canAccessMessages?: boolean
 }) {
   const { copy } = useI18n()
   const quickActions = useMemo<KBotAction[]>(() => [
     {
-      href: '/agent/kbot', badge: 'AI',
+      href: '/agent/ai/acoes', badge: 'AI',
       label: copy('Follow-up de clientes', 'Customer follow-up'),
       detail: copy('Atendimento manual, ações com IA e resultados', 'Manual contact, AI actions and results'),
     },
+    ...(canAccessMessages ? [{
+      href: '/agent/ai/mensagens',
+      badge: 'MSG',
+      label: copy('Mensagens', 'Messages'),
+      detail: copy('Conversas do WhatsApp e aprovações do K-Bot', 'WhatsApp conversations and K-Bot approvals'),
+    }] : []),
     ...(canAccessNationalLife ? [{
       href: '/agent/integrations/national-life',
       badge: 'NL',
@@ -64,7 +72,7 @@ export function CarrierSyncBadge({
       label: copy('Criar ilustração', 'Create Illustration'),
       detail: copy('Prepare uma ilustração oficial de Term ou IUL', 'Prepare a Term or IUL official illustration'),
     }] : []),
-  ], [canAccessIllustrations, canAccessNationalLife, copy])
+  ], [canAccessIllustrations, canAccessMessages, canAccessNationalLife, copy])
   const [state, setState] = useState<CarrierSyncState | null>(null)
   const [sync, setSync] = useState<CompactSyncStatus | null>(null)
   const [illustration, setIllustration] = useState<IllustrationActivity | null>(null)
@@ -528,20 +536,20 @@ export function CarrierSyncBadge({
       botState = 'waiting'
       title = copy('Há follow-ups que precisam de revisão', 'Some follow-ups need review')
       detail = copy('Confira as atividades antes de fazer um novo contato.', 'Check activities before making another contact.')
-      actionHref = '/agent/kbot?view=activities'
+      actionHref = '/agent/ai/acoes?view=activities'
       actionLabel = copy('Revisar atividades', 'Review activities')
     } else if (followup?.working && !showWelcome && !notice && tasks.length === 1) {
       botState = 'working'
       title = copy('Estou cuidando dos seus follow-ups', 'I am handling your follow-ups')
       detail = copy('As mensagens autorizadas continuam em segundo plano.', 'Authorized messages continue in the background.')
-      actionHref = '/agent/kbot?view=activities'
+      actionHref = '/agent/ai/acoes?view=activities'
       actionLabel = copy('Ver atividades', 'View activities')
     }
     if (statusUnavailable && !showWelcome) {
       botState = 'waiting'
       title = copy('Não consegui atualizar as atividades', 'I could not refresh activities')
       detail = copy('Esta é a última informação conhecida. Vou verificar novamente.', 'This is the last known information. I will check again.')
-      actionHref = '/agent/kbot?view=activities'
+      actionHref = '/agent/ai/acoes?view=activities'
       actionLabel = copy('Ver atividades', 'View activities')
     }
     return (

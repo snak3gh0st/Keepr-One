@@ -16,6 +16,16 @@ const nextConfig: NextConfig = {
     serverActions: { bodySizeLimit: '12mb' },
   },
   allowedDevOrigins: ["127.0.0.1"],
+  // K-Bot AI areas moved under /agent/ai. Stored notifications and Stripe
+  // sessions still carry the old URLs, so these stay permanent. Config
+  // redirects run before the proxy, so the module gate sees the new path.
+  async redirects() {
+    return [
+      { source: "/agent/mensagens", destination: "/agent/ai/mensagens", permanent: true },
+      { source: "/agent/kbot/agendadas", destination: "/agent/ai/agendadas", permanent: true },
+      { source: "/agent/kbot", destination: "/agent/ai/acoes", permanent: true },
+    ];
+  },
   images: {
     remotePatterns: [
       {

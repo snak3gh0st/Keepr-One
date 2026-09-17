@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const subscription = await prisma.platformAddonSubscription.findFirst({ where: { agentId: agent.id, addon: 'K_BOT_FOLLOWUP', stripeSubscriptionId: { not: null }, stripeCustomerId: { not: null } }, orderBy: { createdAt: 'desc' } })
     const origin = process.env.NEXT_PUBLIC_APP_URL ?? process.env.BETTER_AUTH_URL
     if (!subscription?.stripeCustomerId || !origin) return Response.json({ error: 'BILLING_PORTAL_UNAVAILABLE' }, { status: 409 })
-    const portal = await getStripeClient().billingPortal.sessions.create({ customer: subscription.stripeCustomerId, return_url: `${origin.replace(/\/$/, '')}/agent/kbot` })
+    const portal = await getStripeClient().billingPortal.sessions.create({ customer: subscription.stripeCustomerId, return_url: `${origin.replace(/\/$/, '')}/agent/ai/acoes` })
     return NextResponse.redirect(portal.url, 303)
   } catch { return Response.json({ error: 'BILLING_PORTAL_UNAVAILABLE' }, { status: 503 }) }
 }

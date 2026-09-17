@@ -20,7 +20,7 @@ export type ScheduledActionResult =
   | { ok: true; preview?: string; released?: number }
   | { ok: false; message: string }
 
-const PATH = '/agent/kbot/agendadas'
+const PATH = '/agent/ai/agendadas'
 
 const templateSchema = z.strictObject({
   category: z.enum(SCHEDULED_CATEGORIES),
@@ -286,7 +286,7 @@ export async function approveScheduledProposals(input: unknown): Promise<Schedul
     const agent = await currentAgent()
     const { released } = await approveScheduledMessages(agent.id, parsed.data.jobIds)
     revalidatePath(PATH)
-    revalidatePath('/agent/mensagens')
+    revalidatePath('/agent/ai/mensagens')
     return { ok: true, released }
   } catch {
     return { ok: false, message: unavailable(copy) }
@@ -304,7 +304,7 @@ export async function discardScheduledProposals(input: unknown): Promise<Schedul
     const agent = await currentAgent()
     const { released } = await discardScheduledMessages(agent.id, parsed.data.jobIds)
     revalidatePath(PATH)
-    revalidatePath('/agent/mensagens')
+    revalidatePath('/agent/ai/mensagens')
     return { ok: true, released }
   } catch {
     return { ok: false, message: unavailable(copy) }

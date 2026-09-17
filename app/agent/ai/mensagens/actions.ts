@@ -10,7 +10,7 @@ import { assertSameOriginAction } from '@/lib/security/same-origin-action'
 import { setContactEnabled, enableAllAgentContacts, type EnableAllTally } from '@/lib/kbot-messaging/contact-enablement'
 
 /// As ações de habilitação do K-Bot dentro da Central de Mensagens — mesmo
-/// formato de `app/agent/kbot/agendadas/actions.ts`: origem verificada, agente
+/// formato de `app/agent/ai/agendadas/actions.ts`: origem verificada, agente
 /// resolvido da sessão (nunca do corpo da requisição), e a página revalidada
 /// depois de escrever. O gate de envio continua sendo o único ponto de
 /// decisão; estas ações apenas ligam ou desligam quem pode ser alcançado.
@@ -23,7 +23,7 @@ export type KBotEnableAllResult =
   | ({ ok: true } & EnableAllTally)
   | { ok: false; message: string }
 
-const PATH = '/agent/mensagens'
+const PATH = '/agent/ai/mensagens'
 
 const toggleSchema = z.strictObject({
   clientId: z.string().min(1).max(64),

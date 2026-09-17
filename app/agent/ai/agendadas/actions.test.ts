@@ -172,7 +172,7 @@ describe('turning automatic sending on', () => {
       where: { agentId: 'agent-1', category: 'BIRTHDAY' },
       data: { autoSend: true },
     })
-    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/kbot/agendadas')
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/ai/agendadas')
   })
 
   it('refuses a category that has no rows at all', async () => {
@@ -233,8 +233,8 @@ describe('releasing proposals', () => {
 
     expect(mocks.approve).toHaveBeenCalledWith('agent-1', ['j1', 'j2'])
     expect(result).toEqual({ ok: true, released: 2 })
-    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/kbot/agendadas')
-    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/mensagens')
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/ai/agendadas')
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/ai/mensagens')
   })
 
   it('refuses a payload that tries to name its own agent', async () => {
@@ -258,7 +258,7 @@ describe('releasing proposals', () => {
 
     expect(mocks.discard).toHaveBeenCalledWith('agent-1', ['j1', 'j2'])
     expect(result).toEqual({ ok: true, released: 2 })
-    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/mensagens')
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/agent/ai/mensagens')
   })
 
   it('refuses an empty selection instead of reporting a no-op as done', async () => {

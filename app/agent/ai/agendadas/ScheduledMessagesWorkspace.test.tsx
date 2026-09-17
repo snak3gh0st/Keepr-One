@@ -123,7 +123,7 @@ describe('consent history', () => {
   })
 })
 
-// A fila de aprovação mudou de casa (agora vive em /agent/mensagens), então
+// A fila de aprovação mudou de casa (agora vive em /agent/ai/mensagens), então
 // este componente nunca mais renderiza "Esperando você liberar". O que fica
 // aqui é configuração: Modelos, Envios e Consentimento continuam alcançáveis.
 describe('a configuração continua alcançável depois que a fila saiu daqui', () => {

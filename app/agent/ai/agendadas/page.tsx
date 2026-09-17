@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import { AiAreaTabs } from '@/components/kbot/AiAreaTabs'
 import { Shell } from '@/components/Shell'
 import { getCurrentAgent } from '@/lib/agent-context'
 import { getServerI18n } from '@/lib/i18n/server'
@@ -25,7 +25,7 @@ export default async function KBotScheduledMessagesPage() {
       select: { category: true, language: true, body: true, enabled: true, autoSend: true, updatedAt: true },
     }),
     // The queue of proposals waiting for approval now lives in
-    // `/agent/mensagens` — this screen only reads what already happened.
+    // `/agent/ai/mensagens` — this screen only reads what already happened.
     prisma.kBotFollowupJob.findMany({
       where: { agentId: agent.id, category: { in: [...SCHEDULED_CATEGORIES] }, status: { not: AWAITING_APPROVAL } },
       orderBy: { updatedAt: 'desc' },
@@ -91,13 +91,13 @@ export default async function KBotScheduledMessagesPage() {
   }
 
   return <Shell role="AGENT" userName={user.name}>
+    <AiAreaTabs />
     <header className="flex flex-wrap items-end justify-between gap-4 py-5">
       <div>
         <p className="text-xs font-semibold uppercase tracking-widest text-teal-deep">K-Bot</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink">{copy('Mensagens agendadas', 'Scheduled messages')}</h1>
         <p className="mt-2 text-sm text-ink-muted">{copy('Escreva o texto de cada categoria, ative quando estiver pronto e acompanhe quem recebeu — e quem não recebeu.', 'Write the text for each category, turn it on when you are ready and track who received it — and who did not.')}</p>
       </div>
-      <Link href="/agent/kbot" className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-semibold text-teal-deep">{copy('Voltar ao follow-up', 'Back to follow-up')}</Link>
     </header>
     <ScheduledMessagesWorkspace view={view} />
   </Shell>

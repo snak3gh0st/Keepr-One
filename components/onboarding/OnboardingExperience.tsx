@@ -14,8 +14,8 @@ import {
   INITIAL_ONBOARDING_ACTION_STATE,
   type OnboardingActionState,
 } from "@/app/onboarding/state";
-import { ConnectOfficialWhatsapp } from "@/app/agent/mensagens/ConnectOfficialWhatsapp";
-import { ConnectWhatsapp } from "@/app/agent/mensagens/ConnectWhatsapp";
+import { ConnectOfficialWhatsapp } from "@/app/agent/ai/mensagens/ConnectOfficialWhatsapp";
+import { ConnectWhatsapp } from "@/app/agent/ai/mensagens/ConnectWhatsapp";
 import {
   NationalLifeLocalConnectorCard,
   type NationalLifeConnectorViewState,

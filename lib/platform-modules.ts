@@ -163,7 +163,7 @@ const MODULE_ROUTES: readonly ModuleRoute[] = [
   { path: '/agent/cases', module: 'CRM' },
   { path: '/agent/clients', module: 'CRM' },
   { path: '/agent/activities', module: 'CRM' },
-  { path: '/agent/mensagens', module: 'MESSAGES' },
+  { path: '/agent/ai/mensagens', module: 'MESSAGES' },
   { path: '/agent/policies', module: 'POLICIES' },
   { path: '/agent/illustrations', module: 'ILLUSTRATIONS' },
   { path: '/agent/commissions', module: 'COMMISSIONS' },
