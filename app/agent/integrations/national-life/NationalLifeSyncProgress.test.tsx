@@ -93,7 +93,7 @@ describe('NationalLifeSyncProgress', () => {
 
     expect(screen.getByText('K-Bot is updating your National Life data')).toBeTruthy()
     expect(screen.getByText(
-      'K-Bot is collecting your correspondence information from National Life. Everything already collected is safe.',
+      'Everything already collected is saved. You can keep using Keepr One meanwhile.',
     )).toBeTruthy()
     expect(screen.getByText('3 of 13 plan stages finished')).toBeTruthy()
     expect(screen.getByText('Reading and saving correspondence.')).toBeTruthy()

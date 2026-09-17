@@ -167,21 +167,73 @@ function activeLine(status: NationalLifeSyncStatus, reused: number, copy: Copy, 
   return `${reusePrefix}${copy('Lendo e salvando {area}.', 'Reading and saving {area}.', { area: status.currentGridLabel })}`
 }
 
-function coverageTone(state: NonNullable<NationalLifeSyncStatus['stageCoverage']>[number]['state']) {
-  if (state === 'VERIFIED') return 'border-teal/30 bg-teal-pale/45 text-teal-deep'
-  if (state === 'REUSED') return 'border-teal/30 bg-teal-pale/25 text-teal-deep'
-  if (state === 'CAPTURED') return 'border-blue-200 bg-blue-50 text-blue-800'
-  if (state === 'READING') return 'border-gold/40 bg-gold-pale text-gold-ink'
-  if (state === 'FAILED') return 'border-red-300 bg-red-50 text-red-700'
-  return 'border-border-steel bg-panel/55 text-ink-muted'
+type StageState = NonNullable<NationalLifeSyncStatus['stageCoverage']>[number]['state']
+type SegmentState = StageState | 'DONE'
+
+function segmentTone(state: SegmentState) {
+  if (state === 'VERIFIED' || state === 'REUSED' || state === 'DONE') return 'bg-teal'
+  if (state === 'CAPTURED') return 'bg-blue-600'
+  if (state === 'READING') return 'bg-gold animate-pulse motion-reduce:animate-none'
+  if (state === 'FAILED') return 'bg-danger'
+  return 'bg-border-steel'
 }
 
-function coverageLabel(state: NonNullable<NationalLifeSyncStatus['stageCoverage']>[number]['state'], copy: Copy) {
+/// One segment per stage of the plan, so a run at "0 of 6" still shows where
+/// K-Bot is instead of an empty gray bar. The native <progress> stays for
+/// assistive tech; this is its visual twin.
+function stageSegments(status: NationalLifeSyncStatus, checked: number): SegmentState[] {
+  if (status.stageCoverage && status.stageCoverage.length === status.total) {
+    return status.stageCoverage.map((stage) => stage.state)
+  }
+  return Array.from({ length: status.total }, (_, index): SegmentState => {
+    if (index < status.completed) return 'DONE'
+    if (index < checked) return 'FAILED'
+    if (index === checked && status.shouldPoll) return 'READING'
+    return 'PENDING'
+  })
+}
+
+function StageIcon({ state }: { state: StageState }) {
+  const base = 'mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full'
+  if (state === 'VERIFIED' || state === 'REUSED') {
+    return (
+      <span aria-hidden="true" className={`${base} ${state === 'VERIFIED' ? 'bg-teal text-paper' : 'border border-teal text-teal'}`}>
+        <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 6.2 5 8.5l4.5-5" /></svg>
+      </span>
+    )
+  }
+  if (state === 'CAPTURED') {
+    return (
+      <span aria-hidden="true" className={`${base} bg-blue-50 text-blue-700`}>
+        <span className="h-2 w-2 rounded-[2px] bg-current" />
+      </span>
+    )
+  }
+  if (state === 'READING') {
+    return (
+      <span aria-hidden="true" className={base}>
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-gold/25 border-t-gold motion-reduce:animate-none" />
+      </span>
+    )
+  }
+  if (state === 'FAILED') {
+    return (
+      <span aria-hidden="true" className={`${base} bg-danger text-[11px] font-bold leading-none text-paper`}>!</span>
+    )
+  }
+  return (
+    <span aria-hidden="true" className={base}>
+      <span className="h-3.5 w-3.5 rounded-full border-[1.5px] border-dashed border-ink-muted/50" />
+    </span>
+  )
+}
+
+function coverageLabel(state: StageState, copy: Copy) {
   if (state === 'VERIFIED') return copy('Verificado', 'Verified')
   if (state === 'REUSED') return copy('Reutilizado', 'Reused')
   if (state === 'CAPTURED') return copy('Capturado', 'Captured')
   if (state === 'READING') return copy('Lendo', 'Reading')
-  if (state === 'FAILED') return copy('Precisa tentar novamente', 'Needs retry')
+  if (state === 'FAILED') return copy('Falhou', 'Failed')
   return copy('Aguardando', 'Waiting')
 }
 
@@ -249,10 +301,15 @@ export function NationalLifeSyncProgress({
           title={copy('O K-Bot está pronto para a primeira sincronização', 'K-Bot is ready for the first sync')}
           detail={copy('Inicie acima. Este painel mostrará cada área da National Life conforme ela for recebida e salva.', 'Start it above. This panel will show each National Life area only as it is received and saved.')}
         />
-        <div className="mt-5 flex items-center justify-between rounded-xl border border-border-steel bg-panel/55 px-4 py-3 text-sm">
-          <span className="font-medium text-ink">{copy('Nenhuma sincronização foi iniciada nesta conta.', 'No sync has started on this account yet.')}</span>
-          <span className="text-ink-muted">{copy('Aguardando a primeira execução', 'Waiting for your first run')}</span>
+        <div className="mt-5 flex gap-1" aria-hidden="true">
+          {Array.from({ length: 6 }, (_, index) => (
+            <span key={index} className="h-1.5 flex-1 rounded-full bg-border-steel/70" />
+          ))}
         </div>
+        <p className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+          <span className="text-ink">{copy('Nenhuma sincronização foi iniciada nesta conta.', 'No sync has started on this account yet.')}</span>
+          <span className="text-ink-muted">{copy('Aguardando a primeira execução', 'Waiting for your first run')}</span>
+        </p>
       </section>
     )
   }
@@ -297,11 +354,14 @@ export function NationalLifeSyncProgress({
     ? copy('Entre uma vez e a mesma tarefa continuará do último ponto salvo.', 'Sign in once and the same task continues from its last saved checkpoint.')
     : active
       ? status.currentGridLabel
-        ? copy('O K-Bot está coletando suas informações de {area} na National Life. Tudo que já foi coletado está seguro.', 'K-Bot is collecting your {area} information from National Life. Everything already collected is safe.', { area: status.currentGridLabel })
+        ? copy('Tudo que já foi coletado está salvo. Você pode continuar usando a Keepr One enquanto isso.', 'Everything already collected is saved. You can keep using Keepr One meanwhile.')
         : copy('O K-Bot está abrindo a próxima área necessária na National Life.', 'K-Bot is opening the next place it needs in National Life.')
       : status.state === 'COMPLETED'
         ? copy('O plano desta execução terminou. Confira abaixo os dados estruturados e as fontes apenas capturadas.', 'This run’s plan is complete. Review the structured data and capture-only sources below.')
         : copy('Você pode tentar novamente apenas as áreas que a National Life não retornou.', 'You can retry only the areas National Life did not return.')
+
+  const segments = stageSegments(status, checked)
+  const pillClass = 'rounded-full border border-border-steel bg-paper px-3 py-1 text-sm font-medium text-ink'
 
   return (
     <section
@@ -309,14 +369,9 @@ export function NationalLifeSyncProgress({
       aria-busy={active}
       className="mb-6 rounded-xl border border-border-steel bg-paper p-5 sm:p-6"
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <KBotActivity
-            state={botState}
-            title={botTitle}
-            detail={botDetail}
-            estimate={estimate}
-          />
+      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+        <div className="min-w-0 flex-1">
+          <KBotActivity state={botState} title={botTitle} detail={botDetail} />
           {terminal && lastSynced && (
             <p className="ml-[60px] mt-1 text-xs text-ink-muted">{copy('Última sincronização: {date}', 'Last synced {date}', { date: lastSynced })}</p>
           )}
@@ -326,85 +381,65 @@ export function NationalLifeSyncProgress({
             </p>
           )}
         </div>
-        <div className="text-right">
-          <span className="block font-mono text-sm font-semibold tabular-nums text-teal">
-            {copy('{checked} de {total} etapas do plano encerradas', '{checked} of {total} plan stages finished', { checked, total: status.total })}
-          </span>
-          {status.failed > 0 && (
-            <span className="mt-1 block text-xs text-amber-800">
-              {copy('{count} etapas com falha; precisam de nova tentativa.', '{count} failed stages need another attempt.', { count: status.failed })}
-            </span>
-          )}
-          {status.state === 'COMPLETED' && !!status.stageCoverage?.length && (
-            <span className="mt-1 block max-w-sm text-xs text-ink-muted">
-              {copy('Plano concluído: {structured} fontes estruturadas + {captured} fontes apenas capturadas.', 'Plan complete: {structured} structured sources + {captured} capture-only sources.', { structured: plannedStructuredSources, captured: plannedSnapshotSources })}
-            </span>
-          )}
-          {status.estimate && (
-            <span className="mt-1 block text-xs text-ink-muted">
-              <span className="block">
-                {copy(
-                  'Com base em {count} {runs} recentes desta conta',
-                  'Based on {count} recent {runs} from this account',
-                  { count: status.estimate.basisRuns, runs: status.estimate.basisRuns === 1 ? copy('sincronização', 'sync') : copy('sincronizações', 'syncs') },
-                )}
-              </span>
-            </span>
+        {status.estimate && estimate && (
+          <div className="sm:max-w-[16rem] sm:text-right">
+            <p className="text-sm font-medium text-ink">{estimate}</p>
+            <p className="mt-0.5 text-xs text-ink-muted">
+              {copy(
+                'Com base em {count} {runs} recentes desta conta',
+                'Based on {count} recent {runs} from this account',
+                { count: status.estimate.basisRuns, runs: status.estimate.basisRuns === 1 ? copy('sincronização', 'sync') : copy('sincronizações', 'syncs') },
+              )}
+            </p>
+          </div>
+        )}
+      </header>
+
+      <div className="mt-6">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <p className="min-w-0 text-sm text-ink">{outcome ?? activeLine(status, reused, copy, locale)}</p>
+          <p className="text-sm tabular-nums text-ink-muted">
+            <span>{copy('{checked} de {total} etapas concluídas', '{checked} of {total} plan stages finished', { checked, total: status.total })}</span>
+            {status.failed > 0 && (
+              <span className="ml-2 font-medium text-danger">{copy('{count} etapas com falha; precisam de nova tentativa.', '{count} failed stages need another attempt.', { count: status.failed })}</span>
+            )}
+          </p>
+        </div>
+        <progress
+          aria-label={copy('Progresso da atualização', 'Update progress')}
+          className="sr-only"
+          max={status.total}
+          value={checked}
+        />
+        {segments.length > 0 && (
+          <div aria-hidden="true" className="mt-3 flex gap-1">
+            {segments.map((segment, index) => (
+              <span key={index} className={`h-1.5 flex-1 rounded-full transition-colors duration-200 ${segmentTone(segment)}`} />
+            ))}
+          </div>
+        )}
+        {discards && <p className="mt-3 max-w-3xl text-xs leading-5 text-ink-muted">{discards}</p>}
+      </div>
+
+      {message && (
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gold/40 bg-gold-pale px-4 py-3 text-sm text-gold-ink">
+          <span className="font-medium">{message}</span>
+          {status.state === 'PAUSED' && (
+            <Link className="inline-flex min-h-9 items-center rounded-full bg-rail-strong px-4 text-sm font-semibold text-paper transition-colors hover:bg-rail" href="/agent/integrations/national-life">
+              {copy('Conectar', 'Connect')}
+            </Link>
           )}
         </div>
-      </div>
-
-      <progress
-        aria-label={copy('Progresso da atualização', 'Update progress')}
-        className="mt-5 h-2 w-full overflow-hidden rounded-full accent-teal"
-        max={status.total}
-        value={checked}
-      />
-
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-ink-muted">
-        <span>
-          {outcome ?? activeLine(status, reused, copy, locale)}
-          {discards && <span className="block text-xs text-ink-muted">{discards}</span>}
-        </span>
-        {message && (
-          <span className="font-semibold text-gold">
-            {message}
-            {status.state === 'PAUSED' && (
-              <Link className="ml-2 underline" href="/agent/integrations/national-life">
-                {copy('Conectar', 'Connect')}
-              </Link>
-            )}
-          </span>
-        )}
-      </div>
+      )}
 
       {active && status.failed > 0 && (
-        <div className="mt-4 rounded-xl border border-gold/35 bg-gold-pale px-4 py-3 text-sm text-gold-ink">
+        <p className="mt-5 rounded-lg border border-gold/40 bg-gold-pale px-4 py-3 text-sm text-gold-ink">
           {copy(
             '{count} {areas} não puderam ser lidas. A sincronização continua com as áreas restantes.',
             '{count} {areas} not be read. The sync is continuing with the remaining areas.',
             { count: status.failed, areas: status.failed === 1 ? copy('área', 'area could') : copy('áreas', 'areas could') },
           )}
-        </div>
-      )}
-
-      {terminal && status.delta && (
-        <div className="mt-5 rounded-xl border border-teal/20 bg-teal-pale/30 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">{copy('O que mudou na Keepr One', 'What changed in Keepr One')}</p>
-          <div className="mt-3 flex flex-wrap gap-2 text-sm">
-            <span className="rounded-full bg-paper px-3 py-1.5 font-semibold text-ink shadow-sm">
-              {copy('{count} novos na Keepr One', '{count} new to Keepr One', { count: status.delta.addedRecords.toLocaleString(locale) })}
-            </span>
-            <span className="rounded-full bg-paper px-3 py-1.5 font-semibold text-ink shadow-sm">
-              {copy('{count} reconfirmados', '{count} reconfirmed', { count: status.delta.refreshedRecords.toLocaleString(locale) })}
-            </span>
-            {status.delta.newCommissionAmount !== null && (
-              <span className="rounded-full bg-paper px-3 py-1.5 font-semibold text-ink shadow-sm">
-                {copy('{amount} em novos lançamentos de comissão recebidos', '{amount} in newly received commission entries', { amount: money(status.delta.newCommissionAmount, locale) })}
-              </span>
-            )}
-          </div>
-        </div>
+        </p>
       )}
 
       {terminal && status.failed > 0 && (
@@ -421,89 +456,118 @@ export function NationalLifeSyncProgress({
         </button>
       )}
 
-      <div className={`mt-5 grid overflow-hidden rounded-lg border border-border-steel bg-panel/55 divide-y divide-border-steel sm:divide-x sm:divide-y-0 ${snapshotRecords > 0 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-        <div className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">{copy('Recebido da National Life', 'Received from National Life')}</p>
-          <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">{formatCount(status.receivedRecords, locale)}</p>
-          <p className="mt-1 text-xs text-ink-muted">{copy('Linhas entregues pelo portal', 'Rows delivered by the portal')}</p>
+      <dl className={`mt-6 grid gap-y-4 border-y border-border-steel py-4 sm:divide-x sm:divide-border-steel ${snapshotRecords > 0 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+        <div className="sm:pr-6">
+          <dt className="text-sm text-ink-muted">{copy('Recebido da National Life', 'Received from National Life')}</dt>
+          <dd className="mt-1 font-mono text-2xl font-semibold tabular-nums tracking-tight text-ink">{formatCount(status.receivedRecords, locale)}</dd>
         </div>
-        <div className="bg-teal-pale/45 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal-deep">{copy('Estruturado na Keepr One', 'Structured in Keepr One')}</p>
-          <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">{formatCount(status.writtenRecords, locale)}</p>
-          <p className="mt-1 text-xs text-ink-muted">{copy('Linhas gravadas nos seus dados da National Life', 'Rows written to your National Life data')}</p>
+        <div className="sm:px-6">
+          <dt className="text-sm text-ink-muted">{copy('Estruturado na Keepr One', 'Structured in Keepr One')}</dt>
+          <dd className="mt-1 font-mono text-2xl font-semibold tabular-nums tracking-tight text-teal">{formatCount(status.writtenRecords, locale)}</dd>
         </div>
         {snapshotRecords > 0 && (
-          <div className="bg-blue-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-blue-800">{copy('Snapshots de origem preservados', 'Source snapshots preserved')}</p>
-            <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">
-              {snapshotRecords.toLocaleString(locale)}
-            </p>
-            <p className="mt-1 text-xs text-ink-muted">{copy('Mantidos para mapeamento, sem aparecer como linhas operacionais', 'Kept for mapping, not shown as operational rows')}</p>
+          <div className="sm:pl-6">
+            <dt className="text-sm text-ink-muted">{copy('Snapshots de origem preservados', 'Source snapshots preserved')}</dt>
+            <dd className="mt-1 font-mono text-2xl font-semibold tabular-nums tracking-tight text-ink">{snapshotRecords.toLocaleString(locale)}</dd>
           </div>
         )}
-      </div>
+      </dl>
+
+      {terminal && status.delta && (
+        <div className="mt-5">
+          <p className="text-sm font-semibold text-ink">{copy('O que mudou na Keepr One', 'What changed in Keepr One')}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className={pillClass}>
+              {copy('{count} novos na Keepr One', '{count} new to Keepr One', { count: status.delta.addedRecords.toLocaleString(locale) })}
+            </span>
+            <span className={pillClass}>
+              {copy('{count} reconfirmados', '{count} reconfirmed', { count: status.delta.refreshedRecords.toLocaleString(locale) })}
+            </span>
+            {status.delta.newCommissionAmount !== null && (
+              <span className={pillClass}>
+                {copy('{amount} em novos lançamentos de comissão recebidos', '{amount} in newly received commission entries', { amount: money(status.delta.newCommissionAmount, locale) })}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {status.stageCoverage && status.stageCoverage.length > 0 && (
-        <div className="mt-5 border-t border-border-steel pt-4">
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted">{copy('Cobertura das fontes do portal', 'Portal source coverage')}</p>
+        <div className="mt-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <p className="text-sm font-semibold text-ink">{copy('Áreas desta atualização', 'Areas in this update')}</p>
             {reused > 0 && (
               <p className="text-xs text-ink-muted">
                 {copy('As áreas reutilizadas já haviam sido verificadas na tentativa anterior.', 'Reused areas were already verified in the previous attempt.')}
               </p>
             )}
           </div>
-          <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {status.stageCoverage.map((stage) => (
-              <li key={stage.gridKey} className={`rounded-lg border px-3 py-2 text-xs ${coverageTone(stage.state)}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold capitalize">{stage.label ?? stage.gridKey.replace(/_/g, ' ').toLowerCase()}</span>
-                  <span className="font-mono text-[10px] uppercase">{coverageLabel(stage.state, copy)}</span>
-                </div>
-                {stage.verifiedRecords !== null && (
-                  <p className="mt-1 font-mono tabular-nums">
-                    {stage.verifiedRecords.toLocaleString(locale)}{' '}
-                    {stage.state === 'CAPTURED'
-                      ? copy('registros de snapshot capturados', 'snapshot records captured')
-                      : copy('linhas verificadas', 'rows verified')}
-                  </p>
-                )}
-                {hydrated && stage.verifiedAt && (
-                  <p className="mt-1 text-[10px] opacity-80">
-                    {copy('Confirmado pela National Life em {date}', 'Confirmed by National Life {date}', { date: formatMoment(stage.verifiedAt, locale) ?? '—' })}
-                  </p>
-                )}
-                {stage.state === 'FAILED' && (
-                  <p className="mt-1 text-[10px] font-semibold">{copy('A última tentativa precisa ser refeita', 'Last attempt needs retry')}</p>
-                )}
-              </li>
-            ))}
+          <ul className="mt-2 grid items-start gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
+            {status.stageCoverage.map((stage) => {
+              const reading = stage.state === 'READING'
+              const failed = stage.state === 'FAILED'
+              return (
+                <li
+                  key={stage.gridKey}
+                  className={`-mx-2 flex gap-2.5 rounded-lg px-2 py-2.5 ${reading ? 'bg-gold-pale/70' : failed ? 'bg-danger-pale/70' : ''}`}
+                >
+                  <StageIcon state={stage.state} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className={`truncate text-sm font-medium capitalize ${stage.state === 'PENDING' ? 'text-ink-muted' : 'text-ink'}`}>
+                        {stage.label ?? stage.gridKey.replace(/_/g, ' ').toLowerCase()}
+                      </span>
+                      <span className={`shrink-0 text-xs ${reading ? 'font-medium text-gold-ink' : failed ? 'font-medium text-danger' : 'text-ink-muted'}`}>
+                        {coverageLabel(stage.state, copy)}
+                      </span>
+                    </div>
+                    {stage.verifiedRecords !== null && (
+                      <p className="mt-0.5 text-xs tabular-nums text-ink-muted">
+                        {stage.verifiedRecords.toLocaleString(locale)}{' '}
+                        {stage.state === 'CAPTURED'
+                          ? copy('registros de snapshot capturados', 'snapshot records captured')
+                          : copy('linhas verificadas', 'rows verified')}
+                      </p>
+                    )}
+                    {hydrated && stage.verifiedAt && (
+                      <p className="mt-0.5 text-xs text-ink-muted">
+                        {copy('Confirmado pela National Life em {date}', 'Confirmed by National Life {date}', { date: formatMoment(stage.verifiedAt, locale) ?? '—' })}
+                      </p>
+                    )}
+                    {failed && (
+                      <p className="mt-0.5 text-xs font-medium text-danger">{copy('A última tentativa precisa ser refeita', 'Last attempt needs retry')}</p>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
           </ul>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-steel bg-panel/45 px-3 py-2 text-xs text-ink-muted">
-            <span>
-              {currentPriorityPlan ? copy('Plano atual', 'Current plan') : copy('Plano da execução anterior', 'Previous run plan')}: {plannedStructuredSources} {copy('estruturadas', 'structured')}
-              {plannedSnapshotSources > 0
-                ? copy(' + {count} fontes de snapshot', ' + {count} snapshot sources', { count: plannedSnapshotSources })
-                : ''}
-            </span>
-            <span className="font-mono font-semibold tabular-nums text-ink">
-              {copy(
-                '{automatic} de {required} fontes conhecidas estão estruturadas operacionalmente',
-                '{automatic} of {required} known sources are operationally structured',
-                { automatic: PORTAL_COVERAGE.automatic, required: PORTAL_COVERAGE.required },
-              )}
-            </span>
-          </div>
-        </div>
-      )}
 
-      {active && (
-        <p className="mt-4 text-xs leading-5 text-ink-muted">
-          {copy(
-            'Os dados são salvos em lotes conforme cada área termina. Você pode continuar trabalhando em qualquer parte da Keepr One durante a leitura da National Life.',
-            'Data is saved in batches as each area finishes. You can keep working anywhere in Keepr One while National Life is being read.',
-          )}
-        </p>
+          <details className="group mt-3 border-t border-border-steel pt-3 text-xs text-ink-muted">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 font-medium text-ink-muted hover:text-ink [&::-webkit-details-marker]:hidden">
+              <svg aria-hidden="true" viewBox="0 0 12 12" className="h-3 w-3 transition-transform duration-200 group-open:rotate-90 motion-reduce:transition-none" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="m4.5 2.5 3.5 3.5-3.5 3.5" /></svg>
+              {copy('Detalhes do plano', 'Plan details')}
+            </summary>
+            <dl className="mt-2 grid gap-1.5 pl-[18px] leading-5">
+              <div>
+                {currentPriorityPlan ? copy('Plano atual', 'Current plan') : copy('Plano da execução anterior', 'Previous run plan')}: {plannedStructuredSources} {copy('estruturadas', 'structured')}
+                {plannedSnapshotSources > 0
+                  ? copy(' + {count} fontes de snapshot', ' + {count} snapshot sources', { count: plannedSnapshotSources })
+                  : ''}
+              </div>
+              {status.state === 'COMPLETED' && (
+                <div>{copy('Plano concluído: {structured} fontes estruturadas + {captured} fontes apenas capturadas.', 'Plan complete: {structured} structured sources + {captured} capture-only sources.', { structured: plannedStructuredSources, captured: plannedSnapshotSources })}</div>
+              )}
+              <div>
+                {copy(
+                  '{automatic} de {required} fontes conhecidas estão estruturadas operacionalmente',
+                  '{automatic} of {required} known sources are operationally structured',
+                  { automatic: PORTAL_COVERAGE.automatic, required: PORTAL_COVERAGE.required },
+                )}
+              </div>
+            </dl>
+          </details>
+        </div>
       )}
     </section>
   )
