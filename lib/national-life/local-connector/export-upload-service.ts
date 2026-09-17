@@ -331,7 +331,15 @@ export async function completeNationalLifeExportUpload(
     throw new NationalLifeExportUploadError('EXPORT_NOT_ALLOWED')
   }
   const parsed = await parseNationalLifeInforceExport(fileBytes)
-  const observedAt = new Date()
+  // Derived from the upload, never from the clock. The envelope is hashed into
+  // the stage receipt, so a `new Date()` here made every retry produce a
+  // different content hash for the same page — and stage ingestion rejects a
+  // repeated sequence whose hash changed. That made an interrupted export
+  // impossible to finish: the recovery attempt collided with its own first try.
+  //
+  // The upload's creation is also the more honest observation time: it is when
+  // the carrier's workbook arrived, not when we happened to parse it.
+  const observedAt = upload.createdAt
   let writtenCount = 0
   let finalSequence = -1
   let stageCompletion: Awaited<ReturnType<typeof completeLocalConnectorStage>>
@@ -400,6 +408,27 @@ export async function completeNationalLifeExportUpload(
       truncated: false,
     })
   } catch (error) {
+    // The page writes above are not transactional with the terminal write
+    // below. An interruption here leaves rows already ingested and the upload
+    // still UPLOADING, which used to be indistinguishable from an upload still
+    // in flight — so nothing retried it, nothing reported it, and the grid
+    // collector silently finished the stage with rows the export would have
+    // carried money for.
+    //
+    // The state is deliberately left UPLOADING: it is still recoverable, and
+    // completeNationalLifeExportUpload is idempotent for terminal runs. Only
+    // the reason is recorded, so the interruption becomes visible and the
+    // recovery pass can find it.
+    await db.nationalLifeExportUpload.updateMany({
+      where: {
+        id: upload.id,
+        agentId: input.agentId,
+        deviceId: input.deviceId,
+        state: 'UPLOADING',
+      },
+      data: { safeErrorCode: 'EXPORT_WRITE_INTERRUPTED' },
+    }).catch(() => undefined)
+
     if (
       error instanceof LocalConnectorRunError &&
       (error.code === 'RUN_NOT_FOUND' || error.code === 'RUN_NOT_ACTIVE')
