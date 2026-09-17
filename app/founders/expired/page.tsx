@@ -11,6 +11,8 @@ import { prisma } from '@/lib/prisma'
 import { requireRoleWithoutFounderAccess } from '@/lib/require-role'
 import { buildAccessRequiredPresentation } from './presentation'
 import { getStripeCatalogEntry } from '@/lib/stripe/platform-catalog'
+import { resolveRetentionOfferView } from '@/lib/billing/retention-offer-view'
+import { RetentionOfferCard } from '@/components/billing/RetentionOfferCard'
 
 export async function generateMetadata(): Promise<Metadata> {
   const { copy } = await getServerI18n()
@@ -79,6 +81,13 @@ export default async function FounderExpiredPage({
   )
   const impersonatedBy = (session.session as { impersonatedBy?: unknown }).impersonatedBy
   const isSupportPreview = typeof impersonatedBy === 'string'
+
+  // Only offered when there is no linked Stripe subscription to repair: an
+  // account already carrying one belongs in the billing portal, where applying
+  // a new coupon would be the wrong operation.
+  const retentionOffer = stripePlan && !hasLinkedStripeSubscription
+    ? await resolveRetentionOfferView(access, presentation.plan, localeFor(language))
+    : null
 
   return (
     <main className="relative isolate min-h-svh overflow-hidden bg-canvas px-4 py-5 text-ink sm:px-7 sm:py-7">
@@ -149,15 +158,25 @@ export default async function FounderExpiredPage({
               </p>
             )}
 
+              {retentionOffer && (
+                <RetentionOfferCard
+                  offer={retentionOffer}
+                  language={language}
+                  disabled={isSupportPreview}
+                />
+              )}
+
               {!isSupportPreview && stripePlan ? (
                 <form action={hasLinkedStripeSubscription ? '/api/billing/portal' : '/api/billing/checkout'} method="post">
                 <button
                   type="submit"
-                    className="mt-6 flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-rail-strong px-5 text-sm font-semibold text-paper transition-colors hover:bg-rail focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale"
+                    className={`${retentionOffer ? 'mt-3 border border-border-steel bg-transparent text-ink hover:bg-panel' : 'mt-6 bg-rail-strong text-paper hover:bg-rail'} flex min-h-12 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-teal-pale`}
                 >
                     {hasLinkedStripeSubscription
                       ? copy('Resolver pagamento no Stripe', 'Resolve payment in Stripe')
-                      : copy(`Ativar plano por ${price}/mês`, `Activate plan for ${price}/month`)}
+                      : retentionOffer
+                        ? copy(`Continuar sem desconto por ${price}/mês`, `Continue without the discount at ${price}/month`)
+                        : copy(`Ativar plano por ${price}/mês`, `Activate plan for ${price}/month`)}
                   <span aria-hidden>↗</span>
                 </button>
               </form>

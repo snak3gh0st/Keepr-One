@@ -8,8 +8,10 @@ import {
   FounderAccessRequiredError,
   resolveFounderAccessForAgent,
 } from "@/lib/founder-access";
-import { getCurrentSession } from "@/lib/i18n/server";
+import { getCurrentSession, getServerI18n } from "@/lib/i18n/server";
 import { buildTrialCountdownView } from "@/lib/trial-countdown";
+import { resolveRetentionOfferView } from "@/lib/billing/retention-offer-view";
+import { localeFor } from "@/lib/i18n/config";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -45,10 +47,28 @@ export default async function AgentLayout({
     getAgentAccessForAgent(agent.id),
     resolveFounderAccessForAgent(agent.id),
   ]);
-  const promotion = access.enabledModules === null || access.enabledModules.includes("JOURNEY")
-    ? await getAgentPromotionSnapshot(agent.id)
-    : null;
+  // The Journey surface was removed, but the promotion snapshot still feeds the
+  // recognition identity (jacket tone) rendered in the shell header, so it is no
+  // longer gated behind a module entitlement.
+  const promotion = await getAgentPromotionSnapshot(agent.id);
   const trial = buildTrialCountdownView(platformAccess, now);
+  // Two reachable moments, both while the agent still has access:
+  //
+  // - the trial is running and near its end (the offer precedes the wall at
+  //   /founders/expired, which requireRole() enforces once it actually expires);
+  // - a cancellation is scheduled. That agent keeps access until the period
+  //   ends, so they never reach /founders/expired — in-product is the only
+  //   place the retention offer can meet them.
+  const offerPlan = trial?.plan ?? platformAccess.requiredPlan;
+  const cancellationScheduled = platformAccess.subscription?.cancelAtPeriodEnd === true;
+  const retentionOffer = offerPlan && (trial || cancellationScheduled)
+    ? await resolveRetentionOfferView(
+        platformAccess,
+        offerPlan,
+        localeFor((await getServerI18n()).language),
+        now,
+      )
+    : null;
 
   return (
     <AgentAccessProvider
@@ -62,6 +82,7 @@ export default async function AgentLayout({
         canViewAgencyNationalLife: access.canViewAgencyNationalLife,
         enabledModules: access.enabledModules,
         trial,
+        retentionOffer,
       }}
     >
       <AgentPromotionProvider initialIdentity={promotion?.identity ?? null}>

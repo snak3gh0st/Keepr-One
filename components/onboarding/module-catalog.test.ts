@@ -14,7 +14,6 @@ describe("onboarding module catalog", () => {
       "POLICIES",
       "ILLUSTRATIONS",
       "COMMISSIONS",
-      "JOURNEY",
       "TEAM",
       "INTEGRATIONS",
     ]);

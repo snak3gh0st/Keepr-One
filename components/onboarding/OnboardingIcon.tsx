@@ -19,7 +19,6 @@ const paths: Record<IconName, React.ReactNode> = {
   POLICIES: <><path d="M6 3.5h8l4 4v13H6z" /><path d="M14 3.5v4h4M9 12h6M9 16h6" /></>,
   ILLUSTRATIONS: <><rect x="4" y="3.5" width="16" height="17" rx="2" /><circle cx="9" cy="9" r="1.5" /><path d="m6.5 17 4-4 2.5 2 2.5-3 2.5 5" /></>,
   COMMISSIONS: <><circle cx="12" cy="12" r="8.5" /><path d="M15.5 9.2c-.6-1-1.7-1.7-3.4-1.7-1.9 0-3.2.9-3.2 2.3 0 3.6 6.5 1.1 6.5 4.5 0 1.4-1.3 2.3-3.4 2.3-1.7 0-2.9-.6-3.6-1.7M12 5.5v13" /></>,
-  JOURNEY: <><path d="M4 19 9 14l3 2 7-9" /><path d="M14.5 7H19v4.5" /></>,
   TEAM: <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="10" r="2.5" /><path d="M3.5 19c.6-3 2.5-4.5 5.5-4.5s5 1.5 5.5 4.5M14 15c2.8 0 4.7 1.3 5.3 4" /></>,
   INTEGRATIONS: <><path d="M9.5 14.5 14.5 9M7.5 17.5l-1 1a3.5 3.5 0 0 1-5-5l3-3a3.5 3.5 0 0 1 5 0M16.5 6.5l1-1a3.5 3.5 0 1 1 5 5l-3 3a3.5 3.5 0 0 1-5 0" /></>,
   profile: <><circle cx="12" cy="8" r="4" /><path d="M4.5 20c.8-4.2 3.3-6.3 7.5-6.3s6.7 2.1 7.5 6.3" /></>,

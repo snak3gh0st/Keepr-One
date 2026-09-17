@@ -23,7 +23,6 @@ const navigation: {
       { label: "Apólices", icon: "document" },
       { label: "Ilustrações", icon: "document" },
       { label: "Comissões", icon: "money" },
-      { label: "Jornada", icon: "chart" },
     ],
   },
   {

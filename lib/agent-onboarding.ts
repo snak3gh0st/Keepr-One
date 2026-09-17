@@ -31,7 +31,6 @@ export const ONBOARDING_UNIVERSAL_MODULES = [
   'POLICIES',
   'ILLUSTRATIONS',
   'COMMISSIONS',
-  'JOURNEY',
 ] as const satisfies readonly AgentOnboardingModule[]
 
 export const ONBOARDING_MODULES = [
@@ -47,6 +46,21 @@ export const ONBOARDING_OPTIONAL_DECISIONS = [
 
 export type OnboardingModuleName = (typeof ONBOARDING_MODULES)[number]
 export type OnboardingOptionalDecisionName = (typeof ONBOARDING_OPTIONAL_DECISIONS)[number]
+
+const ONBOARDING_MODULE_SET = new Set<string>(ONBOARDING_MODULES)
+
+/**
+ * Persisted onboarding rows can still carry module values that the product no
+ * longer offers (the database enum keeps retired members so historical rows
+ * stay readable). Narrow those stored lists to the modules we ship today.
+ */
+export function narrowOnboardingModules(
+  input: readonly AgentOnboardingModule[],
+): OnboardingModuleName[] {
+  return input.filter((item): item is OnboardingModuleName =>
+    ONBOARDING_MODULE_SET.has(item),
+  )
+}
 
 export type AgentOnboardingView = {
   id: string

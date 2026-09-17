@@ -8,7 +8,6 @@ export const PLATFORM_MODULES = [
   'POLICIES',
   'ILLUSTRATIONS',
   'COMMISSIONS',
-  'JOURNEY',
   'AGENCY',
   'TEAM',
   'INTEGRATIONS',
@@ -72,13 +71,6 @@ export const PLATFORM_MODULE_CATALOG = {
       EN: 'Production, entries, and commission amounts.',
     },
   },
-  JOURNEY: {
-    label: { PT: 'Jornada', EN: 'Journey' },
-    description: {
-      PT: 'Metas, progresso e reconhecimento da carreira.',
-      EN: 'Goals, progress, and career recognition.',
-    },
-  },
   AGENCY: {
     label: { PT: 'Agência', EN: 'Agency' },
     description: {
@@ -110,7 +102,6 @@ const INDIVIDUAL_DEFAULT_MODULES = [
   'POLICIES',
   'ILLUSTRATIONS',
   'COMMISSIONS',
-  'JOURNEY',
   'INTEGRATIONS',
 ] as const satisfies readonly PlatformModuleName[]
 
@@ -167,7 +158,6 @@ const MODULE_ROUTES: readonly ModuleRoute[] = [
   { path: '/agent/policies', module: 'POLICIES' },
   { path: '/agent/illustrations', module: 'ILLUSTRATIONS' },
   { path: '/agent/commissions', module: 'COMMISSIONS' },
-  { path: '/agent/journey', module: 'JOURNEY' },
   { path: '/agent/agency', module: 'AGENCY' },
   { path: '/agent/hierarchy', module: 'TEAM' },
   { path: '/agent/integrations', module: 'INTEGRATIONS' },
