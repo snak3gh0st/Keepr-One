@@ -81,7 +81,6 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
     // there was no route that listed them.
     { href: "/agent/illustrations", labelKey: "nav.illustrations", icon: "document", groupKey: "nav.group.portfolio", module: "ILLUSTRATIONS" },
     { href: "/agent/commissions", labelKey: "nav.commissions", icon: "money", groupKey: "nav.group.portfolio", module: "COMMISSIONS" },
-    { href: "/agent/journey", labelKey: "nav.journey", icon: "chart", groupKey: "nav.group.portfolio", module: "JOURNEY" },
     { href: "/agent/agency", labelKey: "nav.agency", mobileLabelKey: "nav.agency", icon: "users", groupKey: "nav.group.management", module: "AGENCY" },
     { href: "/agent/hierarchy", labelKey: "nav.team", icon: "hierarchy", groupKey: "nav.group.management", module: "TEAM" },
     {
@@ -126,7 +125,6 @@ const PAGE_NAMES: Record<string, MessageKey> = {
   "/agent/policies": "page.policies",
   "/agent/policies/new": "page.aboutPolicies",
   "/agent/commissions": "page.commissions",
-  "/agent/journey": "page.promotionJourney",
   "/agent/integrations/national-life": "page.nationalLife",
   "/agent/integrations": "page.integrations",
   "/agent/integrations/google-calendar": "page.googleCalendar",
@@ -148,14 +146,12 @@ export function Shell({
   role,
   userName,
   promotionIdentity,
-  journeyHref = "/agent/journey",
   kbotWelcome = false,
   children,
 }: {
   role: "ADMIN" | "AGENT" | "CLIENT";
   userName: string;
   promotionIdentity?: PromotionIdentity;
-  journeyHref?: string;
   kbotWelcome?: boolean;
   children: React.ReactNode;
 }) {
@@ -164,7 +160,6 @@ export function Shell({
   const router = useRouter();
   const { t, language, isChanging } = useI18n();
   const impersonation = useImpersonation();
-  const isJourney = role === "AGENT" && pathname === "/agent/journey";
   const promotionContext = useAgentPromotionContext();
   const agentAccess = useAgentAccessContext();
   const enabledModules = agentAccess?.enabledModules ?? null;
@@ -358,7 +353,6 @@ export function Shell({
     <div
       ref={root}
       className="agent-shell min-h-full w-full bg-canvas md:flex"
-      data-shell-module={isJourney ? "journey" : undefined}
     >
       <a href="#main-content" className="sr-only fixed left-3 top-3 z-50 rounded-full bg-paper px-4 py-2.5 text-sm font-semibold text-ink shadow-[var(--shadow-overlay)] focus:not-sr-only">
         {t("common.skipToContent")}
@@ -418,10 +412,7 @@ export function Shell({
         <ul className="relative flex min-w-0 flex-1 snap-x snap-mandatory overflow-x-auto overscroll-x-contain md:w-full md:snap-none md:flex-col md:gap-1.5 md:overflow-y-auto md:px-3">
           {items.map((item, index) => {
             const matchPaths = item.matches ?? [item.href];
-            const itemHref =
-              role === "AGENT" && item.href === "/agent/journey"
-                ? journeyHref
-                : item.href;
+            const itemHref = item.href;
             const active = matchPaths.some((matchPath) => {
               const isSection = matchPath.split("/").filter(Boolean).length > 1;
               return pathname === matchPath || (isSection && pathname.startsWith(`${matchPath}/`));
@@ -641,18 +632,6 @@ export function Shell({
                     ))}
                   </span>
                 </div>
-              )}
-              {hasAchievement && !isJourney && hasModule("JOURNEY") && (
-                <Link
-                  href={journeyHref}
-                  className="shell-journey-link hidden min-h-9 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold md:inline-flex"
-                  data-achievement-reveal
-                >
-                  {t("common.viewJourney")}
-                  <svg aria-hidden="true" viewBox="0 0 14 14" fill="none">
-                    <path d="M3.25 10.75 10.75 3.25M5 3.25h5.75V9" />
-                  </svg>
-                </Link>
               )}
               {role === 'AGENT' && (
                 <div>

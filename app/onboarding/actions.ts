@@ -10,6 +10,7 @@ import {
   deriveAgentOnboardingStep,
   detectOnboardingIntegrations,
   getRequiredOnboardingModulesForAgent,
+  narrowOnboardingModules,
   ONBOARDING_MODULES,
   ONBOARDING_OPTIONAL_DECISIONS,
   reconcileAgentOnboardingModules,
@@ -731,7 +732,7 @@ async function saveOptionalIntegrationDecision(input: {
           transaction,
           actor,
           current,
-          requiredModules: requiredModules ?? current.requiredModules,
+          requiredModules: requiredModules ?? narrowOnboardingModules(current.requiredModules),
           now,
           copy,
           whatsappDecision: input.decision,
@@ -855,7 +856,7 @@ export async function markOnboardingModuleAction(
       const requiredSet = new Set(requiredModules)
       const completedModules = [
         ...new Set([
-          ...reconciled.completedModules.filter((item) => requiredSet.has(item)),
+          ...narrowOnboardingModules(reconciled.completedModules).filter((item) => requiredSet.has(item)),
           onboardingModule,
         ]),
       ]

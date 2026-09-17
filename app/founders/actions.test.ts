@@ -146,7 +146,6 @@ describe('registerFounderAction', () => {
           'POLICIES',
           'ILLUSTRATIONS',
           'COMMISSIONS',
-          'JOURNEY',
           'INTEGRATIONS',
         ],
       },

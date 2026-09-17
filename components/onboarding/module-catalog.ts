@@ -132,21 +132,6 @@ export const ONBOARDING_MODULE_CATALOG: Record<
     },
     accent: "mint",
   },
-  JOURNEY: {
-    key: "JOURNEY",
-    title: { PT: "Jornada", EN: "Journey" },
-    shortTitle: { PT: "Jornada", EN: "Journey" },
-    href: "/agent/journey",
-    description: {
-      PT: "Produção reconhecida vira uma rota objetiva até a próxima conquista profissional.",
-      EN: "Recognized production becomes a clear path toward your next professional achievement.",
-    },
-    outcome: {
-      PT: "Visualizar o caminho sem misturar previsão e confirmação.",
-      EN: "See the path without mixing forecasts and confirmed results.",
-    },
-    accent: "paper",
-  },
   TEAM: {
     key: "TEAM",
     title: { PT: "Equipe", EN: "Team" },

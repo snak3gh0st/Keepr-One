@@ -19,10 +19,6 @@ import {
   KeeprDashboardMotion,
 } from '@/components/KeeprDashboardMotion'
 import { OperationSignals, type OperationSignal } from '@/components/OperationSignals'
-import { getAgentPromotionSnapshot } from '@/lib/agent-promotion'
-import { getLocalPromotionPreview } from '@/lib/promotion-preview'
-import { getPromotionIdentity, getPromotionJourney } from '@/lib/promotion-journey'
-import { JourneyDashboardPreview } from './JourneyDashboardPreview'
 import { FollowupWorkspace } from './ai/acoes/FollowupWorkspace'
 import { FollowUpActionCard } from '@/components/crm/FollowUpActionCard'
 import { getDueFollowUpsForScope, nyDayBounds, type DueFollowUpView } from '@/lib/crm'
@@ -135,7 +131,6 @@ export default async function AgentDashboard({
   searchParams,
 }: {
   searchParams: Promise<{
-    preview?: string
     onboarding?: string
     premiumRange?: string
     premiumProduct?: string
@@ -143,7 +138,7 @@ export default async function AgentDashboard({
   }>
 }) {
   const params = await searchParams
-  const { preview, onboarding } = params
+  const { onboarding } = params
   const { copy, language } = await getServerI18n()
   const locale = language === 'PT' ? 'pt-BR' : 'en-US'
   const agent = await getCurrentAgent()
@@ -157,79 +152,11 @@ export default async function AgentDashboard({
   const canUseCrm = hasModule('CRM')
   const canUsePolicies = hasModule('POLICIES')
   const canUseIllustrations = hasModule('ILLUSTRATIONS')
-  const canUseJourney = hasModule('JOURNEY')
   const canUseTeam = hasModule('TEAM') && access.canManageTeam
   const hasPriorityQueue = canUseCrm || canUsePolicies
-  const promotion = canUseJourney
-    ? await getAgentPromotionSnapshot(agent.id)
-    : null
-  const localPromotionPreview = canUseJourney
-    ? getLocalPromotionPreview(preview)
-    : null
   const scope = access.scopeAgentIds
   const teamAgentIds = scope.filter((id) => id !== agent.id)
 
-  const availablePromotion = promotion
-    ? localPromotionPreview
-      ? {
-        personalPc: localPromotionPreview.personalPc,
-        agencyPc: localPromotionPreview.agencyPc,
-        estimatedPersonalPc: 0,
-        estimatedAgencyPc: 0,
-        pendingPersonalPc: 0,
-        pendingAgencyPc: 0,
-        hasPromotionData: true,
-        ledgerReady: true,
-        highestAchievementRankId: 'executive-vice-president',
-        mode: localPromotionPreview.mode,
-        loadError: false,
-        }
-      : {
-        personalPc: promotion.personalPc,
-        agencyPc: promotion.agencyPc,
-        estimatedPersonalPc: promotion.estimatedPersonalPc,
-        estimatedAgencyPc: promotion.estimatedAgencyPc,
-        pendingPersonalPc: promotion.pendingPersonalPc,
-        pendingAgencyPc: promotion.pendingAgencyPc,
-        hasPromotionData: promotion.hasPromotionData,
-        ledgerReady: promotion.ledgerReady,
-        highestAchievementRankId: promotion.highestAchievement?.rankId ?? null,
-        mode: promotion.mode,
-        loadError: promotion.loadError,
-      }
-    : null
-  // The legacy promotion entitlement is intentionally not an authorization
-  // source for the platform plan. An individual subscriber can keep their
-  // personal journey without receiving agency production or achievements.
-  const displayedPromotion = availablePromotion
-    ? access.canViewAgencyNationalLife
-      ? availablePromotion
-      : {
-        ...availablePromotion,
-        agencyPc: 0,
-        estimatedAgencyPc: 0,
-        pendingAgencyPc: 0,
-        highestAchievementRankId:
-          getPromotionJourney({
-            personalPc: availablePromotion.personalPc,
-            agencyPc: 0,
-            mode: 'individual',
-          }).currentRank?.id ?? null,
-        mode: 'individual' as const,
-      }
-    : null
-  const previewPromotionIdentity = localPromotionPreview && displayedPromotion
-    ? getPromotionIdentity(
-        getPromotionJourney({
-          personalPc: displayedPromotion.personalPc,
-          agencyPc: displayedPromotion.agencyPc,
-          mode: displayedPromotion.mode,
-        }),
-      )
-    : undefined
-  const journeyHref = canUseJourney && localPromotionPreview && access.canViewAgencyNationalLife
-    ? `/agent/journey?preview=${encodeURIComponent(preview ?? '')}`
-    : '/agent/journey'
 
   const now = new Date()
   const localConnectorEnabled = getNationalLifeLocalConnectorConfig().enabled
@@ -542,8 +469,6 @@ export default async function AgentDashboard({
     <Shell
       role="AGENT"
       userName={user?.name ?? ''}
-      promotionIdentity={previewPromotionIdentity}
-      journeyHref={journeyHref}
       kbotWelcome={onboarding === 'completed'}
     >
       <KeeprDashboardMotion>
@@ -590,14 +515,6 @@ export default async function AgentDashboard({
                     className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-white/15 px-4 py-2.5 text-xs font-semibold text-paper/78 transition-colors hover:bg-white hover:text-rail-strong"
                   >
                     {copy('Gerenciar K-Bot', 'Manage K-Bot')} <span aria-hidden>↗</span>
-                  </Link>
-                ) : canUseJourney ? (
-                  <Link
-                    data-hero-reveal
-                    href={journeyHref}
-                    className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-white/15 px-4 py-2.5 text-xs font-semibold text-paper/78 transition-colors hover:bg-white hover:text-rail-strong"
-                  >
-                    {copy('Ver jornada', 'View journey')} <span aria-hidden>↗</span>
                   </Link>
                 ) : null}
               </div>
@@ -970,24 +887,6 @@ export default async function AgentDashboard({
               ))}
             </div>
           </div>
-        )}
-
-        {canUseJourney && promotion && displayedPromotion && (
-          <JourneyDashboardPreview
-            personalPc={displayedPromotion.personalPc}
-            agencyPc={displayedPromotion.agencyPc}
-            estimatedPersonalPc={displayedPromotion.estimatedPersonalPc}
-            estimatedAgencyPc={displayedPromotion.estimatedAgencyPc}
-            pendingPersonalPc={displayedPromotion.pendingPersonalPc}
-            pendingAgencyPc={displayedPromotion.pendingAgencyPc}
-            hasPromotionData={displayedPromotion.hasPromotionData}
-            windowStart={promotion.windowStart}
-            windowEnd={promotion.windowEnd}
-            highestAchievementRankId={displayedPromotion.highestAchievementRankId}
-            mode={displayedPromotion.mode}
-            loadError={displayedPromotion.loadError}
-            journeyHref={journeyHref}
-          />
         )}
 
         {(canUseCrm || canUsePolicies || canUseTeam) && (

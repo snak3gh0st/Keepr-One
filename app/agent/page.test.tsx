@@ -6,8 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   getCurrentAgent: vi.fn(),
   getCurrentAgentAccess: vi.fn(),
-  getPromotionSnapshot: vi.fn(),
-  getPromotionPreview: vi.fn(),
   findUser: vi.fn(),
   policyCount: vi.fn(),
   policyFindMany: vi.fn(),
@@ -45,16 +43,6 @@ vi.mock('@/lib/national-life/current-portfolio-prisma', () => ({
 }))
 vi.mock('@/lib/agent-access', () => ({
   getCurrentAgentAccess: mocks.getCurrentAgentAccess,
-}))
-vi.mock('@/lib/agent-promotion', () => ({
-  getAgentPromotionSnapshot: mocks.getPromotionSnapshot,
-}))
-vi.mock('@/lib/promotion-preview', () => ({
-  getLocalPromotionPreview: mocks.getPromotionPreview,
-}))
-vi.mock('@/lib/promotion-journey', () => ({
-  getPromotionIdentity: vi.fn(() => ({ tone: 'standard', rankTitle: null, jacket: null })),
-  getPromotionJourney: vi.fn(() => ({ currentRank: null })),
 }))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -122,9 +110,6 @@ vi.mock('@/components/TrendChart', () => ({
 vi.mock('@/components/OperationSignals', () => ({
   OperationSignals: () => <div data-testid="operation-signals" />,
 }))
-vi.mock('./JourneyDashboardPreview', () => ({
-  JourneyDashboardPreview: () => <div data-testid="journey-preview" />,
-}))
 vi.mock('@/components/crm/FollowUpActionCard', () => ({
   FollowUpActionCard: () => <div data-testid="follow-up-card" />,
 }))
@@ -143,22 +128,6 @@ vi.mock('@/lib/i18n/server', () => ({
 
 import AgentDashboard from './page'
 
-const promotionSnapshot = {
-  personalPc: 0,
-  agencyPc: 0,
-  estimatedPersonalPc: 0,
-  estimatedAgencyPc: 0,
-  pendingPersonalPc: 0,
-  pendingAgencyPc: 0,
-  hasPromotionData: false,
-  ledgerReady: true,
-  highestAchievement: null,
-  mode: 'individual',
-  loadError: false,
-  windowStart: '2025-09-01T00:00:00.000Z',
-  windowEnd: '2026-09-01T00:00:00.000Z',
-}
-
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.getCurrentAgent.mockResolvedValue({ id: 'agent-1', userId: 'user-1' })
@@ -170,8 +139,6 @@ beforeEach(() => {
     canViewAgencyNationalLife: false,
     canManageTeam: false,
   })
-  mocks.getPromotionSnapshot.mockResolvedValue(promotionSnapshot)
-  mocks.getPromotionPreview.mockReturnValue(null)
   mocks.policyCount.mockResolvedValue(0)
   mocks.policyFindMany.mockResolvedValue([])
   mocks.policyGroupBy.mockResolvedValue([])
@@ -222,8 +189,6 @@ describe('AgentDashboard module access', () => {
     render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
 
     expect(screen.getByRole('heading', { name: 'Seu dia começa com clareza.' })).toBeVisible()
-    expect(mocks.getPromotionSnapshot).not.toHaveBeenCalled()
-    expect(mocks.getPromotionPreview).not.toHaveBeenCalled()
     expect(mocks.policyCount).not.toHaveBeenCalled()
     expect(mocks.targetPremiumAggregate).not.toHaveBeenCalled()
     expect(mocks.policyGroupBy).not.toHaveBeenCalled()
@@ -243,7 +208,6 @@ describe('AgentDashboard module access', () => {
     expect(screen.queryByTestId('commission-trend')).not.toBeInTheDocument()
     expect(screen.queryByTestId('today-meetings')).not.toBeInTheDocument()
     expect(screen.queryByTestId('upcoming-meetings')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('journey-preview')).not.toBeInTheDocument()
     expect(screen.queryByTestId('operation-signals')).not.toBeInTheDocument()
 
     const hrefs = Array.from(document.querySelectorAll('a')).map((link) =>
@@ -256,7 +220,6 @@ describe('AgentDashboard module access', () => {
       '/agent/cases/new',
       '/agent/policies',
       '/agent/commissions',
-      '/agent/journey',
       '/agent/hierarchy',
     ]))
   })
@@ -272,7 +235,6 @@ describe('AgentDashboard module access', () => {
 
     render(await AgentDashboard({ searchParams: Promise.resolve({}) }))
 
-    expect(mocks.getPromotionSnapshot).toHaveBeenCalledWith('agent-1')
     expect(mocks.policyCount).toHaveBeenCalled()
     expect(mocks.policyFindMany).toHaveBeenCalled()
     expect(mocks.commissionAggregate).not.toHaveBeenCalled()
@@ -284,7 +246,6 @@ describe('AgentDashboard module access', () => {
     expect(screen.queryByTestId('commission-trend')).not.toBeInTheDocument()
     expect(screen.getByTestId('today-meetings')).toBeInTheDocument()
     expect(screen.getByTestId('upcoming-meetings')).toBeInTheDocument()
-    expect(screen.getByTestId('journey-preview')).toBeInTheDocument()
     expect(screen.getByTestId('operation-signals')).toBeInTheDocument()
   })
 

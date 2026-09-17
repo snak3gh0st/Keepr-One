@@ -37,7 +37,6 @@ describe('getPlatformModuleForPath', () => {
     ['/agent/policies/policy-1', 'POLICIES'],
     ['/agent/illustrations/new', 'ILLUSTRATIONS'],
     ['/agent/commissions', 'COMMISSIONS'],
-    ['/agent/journey', 'JOURNEY'],
     ['/agent/agency', 'AGENCY'],
     ['/agent/hierarchy', 'TEAM'],
     ['/agent/integrations/google-calendar', 'INTEGRATIONS'],

@@ -68,7 +68,6 @@ const AGENT_MODULES = [
   'POLICIES',
   'ILLUSTRATIONS',
   'COMMISSIONS',
-  'JOURNEY',
   'INTEGRATIONS',
 ]
 const AGENCY_MODULES = [...AGENT_MODULES.slice(0, -1), 'AGENCY', 'TEAM', 'INTEGRATIONS']
@@ -267,7 +266,6 @@ describe('createManagedUserAction', () => {
           'POLICIES',
           'ILLUSTRATIONS',
           'COMMISSIONS',
-          'JOURNEY',
           'TEAM',
           'INTEGRATIONS',
         ],

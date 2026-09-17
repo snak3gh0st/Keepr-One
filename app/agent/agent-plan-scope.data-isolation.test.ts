@@ -49,7 +49,10 @@ describe('agent plan data isolation', () => {
 
     expect(source).toContain("const canUseTeam = hasModule('TEAM') && access.canManageTeam")
     expect(source).toContain('{canUseTeam ? (')
-    expect(source).toContain('access.canViewAgencyNationalLife')
-    expect(source).toContain("mode: 'individual' as const")
+    // The Journey surface was removed, so the dashboard no longer reads the
+    // promotion ledger at all. Agency promotion credit can therefore never leak
+    // into an individual plan's view from here.
+    expect(source).not.toContain('getAgentPromotionSnapshot')
+    expect(source).not.toContain('agencyPc')
   })
 })

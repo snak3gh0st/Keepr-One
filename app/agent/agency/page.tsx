@@ -300,7 +300,6 @@ function IndividualPlan({
           <ul className="mt-2">
             <AccessItem title={copy("CRM e carteira pessoais", "Personal CRM and portfolio")} description={copy("Clientes, oportunidades, apólices e comissões atribuídos a você.", "Clients, opportunities, policies, and commissions assigned to you.")} />
             <AccessItem title={copy("National Life pessoal", "Personal National Life")} description={copy("A integração e os dados da seguradora ficam limitados à sua própria produção.", "The carrier integration and data are limited to your own production.")} />
-            <AccessItem title={copy("Jornada individual", "Individual journey")} description={copy("Metas, progresso e próximos passos calculados para o seu resultado.", "Goals, progress, and next steps calculated for your results.")} />
             <AccessItem enabled={false} title={copy("Gestão de equipe", "Team management")} description={copy("Hierarquia, produção consolidada e assinaturas da equipe não aparecem neste plano.", "Hierarchy, consolidated production, and team subscriptions are not available on this plan.")} />
           </ul>
         </section>

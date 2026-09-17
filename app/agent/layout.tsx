@@ -45,9 +45,10 @@ export default async function AgentLayout({
     getAgentAccessForAgent(agent.id),
     resolveFounderAccessForAgent(agent.id),
   ]);
-  const promotion = access.enabledModules === null || access.enabledModules.includes("JOURNEY")
-    ? await getAgentPromotionSnapshot(agent.id)
-    : null;
+  // The Journey surface was removed, but the promotion snapshot still feeds the
+  // recognition identity (jacket tone) rendered in the shell header, so it is no
+  // longer gated behind a module entitlement.
+  const promotion = await getAgentPromotionSnapshot(agent.id);
   const trial = buildTrialCountdownView(platformAccess, now);
 
   return (
