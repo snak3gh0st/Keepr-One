@@ -38,6 +38,16 @@ const DAY_MS = 86_400_000
 export const LAPSED_REMINDER_INTERVAL_DAYS = 7
 export const LAPSED_REMINDER_MAX_SENDS = 4
 
+/**
+ * How long after access ends the win-back offer may still be sent.
+ *
+ * Without this bound, the first run of the sequence would mail every account
+ * that ever lapsed, however long ago — an account that churned a year back has
+ * not been "nurtured", it has been cold-mailed. The window also keeps a newly
+ * enabled cron from writing to a backlog of old churn in one pass.
+ */
+export const LAPSED_WINDOW_MAX_DAYS = 45
+
 export type RetentionEmailDecision =
   | { send: true; step: RetentionEmailStepKey; sequenceNumber: number }
   | { send: false; reason: RetentionEmailSkipReason }
@@ -48,6 +58,7 @@ export type RetentionEmailSkipReason =
   | 'NOTHING_DUE'
   | 'ALREADY_SENT'
   | 'SEQUENCE_EXHAUSTED'
+  | 'LAPSED_TOO_LONG_AGO'
 
 export type RetentionEmailState = {
   /** Sequence keys already delivered to this subscription. */
@@ -85,6 +96,9 @@ export function decideRetentionEmail(
   const sent = new Set(state.sentKeys)
 
   if (remaining < 0) {
+    if (-remaining > LAPSED_WINDOW_MAX_DAYS) {
+      return { send: false, reason: 'LAPSED_TOO_LONG_AGO' }
+    }
     if (state.lapsedSends >= LAPSED_REMINDER_MAX_SENDS) {
       return { send: false, reason: 'SEQUENCE_EXHAUSTED' }
     }
