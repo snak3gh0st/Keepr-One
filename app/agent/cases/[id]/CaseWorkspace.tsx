@@ -498,40 +498,44 @@ export function CaseWorkspace({ caseData: c }: { caseData: CaseData }) {
         )}
       </Section>
 
-      <div id="application" className="scroll-mt-24">
-        <Section title={copy("Aplicação", "Application")}>
-          {!hasApplication ? (
-            <div className="space-y-3">
-              <Empty>
-                {copy(
-                  "Nenhuma Application iniciada. A Application deve nascer de uma Illustration com PDF oficial e valores confirmados pela National Life.",
-                  "No Application has been started. The Application must originate from an Illustration with an official PDF and values confirmed by National Life.",
-                )}
-              </Empty>
-              {c.applicationAddon.offered ? (
-                <Link
-                  href="/agent/illustrations?intent=application"
-                  className="inline-flex min-h-11 items-center justify-center rounded-md bg-teal-deep px-4 py-2 text-sm font-semibold text-paper transition-colors hover:bg-teal"
-                >
-                  {copy("Escolher Illustration oficial", "Choose official Illustration")}
-                </Link>
-              ) : null}
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {c.applications.map((app) => (
-                <ApplicationDossier
-                  key={app.id}
-                  application={app}
-                  addon={c.applicationAddon}
-                  prospect={c.prospect}
-                  illustrations={c.illustrations}
-                />
-              ))}
-            </div>
-          )}
-        </Section>
-      </div>
+      {/* Application ships in a later release. Cases that already have one keep
+          their dossier; everyone else sees no section for a feature they cannot use. */}
+      {hasApplication || c.applicationAddon.offered ? (
+        <div id="application" className="scroll-mt-24">
+          <Section title={copy("Aplicação", "Application")}>
+            {!hasApplication ? (
+              <div className="space-y-3">
+                <Empty>
+                  {copy(
+                    "Nenhuma Application iniciada. A Application deve nascer de uma Illustration com PDF oficial e valores confirmados pela National Life.",
+                    "No Application has been started. The Application must originate from an Illustration with an official PDF and values confirmed by National Life.",
+                  )}
+                </Empty>
+                {c.applicationAddon.offered ? (
+                  <Link
+                    href="/agent/illustrations?intent=application"
+                    className="inline-flex min-h-11 items-center justify-center rounded-md bg-teal-deep px-4 py-2 text-sm font-semibold text-paper transition-colors hover:bg-teal"
+                  >
+                    {copy("Escolher Illustration oficial", "Choose official Illustration")}
+                  </Link>
+                ) : null}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {c.applications.map((app) => (
+                  <ApplicationDossier
+                    key={app.id}
+                    application={app}
+                    addon={c.applicationAddon}
+                    prospect={c.prospect}
+                    illustrations={c.illustrations}
+                  />
+                ))}
+              </div>
+            )}
+          </Section>
+        </div>
+      ) : null}
 
       <Section title={copy("Pendências", "Pending items")}>
         {requirements.length === 0 ? (
