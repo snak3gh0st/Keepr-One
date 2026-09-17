@@ -62,6 +62,27 @@ export type IngestReport = {
   failed: { policyNumber: string; reason: string }[]
 }
 
+/// A data de nascimento é o que separa dois homônimos, e `matchClient` trata a
+/// sua ausência como notícia sobre a pessoa. Quando a coleta perde a coluna
+/// inteira, essa leitura vira mentira: cada cliente já conhecido deixa de casar
+/// com a sua própria linha e nasce de novo, sem data, ao lado do original.
+/// Foi assim que uma coleta de 04/09/2026 com InsuredDOB vazio nas 9.826 linhas
+/// virou 8.508 clones em 12/09 — 97,8% do livro duplicado.
+///
+/// O teste é deliberadamente o caso binário observado, sem limiar a calibrar:
+/// nenhuma linha com data, tendo o CRM datas guardadas. Uma pessoa sem data é
+/// ausência de informação sobre ela; a coluna inteira vazia é defeito de
+/// coleta. Sem data nenhuma no CRM não há o que contradizer, e um agente cujo
+/// livro nunca teve datas não pode ficar travado para sempre.
+function dateOfBirthColumnIsBlank(
+  rows: readonly InforceRow[],
+  existingClients: readonly { dateOfBirth: Date | null }[],
+): boolean {
+  if (rows.length === 0) return false
+  if (rows.some((row) => (row.insuredDob ?? '').trim() !== '')) return false
+  return existingClients.some((client) => client.dateOfBirth !== null)
+}
+
 export async function ingestNationalLifePortfolio(
   deps: IngestDeps,
   input: PortfolioRunScope,
@@ -75,6 +96,10 @@ export async function ingestNationalLifePortfolio(
   // the completion/raw-page proof is absent or inconsistent, and must never be
   // treated as an empty account book.
   if (rows === null) throw new Error('NATIONAL_PORTFOLIO_SNAPSHOT_UNAVAILABLE')
+
+  if (dateOfBirthColumnIsBlank(rows, existingClients)) {
+    throw new Error('NATIONAL_PORTFOLIO_DOB_COLUMN_BLANK')
+  }
 
   const plan = planPortfolioIngest({ rows, existingClients })
   const sourceTimes = rows.flatMap((row) => row.sourceObservedAt ? [row.sourceObservedAt.getTime()] : [])
@@ -162,7 +187,16 @@ export async function ingestPortfolioIfRunFinished(
       deviceId: input.deviceId,
       runId: input.runId,
     })
-  } catch {
+  } catch (error) {
+    // Engolir não pode significar não deixar rastro: um export recusado pelo
+    // gate acima some sem uma linha de log, e a falha muda é justamente o que
+    // custou caro aqui. O retorno continua `null` — quem chama segue sem dizer
+    // nada ao dispositivo.
+    console.error('[national-life] portfolio ingest failed', {
+      agentId: input.agentId,
+      runId: input.runId,
+      reason: error instanceof Error ? error.message : 'UNKNOWN',
+    })
     return null
   }
 }

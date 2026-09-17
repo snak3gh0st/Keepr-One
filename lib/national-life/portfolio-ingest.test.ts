@@ -125,6 +125,55 @@ describe('ingestNationalLifePortfolio', () => {
   })
 })
 
+/// Em 04/09/2026 uma coleta voltou com a coluna InsuredDOB vazia nas 9.826
+/// linhas. Sem data, `matchClient` só aceita um homônimo também sem data, e
+/// todos os clientes existentes tinham a sua: a ingestão de 12/09 criou 8.508
+/// clones do livro inteiro em dois minutos. A coluna em branco é defeito de
+/// coleta, não notícia sobre as pessoas, e é aqui que ela para.
+describe('ingestNationalLifePortfolio: coluna de nascimento em branco', () => {
+  const dated = [{ id: 'c1', name: 'Enrico Abdalla', dateOfBirth: new Date(Date.UTC(1980, 6, 10)) }]
+
+  it('recusa o export quando nenhuma linha traz data e o CRM já tem datas', async () => {
+    const h = harness([row({ policyNumber: 'LS1' }), row({ policyNumber: 'LS2' })], dated)
+
+    await expect(ingestNationalLifePortfolio(h.deps, runScope))
+      .rejects.toThrow('NATIONAL_PORTFOLIO_DOB_COLUMN_BLANK')
+    expect(h.createdClients).toEqual([])
+    expect(h.upserted).toEqual([])
+  })
+
+  it('aceita quando ao menos uma linha traz a data: aí a coluna veio', async () => {
+    // Uma pessoa sem data é ausência de informação sobre ela. A coluna inteira
+    // vazia é outra coisa, e só essa outra coisa bloqueia.
+    const h = harness(
+      [row({ policyNumber: 'LS1', insuredDob: '07/10/1980' }), row({ policyNumber: 'LS2' })],
+      dated,
+    )
+
+    const report = await ingestNationalLifePortfolio(h.deps, runScope)
+
+    expect(report.policiesUpserted).toBe(2)
+  })
+
+  it('aceita quando o próprio CRM não conhece nenhuma data', async () => {
+    // Um agente cujo livro nunca teve datas não pode ficar travado para sempre:
+    // sem data guardada, não há nada que a coluna vazia contradiga.
+    const h = harness([row({})], [{ id: 'c1', name: 'Outra Pessoa', dateOfBirth: null }])
+
+    const report = await ingestNationalLifePortfolio(h.deps, runScope)
+
+    expect(report.policiesUpserted).toBe(1)
+  })
+
+  it('aceita um export vazio: não há coluna para estar em branco', async () => {
+    const h = harness([], dated)
+
+    const report = await ingestNationalLifePortfolio(h.deps, runScope)
+
+    expect(report.policiesUpserted).toBe(0)
+  })
+})
+
 describe('ingestPortfolioIfRunFinished', () => {
   it('does nothing while the run still has stages left', async () => {
     const h = harness([row({})])
