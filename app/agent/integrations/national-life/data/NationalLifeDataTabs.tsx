@@ -117,11 +117,51 @@ function TabButton({
   );
 }
 
-function Meta({ label, value }: { label: string; value: string | null }) {
+/// Cases and policies share one column template so every row lines up under a
+/// single header on desktop. `EntityCard` lays children out as a flex row, so
+/// each card gets exactly one grid child that fills it.
+const ROW_COLUMNS =
+  "grid min-w-0 flex-1 grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1.3fr)] md:items-center";
+
+function Meta({
+  label,
+  value,
+  labelOnMobileOnly = false,
+  numeric = false,
+}: {
+  label: string;
+  value: string | null;
+  labelOnMobileOnly?: boolean;
+  numeric?: boolean;
+}) {
   return (
-    <div>
-      <p className="text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-ink-muted">{label}</p>
-      <p className="mt-0.5 text-sm text-ink">{value?.trim() ? value : "—"}</p>
+    <div className="min-w-0">
+      <p className={`text-xs text-ink-muted ${labelOnMobileOnly ? "md:sr-only" : ""}`}>{label}</p>
+      <p className={`mt-0.5 truncate text-sm text-ink ${numeric ? "tabular-nums" : ""} ${labelOnMobileOnly ? "md:mt-0" : ""}`} title={value?.trim() || undefined}>
+        {value?.trim() ? value : "—"}
+      </p>
+    </div>
+  );
+}
+
+function Identity({ name, reference, status }: { name: string | null; reference: string; status: string | null }) {
+  return (
+    <div className="col-span-2 min-w-0 md:col-span-1">
+      <p className="truncate font-semibold text-ink" title={name ?? undefined}>{name ?? "—"}</p>
+      <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-xs">
+        <span className="font-mono text-ink-muted">{reference}</span>
+        <span className={`font-medium ${statusTone(status)}`}>{status ?? "—"}</span>
+      </p>
+    </div>
+  );
+}
+
+function ColumnHeader({ labels }: { labels: string[] }) {
+  return (
+    <div aria-hidden="true" className={`${ROW_COLUMNS} mt-4 hidden border border-transparent px-4 pb-1 text-xs font-medium text-ink-muted md:grid`}>
+      {labels.map((label) => (
+        <span key={label} className="truncate">{label}</span>
+      ))}
     </div>
   );
 }
@@ -210,69 +250,86 @@ export function NationalLifeDataTabs({
           </EmptyState>
         </div>
       ) : (
-        <EntityCardList>
-          {tab === "cases" &&
-            (visible as CaseRow[]).map((row, index) => (
-              <EntityCard key={row.id} index={index}>
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="font-semibold text-ink">{row.insuredName ?? "—"}</p>
-                  <p className="font-mono text-xs text-ink-muted">{row.policyNo}</p>
-                </div>
-                <p className={`mt-1 text-sm font-medium ${statusTone(row.carrierStatus)}`}>
-                  {row.carrierStatus ?? "—"}
-                </p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-4">
-                  <Meta label={copy("Produto", "Product")} value={row.product} />
-                  <Meta label={copy("Enviado em", "Submitted on")} value={row.submitDate} />
-                  <Meta label={copy("Prêmio anual", "Annual premium")} value={row.anticipatedAnnualPremium} />
-                  <Meta label={copy("Pendências", "Requirements")} value={row.requirements} />
-                </div>
-              </EntityCard>
-            ))}
-
-          {tab === "inforce" &&
-            (visible as InforceRow[]).map((row, index) => (
-              <EntityCard key={row.id} index={index}>
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="font-semibold text-ink">{row.insuredClientName ?? "—"}</p>
-                  <p className="font-mono text-xs text-ink-muted">{row.policyNumber}</p>
-                </div>
-                <p className={`mt-1 text-sm font-medium ${statusTone(row.policyStatus)}`}>
-                  {row.policyStatus ?? "—"}
-                </p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-4">
-                  <Meta label={copy("Produto", "Product")} value={row.productName} />
-                  <Meta label={copy("Titular", "Owner")} value={row.ownerClientName} />
-                  <Meta label={copy("Emissão", "Issue date")} value={row.policyIssueDate} />
-                  <Meta label={copy("Agência", "Agency")} value={row.servicingAgencyName} />
-                </div>
-              </EntityCard>
-            ))}
-
-          {tab === "reports" &&
-            (visible as PortalReportRow[]).map((row, index) => {
-              const entries = Object.entries(row.amounts).slice(0, 4);
-              return (
-                <EntityCard key={row.id} index={index}>
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="font-semibold text-ink">{row.label ?? "—"}</p>
-                    <p className="text-xs text-ink-muted">{row.primaryDate ?? "—"}</p>
-                  </div>
-                  <p className="mt-1 text-xs uppercase tracking-[0.08em] text-ink-muted">
-                    {row.gridKey.replace(/_/g, " ").toLowerCase()}
-                  </p>
-                  <p className="mt-1 text-xs text-ink-muted">{formatFetchedAt(row.fetchedAt, locale, copy)}</p>
-                  {entries.length > 0 && (
-                    <div className="mt-3 grid gap-3 sm:grid-cols-4">
-                      {entries.map(([field, value]) => (
-                        <Meta key={field} label={field} value={formatAmount(value, locale)} />
-                      ))}
+        <>
+          {tab === "cases" && (
+            <ColumnHeader
+              labels={[
+                copy("Cliente", "Client"),
+                copy("Produto", "Product"),
+                copy("Enviado em", "Submitted on"),
+                copy("Prêmio anual", "Annual premium"),
+                copy("Pendências", "Requirements"),
+              ]}
+            />
+          )}
+          {tab === "inforce" && (
+            <ColumnHeader
+              labels={[
+                copy("Segurado", "Insured"),
+                copy("Produto", "Product"),
+                copy("Titular", "Owner"),
+                copy("Emissão", "Issue date"),
+                copy("Agência", "Agency"),
+              ]}
+            />
+          )}
+          <div className={tab === "reports" ? "mt-5" : "mt-2 md:mt-0"}>
+            <EntityCardList>
+              {tab === "cases" &&
+                (visible as CaseRow[]).map((row, index) => (
+                  <EntityCard key={row.id} index={index}>
+                    <div className={ROW_COLUMNS}>
+                      <Identity name={row.insuredName} reference={row.policyNo} status={row.carrierStatus} />
+                      <Meta labelOnMobileOnly label={copy("Produto", "Product")} value={row.product} />
+                      <Meta labelOnMobileOnly numeric label={copy("Enviado em", "Submitted on")} value={row.submitDate} />
+                      <Meta labelOnMobileOnly numeric label={copy("Prêmio anual", "Annual premium")} value={row.anticipatedAnnualPremium} />
+                      <Meta labelOnMobileOnly label={copy("Pendências", "Requirements")} value={row.requirements} />
                     </div>
-                  )}
-                </EntityCard>
-              );
-            })}
-        </EntityCardList>
+                  </EntityCard>
+                ))}
+
+              {tab === "inforce" &&
+                (visible as InforceRow[]).map((row, index) => (
+                  <EntityCard key={row.id} index={index}>
+                    <div className={ROW_COLUMNS}>
+                      <Identity name={row.insuredClientName} reference={row.policyNumber} status={row.policyStatus} />
+                      <Meta labelOnMobileOnly label={copy("Produto", "Product")} value={row.productName} />
+                      <Meta labelOnMobileOnly label={copy("Titular", "Owner")} value={row.ownerClientName} />
+                      <Meta labelOnMobileOnly numeric label={copy("Emissão", "Issue date")} value={row.policyIssueDate} />
+                      <Meta labelOnMobileOnly label={copy("Agência", "Agency")} value={row.servicingAgencyName} />
+                    </div>
+                  </EntityCard>
+                ))}
+
+              {tab === "reports" &&
+                (visible as PortalReportRow[]).map((row, index) => {
+                  const entries = Object.entries(row.amounts).slice(0, 4);
+                  return (
+                    <EntityCard key={row.id} index={index}>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <p className="font-semibold text-ink">{row.label ?? "—"}</p>
+                          <p className="text-xs tabular-nums text-ink-muted">{row.primaryDate ?? "—"}</p>
+                        </div>
+                        <p className="mt-0.5 text-xs text-ink-muted">
+                          <span className="capitalize">{row.gridKey.replace(/_/g, " ").toLowerCase()}</span>
+                          {" · "}
+                          {formatFetchedAt(row.fetchedAt, locale, copy)}
+                        </p>
+                        {entries.length > 0 && (
+                          <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-4">
+                            {entries.map(([field, value]) => (
+                              <Meta key={field} numeric label={field} value={formatAmount(value, locale)} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </EntityCard>
+                  );
+                })}
+            </EntityCardList>
+          </div>
+        </>
       )}
 
       <Pagination page={currentPage} pageCount={pageCount} onPageChange={setPage} className="mt-6" />
