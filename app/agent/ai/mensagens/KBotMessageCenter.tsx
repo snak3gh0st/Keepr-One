@@ -199,31 +199,36 @@ export function KBotMessageCenter({
       >{copy('Ligar o K-Bot para todos', 'Turn K-Bot on for everyone')}</button>
     </div>}
 
-    <div className="mt-5">
+    {/* Uma coluna com medida legível: sem o teto, o interruptor de cada linha
+        acaba a uma tela inteira de distância do nome a que pertence. */}
+    <div className="mt-5 max-w-3xl">
+      <h3 className="text-sm font-semibold text-ink">{copy('Contatos', 'Contacts')}</h3>
       {/* Busca server-side: 17.733 contatos por agente não cabem numa única
           página, e a lista abaixo não tem virtualização. */}
-      <form className="flex flex-wrap items-center gap-2" method="get">
+      <form className="mt-2 flex flex-wrap items-center gap-2" method="get">
         <input
           type="search"
           name="contactsQuery"
           defaultValue={contactsQuery}
           placeholder={copy('Buscar por nome ou telefone', 'Search by name or phone')}
-          className="min-h-11 flex-1 rounded-xl border border-border-steel bg-panel px-3 text-sm text-ink"
+          className="min-h-11 flex-1 rounded-xl border border-border-steel bg-paper px-3 text-sm text-ink transition-colors focus:border-teal"
         />
-        <button type="submit" className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-medium text-ink">
+        <button type="submit" className="inline-flex min-h-11 items-center rounded-xl border border-border-steel bg-panel px-4 text-sm font-medium text-ink transition-colors hover:bg-teal-pale/60">
           {copy('Buscar', 'Search')}
         </button>
       </form>
 
-      <KBotContactList
-        rows={contacts}
-        onToggle={({ clientId, enabled }) => run(
-          () => toggleKBotContact({ clientId, enabled }),
-          enabled
-            ? copy('K-Bot ligado para este contato.', 'K-Bot turned on for this contact.')
-            : copy('K-Bot desligado para este contato.', 'K-Bot turned off for this contact.'),
-        )}
-      />
+      <div className="mt-3">
+        <KBotContactList
+          rows={contacts}
+          onToggle={({ clientId, enabled }) => run(
+            () => toggleKBotContact({ clientId, enabled }),
+            enabled
+              ? copy('K-Bot ligado para este contato.', 'K-Bot turned on for this contact.')
+              : copy('K-Bot desligado para este contato.', 'K-Bot turned off for this contact.'),
+          )}
+        />
+      </div>
 
       {contactsTotalPages > 1 && <nav className="mt-3 flex items-center justify-between gap-3" aria-label={copy('Páginas de contatos', 'Contact pages')}>
         <a
