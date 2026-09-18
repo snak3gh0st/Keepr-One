@@ -58,5 +58,5 @@ export type MarketingSummary = {
   activeCampaigns: number
 }
 export type MarketingActionResult =
-  | { ok: true; id?: string }
+  | { ok: true; id?: string; delivery?: 'SENT' | 'FAILED'; accountCreated?: boolean }
   | { ok: false; message: string; fieldErrors?: Record<string, string[]> }

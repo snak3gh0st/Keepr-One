@@ -20,6 +20,8 @@ import {
 // mutation boundary.
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 const STOP_PREVIEW_PATH = '/api/admin/user-preview/stop'
+const ADMIN_CANONICAL_PREFIX = '/backoffice'
+const ADMIN_IMPLEMENTATION_PREFIX = '/admin'
 
 function moduleDeniedResponse(request: NextRequest, module: PlatformModuleName) {
   const pathname = request.nextUrl.pathname
@@ -64,7 +66,7 @@ function isSafeDuringPreview(request: NextRequest) {
   )
 }
 
-function privateLoginRedirect(request: NextRequest, loginPath: '/login' | '/admin/login') {
+function privateLoginRedirect(request: NextRequest, loginPath: '/login' | '/backoffice/login') {
   const destination = new URL(loginPath, request.url)
   // pathname and search come from Next's parsed request URL, so this can only
   // carry a same-origin path back through the login flow.
@@ -75,15 +77,26 @@ function privateLoginRedirect(request: NextRequest, loginPath: '/login' | '/admi
 export async function proxy(request: NextRequest) {
   const sessionCookie = getSessionCookie(request)
   const pathname = request.nextUrl.pathname
+
+  // Keep the old address as a compatibility redirect only. The browser-facing
+  // admin namespace is /backoffice; the existing app/admin tree is reached by
+  // an internal rewrite below so links and bookmarks no longer establish /admin
+  // as the product URL.
+  if (pathname === ADMIN_IMPLEMENTATION_PREFIX || pathname.startsWith(`${ADMIN_IMPLEMENTATION_PREFIX}/`)) {
+    const destination = request.nextUrl.clone()
+    destination.pathname = `${ADMIN_CANONICAL_PREFIX}${pathname.slice(ADMIN_IMPLEMENTATION_PREFIX.length)}`
+    return NextResponse.redirect(destination)
+  }
+
   const requiredModule = getPlatformModuleForPath(pathname)
-  const isAdminPage = pathname === '/admin' || pathname.startsWith('/admin/')
-  const requiresAdminSession = isAdminPage && pathname !== '/admin/login'
+  const isAdminPage = pathname === ADMIN_CANONICAL_PREFIX || pathname.startsWith(`${ADMIN_CANONICAL_PREFIX}/`)
+  const requiresAdminSession = isAdminPage && pathname !== `${ADMIN_CANONICAL_PREFIX}/login`
   const requiresUserSession = ['/agent', '/client', '/onboarding'].some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   )
 
   if (!sessionCookie && requiresAdminSession) {
-    const destination = new URL('/admin/login', request.url)
+    const destination = new URL(`${ADMIN_CANONICAL_PREFIX}/login`, request.url)
     destination.searchParams.set('next', `${pathname}${request.nextUrl.search}`)
     return NextResponse.redirect(destination)
   }
@@ -103,7 +116,7 @@ export async function proxy(request: NextRequest) {
     : null
 
   if (!session && sessionCookie && requiresAdminSession) {
-    return privateLoginRedirect(request, '/admin/login')
+    return privateLoginRedirect(request, `${ADMIN_CANONICAL_PREFIX}/login`)
   }
 
   if (!session && sessionCookie && requiresUserSession) {
@@ -159,6 +172,12 @@ export async function proxy(request: NextRequest) {
     ) {
       return moduleDeniedResponse(request, requiredModule)
     }
+  }
+
+  if (isAdminPage) {
+    const destination = request.nextUrl.clone()
+    destination.pathname = `${ADMIN_IMPLEMENTATION_PREFIX}${pathname.slice(ADMIN_CANONICAL_PREFIX.length)}`
+    return NextResponse.rewrite(destination)
   }
 
   return NextResponse.next()

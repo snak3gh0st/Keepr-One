@@ -24,7 +24,7 @@ export function ResetPasswordForm({
   const [error, setError] = useState<string | null>(null)
   const [requestEmail, setRequestEmail] = useState('')
   const [requestSent, setRequestSent] = useState(false)
-  const returnTo = portal === 'admin' ? '/admin/login' : '/login'
+  const returnTo = portal === 'admin' ? '/backoffice/login' : '/login'
   const resetDestination = portal === 'admin'
     ? `/reset-password?lang=${language}&portal=admin`
     : `/reset-password?lang=${language}`

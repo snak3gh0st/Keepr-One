@@ -52,7 +52,7 @@ describe('ResetPasswordForm', () => {
     }))
     expect(screen.getByRole('link', { name: 'Voltar para o acesso' })).toHaveAttribute(
       'href',
-      '/admin/login',
+      '/backoffice/login',
     )
   })
 

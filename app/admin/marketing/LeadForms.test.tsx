@@ -35,6 +35,7 @@ describe('Marketing lead follow-up', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Adicionar nota' }))
     await screen.findByRole('alert')
     expect(screen.getByLabelText('Adicionar nota interna')).toHaveValue('Retornar amanhã, após a reunião.')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Adicionar nota' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'Adicionar nota' }))
     await waitFor(() => expect(screen.getByLabelText('Adicionar nota interna')).toHaveValue(''))
     expect(mocks.note.mock.calls[1][0].get('leadId')).toBe('lead-1')

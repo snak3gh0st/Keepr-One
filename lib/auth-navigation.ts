@@ -32,11 +32,11 @@ function parseLocalPath(value: string | null | undefined) {
 
 export function sanitizeAdminRedirectPath(value: string | null | undefined) {
   const parsed = parseLocalPath(value)
-  if (!parsed) return '/admin'
+  if (!parsed) return '/backoffice'
 
-  const isAdminPath = parsed.pathname === '/admin' || parsed.pathname.startsWith('/admin/')
-  const isLoginPath = parsed.pathname === '/admin/login' || parsed.pathname.startsWith('/admin/login/')
-  return isAdminPath && !isLoginPath ? parsed.href : '/admin'
+  const isAdminPath = parsed.pathname === '/backoffice' || parsed.pathname.startsWith('/backoffice/')
+  const isLoginPath = parsed.pathname === '/backoffice/login' || parsed.pathname.startsWith('/backoffice/login/')
+  return isAdminPath && !isLoginPath ? parsed.href : '/backoffice'
 }
 
 export function sanitizeUserRedirectPath(value: string | null | undefined) {
@@ -45,6 +45,7 @@ export function sanitizeUserRedirectPath(value: string | null | undefined) {
 
   const isRestrictedNamespace = [
     '/admin',
+    '/backoffice',
     '/api',
     '/login',
   ].some((prefix) => parsed.pathname === prefix || parsed.pathname.startsWith(`${prefix}/`))
@@ -53,7 +54,7 @@ export function sanitizeUserRedirectPath(value: string | null | undefined) {
 }
 
 export function portalHomeForRole(role: PortalRole) {
-  if (role === 'ADMIN') return '/admin'
+  if (role === 'ADMIN') return '/backoffice'
   if (role === 'CLIENT') return '/client'
   return '/agent'
 }

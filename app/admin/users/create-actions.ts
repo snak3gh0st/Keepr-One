@@ -31,7 +31,6 @@ const ONBOARDING_MODULES = new Set<AgentOnboardingModule>([
   'POLICIES',
   'ILLUSTRATIONS',
   'COMMISSIONS',
-  'JOURNEY',
   'TEAM',
   'INTEGRATIONS',
 ])

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import type { PlatformModule } from '@prisma/client'
 import { Avatar } from '@/components/Avatar'
 import { ModuleSummary } from '@/components/ModuleSummary'
 import { PageHeader } from '@/components/PageHeader'
@@ -158,6 +159,9 @@ function actionLabel(action: string, copy: Copy) {
     ADMIN_USER_SUSPENDED: copy('Conta suspensa', 'Account suspended'),
     ADMIN_USER_RESTORED: copy('Acesso restaurado', 'Access restored'),
     ADMIN_PASSWORD_RESET_REQUESTED: copy('Redefinição de senha enviada', 'Password reset sent'),
+    MARKETING_LEAD_ACCESS_INVITE_REQUESTED: copy('Convite de acesso do Marketing enviado', 'Marketing access invitation sent'),
+    CRM_LEADS_IMPORTED: copy('Leads importados no CRM', 'CRM leads imported'),
+    BILLING_RETENTION_OFFER_GRANTED: copy('Desconto de retenção aplicado', 'Retention discount granted'),
     ADMIN_EMAIL_VERIFICATION_SENT: copy('Verificação de e-mail enviada', 'Email verification sent'),
     ADMIN_USER_EMAIL_CHANGE_REQUESTED: copy('Troca de e-mail solicitada', 'Email change requested'),
     ADMIN_USER_EMAIL_CHANGE_CURRENT_APPROVED: copy('E-mail atual autorizou a troca', 'Current email authorized the change'),
@@ -409,7 +413,9 @@ export default async function AdminManagedUserPage({
                   status={user.productAccess.status === 'LEGACY' || user.productAccess.status === 'NOT_APPLICABLE'
                     ? 'PAYMENT_REQUIRED'
                     : user.productAccess.status}
-                  modules={user.productAccess.enabledModules}
+                  modules={user.productAccess.enabledModules.filter(
+                    (module): module is Exclude<PlatformModule, 'JOURNEY'> => module !== 'JOURNEY',
+                  )}
                   paymentReason={user.productAccess.paymentReason}
                   currentPeriodEnd={user.subscription.currentPeriodEnd?.toISOString() ?? null}
                   providerManaged={user.subscription.providerManaged}

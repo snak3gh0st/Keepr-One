@@ -91,9 +91,9 @@ afterEach(() => {
 
 describe('Shell plan access', () => {
   it('includes Marketing for admins and identifies its nested routes', () => {
-    mocks.pathname = '/admin/marketing/campaigns/founders-program'
+    mocks.pathname = '/backoffice/marketing/campaigns/founders-program'
     const { container } = render(<Shell role="ADMIN" userName="Admin"><p>Campanhas</p></Shell>)
-    expect(screen.getByRole('link', { name: 'Marketing' })).toHaveAttribute('href', '/admin/marketing')
+    expect(screen.getByRole('link', { name: 'Marketing' })).toHaveAttribute('href', '/backoffice/marketing')
     expect(screen.getByRole('link', { name: 'Marketing' })).toHaveAttribute('aria-current', 'page')
     expect(container.querySelector('.shell-topbar-title')).toHaveTextContent('Marketing')
   })
@@ -318,7 +318,7 @@ describe('Shell plan access', () => {
   })
 
   it('exposes user management and names dynamic user details in the admin shell', () => {
-    mocks.pathname = '/admin/users/user-123'
+    mocks.pathname = '/backoffice/users/user-123'
 
     const { container } = render(
       <Shell role="ADMIN" userName="Admin">
@@ -327,12 +327,12 @@ describe('Shell plan access', () => {
     )
 
     expect(screen.getAllByRole('link', { name: 'Usuários' })).not.toHaveLength(0)
-    expect(screen.getAllByRole('link', { name: 'Usuários' })[0]).toHaveAttribute('href', '/admin/users')
+    expect(screen.getAllByRole('link', { name: 'Usuários' })[0]).toHaveAttribute('href', '/backoffice/users')
     expect(container.querySelector('.shell-topbar-title')).toHaveTextContent('Detalhe do usuário')
   })
 
   it('shows overview, users and marketing in the administrative navigation', () => {
-    mocks.pathname = '/admin'
+    mocks.pathname = '/backoffice'
 
     render(
       <Shell role="ADMIN" userName="Admin">
@@ -426,7 +426,7 @@ describe('Shell sign-out ordering', () => {
 
     await userEvent.click(screen.getAllByRole('button', { name: /Sair/ })[0])
 
-    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/admin/login'))
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/backoffice/login'))
   })
 })
 
@@ -514,7 +514,7 @@ describe('Shell achievement band', () => {
   })
 
   it('does not apply an agent achievement to non-agent shells', () => {
-    mocks.pathname = '/admin'
+    mocks.pathname = '/backoffice'
     // If this ever answered "Em dia", CarrierSyncBadge would have mounted for
     // an ADMIN shell despite the `role === 'AGENT'` gate — and fetch would
     // have been called at all, which the assertion below also checks.

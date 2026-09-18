@@ -48,7 +48,7 @@ export default async function Home() {
     // Not signed in — fall through to the guest landing page.
   }
 
-  if (role === 'ADMIN') redirect('/admin')
+  if (role === 'ADMIN') redirect('/backoffice')
   if (role === 'AGENT') redirect('/agent')
   if (role === 'CLIENT') redirect('/client')
 

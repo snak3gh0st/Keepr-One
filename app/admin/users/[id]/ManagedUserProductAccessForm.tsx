@@ -20,7 +20,6 @@ type ModuleName =
   | "POLICIES"
   | "ILLUSTRATIONS"
   | "COMMISSIONS"
-  | "JOURNEY"
   | "AGENCY"
   | "TEAM"
   | "INTEGRATIONS";
@@ -38,7 +37,6 @@ const MODULES: Array<{
   { value: "POLICIES", label: ["Apólices", "Policies"], description: ["Carteira e documentos", "Book of business and documents"] },
   { value: "ILLUSTRATIONS", label: ["Ilustrações", "Illustrations"], description: ["Cotações e propostas", "Quotes and proposals"] },
   { value: "COMMISSIONS", label: ["Comissões", "Commissions"], description: ["Produção e pagamentos", "Production and payments"] },
-  { value: "JOURNEY", label: ["Jornada", "Journey"], description: ["Progresso e promoções", "Progress and promotions"] },
   { value: "AGENCY", label: ["Agência", "Agency"], description: ["Convites e gestão direta", "Invites and direct management"], agencyOnly: true },
   { value: "TEAM", label: ["Equipe", "Team"], description: ["Estrutura e hierarquia", "Structure and hierarchy"], agencyOnly: true },
   { value: "INTEGRATIONS", label: ["Integrações", "Integrations"], description: ["Google Agenda e National Life", "Google Calendar and National Life"] },

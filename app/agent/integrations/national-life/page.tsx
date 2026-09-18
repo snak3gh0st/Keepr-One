@@ -34,7 +34,7 @@ export default async function NationalLifeConnectionPage() {
   ])
 
   const role = user?.role === 'ADMIN' ? 'ADMIN' : 'AGENT'
-  const backHref = role === 'ADMIN' ? '/admin' : '/agent'
+  const backHref = role === 'ADMIN' ? '/backoffice' : '/agent'
 
   return (
     <Shell role={role} userName={user?.name ?? ''}>

@@ -7,18 +7,19 @@ import {
 
 describe('authentication navigation', () => {
   it.each([
-    [undefined, '/admin'],
-    ['', '/admin'],
-    ['/admin', '/admin'],
-    ['/admin/users?page=2#directory', '/admin/users?page=2#directory'],
-    ['/agent', '/admin'],
-    ['/api/admin/users', '/admin'],
-    ['/admin/login', '/admin'],
-    ['/admin/login/help', '/admin'],
-    ['https://evil.example/admin', '/admin'],
-    ['//evil.example/admin', '/admin'],
-    ['/admin\\@evil.example', '/admin'],
-    ['/admin%2f%2fevil.example', '/admin'],
+    [undefined, '/backoffice'],
+    ['', '/backoffice'],
+    ['/backoffice', '/backoffice'],
+    ['/backoffice/users?page=2#directory', '/backoffice/users?page=2#directory'],
+    ['/agent', '/backoffice'],
+    ['/api/admin/users', '/backoffice'],
+    ['/backoffice/login', '/backoffice'],
+    ['/backoffice/login/help', '/backoffice'],
+    ['/admin', '/backoffice'],
+    ['https://evil.example/admin', '/backoffice'],
+    ['//evil.example/admin', '/backoffice'],
+    ['/admin\\@evil.example', '/backoffice'],
+    ['/admin%2f%2fevil.example', '/backoffice'],
   ])('sanitizes the admin destination %s', (input, expected) => {
     expect(sanitizeAdminRedirectPath(input)).toBe(expected)
   })
@@ -28,6 +29,7 @@ describe('authentication navigation', () => {
     ['/agent/calendar?view=week', '/agent/calendar?view=week'],
     ['/client#policies', '/client#policies'],
     ['/convites/agencia/token', '/convites/agencia/token'],
+    ['/backoffice/users', '/'],
     ['/admin/users', '/'],
     ['/api/auth/get-session', '/'],
     ['/login?next=/agent', '/'],
@@ -37,7 +39,7 @@ describe('authentication navigation', () => {
   })
 
   it('maps each persisted role to its own portal', () => {
-    expect(portalHomeForRole('ADMIN')).toBe('/admin')
+    expect(portalHomeForRole('ADMIN')).toBe('/backoffice')
     expect(portalHomeForRole('AGENT')).toBe('/agent')
     expect(portalHomeForRole('CLIENT')).toBe('/client')
   })

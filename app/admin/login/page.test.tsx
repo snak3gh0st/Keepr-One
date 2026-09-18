@@ -51,7 +51,7 @@ describe('AdminLoginPage', () => {
 
     expect(screen.getByText('Formulário administrativo')).toBeVisible()
     expect(mocks.formProps).toHaveBeenCalledWith({
-      redirectTo: '/admin',
+      redirectTo: '/backoffice',
       initialActiveSession: null,
     })
   })
@@ -62,8 +62,8 @@ describe('AdminLoginPage', () => {
     })
 
     await expect(AdminLoginPage({
-      searchParams: Promise.resolve({ next: '/admin/users?page=2' }),
-    })).rejects.toThrow('REDIRECT:/admin/users?page=2')
+      searchParams: Promise.resolve({ next: '/backoffice/users?page=2' }),
+    })).rejects.toThrow('REDIRECT:/backoffice/users?page=2')
   })
 
   it('asks an authenticated agent to end the user session first', async () => {
@@ -74,7 +74,7 @@ describe('AdminLoginPage', () => {
     render(await AdminLoginPage({ searchParams: Promise.resolve({}) }))
 
     expect(mocks.formProps).toHaveBeenCalledWith({
-      redirectTo: '/admin',
+      redirectTo: '/backoffice',
       initialActiveSession: {
         name: 'Ana',
         email: 'ana@example.com',

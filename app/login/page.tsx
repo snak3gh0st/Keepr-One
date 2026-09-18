@@ -394,7 +394,7 @@ export default function LoginPage() {
                   <div id="login-error" role="alert" className="border-l-2 border-danger bg-danger/10 px-4 py-3 text-sm leading-6 text-white/78">
                     <p>{error}</p>
                     {adminAccessDetected ? (
-                      <Link href="/admin/login" className="mt-2 inline-flex font-semibold text-mint hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint/40">
+                      <Link href="/backoffice/login" className="mt-2 inline-flex font-semibold text-mint hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint/40">
                         {copy('Ir para o login administrativo', 'Go to admin sign in')} <span aria-hidden className="ml-1">→</span>
                       </Link>
                     ) : null}
