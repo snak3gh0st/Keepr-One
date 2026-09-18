@@ -79,10 +79,10 @@ describe("AgentLayout", () => {
     });
 
     await expect(AgentLayout({ children: <div>Agent portal</div> })).rejects.toThrow(
-      "REDIRECT:/admin/users",
+      "REDIRECT:/backoffice/users",
     );
 
-    expect(mocks.redirect).toHaveBeenCalledWith("/admin/users");
+    expect(mocks.redirect).toHaveBeenCalledWith("/backoffice/users");
     expect(mocks.getCurrentAgent).not.toHaveBeenCalled();
   });
 

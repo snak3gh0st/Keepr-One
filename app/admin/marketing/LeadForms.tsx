@@ -42,7 +42,7 @@ export function LeadFollowUpForm({ lead, owners }: { lead: MarketingLeadRow; own
       <select id="contact-status" name="status" defaultValue={lead.status} disabled={pending} aria-invalid={Boolean(errors.status)} aria-describedby={errors.status ? 'status-error' : undefined}>
         {LEAD_STATUSES.map(status => <option value={status} key={status}>{leadStatusLabel(status, copy)}</option>)}
       </select>{fieldError('status')}
-      <p className={styles.hint}>{copy('A etapa registra o resultado do atendimento. O acesso à plataforma é gerenciado em Usuários.', 'The stage records the outcome of the conversation. Platform access is managed in Users.')}</p>
+      <p className={styles.hint}>{copy('A etapa registra o resultado do atendimento. O convite de acesso fica disponível no cartão de acesso deste lead.', 'The stage records the outcome of the conversation. The access invitation is available in this lead’s access card.')}</p>
     </div>
     <div className={styles.field}>
       <label htmlFor="contact-owner">{copy('Responsável pelo contato', 'Contact owner')}</label>

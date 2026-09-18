@@ -58,9 +58,9 @@ type NavItem = {
 
 const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
   ADMIN: [
-    { href: "/admin", labelKey: "nav.dashboard", icon: "grid", groupKey: "nav.group.platform" },
-    { href: "/admin/users", labelKey: "nav.users", icon: "users", groupKey: "nav.group.platform" },
-    { href: "/admin/marketing", labelKey: "nav.marketing", icon: "megaphone", groupKey: "nav.group.platform" },
+    { href: "/backoffice", labelKey: "nav.dashboard", icon: "grid", groupKey: "nav.group.platform" },
+    { href: "/backoffice/users", labelKey: "nav.users", icon: "users", groupKey: "nav.group.platform" },
+    { href: "/backoffice/marketing", labelKey: "nav.marketing", icon: "megaphone", groupKey: "nav.group.platform" },
   ],
   AGENT: [
     { href: "/agent", labelKey: "nav.today", icon: "grid", groupKey: "nav.group.operations", module: "TODAY" },
@@ -98,17 +98,17 @@ const NAV: Record<"ADMIN" | "AGENT" | "CLIENT", NavItem[]> = {
 };
 
 const PAGE_NAMES: Record<string, MessageKey> = {
-  "/admin": "page.admin",
-  "/admin/users": "page.adminUsers",
-  "/admin/marketing": "page.adminMarketing",
-  "/admin/users/new": "page.adminUserCreate",
-  "/admin/agents": "page.adminAgents",
-  "/admin/pipeline": "page.adminPipeline",
-  "/admin/production": "page.adminProduction",
-  "/admin/commission-plans": "page.adminCommissionPlans",
-  "/admin/import": "page.adminImport",
-  "/admin/audit": "page.adminAudit",
-  "/admin/integrations/national-life": "page.adminNationalLife",
+  "/backoffice": "page.admin",
+  "/backoffice/users": "page.adminUsers",
+  "/backoffice/marketing": "page.adminMarketing",
+  "/backoffice/users/new": "page.adminUserCreate",
+  "/backoffice/agents": "page.adminAgents",
+  "/backoffice/pipeline": "page.adminPipeline",
+  "/backoffice/production": "page.adminProduction",
+  "/backoffice/commission-plans": "page.adminCommissionPlans",
+  "/backoffice/import": "page.adminImport",
+  "/backoffice/audit": "page.adminAudit",
+  "/backoffice/integrations/national-life": "page.adminNationalLife",
   "/agent": "page.today",
   "/agent/calendar": "page.calendar",
   "/agent/ai": "nav.ai",
@@ -136,8 +136,8 @@ const PAGE_NAMES: Record<string, MessageKey> = {
 
 function resolvePageName(pathname: string, role: "ADMIN" | "AGENT" | "CLIENT", t: (key: MessageKey) => string) {
   if (PAGE_NAMES[pathname]) return t(PAGE_NAMES[pathname]);
-  if (pathname.startsWith("/admin/marketing/")) return t("page.adminMarketing");
-  if (/^\/admin\/users\/[^/]+$/.test(pathname)) return t("page.adminUserDetail");
+  if (pathname.startsWith("/backoffice/marketing/")) return t("page.adminMarketing");
+  if (/^\/backoffice\/users\/[^/]+$/.test(pathname)) return t("page.adminUserDetail");
   if (/^\/agent\/cases\/[^/]+$/.test(pathname)) return t("page.caseDetail");
   if (/^\/agent\/policies\/[^/]+$/.test(pathname)) return t("page.policyDetail");
   return role === "ADMIN" ? t("page.operation") : role === "AGENT" ? t("page.myOperation") : t("page.myAccount");
@@ -347,7 +347,7 @@ export function Shell({
     window.dispatchEvent(new Event('keepr-one:sign-out'));
     await new Promise((resolve) => window.setTimeout(resolve, 50));
     await authClient.signOut();
-    router.push(role === "ADMIN" ? "/admin/login" : "/login");
+    router.push(role === "ADMIN" ? "/backoffice/login" : "/login");
     router.refresh();
   }
 

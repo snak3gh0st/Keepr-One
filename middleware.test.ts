@@ -50,22 +50,22 @@ describe('middleware administrative user preview boundary', () => {
   it('uses the dedicated login for anonymous admin pages and preserves the destination', async () => {
     mocks.getSessionCookie.mockReturnValue(null)
 
-    const response = await proxy(request('/admin/users?query=ana&page=2'))
+    const response = await proxy(request('/backoffice/users?query=ana&page=2'))
 
     expect(response.status).toBe(307)
     expect(response.headers.get('location')).toBe(
-      'http://localhost:3000/admin/login?next=%2Fadmin%2Fusers%3Fquery%3Dana%26page%3D2',
+      'http://localhost:3000/backoffice/login?next=%2Fbackoffice%2Fusers%3Fquery%3Dana%26page%3D2',
     )
   })
 
   it('keeps the admin login itself public without changing user-portal redirects', async () => {
     mocks.getSessionCookie.mockReturnValue(null)
 
-    const adminLogin = await proxy(request('/admin/login'))
+    const adminLogin = await proxy(request('/backoffice/login'))
     const clientPortal = await proxy(request('/client'))
     const onboarding = await proxy(request('/onboarding'))
 
-    expect(adminLogin.headers.get('x-middleware-next')).toBe('1')
+    expect(adminLogin.headers.get('x-middleware-rewrite')).toBe('http://localhost:3000/admin/login')
     expect(clientPortal.headers.get('location')).toBe('http://localhost:3000/login')
     expect(onboarding.headers.get('location')).toBe('http://localhost:3000/login')
   })
@@ -74,7 +74,7 @@ describe('middleware administrative user preview boundary', () => {
     ['/agent/cases?stage=follow-up', 'http://localhost:3000/login?next=%2Fagent%2Fcases%3Fstage%3Dfollow-up'],
     ['/client', 'http://localhost:3000/login?next=%2Fclient'],
     ['/onboarding', 'http://localhost:3000/login?next=%2Fonboarding'],
-    ['/admin/users?query=ana', 'http://localhost:3000/admin/login?next=%2Fadmin%2Fusers%3Fquery%3Dana'],
+    ['/backoffice/users?query=ana', 'http://localhost:3000/backoffice/login?next=%2Fbackoffice%2Fusers%3Fquery%3Dana'],
   ])('returns a stale private-session cookie from %s to its login page', async (path, location) => {
     mocks.getSession.mockResolvedValue(null)
 
@@ -107,7 +107,7 @@ describe('middleware administrative user preview boundary', () => {
       session: { id: 'session-1', impersonatedBy: null },
     })
 
-    const response = await proxy(request('/admin/users?query=ana'))
+    const response = await proxy(request('/backoffice/users?query=ana'))
 
     expect(response.status).toBe(307)
     expect(response.headers.get('location')).toBe(location)
@@ -123,7 +123,7 @@ describe('middleware administrative user preview boundary', () => {
       session: { id: 'preview-session', impersonatedBy: 'admin-1' },
     })
 
-    const response = await proxy(request('/admin/users/agent-1'))
+    const response = await proxy(request('/backoffice/users/agent-1'))
 
     expect(response.status).toBe(307)
     expect(response.headers.get('location')).toBe('http://localhost:3000/agent')
@@ -135,9 +135,16 @@ describe('middleware administrative user preview boundary', () => {
       session: { id: 'admin-session', impersonatedBy: null },
     })
 
-    const response = await proxy(request('/admin/users'))
+    const response = await proxy(request('/backoffice/users'))
 
-    expect(response.headers.get('x-middleware-next')).toBe('1')
+    expect(response.headers.get('x-middleware-rewrite')).toBe('http://localhost:3000/admin/users')
+  })
+
+  it('redirects the legacy admin namespace to the canonical backoffice URL', async () => {
+    const response = await proxy(request('/admin/marketing?status=NEW'))
+
+    expect(response.status).toBe(307)
+    expect(response.headers.get('location')).toBe('http://localhost:3000/backoffice/marketing?status=NEW')
   })
 
   it('does not disguise an authentication-service failure as a stale-session redirect', async () => {

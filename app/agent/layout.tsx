@@ -23,7 +23,7 @@ export default async function AgentLayout({
 }>) {
   const session = await getCurrentSession();
   if (session?.user.role === "ADMIN") {
-    redirect("/admin/users");
+    redirect("/backoffice/users");
   }
 
   let agent: Awaited<ReturnType<typeof getCurrentAgent>>;

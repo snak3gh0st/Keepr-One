@@ -12,7 +12,7 @@ O Keepr One atende três áreas com isolamento por papel:
 - **Agente** (`/agent`): fila operacional, casos, clientes, apólices,
   ilustrações, requirements, comissões e equipe/downline.
 - **Cliente** (`/client`): consulta das próprias apólices e documentos.
-- **Admin** (`/admin`): agentes, hierarquia, importações, planos de comissão e
+- **Admin** (`/backoffice`): agentes, hierarquia, importações, planos de comissão e
   acompanhamento operacional das integrações.
 
 O Distribution Core mantém a trilha prospect → caso → emissão/importação de

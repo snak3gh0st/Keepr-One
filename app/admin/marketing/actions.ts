@@ -8,6 +8,7 @@ import { getServerI18n } from '@/lib/i18n/server'
 import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/require-role'
 import { assertSameOriginAction } from '@/lib/security/same-origin-action'
+import { AccessInvitationError, sendMarketingLeadAccessInvitation } from '@/lib/admin/access-invitation'
 import { bulkLeadSchema, campaignSchema, formString, leadUpdateSchema, marketingFieldErrors, noteSchema } from '@/lib/marketing/validation'
 import type { MarketingActionResult } from '@/lib/marketing/types'
 
@@ -19,7 +20,7 @@ async function actionContext() {
     forwardedHost: requestHeaders.get('x-forwarded-host'), forwardedProto: requestHeaders.get('x-forwarded-proto'),
   })
   const { copy } = await getServerI18n()
-  return { session, copy }
+  return { session, copy, requestHeaders }
 }
 
 function revalidateMarketing(leadId?: string, campaignId?: string) {
@@ -132,6 +133,43 @@ export async function addLeadNoteAction(formData: FormData): Promise<MarketingAc
     return { ok: false, message: errorCode(error) === 'NOT_FOUND'
       ? copy('Lead não encontrado. Atualize a página.', 'Lead not found. Refresh the page.')
       : copy('Não foi possível adicionar a nota agora.', 'We could not add the note right now.') }
+  }
+}
+
+export async function inviteLeadAccessAction(formData: FormData): Promise<MarketingActionResult> {
+  const { session, copy, requestHeaders } = await actionContext()
+  const leadId = formString(formData, 'leadId')
+  if (!leadId) return { ok: false, message: copy('Lead inválido.', 'Invalid lead.') }
+
+  try {
+    const result = await sendMarketingLeadAccessInvitation({
+      leadId,
+      requestedById: session.user.id,
+      requestHeaders,
+    })
+    revalidateMarketing(leadId)
+    revalidatePath('/backoffice/users')
+    return {
+      ok: true,
+      id: leadId,
+      delivery: result.delivery,
+      accountCreated: result.accountCreated,
+    }
+  } catch (error) {
+    if (error instanceof AccessInvitationError) {
+      const messages: Record<AccessInvitationError['code'], string> = {
+        LEAD_NOT_FOUND: copy('Lead não encontrado. Atualize a página.', 'Lead not found. Refresh the page.'),
+        INCOMPATIBLE_ACCOUNT: copy('Este e-mail já pertence a uma conta que não pode receber acesso de agente.', 'This email already belongs to an account that cannot receive agent access.'),
+        CATALOG_UNAVAILABLE: copy('O plano de agente não está configurado para provisionamento.', 'The agent plan is not configured for provisioning.'),
+        PENDING_INVITATION_CHECKOUT: copy('Este e-mail já está concluindo um convite de Agência.', 'This email is already completing an Agency invitation.'),
+      }
+      return { ok: false, message: messages[error.code] }
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return { ok: false, message: copy('O acesso já foi criado para este e-mail. Atualize a página e reenvie o convite.', 'Access already exists for this email. Refresh the page and resend the invitation.') }
+    }
+    console.error('Marketing lead access invitation failed', error)
+    return { ok: false, message: copy('Não foi possível enviar o convite agora.', 'We could not send the invitation right now.') }
   }
 }
 

@@ -7,6 +7,7 @@ import { readMarketingLead, readMarketingOwners, parseLeadFilters, leadQueryStri
 import { MarketingShell } from '../../MarketingShell'
 import { leadStatusLabel, displayPhone } from '../../labels'
 import { LeadFollowUpForm, LeadNoteForm } from '../../LeadForms'
+import { LeadAccessInvite } from '../../LeadAccessInvite'
 import styles from '../../marketing.module.css'
 
 export const dynamic = 'force-dynamic'
@@ -46,6 +47,7 @@ export default async function MarketingLeadPage({ params, searchParams }: {
             <a className={styles.secondary} href={`mailto:${lead.email}`}>{copy('Escrever e-mail', 'Write email')}</a>
             <a className={styles.secondary} href={`tel:${lead.phone}`}>{copy('Ligar', 'Call')}</a>
           </div>
+          <LeadAccessInvite leadId={lead.id} />
           <details className={styles.metadata}>
             <summary>{copy('Rastreamento do cadastro', 'Signup attribution')}</summary>
             {attribution.length ? <dl className={styles.details}>{attribution.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl> : <p className={styles.hint}>{copy('Cadastro direto, sem parâmetros de campanha.', 'Direct signup, without campaign parameters.')}</p>}

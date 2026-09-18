@@ -84,7 +84,7 @@ describe("LoginPage localization", () => {
     );
     expect(screen.getByRole("link", { name: /Go to admin sign in/ })).toHaveAttribute(
       "href",
-      "/admin/login",
+      "/backoffice/login",
     );
     expect(mocks.signOut).toHaveBeenCalledTimes(1);
     expect(mocks.replace).not.toHaveBeenCalled();

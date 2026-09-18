@@ -38,6 +38,10 @@ export default async function AuditPage() {
     ADMIN_USER_PREVIEW_STOP_FAILED: copy('Falha ao encerrar visualização', 'Support preview failed to end'),
     ADMIN_USER_PLAN_CHANGED: copy('Plano do usuário alterado', 'User plan changed'),
     ADMIN_USER_PLAN_RECONCILIATION_REQUIRED: copy('Cobrança exige reconciliação', 'Billing reconciliation required'),
+    ADMIN_USER_CREATED: copy('Usuário cadastrado', 'User created'),
+    MARKETING_LEAD_ACCESS_INVITE_REQUESTED: copy('Convite de acesso do Marketing enviado', 'Marketing access invitation sent'),
+    CRM_LEADS_IMPORTED: copy('Leads importados no CRM', 'CRM leads imported'),
+    BILLING_RETENTION_OFFER_GRANTED: copy('Desconto de retenção aplicado', 'Retention discount granted'),
   }
   const rows = logs.map((log) => ({
     id: log.id,
@@ -57,8 +61,8 @@ export default async function AuditPage() {
         title={copy('Auditoria', 'Audit')}
         eyebrow={copy('Controle', 'Controls')}
         description={copy(
-          'Últimas 100 ações administrativas em usuários, hierarquia e planos, com responsável e valores antes e depois da mudança.',
-          'The latest 100 administrative actions across users, hierarchy, and plans, with the actor and values before and after each change.',
+          'Últimas 100 ações administrativas em usuários, Marketing, CRM, hierarquia, planos e cobrança, com responsável e valores antes e depois da mudança.',
+          'The latest 100 administrative actions across users, Marketing, CRM, hierarchy, plans, and billing, with the actor and values before and after each change.',
         )}
       />
       <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">

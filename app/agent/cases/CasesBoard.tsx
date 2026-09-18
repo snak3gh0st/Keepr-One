@@ -330,6 +330,10 @@ export function CasesBoard({
               <span aria-hidden="true">+</span>
               {copy("Novo atendimento", "New case")}
             </Link>
+            <Link href="/agent/cases/import" className="cases-hero-secondary">
+              {copy("Importar leads", "Import leads")}
+              <span aria-hidden="true">↥</span>
+            </Link>
           </div>
         </div>
 

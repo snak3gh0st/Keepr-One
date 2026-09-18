@@ -1,6 +1,6 @@
 # Marketing administrativo
 
-O módulo em `/admin/marketing` reúne os cadastros recebidos por `/founders`, o
+O módulo em `/backoffice/marketing` reúne os cadastros recebidos por `/founders`, o
 acompanhamento dos contatos e o planejamento das campanhas. A implementação desta
 entrega está no ambiente local; a migration foi aplicada ao banco local usado na
 validação. Esta entrega não foi publicada em produção.
@@ -12,12 +12,12 @@ e **Campanhas**.
 
 | Superfície | Caminho | Uso |
 | --- | --- | --- |
-| Leads | `/admin/marketing` | Indicadores da base, filtros, seleção e exportação |
-| Contato | `/admin/marketing/leads/[id]` | Dados do cadastro, atribuição, notas e acompanhamento |
-| Campanhas | `/admin/marketing/campaigns` | Listagem, busca, filtros e indicadores das campanhas |
-| Nova campanha | `/admin/marketing/campaigns/new` | Nome, contexto, canal, status, datas e orçamento |
-| Campanha | `/admin/marketing/campaigns/[id]` | Edição, resultados e link de captação |
-| Exportação | `/admin/marketing/export` | Download CSV autenticado com os filtros da listagem |
+| Leads | `/backoffice/marketing` | Indicadores da base, filtros, seleção e exportação |
+| Contato | `/backoffice/marketing/leads/[id]` | Dados do cadastro, atribuição, notas, acompanhamento e convite de acesso |
+| Campanhas | `/backoffice/marketing/campaigns` | Listagem, busca, filtros e indicadores das campanhas |
+| Nova campanha | `/backoffice/marketing/campaigns/new` | Nome, contexto, canal, status, datas e orçamento |
+| Campanha | `/backoffice/marketing/campaigns/[id]` | Edição, resultados e link de captação |
+| Exportação | `/backoffice/marketing/export` | Download CSV autenticado com os filtros da listagem |
 
 A lista de leads mostra 25 contatos por página, ordenados por cadastro mais recente
 e ID decrescente como critério de desempate. Os filtros permitem buscar nome,
@@ -48,8 +48,33 @@ As datas do cadastro e das notas são exibidas no horário de Nova York. O formu
 de próximo contato identifica o fuso utilizado; a persistência usa instantes com
 fuso explícito. A exportação utiliza timestamps UTC.
 
-Marcar um lead como convertido registra uma decisão da equipe. Essa ação não cria
-`User`, `Agent`, `FounderEnrollment`, assinatura ou período gratuito.
+Marcar um lead como convertido registra uma decisão da equipe. O botão **Enviar
+convite de acesso** no detalhe do lead cria, quando necessário, uma conta de agente
+individual com trial de 30 dias e módulos padrão, ou reutiliza a conta de agente já
+existente para reenviar o convite de definição de senha. A operação é registrada
+no painel de auditoria; contas de administrador/cliente não são convertidas
+silenciosamente em agentes.
+
+O painel administrativo usa `/backoffice` como endereço oficial. O namespace antigo
+`/admin` permanece somente como redirecionamento de compatibilidade e não renderiza
+o painel diretamente.
+
+## Importação de leads no CRM
+
+Agentes encontram **Importar leads** em `/agent/cases/import`. Administradores usam
+**Leads CRM (CSV)** em `/backoffice/import` e escolhem o agente ativo que receberá
+as oportunidades. O formato aceito é:
+
+```text
+firstName,lastName,email,phone,dateOfBirth,state,tobaccoStatus,objective,productType,targetCoverage,monthlyBudget
+```
+
+Também são aceitas as colunas `name`/`fullName` para o nome completo. Apenas o nome
+é obrigatório; os padrões são `NO`, `PROTECTION` e `UNDECIDED` para tabaco, objetivo
+e produto. O limite é 5 MB e 2.000 linhas. Cada linha válida cria um `Prospect` e
+uma oportunidade na etapa `NEW_LEAD`. E-mail ou telefone normalizados evitam
+duplicatas dentro da carteira do agente; linhas duplicadas são reportadas como
+ignoradas. O resultado informa sucessos, duplicatas e erros por número de linha.
 
 ### Campanhas
 
